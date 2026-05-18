@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (ruff, black, mypy, pytest)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aurum_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry==1.8.4
+
+      - name: Install dependencies
+        run: poetry install --no-root --with dev
+
+      - name: Ruff
+        run: poetry run ruff check app tests
+
+      - name: Black
+        run: poetry run black --check app tests
+
+      - name: Mypy
+        run: poetry run mypy app
+
+      - name: Pytest
+        env:
+          ENVIRONMENT: development
+          DATABASE_URL_APP: postgresql+asyncpg://postgres:postgres@localhost:5432/aurum_test
+          DATABASE_URL_SUPPORT: postgresql+asyncpg://postgres:postgres@localhost:5432/aurum_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: ci-test-secret-do-not-use-in-prod
+          CORS_ORIGINS: '["http://localhost:5173"]'
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+        run: poetry run pytest tests/ -v
+
+  frontend:
+    name: Frontend (typecheck, lint)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint

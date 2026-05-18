@@ -1,0 +1,46 @@
+# Aurum Pharma
+
+SaaS-система автоматизации аптек для Республики Таджикистан. Мульти-тенантная, по подписке.
+
+> Этап 1 (MVP). Активная разработка. Полные правила, стек и конвенции — в [CLAUDE.md](CLAUDE.md).
+
+## Быстрый старт
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+После того как все контейнеры стали healthy:
+
+- Backend API: <http://localhost:8000> (`/healthz`, `/docs`)
+- Frontend: <http://localhost:5173>
+- MinIO console: <http://localhost:9001>
+- Prometheus: <http://localhost:9090>
+- Postgres (основной): `localhost:5432`, БД `aurum`
+- Postgres (тестовый): `localhost:5433`, БД `aurum_test`
+- Redis: `localhost:6379`
+
+## Структура
+
+```
+aurum-pharma/
+├── backend/            FastAPI + SQLAlchemy 2.0 async + Alembic
+├── frontend/           React 18 + TS strict + Vite + TanStack
+├── infra/              Postgres init, Prometheus config
+├── docs/               Спецификация, схема БД, план разработки
+├── docker-compose.yml  Dev-окружение
+└── CLAUDE.md           Правила и инструкции для AI-ассистента
+```
+
+## Документы
+
+- [CLAUDE.md](CLAUDE.md) — правила, стек, архитектурные ограничения
+- [docs/spec-v3.md](docs/spec-v3.md) — функциональная спецификация
+- [docs/db-schema-v2.md](docs/db-schema-v2.md) — схема БД
+- [docs/handoff.md](docs/handoff.md) — план разработки по доменам
+- [docs/known-issues.md](docs/known-issues.md) — известные проблемы
+
+## Чек-лист после каждого домена
+
+См. раздел 6 в [CLAUDE.md](CLAUDE.md).
