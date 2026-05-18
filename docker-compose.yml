@@ -14,10 +14,14 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
+      # Probes the superuser (always exists). aurum_app is created later by
+      # init.sh and would race with the first healthcheck. start_period covers
+      # initdb + init.sh + the entrypoint's internal shutdown/restart (~60s).
       test: ["CMD-SHELL", "pg_isready -U postgres -d aurum"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 60s
     restart: unless-stopped
 
   postgres-test:
@@ -38,7 +42,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres -d aurum_test"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 60s
     restart: unless-stopped
 
   redis:

@@ -47,3 +47,8 @@ frontend/src/routeTree.gen.ts
 
 # Poetry
 poetry.lock
+
+# Celery beat scheduler state (runtime artifact)
+celerybeat-schedule
+celerybeat-schedule.*
+
