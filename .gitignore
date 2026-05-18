@@ -52,3 +52,6 @@ poetry.lock
 celerybeat-schedule
 celerybeat-schedule.*
 
+# Claude Code local settings (per-machine, never committed)
+.claude/
+
