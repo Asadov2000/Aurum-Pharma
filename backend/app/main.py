@@ -22,6 +22,7 @@ from app.core.db import app_engine, support_engine
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import redis_client
 from app.domains.auth import router as auth_router
+from app.domains.catalog import router as catalog_router
 from app.domains.foundation import admin_router as foundation_admin_router
 from app.domains.foundation import tenant_router as foundation_tenant_router
 from app.domains.roles import router as roles_router
@@ -72,6 +73,7 @@ app.include_router(auth_router)
 app.include_router(foundation_admin_router)
 app.include_router(foundation_tenant_router)
 app.include_router(roles_router)
+app.include_router(catalog_router)
 
 
 @app.get("/healthz", tags=["meta"])

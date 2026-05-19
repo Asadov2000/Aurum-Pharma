@@ -63,9 +63,7 @@ class RolesService:
     # Users in tenant
     # -------------------------------------------------------------------------
 
-    async def list_users(
-        self, tenant_id: UUID
-    ) -> list[tuple[AppUser, list[UserAssignment]]]:
+    async def list_users(self, tenant_id: UUID) -> list[tuple[AppUser, list[UserAssignment]]]:
         users = await self.repo.list_users_for_tenant(tenant_id)
         out: list[tuple[AppUser, list[UserAssignment]]] = []
         for user in users:
