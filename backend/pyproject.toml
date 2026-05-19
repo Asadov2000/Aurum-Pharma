@@ -51,6 +51,9 @@ select = ["E", "F", "W", "I", "B", "C4", "UP", "PL", "RUF"]
 ignore = [
     "PLR0913",  # too many arguments — common for FastAPI deps
     "PLR2004",  # magic values — too noisy
+    "RUF001",   # ambiguous cyrillic chars — we ship Russian product strings
+    "RUF002",   # same as RUF001 but in docstrings
+    "RUF003",   # same as RUF001 but in comments
 ]
 
 [tool.ruff.lint.per-file-ignores]

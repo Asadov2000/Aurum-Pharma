@@ -22,6 +22,8 @@ from app.core.db import app_engine, support_engine
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import redis_client
 from app.domains.auth import router as auth_router
+from app.domains.foundation import admin_router as foundation_admin_router
+from app.domains.foundation import tenant_router as foundation_tenant_router
 from app.middleware.auth_context import AuthContextMiddleware
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.request_id import RequestIdMiddleware
@@ -66,6 +68,8 @@ app.add_middleware(RequestIdMiddleware)
 register_error_handlers(app)
 
 app.include_router(auth_router)
+app.include_router(foundation_admin_router)
+app.include_router(foundation_tenant_router)
 
 
 @app.get("/healthz", tags=["meta"])

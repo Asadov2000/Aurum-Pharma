@@ -1,0 +1,146 @@
+"""Database access for the foundation domain. No business logic here."""
+
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
+
+
+class FoundationRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    # -------------------------------------------------------------------------
+    # tenant
+    # -------------------------------------------------------------------------
+
+    async def create_tenant(self, **fields: Any) -> Tenant:
+        t = Tenant(**fields)
+        self.session.add(t)
+        await self.session.flush()
+        await self.session.refresh(t)
+        return t
+
+    async def list_tenants(self, *, limit: int = 100, offset: int = 0) -> list[Tenant]:
+        stmt = select(Tenant).order_by(Tenant.created_at.desc()).limit(limit).offset(offset)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_tenant(self, tenant_id: UUID) -> Tenant | None:
+        return await self.session.get(Tenant, tenant_id)
+
+    async def update_tenant(self, tenant: Tenant, **fields: Any) -> Tenant:
+        for key, value in fields.items():
+            setattr(tenant, key, value)
+        await self.session.flush()
+        await self.session.refresh(tenant)
+        return tenant
+
+    # -------------------------------------------------------------------------
+    # tenant_settings
+    # -------------------------------------------------------------------------
+
+    async def create_default_settings(self, tenant_id: UUID) -> TenantSettings:
+        s = TenantSettings(
+            tenant_id=tenant_id,
+            expiry_thresholds={"yellow": 6, "orange": 3, "red": 1},
+            expired_sale_mode="strict",
+            refund_reason_mode="optional",
+            session_admin_minutes=480,
+            session_pos_minutes=480,
+            pin_mode_enabled=False,
+            prescription_warning_text=(
+                "Отпуск рецептурных препаратов осуществляется в соответствии "
+                "с действующим законодательством РТ"
+            ),
+        )
+        self.session.add(s)
+        await self.session.flush()
+        await self.session.refresh(s)
+        return s
+
+    async def get_settings(self, tenant_id: UUID) -> TenantSettings | None:
+        return await self.session.get(TenantSettings, tenant_id)
+
+    async def update_settings(self, settings: TenantSettings, **fields: Any) -> TenantSettings:
+        for key, value in fields.items():
+            setattr(settings, key, value)
+        await self.session.flush()
+        await self.session.refresh(settings)
+        return settings
+
+    # -------------------------------------------------------------------------
+    # branch
+    # -------------------------------------------------------------------------
+
+    async def create_branch(self, **fields: Any) -> Branch:
+        b = Branch(**fields)
+        self.session.add(b)
+        await self.session.flush()
+        await self.session.refresh(b)
+        return b
+
+    async def list_branches(self, *, include_inactive: bool = False) -> list[Branch]:
+        stmt = select(Branch)
+        if not include_inactive:
+            stmt = stmt.where(Branch.is_active.is_(True))
+        stmt = stmt.order_by(Branch.created_at.asc())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_branch(self, branch_id: UUID) -> Branch | None:
+        return await self.session.get(Branch, branch_id)
+
+    async def update_branch(self, branch: Branch, **fields: Any) -> Branch:
+        for key, value in fields.items():
+            setattr(branch, key, value)
+        await self.session.flush()
+        await self.session.refresh(branch)
+        return branch
+
+    async def count_active_branches(self, tenant_id: UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(Branch)
+            .where(and_(Branch.tenant_id == tenant_id, Branch.is_active.is_(True)))
+        )
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one())
+
+    # -------------------------------------------------------------------------
+    # register
+    # -------------------------------------------------------------------------
+
+    async def create_register(self, **fields: Any) -> Register:
+        r = Register(**fields)
+        self.session.add(r)
+        await self.session.flush()
+        await self.session.refresh(r)
+        return r
+
+    async def list_registers(
+        self, *, branch_id: UUID | None = None, include_inactive: bool = False
+    ) -> list[Register]:
+        stmt = select(Register)
+        if branch_id is not None:
+            stmt = stmt.where(Register.branch_id == branch_id)
+        if not include_inactive:
+            stmt = stmt.where(Register.is_active.is_(True))
+        stmt = stmt.order_by(Register.created_at.asc())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_register(self, register_id: UUID) -> Register | None:
+        return await self.session.get(Register, register_id)
+
+    async def update_register(self, register: Register, **fields: Any) -> Register:
+        for key, value in fields.items():
+            setattr(register, key, value)
+        await self.session.flush()
+        await self.session.refresh(register)
+        return register

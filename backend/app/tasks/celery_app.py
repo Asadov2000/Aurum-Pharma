@@ -13,7 +13,7 @@ celery_app = Celery(
     "aurum",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.auth"],
+    include=["app.tasks.auth", "app.tasks.foundation"],
 )
 
 celery_app.conf.update(
@@ -36,5 +36,9 @@ celery_app.conf.beat_schedule = {
     "expire-sessions": {
         "task": "auth.expire_sessions",
         "schedule": crontab(minute=0, hour=3),
+    },
+    "auto-start-trials": {
+        "task": "foundation.auto_start_trials",
+        "schedule": crontab(minute=0, hour=4),
     },
 }
