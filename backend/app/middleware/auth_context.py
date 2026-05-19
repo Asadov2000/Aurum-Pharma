@@ -7,6 +7,7 @@ That keeps RLS context bound to the SQLAlchemy transaction, not the connection p
 Routes that *require* authentication declare a dependency (added in the auth
 domain) that raises if `request.state.user_id` is missing.
 """
+
 from __future__ import annotations
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint

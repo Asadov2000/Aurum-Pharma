@@ -1,4 +1,5 @@
 """structlog configuration. JSON in non-dev environments, console-friendly in dev."""
+
 from __future__ import annotations
 
 import logging
@@ -42,4 +43,6 @@ def configure_logging() -> None:
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
-    return structlog.get_logger(name)
+    # structlog.get_logger is dynamically typed as Any.
+    logger: structlog.stdlib.BoundLogger = structlog.get_logger(name)
+    return logger

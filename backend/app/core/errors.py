@@ -1,4 +1,5 @@
 """Domain error hierarchy. Services raise these; the error handler maps them to HTTP."""
+
 from __future__ import annotations
 
 from typing import Any

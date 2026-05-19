@@ -1,4 +1,5 @@
 """Attach an `X-Request-ID` to each request and bind it into the log context."""
+
 from __future__ import annotations
 
 import uuid

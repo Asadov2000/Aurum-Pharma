@@ -1,4 +1,5 @@
 """Application settings, loaded from environment / .env via pydantic-settings."""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -49,4 +50,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]  # values come from env
+    return Settings()

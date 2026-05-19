@@ -6,6 +6,7 @@ Two pools:
 
 Engine selection is per-request, driven by the auth context. See `app.core.deps.get_db`.
 """
+
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import (

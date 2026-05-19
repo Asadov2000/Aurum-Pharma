@@ -7,6 +7,7 @@ Middleware order matters: Starlette wraps middleware bottom-up, so the *last*
 
 So we add CORS first, then AuthContext, then RequestId last.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -20,6 +21,7 @@ from app.core.config import get_settings
 from app.core.db import app_engine, support_engine
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import redis_client
+from app.domains.auth import router as auth_router
 from app.middleware.auth_context import AuthContextMiddleware
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.request_id import RequestIdMiddleware
@@ -63,6 +65,8 @@ app.add_middleware(RequestIdMiddleware)
 
 register_error_handlers(app)
 
+app.include_router(auth_router)
+
 
 @app.get("/healthz", tags=["meta"])
 async def healthz() -> dict[str, object]:
@@ -73,12 +77,12 @@ async def healthz() -> dict[str, object]:
         async with app_engine.connect() as conn:
             result = await conn.execute(text("SELECT 1"))
             db_ok = result.scalar() == 1
-    except Exception as exc:  # noqa: BLE001 — healthcheck must not raise
+    except Exception as exc:
         logger.warning("healthz_db_fail", error=str(exc))
 
     try:
         redis_ok = bool(await redis_client.ping())
-    except Exception as exc:  # noqa: BLE001 — healthcheck must not raise
+    except Exception as exc:
         logger.warning("healthz_redis_fail", error=str(exc))
 
     status = "ok" if db_ok and redis_ok else "degraded"

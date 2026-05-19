@@ -1,10 +1,16 @@
 """Shared pytest fixtures.
 
 `db_session` wraps each test in a SAVEPOINT on a connection-level transaction
-that is rolled back in teardown — no test leaks data into another. The session
-is bound to the support engine (BYPASSRLS) so fixtures can seed any tenant data;
-tests that need to verify RLS isolation switch to the app engine explicitly.
+that is rolled back in teardown — no test leaks data into another. A fresh
+async engine is built per-test with NullPool, sidestepping pytest-asyncio's
+"Event loop is closed" trap (the module-level pooled engine survives across
+loops and the second use blows up).
+
+`client` exposes the FastAPI app over an ASGI transport for HTTP-level tests.
+Most domain tests will also reach for the per-domain `auth_client` fixture
+which overrides `get_db` to share the same in-flight SAVEPOINT.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -12,16 +18,38 @@ from collections.abc import AsyncIterator
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import NullPool
 
-from app.core.db import support_engine
+from app.core.config import get_settings
 from app.core.redis import redis_client
 from app.main import app
 
 
 @pytest_asyncio.fixture
-async def db_connection() -> AsyncIterator[AsyncConnection]:
-    async with support_engine.connect() as connection:
+async def db_engine() -> AsyncIterator[AsyncEngine]:
+    settings = get_settings()
+    engine = create_async_engine(
+        settings.DATABASE_URL_SUPPORT,
+        poolclass=NullPool,
+    )
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_connection(
+    db_engine: AsyncEngine,
+) -> AsyncIterator[AsyncConnection]:
+    async with db_engine.connect() as connection:
         outer = await connection.begin()
         try:
             yield connection
@@ -57,9 +85,4 @@ async def client() -> AsyncIterator[AsyncClient]:
 
 @pytest_asyncio.fixture
 async def redis() -> AsyncIterator[Redis]:
-    try:
-        yield redis_client
-    finally:
-        # Flush keys this test touched. Each test should use a unique prefix
-        # if it wants stronger isolation; tenant-scoped keys handle that.
-        pass
+    yield redis_client

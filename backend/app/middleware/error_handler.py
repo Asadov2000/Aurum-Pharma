@@ -1,4 +1,5 @@
 """Translate domain exceptions and unhandled errors into a uniform JSON envelope."""
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

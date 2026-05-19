@@ -11,6 +11,18 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     GRANT ALL PRIVILEGES ON DATABASE ${POSTGRES_DB} TO aurum_app, aurum_support;
     GRANT ALL ON SCHEMA public TO aurum_app, aurum_support;
 
+    -- DEFAULT PRIVILEGES are scoped to the role that *creates* the object.
+    -- Migrations run as aurum_support, so we set defaults FOR THAT ROLE
+    -- (otherwise aurum_app gets a "permission denied" on every migration-
+    -- created table). The unqualified ALTER DEFAULT PRIVILEGES below also
+    -- covers objects created by the postgres superuser.
+    ALTER DEFAULT PRIVILEGES FOR ROLE aurum_support IN SCHEMA public
+        GRANT ALL ON TABLES TO aurum_app, aurum_support;
+    ALTER DEFAULT PRIVILEGES FOR ROLE aurum_support IN SCHEMA public
+        GRANT ALL ON SEQUENCES TO aurum_app, aurum_support;
+    ALTER DEFAULT PRIVILEGES FOR ROLE aurum_support IN SCHEMA public
+        GRANT ALL ON FUNCTIONS TO aurum_app, aurum_support;
+
     ALTER DEFAULT PRIVILEGES IN SCHEMA public
         GRANT ALL ON TABLES TO aurum_app, aurum_support;
     ALTER DEFAULT PRIVILEGES IN SCHEMA public
