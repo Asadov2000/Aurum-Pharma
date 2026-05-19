@@ -63,7 +63,7 @@ def get_object(object_path: str) -> bytes:
     client = get_minio()
     response = client.get_object(bucket, key)
     try:
-        return response.read()  # type: ignore[no-any-return]
+        return response.read()
     finally:
         response.close()
         response.release_conn()
