@@ -1,15 +1,11 @@
 """FastAPI dependencies.
 
 `get_db` picks the app or support pool based on the auth context populated by
-`AuthContextMiddleware`, opens a transaction, and seeds the RLS GUCs:
-    app.tenant_id      — UUID of the active tenant
-    app.user_id        — UUID of the acting user
-    app.support_session — 'true' when a support/dev session is bypassing RLS
+`AuthContextMiddleware`, opens a transaction, and seeds the RLS GUCs.
 
-`current_user` decodes the access token and assembles a CurrentUser snapshot.
-Permission loading from the DB + Redis cache will be wired up after the roles
-domain (migration 0004) lands; right now CurrentUser.permissions is always an
-empty set, and routes that need fine-grained perms must wait until then.
+`current_user` decodes the access token and assembles a CurrentUser snapshot
+that includes the effective permission set (loaded from Redis cache, or
+recomputed from DB and re-cached).
 """
 
 from __future__ import annotations
@@ -67,14 +63,28 @@ class CurrentUser:
     tenant_id: UUID | None
     is_developer: bool
     is_administrator: bool
-    # Permissions are populated by the roles domain (migration 0004). Until
-    # then this is an empty set and permission checks below should be guarded
-    # by `is_developer` / `is_administrator` (those bypass per the spec).
     permissions: set[str] = field(default_factory=set)
     branch_assignments: dict[str, str] = field(default_factory=dict)
 
+    @property
+    def level(self) -> int:
+        """Effective level used for the anti-escalation rule.
+
+        1 = developer, 2 = administrator, 3 = owner, 4 = seller.
+        Without any assignment we conservatively treat the user as seller.
+        """
+        if self.is_developer:
+            return 1
+        if self.is_administrator:
+            return 2
+        if "users.invite" in self.permissions or "roles.assign" in self.permissions:
+            return 3
+        return 4
+
 
 async def current_user(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentUser:
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -101,20 +111,45 @@ async def current_user(
     else:
         tenant_id = None
 
+    is_dev = bool(claims.get("is_developer", False))
+    is_admin = bool(claims.get("is_administrator", False))
+
+    permissions: set[str] = set()
+    branch_assignments: dict[str, str] = {}
+
+    if tenant_id is not None:
+        # Local import — roles depends on auth at module level, can't import
+        # the other way without a circular reference.
+        from app.domains.roles.repository import RolesRepository
+        from app.domains.roles.service import RolesService
+
+        service = RolesService(RolesRepository(db), redis=redis)
+        permissions = await service.get_effective_permissions(user_id, tenant_id)
+
+        # branch_assignments: {branch_id_str | "tenant": role_id_str}
+        assignments = await service.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
+        for a in assignments:
+            if not a.is_active:
+                continue
+            key = str(a.branch_id) if a.branch_id is not None else "tenant"
+            branch_assignments[key] = str(a.role_id)
+
     return CurrentUser(
         user_id=user_id,
         tenant_id=tenant_id,
-        is_developer=bool(claims.get("is_developer", False)),
-        is_administrator=bool(claims.get("is_administrator", False)),
+        is_developer=is_dev,
+        is_administrator=is_admin,
+        permissions=permissions,
+        branch_assignments=branch_assignments,
     )
 
 
 def require_permission(code: str):  # type: ignore[no-untyped-def]
     """Dependency factory — declares that a route needs `code`.
 
-    Until the roles domain lands, only developers / administrators pass any
-    permission check (matches the spec: levels 1-2 see everything). Regular
-    users get a 403 from here.
+    Developers and administrators bypass per-permission checks per the spec
+    (levels 1-2 see everything). Regular users must have `code` in their
+    effective permission set.
     """
 
     async def _checker(

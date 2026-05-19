@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, current_user, get_db
+from app.core.deps import CurrentUser, current_user, get_db, get_redis
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
     LoginCodeRequest,
@@ -32,8 +33,11 @@ def _client_ip(request: Request) -> str:
     return "0.0.0.0"
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> AuthService:
-    return AuthService(AuthRepository(db))
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> AuthService:
+    return AuthService(AuthRepository(db), redis=redis)
 
 
 @router.post(
@@ -99,4 +103,6 @@ async def me(
     service: Annotated[AuthService, Depends(_service)],
 ) -> MeResponse:
     info = await service.get_user_info(user.user_id)
-    return MeResponse.model_validate(info)
+    me_data = MeResponse.model_validate(info)
+    me_data.branch_assignments = user.branch_assignments
+    return me_data

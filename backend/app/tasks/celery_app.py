@@ -13,7 +13,7 @@ celery_app = Celery(
     "aurum",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.auth", "app.tasks.foundation"],
+    include=["app.tasks.auth", "app.tasks.foundation", "app.tasks.roles"],
 )
 
 celery_app.conf.update(

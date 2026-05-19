@@ -1,0 +1,218 @@
+"""FastAPI endpoints for the roles domain."""
+
+from __future__ import annotations
+
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, status
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import CurrentUser, current_user, get_db, get_redis, require_permission
+from app.core.errors import BusinessRuleError
+from app.domains.roles.repository import RolesRepository
+from app.domains.roles.schemas import (
+    AssignmentCreate,
+    AssignmentRead,
+    InviteUserRequest,
+    PermissionRead,
+    RoleWithPermissions,
+    UserUpdate,
+    UserWithAssignments,
+)
+from app.domains.roles.service import RolesService
+
+router = APIRouter(prefix="/api/v1", tags=["roles"])
+
+
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> RolesService:
+    return RolesService(RolesRepository(db), redis=redis)
+
+
+def _current_tenant_or_400(user: CurrentUser) -> UUID:
+    if user.tenant_id is None:
+        raise BusinessRuleError(
+            "Request is not scoped to a tenant",
+            details={"hint": "Login as a tenant user or pass X-Tenant-Id (phase 2)."},
+        )
+    return user.tenant_id
+
+
+# -----------------------------------------------------------------------------
+# Catalogue
+# -----------------------------------------------------------------------------
+
+
+@router.get("/permissions", response_model=list[PermissionRead])
+async def list_permissions(
+    _user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> list[PermissionRead]:
+    perms = await service.list_permissions()
+    return [PermissionRead.model_validate(p) for p in perms]
+
+
+@router.get("/roles", response_model=list[RoleWithPermissions])
+async def list_roles(
+    _user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> list[RoleWithPermissions]:
+    pairs = await service.list_roles_with_permissions()
+    out: list[RoleWithPermissions] = []
+    for role, codes in pairs:
+        out.append(
+            RoleWithPermissions(
+                id=role.id,
+                tenant_id=role.tenant_id,
+                name=role.name,
+                description=role.description,
+                level=role.level,
+                is_system=role.is_system,
+                is_active=role.is_active,
+                permissions=codes,
+            )
+        )
+    return out
+
+
+# -----------------------------------------------------------------------------
+# Users
+# -----------------------------------------------------------------------------
+
+
+@router.get("/users", response_model=list[UserWithAssignments])
+async def list_users(
+    user: Annotated[CurrentUser, Depends(require_permission("users.view"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> list[UserWithAssignments]:
+    tenant_id = _current_tenant_or_400(user)
+    pairs = await service.list_users(tenant_id)
+    out: list[UserWithAssignments] = []
+    for u, assignments in pairs:
+        out.append(
+            UserWithAssignments(
+                id=u.id,
+                email=u.email,
+                full_name=u.full_name,
+                phone=u.phone,
+                status=u.status,
+                last_login_at=u.last_login_at,
+                assignments=[AssignmentRead.model_validate(a) for a in assignments],
+            )
+        )
+    return out
+
+
+@router.post(
+    "/users/invite",
+    response_model=AssignmentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def invite_user(
+    payload: InviteUserRequest,
+    user: Annotated[CurrentUser, Depends(require_permission("users.invite"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> AssignmentRead:
+    _, assignment, _ = await service.invite_user(
+        actor_level=user.level,
+        actor_id=user.user_id,
+        tenant_id=_current_tenant_or_400(user),
+        email=str(payload.email),
+        full_name=payload.full_name,
+        role_id=payload.role_id,
+        branch_id=payload.branch_id,
+        password_required=payload.password_required,
+    )
+    return AssignmentRead.model_validate(assignment)
+
+
+@router.patch("/users/{user_id}")
+async def update_user(
+    user_id: UUID,
+    payload: UserUpdate,
+    user: Annotated[CurrentUser, Depends(require_permission("users.update"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> dict[str, object]:
+    fields = payload.model_dump(exclude_none=True)
+    updated = await service.update_user_profile(
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+        fields=fields,
+    )
+    return {"id": str(updated.id), "full_name": updated.full_name, "phone": updated.phone}
+
+
+@router.post("/users/{user_id}/block")
+async def block_user(
+    user_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("users.block"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> dict[str, str]:
+    await service.block_user(
+        actor_level=user.level,
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+    )
+    return {"status": "blocked"}
+
+
+@router.delete("/users/{user_id}")
+async def soft_delete_user(
+    user_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("users.delete"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> dict[str, str]:
+    await service.soft_delete_user(
+        actor_level=user.level,
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+    )
+    return {"status": "archived"}
+
+
+# -----------------------------------------------------------------------------
+# Assignments
+# -----------------------------------------------------------------------------
+
+
+@router.post(
+    "/users/{user_id}/assignments",
+    response_model=AssignmentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_assignment(
+    user_id: UUID,
+    payload: AssignmentCreate,
+    user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> AssignmentRead:
+    assignment = await service.assign_role(
+        actor_level=user.level,
+        actor_id=user.user_id,
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+        role_id=payload.role_id,
+        branch_id=payload.branch_id,
+        password_required=payload.password_required,
+    )
+    return AssignmentRead.model_validate(assignment)
+
+
+@router.delete("/users/{user_id}/assignments/{assignment_id}")
+async def revoke_assignment(
+    user_id: UUID,
+    assignment_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> dict[str, str]:
+    await service.revoke_assignment(
+        actor_level=user.level,
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+        assignment_id=assignment_id,
+    )
+    return {"status": "revoked"}

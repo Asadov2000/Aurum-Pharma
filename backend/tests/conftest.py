@@ -4,7 +4,9 @@
 that is rolled back in teardown — no test leaks data into another. A fresh
 async engine is built per-test with NullPool, sidestepping pytest-asyncio's
 "Event loop is closed" trap (the module-level pooled engine survives across
-loops and the second use blows up).
+loops and the second use blows up). The Redis client is per-test for the
+same reason — and the `get_redis` dependency is overridden so the FastAPI
+app pulls the same per-test client when handling HTTP requests.
 
 `client` exposes the FastAPI app over an ASGI transport for HTTP-level tests.
 Most domain tests will also reach for the per-domain `auth_client` fixture
@@ -17,7 +19,7 @@ from collections.abc import AsyncIterator
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from redis.asyncio import Redis
+from redis.asyncio import Redis, from_url
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -28,7 +30,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
-from app.core.redis import redis_client
+from app.core.deps import get_redis
 from app.main import app
 
 
@@ -77,12 +79,34 @@ async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSessi
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
-        yield ac
+async def redis() -> AsyncIterator[Redis]:
+    """Per-test Redis connection. Returned to the pool on teardown.
+
+    Also overrides FastAPI's `get_redis` dependency so HTTP handlers in the
+    same test reuse the same client (otherwise they'd hit the module-level
+    `redis_client` which keeps state across test loops)."""
+    settings = get_settings()
+    client = from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
+
+    async def _override() -> Redis:
+        return client
+
+    app.dependency_overrides[get_redis] = _override
+    try:
+        # Clean leftover perm-cache keys so cache tests start from a known state.
+        try:
+            async for key in client.scan_iter(match="auth:perms:*"):
+                await client.delete(key)
+        except Exception:
+            pass
+        yield client
+    finally:
+        app.dependency_overrides.pop(get_redis, None)
+        await client.aclose()
 
 
 @pytest_asyncio.fixture
-async def redis() -> AsyncIterator[Redis]:
-    yield redis_client
+async def client(redis: Redis) -> AsyncIterator[AsyncClient]:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        yield ac

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import structlog
+from redis.asyncio import Redis
 
 from app.core.config import get_settings
 from app.core.errors import (
@@ -51,8 +52,9 @@ LOGIN_BLOCK_DURATION = timedelta(minutes=15)
 
 
 class AuthService:
-    def __init__(self, repo: AuthRepository) -> None:
+    def __init__(self, repo: AuthRepository, redis: Redis | None = None) -> None:
         self.repo = repo
+        self.redis = redis
 
     # -------------------------------------------------------------------------
     # 1. Request an email code
@@ -211,11 +213,24 @@ class AuthService:
             # The schema says only support creates users in phase 1.
             raise NotFoundError("User does not exist")
 
-        # Optional password check. If a password_hash is set on the user we
-        # require it; the spec also allows tenant-wide enforcement via
-        # user_assignment.password_required — TODO(roles) once that table lands.
-        if user.password_hash:
-            if not password or not verify_password(password, user.password_hash):
+        # Password check. We require a password when EITHER:
+        #   1) the user has a password_hash set, OR
+        #   2) any active user_assignment in the user's home tenant has
+        #      password_required = true.
+        needs_password = bool(user.password_hash)
+        if not needs_password and user.home_tenant_id is not None:
+            from app.domains.roles.repository import RolesRepository
+
+            roles_repo = RolesRepository(self.repo.session)
+            assignments = await roles_repo.list_assignments_for_user(
+                user.id, tenant_id=user.home_tenant_id
+            )
+            needs_password = any(a.password_required and a.is_active for a in assignments)
+        if needs_password:
+            password_ok = bool(
+                password and user.password_hash and verify_password(password, user.password_hash)
+            )
+            if not password_ok:
                 await self.repo.insert_login_attempt(
                     email_lower=email_lower,
                     user_id=user.id,
@@ -282,9 +297,19 @@ class AuthService:
     async def logout(self, refresh_token: str) -> None:
         now = utc_now()
         token_hash = hash_token(refresh_token)
+        # Locate the session BEFORE revoking it so we know whose perms cache
+        # to drop.
+        s = await self.repo.get_active_session_by_hash(token_hash)
         revoked = await self.repo.revoke_session_by_hash(token_hash, reason="logout", when=now)
+        if revoked and s is not None and self.redis is not None:
+            # Local import — RolesService pulls from roles domain, which
+            # imports auth at module level. Lazy keeps the load DAG acyclic.
+            from app.domains.roles.repository import RolesRepository
+            from app.domains.roles.service import RolesService
+
+            roles_service = RolesService(RolesRepository(self.repo.session), redis=self.redis)
+            await roles_service.invalidate_user_perms_all_tenants(s.user_id)
         if revoked:
-            # TODO(roles): purge auth:perms:{user_id}:* keys in Redis here.
             logger.info("logout", token_hash_prefix=token_hash[:8])
 
     # -------------------------------------------------------------------------
