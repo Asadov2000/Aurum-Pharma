@@ -27,6 +27,7 @@ from app.domains.foundation import admin_router as foundation_admin_router
 from app.domains.foundation import tenant_router as foundation_tenant_router
 from app.domains.incoming import router as incoming_router
 from app.domains.inventory import router as inventory_router
+from app.domains.pos import router as pos_router
 from app.domains.roles import router as roles_router
 from app.domains.suppliers import router as suppliers_router
 from app.middleware.auth_context import AuthContextMiddleware
@@ -80,6 +81,7 @@ app.include_router(catalog_router)
 app.include_router(inventory_router)
 app.include_router(suppliers_router)
 app.include_router(incoming_router)
+app.include_router(pos_router)
 
 
 @app.get("/healthz", tags=["meta"])
