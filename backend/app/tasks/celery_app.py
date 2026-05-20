@@ -18,6 +18,7 @@ celery_app = Celery(
         "app.tasks.foundation",
         "app.tasks.roles",
         "app.tasks.catalog",
+        "app.tasks.billing",
     ],
 )
 
@@ -45,5 +46,17 @@ celery_app.conf.beat_schedule = {
     "auto-start-trials": {
         "task": "foundation.auto_start_trials",
         "schedule": crontab(minute=0, hour=4),
+    },
+    "billing-generate-monthly-invoices": {
+        "task": "billing.generate_monthly_invoices",
+        "schedule": crontab(minute=0, hour=5),
+    },
+    "billing-process-trial-endings": {
+        "task": "billing.process_trial_endings",
+        "schedule": crontab(minute=0, hour=6),
+    },
+    "billing-process-grace-endings": {
+        "task": "billing.process_grace_endings",
+        "schedule": crontab(minute=0, hour=7),
     },
 }

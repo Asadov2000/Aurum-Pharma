@@ -13,7 +13,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, current_user, get_db, require_permission
+from app.core.deps import (
+    CurrentUser,
+    current_user,
+    get_db,
+    require_permission,
+    require_writable_tenant,
+)
 from app.core.errors import BusinessRuleError, NotFoundError
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import (
@@ -58,6 +64,7 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     "/shifts/open",
     response_model=ShiftRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
 )
 async def open_shift(
     payload: ShiftOpenRequest,
@@ -117,6 +124,7 @@ async def z_report(
     "/sales",
     response_model=SaleRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
 )
 async def create_sale(
     payload: SaleCreate,
@@ -244,6 +252,7 @@ async def add_prescription(
     "/sales/{parent_id}/refund",
     response_model=SaleRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
 )
 async def refund_sale(
     parent_id: UUID,

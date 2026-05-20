@@ -162,3 +162,31 @@ def require_permission(code: str):  # type: ignore[no-untyped-def]
         raise PermissionDeniedError(f"Missing permission: {code}")
 
     return _checker
+
+
+async def require_writable_tenant(
+    user: Annotated[CurrentUser, Depends(current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CurrentUser:
+    """Block mutating endpoints when the tenant is read-only.
+
+    Used in POS endpoints — once billing transitions a tenant to
+    'readonly' (via process_grace_endings), the cashier UI must refuse
+    to open shifts, sell, refund, etc.
+    """
+    if user.tenant_id is None:
+        return user
+    from app.core.errors import BusinessRuleError
+    from app.domains.foundation.models import Tenant
+
+    tenant = await db.get(Tenant, user.tenant_id)
+    if tenant is not None and tenant.status in (
+        "readonly",
+        "suspended",
+        "archived",
+    ):
+        raise BusinessRuleError(
+            "Tenant is read-only (subscription suspended)",
+            details={"status": tenant.status},
+        )
+    return user
