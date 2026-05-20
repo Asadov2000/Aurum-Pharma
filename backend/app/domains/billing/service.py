@@ -49,9 +49,7 @@ class BillingService:
 
     # -------- subscriptions --------
 
-    async def get_active_subscription(
-        self, tenant_id: UUID
-    ) -> dict[str, object] | None:
+    async def get_active_subscription(self, tenant_id: UUID) -> dict[str, object] | None:
         return await self.repo.get_active_subscription(tenant_id)
 
     async def create_subscription(

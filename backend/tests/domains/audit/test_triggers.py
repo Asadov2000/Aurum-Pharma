@@ -1,0 +1,185 @@
+"""Audit triggers fire on INSERT/UPDATE/DELETE; service-level PII scrub works."""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domains.audit.models import AuditLog
+from app.domains.audit.repository import AuditRepository
+from app.domains.audit.service import AuditService
+from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.service import FoundationService
+
+
+async def test_insert_creates_audit_record(db_session: AsyncSession) -> None:
+    service = FoundationService(FoundationRepository(db_session))
+    tenant = await service.create_tenant(
+        payload={
+            "name": "AuditTenant",
+            "contact_email": f"audit-{uuid4().hex[:6]}@aurum.tj",
+        }
+    )
+
+    rows = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.table_name == "tenant",
+                    AuditLog.record_id == tenant.id,
+                    AuditLog.action == "INSERT",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) >= 1
+    assert rows[0].new_values is not None
+    assert rows[0].new_values.get("name") == "AuditTenant"
+
+
+async def test_update_logs_only_changed_fields(db_session: AsyncSession) -> None:
+    service = FoundationService(FoundationRepository(db_session))
+    tenant = await service.create_tenant(
+        payload={
+            "name": "Before",
+            "contact_email": f"upd-{uuid4().hex[:6]}@aurum.tj",
+        }
+    )
+    await service.update_tenant(tenant.id, fields={"name": "After"})
+
+    upd = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.table_name == "tenant",
+                    AuditLog.record_id == tenant.id,
+                    AuditLog.action == "UPDATE",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(upd) >= 1
+    changed = upd[-1].changed_fields or {}
+    assert "name" in changed
+    # The updated_at column auto-updates via trigger, so it'll show too —
+    # but contact_email should NOT, because it wasn't changed.
+    assert "contact_email" not in changed
+
+
+async def test_delete_creates_record_with_old_values(db_session: AsyncSession) -> None:
+    service = FoundationService(FoundationRepository(db_session))
+    tenant = await service.create_tenant(
+        payload={
+            "name": "Doomed",
+            "contact_email": f"del-{uuid4().hex[:6]}@aurum.tj",
+        }
+    )
+    # Use a branch to test DELETE since the foundation service doesn't
+    # delete tenants; deactivating a branch isn't DELETE either. Use raw SQL.
+    branch = await service.create_branch(tenant_id=tenant.id, fields={"name": "B1"})
+    branch2 = await service.create_branch(tenant_id=tenant.id, fields={"name": "B2"})
+    _ = branch2
+
+    from sqlalchemy import text
+
+    await db_session.execute(
+        text("DELETE FROM branch WHERE id = :id"),
+        {"id": branch.id},
+    )
+    await db_session.flush()
+
+    rows = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.table_name == "branch",
+                    AuditLog.record_id == branch.id,
+                    AuditLog.action == "DELETE",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) >= 1
+    assert rows[0].old_values is not None
+    assert rows[0].old_values.get("name") == "B1"
+
+
+async def test_scrub_hides_sensitive_fields() -> None:
+    """The service-level scrub() must replace sensitive fields with '***'
+    without losing the rest of the payload."""
+    fake = AuditLog(
+        id=uuid4(),
+        tenant_id=None,
+        user_id=None,
+        action="UPDATE",
+        table_name="app_user",
+        record_id=uuid4(),
+        old_values={
+            "email": "x@aurum.tj",
+            "password_hash": "$2b$12$abcdef",
+            "totp_secret": "JBSWY3DPEHPK3PXP",
+        },
+        new_values={
+            "email": "x@aurum.tj",
+            "password_hash": "$2b$12$newhash",
+        },
+        changed_fields={"password_hash": "$2b$12$newhash"},
+    )
+    fake.created_at = __import__("datetime").datetime.utcnow()
+
+    scrubbed = AuditService.scrub(fake)
+    assert scrubbed["old_values"]["password_hash"] == "***"
+    assert scrubbed["old_values"]["totp_secret"] == "***"
+    assert scrubbed["new_values"]["password_hash"] == "***"
+    assert scrubbed["changed_fields"]["password_hash"] == "***"
+    # Non-sensitive fields stay intact
+    assert scrubbed["old_values"]["email"] == "x@aurum.tj"
+
+
+async def test_service_search_filters_by_tenant(db_session: AsyncSession) -> None:
+    foundation = FoundationService(FoundationRepository(db_session))
+    audit = AuditService(AuditRepository(db_session))
+    t1 = await foundation.create_tenant(
+        payload={"name": "T1", "contact_email": f"t1-{uuid4().hex[:6]}@aurum.tj"}
+    )
+    t2 = await foundation.create_tenant(
+        payload={"name": "T2", "contact_email": f"t2-{uuid4().hex[:6]}@aurum.tj"}
+    )
+
+    rows_t1, total_t1 = await audit.search(tenant_id=t1.id)
+    rows_t2, total_t2 = await audit.search(tenant_id=t2.id)
+
+    assert total_t1 >= 1
+    assert total_t2 >= 1
+    assert all(r.tenant_id == t1.id for r in rows_t1)
+    assert all(r.tenant_id == t2.id for r in rows_t2)
+
+
+async def test_explicit_log_view_writes_row(db_session: AsyncSession) -> None:
+    service = AuditService(AuditRepository(db_session))
+    rec_id = uuid4()
+
+    # user_id has a FK to app_user; passing None is fine (it's nullable).
+    entry = await service.log_view(
+        tenant_id=None,
+        user_id=None,
+        table_name="batch",
+        record_id=rec_id,
+        metadata={"reason": "show_purchase_price"},
+    )
+    assert entry.action == "VIEW"
+    assert entry.record_id == rec_id
+
+    found = (
+        await db_session.execute(select(AuditLog).where(AuditLog.id == entry.id))
+    ).scalar_one_or_none()
+    assert found is not None
+    assert found.action == "VIEW"
