@@ -36,6 +36,14 @@ class FoundationService:
     async def create_tenant(self, *, payload: dict[str, object]) -> Tenant:
         tenant = await self.repo.create_tenant(**payload)
         await self.repo.create_default_settings(tenant.id)
+        # Onboarding hook — wizard + checklist. Lazy import to avoid
+        # circular dependencies; the call is idempotent.
+        from app.domains.onboarding.repository import OnboardingRepository
+        from app.domains.onboarding.service import OnboardingService
+
+        onboarding = OnboardingService(OnboardingRepository(self.repo.session))
+        await onboarding.on_tenant_created(tenant.id)
+
         logger.info("tenant_created", tenant_id=str(tenant.id), name=tenant.name)
         return tenant
 

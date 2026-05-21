@@ -30,6 +30,7 @@ from app.domains.foundation import admin_router as foundation_admin_router
 from app.domains.foundation import tenant_router as foundation_tenant_router
 from app.domains.incoming import router as incoming_router
 from app.domains.inventory import router as inventory_router
+from app.domains.onboarding import router as onboarding_router
 from app.domains.pos import router as pos_router
 from app.domains.roles import router as roles_router
 from app.domains.suppliers import router as suppliers_router
@@ -88,6 +89,7 @@ app.include_router(pos_router)
 app.include_router(billing_tenant_router)
 app.include_router(billing_admin_router)
 app.include_router(audit_router)
+app.include_router(onboarding_router)
 
 
 @app.get("/healthz", tags=["meta"])
