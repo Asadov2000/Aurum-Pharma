@@ -19,6 +19,7 @@ celery_app = Celery(
         "app.tasks.roles",
         "app.tasks.catalog",
         "app.tasks.billing",
+        "app.tasks.notifications",
     ],
 )
 
@@ -58,5 +59,18 @@ celery_app.conf.beat_schedule = {
     "billing-process-grace-endings": {
         "task": "billing.process_grace_endings",
         "schedule": crontab(minute=0, hour=7),
+    },
+    "notifications-process-pending-deliveries": {
+        "task": "notifications.process_pending_deliveries",
+        "schedule": crontab(minute="*"),
+    },
+    "notifications-check-expiring-licenses": {
+        "task": "notifications.check_expiring_licenses",
+        "schedule": crontab(minute=0, hour=8),
+    },
+    "notifications-purge-old": {
+        "task": "notifications.purge_old_notifications",
+        # Mondays at 02:00 UTC
+        "schedule": crontab(minute=0, hour=2, day_of_week=1),
     },
 }
