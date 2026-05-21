@@ -2,13 +2,21 @@ import { api, withoutAuth } from "@/lib/api";
 
 import {
   type LoginCodeRequest,
+  type LoginCodeResponse,
   type LoginVerifyRequest,
   type MeResponse,
   type TokenPair,
 } from "./types";
 
-export async function requestLoginCode(payload: LoginCodeRequest): Promise<void> {
-  await api.post("/auth/login/code", payload, withoutAuth());
+export async function requestLoginCode(
+  payload: LoginCodeRequest,
+): Promise<LoginCodeResponse> {
+  const { data } = await api.post<LoginCodeResponse>(
+    "/auth/login/code",
+    payload,
+    withoutAuth(),
+  );
+  return data;
 }
 
 export async function verifyLoginCode(payload: LoginVerifyRequest): Promise<TokenPair> {

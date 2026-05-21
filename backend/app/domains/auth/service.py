@@ -66,7 +66,9 @@ class AuthService:
         email: str,
         ip_address: str,
         user_agent: str | None = None,
-    ) -> None:
+    ) -> str:
+        """Returns the freshly minted plaintext code. The router decides
+        whether to leak it back to the caller (dev only) or keep it secret."""
         email_lower = email.lower()
         now = utc_now()
 
@@ -125,6 +127,7 @@ class AuthService:
 
         send_email_code.delay(email_lower, code)
         logger.info("login_code_issued", email=email_lower)
+        return code
 
     # -------------------------------------------------------------------------
     # 2. Verify an email code → issue tokens

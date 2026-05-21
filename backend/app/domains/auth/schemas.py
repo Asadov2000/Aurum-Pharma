@@ -14,9 +14,15 @@ class LoginCodeRequest(BaseModel):
 
 class LoginCodeResponse(BaseModel):
     """Returned for every code request — successful or not — to avoid leaking
-    whether an email exists in the system (anti-enumeration)."""
+    whether an email exists in the system (anti-enumeration).
+
+    `dev_code` is populated ONLY in `ENVIRONMENT=development`, so the local
+    UI can pre-fill the field without making the user grep Celery logs.
+    Never set in staging / production responses.
+    """
 
     status: str = "ok"
+    dev_code: str | None = None
 
 
 class LoginCodeVerify(BaseModel):

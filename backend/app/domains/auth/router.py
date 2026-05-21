@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.deps import CurrentUser, current_user, get_db, get_redis
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
@@ -50,12 +51,13 @@ async def request_login_code(
     request: Request,
     service: Annotated[AuthService, Depends(_service)],
 ) -> LoginCodeResponse:
-    await service.request_login_code(
+    code = await service.request_login_code(
         email=str(payload.email),
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
-    return LoginCodeResponse()
+    dev_code = code if get_settings().ENVIRONMENT == "development" else None
+    return LoginCodeResponse(dev_code=dev_code)
 
 
 @router.post("/login/verify", response_model=TokenResponse)

@@ -21,6 +21,13 @@ export interface LoginCodeRequest {
   email: string;
 }
 
+export interface LoginCodeResponse {
+  status: string;
+  // Populated only in dev — the backend leaks the freshly minted code so the
+  // UI can pre-fill it without making the user grep Celery logs.
+  dev_code: string | null;
+}
+
 export interface LoginVerifyRequest {
   email: string;
   code: string;

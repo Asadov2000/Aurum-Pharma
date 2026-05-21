@@ -34,6 +34,7 @@ function extractErrorMessage(err: unknown): string {
 export function LoginPage(): JSX.Element {
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
+  const [devCode, setDevCode] = useState<string | null>(null);
   const [topError, setTopError] = useState<string | null>(null);
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -56,8 +57,14 @@ export function LoginPage(): JSX.Element {
     }
     setTopError(null);
     try {
-      await requestLoginCode({ email: parsed.data.email });
+      const res = await requestLoginCode({ email: parsed.data.email });
       setEmail(parsed.data.email);
+      if (res.dev_code) {
+        setDevCode(res.dev_code);
+        codeForm.setValue("code", res.dev_code);
+      } else {
+        setDevCode(null);
+      }
       setStep("code");
     } catch (err) {
       setTopError(extractErrorMessage(err));
@@ -121,6 +128,15 @@ export function LoginPage(): JSX.Element {
               <p className="text-sm text-slate-600">
                 Код отправлен на <span className="font-medium text-slate-900">{email}</span>
               </p>
+              {devCode && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <span className="font-medium">Dev-режим:</span> код{" "}
+                  <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-base font-semibold">
+                    {devCode}
+                  </code>
+                  {" — "}уже подставлен в поле ниже.
+                </div>
+              )}
               <div>
                 <Label htmlFor="code">Код из письма</Label>
                 <Input

@@ -53,7 +53,7 @@ describe("LoginPage", () => {
   });
 
   it("advances to code step on successful email submit", async () => {
-    requestLoginCode.mockResolvedValueOnce(undefined);
+    requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: null });
     renderPage();
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@aurum.tj" } });
     fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
@@ -61,8 +61,18 @@ describe("LoginPage", () => {
     expect(requestLoginCode).toHaveBeenCalledWith({ email: "owner@aurum.tj" });
   });
 
+  it("auto-fills code input from dev_code in the response", async () => {
+    requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: "654321" });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "dev@aurum.tj" } });
+    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
+    const codeInput = (await screen.findByLabelText(/Код из письма/i)) as HTMLInputElement;
+    expect(codeInput.value).toBe("654321");
+    expect(screen.getByText(/Dev-режим/i)).toBeInTheDocument();
+  });
+
   it("logs in and navigates home on valid code", async () => {
-    requestLoginCode.mockResolvedValueOnce(undefined);
+    requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: null });
     verifyLoginCode.mockResolvedValueOnce({
       access_token: "A",
       refresh_token: "R",
