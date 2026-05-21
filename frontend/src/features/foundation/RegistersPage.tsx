@@ -1,0 +1,160 @@
+import { useState } from "react";
+
+import {
+  Badge,
+  Button,
+  Label,
+  Modal,
+  Select,
+  Switch,
+  Table,
+  TableEmpty,
+  TBody,
+  TD,
+  TH,
+  THead,
+  TR,
+} from "@/components/ui";
+
+import { describeApiError } from "./errors";
+import {
+  useBranchesQuery,
+  useDeleteRegister,
+  useRegistersQuery,
+} from "./queries";
+import { RegisterForm } from "./RegisterForm";
+import { type PrinterType, type Register } from "./types";
+
+const printerLabel: Record<PrinterType, string> = {
+  browser: "Браузер",
+  thermal_58: "58 мм",
+  thermal_80: "80 мм",
+  a4: "A4",
+};
+
+export function RegistersPage(): JSX.Element {
+  const [branchFilter, setBranchFilter] = useState<string>("");
+  const [includeInactive, setIncludeInactive] = useState(false);
+  const [editing, setEditing] = useState<Register | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const branches = useBranchesQuery(true);
+  const { data, isLoading, error } = useRegistersQuery(
+    branchFilter || null,
+    includeInactive,
+  );
+  const deleteMutation = useDeleteRegister();
+
+  const branchNameById = (id: string): string =>
+    branches.data?.find((b) => b.id === id)?.name ?? id.slice(0, 8);
+
+  const handleDelete = async (r: Register) => {
+    if (!window.confirm(`Деактивировать кассу «${r.name}»?`)) return;
+    try {
+      await deleteMutation.mutateAsync(r.id);
+    } catch (err) {
+      window.alert(describeApiError(err, "Не удалось деактивировать"));
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-slate-900">Кассы</h1>
+        <Button onClick={() => setCreating(true)}>+ Новая касса</Button>
+      </div>
+      <div className="flex items-end gap-4">
+        <div>
+          <Label htmlFor="branch_filter">Точка</Label>
+          <Select
+            id="branch_filter"
+            value={branchFilter}
+            onChange={(e) => setBranchFilter(e.target.value)}
+            className="w-64"
+          >
+            <option value="">Все точки</option>
+            {branches.data?.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <Switch
+          label="Показывать неактивные"
+          checked={includeInactive}
+          onChange={(e) => setIncludeInactive(e.target.checked)}
+        />
+      </div>
+      {error && (
+        <p className="text-sm text-red-600">
+          {describeApiError(error, "Не удалось загрузить список")}
+        </p>
+      )}
+      {isLoading ? (
+        <p className="text-sm text-slate-500">Загрузка…</p>
+      ) : !data || data.length === 0 ? (
+        <TableEmpty>Пока нет ни одной кассы</TableEmpty>
+      ) : (
+        <Table>
+          <THead>
+            <TR>
+              <TH>Название</TH>
+              <TH>Точка</TH>
+              <TH>Принтер</TH>
+              <TH>Статус</TH>
+              <TH className="text-right">Действия</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {data.map((r) => (
+              <TR key={r.id}>
+                <TD className="font-medium">{r.name}</TD>
+                <TD>{branchNameById(r.branch_id)}</TD>
+                <TD>{r.printer_type ? printerLabel[r.printer_type] : "—"}</TD>
+                <TD>
+                  {r.is_active ? (
+                    <Badge tone="success">Активна</Badge>
+                  ) : (
+                    <Badge tone="neutral">Неактивна</Badge>
+                  )}
+                </TD>
+                <TD className="text-right">
+                  <Button variant="ghost" size="sm" onClick={() => setEditing(r)}>
+                    Изменить
+                  </Button>
+                  {r.is_active && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void handleDelete(r)}
+                      isLoading={deleteMutation.isPending}
+                    >
+                      Удалить
+                    </Button>
+                  )}
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      )}
+      <Modal
+        open={creating || editing !== null}
+        onClose={() => {
+          setCreating(false);
+          setEditing(null);
+        }}
+        title={editing ? `Редактирование: ${editing.name}` : "Новая касса"}
+      >
+        <RegisterForm
+          register={editing}
+          onClose={() => {
+            setCreating(false);
+            setEditing(null);
+          }}
+        />
+      </Modal>
+    </div>
+  );
+}
