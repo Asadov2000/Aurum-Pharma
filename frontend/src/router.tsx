@@ -7,6 +7,7 @@ import { AuthGuard } from "@/features/auth/AuthGuard";
 import { Dashboard } from "@/features/auth/Dashboard";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { CatalogPage } from "@/features/catalog/CatalogPage";
+import { BatchesPage } from "@/features/inventory/BatchesPage";
 import { BranchesPage } from "@/features/foundation/BranchesPage";
 import { RegistersPage } from "@/features/foundation/RegistersPage";
 import { SettingsPage } from "@/features/foundation/SettingsPage";
@@ -75,6 +76,12 @@ const catalogRoute = createRoute({
   component: () => protect(<CatalogPage />),
 });
 
+const batchesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/batches",
+  component: () => protect(<BatchesPage />),
+});
+
 const loginSearchSchema = z.object({
   from: z.string().optional(),
 });
@@ -95,6 +102,7 @@ const routeTree = rootRoute.addChildren([
   usersRoute,
   rolesRoute,
   catalogRoute,
+  batchesRoute,
   loginRoute,
 ]);
 
