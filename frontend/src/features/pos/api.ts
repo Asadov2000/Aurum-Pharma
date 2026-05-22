@@ -1,0 +1,103 @@
+import { api } from "@/lib/api";
+
+import {
+  type PaymentAddPayload,
+  type PrescriptionLog,
+  type PrescriptionLogPayload,
+  type Sale,
+  type SaleDetails,
+  type SaleItem,
+  type SaleItemAddedResponse,
+  type Shift,
+  type ShiftClosePayload,
+  type ShiftOpenPayload,
+  type ZReport,
+} from "./types";
+
+// ---- Shifts ----
+
+export async function openShift(payload: ShiftOpenPayload): Promise<Shift> {
+  const { data } = await api.post<Shift>("/shifts/open", payload);
+  return data;
+}
+
+export async function getCurrentShift(registerId: string): Promise<Shift | null> {
+  const { data } = await api.get<Shift | null>("/shifts/current", {
+    params: { register_id: registerId },
+  });
+  return data;
+}
+
+export async function closeShift(
+  shiftId: string,
+  payload: ShiftClosePayload,
+): Promise<Shift> {
+  const { data } = await api.post<Shift>(`/shifts/${shiftId}/close`, payload);
+  return data;
+}
+
+export async function getZReport(shiftId: string): Promise<ZReport> {
+  const { data } = await api.get<ZReport>(`/shifts/${shiftId}/z-report`);
+  return data;
+}
+
+// ---- Sales ----
+
+export async function createSale(registerId: string): Promise<Sale> {
+  const { data } = await api.post<Sale>("/sales", { register_id: registerId });
+  return data;
+}
+
+export async function getSale(id: string): Promise<SaleDetails> {
+  const { data } = await api.get<SaleDetails>(`/sales/${id}`);
+  return data;
+}
+
+export async function addSaleItem(
+  saleId: string,
+  catalogId: string,
+  qty: string,
+): Promise<SaleItemAddedResponse> {
+  const { data } = await api.post<SaleItemAddedResponse>(
+    `/sales/${saleId}/items`,
+    { catalog_id: catalogId, qty },
+  );
+  return data;
+}
+
+export async function updateSaleItem(
+  saleId: string,
+  itemId: string,
+  qty: string,
+): Promise<SaleItem> {
+  const { data } = await api.patch<SaleItem>(`/sales/${saleId}/items/${itemId}`, { qty });
+  return data;
+}
+
+export async function deleteSaleItem(saleId: string, itemId: string): Promise<void> {
+  await api.delete(`/sales/${saleId}/items/${itemId}`);
+}
+
+export async function addPayment(
+  saleId: string,
+  payload: PaymentAddPayload,
+): Promise<{ id: string }> {
+  const { data } = await api.post<{ id: string }>(`/sales/${saleId}/payments`, payload);
+  return data;
+}
+
+export async function completeSale(saleId: string): Promise<Sale> {
+  const { data } = await api.post<Sale>(`/sales/${saleId}/complete`);
+  return data;
+}
+
+export async function addPrescription(
+  saleId: string,
+  payload: PrescriptionLogPayload,
+): Promise<PrescriptionLog> {
+  const { data } = await api.post<PrescriptionLog>(
+    `/sales/${saleId}/prescription`,
+    payload,
+  );
+  return data;
+}

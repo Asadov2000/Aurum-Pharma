@@ -15,6 +15,7 @@ import { RegistersPage } from "@/features/foundation/RegistersPage";
 import { SettingsPage } from "@/features/foundation/SettingsPage";
 import { TenantsPage } from "@/features/foundation/TenantsPage";
 import { RolesPage } from "@/features/roles/RolesPage";
+import { POSPage } from "@/features/pos/POSPage";
 import { UsersPage } from "@/features/roles/UsersPage";
 import { SuppliersPage } from "@/features/suppliers/SuppliersPage";
 
@@ -103,6 +104,12 @@ const incomingDetailRoute = createRoute({
   component: () => protect(<IncomingDetailPage />),
 });
 
+const posRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/pos",
+  component: () => protect(<POSPage />),
+});
+
 const loginSearchSchema = z.object({
   from: z.string().optional(),
 });
@@ -127,6 +134,7 @@ const routeTree = rootRoute.addChildren([
   suppliersRoute,
   incomingRoute,
   incomingDetailRoute,
+  posRoute,
   loginRoute,
 ]);
 
