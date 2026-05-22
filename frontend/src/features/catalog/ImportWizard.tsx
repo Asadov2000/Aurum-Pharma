@@ -66,6 +66,14 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
   const onPick = async (file: File | null) => {
     if (!file) return;
     setTopError(null);
+    // Backend parser is CSV-only (openpyxl arrives in Phase 2). Reject
+    // .xlsx upfront so the user sees a friendly message instead of an
+    // opaque server error from the CSV parser choking on a zip stream.
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+      setTopError("XLSX пока не поддерживается. Сохраните таблицу как CSV (UTF-8) и попробуйте снова.");
+      return;
+    }
     try {
       const j = await upload.mutateAsync(file);
       setJobId(j.id);
@@ -110,13 +118,16 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
     return (
       <div className="space-y-4">
         <p className="text-sm text-slate-600">
-          Загрузите CSV / Excel с позициями каталога. Файл уйдёт в MinIO; на следующем шаге
-          сервер построит превью.
+          Загрузите CSV-файл с позициями каталога (UTF-8 или Windows-1251).
+          Файл уйдёт в MinIO; на следующем шаге сервер построит превью.
+        </p>
+        <p className="text-xs text-slate-500">
+          XLSX пока не поддерживается — появится в Этапе 2 вместе с openpyxl.
         </p>
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          accept=".csv,text/csv"
           onChange={(e) => void onPick(e.target.files?.[0] ?? null)}
           className="block w-full text-sm"
         />
