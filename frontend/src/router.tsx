@@ -6,6 +6,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { AuthGuard } from "@/features/auth/AuthGuard";
 import { Dashboard } from "@/features/auth/Dashboard";
 import { LoginPage } from "@/features/auth/LoginPage";
+import { CatalogPage } from "@/features/catalog/CatalogPage";
 import { BranchesPage } from "@/features/foundation/BranchesPage";
 import { RegistersPage } from "@/features/foundation/RegistersPage";
 import { SettingsPage } from "@/features/foundation/SettingsPage";
@@ -68,6 +69,12 @@ const rolesRoute = createRoute({
   component: () => protect(<RolesPage />),
 });
 
+const catalogRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/catalog",
+  component: () => protect(<CatalogPage />),
+});
+
 const loginSearchSchema = z.object({
   from: z.string().optional(),
 });
@@ -87,6 +94,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
   usersRoute,
   rolesRoute,
+  catalogRoute,
   loginRoute,
 ]);
 
