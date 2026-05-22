@@ -10,6 +10,8 @@ import { BranchesPage } from "@/features/foundation/BranchesPage";
 import { RegistersPage } from "@/features/foundation/RegistersPage";
 import { SettingsPage } from "@/features/foundation/SettingsPage";
 import { TenantsPage } from "@/features/foundation/TenantsPage";
+import { RolesPage } from "@/features/roles/RolesPage";
+import { UsersPage } from "@/features/roles/UsersPage";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -54,6 +56,18 @@ const settingsRoute = createRoute({
   component: () => protect(<SettingsPage />),
 });
 
+const usersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/users",
+  component: () => protect(<UsersPage />),
+});
+
+const rolesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/roles",
+  component: () => protect(<RolesPage />),
+});
+
 const loginSearchSchema = z.object({
   from: z.string().optional(),
 });
@@ -71,6 +85,8 @@ const routeTree = rootRoute.addChildren([
   branchesRoute,
   registersRoute,
   settingsRoute,
+  usersRoute,
+  rolesRoute,
   loginRoute,
 ]);
 
