@@ -16,6 +16,8 @@ function buildNav(isSupport: boolean, hasTenant: boolean): NavItem[] {
     items.push({ to: "/users", label: "Пользователи" });
     items.push({ to: "/roles", label: "Роли" });
     items.push({ to: "/catalog", label: "Каталог" });
+    items.push({ to: "/suppliers", label: "Поставщики" });
+    items.push({ to: "/incoming", label: "Приходы" });
     items.push({ to: "/batches", label: "Партии" });
     items.push({ to: "/settings", label: "Настройки" });
   }

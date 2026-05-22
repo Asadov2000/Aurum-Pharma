@@ -7,6 +7,8 @@ import { AuthGuard } from "@/features/auth/AuthGuard";
 import { Dashboard } from "@/features/auth/Dashboard";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { CatalogPage } from "@/features/catalog/CatalogPage";
+import { IncomingDetailPage } from "@/features/incoming/IncomingDetailPage";
+import { IncomingPage } from "@/features/incoming/IncomingPage";
 import { BatchesPage } from "@/features/inventory/BatchesPage";
 import { BranchesPage } from "@/features/foundation/BranchesPage";
 import { RegistersPage } from "@/features/foundation/RegistersPage";
@@ -14,6 +16,7 @@ import { SettingsPage } from "@/features/foundation/SettingsPage";
 import { TenantsPage } from "@/features/foundation/TenantsPage";
 import { RolesPage } from "@/features/roles/RolesPage";
 import { UsersPage } from "@/features/roles/UsersPage";
+import { SuppliersPage } from "@/features/suppliers/SuppliersPage";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -82,6 +85,24 @@ const batchesRoute = createRoute({
   component: () => protect(<BatchesPage />),
 });
 
+const suppliersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/suppliers",
+  component: () => protect(<SuppliersPage />),
+});
+
+const incomingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/incoming",
+  component: () => protect(<IncomingPage />),
+});
+
+const incomingDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/incoming/$id",
+  component: () => protect(<IncomingDetailPage />),
+});
+
 const loginSearchSchema = z.object({
   from: z.string().optional(),
 });
@@ -103,6 +124,9 @@ const routeTree = rootRoute.addChildren([
   rolesRoute,
   catalogRoute,
   batchesRoute,
+  suppliersRoute,
+  incomingRoute,
+  incomingDetailRoute,
   loginRoute,
 ]);
 
