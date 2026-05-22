@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Input } from "@/components/ui";
-import { useCatalogQuery } from "@/features/catalog/queries";
+
+import { useCatalogQuery } from "./queries";
 
 interface Props {
   value: string;
   onChange: (catalogId: string, brandName: string) => void;
+  /** Optional initial label shown when `value` is preset (e.g. from URL state). */
+  initialLabel?: string;
+  /** Render an inline ✕ that clears the selection. Useful for filters. */
+  clearable?: boolean;
   placeholder?: string;
   invalid?: boolean;
 }
@@ -15,11 +20,13 @@ interface Props {
 export function CatalogPicker({
   value,
   onChange,
+  initialLabel,
+  clearable = false,
   placeholder = "Начните вводить название…",
   invalid = false,
 }: Props): JSX.Element {
   const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialLabel ?? "");
   const [debounced, setDebounced] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -41,6 +48,12 @@ export function CatalogPicker({
     return () => window.removeEventListener("mousedown", onClickOutside);
   }, []);
 
+  const onClear = () => {
+    setText("");
+    setDebounced("");
+    onChange("", "");
+  };
+
   return (
     <div ref={containerRef} className="relative">
       <Input
@@ -53,7 +66,18 @@ export function CatalogPicker({
         placeholder={placeholder}
         invalid={invalid}
         autoComplete="off"
+        className={clearable && value ? "pr-9" : undefined}
       />
+      {clearable && value && (
+        <button
+          type="button"
+          onClick={onClear}
+          aria-label="Очистить"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        >
+          ✕
+        </button>
+      )}
       {value && !text && (
         <p className="mt-1 text-xs text-slate-500">
           Выбрано: <span className="font-mono">{value.slice(0, 8)}</span>

@@ -15,6 +15,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 
@@ -27,6 +28,7 @@ const PAGE_SIZE = 50;
 
 export function BatchesPage(): JSX.Element {
   const [branchId, setBranchId] = useState("");
+  const [catalogId, setCatalogId] = useState("");
   const [expiry, setExpiry] = useState<ExpiryStatus | "">("");
   const [showEmpty, setShowEmpty] = useState(false);
   const [page, setPage] = useState(1);
@@ -35,6 +37,7 @@ export function BatchesPage(): JSX.Element {
   const branches = useBranchesQuery(true);
   const { data, isLoading, error } = useBatchesQuery({
     branch_id: branchId || undefined,
+    catalog_id: catalogId || undefined,
     expiry_status: expiry || undefined,
     show_empty: showEmpty,
     page,
@@ -57,6 +60,18 @@ export function BatchesPage(): JSX.Element {
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
+        <div className="w-72">
+          <Label htmlFor="catalog">Товар</Label>
+          <CatalogPicker
+            value={catalogId}
+            onChange={(id) => {
+              setCatalogId(id);
+              setPage(1);
+            }}
+            placeholder="Найти по названию…"
+            clearable
+          />
+        </div>
         <div>
           <Label htmlFor="branch">Точка</Label>
           <Select
@@ -115,7 +130,7 @@ export function BatchesPage(): JSX.Element {
         <p className="text-sm text-slate-500">Загрузка…</p>
       ) : !data || data.items.length === 0 ? (
         <TableEmpty>
-          {branchId || expiry || showEmpty
+          {branchId || catalogId || expiry || showEmpty
             ? "По текущим фильтрам ничего не найдено"
             : "Партии появятся после приёмки от поставщика"}
         </TableEmpty>

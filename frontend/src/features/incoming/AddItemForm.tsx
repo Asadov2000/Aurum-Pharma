@@ -5,7 +5,7 @@ import { z } from "zod";
 import { Button, FormError, Input, Label } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 
-import { CatalogPicker } from "./CatalogPicker";
+import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { useAddIncomingItem } from "./queries";
 
 const schema = z.object({
