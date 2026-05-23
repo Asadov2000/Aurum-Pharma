@@ -20,6 +20,7 @@ function buildNav(isSupport: boolean, hasTenant: boolean): NavItem[] {
     items.push({ to: "/incoming", label: "Приходы" });
     items.push({ to: "/batches", label: "Партии" });
     items.push({ to: "/pos", label: "Касса" });
+    items.push({ to: "/billing", label: "Биллинг" });
     items.push({ to: "/settings", label: "Настройки" });
   }
   items.push({ to: "/", label: "Профиль" });

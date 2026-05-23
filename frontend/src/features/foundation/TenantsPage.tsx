@@ -12,6 +12,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { AdminBillingDrawer } from "@/features/billing/AdminBillingDrawer";
 
 import { describeApiError } from "./errors";
 import { useTenantsQuery } from "./queries";
@@ -39,6 +40,7 @@ const statusLabel: Record<TenantStatus, string> = {
 export function TenantsPage(): JSX.Element {
   const [editing, setEditing] = useState<Tenant | null>(null);
   const [creating, setCreating] = useState(false);
+  const [billingTenant, setBillingTenant] = useState<Tenant | null>(null);
   const { data, isLoading, error } = useTenantsQuery();
 
   return (
@@ -76,9 +78,12 @@ export function TenantsPage(): JSX.Element {
                   <Badge tone={statusTone[t.status]}>{statusLabel[t.status]}</Badge>
                 </TD>
                 <TD>{new Date(t.created_at).toLocaleDateString("ru-RU")}</TD>
-                <TD className="text-right">
+                <TD className="text-right whitespace-nowrap">
                   <Button variant="ghost" size="sm" onClick={() => setEditing(t)}>
                     Изменить
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setBillingTenant(t)}>
+                    Биллинг
                   </Button>
                 </TD>
               </TR>
@@ -102,6 +107,13 @@ export function TenantsPage(): JSX.Element {
           }}
         />
       </Modal>
+      {billingTenant && (
+        <AdminBillingDrawer
+          tenantId={billingTenant.id}
+          tenantName={billingTenant.name}
+          onClose={() => setBillingTenant(null)}
+        />
+      )}
     </div>
   );
 }
