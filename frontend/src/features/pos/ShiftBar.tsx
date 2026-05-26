@@ -46,6 +46,8 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
           notes: notes.trim() || null,
         },
       });
+      // Stash the just-closed shift id so /reports can preload the Z-report.
+      window.localStorage.setItem("pos:lastClosedShiftId", shift.id);
       setCloseOpen(false);
       setClosingCash("");
       setNotes("");

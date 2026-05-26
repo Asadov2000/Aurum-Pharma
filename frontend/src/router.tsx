@@ -18,6 +18,7 @@ import { RolesPage } from "@/features/roles/RolesPage";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { NotificationsPage } from "@/features/notifications/NotificationsPage";
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
+import { ReportsPage } from "@/features/reports/ReportsPage";
 import { BillingPage } from "@/features/billing/BillingPage";
 import { POSPage } from "@/features/pos/POSPage";
 import { UsersPage } from "@/features/roles/UsersPage";
@@ -138,6 +139,12 @@ const notificationsRoute = createRoute({
   component: () => protect(<NotificationsPage />),
 });
 
+const reportsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reports",
+  component: () => protect(<ReportsPage />),
+});
+
 const loginSearchSchema = z.object({
   from: z.string().optional(),
 });
@@ -167,6 +174,7 @@ const routeTree = rootRoute.addChildren([
   auditRoute,
   onboardingRoute,
   notificationsRoute,
+  reportsRoute,
   loginRoute,
 ]);
 
