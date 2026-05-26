@@ -11,6 +11,7 @@ function buildNav(isSupport: boolean, hasTenant: boolean): NavItem[] {
     items.push({ to: "/admin/tenants", label: "Тенанты" });
   }
   if (hasTenant) {
+    items.push({ to: "/onboarding", label: "Старт" });
     items.push({ to: "/branches", label: "Точки" });
     items.push({ to: "/registers", label: "Кассы" });
     items.push({ to: "/users", label: "Пользователи" });

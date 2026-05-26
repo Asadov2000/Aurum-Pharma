@@ -16,6 +16,7 @@ import { SettingsPage } from "@/features/foundation/SettingsPage";
 import { TenantsPage } from "@/features/foundation/TenantsPage";
 import { RolesPage } from "@/features/roles/RolesPage";
 import { AuditPage } from "@/features/audit/AuditPage";
+import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
 import { BillingPage } from "@/features/billing/BillingPage";
 import { POSPage } from "@/features/pos/POSPage";
 import { UsersPage } from "@/features/roles/UsersPage";
@@ -124,6 +125,12 @@ const auditRoute = createRoute({
   component: () => protect(<AuditPage />),
 });
 
+const onboardingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/onboarding",
+  component: () => protect(<OnboardingPage />),
+});
+
 const loginSearchSchema = z.object({
   from: z.string().optional(),
 });
@@ -151,6 +158,7 @@ const routeTree = rootRoute.addChildren([
   posRoute,
   billingRoute,
   auditRoute,
+  onboardingRoute,
   loginRoute,
 ]);
 
