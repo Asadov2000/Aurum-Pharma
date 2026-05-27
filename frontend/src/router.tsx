@@ -4,8 +4,8 @@ import { z } from "zod";
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AuthGuard } from "@/features/auth/AuthGuard";
-import { Dashboard } from "@/features/auth/Dashboard";
 import { LoginPage } from "@/features/auth/LoginPage";
+import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { CatalogPage } from "@/features/catalog/CatalogPage";
 import { IncomingDetailPage } from "@/features/incoming/IncomingDetailPage";
 import { IncomingPage } from "@/features/incoming/IncomingPage";
@@ -40,7 +40,7 @@ function protect(node: ReactNode): JSX.Element {
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: () => protect(<Dashboard />),
+  component: () => protect(<DashboardPage />),
 });
 
 const tenantsRoute = createRoute({

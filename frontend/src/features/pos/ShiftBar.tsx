@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { Badge, Button, Card, CardContent, Input, Label, Modal, Textarea } from "@/components/ui";
-import { describeApiError } from "@/features/foundation/errors";
+import { describeApiError } from "@/lib/errorMessages";
 
 import { useCloseShift, useCurrentShiftQuery, useOpenShift } from "./queries";
 

@@ -1,5 +1,5 @@
 import { Badge, Button, Modal, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
-import { describeApiError } from "@/features/foundation/errors";
+import { describeApiError } from "@/lib/errorMessages";
 
 import {
   invoiceStatusLabel,

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 
 import { Button, Input, Label, Modal, Textarea } from "@/components/ui";
-import { describeApiError } from "@/features/foundation/errors";
+import { describeApiError } from "@/lib/errorMessages";
 
 import { useAddPrescription } from "./queries";
 

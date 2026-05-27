@@ -3,10 +3,10 @@ import { type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 
-import { Sidebar, type NavItem } from "./Sidebar";
+import { HomeIcon, Sidebar, type NavItem } from "./Sidebar";
 
 function buildNav(isSupport: boolean, hasTenant: boolean): NavItem[] {
-  const items: NavItem[] = [];
+  const items: NavItem[] = [{ to: "/", label: "Главная", icon: <HomeIcon /> }];
   if (isSupport) {
     items.push({ to: "/admin/tenants", label: "Тенанты" });
   }
@@ -27,7 +27,6 @@ function buildNav(isSupport: boolean, hasTenant: boolean): NavItem[] {
     items.push({ to: "/notifications", label: "Уведомления" });
     items.push({ to: "/settings", label: "Настройки" });
   }
-  items.push({ to: "/", label: "Профиль" });
   return items;
 }
 

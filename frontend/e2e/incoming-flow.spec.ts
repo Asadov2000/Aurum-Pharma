@@ -2,6 +2,7 @@ import { test, request } from "@playwright/test";
 
 import {
   apiContext,
+  catalogSearchKey,
   apiLogin,
   clearLoginRateLimit,
   expect,
@@ -51,7 +52,7 @@ test.describe("Incoming flow (owner)", () => {
     const pickerInput = page.getByPlaceholder(/Начните вводить название/);
     // Use a search string with enough characters to be unique. CatalogPicker
     // debounces at 200ms, then fires the trigram search.
-    const searchKey = item.brand_name.split("-").slice(0, 2).join("-");
+    const searchKey = catalogSearchKey(item.brand_name);
     await pickerInput.fill(searchKey);
     const option = page.getByRole("button", { name: new RegExp(item.brand_name) });
     await expect(option).toBeVisible({ timeout: 15_000 });

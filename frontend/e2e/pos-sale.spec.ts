@@ -2,6 +2,7 @@ import { test, request } from "@playwright/test";
 
 import {
   apiContext,
+  catalogSearchKey,
   apiLogin,
   clearLoginRateLimit,
   expect,
@@ -83,7 +84,7 @@ test.describe("POS sale (owner)", () => {
 
     // Pick the catalog item and ask for 7 units → FEFO splits 5 + 2.
     const pickerInput = page.getByPlaceholder(/Начните вводить название/);
-    const searchKey = item.brand_name.split("-").slice(0, 2).join("-");
+    const searchKey = catalogSearchKey(item.brand_name);
     await pickerInput.fill(searchKey);
     const option = page.getByRole("button", { name: new RegExp(item.brand_name) });
     await expect(option).toBeVisible({ timeout: 15_000 });

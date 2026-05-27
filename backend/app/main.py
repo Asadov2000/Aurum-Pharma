@@ -26,6 +26,7 @@ from app.domains.auth import router as auth_router
 from app.domains.billing import admin_router as billing_admin_router
 from app.domains.billing import tenant_router as billing_tenant_router
 from app.domains.catalog import router as catalog_router
+from app.domains.dashboard import router as dashboard_router
 from app.domains.foundation import admin_router as foundation_admin_router
 from app.domains.foundation import tenant_router as foundation_tenant_router
 from app.domains.incoming import router as incoming_router
@@ -92,6 +93,7 @@ app.include_router(billing_admin_router)
 app.include_router(audit_router)
 app.include_router(onboarding_router)
 app.include_router(notifications_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/healthz", tags=["meta"])

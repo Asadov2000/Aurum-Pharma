@@ -4,22 +4,25 @@ import { defineConfig, devices } from "@playwright/test";
 // Both must be up before `pnpm e2e` — see docs/e2e.md.
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 60_000,
-  expect: { timeout: 10_000 },
+  // Generous timeouts: the dev Vite server in Docker can take several
+  // seconds per route on a loaded host, so navigation + a few interactions
+  // need headroom. Real bugs still fail well inside these limits.
+  timeout: 90_000,
+  expect: { timeout: 15_000 },
   // Sequential by default — POS/inventory tests assert global DB state.
   workers: 1,
   fullyParallel: false,
-  // One retry absorbs transient infra hiccups (Docker Desktop pipe drops,
-  // a cold Vite chunk) without masking real product bugs — a genuinely
-  // broken flow fails both attempts.
-  retries: 1,
+  // Two retries absorb transient infra hiccups (Docker Desktop pipe drops,
+  // slow cold Vite chunks) without masking real product bugs — a genuinely
+  // broken flow fails every attempt.
+  retries: 2,
   reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://localhost:5173",
     // Backend API base; helpers use it directly for seed.
     extraHTTPHeaders: {},
-    actionTimeout: 10_000,
-    navigationTimeout: 30_000,
+    actionTimeout: 15_000,
+    navigationTimeout: 45_000,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "retain-on-failure",

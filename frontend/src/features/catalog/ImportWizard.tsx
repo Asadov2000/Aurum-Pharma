@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 
 import { Badge, Button, Label, Select } from "@/components/ui";
-import { describeApiError } from "@/features/foundation/errors";
+import { describeApiError } from "@/lib/errorMessages";
 
 import {
   useConfirmImport,

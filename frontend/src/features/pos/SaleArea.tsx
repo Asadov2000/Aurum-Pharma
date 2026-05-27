@@ -15,7 +15,7 @@ import {
   TR,
 } from "@/components/ui";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
-import { describeApiError } from "@/features/foundation/errors";
+import { describeApiError } from "@/lib/errorMessages";
 
 import {
   paymentMethodLabel,

@@ -128,6 +128,18 @@ export function uniqueName(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/**
+ * The catalog search ranks by pg_trgm similarity, so a query that shares a
+ * long prefix with many seeded rows (e.g. "E2E Med-…") can push the exact
+ * target out of the page_size=10 window once dozens of look-alike rows
+ * accumulate across runs. Drive CatalogPicker with the unique tail of a
+ * `uniqueName()` value ("<ts36>-<rand>") instead — it matches exactly one row.
+ */
+export function catalogSearchKey(brandName: string): string {
+  const parts = brandName.split("-");
+  return parts.length >= 2 ? parts.slice(-2).join("-") : brandName;
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }

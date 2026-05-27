@@ -14,7 +14,7 @@ import {
   Select,
   Textarea,
 } from "@/components/ui";
-import { describeApiError } from "@/features/foundation/errors";
+import { describeApiError } from "@/lib/errorMessages";
 
 import { billingPeriodLabel, paymentMethodLabel, paymentMethodOptions } from "./labels";
 import {

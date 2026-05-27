@@ -2,6 +2,7 @@ import { test, request } from "@playwright/test";
 
 import {
   apiContext,
+  catalogSearchKey,
   apiLogin,
   clearLoginRateLimit,
   expect,
@@ -62,7 +63,7 @@ test.describe("Shift close → Z-report", () => {
     // Create + complete a 50 TJS cash sale.
     await page.getByRole("button", { name: /\+ Новая продажа/ }).click();
     const picker = page.getByPlaceholder(/Начните вводить название/);
-    const searchKey = item.brand_name.split("-").slice(0, 2).join("-");
+    const searchKey = catalogSearchKey(item.brand_name);
     await picker.fill(searchKey);
     const opt = page.getByRole("button", { name: new RegExp(item.brand_name) });
     await expect(opt).toBeVisible({ timeout: 15_000 });

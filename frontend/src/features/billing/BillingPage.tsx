@@ -14,7 +14,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { describeApiError } from "@/features/foundation/errors";
+import { describeApiError } from "@/lib/errorMessages";
 
 import { InvoiceDetailModal } from "./InvoiceDetailModal";
 import {
