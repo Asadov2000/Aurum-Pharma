@@ -34,7 +34,10 @@ export function Modal({
     >
       <div
         className={cn(
-          "w-full max-w-lg rounded-lg border border-slate-200 bg-white shadow-xl",
+          // max-h + flex-column lets the body scroll on tall content
+          // (e.g. AdminBillingDrawer's 3 stacked forms) while keeping
+          // the header pinned to the top.
+          "flex max-h-[90vh] w-full max-w-lg flex-col rounded-lg border border-slate-200 bg-white shadow-xl",
           className,
         )}
         onClick={(e) => e.stopPropagation()}
@@ -42,7 +45,7 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <button
             type="button"
@@ -53,7 +56,7 @@ export function Modal({
             ✕
           </button>
         </div>
-        <div className="px-6 py-4">{children}</div>
+        <div className="overflow-y-auto px-6 py-4">{children}</div>
       </div>
     </div>
   );

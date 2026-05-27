@@ -24,6 +24,12 @@ pnpm-debug.log*
 frontend/dist/
 backend/dist/
 
+# Playwright (E2E) — runtime artifacts, never committed
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.cache/
+
 # Environment
 .env
 .env.local
