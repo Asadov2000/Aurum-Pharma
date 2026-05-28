@@ -4,8 +4,6 @@ import { Card, CardContent, Label, Select } from "@/components/ui";
 import { useRegistersQuery } from "@/features/foundation/queries";
 
 import { SaleArea } from "./SaleArea";
-import { ShiftBar } from "./ShiftBar";
-import { useCurrentShiftQuery } from "./queries";
 
 const STORAGE_KEY = "pos:lastRegisterId";
 
@@ -27,45 +25,38 @@ export function POSPage(): JSX.Element {
     if (registerId) window.localStorage.setItem(STORAGE_KEY, registerId);
   }, [registerId]);
 
-  const shiftQuery = useCurrentShiftQuery(registerId || null);
-  const hasShift = Boolean(shiftQuery.data);
-
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-foreground">Касса</h1>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-foreground">Касса</h1>
+        <Card className="shrink-0">
+          <CardContent className="flex items-end gap-3 py-3">
+            <div>
+              <Label htmlFor="register">Касса</Label>
+              <Select
+                id="register"
+                value={registerId}
+                onChange={(e) => setRegisterId(e.target.value)}
+                className="w-56"
+              >
+                <option value="">— выберите —</option>
+                {registers.data?.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {registers.data?.length === 0 && (
+              <p className="text-sm text-foreground-muted">
+                Нет активных касс. Создайте кассу в разделе «Кассы».
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-      <Card>
-        <CardContent className="flex items-end gap-3 py-4">
-          <div>
-            <Label htmlFor="register">Касса</Label>
-            <Select
-              id="register"
-              value={registerId}
-              onChange={(e) => setRegisterId(e.target.value)}
-              className="w-64"
-            >
-              <option value="">— выберите —</option>
-              {registers.data?.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {registers.data?.length === 0 && (
-            <p className="text-sm text-foreground-muted">
-              Нет активных касс. Создайте кассу в разделе «Кассы».
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {registerId && (
-        <>
-          <ShiftBar registerId={registerId} />
-          {hasShift && <SaleArea registerId={registerId} />}
-        </>
-      )}
+      {registerId && <SaleArea registerId={registerId} />}
     </div>
   );
 }

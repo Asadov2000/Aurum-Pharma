@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 
 import { Input } from "@/components/ui";
 
@@ -16,15 +16,19 @@ interface Props {
 }
 
 // Lightweight typeahead over /api/v1/catalog. Defers fetching until the
-// user types something — a blank input does NOT spam the server.
-export function CatalogPicker({
-  value,
-  onChange,
-  initialLabel,
-  clearable = false,
-  placeholder = "Начните вводить название…",
-  invalid = false,
-}: Props): JSX.Element {
+// user types something — a blank input does NOT spam the server. The
+// forwarded ref points at the text input (POS focuses it via "/").
+export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function CatalogPicker(
+  {
+    value,
+    onChange,
+    initialLabel,
+    clearable = false,
+    placeholder = "Начните вводить название…",
+    invalid = false,
+  },
+  ref,
+): JSX.Element {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(initialLabel ?? "");
   const [debounced, setDebounced] = useState("");
@@ -57,6 +61,7 @@ export function CatalogPicker({
   return (
     <div ref={containerRef} className="relative">
       <Input
+        ref={ref}
         value={text}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
@@ -111,4 +116,4 @@ export function CatalogPicker({
       )}
     </div>
   );
-}
+});
