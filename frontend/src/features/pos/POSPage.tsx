@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Card, CardContent, Label, Select } from "@/components/ui";
+import { Card, CardContent, Label, Select, Switch } from "@/components/ui";
 import { useRegistersQuery } from "@/features/foundation/queries";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +9,7 @@ import { SaleArea } from "./SaleArea";
 import { usePosMode } from "./usePosMode";
 
 const STORAGE_KEY = "pos:lastRegisterId";
+const SOUND_KEY = "pos:beep";
 
 export function POSPage(): JSX.Element {
   const { mode, pref, setPref } = usePosMode();
@@ -16,6 +17,18 @@ export function POSPage(): JSX.Element {
   const [registerId, setRegisterId] = useState<string>(() => {
     return window.localStorage.getItem(STORAGE_KEY) ?? "";
   });
+  const [soundOn, setSoundOn] = useState<boolean>(() => {
+    return window.localStorage.getItem(SOUND_KEY) === "1";
+  });
+
+  const toggleSound = (on: boolean) => {
+    setSoundOn(on);
+    try {
+      window.localStorage.setItem(SOUND_KEY, on ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  };
 
   // Auto-select the first active register the first time the user lands.
   useEffect(() => {
@@ -34,7 +47,14 @@ export function POSPage(): JSX.Element {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <h1 className="text-2xl font-semibold text-foreground">Касса</h1>
         <div className="flex flex-wrap items-end gap-3">
-          <ModeToggle pref={pref} setPref={setPref} />
+          <div className="flex flex-col gap-1">
+            <ModeToggle pref={pref} setPref={setPref} />
+            <Switch
+              label="Звук сканера"
+              checked={soundOn}
+              onChange={(e) => toggleSound(e.target.checked)}
+            />
+          </div>
           <Card className="shrink-0">
             <CardContent className="flex items-end gap-3 py-3">
               <div>
@@ -63,7 +83,7 @@ export function POSPage(): JSX.Element {
         </div>
       </div>
 
-      {registerId && <SaleArea registerId={registerId} mode={mode} />}
+      {registerId && <SaleArea registerId={registerId} mode={mode} soundOn={soundOn} />}
     </div>
   );
 }

@@ -102,4 +102,24 @@
   .skeleton {
     @apply animate-pulse rounded-md bg-foreground/10;
   }
+
+  /* Cheap windowing for long POS carts: the browser skips rendering rows that
+     are scrolled out of view. The intrinsic size keeps the scrollbar honest. */
+  .pos-cv {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 64px;
+  }
+}
+
+/* Respect the OS "reduce motion" setting: kill transitions/animations so the
+   scan flash collapses to a plain static border instead of a fade. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

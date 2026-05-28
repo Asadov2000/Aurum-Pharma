@@ -1,13 +1,18 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { isAxiosError } from "axios";
 
 import { Button } from "@/components/ui";
+import { findByBarcode } from "@/features/catalog/api";
 import { describeApiError } from "@/lib/errorMessages";
+import { cn } from "@/lib/utils";
 
+import { BarcodeListener } from "./BarcodeListener";
 import { CartList } from "./CartList";
 import { PaymentPanel } from "./PaymentPanel";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
+import { beep } from "./beep";
 import {
   useAddPayment,
   useAddSaleItem,
@@ -28,6 +33,30 @@ type NumPadState =
   | { kind: "qty"; itemId: string; initial: string }
   | { kind: "payment"; method: PaymentMethod; initial: string };
 
+type FlashTone = "success" | "danger";
+
+const draftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
+
+interface SavedDraft {
+  saleId: string | null;
+  nameById: Record<string, string>;
+}
+
+function readDraft(registerId: string): SavedDraft {
+  try {
+    const raw = window.localStorage.getItem(draftKey(registerId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<SavedDraft>;
+      if (parsed && typeof parsed.saleId === "string") {
+        return { saleId: parsed.saleId, nameById: parsed.nameById ?? {} };
+      }
+    }
+  } catch {
+    // ignore corrupt/blocked storage
+  }
+  return { saleId: null, nameById: {} };
+}
+
 /**
  * The POS workspace. Owns the shift gate and the active sale, and lays the UI
  * out responsively: two columns on ≥lg (cart left, payment right) and a single
@@ -36,9 +65,11 @@ type NumPadState =
 export function SaleArea({
   registerId,
   mode,
+  soundOn,
 }: {
   registerId: string;
   mode: PosMode;
+  soundOn: boolean;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
@@ -46,7 +77,8 @@ export function SaleArea({
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
       {hasShift ? (
-        <ActiveWorkspace registerId={registerId} mode={mode} />
+        // Key by register so switching registers restores that one's draft.
+        <ActiveWorkspace key={registerId} registerId={registerId} mode={mode} soundOn={soundOn} />
       ) : (
         <>
           <div className="lg:col-span-7">
@@ -66,21 +98,27 @@ export function SaleArea({
 function ActiveWorkspace({
   registerId,
   mode,
+  soundOn,
 }: {
   registerId: string;
   mode: PosMode;
+  soundOn: boolean;
 }): JSX.Element {
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
 
-  const [saleId, setSaleId] = useState<string | null>(null);
-  const [nameById, setNameById] = useState<Record<string, string>>({});
+  const [saleId, setSaleId] = useState<string | null>(() => readDraft(registerId).saleId);
+  const [nameById, setNameById] = useState<Record<string, string>>(
+    () => readDraft(registerId).nameById,
+  );
   const [topError, setTopError] = useState<string | null>(null);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [requiresRx, setRequiresRx] = useState(false);
   const [payingMethod, setPayingMethod] = useState<PaymentMethod | null>(null);
   const [numpad, setNumpad] = useState<NumPadState | null>(null);
+  const [flash, setFlash] = useState<FlashTone | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const flashTimer = useRef<number | undefined>(undefined);
 
   const createSale = useCreateSale();
   const addItem = useAddSaleItem();
@@ -98,6 +136,39 @@ function ActiveWorkspace({
   const totalDue = sale ? Number(sale.total_amount) : 0;
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = totalDue - totalPaid;
+
+  const clearDraft = useCallback(() => {
+    try {
+      window.localStorage.removeItem(draftKey(registerId));
+    } catch {
+      // ignore
+    }
+  }, [registerId]);
+
+  // Persist the live draft so a reload (or accidental close) restores the cart.
+  useEffect(() => {
+    if (saleId && isDraft) {
+      try {
+        window.localStorage.setItem(draftKey(registerId), JSON.stringify({ saleId, nameById }));
+      } catch {
+        // ignore
+      }
+    }
+  }, [saleId, nameById, isDraft, registerId]);
+
+  // If a restored sale turns out already completed/voided, drop the stash so it
+  // doesn't keep resurrecting on reload.
+  useEffect(() => {
+    if (sale && sale.status !== "draft") clearDraft();
+  }, [sale, clearDraft]);
+
+  useEffect(() => () => window.clearTimeout(flashTimer.current), []);
+
+  const doFlash = (tone: FlashTone) => {
+    setFlash(tone);
+    window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(null), 600);
+  };
 
   // Lazily create a draft on the first add so we never leave empty drafts.
   const ensureSaleId = useCallback(async (): Promise<string> => {
@@ -120,6 +191,23 @@ function ActiveWorkspace({
       searchRef.current?.focus();
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось добавить позицию"));
+    }
+  };
+
+  const onScan = async (code: string) => {
+    setTopError(null);
+    try {
+      const item = await findByBarcode(code);
+      await onAdd(item.id, item.brand_name, 1);
+      doFlash("success");
+      if (soundOn) beep();
+    } catch (err) {
+      doFlash("danger");
+      if (isAxiosError(err) && err.response?.status === 404) {
+        setTopError(`Штрихкод ${code} не найден`);
+      } else {
+        setTopError(describeApiError(err, `Штрихкод ${code} не найден`));
+      }
     }
   };
 
@@ -184,12 +272,14 @@ function ActiveWorkspace({
     setTopError(null);
     try {
       await completeSale.mutateAsync(saleId);
+      clearDraft();
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось завершить продажу"));
     }
   };
 
   const onNewSale = () => {
+    clearDraft();
     setSaleId(null);
     setNameById({});
     setRequiresRx(false);
@@ -259,6 +349,21 @@ function ActiveWorkspace({
 
   return (
     <>
+      {/* Global barcode capture — only while editing a draft. */}
+      <BarcodeListener enabled={isDraft} onScan={(code) => void onScan(code)} />
+
+      {/* Scan feedback: green/red edge flash (collapses to a static border under
+          reduced-motion). */}
+      {flash && (
+        <div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none fixed inset-0 z-toast ring-4 ring-inset transition-opacity duration-slow",
+            flash === "success" ? "ring-success" : "ring-danger",
+          )}
+        />
+      )}
+
       {/* LEFT — search + cart */}
       <div className="space-y-3 lg:col-span-7">
         <div className="flex items-center justify-between gap-3">
