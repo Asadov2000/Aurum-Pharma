@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
@@ -19,20 +19,34 @@ import {
   useUpdateSaleItem,
 } from "./queries";
 import { type PaymentMethod, type SaleDetails } from "./types";
+import { type PosMode } from "./usePosMode";
+
+// Lazy so the on-screen keypad chunk only loads when a cashier taps a field.
+const NumPad = lazy(() => import("./NumPad"));
+
+type NumPadState =
+  | { kind: "qty"; itemId: string; initial: string }
+  | { kind: "payment"; method: PaymentMethod; initial: string };
 
 /**
  * The POS workspace. Owns the shift gate and the active sale, and lays the UI
  * out responsively: two columns on ≥lg (cart left, payment right) and a single
- * stack below lg.
+ * stack below lg. `mode` decides touch- vs keyboard-optimised behaviour.
  */
-export function SaleArea({ registerId }: { registerId: string }): JSX.Element {
+export function SaleArea({
+  registerId,
+  mode,
+}: {
+  registerId: string;
+  mode: PosMode;
+}): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
       {hasShift ? (
-        <ActiveWorkspace registerId={registerId} />
+        <ActiveWorkspace registerId={registerId} mode={mode} />
       ) : (
         <>
           <div className="lg:col-span-7">
@@ -41,7 +55,7 @@ export function SaleArea({ registerId }: { registerId: string }): JSX.Element {
             </div>
           </div>
           <div className="lg:col-span-5">
-            <ShiftBar registerId={registerId} />
+            <ShiftBar registerId={registerId} mode={mode} />
           </div>
         </>
       )}
@@ -49,13 +63,23 @@ export function SaleArea({ registerId }: { registerId: string }): JSX.Element {
   );
 }
 
-function ActiveWorkspace({ registerId }: { registerId: string }): JSX.Element {
+function ActiveWorkspace({
+  registerId,
+  mode,
+}: {
+  registerId: string;
+  mode: PosMode;
+}): JSX.Element {
+  const touch = mode === "touch";
+  const keyboard = mode === "keyboard";
+
   const [saleId, setSaleId] = useState<string | null>(null);
   const [nameById, setNameById] = useState<Record<string, string>>({});
   const [topError, setTopError] = useState<string | null>(null);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [requiresRx, setRequiresRx] = useState(false);
   const [payingMethod, setPayingMethod] = useState<PaymentMethod | null>(null);
+  const [numpad, setNumpad] = useState<NumPadState | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const createSale = useCreateSale();
@@ -118,20 +142,33 @@ function ActiveWorkspace({ registerId }: { registerId: string }): JSX.Element {
     }
   };
 
-  const onPayTile = async (method: PaymentMethod) => {
-    if (!saleId || remaining <= 0.001) return;
+  const pay = async (method: PaymentMethod, amount: string) => {
+    if (!saleId) return;
+    const amt = Number(amount);
+    if (!(amt > 0)) return;
     setTopError(null);
     setPayingMethod(method);
     try {
       await addPayment.mutateAsync({
         saleId,
-        payload: { payment_method: method, amount: remaining.toFixed(2) },
+        payload: { payment_method: method, amount: amt.toFixed(2) },
       });
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось добавить оплату"));
     } finally {
       setPayingMethod(null);
     }
+  };
+
+  // Touch: tapping a tile opens the keypad pre-filled with the remaining amount
+  // (so partial payments are easy). Keyboard/desktop: one tap pays the rest.
+  const onPayTile = (method: PaymentMethod) => {
+    if (!saleId || remaining <= 0.001) return;
+    if (touch) {
+      setNumpad({ kind: "payment", method, initial: remaining.toFixed(2) });
+      return;
+    }
+    void pay(method, remaining.toFixed(2));
   };
 
   const onComplete = async () => {
@@ -159,6 +196,67 @@ function ActiveWorkspace({ registerId }: { registerId: string }): JSX.Element {
     setTopError(null);
   };
 
+  const onQtyTap = (itemId: string) => {
+    const it = items.find((i) => i.id === itemId);
+    if (!it) return;
+    setNumpad({ kind: "qty", itemId, initial: String(Number(it.qty)) });
+  };
+
+  const onNumpadSubmit = (value: string) => {
+    if (!numpad) return;
+    if (numpad.kind === "qty") {
+      const q = Math.max(1, Math.round(Number(value)));
+      if (Number.isFinite(q)) void onQtyChange(numpad.itemId, q);
+    } else {
+      void pay(numpad.method, value);
+    }
+    setNumpad(null);
+  };
+
+  // Keyboard shortcuts. Ref holds the latest handlers so we bind the listener
+  // once. F-keys are ignored while any modal/keypad (role="dialog") is open so
+  // they don't fire actions hidden behind it.
+  const actionsRef = useRef({ onNewSale, onComplete });
+  actionsRef.current = { onNewSale, onComplete };
+
+  useEffect(() => {
+    if (!keyboard) return;
+    const handler = (e: KeyboardEvent) => {
+      const dialogOpen = document.querySelector('[role="dialog"]') !== null;
+      const el = document.activeElement as HTMLElement | null;
+      const typing =
+        !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      switch (e.key) {
+        case "F2":
+          if (dialogOpen) return;
+          e.preventDefault();
+          actionsRef.current.onNewSale();
+          searchRef.current?.focus();
+          break;
+        case "F3":
+          if (dialogOpen) return;
+          e.preventDefault();
+          document.querySelector<HTMLElement>(".pos-tile")?.focus();
+          break;
+        case "F4":
+          if (dialogOpen) return;
+          e.preventDefault();
+          void actionsRef.current.onComplete();
+          break;
+        case "/":
+          if (dialogOpen || typing) return;
+          e.preventDefault();
+          searchRef.current?.focus();
+          break;
+        case "Escape":
+          if (!dialogOpen) setTopError(null);
+          break;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [keyboard]);
+
   return (
     <>
       {/* LEFT — search + cart */}
@@ -179,14 +277,20 @@ function ActiveWorkspace({ registerId }: { registerId: string }): JSX.Element {
               </span>
             )}
             {!isDraft && (
-              <Button variant="secondary" onClick={onNewSale}>
+              <Button
+                variant="secondary"
+                onClick={onNewSale}
+                title={keyboard ? "Новая продажа (F2)" : undefined}
+              >
                 + Новая продажа
               </Button>
             )}
           </div>
         </div>
 
-        {isDraft && <SearchBar ref={searchRef} onAdd={onAdd} busy={addItem.isPending} />}
+        {isDraft && (
+          <SearchBar ref={searchRef} onAdd={onAdd} busy={addItem.isPending} touch={touch} />
+        )}
 
         <CartList
           items={items}
@@ -195,6 +299,8 @@ function ActiveWorkspace({ registerId }: { registerId: string }): JSX.Element {
           editable={isDraft}
           onQtyChange={(id, q) => void onQtyChange(id, q)}
           onDelete={(id) => void onDelete(id)}
+          onQtyTap={touch ? onQtyTap : undefined}
+          touch={touch}
           busy={updateItem.isPending || deleteItem.isPending}
         />
 
@@ -203,7 +309,7 @@ function ActiveWorkspace({ registerId }: { registerId: string }): JSX.Element {
 
       {/* RIGHT — shift + payment */}
       <div className="space-y-4 lg:col-span-5">
-        <ShiftBar registerId={registerId} />
+        <ShiftBar registerId={registerId} mode={mode} />
         <PaymentPanel
           totalDue={totalDue}
           totalPaid={totalPaid}
@@ -213,9 +319,11 @@ function ActiveWorkspace({ registerId }: { registerId: string }): JSX.Element {
           isDraft={isDraft}
           completing={completeSale.isPending}
           payingMethod={payingMethod}
-          onPayTile={(m) => void onPayTile(m)}
+          onPayTile={onPayTile}
           onComplete={() => void onComplete()}
           completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
+          touch={touch}
+          completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
         />
       </div>
 
@@ -229,6 +337,18 @@ function ActiveWorkspace({ registerId }: { registerId: string }): JSX.Element {
             setPrescriptionOpen(false);
           }}
         />
+      )}
+
+      {numpad && (
+        <Suspense fallback={null}>
+          <NumPad
+            title={numpad.kind === "qty" ? "Количество" : "Сумма оплаты"}
+            initial={numpad.initial}
+            allowDecimal={numpad.kind === "payment"}
+            onSubmit={onNumpadSubmit}
+            onClose={() => setNumpad(null)}
+          />
+        </Suspense>
       )}
     </>
   );

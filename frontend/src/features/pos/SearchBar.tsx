@@ -17,8 +17,9 @@ export const SearchBar = forwardRef<
     onAdd: (catalogId: string, name: string, qty: number) => void;
     busy?: boolean;
     scanner?: ScannerStatus;
+    touch?: boolean;
   }
->(function SearchBar({ onAdd, busy, scanner = "ready" }, ref) {
+>(function SearchBar({ onAdd, busy, scanner = "ready", touch }, ref) {
   const [catalogId, setCatalogId] = useState("");
   const [name, setName] = useState("");
   const [qty, setQty] = useState("1");
@@ -52,10 +53,24 @@ export const SearchBar = forwardRef<
           inputMode="numeric"
           value={qty}
           onChange={(e) => setQty(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit();
+            }
+          }}
           aria-label="Количество"
-          className="h-10 w-16 rounded-md border border-input bg-surface px-2 text-center font-mono text-foreground"
+          className={cn(
+            "rounded-md border border-input bg-surface px-2 text-center font-mono text-foreground",
+            touch ? "h-14 w-16 text-xl" : "h-10 w-16",
+          )}
         />
-        <Button onClick={submit} isLoading={busy} disabled={!catalogId}>
+        <Button
+          onClick={submit}
+          isLoading={busy}
+          disabled={!catalogId}
+          size={touch ? "xl" : "md"}
+        >
           Добавить
         </Button>
       </div>

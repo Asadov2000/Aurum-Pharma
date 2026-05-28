@@ -1,4 +1,5 @@
 import { Button, TableEmpty } from "@/components/ui";
+import { cn } from "@/lib/utils";
 
 import { QtyStepper } from "./QtyStepper";
 import { type SaleItem } from "./types";
@@ -11,6 +12,7 @@ export function CartList({
   onQtyChange,
   onDelete,
   onQtyTap,
+  touch,
   busy,
 }: {
   items: SaleItem[];
@@ -20,6 +22,7 @@ export function CartList({
   onQtyChange: (itemId: string, qty: number) => void;
   onDelete: (itemId: string) => void;
   onQtyTap?: (itemId: string) => void;
+  touch?: boolean;
   busy?: boolean;
 }): JSX.Element {
   if (items.length === 0) {
@@ -37,10 +40,17 @@ export function CartList({
         return (
           <li
             key={it.id}
-            className="flex items-center gap-3 px-4 py-3"
+            className={cn("flex items-center gap-3 px-4", touch ? "py-4" : "py-3")}
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate font-medium text-foreground">{name}</p>
+              <p
+                className={cn(
+                  "truncate font-medium text-foreground",
+                  touch && "text-lg",
+                )}
+              >
+                {name}
+              </p>
               <p className="text-xs text-foreground-muted">
                 {Number(it.unit_price).toFixed(2)} {currency} / шт
               </p>
@@ -52,12 +62,18 @@ export function CartList({
                 onChange={(q) => onQtyChange(it.id, q)}
                 onValueTap={onQtyTap ? () => onQtyTap(it.id) : undefined}
                 disabled={busy}
+                size={touch ? "lg" : "md"}
               />
             ) : (
               <span className="font-mono tabular-nums text-foreground">×{Number(it.qty)}</span>
             )}
 
-            <div className="w-24 text-right font-mono font-semibold tabular-nums text-foreground">
+            <div
+              className={cn(
+                "w-24 text-right font-mono font-semibold tabular-nums text-foreground",
+                touch && "text-lg",
+              )}
+            >
               {Number(it.total_price).toFixed(2)}
             </div>
 
@@ -67,7 +83,10 @@ export function CartList({
                 onClick={() => onDelete(it.id)}
                 disabled={busy}
                 aria-label={`Удалить ${name}`}
-                className="h-9 w-9 rounded-md p-0 text-foreground-muted hover:text-danger"
+                className={cn(
+                  "rounded-md p-0 text-foreground-muted hover:text-danger",
+                  touch ? "h-14 w-14 text-xl" : "h-9 w-9",
+                )}
               >
                 ✕
               </Button>

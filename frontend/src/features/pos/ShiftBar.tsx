@@ -1,11 +1,18 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, CardContent, Input, Label, Modal, Textarea } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { useCloseShift, useCurrentShiftQuery, useOpenShift } from "./queries";
+import { type PosMode } from "./usePosMode";
 
-export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
+export function ShiftBar({
+  registerId,
+  mode = "keyboard",
+}: {
+  registerId: string;
+  mode?: PosMode;
+}): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const openMutation = useOpenShift();
   const closeMutation = useCloseShift();
@@ -56,6 +63,25 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
     }
   };
 
+  // F9 toggles the shift in keyboard mode: open it (no shift) or pop the close
+  // dialog. Ref keeps the latest closures so the listener binds once.
+  const toggleRef = useRef<() => void>(() => {});
+  toggleRef.current = () => {
+    if (shift) setCloseOpen(true);
+    else void onOpen();
+  };
+  useEffect(() => {
+    if (mode !== "keyboard") return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "F9") return;
+      if (document.querySelector('[role="dialog"]')) return;
+      e.preventDefault();
+      toggleRef.current();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [mode]);
+
   if (shiftQuery.isLoading) {
     return <p className="text-sm text-foreground-muted">Загрузка состояния смены…</p>;
   }
@@ -75,7 +101,11 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
               className="w-40"
             />
           </div>
-          <Button onClick={() => void onOpen()} isLoading={openMutation.isPending}>
+          <Button
+            onClick={() => void onOpen()}
+            isLoading={openMutation.isPending}
+            title={mode === "keyboard" ? "Открыть смену (F9)" : undefined}
+          >
             Открыть смену
           </Button>
           {topError && <p className="ml-2 text-sm text-danger">{topError}</p>}
@@ -100,7 +130,11 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
             </p>
           </div>
           <div className="ml-auto">
-            <Button variant="secondary" onClick={() => setCloseOpen(true)}>
+            <Button
+              variant="secondary"
+              onClick={() => setCloseOpen(true)}
+              title={mode === "keyboard" ? "Закрыть смену (F9)" : undefined}
+            >
               Закрыть смену
             </Button>
           </div>

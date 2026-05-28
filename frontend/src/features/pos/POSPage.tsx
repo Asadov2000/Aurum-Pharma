@@ -2,12 +2,16 @@ import { useEffect, useState } from "react";
 
 import { Card, CardContent, Label, Select } from "@/components/ui";
 import { useRegistersQuery } from "@/features/foundation/queries";
+import { cn } from "@/lib/utils";
 
+import { ModeToggle } from "./ModeToggle";
 import { SaleArea } from "./SaleArea";
+import { usePosMode } from "./usePosMode";
 
 const STORAGE_KEY = "pos:lastRegisterId";
 
 export function POSPage(): JSX.Element {
+  const { mode, pref, setPref } = usePosMode();
   const registers = useRegistersQuery(null, false);
   const [registerId, setRegisterId] = useState<string>(() => {
     return window.localStorage.getItem(STORAGE_KEY) ?? "";
@@ -26,37 +30,40 @@ export function POSPage(): JSX.Element {
   }, [registerId]);
 
   return (
-    <div className="space-y-4">
+    <div className={cn("space-y-4", mode === "touch" ? "pos--touch" : "pos--keyboard")}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <h1 className="text-2xl font-semibold text-foreground">Касса</h1>
-        <Card className="shrink-0">
-          <CardContent className="flex items-end gap-3 py-3">
-            <div>
-              <Label htmlFor="register">Касса</Label>
-              <Select
-                id="register"
-                value={registerId}
-                onChange={(e) => setRegisterId(e.target.value)}
-                className="w-56"
-              >
-                <option value="">— выберите —</option>
-                {registers.data?.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {registers.data?.length === 0 && (
-              <p className="text-sm text-foreground-muted">
-                Нет активных касс. Создайте кассу в разделе «Кассы».
-              </p>
-            )}
-          </CardContent>
-        </Card>
+        <div className="flex flex-wrap items-end gap-3">
+          <ModeToggle pref={pref} setPref={setPref} />
+          <Card className="shrink-0">
+            <CardContent className="flex items-end gap-3 py-3">
+              <div>
+                <Label htmlFor="register">Касса</Label>
+                <Select
+                  id="register"
+                  value={registerId}
+                  onChange={(e) => setRegisterId(e.target.value)}
+                  className="w-56"
+                >
+                  <option value="">— выберите —</option>
+                  {registers.data?.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {registers.data?.length === 0 && (
+                <p className="text-sm text-foreground-muted">
+                  Нет активных касс. Создайте кассу в разделе «Кассы».
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      {registerId && <SaleArea registerId={registerId} />}
+      {registerId && <SaleArea registerId={registerId} mode={mode} />}
     </div>
   );
 }

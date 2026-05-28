@@ -27,6 +27,8 @@ export function PaymentPanel({
   onPayTile,
   onComplete,
   completedReceiptNumber,
+  touch,
+  completeHint,
 }: {
   totalDue: number;
   totalPaid: number;
@@ -39,6 +41,8 @@ export function PaymentPanel({
   onPayTile: (method: PaymentMethod) => void;
   onComplete: () => void;
   completedReceiptNumber: string | null;
+  touch?: boolean;
+  completeHint?: string;
 }): JSX.Element {
   const settled = remaining <= 0.001;
 
@@ -71,15 +75,23 @@ export function PaymentPanel({
               onClick={() => onPayTile(m)}
               disabled={settled || payingMethod !== null || totalDue <= 0}
               className={cn(
-                "pos-tile flex min-h-[88px] flex-col items-center justify-center gap-1 rounded-xl border border-border bg-surface p-2 text-center transition-colors",
+                "pos-tile flex flex-col items-center justify-center gap-1 rounded-xl border border-border bg-surface p-2 text-center transition-colors",
+                touch ? "min-h-[96px]" : "min-h-[88px]",
                 "hover:border-primary hover:bg-primary/5 active:bg-primary/10",
                 "disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
-              <span className="text-2xl" aria-hidden="true">
+              <span className={cn(touch ? "text-3xl" : "text-2xl")} aria-hidden="true">
                 {tileIcon[m]}
               </span>
-              <span className="text-sm font-medium text-foreground">{paymentMethodLabel[m]}</span>
+              <span
+                className={cn(
+                  "font-medium text-foreground",
+                  touch ? "text-base" : "text-sm",
+                )}
+              >
+                {paymentMethodLabel[m]}
+              </span>
             </button>
           ))}
         </div>
@@ -107,6 +119,7 @@ export function PaymentPanel({
           onClick={onComplete}
           isLoading={completing}
           disabled={totalDue <= 0}
+          title={completeHint}
         >
           Завершить продажу
         </Button>
