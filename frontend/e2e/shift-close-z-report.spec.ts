@@ -60,23 +60,21 @@ test.describe("Shift close → Z-report", () => {
     await page.getByRole("button", { name: "Открыть смену" }).click();
     await expect(page.getByText("Смена открыта")).toBeVisible();
 
-    // Create + complete a 50 TJS cash sale.
-    await page.getByRole("button", { name: /\+ Новая продажа/ }).click();
-    const picker = page.getByPlaceholder(/Начните вводить название/);
+    // Complete a 50 TJS cash sale (draft is created lazily on first add).
+    const picker = page.getByPlaceholder(/Поиск товара/);
     const searchKey = catalogSearchKey(item.brand_name);
     await picker.fill(searchKey);
     const opt = page.getByRole("button", { name: new RegExp(item.brand_name) });
     await expect(opt).toBeVisible({ timeout: 15_000 });
     await opt.click();
-    await page.getByLabel("Кол-во").fill("1");
+    await page.getByRole("textbox", { name: "Количество" }).fill("1");
     await page.getByRole("button", { name: "Добавить" }).click();
-    await page.getByLabel("Сумма").fill("50.00");
-    await page.getByRole("button", { name: /\+ Оплата/ }).click();
-    // Wait for the payment to settle — otherwise clicking "Завершить" reads
-    // a stale remaining-balance and shows "Осталось оплатить" top-error.
-    await expect(page.getByText(/оплачено 50\.00/)).toBeVisible();
+    // One-tap cash tile pays the full remaining balance. Wait for it to settle
+    // before completing, else "Завершить" reads a stale remaining and errors.
+    await page.getByRole("button", { name: "Наличные" }).click();
+    await expect(page.getByText(/Оплачено 50\.00/)).toBeVisible();
     await page.getByRole("button", { name: /Завершить продажу/ }).click();
-    await expect(page.getByText(/Чек №/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
 
     // Close the shift, declaring 140 cash (expected 150 = 100 + 50 sale).
     await page.getByRole("button", { name: "Закрыть смену" }).click();

@@ -42,6 +42,7 @@ export function CartList({
         return (
           <li
             key={it.id}
+            data-testid="cart-item"
             className={cn(
               "flex items-center gap-3 px-4",
               touch ? "py-4" : "py-3",

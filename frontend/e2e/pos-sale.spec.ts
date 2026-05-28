@@ -78,39 +78,33 @@ test.describe("POS sale (owner)", () => {
     await page.getByRole("button", { name: "Открыть смену" }).click();
     await expect(page.getByText("Смена открыта")).toBeVisible();
 
-    // Create a draft sale.
-    await page.getByRole("button", { name: /\+ Новая продажа/ }).click();
-    await expect(page.getByText(/^Продажа /)).toBeVisible();
-
+    // The redesigned register shows the search directly (the draft is created
+    // lazily on the first add — no "+ Новая продажа" step up front).
     // Pick the catalog item and ask for 7 units → FEFO splits 5 + 2.
-    const pickerInput = page.getByPlaceholder(/Начните вводить название/);
+    const pickerInput = page.getByPlaceholder(/Поиск товара/);
     const searchKey = catalogSearchKey(item.brand_name);
     await pickerInput.fill(searchKey);
     const option = page.getByRole("button", { name: new RegExp(item.brand_name) });
     await expect(option).toBeVisible({ timeout: 15_000 });
     await option.click();
-    await page.getByLabel("Кол-во").fill("7");
+    await page.getByRole("textbox", { name: "Количество" }).fill("7");
     await page.getByRole("button", { name: "Добавить" }).click();
 
-    // Two rows in the items table — positions 1 and 2.
-    const rows = page.locator("table tbody tr");
-    await expect(rows).toHaveCount(2, { timeout: 15_000 });
+    // Two cart rows — FEFO split into positions 1 and 2.
+    await expect(page.getByTestId("cart-item")).toHaveCount(2, { timeout: 15_000 });
 
-    // The remaining-balance gate is a top-error after clicking, not a
-    // disabled attribute (SaleArea only disables when items.length === 0).
     // Two items × 20 TJS each line = 140 TJS total to settle.
     const completeBtn = page.getByRole("button", { name: /Завершить продажу/ });
     await expect(page.getByText(/К оплате/)).toBeVisible();
-    await expect(page.getByText("140.00", { exact: false })).toBeVisible();
+    await expect(page.getByText("140.00", { exact: false }).first()).toBeVisible();
 
-    // Add 140 TJS cash payment.
-    await page.getByLabel("Сумма").fill("140.00");
-    await page.getByRole("button", { name: /\+ Оплата/ }).click();
-    await expect(page.getByText(/оплачено 140\.00/)).toBeVisible();
+    // One-tap cash tile pays the full remaining balance.
+    await page.getByRole("button", { name: "Наличные" }).click();
+    await expect(page.getByText(/Оплачено 140\.00/)).toBeVisible();
 
-    // Complete — receipt number eventually appears.
+    // Complete — the completion banner appears.
     await completeBtn.click();
-    await expect(page.getByText(/Чек №/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
 
     // ---- Check that batches are drained: total qty_remaining = 10 - 7 = 3 ----
     await page.goto("/batches");
