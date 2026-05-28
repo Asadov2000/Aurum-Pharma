@@ -14,6 +14,13 @@ import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
 import { beep } from "./beep";
 import {
+  DRAFT_TTL_MIN,
+  type DraftInit,
+  clearDraft as clearDraftStorage,
+  loadDraft,
+  saveDraft,
+} from "./draftStorage";
+import {
   useAddPayment,
   useAddSaleItem,
   useCompleteSale,
@@ -34,28 +41,6 @@ type NumPadState =
   | { kind: "payment"; method: PaymentMethod; initial: string };
 
 type FlashTone = "success" | "danger";
-
-const draftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
-
-interface SavedDraft {
-  saleId: string | null;
-  nameById: Record<string, string>;
-}
-
-function readDraft(registerId: string): SavedDraft {
-  try {
-    const raw = window.localStorage.getItem(draftKey(registerId));
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<SavedDraft>;
-      if (parsed && typeof parsed.saleId === "string") {
-        return { saleId: parsed.saleId, nameById: parsed.nameById ?? {} };
-      }
-    }
-  } catch {
-    // ignore corrupt/blocked storage
-  }
-  return { saleId: null, nameById: {} };
-}
 
 /**
  * The POS workspace. Owns the shift gate and the active sale, and lays the UI
@@ -107,10 +92,10 @@ function ActiveWorkspace({
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
 
-  const [saleId, setSaleId] = useState<string | null>(() => readDraft(registerId).saleId);
-  const [nameById, setNameById] = useState<Record<string, string>>(
-    () => readDraft(registerId).nameById,
-  );
+  const [init] = useState<DraftInit>(() => loadDraft(registerId));
+  const [saleId, setSaleId] = useState<string | null>(init.saleId);
+  const [nameById, setNameById] = useState<Record<string, string>>(init.nameById);
+  const [staleNotice, setStaleNotice] = useState<boolean>(init.expired);
   const [topError, setTopError] = useState<string | null>(null);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [requiresRx, setRequiresRx] = useState(false);
@@ -137,23 +122,12 @@ function ActiveWorkspace({
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = totalDue - totalPaid;
 
-  const clearDraft = useCallback(() => {
-    try {
-      window.localStorage.removeItem(draftKey(registerId));
-    } catch {
-      // ignore
-    }
-  }, [registerId]);
+  const clearDraft = useCallback(() => clearDraftStorage(registerId), [registerId]);
 
   // Persist the live draft so a reload (or accidental close) restores the cart.
+  // The savedAt stamp refreshes on every change → the TTL is an idle timeout.
   useEffect(() => {
-    if (saleId && isDraft) {
-      try {
-        window.localStorage.setItem(draftKey(registerId), JSON.stringify({ saleId, nameById }));
-      } catch {
-        // ignore
-      }
-    }
+    if (saleId && isDraft) saveDraft(registerId, saleId, nameById);
   }, [saleId, nameById, isDraft, registerId]);
 
   // If a restored sale turns out already completed/voided, drop the stash so it
@@ -175,6 +149,7 @@ function ActiveWorkspace({
     if (saleId) return saleId;
     const created = await createSale.mutateAsync(registerId);
     setSaleId(created.id);
+    setStaleNotice(false);
     return created.id;
   }, [saleId, createSale, registerId]);
 
@@ -284,6 +259,7 @@ function ActiveWorkspace({
     setNameById({});
     setRequiresRx(false);
     setTopError(null);
+    setStaleNotice(false);
   };
 
   const onQtyTap = (itemId: string) => {
@@ -392,6 +368,13 @@ function ActiveWorkspace({
             )}
           </div>
         </div>
+
+        {staleNotice && (
+          <p className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
+            Прошлый черновик устарел (более {DRAFT_TTL_MIN} мин) и был очищен — начните новую
+            продажу.
+          </p>
+        )}
 
         {isDraft && (
           <SearchBar ref={searchRef} onAdd={onAdd} busy={addItem.isPending} touch={touch} />
