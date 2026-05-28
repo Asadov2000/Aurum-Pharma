@@ -57,7 +57,7 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
   };
 
   if (shiftQuery.isLoading) {
-    return <p className="text-sm text-slate-500">Загрузка состояния смены…</p>;
+    return <p className="text-sm text-foreground-muted">Загрузка состояния смены…</p>;
   }
 
   if (!shift) {
@@ -78,7 +78,7 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
           <Button onClick={() => void onOpen()} isLoading={openMutation.isPending}>
             Открыть смену
           </Button>
-          {topError && <p className="ml-2 text-sm text-red-600">{topError}</p>}
+          {topError && <p className="ml-2 text-sm text-danger">{topError}</p>}
         </CardContent>
       </Card>
     );
@@ -90,11 +90,11 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
         <CardContent className="flex flex-wrap items-center gap-4 py-4">
           <Badge tone="success">Смена открыта</Badge>
           <div className="text-sm">
-            <p className="text-xs text-slate-500">Открыта</p>
+            <p className="text-xs text-foreground-muted">Открыта</p>
             <p>{new Date(shift.opened_at).toLocaleString("ru-RU")}</p>
           </div>
           <div className="text-sm">
-            <p className="text-xs text-slate-500">Начальная касса</p>
+            <p className="text-xs text-foreground-muted">Начальная касса</p>
             <p className="font-mono">
               {Number(shift.opening_cash).toFixed(2)} {shift.currency}
             </p>
@@ -119,7 +119,7 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
               onChange={(e) => setClosingCash(e.target.value)}
               autoFocus
             />
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-foreground-muted">
               Сумма в кассе после пересчёта. Расхождение с ожидаемым появится в Z-отчёте.
             </p>
           </div>
@@ -127,7 +127,7 @@ export function ShiftBar({ registerId }: { registerId: string }): JSX.Element {
             <Label htmlFor="notes">Комментарий</Label>
             <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
-          {topError && <p className="text-sm text-red-600">{topError}</p>}
+          {topError && <p className="text-sm text-danger">{topError}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setCloseOpen(false)}>
               Отмена

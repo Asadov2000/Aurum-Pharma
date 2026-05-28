@@ -73,20 +73,20 @@ export function CatalogPicker({
           type="button"
           onClick={onClear}
           aria-label="Очистить"
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-foreground-muted hover:bg-foreground/5 hover:text-foreground-secondary"
         >
           ✕
         </button>
       )}
       {value && !text && (
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-foreground-muted">
           Выбрано: <span className="font-mono">{value.slice(0, 8)}</span>
         </p>
       )}
       {open && debounced.length >= 2 && (
-        <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+        <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-surface shadow-lg">
           {data?.items.length === 0 ? (
-            <p className="px-3 py-2 text-sm italic text-slate-500">Ничего не найдено</p>
+            <p className="px-3 py-2 text-sm italic text-foreground-muted">Ничего не найдено</p>
           ) : (
             data?.items.map((it) => (
               <button
@@ -97,12 +97,12 @@ export function CatalogPicker({
                   setText(it.brand_name);
                   setOpen(false);
                 }}
-                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-foreground/[0.03]"
               >
                 <span className="font-medium">{it.brand_name}</span>
-                {it.dosage && <span className="ml-2 text-slate-500">{it.dosage}</span>}
+                {it.dosage && <span className="ml-2 text-foreground-muted">{it.dosage}</span>}
                 {it.manufacturer && (
-                  <span className="ml-2 text-xs text-slate-400">· {it.manufacturer}</span>
+                  <span className="ml-2 text-xs text-foreground-muted">· {it.manufacturer}</span>
                 )}
               </button>
             ))

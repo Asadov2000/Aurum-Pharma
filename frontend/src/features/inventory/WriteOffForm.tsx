@@ -75,9 +75,9 @@ export function WriteOffForm({
   });
 
   return (
-    <form onSubmit={onSubmit} noValidate className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4">
-      <p className="text-sm font-medium text-slate-800">Списать из партии</p>
-      <p className="text-xs text-slate-500">
+    <form onSubmit={onSubmit} noValidate className="space-y-3 rounded-md border border-warning/40 bg-warning-subtle p-4">
+      <p className="text-sm font-medium text-foreground">Списать из партии</p>
+      <p className="text-xs text-foreground-muted">
         Доступно: <span className="font-mono">{maxQty}</span>
       </p>
       <div className="grid grid-cols-2 gap-3">
@@ -107,7 +107,7 @@ export function WriteOffForm({
         <Label htmlFor="comment">Комментарий</Label>
         <Textarea id="comment" {...form.register("comment")} />
       </div>
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           Отмена

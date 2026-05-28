@@ -34,7 +34,7 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
   if (accessToken === null) return null;
   if (isLoading && user === null) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">
+      <div className="flex min-h-screen items-center justify-center text-sm text-foreground-muted">
         Загрузка…
       </div>
     );

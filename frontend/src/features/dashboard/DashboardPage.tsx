@@ -49,18 +49,18 @@ export function DashboardPage(): JSX.Element {
   if (!hasTenant) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold text-slate-900">Главная</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Главная</h1>
         <Card>
           <CardHeader>
             <CardTitle>{user?.full_name ?? "Профиль"}</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1 text-sm text-slate-700">
+          <CardContent className="space-y-1 text-sm text-foreground-secondary">
             <p>
               <span className="font-medium">Email:</span> {user?.email}
             </p>
-            {user?.is_developer && <p className="text-emerald-700">Developer</p>}
-            {user?.is_administrator && <p className="text-emerald-700">Administrator</p>}
-            <p className="pt-2 text-slate-500">
+            {user?.is_developer && <p className="text-success-foreground">Developer</p>}
+            {user?.is_administrator && <p className="text-success-foreground">Administrator</p>}
+            <p className="pt-2 text-foreground-muted">
               Сводка по аптеке доступна пользователям, привязанным к тенанту.
               Выберите раздел в меню слева.
             </p>
@@ -73,20 +73,20 @@ export function DashboardPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Главная</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Главная</h1>
         {user?.full_name && (
-          <span className="text-sm text-slate-500">{user.full_name}</span>
+          <span className="text-sm text-foreground-muted">{user.full_name}</span>
         )}
       </div>
 
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить сводку")}
         </p>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : data ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <TodayCard data={data.today} />
@@ -137,10 +137,10 @@ function Metric({
 }): JSX.Element {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-foreground-muted">{label}</p>
       <p
         className={cn(
-          "font-mono font-semibold text-slate-900",
+          "font-mono font-semibold text-foreground",
           big ? "text-2xl" : "text-lg",
         )}
       >
@@ -166,17 +166,17 @@ function ExpiringCard({
         <CardTitle>Скоро истекает</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {empty && <p className="text-sm text-slate-500">Всё в порядке 👌</p>}
+        {empty && <p className="text-sm text-foreground-muted">Всё в порядке 👌</p>}
 
         {batches.length > 0 && (
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Партии</p>
+            <p className="text-xs uppercase tracking-wide text-foreground-muted">Партии</p>
             <ul className="space-y-1">
               {batches.map((b) => (
                 <li key={b.id} className="flex items-center justify-between gap-2 text-sm">
                   <Link
                     to="/batches"
-                    className="truncate text-slate-700 hover:text-slate-900 hover:underline"
+                    className="truncate text-foreground-secondary hover:text-foreground hover:underline"
                   >
                     {b.batch_number ?? b.id.slice(0, 8)}
                   </Link>
@@ -193,7 +193,7 @@ function ExpiringCard({
 
         {licenses.length > 0 && (
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Лицензии</p>
+            <p className="text-xs uppercase tracking-wide text-foreground-muted">Лицензии</p>
             <ul className="space-y-1">
               {licenses.map((lic) => (
                 <li
@@ -202,7 +202,7 @@ function ExpiringCard({
                 >
                   <Link
                     to="/branches"
-                    className="truncate text-slate-700 hover:text-slate-900 hover:underline"
+                    className="truncate text-foreground-secondary hover:text-foreground hover:underline"
                   >
                     {lic.branch_name}
                   </Link>
@@ -229,7 +229,7 @@ function FinanceCard({ data }: { data: FinanceSection }): JSX.Element {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div>
-          <p className="text-xs text-slate-500">Подписка</p>
+          <p className="text-xs text-foreground-muted">Подписка</p>
           {data.subscription_status ? (
             <div className="flex items-center gap-2">
               <Badge
@@ -238,18 +238,18 @@ function FinanceCard({ data }: { data: FinanceSection }): JSX.Element {
                 {subscriptionLabel[data.subscription_status] ?? data.subscription_status}
               </Badge>
               {data.subscription_period_end && (
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-foreground-muted">
                   до {new Date(data.subscription_period_end).toLocaleDateString("ru-RU")}
                 </span>
               )}
             </div>
           ) : (
-            <p className="text-slate-400">нет</p>
+            <p className="text-foreground-muted">нет</p>
           )}
         </div>
 
         <div>
-          <p className="text-xs text-slate-500">Открытые счета</p>
+          <p className="text-xs text-foreground-muted">Открытые счета</p>
           <p className="font-mono">
             {data.open_invoices_count} шт ·{" "}
             {money(data.open_invoices_total, data.currency)}
@@ -293,12 +293,12 @@ function ChecklistCard({
         <CardTitle>Чек-лист</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        {nothing && <p className="text-slate-500">Задач нет 🎉</p>}
+        {nothing && <p className="text-foreground-muted">Задач нет 🎉</p>}
 
         {draftIncoming > 0 && (
           <Link
             to="/incoming"
-            className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
+            className="flex items-center justify-between rounded-md border border-border px-3 py-2 hover:bg-foreground/[0.03]"
           >
             <span>Черновики приходов</span>
             <Badge tone="info">{draftIncoming}</Badge>
@@ -309,7 +309,7 @@ function ChecklistCard({
           <Link
             to="/reports"
             onClick={onReportsClick}
-            className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
+            className="flex items-center justify-between rounded-md border border-border px-3 py-2 hover:bg-foreground/[0.03]"
           >
             <span>Закрытые смены — Z-отчёт</span>
             <Badge tone="neutral">{closedShifts}</Badge>

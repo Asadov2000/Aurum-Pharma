@@ -98,7 +98,7 @@ export function LoginPage(): JSX.Element {
   });
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Вход в Aurum Pharma</CardTitle>
@@ -118,20 +118,20 @@ export function LoginPage(): JSX.Element {
                 />
                 <FormError>{emailForm.formState.errors.email?.message}</FormError>
               </div>
-              {topError && <p className="text-sm text-red-600">{topError}</p>}
+              {topError && <p className="text-sm text-danger">{topError}</p>}
               <Button type="submit" className="w-full" isLoading={emailForm.formState.isSubmitting}>
                 Получить код
               </Button>
             </form>
           ) : (
             <form onSubmit={submitCode} noValidate className="space-y-4">
-              <p className="text-sm text-slate-600">
-                Код отправлен на <span className="font-medium text-slate-900">{email}</span>
+              <p className="text-sm text-foreground-secondary">
+                Код отправлен на <span className="font-medium text-foreground">{email}</span>
               </p>
               {devCode && (
-                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <div className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
                   <span className="font-medium">Dev-режим:</span> код{" "}
-                  <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-base font-semibold">
+                  <code className="rounded bg-warning/15 px-1.5 py-0.5 font-mono text-base font-semibold">
                     {devCode}
                   </code>
                   {" — "}уже подставлен в поле ниже.
@@ -161,7 +161,7 @@ export function LoginPage(): JSX.Element {
                 />
                 <FormError>{codeForm.formState.errors.password?.message}</FormError>
               </div>
-              {topError && <p className="text-sm text-red-600">{topError}</p>}
+              {topError && <p className="text-sm text-danger">{topError}</p>}
               <Button type="submit" className="w-full" isLoading={codeForm.formState.isSubmitting}>
                 Войти
               </Button>

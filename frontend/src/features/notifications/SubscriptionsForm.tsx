@@ -97,17 +97,17 @@ export function SubscriptionsForm(): JSX.Element {
     [rows],
   );
 
-  if (subs.isLoading) return <p className="text-sm text-slate-500">Загрузка…</p>;
+  if (subs.isLoading) return <p className="text-sm text-foreground-muted">Загрузка…</p>;
   if (subs.error)
     return (
-      <p className="text-sm text-red-600">
+      <p className="text-sm text-danger">
         {describeApiError(subs.error, "Не удалось загрузить подписки")}
       </p>
     );
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-foreground-secondary">
         Выберите, какие события и по каким каналам вы хотите получать. По умолчанию все
         события приходят в систему.
       </p>
@@ -121,7 +121,7 @@ export function SubscriptionsForm(): JSX.Element {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <CardTitle className="text-base">{title}</CardTitle>
-                    <p className="mt-1 text-xs text-slate-500">{description}</p>
+                    <p className="mt-1 text-xs text-foreground-muted">{description}</p>
                   </div>
                   <Switch
                     label={r.is_enabled ? "Включено" : "Выключено"}
@@ -155,8 +155,8 @@ export function SubscriptionsForm(): JSX.Element {
         })}
       </div>
 
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
-      {savedBanner && <p className="text-sm text-emerald-700">✅ Подписки сохранены.</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
+      {savedBanner && <p className="text-sm text-success-foreground">✅ Подписки сохранены.</p>}
 
       <Button onClick={() => void onSave()} isLoading={patch.isPending}>
         Сохранить

@@ -19,11 +19,11 @@ export function BatchDetailModal({
   const [writeOffOpen, setWriteOffOpen] = useState(false);
 
   if (batchQuery.isLoading) {
-    return <p className="text-sm text-slate-500">Загрузка…</p>;
+    return <p className="text-sm text-foreground-muted">Загрузка…</p>;
   }
   if (batchQuery.error || !batchQuery.data) {
     return (
-      <p className="text-sm text-red-600">
+      <p className="text-sm text-danger">
         {describeApiError(batchQuery.error, "Не удалось загрузить партию")}
       </p>
     );
@@ -56,7 +56,7 @@ export function BatchDetailModal({
           value={`${b.qty_remaining} из ${b.qty_initial}`}
         />
         <div>
-          <p className="text-xs text-slate-500">Статус</p>
+          <p className="text-xs text-foreground-muted">Статус</p>
           {b.is_blocked ? (
             <Badge tone="danger">
               Заблокирована{b.block_reason ? `: ${b.block_reason}` : ""}
@@ -82,11 +82,11 @@ export function BatchDetailModal({
       )}
 
       <div>
-        <p className="mb-2 text-sm font-medium text-slate-700">История движений</p>
+        <p className="mb-2 text-sm font-medium text-foreground-secondary">История движений</p>
         {movementsQuery.isLoading ? (
-          <p className="text-sm text-slate-500">Загрузка…</p>
+          <p className="text-sm text-foreground-muted">Загрузка…</p>
         ) : movements.length === 0 ? (
-          <p className="text-sm italic text-slate-500">Движений пока нет</p>
+          <p className="text-sm italic text-foreground-muted">Движений пока нет</p>
         ) : (
           <Table>
             <THead>
@@ -107,12 +107,12 @@ export function BatchDetailModal({
                     </TD>
                     <TD>{movementLabel[m.movement_type] ?? m.movement_type}</TD>
                     <TD
-                      className={`font-mono ${isPositive ? "text-emerald-700" : "text-red-700"}`}
+                      className={`font-mono ${isPositive ? "text-success-foreground" : "text-danger"}`}
                     >
                       {isPositive ? "+" : ""}
                       {m.qty_delta}
                     </TD>
-                    <TD className="text-xs text-slate-500">
+                    <TD className="text-xs text-foreground-muted">
                       {m.source_table ?? "—"}
                       {m.notes && <span className="ml-1">· {m.notes}</span>}
                     </TD>
@@ -144,7 +144,7 @@ function Field({
 }): JSX.Element {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-foreground-muted">{label}</p>
       <p className={mono ? "font-mono" : ""}>{value}</p>
     </div>
   );

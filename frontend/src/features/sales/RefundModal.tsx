@@ -149,7 +149,7 @@ export function RefundModal({
           </div>
         </div>
 
-        {topError && <p className="text-sm text-red-600">{topError}</p>}
+        {topError && <p className="text-sm text-danger">{topError}</p>}
 
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>

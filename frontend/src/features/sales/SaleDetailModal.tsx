@@ -50,12 +50,12 @@ export function SaleDetailModal({
       className="max-w-2xl"
     >
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить чек")}
         </p>
       )}
       {isLoading || !data ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -90,7 +90,7 @@ export function SaleDetailModal({
           </div>
 
           <div>
-            <p className="mb-1 text-xs uppercase tracking-wide text-slate-500">Позиции</p>
+            <p className="mb-1 text-xs uppercase tracking-wide text-foreground-muted">Позиции</p>
             <Table>
               <THead>
                 <TR>
@@ -114,9 +114,9 @@ export function SaleDetailModal({
           </div>
 
           <div>
-            <p className="mb-1 text-xs uppercase tracking-wide text-slate-500">Оплаты</p>
+            <p className="mb-1 text-xs uppercase tracking-wide text-foreground-muted">Оплаты</p>
             {data.payments.length === 0 ? (
-              <p className="text-sm italic text-slate-500">Нет</p>
+              <p className="text-sm italic text-foreground-muted">Нет</p>
             ) : (
               <ul className="space-y-1 text-sm">
                 {data.payments.map((p) => (
@@ -162,7 +162,7 @@ export function SaleDetailModal({
 function Field({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-foreground-muted">{label}</p>
       <p>{value}</p>
     </div>
   );

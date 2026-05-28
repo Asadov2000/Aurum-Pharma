@@ -28,7 +28,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4"
+      className="bg-overlay fixed inset-0 z-modal flex items-center justify-center px-4"
       onClick={onClose}
       role="presentation"
     >
@@ -37,7 +37,7 @@ export function Modal({
           // max-h + flex-column lets the body scroll on tall content
           // (e.g. AdminBillingDrawer's 3 stacked forms) while keeping
           // the header pinned to the top.
-          "flex max-h-[90vh] w-full max-w-lg flex-col rounded-lg border border-slate-200 bg-white shadow-xl",
+          "flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl border border-border bg-surface-raised shadow-xl",
           className,
         )}
         onClick={(e) => e.stopPropagation()}
@@ -45,13 +45,13 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
+          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="rounded p-1 text-slate-500 hover:bg-slate-100"
+            className="rounded-md p-1 text-foreground-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
           >
             ✕
           </button>

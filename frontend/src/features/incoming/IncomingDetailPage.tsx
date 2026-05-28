@@ -42,7 +42,7 @@ export function IncomingDetailPage(): JSX.Element {
   const [topError, setTopError] = useState<string | null>(null);
 
   if (isLoading) {
-    return <p className="text-sm text-slate-500">Загрузка…</p>;
+    return <p className="text-sm text-foreground-muted">Загрузка…</p>;
   }
   if (error || !doc) {
     return (
@@ -52,7 +52,7 @@ export function IncomingDetailPage(): JSX.Element {
             ← К списку
           </Button>
         </Link>
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить документ")}
         </p>
       </div>
@@ -135,17 +135,17 @@ export function IncomingDetailPage(): JSX.Element {
           />
           {doc.notes && (
             <div className="col-span-2">
-              <p className="text-xs text-slate-500">Комментарий</p>
+              <p className="text-xs text-foreground-muted">Комментарий</p>
               <p className="whitespace-pre-wrap">{doc.notes}</p>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium text-slate-900">Позиции ({doc.items.length})</h2>
+        <h2 className="text-lg font-medium text-foreground">Позиции ({doc.items.length})</h2>
         {isDraft && <Button onClick={() => setAdding(true)}>+ Добавить позицию</Button>}
       </div>
 
@@ -210,7 +210,7 @@ export function IncomingDetailPage(): JSX.Element {
 function Field({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-foreground-muted">{label}</p>
       <p>{value}</p>
     </div>
   );

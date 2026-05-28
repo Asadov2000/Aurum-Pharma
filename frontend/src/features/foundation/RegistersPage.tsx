@@ -60,7 +60,7 @@ export function RegistersPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Кассы</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Кассы</h1>
         <Button onClick={() => setCreating(true)}>+ Новая касса</Button>
       </div>
       <div className="flex items-end gap-4">
@@ -87,12 +87,12 @@ export function RegistersPage(): JSX.Element {
         />
       </div>
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить список")}
         </p>
       )}
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : !data || data.length === 0 ? (
         <TableEmpty>Пока нет ни одной кассы</TableEmpty>
       ) : (

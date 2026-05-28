@@ -5,10 +5,16 @@ import { RouterProvider } from "@tanstack/react-router";
 
 import { bootstrapAuth } from "@/features/auth/bootstrap";
 import { queryClient } from "@/lib/query";
+import { applyTheme, getThemePreference, watchSystemTheme } from "@/lib/theme";
 import { router } from "@/router";
 import "@/styles/index.css";
 
 bootstrapAuth();
+
+// The inline script in index.html set the initial theme pre-paint; re-apply
+// from the stored preference and keep "system" in sync with the OS.
+applyTheme(getThemePreference());
+watchSystemTheme();
 
 const root = document.getElementById("root");
 if (!root) {

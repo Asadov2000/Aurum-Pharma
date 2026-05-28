@@ -32,7 +32,7 @@ export function ReportsPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-slate-900">Отчёты</h1>
+      <h1 className="text-2xl font-semibold text-foreground">Отчёты</h1>
 
       <Card>
         <CardHeader>
@@ -49,7 +49,7 @@ export function ReportsPage(): JSX.Element {
                 placeholder="UUID смены"
               />
               {lastClosed && lastClosed !== shiftId && (
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-foreground-muted">
                   Подставлен последний закрытый shift_id из этого браузера.
                 </p>
               )}
@@ -68,7 +68,7 @@ export function ReportsPage(): JSX.Element {
           <CardTitle>Другие отчёты</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-foreground-secondary">
             Сводка продаж за период, оборачиваемость склада и отчёт по списаниям
             появятся в Этапе 2 — для них нужны новые серверные эндпоинты.
           </p>
@@ -81,14 +81,14 @@ export function ReportsPage(): JSX.Element {
 function ZReportSection({ shiftId }: { shiftId: string }): JSX.Element {
   const { data, isLoading, error } = useZReportQuery(shiftId);
 
-  if (isLoading) return <p className="text-sm text-slate-500">Загрузка…</p>;
+  if (isLoading) return <p className="text-sm text-foreground-muted">Загрузка…</p>;
   if (error) {
     return (
-      <p className="text-sm text-red-600">
+      <p className="text-sm text-danger">
         {describeApiError(error, "Не удалось загрузить отчёт")}
       </p>
     );
   }
-  if (!data) return <p className="text-sm text-slate-500">Нет данных</p>;
+  if (!data) return <p className="text-sm text-foreground-muted">Нет данных</p>;
   return <ZReportCard report={data} />;
 }

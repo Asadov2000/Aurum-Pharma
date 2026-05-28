@@ -28,7 +28,7 @@ export function SuppliersPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Поставщики</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Поставщики</h1>
         <Button onClick={() => setCreating(true)}>+ Новый поставщик</Button>
       </div>
       <Switch
@@ -37,12 +37,12 @@ export function SuppliersPage(): JSX.Element {
         onChange={(e) => setIncludeInactive(e.target.checked)}
       />
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить список")}
         </p>
       )}
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : !data || data.length === 0 ? (
         <TableEmpty>Поставщиков пока нет</TableEmpty>
       ) : (

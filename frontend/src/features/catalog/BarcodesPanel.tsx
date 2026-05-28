@@ -59,18 +59,18 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
   };
 
   return (
-    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4">
-      <p className="text-sm font-medium text-slate-700">Штрихкоды</p>
+    <div className="space-y-3 rounded-md border border-border bg-foreground/[0.03] p-4">
+      <p className="text-sm font-medium text-foreground-secondary">Штрихкоды</p>
       {detail.isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : detail.data?.barcodes.length === 0 ? (
-        <p className="text-sm italic text-slate-500">Пока нет штрихкодов</p>
+        <p className="text-sm italic text-foreground-muted">Пока нет штрихкодов</p>
       ) : (
         <ul className="space-y-1">
           {detail.data?.barcodes.map((b) => (
             <li
               key={b.id}
-              className="flex items-center justify-between rounded border border-slate-200 bg-white px-3 py-2"
+              className="flex items-center justify-between rounded border border-border bg-surface px-3 py-2"
             >
               <div className="flex items-center gap-2">
                 <code className="font-mono text-sm">{b.code}</code>
@@ -113,7 +113,7 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
           + Добавить
         </Button>
       </form>
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
     </div>
   );
 }

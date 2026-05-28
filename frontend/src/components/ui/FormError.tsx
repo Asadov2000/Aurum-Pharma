@@ -10,5 +10,5 @@ export function FormError({
   className?: string;
 }): JSX.Element | null {
   if (!children) return null;
-  return <p className={cn("mt-1 text-sm text-red-600", className)}>{children}</p>;
+  return <p className={cn("mt-1 text-sm text-danger", className)}>{children}</p>;
 }

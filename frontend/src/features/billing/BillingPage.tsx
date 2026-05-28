@@ -33,7 +33,7 @@ export function BillingPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Биллинг</h1>
+      <h1 className="text-2xl font-semibold text-foreground">Биллинг</h1>
 
       {/* SUBSCRIPTION CARD */}
       <Card>
@@ -42,46 +42,46 @@ export function BillingPage(): JSX.Element {
         </CardHeader>
         <CardContent>
           {subscription.isLoading ? (
-            <p className="text-sm text-slate-500">Загрузка…</p>
+            <p className="text-sm text-foreground-muted">Загрузка…</p>
           ) : subscription.error ? (
-            <p className="text-sm text-red-600">
+            <p className="text-sm text-danger">
               {describeApiError(subscription.error, "Не удалось загрузить подписку")}
             </p>
           ) : !subscription.data ? (
-            <p className="text-sm italic text-slate-500">
+            <p className="text-sm italic text-foreground-muted">
               Подписки пока нет. Свяжитесь с поддержкой, чтобы её активировать.
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               <div>
-                <p className="text-xs text-slate-500">План</p>
+                <p className="text-xs text-foreground-muted">План</p>
                 <p className="text-lg font-medium">{subscription.data.plan_name}</p>
-                <p className="font-mono text-xs text-slate-400">
+                <p className="font-mono text-xs text-foreground-muted">
                   {subscription.data.plan_code}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Статус</p>
+                <p className="text-xs text-foreground-muted">Статус</p>
                 <Badge tone={subscriptionStatusTone[subscription.data.status]}>
                   {subscriptionStatusLabel[subscription.data.status]}
                 </Badge>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Период</p>
+                <p className="text-xs text-foreground-muted">Период</p>
                 <p>{billingPeriodLabel[subscription.data.billing_period]}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Точек</p>
+                <p className="text-xs text-foreground-muted">Точек</p>
                 <p>{subscription.data.branches_count}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Сумма за период</p>
+                <p className="text-xs text-foreground-muted">Сумма за период</p>
                 <p className="font-mono">
                   {Number(subscription.data.amount).toFixed(2)} {subscription.data.currency}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Действует до</p>
+                <p className="text-xs text-foreground-muted">Действует до</p>
                 <p>{new Date(subscription.data.period_end).toLocaleDateString("ru-RU")}</p>
               </div>
             </div>
@@ -96,9 +96,9 @@ export function BillingPage(): JSX.Element {
         </CardHeader>
         <CardContent>
           {invoices.isLoading ? (
-            <p className="text-sm text-slate-500">Загрузка…</p>
+            <p className="text-sm text-foreground-muted">Загрузка…</p>
           ) : invoices.error ? (
-            <p className="text-sm text-red-600">
+            <p className="text-sm text-danger">
               {describeApiError(invoices.error, "Не удалось загрузить счета")}
             </p>
           ) : !invoices.data || invoices.data.length === 0 ? (

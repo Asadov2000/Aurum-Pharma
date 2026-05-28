@@ -62,11 +62,11 @@ export function AuditPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Журнал аудита</h1>
-        <span className="text-sm text-slate-500">всего: {total}</span>
+        <h1 className="text-2xl font-semibold text-foreground">Журнал аудита</h1>
+        <span className="text-sm text-foreground-muted">всего: {total}</span>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-3">
         <div>
           <Label htmlFor="scope">Область</Label>
           <Select
@@ -166,13 +166,13 @@ export function AuditPage(): JSX.Element {
       </div>
 
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить журнал")}
         </p>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : !data || data.items.length === 0 ? (
         <TableEmpty>
           {action || tableName || userId || tenantId || dateFrom || dateTo
@@ -222,7 +222,7 @@ export function AuditPage(): JSX.Element {
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-500">
+              <span className="text-foreground-muted">
                 Страница {page} из {totalPages}
               </span>
               <div className="flex gap-2">

@@ -55,13 +55,13 @@ export function OnboardingPage(): JSX.Element {
   };
 
   if (wizard.isLoading || checklist.isLoading) {
-    return <p className="text-sm text-slate-500">Загрузка…</p>;
+    return <p className="text-sm text-foreground-muted">Загрузка…</p>;
   }
   if (wizard.error || !wizard.data) {
     return (
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-slate-900">Старт</h1>
-        <p className="text-sm text-red-600">
+        <h1 className="text-2xl font-semibold text-foreground">Старт</h1>
+        <p className="text-sm text-danger">
           {describeApiError(wizard.error, "Не удалось загрузить визард")}
         </p>
       </div>
@@ -79,31 +79,31 @@ export function OnboardingPage(): JSX.Element {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Старт</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Старт</h1>
         {w.is_completed ? (
           <Badge tone="success">Визард завершён</Badge>
         ) : (
-          <span className="text-sm text-slate-500">
+          <span className="text-sm text-foreground-muted">
             {w.steps_completed.length} из {wizardSteps.length}
           </span>
         )}
       </div>
 
       {trialBanner && (
-        <p className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <p className="rounded-md border border-success/40 bg-success-subtle px-3 py-2 text-sm text-success-foreground">
           {trialBanner}
         </p>
       )}
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
 
       <Card>
         <CardHeader>
           <CardTitle>Мастер настройки</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-foreground/10">
             <div
-              className="h-full bg-emerald-500 transition-all"
+              className="h-full bg-success transition-all"
               style={{ width: `${progressPct}%` }}
             />
           </div>
@@ -117,10 +117,10 @@ export function OnboardingPage(): JSX.Element {
                   className={cn(
                     "rounded-md border px-3 py-2",
                     done
-                      ? "border-emerald-200 bg-emerald-50"
+                      ? "border-success/30 bg-success-subtle"
                       : isCurrent
-                        ? "border-slate-300 bg-white"
-                        : "border-slate-200 bg-white",
+                        ? "border-input bg-surface"
+                        : "border-border bg-surface",
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -130,20 +130,20 @@ export function OnboardingPage(): JSX.Element {
                           className={cn(
                             "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
                             done
-                              ? "bg-emerald-600 text-white"
-                              : "bg-slate-200 text-slate-700",
+                              ? "bg-success text-white"
+                              : "bg-foreground/10 text-foreground-secondary",
                           )}
                         >
                           {done ? "✓" : s.step}
                         </span>
-                        <span className="font-medium text-slate-900">{s.title}</span>
+                        <span className="font-medium text-foreground">{s.title}</span>
                         {isCurrent && <Badge tone="info">текущий</Badge>}
                       </div>
-                      <p className="ml-8 mt-1 text-sm text-slate-600">{s.description}</p>
+                      <p className="ml-8 mt-1 text-sm text-foreground-secondary">{s.description}</p>
                       {s.linkTo && (
                         <Link
                           to={s.linkTo}
-                          className="ml-8 mt-1 inline-block text-sm text-slate-700 underline hover:text-slate-900"
+                          className="ml-8 mt-1 inline-block text-sm text-foreground-secondary underline hover:text-foreground"
                         >
                           {s.linkLabel ?? "Открыть"}
                         </Link>
@@ -175,18 +175,18 @@ export function OnboardingPage(): JSX.Element {
           <CardContent className="space-y-4">
             <div>
               <div className="flex justify-between text-sm">
-                <span className="text-slate-600">Каталог</span>
+                <span className="text-foreground-secondary">Каталог</span>
                 <span className="font-mono">
                   {c.catalog_items_count} / {TRIAL_MIN_CATALOG}
                 </span>
               </div>
-              <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+              <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-foreground/10">
                 <div
                   className={cn(
                     "h-full transition-all",
                     c.catalog_items_count >= TRIAL_MIN_CATALOG
-                      ? "bg-emerald-500"
-                      : "bg-amber-500",
+                      ? "bg-success"
+                      : "bg-warning",
                   )}
                   style={{ width: `${catalogPct}%` }}
                 />
@@ -194,9 +194,9 @@ export function OnboardingPage(): JSX.Element {
             </div>
 
             <div>
-              <p className="text-sm font-medium text-slate-700">Задачи</p>
+              <p className="text-sm font-medium text-foreground-secondary">Задачи</p>
               {c.completed_tasks.length === 0 ? (
-                <p className="mt-1 text-sm italic text-slate-500">
+                <p className="mt-1 text-sm italic text-foreground-muted">
                   Действия в системе автоматически отмечаются здесь.
                 </p>
               ) : (
@@ -212,7 +212,7 @@ export function OnboardingPage(): JSX.Element {
 
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
-                <p className="text-xs text-slate-500">Право на trial</p>
+                <p className="text-xs text-foreground-muted">Право на trial</p>
                 {c.trial_eligible ? (
                   <Badge tone="success">Доступен</Badge>
                 ) : (
@@ -220,12 +220,12 @@ export function OnboardingPage(): JSX.Element {
                 )}
               </div>
               <div>
-                <p className="text-xs text-slate-500">Фаза настройки до</p>
+                <p className="text-xs text-foreground-muted">Фаза настройки до</p>
                 <p>{new Date(c.setup_ends_at).toLocaleDateString("ru-RU")}</p>
               </div>
               {c.trial_started_at && (
                 <div className="col-span-2">
-                  <p className="text-xs text-slate-500">Trial начат</p>
+                  <p className="text-xs text-foreground-muted">Trial начат</p>
                   <p>{new Date(c.trial_started_at).toLocaleString("ru-RU")}</p>
                 </div>
               )}

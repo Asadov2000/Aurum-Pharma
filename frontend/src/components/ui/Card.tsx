@@ -6,7 +6,8 @@ export function Card({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JS
   return (
     <div
       className={cn(
-        "rounded-lg border border-slate-200 bg-white shadow-sm",
+        // Soft shadow + hairline border on a raised surface — gentle elevation.
+        "rounded-xl border border-border bg-surface shadow-sm",
         className,
       )}
       {...rest}
@@ -15,13 +16,11 @@ export function Card({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JS
 }
 
 export function CardHeader({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={cn("border-b border-slate-200 px-6 py-4", className)} {...rest} />;
+  return <div className={cn("border-b border-border px-6 py-4", className)} {...rest} />;
 }
 
 export function CardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>): JSX.Element {
-  return (
-    <h2 className={cn("text-lg font-semibold text-slate-900", className)} {...rest} />
-  );
+  return <h2 className={cn("text-lg font-semibold text-foreground", className)} {...rest} />;
 }
 
 export function CardContent({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JSX.Element {
@@ -29,5 +28,5 @@ export function CardContent({ className, ...rest }: HTMLAttributes<HTMLDivElemen
 }
 
 export function CardFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={cn("border-t border-slate-200 px-6 py-4", className)} {...rest} />;
+  return <div className={cn("border-t border-border px-6 py-4", className)} {...rest} />;
 }

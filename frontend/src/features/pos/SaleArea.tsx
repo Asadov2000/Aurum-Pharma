@@ -55,12 +55,12 @@ export function SaleArea({ registerId }: { registerId: string }): JSX.Element {
 
   if (saleId === null) {
     return (
-      <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
-        <p className="text-sm text-slate-500">Активной продажи нет</p>
+      <div className="rounded-lg border border-dashed border-input bg-surface px-6 py-10 text-center">
+        <p className="text-sm text-foreground-muted">Активной продажи нет</p>
         <Button className="mt-4" onClick={() => void onStart()} isLoading={createSale.isPending}>
           + Новая продажа
         </Button>
-        {topError && <p className="mt-2 text-sm text-red-600">{topError}</p>}
+        {topError && <p className="mt-2 text-sm text-danger">{topError}</p>}
       </div>
     );
   }
@@ -107,7 +107,7 @@ function ActiveSale({
   const [topError, setTopError] = useState<string | null>(null);
 
   if (saleQuery.isLoading || !saleQuery.data) {
-    return <p className="text-sm text-slate-500">Загрузка продажи…</p>;
+    return <p className="text-sm text-foreground-muted">Загрузка продажи…</p>;
   }
   const sale: SaleDetails = saleQuery.data;
   const isDraft = sale.status === "draft";
@@ -184,9 +184,9 @@ function ActiveSale({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-medium text-slate-900">
+          <h2 className="text-lg font-medium text-foreground">
             Продажа{" "}
-            <span className="font-mono text-sm text-slate-500">{sale.id.slice(0, 8)}</span>
+            <span className="font-mono text-sm text-foreground-muted">{sale.id.slice(0, 8)}</span>
           </h2>
           <Badge tone={saleStatusTone[sale.status]}>{saleStatusLabel[sale.status]}</Badge>
           {requiresRx && <Badge tone="warning">требуется рецепт</Badge>}
@@ -200,7 +200,7 @@ function ActiveSale({
 
       {/* ITEMS */}
       {isDraft && (
-        <div className="flex flex-wrap items-end gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-foreground/[0.03] p-3">
           <div className="min-w-[260px] flex-1">
             <Label>Позиция</Label>
             <CatalogPicker
@@ -266,16 +266,16 @@ function ActiveSale({
       )}
 
       {/* PAYMENTS */}
-      <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="rounded-md border border-border bg-surface p-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-slate-700">Оплаты</h3>
+          <h3 className="text-sm font-medium text-foreground-secondary">Оплаты</h3>
           <div className="text-right">
-            <p className="text-xs text-slate-500">К оплате</p>
+            <p className="text-xs text-foreground-muted">К оплате</p>
             <p className="font-mono text-lg">
               {totalDue.toFixed(2)} {sale.currency}
             </p>
             {totalPaid > 0 && (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-foreground-muted">
                 оплачено {totalPaid.toFixed(2)}; остаток {remaining.toFixed(2)}
               </p>
             )}
@@ -283,7 +283,7 @@ function ActiveSale({
         </div>
 
         {sale.payments.length > 0 && (
-          <ul className="mt-2 divide-y divide-slate-100 text-sm">
+          <ul className="mt-2 divide-y divide-border text-sm">
             {sale.payments.map((p) => (
               <li key={p.id} className="flex justify-between py-1.5">
                 <span>{paymentMethodLabel[p.payment_method]}</span>
@@ -333,7 +333,7 @@ function ActiveSale({
         )}
       </div>
 
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
 
       {isDraft && (
         <div className="flex justify-end">
@@ -348,7 +348,7 @@ function ActiveSale({
       )}
 
       {!isDraft && sale.receipt_number && (
-        <p className="text-sm text-emerald-700">
+        <p className="text-sm text-success-foreground">
           ✅ Чек № {sale.receipt_number} оформлен. Партии списаны.
         </p>
       )}

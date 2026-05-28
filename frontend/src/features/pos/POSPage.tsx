@@ -32,7 +32,7 @@ export function POSPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-slate-900">Касса</h1>
+      <h1 className="text-2xl font-semibold text-foreground">Касса</h1>
 
       <Card>
         <CardContent className="flex items-end gap-3 py-4">
@@ -53,7 +53,7 @@ export function POSPage(): JSX.Element {
             </Select>
           </div>
           {registers.data?.length === 0 && (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-foreground-muted">
               Нет активных касс. Создайте кассу в разделе «Кассы».
             </p>
           )}

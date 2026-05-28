@@ -53,8 +53,8 @@ export function BatchesPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Партии</h1>
-        <span className="text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold text-foreground">Партии</h1>
+        <span className="text-sm text-foreground-muted">
           Создание партий — через приёмку поставщиков
         </span>
       </div>
@@ -121,13 +121,13 @@ export function BatchesPage(): JSX.Element {
       </div>
 
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить партии")}
         </p>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : !data || data.items.length === 0 ? (
         <TableEmpty>
           {branchId || catalogId || expiry || showEmpty
@@ -153,12 +153,12 @@ export function BatchesPage(): JSX.Element {
                 <TR key={b.id}>
                   <TD className="font-mono text-xs">
                     {b.batch_number ?? "—"}
-                    <div className="text-slate-400">id: {b.id.slice(0, 8)}</div>
+                    <div className="text-foreground-muted">id: {b.id.slice(0, 8)}</div>
                   </TD>
                   <TD>{branchNameById(b.branch_id)}</TD>
                   <TD>
                     <div>{new Date(b.expires_at).toLocaleDateString("ru-RU")}</div>
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-foreground-muted">
                       {b.days_to_expiry >= 0
                         ? `через ${b.days_to_expiry} дн.`
                         : `${-b.days_to_expiry} дн. назад`}
@@ -166,7 +166,7 @@ export function BatchesPage(): JSX.Element {
                   </TD>
                   <TD className="font-mono">
                     {b.qty_remaining}
-                    <span className="ml-1 text-xs text-slate-500">/ {b.qty_initial}</span>
+                    <span className="ml-1 text-xs text-foreground-muted">/ {b.qty_initial}</span>
                   </TD>
                   <TD>
                     {Number(b.sale_price).toFixed(2)} {b.currency}
@@ -188,7 +188,7 @@ export function BatchesPage(): JSX.Element {
               ))}
             </TBody>
           </Table>
-          <div className="flex items-center justify-between text-sm text-slate-600">
+          <div className="flex items-center justify-between text-sm text-foreground-secondary">
             <span>
               Всего: <span className="font-medium">{total}</span>
             </span>

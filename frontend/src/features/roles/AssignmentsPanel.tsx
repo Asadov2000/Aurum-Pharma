@@ -85,15 +85,15 @@ export function AssignmentsPanel({
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-sm text-slate-500">Назначения роли</p>
+        <p className="text-sm text-foreground-muted">Назначения роли</p>
         {user.assignments.length === 0 ? (
-          <p className="text-sm italic text-slate-500">Ролей пока нет</p>
+          <p className="text-sm italic text-foreground-muted">Ролей пока нет</p>
         ) : (
           <ul className="mt-2 space-y-2">
             {user.assignments.map((a) => (
               <li
                 key={a.id}
-                className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2"
+                className="flex items-center justify-between rounded-md border border-border bg-surface px-3 py-2"
               >
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
@@ -103,7 +103,7 @@ export function AssignmentsPanel({
                     </Badge>
                     {a.password_required && <Badge tone="info">пароль</Badge>}
                   </div>
-                  <p className="text-xs text-slate-500">{branchName(a.branch_id)}</p>
+                  <p className="text-xs text-foreground-muted">{branchName(a.branch_id)}</p>
                 </div>
                 {a.is_active && (
                   <Button
@@ -122,7 +122,7 @@ export function AssignmentsPanel({
       </div>
 
       {addOpen ? (
-        <form onSubmit={onAdd} noValidate className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <form onSubmit={onAdd} noValidate className="space-y-3 rounded-md border border-border bg-foreground/[0.03] p-3">
           <div>
             <Label htmlFor="role_id">Роль</Label>
             <Select
@@ -153,7 +153,7 @@ export function AssignmentsPanel({
             </Select>
           </div>
           <Switch label="Требовать пароль" {...form.register("password_required")} />
-          {topError && <p className="text-sm text-red-600">{topError}</p>}
+          {topError && <p className="text-sm text-danger">{topError}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>
               Отмена

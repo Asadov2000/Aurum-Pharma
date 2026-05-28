@@ -50,7 +50,7 @@ export function IncomingPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Приходы</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Приходы</h1>
         <Button onClick={() => setCreating(true)}>+ Новый приход</Button>
       </div>
 
@@ -106,12 +106,12 @@ export function IncomingPage(): JSX.Element {
       </div>
 
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить приходы")}
         </p>
       )}
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : !data || data.length === 0 ? (
         <TableEmpty>Приходов пока нет</TableEmpty>
       ) : (

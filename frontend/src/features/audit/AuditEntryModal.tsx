@@ -59,7 +59,7 @@ export function AuditEntryModal({
           <DiffTable entry={entry} />
 
           {entry.metadata && Object.keys(entry.metadata).length > 0 && (
-            <details className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+            <details className="rounded-md border border-border bg-foreground/[0.03] px-3 py-2 text-sm">
               <summary className="cursor-pointer font-medium">Доп. данные</summary>
               <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-xs">
                 {JSON.stringify(entry.metadata, null, 2)}
@@ -81,7 +81,7 @@ export function AuditEntryModal({
 function DiffTable({ entry }: { entry: AuditEntry }): JSX.Element {
   const keys = diffKeys(entry);
   if (keys.length === 0) {
-    return <p className="text-sm italic text-slate-500">Поля не записаны</p>;
+    return <p className="text-sm italic text-foreground-muted">Поля не записаны</p>;
   }
 
   const isUpdate = entry.action === "update";
@@ -90,33 +90,33 @@ function DiffTable({ entry }: { entry: AuditEntry }): JSX.Element {
   );
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200">
+    <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-left">
+        <thead className="bg-foreground/[0.03] text-left">
           <tr>
-            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-600">
+            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-secondary">
               Поле
             </th>
-            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-600">
+            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-secondary">
               {isUpdate ? "Было" : entry.action === "delete" ? "Значение" : ""}
             </th>
-            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-600">
+            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-secondary">
               {entry.action === "delete" ? "" : "Стало"}
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody className="divide-y divide-border">
           {keys.map((k) => {
             const oldV = entry.old_values?.[k];
             const newV = entry.new_values?.[k];
             const changed = isUpdate ? changedSet.has(k) : true;
             return (
-              <tr key={k} className={changed ? "bg-amber-50/50" : ""}>
-                <td className="px-3 py-2 font-mono text-xs text-slate-700">{k}</td>
-                <td className="px-3 py-2 font-mono text-xs text-red-700">
+              <tr key={k} className={changed ? "bg-warning-subtle/50" : ""}>
+                <td className="px-3 py-2 font-mono text-xs text-foreground-secondary">{k}</td>
+                <td className="px-3 py-2 font-mono text-xs text-danger">
                   {entry.old_values ? format(oldV) : ""}
                 </td>
-                <td className="px-3 py-2 font-mono text-xs text-emerald-700">
+                <td className="px-3 py-2 font-mono text-xs text-success-foreground">
                   {entry.new_values ? format(newV) : ""}
                 </td>
               </tr>
@@ -139,7 +139,7 @@ function Field({
 }): JSX.Element {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-foreground-muted">{label}</p>
       <p className={mono ? "font-mono text-xs" : ""}>{value}</p>
     </div>
   );

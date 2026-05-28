@@ -120,7 +120,7 @@ export function RegisterForm({ register: row, onClose }: Props): JSX.Element {
         </Select>
         <FormError>{form.formState.errors.branch_id?.message}</FormError>
         {isEdit && (
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-foreground-muted">
             Точку нельзя менять после создания кассы
           </p>
         )}
@@ -137,7 +137,7 @@ export function RegisterForm({ register: row, onClose }: Props): JSX.Element {
         </Select>
       </div>
       {isEdit && <Switch label="Активна" {...form.register("is_active")} />}
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onClose}>
           Отмена

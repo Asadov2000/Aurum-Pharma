@@ -65,9 +65,7 @@ describe("CatalogPage", () => {
   it("shows the empty state when no items match", async () => {
     listCatalog.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
     renderPage();
-    expect(
-      await screen.findByText(/Пока нет позиций/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Каталог пуст/i)).toBeInTheDocument();
   });
 
   it("renders items returned from the API", async () => {
@@ -87,8 +85,9 @@ describe("CatalogPage", () => {
   it("rejects empty submission of the new item form", async () => {
     listCatalog.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
     renderPage();
-    await screen.findByText(/Пока нет позиций/i);
-    fireEvent.click(screen.getByRole("button", { name: /\+ Новая позиция/i }));
+    await screen.findByText(/Каталог пуст/i);
+    // Header + empty-state both expose "+ Новая позиция"; the header one is first.
+    fireEvent.click(screen.getAllByRole("button", { name: /\+ Новая позиция/i })[0]!);
     const submit = await screen.findByRole("button", { name: /^Создать$/i });
     fireEvent.click(submit);
     expect(await screen.findByText(/Введите название/i)).toBeInTheDocument();
@@ -99,8 +98,8 @@ describe("CatalogPage", () => {
     listCatalog.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
     createCatalogItem.mockResolvedValueOnce(ITEM);
     renderPage();
-    await screen.findByText(/Пока нет позиций/i);
-    fireEvent.click(screen.getByRole("button", { name: /\+ Новая позиция/i }));
+    await screen.findByText(/Каталог пуст/i);
+    fireEvent.click(screen.getAllByRole("button", { name: /\+ Новая позиция/i })[0]!);
     fireEvent.change(await screen.findByLabelText(/Торговое название/i), {
       target: { value: "Анальгин" },
     });

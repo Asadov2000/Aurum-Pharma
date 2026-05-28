@@ -1,3 +1,105 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* =============================================================================
+   Design tokens — single source of truth for the visual language.
+   Values are HSL channels ("H S% L%") so Tailwind can apply opacity modifiers
+   (e.g. bg-primary/50). Roles flip between light and dark via [data-theme].
+   See docs/design-system.md.
+   ========================================================================== */
+@layer base {
+  :root,
+  [data-theme="light"] {
+    /* surfaces & text */
+    --background: 210 40% 98%;
+    --surface: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 213 27% 84%;
+    --ring: 174 84% 31%;
+    --foreground: 222 47% 11%;
+    --foreground-secondary: 215 25% 27%;
+    --foreground-muted: 215 20% 55%;
+
+    /* primary — medical teal */
+    --primary: 174 84% 31%;
+    --primary-foreground: 0 0% 100%;
+
+    /* semantic: base / subtle background / readable foreground */
+    --success: 142 72% 32%;
+    --success-subtle: 141 79% 93%;
+    --success-foreground: 142 72% 24%;
+    --warning: 32 95% 38%;
+    --warning-subtle: 48 96% 89%;
+    --warning-foreground: 26 84% 31%;
+    --danger: 0 72% 48%;
+    --danger-subtle: 0 93% 94%;
+    --danger-foreground: 0 70% 38%;
+    --info: 221 83% 50%;
+    --info-subtle: 214 95% 93%;
+    --info-foreground: 226 71% 40%;
+
+    /* modal scrim */
+    --overlay: 222 47% 11%;
+    --overlay-opacity: 0.45;
+  }
+
+  [data-theme="dark"] {
+    --background: 222 47% 8%;
+    --surface: 219 43% 12%;
+    --surface-raised: 220 45% 16%;
+    --border: 222 33% 21%;
+    --input: 219 33% 26%;
+    --ring: 173 80% 45%;
+    --foreground: 215 38% 93%;
+    --foreground-secondary: 217 25% 73%;
+    --foreground-muted: 215 16% 55%;
+
+    --primary: 173 80% 42%;
+    --primary-foreground: 168 91% 8%;
+
+    --success: 142 65% 45%;
+    --success-subtle: 145 40% 15%;
+    --success-foreground: 141 73% 73%;
+    --warning: 38 92% 50%;
+    --warning-subtle: 38 60% 14%;
+    --warning-foreground: 45 96% 64%;
+    --danger: 0 84% 62%;
+    --danger-subtle: 0 45% 16%;
+    --danger-foreground: 0 93% 82%;
+    --info: 217 91% 62%;
+    --info-subtle: 218 50% 17%;
+    --info-foreground: 213 96% 80%;
+
+    --overlay: 222 60% 4%;
+    --overlay-opacity: 0.6;
+  }
+
+  html {
+    font-family: theme("fontFamily.sans");
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Keyboard-visible focus ring everywhere, without a ring on mouse clicks. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer utilities {
+  /* Translucent modal scrim built from the themed overlay token. */
+  .bg-overlay {
+    background-color: hsl(var(--overlay) / var(--overlay-opacity));
+  }
+
+  /* Skeleton shimmer for loading states. */
+  .skeleton {
+    @apply animate-pulse rounded-md bg-foreground/10;
+  }
+}

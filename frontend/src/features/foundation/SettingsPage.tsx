@@ -124,16 +124,16 @@ export function SettingsPage(): JSX.Element {
   });
 
   if (isLoading) {
-    return <p className="text-sm text-slate-500">Загрузка…</p>;
+    return <p className="text-sm text-foreground-muted">Загрузка…</p>;
   }
   if (error || !data) {
     return (
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-slate-900">Настройки</h1>
-        <p className="text-sm text-red-600">
+        <h1 className="text-2xl font-semibold text-foreground">Настройки</h1>
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить настройки")}
         </p>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-foreground-muted">
           У учёток developer/administrator нет привязки к тенанту — войдите как owner.
         </p>
       </div>
@@ -142,7 +142,7 @@ export function SettingsPage(): JSX.Element {
 
   return (
     <form onSubmit={onSubmit} noValidate className="max-w-2xl space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Настройки</h1>
+      <h1 className="text-2xl font-semibold text-foreground">Настройки</h1>
 
       <Card>
         <CardHeader>
@@ -253,8 +253,8 @@ export function SettingsPage(): JSX.Element {
         </CardContent>
       </Card>
 
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
-      {okBanner && <p className="text-sm text-emerald-700">Настройки сохранены.</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
+      {okBanner && <p className="text-sm text-success-foreground">Настройки сохранены.</p>}
 
       <Button type="submit" isLoading={form.formState.isSubmitting}>
         Сохранить

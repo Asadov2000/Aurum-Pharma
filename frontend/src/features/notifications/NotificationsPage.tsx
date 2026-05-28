@@ -12,9 +12,9 @@ export function NotificationsPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-slate-900">Уведомления</h1>
+      <h1 className="text-2xl font-semibold text-foreground">Уведомления</h1>
 
-      <div className="flex gap-1 border-b border-slate-200">
+      <div className="flex gap-1 border-b border-border">
         <TabButton active={tab === "inbox"} onClick={() => setTab("inbox")}>
           Инбокс
         </TabButton>
@@ -44,8 +44,8 @@ function TabButton({
       className={cn(
         "border-b-2 px-4 py-2 text-sm font-medium transition-colors",
         active
-          ? "border-slate-900 text-slate-900"
-          : "border-transparent text-slate-500 hover:text-slate-700",
+          ? "border-primary text-foreground"
+          : "border-transparent text-foreground-muted hover:text-foreground-secondary",
       )}
     >
       {children}

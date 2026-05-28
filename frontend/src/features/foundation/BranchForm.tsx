@@ -144,7 +144,7 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
       {isEdit && (
         <Switch label="Активна" {...form.register("is_active")} />
       )}
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onClose}>
           Отмена

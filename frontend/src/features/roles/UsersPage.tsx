@@ -78,16 +78,16 @@ export function UsersPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Пользователи</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Пользователи</h1>
         <Button onClick={() => setInviting(true)}>+ Пригласить</Button>
       </div>
       {users.error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(users.error, "Не удалось загрузить пользователей")}
         </p>
       )}
       {users.isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : !users.data || users.data.length === 0 ? (
         <TableEmpty>Пока нет пользователей</TableEmpty>
       ) : (
@@ -114,7 +114,7 @@ export function UsersPage(): JSX.Element {
                   </TD>
                   <TD>
                     {activeAssignments.length === 0 ? (
-                      <span className="text-slate-400">—</span>
+                      <span className="text-foreground-muted">—</span>
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {activeAssignments.map((a) => (

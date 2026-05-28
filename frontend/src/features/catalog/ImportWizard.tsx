@@ -117,11 +117,11 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
   if (!job) {
     return (
       <div className="space-y-4">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-foreground-secondary">
           Загрузите CSV-файл с позициями каталога (UTF-8 или Windows-1251).
           Файл уйдёт в MinIO; на следующем шаге сервер построит превью.
         </p>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-foreground-muted">
           XLSX пока не поддерживается — появится в Этапе 2 вместе с openpyxl.
         </p>
         <input
@@ -131,7 +131,7 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
           onChange={(e) => void onPick(e.target.files?.[0] ?? null)}
           className="block w-full text-sm"
         />
-        {topError && <p className="text-sm text-red-600">{topError}</p>}
+        {topError && <p className="text-sm text-danger">{topError}</p>}
         <div className="flex justify-end">
           <Button variant="secondary" onClick={onClose}>
             Закрыть
@@ -146,8 +146,8 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-sm">
-          <p className="font-medium text-slate-900">{job.source_filename}</p>
-          <p className="text-xs text-slate-500">id: {job.id.slice(0, 8)}</p>
+          <p className="font-medium text-foreground">{job.source_filename}</p>
+          <p className="text-xs text-foreground-muted">id: {job.id.slice(0, 8)}</p>
         </div>
         <Badge tone={statusBadgeTone(job.status)}>{job.status}</Badge>
       </div>
@@ -161,8 +161,8 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
       )}
 
       {job.preview_data && job.preview_data.length > 0 && (
-        <div className="rounded-md border border-slate-200 bg-white p-3 max-h-64 overflow-auto">
-          <p className="mb-2 text-xs uppercase tracking-wide text-slate-500">
+        <div className="rounded-md border border-border bg-surface p-3 max-h-64 overflow-auto">
+          <p className="mb-2 text-xs uppercase tracking-wide text-foreground-muted">
             Первые строки превью
           </p>
           <pre className="text-xs leading-tight">
@@ -172,21 +172,21 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
       )}
 
       {job.errors && job.errors.length > 0 && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 max-h-48 overflow-auto">
-          <p className="mb-2 text-xs uppercase tracking-wide text-red-600">
+        <div className="rounded-md border border-danger/30 bg-danger-subtle p-3 max-h-48 overflow-auto">
+          <p className="mb-2 text-xs uppercase tracking-wide text-danger">
             Ошибки ({job.errors.length})
           </p>
-          <pre className="text-xs leading-tight text-red-900">
+          <pre className="text-xs leading-tight text-danger">
             {JSON.stringify(job.errors.slice(0, 10), null, 2)}
           </pre>
         </div>
       )}
 
       {isPolling && (
-        <p className="text-sm text-slate-500">Импорт выполняется… (обновление каждые 2 сек)</p>
+        <p className="text-sm text-foreground-muted">Импорт выполняется… (обновление каждые 2 сек)</p>
       )}
 
-      {topError && <p className="text-sm text-red-600">{topError}</p>}
+      {topError && <p className="text-sm text-danger">{topError}</p>}
 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex items-end gap-2">
@@ -247,13 +247,13 @@ function Stat({
 }): JSX.Element {
   const toneClass =
     tone === "success"
-      ? "text-emerald-700"
+      ? "text-success-foreground"
       : tone === "danger"
-        ? "text-red-700"
-        : "text-slate-900";
+        ? "text-danger"
+        : "text-foreground";
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-      <p className="text-xs text-slate-500">{label}</p>
+    <div className="rounded-md border border-border bg-surface px-3 py-2">
+      <p className="text-xs text-foreground-muted">{label}</p>
       <p className={`text-lg font-semibold ${toneClass}`}>{value}</p>
     </div>
   );

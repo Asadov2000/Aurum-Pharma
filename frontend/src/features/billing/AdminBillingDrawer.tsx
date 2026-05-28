@@ -50,7 +50,7 @@ export function AdminBillingDrawer({
       className="max-w-3xl"
     >
       <div className="space-y-4">
-        <p className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <p className="rounded-md bg-foreground/[0.03] px-3 py-2 text-xs text-foreground-secondary">
           Поля только для записи. Прочитать созданное через эту панель нельзя —
           в Этапе 1 нет admin-эндпоинтов чтения. Тенант увидит изменения на
           своей странице «Биллинг». ID результатов появляются ниже каждой формы.
@@ -171,12 +171,12 @@ function SubscriptionForm({
             />
           </div>
           {topError && (
-            <p className="col-span-3 text-sm text-red-600">{topError}</p>
+            <p className="col-span-3 text-sm text-danger">{topError}</p>
           )}
           {lastId && (
-            <p className="col-span-3 text-xs text-emerald-700">
+            <p className="col-span-3 text-xs text-success-foreground">
               ✅ Подписка создана:{" "}
-              <code className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono">
+              <code className="rounded bg-success-subtle px-1.5 py-0.5 font-mono">
                 {lastId}
               </code>
             </p>
@@ -321,12 +321,12 @@ function InvoiceForm({
             <Textarea id="notes" rows={1} {...form.register("notes")} />
           </div>
           {topError && (
-            <p className="col-span-3 text-sm text-red-600">{topError}</p>
+            <p className="col-span-3 text-sm text-danger">{topError}</p>
           )}
           {lastId && (
-            <p className="col-span-3 text-xs text-emerald-700">
+            <p className="col-span-3 text-xs text-success-foreground">
               ✅ Счёт создан:{" "}
-              <code className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono">
+              <code className="rounded bg-success-subtle px-1.5 py-0.5 font-mono">
                 {lastId}
               </code>
             </p>
@@ -465,10 +465,10 @@ function PaymentForm({
             <Textarea id="pay_notes" rows={1} {...form.register("notes")} />
           </div>
           {topError && (
-            <p className="col-span-3 text-sm text-red-600">{topError}</p>
+            <p className="col-span-3 text-sm text-danger">{topError}</p>
           )}
           {recordedAmount && (
-            <p className="col-span-3 text-xs text-emerald-700">
+            <p className="col-span-3 text-xs text-success-foreground">
               ✅ Платёж записан на {recordedAmount}. Статус счёта обновлён автоматически.
             </p>
           )}

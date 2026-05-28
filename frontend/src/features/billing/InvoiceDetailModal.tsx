@@ -25,9 +25,9 @@ export function InvoiceDetailModal({
       className="max-w-2xl"
     >
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : error || !data ? (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить счёт")}
         </p>
       ) : (
@@ -74,15 +74,15 @@ export function InvoiceDetailModal({
           </div>
 
           {data.notes && (
-            <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <p className="rounded-md bg-foreground/[0.03] px-3 py-2 text-sm text-foreground-secondary">
               {data.notes}
             </p>
           )}
 
           <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">Платежи</p>
+            <p className="mb-2 text-sm font-medium text-foreground-secondary">Платежи</p>
             {data.payments.length === 0 ? (
-              <p className="text-sm italic text-slate-500">Оплат пока нет</p>
+              <p className="text-sm italic text-foreground-muted">Оплат пока нет</p>
             ) : (
               <Table>
                 <THead>
@@ -131,7 +131,7 @@ function Field({
 }): JSX.Element {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-foreground-muted">{label}</p>
       <p>{value}</p>
     </div>
   );

@@ -44,7 +44,7 @@ export function BranchesPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Точки</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Точки</h1>
         <Button onClick={() => setCreating(true)}>+ Новая точка</Button>
       </div>
       <Switch
@@ -53,12 +53,12 @@ export function BranchesPage(): JSX.Element {
         onChange={(e) => setIncludeInactive(e.target.checked)}
       />
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить список")}
         </p>
       )}
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : !data || data.length === 0 ? (
         <TableEmpty>Пока нет ни одной точки</TableEmpty>
       ) : (
@@ -82,7 +82,7 @@ export function BranchesPage(): JSX.Element {
                 <TD>
                   {b.license_number ?? "—"}
                   {b.license_expires_at && (
-                    <span className="ml-2 text-xs text-slate-500">
+                    <span className="ml-2 text-xs text-foreground-muted">
                       до {new Date(b.license_expires_at).toLocaleDateString("ru-RU")}
                     </span>
                   )}

@@ -7,6 +7,7 @@ import {
   Label,
   Modal,
   Select,
+  SkeletonRows,
   Table,
   TableEmpty,
   TBody,
@@ -67,7 +68,7 @@ export function CatalogPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Каталог</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Каталог</h1>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => setImporting(true)}>
             Импорт из файла
@@ -108,19 +109,34 @@ export function CatalogPage(): JSX.Element {
       </div>
 
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить каталог")}
         </p>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <SkeletonRows rows={6} />
       ) : !data || data.items.length === 0 ? (
-        <TableEmpty>
-          {q || dispensing
-            ? "По текущим фильтрам ничего не найдено"
-            : "Пока нет позиций — добавь вручную или импортируй из файла"}
-        </TableEmpty>
+        q || dispensing ? (
+          <TableEmpty title="Ничего не найдено">
+            Измените запрос или фильтр отпуска.
+          </TableEmpty>
+        ) : (
+          <TableEmpty
+            icon="💊"
+            title="Каталог пуст"
+            action={
+              <div className="flex justify-center gap-2">
+                <Button variant="secondary" onClick={() => setImporting(true)}>
+                  Импорт из файла
+                </Button>
+                <Button onClick={() => setCreating(true)}>+ Новая позиция</Button>
+              </div>
+            }
+          >
+            Добавьте первую позицию вручную или импортируйте прайс из файла.
+          </TableEmpty>
+        )
       ) : (
         <>
           <Table>
@@ -143,7 +159,7 @@ export function CatalogPage(): JSX.Element {
                   <TD>
                     {[it.form, it.dosage].filter(Boolean).join(" / ") || "—"}
                     {it.pack_size && (
-                      <span className="ml-2 text-xs text-slate-500">№ {it.pack_size}</span>
+                      <span className="ml-2 text-xs text-foreground-muted">№ {it.pack_size}</span>
                     )}
                   </TD>
                   <TD>{dispensingLabel[it.dispensing_type]}</TD>
@@ -178,7 +194,7 @@ export function CatalogPage(): JSX.Element {
               ))}
             </TBody>
           </Table>
-          <div className="flex items-center justify-between text-sm text-slate-600">
+          <div className="flex items-center justify-between text-sm text-foreground-secondary">
             <span>
               Всего: <span className="font-medium">{total}</span>
             </span>

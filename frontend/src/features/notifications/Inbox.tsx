@@ -44,7 +44,7 @@ export function Inbox(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-3">
         <Switch
           label="Только непрочитанные"
           checked={unreadOnly}
@@ -67,7 +67,7 @@ export function Inbox(): JSX.Element {
           </Select>
         </div>
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-sm text-slate-500">
+          <span className="text-sm text-foreground-muted">
             непрочитанных: <span className="font-mono">{unreadCount}</span>
           </span>
           <Button
@@ -83,13 +83,13 @@ export function Inbox(): JSX.Element {
       </div>
 
       {error && (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить уведомления")}
         </p>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : !data || data.length === 0 ? (
         <TableEmpty>
           {unreadOnly || severity ? "По фильтрам ничего нет" : "Пока нет уведомлений"}
@@ -125,21 +125,21 @@ function Item({
     <li
       className={cn(
         "rounded-md border px-4 py-3",
-        isUnread ? "border-slate-300 bg-white" : "border-slate-200 bg-slate-50",
+        isUnread ? "border-input bg-surface" : "border-border bg-foreground/[0.03]",
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <Badge tone={severityTone[n.severity]}>{severityLabel[n.severity]}</Badge>
-            <span className="text-xs text-slate-500">{eventTitle}</span>
+            <span className="text-xs text-foreground-muted">{eventTitle}</span>
             {isUnread && <Badge tone="info">новое</Badge>}
           </div>
-          <p className={cn("text-sm", isUnread ? "font-medium text-slate-900" : "text-slate-700")}>
+          <p className={cn("text-sm", isUnread ? "font-medium text-foreground" : "text-foreground-secondary")}>
             {n.title}
           </p>
-          {n.body && <p className="text-sm text-slate-600">{n.body}</p>}
-          <p className="text-xs text-slate-500">
+          {n.body && <p className="text-sm text-foreground-secondary">{n.body}</p>}
+          <p className="text-xs text-foreground-muted">
             {new Date(n.created_at).toLocaleString("ru-RU")}
           </p>
         </div>

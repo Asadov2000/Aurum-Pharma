@@ -34,8 +34,8 @@ export function RolesPage(): JSX.Element {
   if (roles.error) {
     return (
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-slate-900">Роли</h1>
-        <p className="text-sm text-red-600">
+        <h1 className="text-2xl font-semibold text-foreground">Роли</h1>
+        <p className="text-sm text-danger">
           {describeApiError(roles.error, "Не удалось загрузить список")}
         </p>
       </div>
@@ -44,12 +44,12 @@ export function RolesPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-slate-900">Роли</h1>
-      <p className="text-sm text-slate-500">
+      <h1 className="text-2xl font-semibold text-foreground">Роли</h1>
+      <p className="text-sm text-foreground-muted">
         Системные роли защищены. Кастомные роли появятся в Этапе 2.
       </p>
       {roles.isLoading ? (
-        <p className="text-sm text-slate-500">Загрузка…</p>
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {roles.data?.map((r) => (
@@ -62,17 +62,17 @@ export function RolesPage(): JSX.Element {
                     {!r.is_active && <Badge tone="neutral">неактивна</Badge>}
                   </div>
                 </div>
-                <p className="text-xs text-slate-500">{levelLabel(r.level)}</p>
+                <p className="text-xs text-foreground-muted">{levelLabel(r.level)}</p>
               </CardHeader>
               <CardContent className="space-y-2">
-                {r.description && <p className="text-sm text-slate-700">{r.description}</p>}
+                {r.description && <p className="text-sm text-foreground-secondary">{r.description}</p>}
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                  <p className="text-xs uppercase tracking-wide text-foreground-muted">
                     Права ({r.permissions.length})
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {r.permissions.length === 0 ? (
-                      <span className="text-xs italic text-slate-400">нет прав</span>
+                      <span className="text-xs italic text-foreground-muted">нет прав</span>
                     ) : (
                       r.permissions.map((code) => (
                         <Badge key={code} tone="neutral" title={code}>

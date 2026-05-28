@@ -9,3 +9,4 @@ export { Textarea, type TextareaProps } from "./Textarea";
 export { Table, THead, TBody, TR, TH, TD, TableEmpty } from "./Table";
 export { Badge } from "./Badge";
 export { Switch } from "./Switch";
+export { Skeleton, SkeletonRows } from "./Skeleton";

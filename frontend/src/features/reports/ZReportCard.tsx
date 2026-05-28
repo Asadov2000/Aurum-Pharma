@@ -68,7 +68,7 @@ export function ZReportCard({ report }: { report: ZReport }): JSX.Element {
             <Field label="Ожидалось" value={fmt(report.closing_cash_expected)} mono />
             <Field label="Фактически" value={fmt(report.closing_cash_actual)} mono />
             <div>
-              <p className="text-xs text-slate-500">Разница</p>
+              <p className="text-xs text-foreground-muted">Разница</p>
               <div className="flex items-center gap-2">
                 <p className="font-mono">{fmt(report.closing_difference)}</p>
                 <Badge tone={diffTone}>{diffLabel}</Badge>
@@ -90,7 +90,7 @@ export function ZReportCard({ report }: { report: ZReport }): JSX.Element {
 
           <ByMethodTable totals={totals} />
 
-          <details className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+          <details className="rounded-md border border-border bg-foreground/[0.03] px-3 py-2 text-sm">
             <summary className="cursor-pointer font-medium">Сырой JSON totals</summary>
             <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-xs">
               {JSON.stringify(totals, null, 2)}
@@ -119,7 +119,7 @@ function ByMethodTable({ totals }: { totals: Record<string, unknown> }): JSX.Ele
 
   return (
     <div>
-      <p className="mb-1 text-sm font-medium text-slate-700">По способам оплаты</p>
+      <p className="mb-1 text-sm font-medium text-foreground-secondary">По способам оплаты</p>
       <Table>
         <THead>
           <TR>
@@ -165,7 +165,7 @@ function Field({
 }): JSX.Element {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-foreground-muted">{label}</p>
       <p className={mono ? "font-mono" : ""}>{value}</p>
     </div>
   );
