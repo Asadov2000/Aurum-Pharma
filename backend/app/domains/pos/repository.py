@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.inventory.models import Batch
@@ -231,3 +231,120 @@ class POSRepository:
         stmt = select(Batch).where(Batch.id == batch_id).with_for_update()
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    # -------- sales listing (receipt search) --------
+
+    async def list_sales(
+        self,
+        *,
+        tenant_id: UUID,
+        cashier_id: UUID | None,
+        branch_id: UUID | None,
+        register_id: UUID | None,
+        receipt_number: str | None,
+        date_from: Any | None,
+        date_to: Any | None,
+        has_refund: bool | None,
+        min_total: Decimal | None,
+        max_total: Decimal | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """One query joins sale → branch/register/cashier for resolved names,
+        aggregates payment methods, builds a short item preview, and derives
+        is_refund / has_refund / refund_receipt_number from the parent↔child
+        sale link. Only receipts (completed/voided, completed_at set) appear —
+        drafts have no receipt_number.
+
+        `has_refund` is true when at least one completed return-sale points at
+        this row; `refund_receipt_number` is that return's receipt. Deriving
+        these avoids a denormalized column that could drift.
+        """
+        clauses = ["s.tenant_id = :tid", "s.completed_at IS NOT NULL"]
+        params: dict[str, Any] = {"tid": str(tenant_id)}
+
+        if cashier_id is not None:
+            clauses.append("s.cashier_user_id = :cashier")
+            params["cashier"] = str(cashier_id)
+        if branch_id is not None:
+            clauses.append("s.branch_id = :branch")
+            params["branch"] = str(branch_id)
+        if register_id is not None:
+            clauses.append("s.register_id = :register")
+            params["register"] = str(register_id)
+        if receipt_number is not None:
+            clauses.append("s.receipt_number = :receipt")
+            params["receipt"] = receipt_number
+        if date_from is not None:
+            clauses.append("s.completed_at::date >= :dfrom")
+            params["dfrom"] = date_from
+        if date_to is not None:
+            clauses.append("s.completed_at::date <= :dto")
+            params["dto"] = date_to
+        if min_total is not None:
+            clauses.append("s.total_amount >= :mintot")
+            params["mintot"] = min_total
+        if max_total is not None:
+            clauses.append("s.total_amount <= :maxtot")
+            params["maxtot"] = max_total
+        # has_refund filter operates on the derived EXISTS.
+        refund_exists = (
+            "EXISTS (SELECT 1 FROM sale r WHERE r.parent_sale_id = s.id "
+            "AND r.sale_type = 'return' AND r.status = 'completed')"
+        )
+        if has_refund is True:
+            clauses.append(refund_exists)
+        elif has_refund is False:
+            clauses.append(f"NOT {refund_exists}")
+
+        where = " AND ".join(clauses)
+
+        count_sql = text(f"SELECT COUNT(*) FROM sale s WHERE {where}")
+        total = int((await self.session.execute(count_sql, params)).scalar_one())
+
+        params["limit"] = page_size
+        params["offset"] = (page - 1) * page_size
+        rows_sql = text(
+            f"""
+            SELECT
+              s.id, s.receipt_number, s.completed_at, s.status,
+              s.total_amount, s.currency, s.parent_sale_id,
+              s.sale_type = 'return' AS is_refund,
+              b.name  AS branch_name,
+              reg.name AS register_name,
+              u.full_name AS cashier_name,
+              parent.receipt_number AS parent_receipt_number,
+              {refund_exists} AS has_refund,
+              (SELECT r2.receipt_number FROM sale r2
+                 WHERE r2.parent_sale_id = s.id AND r2.sale_type = 'return'
+                 AND r2.status = 'completed'
+                 ORDER BY r2.completed_at DESC LIMIT 1) AS refund_receipt_number,
+              COALESCE(
+                (SELECT array_agg(DISTINCT p.payment_method)
+                   FROM sale_payment p WHERE p.sale_id = s.id),
+                ARRAY[]::text[]
+              ) AS payment_methods,
+              COALESCE(
+                (SELECT string_agg(line, ', ')
+                   FROM (
+                     SELECT tc.brand_name || ' x' || (si.qty)::float8::text AS line
+                       FROM sale_item si
+                       JOIN tenant_catalog tc ON tc.id = si.catalog_id
+                      WHERE si.sale_id = s.id
+                      ORDER BY si.position
+                      LIMIT 5
+                   ) z),
+                ''
+              ) AS items_summary
+            FROM sale s
+            LEFT JOIN branch b   ON b.id = s.branch_id
+            LEFT JOIN register reg ON reg.id = s.register_id
+            LEFT JOIN app_user u ON u.id = s.cashier_user_id
+            LEFT JOIN sale parent ON parent.id = s.parent_sale_id
+            WHERE {where}
+            ORDER BY s.completed_at DESC
+            LIMIT :limit OFFSET :offset
+            """
+        )
+        rows = (await self.session.execute(rows_sql, params)).mappings().all()
+        return [dict(r) for r in rows], total

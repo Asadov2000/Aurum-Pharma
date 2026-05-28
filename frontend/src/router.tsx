@@ -21,6 +21,7 @@ import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
 import { ReportsPage } from "@/features/reports/ReportsPage";
 import { BillingPage } from "@/features/billing/BillingPage";
 import { POSPage } from "@/features/pos/POSPage";
+import { SalesPage } from "@/features/sales/SalesPage";
 import { UsersPage } from "@/features/roles/UsersPage";
 import { SuppliersPage } from "@/features/suppliers/SuppliersPage";
 
@@ -115,6 +116,12 @@ const posRoute = createRoute({
   component: () => protect(<POSPage />),
 });
 
+const salesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sales",
+  component: () => protect(<SalesPage />),
+});
+
 const billingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/billing",
@@ -170,6 +177,7 @@ const routeTree = rootRoute.addChildren([
   incomingRoute,
   incomingDetailRoute,
   posRoute,
+  salesRoute,
   billingRoute,
   auditRoute,
   onboardingRoute,

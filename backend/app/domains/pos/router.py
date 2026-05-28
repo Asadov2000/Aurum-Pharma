@@ -7,6 +7,8 @@ Two routers under one prefix file:
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -34,6 +36,8 @@ from app.domains.pos.schemas import (
     SaleItemAdded,
     SaleItemPatch,
     SaleItemRead,
+    SaleList,
+    SaleListItem,
     SaleRead,
     ShiftCloseRequest,
     ShiftOpenRequest,
@@ -137,6 +141,52 @@ async def create_sale(
         cashier_user_id=user.user_id,
     )
     return SaleRead.model_validate(sale)
+
+
+@router.get("/sales", response_model=SaleList)
+async def list_sales(
+    user: Annotated[CurrentUser, Depends(require_permission("sales.view.own"))],
+    service: Annotated[POSService, Depends(_service)],
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+    receipt_number: Annotated[str | None, Query()] = None,
+    branch_id: Annotated[UUID | None, Query()] = None,
+    register_id: Annotated[UUID | None, Query()] = None,
+    cashier_id: Annotated[UUID | None, Query()] = None,
+    has_refund: Annotated[bool | None, Query()] = None,
+    min_total: Annotated[Decimal | None, Query()] = None,
+    max_total: Annotated[Decimal | None, Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> SaleList:
+    tenant_id = _current_tenant_or_400(user)
+    # Scope: anyone with sales.view.tenant (owner/admin/dev) sees every
+    # receipt and may filter by cashier; a seller (own-only) is pinned to
+    # their own receipts regardless of the cashier_id query param.
+    if "sales.view.tenant" in user.permissions:
+        effective_cashier = cashier_id
+    else:
+        effective_cashier = user.user_id
+    rows, total = await service.list_sales(
+        tenant_id=tenant_id,
+        cashier_id=effective_cashier,
+        branch_id=branch_id,
+        register_id=register_id,
+        receipt_number=receipt_number,
+        date_from=date_from,
+        date_to=date_to,
+        has_refund=has_refund,
+        min_total=min_total,
+        max_total=max_total,
+        page=page,
+        page_size=page_size,
+    )
+    return SaleList(
+        items=[SaleListItem(**row) for row in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/sales/{sale_id}", response_model=SaleDetails)

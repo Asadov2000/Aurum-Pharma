@@ -183,3 +183,39 @@ class RefundCreate(BaseModel):
     items: list[RefundItem] = Field(min_length=1)
     reason: str | None = None
     comment: str | None = None
+
+
+# ---- sales listing (receipt search) ----
+
+
+class SaleListItem(BaseModel):
+    """Legacy-friendly, fully-resolved row for the receipt search table.
+
+    Names are resolved server-side (no raw UUIDs in the UI) and `has_refund` /
+    `is_refund` are derived from the parent/child sale relationship rather than
+    a stored column, so they can never drift from reality.
+    """
+
+    id: UUID
+    receipt_number: str | None
+    completed_at: datetime | None
+    branch_name: str | None
+    register_name: str | None
+    cashier_name: str | None
+    total_amount: Decimal
+    currency: str
+    payment_methods: list[str]
+    is_refund: bool
+    parent_sale_id: UUID | None
+    parent_receipt_number: str | None
+    has_refund: bool
+    refund_receipt_number: str | None
+    items_summary: str
+    status: str
+
+
+class SaleList(BaseModel):
+    items: list[SaleListItem]
+    total: int
+    page: int
+    page_size: int

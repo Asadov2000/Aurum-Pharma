@@ -168,6 +168,37 @@ class POSService:
             raise NotFoundError("Sale not found")
         return sale
 
+    async def list_sales(
+        self,
+        *,
+        tenant_id: UUID,
+        cashier_id: UUID | None,
+        branch_id: UUID | None,
+        register_id: UUID | None,
+        receipt_number: str | None,
+        date_from: date | None,
+        date_to: date | None,
+        has_refund: bool | None,
+        min_total: Decimal | None,
+        max_total: Decimal | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        return await self.repo.list_sales(
+            tenant_id=tenant_id,
+            cashier_id=cashier_id,
+            branch_id=branch_id,
+            register_id=register_id,
+            receipt_number=receipt_number,
+            date_from=date_from,
+            date_to=date_to,
+            has_refund=has_refund,
+            min_total=min_total,
+            max_total=max_total,
+            page=page,
+            page_size=page_size,
+        )
+
     async def get_sale_details(
         self, sale_id: UUID
     ) -> tuple[Sale, list[SaleItem], list[SalePayment]]:
