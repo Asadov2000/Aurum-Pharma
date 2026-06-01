@@ -263,3 +263,45 @@ class ReceiptData(BaseModel):
     payments: list[ReceiptPayment]
     paid_total: Decimal
     change: Decimal
+
+
+# ---- Z-report (shift close XLSX) ----
+
+
+class ZReportPaymentBreakdown(BaseModel):
+    """Forward-sale totals grouped by the sale's payment method. A sale paid
+    with two+ distinct methods lands in `mixed` (there is no sale.payment_method
+    column — the bucket is derived from the sale_payment rows)."""
+
+    cash: Decimal
+    card: Decimal
+    bank_transfer: Decimal
+    mixed: Decimal
+
+
+class ZReportData(BaseModel):
+    """Fully-resolved shift summary for the XLSX export."""
+
+    shift_id: UUID
+    status: str
+    # header
+    pharmacy_name: str
+    branch_name: str
+    register_name: str
+    cashier_name: str | None
+    opened_at: datetime
+    closed_at: datetime | None
+    # sales / returns
+    sales_count: int
+    total_sales: Decimal
+    total_discounts: Decimal
+    returns_count: int
+    total_refunds: Decimal
+    currency: str
+    payment_breakdown: ZReportPaymentBreakdown
+    # cash reconciliation
+    initial_cash: Decimal
+    expected_cash: Decimal | None
+    actual_cash: Decimal | None
+    cash_difference: Decimal | None
+    difference_reason: str | None

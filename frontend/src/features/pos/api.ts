@@ -42,6 +42,14 @@ export async function getZReport(shiftId: string): Promise<ZReport> {
   return data;
 }
 
+/** Z-report as an Excel workbook (closed shifts only) — authed blob. */
+export async function getZReportXlsx(shiftId: string): Promise<Blob> {
+  const { data } = await api.get<Blob>(`/shifts/${shiftId}/z-report.xlsx`, {
+    responseType: "blob",
+  });
+  return data;
+}
+
 // ---- Sales ----
 
 export async function createSale(registerId: string): Promise<Sale> {

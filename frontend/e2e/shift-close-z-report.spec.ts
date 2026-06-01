@@ -82,7 +82,11 @@ test.describe("Shift close → Z-report", () => {
     await dialog.getByLabel("Фактическая касса").fill("140");
     // The header has a "✕" with aria-label="Закрыть" too — match the
     // primary submit button by its size class to disambiguate.
+    // Closing auto-downloads the Z-report XLSX — catch the download event.
+    const downloadPromise = page.waitForEvent("download");
     await dialog.locator("button.h-10", { hasText: "Закрыть" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
 
     // Shift returns to the open-form state — wait for it to settle.
     await expect(page.getByLabel("Касса на начало смены")).toBeVisible({ timeout: 15_000 });

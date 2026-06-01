@@ -120,6 +120,28 @@ async def z_report(
     return ZReport.model_validate(await service.z_report(shift_id))
 
 
+@router.get(
+    "/shifts/{shift_id}/z-report.xlsx",
+    response_class=Response,
+    responses={
+        200: {"content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}}}
+    },
+)
+async def z_report_xlsx(
+    shift_id: UUID,
+    _user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> Response:
+    """Z-report as an Excel workbook (closed shifts only), lazily generated and
+    cached in MinIO."""
+    xlsx = await service.get_z_report_xlsx(shift_id)
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="z-report-{shift_id}.xlsx"'},
+    )
+
+
 # =============================================================================
 # Sales
 # =============================================================================

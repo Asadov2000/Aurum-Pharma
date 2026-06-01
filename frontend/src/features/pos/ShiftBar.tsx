@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, CardContent, Input, Label, Modal, Textarea } from "@/components/ui";
+import { downloadBlob } from "@/lib/download";
 import { describeApiError } from "@/lib/errorMessages";
 
+import { getZReportXlsx } from "./api";
 import { useCloseShift, useCurrentShiftQuery, useOpenShift } from "./queries";
 import { type PosMode } from "./usePosMode";
 
@@ -58,6 +60,15 @@ export function ShiftBar({
       setCloseOpen(false);
       setClosingCash("");
       setNotes("");
+      // Auto-download the Z-report XLSX. Best-effort: the shift is already
+      // closed, so a download hiccup must not surface as a close failure —
+      // the cashier can re-download from «Отчёты».
+      try {
+        const blob = await getZReportXlsx(shift.id);
+        downloadBlob(blob, `z-report-${shift.id}.xlsx`);
+      } catch {
+        // ignore — re-downloadable from Отчёты
+      }
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось закрыть смену"));
     }

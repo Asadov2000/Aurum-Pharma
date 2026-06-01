@@ -31,7 +31,7 @@ from app.core.errors import (
 from app.core.time import utc_now
 from app.domains.auth.models import AppUser
 from app.domains.catalog.models import TenantCatalog
-from app.domains.foundation.models import Branch, Tenant
+from app.domains.foundation.models import Branch, Register, Tenant
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
@@ -44,7 +44,14 @@ from app.domains.pos.models import (
 )
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
 from app.domains.pos.repository import POSRepository
-from app.domains.pos.schemas import ReceiptData, ReceiptLine, ReceiptPayment
+from app.domains.pos.schemas import (
+    ReceiptData,
+    ReceiptLine,
+    ReceiptPayment,
+    ZReportData,
+    ZReportPaymentBreakdown,
+)
+from app.domains.pos.z_report_xlsx import get_or_render_z_report_xlsx
 
 logger = structlog.get_logger("pos.service")
 
@@ -73,8 +80,6 @@ class POSService:
             )
         # branch_id comes from the register row — fetched directly to avoid
         # a cross-domain dep on foundation.service.
-        from app.domains.foundation.models import Register
-
         register = await self.repo.session.get(Register, register_id)
         if register is None or register.tenant_id != tenant_id:
             raise NotFoundError("Register not found")
@@ -272,6 +277,65 @@ class POSService:
         worker thread so it doesn't stall the event loop."""
         data = await self.build_receipt(sale_id)
         return await anyio.to_thread.run_sync(get_or_render_receipt_pdf, data)
+
+    # ---- Z-report (shift close XLSX) ----
+
+    async def build_z_report(self, shift_id: UUID) -> ZReportData:
+        """Assemble the shift summary (names resolved) for the XLSX export."""
+        shift = await self.repo.get_shift(shift_id)
+        if shift is None:
+            raise NotFoundError("Shift not found")
+
+        tenant = await self.repo.session.get(Tenant, shift.tenant_id)
+        branch = await self.repo.session.get(Branch, shift.branch_id)
+        register = await self.repo.session.get(Register, shift.register_id)
+        cashier = await self.repo.session.get(AppUser, shift.opened_by_user_id)
+        agg = await self.repo.z_report_aggregates(shift_id)
+        bd = agg["payment_breakdown"]
+
+        return ZReportData(
+            shift_id=shift.id,
+            status=shift.status,
+            pharmacy_name=tenant.name if tenant is not None else "",
+            branch_name=branch.name if branch is not None else "",
+            register_name=register.name if register is not None else "",
+            cashier_name=cashier.full_name if cashier is not None else None,
+            opened_at=shift.opened_at,
+            closed_at=shift.closed_at,
+            sales_count=agg["sales_count"],
+            total_sales=agg["total_sales"],
+            total_discounts=agg["total_discounts"],
+            returns_count=agg["returns_count"],
+            total_refunds=agg["total_refunds"],
+            currency=shift.currency,
+            payment_breakdown=ZReportPaymentBreakdown(
+                cash=bd["cash"],
+                card=bd["card"],
+                bank_transfer=bd["bank_transfer"],
+                mixed=bd["mixed"],
+            ),
+            initial_cash=shift.opening_cash,
+            expected_cash=shift.closing_cash_expected,
+            actual_cash=shift.closing_cash_actual,
+            cash_difference=shift.closing_difference,
+            # No dedicated difference_reason column — the close dialog's free-text
+            # note doubles as the explanation.
+            difference_reason=shift.notes,
+        )
+
+    async def get_z_report_xlsx(self, shift_id: UUID) -> bytes:
+        """Lazily render + cache the Z-report XLSX in MinIO. Only closed shifts
+        qualify — an open shift's totals are incomplete."""
+        shift = await self.repo.get_shift(shift_id)
+        if shift is None:
+            raise NotFoundError("Shift not found")
+        if shift.status != "closed":
+            raise BusinessRuleError(
+                "Z-report is available only after the shift is closed",
+                details={"status": shift.status},
+            )
+        data = await self.build_z_report(shift_id)
+        return await anyio.to_thread.run_sync(get_or_render_z_report_xlsx, data)
 
     @staticmethod
     def _assert_draft(sale: Sale) -> None:

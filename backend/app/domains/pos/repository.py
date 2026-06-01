@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, case, distinct, func, literal, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.inventory.models import Batch
@@ -222,6 +222,73 @@ class POSRepository:
         totals["sales_count"] = sales_count
         totals["returns_count"] = returns_count
         return totals
+
+    async def z_report_aggregates(self, shift_id: UUID) -> dict[str, Any]:
+        """Richer aggregation for the Z-report XLSX: gross sales + count,
+        discounts, refunds + count, and a payment breakdown where each sale is
+        bucketed by its method (≥2 distinct methods → 'mixed')."""
+
+        def _sale_filter(sale_type: str) -> Any:
+            return and_(
+                Sale.shift_id == shift_id,
+                Sale.status == "completed",
+                Sale.sale_type == sale_type,
+            )
+
+        sales_stmt = select(func.coalesce(func.sum(Sale.total_amount), 0), func.count()).where(
+            _sale_filter("sale")
+        )
+        total_sales, sales_count = (await self.session.execute(sales_stmt)).one()
+
+        refunds_stmt = select(func.coalesce(func.sum(Sale.total_amount), 0), func.count()).where(
+            _sale_filter("return")
+        )
+        total_refunds, returns_count = (await self.session.execute(refunds_stmt)).one()
+
+        disc_stmt = (
+            select(func.coalesce(func.sum(SaleItem.discount_amount), 0))
+            .select_from(SaleItem)
+            .join(Sale, Sale.id == SaleItem.sale_id)
+            .where(_sale_filter("sale"))
+        )
+        total_discounts = (await self.session.execute(disc_stmt)).scalar_one()
+
+        # Per-sale method: count distinct methods on its payment lines; >1 → mixed.
+        per_sale = (
+            select(
+                Sale.total_amount.label("amt"),
+                func.count(distinct(SalePayment.payment_method)).label("n_methods"),
+                func.min(SalePayment.payment_method).label("only_method"),
+            )
+            .select_from(Sale)
+            .join(SalePayment, SalePayment.sale_id == Sale.id, isouter=True)
+            .where(_sale_filter("sale"))
+            .group_by(Sale.id, Sale.total_amount)
+            .subquery()
+        )
+        method = case((per_sale.c.n_methods > 1, literal("mixed")), else_=per_sale.c.only_method)
+        breakdown_stmt = select(
+            method.label("method"), func.coalesce(func.sum(per_sale.c.amt), 0)
+        ).group_by(method)
+
+        breakdown: dict[str, Decimal] = {
+            "cash": Decimal("0"),
+            "card": Decimal("0"),
+            "bank_transfer": Decimal("0"),
+            "mixed": Decimal("0"),
+        }
+        for m, total in (await self.session.execute(breakdown_stmt)).all():
+            if m in breakdown:
+                breakdown[m] = Decimal(str(total))
+
+        return {
+            "total_sales": Decimal(str(total_sales)),
+            "sales_count": int(sales_count),
+            "total_discounts": Decimal(str(total_discounts)),
+            "total_refunds": Decimal(str(total_refunds)),
+            "returns_count": int(returns_count),
+            "payment_breakdown": breakdown,
+        }
 
     # -------- batch lock (concurrent-safe complete) --------
 

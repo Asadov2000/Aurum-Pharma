@@ -10,6 +10,8 @@ import {
   Label,
 } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
+import { getZReportXlsx } from "@/features/pos/api";
+import { downloadBlob } from "@/lib/download";
 
 import { useZReportQuery } from "./queries";
 import { ZReportCard } from "./ZReportCard";
@@ -80,6 +82,21 @@ export function ReportsPage(): JSX.Element {
 
 function ZReportSection({ shiftId }: { shiftId: string }): JSX.Element {
   const { data, isLoading, error } = useZReportQuery(shiftId);
+  const [downloading, setDownloading] = useState(false);
+  const [dlError, setDlError] = useState<string | null>(null);
+
+  const onDownload = async () => {
+    setDlError(null);
+    setDownloading(true);
+    try {
+      const blob = await getZReportXlsx(shiftId);
+      downloadBlob(blob, `z-report-${shiftId}.xlsx`);
+    } catch (err) {
+      setDlError(describeApiError(err, "Не удалось скачать Z-отчёт"));
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   if (isLoading) return <p className="text-sm text-foreground-muted">Загрузка…</p>;
   if (error) {
@@ -90,5 +107,15 @@ function ZReportSection({ shiftId }: { shiftId: string }): JSX.Element {
     );
   }
   if (!data) return <p className="text-sm text-foreground-muted">Нет данных</p>;
-  return <ZReportCard report={data} />;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="secondary" onClick={() => void onDownload()} isLoading={downloading}>
+          Скачать Z-отчёт (XLSX)
+        </Button>
+      </div>
+      {dlError && <p className="text-sm text-danger">{dlError}</p>}
+      <ZReportCard report={data} />
+    </div>
+  );
 }
