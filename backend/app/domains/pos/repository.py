@@ -415,3 +415,111 @@ class POSRepository:
         )
         rows = (await self.session.execute(rows_sql, params)).mappings().all()
         return [dict(r) for r in rows], total
+
+    async def sales_summary(
+        self,
+        *,
+        tenant_id: UUID,
+        date_from: Any,
+        date_to: Any,
+        branch_id: UUID | None,
+    ) -> dict[str, Any]:
+        """Detail rows + period totals for the accountant summary over
+        [date_from, date_to]. Totals use the same status='completed' basis as
+        the Z-report; the payment breakdown buckets each forward sale by its
+        method (≥2 distinct → 'mixed'), identical to z_report_aggregates, so a
+        single shift's range reconciles with its Z-report.
+        """
+        base = ["s.tenant_id = :tid", "s.completed_at IS NOT NULL"]
+        params: dict[str, Any] = {"tid": str(tenant_id), "dfrom": date_from, "dto": date_to}
+        base.append("s.completed_at::date >= :dfrom")
+        base.append("s.completed_at::date <= :dto")
+        if branch_id is not None:
+            base.append("s.branch_id = :branch")
+            params["branch"] = str(branch_id)
+        where = " AND ".join(base)
+        fwd_done = f"{where} AND s.sale_type = 'sale' AND s.status = 'completed'"
+
+        # --- detail rows: every receipt in range, any status/type ---
+        rows_sql = text(
+            f"""
+            SELECT
+              s.completed_at, s.receipt_number, s.status, s.sale_type,
+              s.total_amount AS gross, s.currency,
+              b.name AS branch_name,
+              u.full_name AS cashier_name,
+              COALESCE(
+                (SELECT SUM(si.discount_amount) FROM sale_item si WHERE si.sale_id = s.id), 0
+              ) AS discount,
+              (SELECT CASE
+                        WHEN COUNT(DISTINCT p.payment_method) = 0 THEN 'none'
+                        WHEN COUNT(DISTINCT p.payment_method) > 1 THEN 'mixed'
+                        ELSE MIN(p.payment_method) END
+                 FROM sale_payment p WHERE p.sale_id = s.id) AS payment_method
+            FROM sale s
+            LEFT JOIN branch b ON b.id = s.branch_id
+            LEFT JOIN app_user u ON u.id = s.cashier_user_id
+            WHERE {where}
+            ORDER BY s.completed_at ASC
+            """
+        )
+        rows = [dict(r) for r in (await self.session.execute(rows_sql, params)).mappings().all()]
+
+        # --- headline totals ---
+        totals_sql = text(
+            f"""
+            SELECT
+              COALESCE(SUM(s.total_amount) FILTER (
+                WHERE s.sale_type = 'sale' AND s.status = 'completed'), 0) AS gross_sales,
+              COALESCE(SUM(s.total_amount) FILTER (
+                WHERE s.sale_type = 'return' AND s.status = 'completed'), 0) AS total_refunds,
+              COUNT(*) FILTER (
+                WHERE s.sale_type = 'sale' AND s.status = 'completed') AS sales_count,
+              COUNT(*) FILTER (
+                WHERE s.sale_type = 'return' AND s.status = 'completed') AS returns_count
+            FROM sale s WHERE {where}
+            """
+        )
+        t = (await self.session.execute(totals_sql, params)).mappings().one()
+
+        disc_sql = text(
+            f"""
+            SELECT COALESCE(SUM(si.discount_amount), 0) AS d
+            FROM sale_item si JOIN sale s ON s.id = si.sale_id
+            WHERE {fwd_done}
+            """
+        )
+        total_discounts = (await self.session.execute(disc_sql, params)).scalar_one()
+
+        # --- payment breakdown over forward completed sales ---
+        bd_sql = text(
+            f"""
+            SELECT method, COALESCE(SUM(amt), 0) AS total FROM (
+              SELECT s.total_amount AS amt,
+                     CASE WHEN COUNT(DISTINCT p.payment_method) > 1 THEN 'mixed'
+                          ELSE MIN(p.payment_method) END AS method
+              FROM sale s LEFT JOIN sale_payment p ON p.sale_id = s.id
+              WHERE {fwd_done}
+              GROUP BY s.id, s.total_amount
+            ) q GROUP BY method
+            """
+        )
+        breakdown: dict[str, Decimal] = {
+            "cash": Decimal("0"),
+            "card": Decimal("0"),
+            "bank_transfer": Decimal("0"),
+            "mixed": Decimal("0"),
+        }
+        for method, total in (await self.session.execute(bd_sql, params)).all():
+            if method in breakdown:
+                breakdown[method] = Decimal(str(total))
+
+        return {
+            "rows": rows,
+            "gross_sales": Decimal(str(t["gross_sales"])),
+            "total_refunds": Decimal(str(t["total_refunds"])),
+            "total_discounts": Decimal(str(total_discounts)),
+            "sales_count": int(t["sales_count"]),
+            "returns_count": int(t["returns_count"]),
+            "payment_breakdown": breakdown,
+        }

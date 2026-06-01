@@ -105,6 +105,12 @@ test.describe("Shift close → Z-report", () => {
 
     // Difference badge surfaces as "недостача" because actual < expected.
     await expect(page.getByText(/недостача/i)).toBeVisible();
+
+    // ---- sales summary XLSX: pick period (defaults to this month) → download ----
+    const summaryDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: /Скачать сводный отчёт/ }).click();
+    const file = await summaryDownload;
+    expect(file.suggestedFilename()).toMatch(/\.xlsx$/);
   });
 });
 

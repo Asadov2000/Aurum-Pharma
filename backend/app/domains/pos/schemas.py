@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -305,3 +305,42 @@ class ZReportData(BaseModel):
     actual_cash: Decimal | None
     cash_difference: Decimal | None
     difference_reason: str | None
+
+
+# ---- sales summary (accountant XLSX, arbitrary date range) ----
+
+
+class SalesSummaryRow(BaseModel):
+    """One receipt line in the detail sheet. `kind` drives the status label:
+    sale → Завершён, return → Возврат, voided → Отменён."""
+
+    completed_at: datetime | None
+    receipt_number: str | None
+    cashier_name: str | None
+    branch_name: str | None
+    kind: str  # "sale" | "return" | "voided"
+    payment_method: str  # cash | card | bank_transfer | mixed | none
+    gross: Decimal
+    discount: Decimal
+    net: Decimal
+
+
+class SalesSummaryData(BaseModel):
+    """Resolved sales summary for the accountant XLSX over [date_from, date_to].
+    Totals count completed forward sales (gross/discounts/breakdown) and
+    completed returns (refunds) — the same status='completed' basis as the
+    Z-report, so a single shift's range reconciles with its Z-report."""
+
+    date_from: date
+    date_to: date
+    branch_name: str | None  # set when filtered to one branch
+    show_branch_column: bool
+    currency: str
+    rows: list[SalesSummaryRow]
+    gross_sales: Decimal
+    total_discounts: Decimal
+    total_refunds: Decimal
+    net: Decimal
+    sales_count: int
+    returns_count: int
+    payment_breakdown: ZReportPaymentBreakdown

@@ -44,10 +44,13 @@ from app.domains.pos.models import (
 )
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
 from app.domains.pos.repository import POSRepository
+from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.schemas import (
     ReceiptData,
     ReceiptLine,
     ReceiptPayment,
+    SalesSummaryData,
+    SalesSummaryRow,
     ZReportData,
     ZReportPaymentBreakdown,
 )
@@ -336,6 +339,99 @@ class POSService:
             )
         data = await self.build_z_report(shift_id)
         return await anyio.to_thread.run_sync(get_or_render_z_report_xlsx, data)
+
+    # ---- sales summary (accountant XLSX, arbitrary range) ----
+
+    async def build_sales_summary(
+        self,
+        *,
+        tenant_id: UUID,
+        date_from: date,
+        date_to: date,
+        branch_id: UUID | None,
+    ) -> SalesSummaryData:
+        agg = await self.repo.sales_summary(
+            tenant_id=tenant_id, date_from=date_from, date_to=date_to, branch_id=branch_id
+        )
+        foundation = FoundationRepository(self.repo.session)
+
+        if branch_id is not None:
+            branch = await foundation.get_branch(branch_id)
+            branch_name = branch.name if branch is not None else None
+            show_branch_column = False
+        else:
+            branch_name = None
+            show_branch_column = await foundation.count_active_branches(tenant_id) > 1
+
+        rows: list[SalesSummaryRow] = []
+        currency = "TJS"
+        for r in agg["rows"]:
+            currency = r["currency"] or currency
+            if r["sale_type"] == "return":
+                kind = "return"
+            elif r["status"] == "voided":
+                kind = "voided"
+            else:
+                kind = "sale"
+            gross = Decimal(str(r["gross"]))
+            discount = Decimal(str(r["discount"]))
+            rows.append(
+                SalesSummaryRow(
+                    completed_at=r["completed_at"],
+                    receipt_number=r["receipt_number"],
+                    cashier_name=r["cashier_name"],
+                    branch_name=r["branch_name"],
+                    kind=kind,
+                    payment_method=r["payment_method"] or "none",
+                    gross=gross,
+                    discount=discount,
+                    net=gross - discount,
+                )
+            )
+
+        bd = agg["payment_breakdown"]
+        net = agg["gross_sales"] - agg["total_discounts"] - agg["total_refunds"]
+        return SalesSummaryData(
+            date_from=date_from,
+            date_to=date_to,
+            branch_name=branch_name,
+            show_branch_column=show_branch_column,
+            currency=currency,
+            rows=rows,
+            gross_sales=agg["gross_sales"],
+            total_discounts=agg["total_discounts"],
+            total_refunds=agg["total_refunds"],
+            net=net,
+            sales_count=agg["sales_count"],
+            returns_count=agg["returns_count"],
+            payment_breakdown=ZReportPaymentBreakdown(
+                cash=bd["cash"],
+                card=bd["card"],
+                bank_transfer=bd["bank_transfer"],
+                mixed=bd["mixed"],
+            ),
+        )
+
+    async def get_sales_summary_xlsx(
+        self,
+        *,
+        tenant_id: UUID,
+        date_from: date,
+        date_to: date,
+        branch_id: UUID | None,
+    ) -> bytes:
+        """Render the accountant sales summary on the fly (no MinIO cache — the
+        range is arbitrary and the data isn't frozen). An empty period yields a
+        valid workbook with zero totals, not an error."""
+        if date_from > date_to:
+            raise BusinessRuleError(
+                "date_from must not be after date_to",
+                details={"from": date_from.isoformat(), "to": date_to.isoformat()},
+            )
+        data = await self.build_sales_summary(
+            tenant_id=tenant_id, date_from=date_from, date_to=date_to, branch_id=branch_id
+        )
+        return await anyio.to_thread.run_sync(render_sales_summary_xlsx, data)
 
     @staticmethod
     def _assert_draft(sale: Sale) -> None:

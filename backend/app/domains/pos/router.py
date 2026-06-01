@@ -142,6 +142,39 @@ async def z_report_xlsx(
     )
 
 
+@router.get(
+    "/reports/sales-summary.xlsx",
+    response_class=Response,
+    responses={
+        200: {"content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}}}
+    },
+)
+async def sales_summary_xlsx(
+    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    service: Annotated[POSService, Depends(_service)],
+    date_from: Annotated[date, Query(alias="from")],
+    date_to: Annotated[date, Query(alias="to")],
+    branch_id: Annotated[UUID | None, Query()] = None,
+) -> Response:
+    """Accountant sales summary over [from, to] as XLSX. Generated on the fly
+    (not cached). from > to → 400; an empty period → a valid zero-total file."""
+    xlsx = await service.get_sales_summary_xlsx(
+        tenant_id=_current_tenant_or_400(user),
+        date_from=date_from,
+        date_to=date_to,
+        branch_id=branch_id,
+    )
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="sales-summary-{date_from}_{date_to}.xlsx"'
+            )
+        },
+    )
+
+
 # =============================================================================
 # Sales
 # =============================================================================
