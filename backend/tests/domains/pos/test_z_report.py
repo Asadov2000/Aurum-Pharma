@@ -99,6 +99,46 @@ async def test_build_z_report_aggregates_and_breakdown(
     assert z.difference_reason == "пересчёт кассы"
 
 
+async def test_z_report_full_refund_counts_sale_and_return(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    """Same-shift full refund: total_sales=100 AND total_refunds=100 (the voided
+    sale still counts), so gross/refunds stay consistent."""
+    s = await pos_scaffold(sale_price=Decimal("100"), batch_qty=10)
+    service = POSService(POSRepository(db_session))
+    await service.open_shift(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        opened_by_user_id=s["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    sale, created = await _complete_sale(
+        service, s, qty=Decimal("1"), payments=[("cash", Decimal("100"))]
+    )
+    await service.refund(
+        parent_sale_id=sale.id,
+        items=[(created[0].id, Decimal("1"))],
+        reason="defect",
+        comment=None,
+        cashier_user_id=s["cashier"].id,
+    )
+    shift = await service.repo.get_open_shift_for_register(s["register"].id)
+    assert shift is not None
+    await service.close_shift(
+        shift_id=shift.id,
+        closing_cash_actual=Decimal("0"),
+        closed_by_user_id=s["cashier"].id,
+        notes=None,
+    )
+
+    z = await service.build_z_report(shift.id)
+    assert z.total_sales == Decimal("100.00")
+    assert z.total_refunds == Decimal("100.00")
+    assert z.sales_count == 1
+    assert z.returns_count == 1
+    assert z.payment_breakdown.cash == Decimal("100.00")
+
+
 async def test_z_report_xlsx_rejects_open_shift(db_session: AsyncSession, pos_scaffold) -> None:
     s = await pos_scaffold()
     service = POSService(POSRepository(db_session))

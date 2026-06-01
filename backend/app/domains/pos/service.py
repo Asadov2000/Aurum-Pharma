@@ -51,9 +51,12 @@ from app.domains.pos.schemas import (
     ReceiptPayment,
     SalesSummaryData,
     SalesSummaryRow,
+    StockOnDateData,
+    StockRow,
     ZReportData,
     ZReportPaymentBreakdown,
 )
+from app.domains.pos.stock_on_date_xlsx import render_stock_on_date_xlsx
 from app.domains.pos.z_report_xlsx import get_or_render_z_report_xlsx
 
 logger = structlog.get_logger("pos.service")
@@ -432,6 +435,76 @@ class POSService:
             tenant_id=tenant_id, date_from=date_from, date_to=date_to, branch_id=branch_id
         )
         return await anyio.to_thread.run_sync(render_sales_summary_xlsx, data)
+
+    # ---- stock on date (accountant XLSX) ----
+
+    async def build_stock_on_date(
+        self,
+        *,
+        tenant_id: UUID,
+        on_date: date,
+        branch_id: UUID | None,
+    ) -> StockOnDateData:
+        raw = await self.repo.stock_on_date(
+            tenant_id=tenant_id, on_date=on_date, branch_id=branch_id
+        )
+        foundation = FoundationRepository(self.repo.session)
+
+        if branch_id is not None:
+            branch = await foundation.get_branch(branch_id)
+            branch_name = branch.name if branch is not None else None
+            show_branch_column = False
+        else:
+            branch_name = None
+            show_branch_column = await foundation.count_active_branches(tenant_id) > 1
+
+        rows: list[StockRow] = []
+        total_qty = Decimal("0")
+        total_value = Decimal("0")
+        currency = "TJS"
+        for r in raw:
+            currency = r["currency"] or currency
+            qty = Decimal(str(r["qty"]))
+            purchase_price = Decimal(str(r["purchase_price"]))
+            value = (qty * purchase_price).quantize(Decimal("0.01"))
+            total_qty += qty
+            total_value += value
+            rows.append(
+                StockRow(
+                    name=r["name"] or "—",
+                    inn=r["inn"],
+                    branch_name=r["branch_name"],
+                    batch_number=r["batch_number"],
+                    expires_at=r["expires_at"],
+                    qty=qty,
+                    purchase_price=purchase_price,
+                    value=value,
+                )
+            )
+
+        return StockOnDateData(
+            on_date=on_date,
+            branch_name=branch_name,
+            show_branch_column=show_branch_column,
+            currency=currency,
+            rows=rows,
+            total_qty=total_qty,
+            total_value=total_value,
+        )
+
+    async def get_stock_on_date_xlsx(
+        self,
+        *,
+        tenant_id: UUID,
+        on_date: date,
+        branch_id: UUID | None,
+    ) -> bytes:
+        """Render the stock-on-date workbook on the fly (no MinIO cache — live
+        data, arbitrary date). An empty result yields a valid zero file."""
+        data = await self.build_stock_on_date(
+            tenant_id=tenant_id, on_date=on_date, branch_id=branch_id
+        )
+        return await anyio.to_thread.run_sync(render_stock_on_date_xlsx, data)
 
     @staticmethod
     def _assert_draft(sale: Sale) -> None:

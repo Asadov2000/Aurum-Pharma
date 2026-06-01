@@ -15,7 +15,7 @@ import { useBranchesQuery } from "@/features/foundation/queries";
 import { getZReportXlsx } from "@/features/pos/api";
 import { downloadBlob } from "@/lib/download";
 
-import { getSalesSummaryXlsx } from "./api";
+import { getSalesSummaryXlsx, getStockOnDateXlsx } from "./api";
 import { useZReportQuery } from "./queries";
 import { ZReportCard } from "./ZReportCard";
 
@@ -77,14 +77,16 @@ export function ReportsPage(): JSX.Element {
 
       <SalesSummaryCard />
 
+      <StockOnDateCard />
+
       <Card>
         <CardHeader>
           <CardTitle>Другие отчёты</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-foreground-secondary">
-            Отчёт по остаткам на дату и отчёт по списаниям появятся отдельно — для
-            них нужны новые серверные эндпоинты.
+            Отчёт по списаниям появится отдельно — для него нужен новый серверный
+            эндпоинт.
           </p>
         </CardContent>
       </Card>
@@ -208,6 +210,76 @@ function SalesSummaryCard(): JSX.Element {
           )}
           <Button variant="secondary" onClick={() => void onDownload()} isLoading={downloading}>
             Скачать сводный отчёт (XLSX)
+          </Button>
+        </div>
+        {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function StockOnDateCard(): JSX.Element {
+  const branches = useBranchesQuery(false);
+  const [date, setDate] = useState(() => isoDate(new Date()));
+  const [branchId, setBranchId] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const hasBranches = Boolean(branches.data && branches.data.length > 0);
+
+  const onDownload = async () => {
+    setError(null);
+    if (!date) {
+      setError("Укажите дату");
+      return;
+    }
+    setDownloading(true);
+    try {
+      const blob = await getStockOnDateXlsx(date, branchId || undefined);
+      downloadBlob(blob, `stock-${date}.xlsx`);
+    } catch (err) {
+      setError(describeApiError(err, "Не удалось скачать отчёт по остаткам"));
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Остатки на дату</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <Label htmlFor="stock_date">Дата</Label>
+            <Input
+              id="stock_date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+          {hasBranches && (
+            <div>
+              <Label htmlFor="stock_branch">Филиал</Label>
+              <Select
+                id="stock_branch"
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                className="w-56"
+              >
+                <option value="">Все филиалы</option>
+                {branches.data?.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+          <Button variant="secondary" onClick={() => void onDownload()} isLoading={downloading}>
+            Скачать отчёт по остаткам (XLSX)
           </Button>
         </div>
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}

@@ -175,6 +175,35 @@ async def sales_summary_xlsx(
     )
 
 
+@router.get(
+    "/reports/stock-on-date.xlsx",
+    response_class=Response,
+    responses={
+        200: {"content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}}}
+    },
+)
+async def stock_on_date_xlsx(
+    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    service: Annotated[POSService, Depends(_service)],
+    on_date: Annotated[date | None, Query(alias="date")] = None,
+    branch_id: Annotated[UUID | None, Query()] = None,
+) -> Response:
+    """Stock as of a date (default today) as XLSX, reconstructed from the
+    batch_movement ledger. Generated on the fly (not cached). Empty stock → a
+    valid zero file."""
+    effective_date = on_date or date.today()
+    xlsx = await service.get_stock_on_date_xlsx(
+        tenant_id=_current_tenant_or_400(user),
+        on_date=effective_date,
+        branch_id=branch_id,
+    )
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="stock-{effective_date}.xlsx"'},
+    )
+
+
 # =============================================================================
 # Sales
 # =============================================================================

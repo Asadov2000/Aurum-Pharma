@@ -112,6 +112,48 @@ async def test_sales_summary_range_excludes_sales_outside_period(
     assert now.sales_count == 1
 
 
+async def test_sales_summary_full_refund_nets_to_zero(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    """A 100 sale fully refunded in the same period: gross=100, refunds=100,
+    net=0 — not gross=0/net=-100. The voided parent still counts as a sale."""
+    s = await pos_scaffold(sale_price=Decimal("100"), batch_qty=10)
+    service = POSService(POSRepository(db_session))
+    await service.open_shift(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        opened_by_user_id=s["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    sale, created = await _complete_sale(
+        service, s, qty=Decimal("1"), payments=[("cash", Decimal("100"))]
+    )
+    # Full refund (the only unit) → parent voided + a return document for 100.
+    await service.refund(
+        parent_sale_id=sale.id,
+        items=[(created[0].id, Decimal("1"))],
+        reason="defect",
+        comment=None,
+        cashier_user_id=s["cashier"].id,
+    )
+
+    today = _today()
+    data = await service.build_sales_summary(
+        tenant_id=s["tenant"].id, date_from=today, date_to=today, branch_id=None
+    )
+
+    assert data.gross_sales == Decimal("100.00")
+    assert data.total_refunds == Decimal("100.00")
+    assert data.net == Decimal("0")  # money in then back out
+    assert data.sales_count == 1
+    assert data.returns_count == 1
+    assert data.payment_breakdown.cash == Decimal("100.00")
+
+    # Both rows are visible: the cancelled sale and the refund.
+    kinds = sorted(r.kind for r in data.rows)
+    assert kinds == ["return", "voided"]
+
+
 async def test_sales_summary_rejects_inverted_range(db_session: AsyncSession, pos_scaffold) -> None:
     s = await pos_scaffold()
     service = POSService(POSRepository(db_session))

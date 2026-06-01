@@ -18,3 +18,12 @@ export async function getSalesSummaryXlsx(
   });
   return data;
 }
+
+/** Stock on a date (YYYY-MM-DD) as an XLSX blob. */
+export async function getStockOnDateXlsx(date: string, branchId?: string): Promise<Blob> {
+  const { data } = await api.get<Blob>("/reports/stock-on-date.xlsx", {
+    params: { date, branch_id: branchId || undefined },
+    responseType: "blob",
+  });
+  return data;
+}

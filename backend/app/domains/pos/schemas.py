@@ -344,3 +344,30 @@ class SalesSummaryData(BaseModel):
     sales_count: int
     returns_count: int
     payment_breakdown: ZReportPaymentBreakdown
+
+
+# ---- stock on date (accountant XLSX) ----
+
+
+class StockRow(BaseModel):
+    name: str
+    inn: str | None
+    branch_name: str | None
+    batch_number: str | None
+    expires_at: date | None
+    qty: Decimal
+    purchase_price: Decimal
+    value: Decimal  # qty × purchase_price
+
+
+class StockOnDateData(BaseModel):
+    """Per-batch stock as of `on_date`, reconstructed from the batch_movement
+    ledger (Σ qty_delta where movement date ≤ on_date)."""
+
+    on_date: date
+    branch_name: str | None
+    show_branch_column: bool
+    currency: str
+    rows: list[StockRow]
+    total_qty: Decimal
+    total_value: Decimal

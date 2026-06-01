@@ -226,22 +226,36 @@ class POSRepository:
     async def z_report_aggregates(self, shift_id: UUID) -> dict[str, Any]:
         """Richer aggregation for the Z-report XLSX: gross sales + count,
         discounts, refunds + count, and a payment breakdown where each sale is
-        bucketed by its method (≥2 distinct methods → 'mixed')."""
+        bucketed by its method (≥2 distinct methods → 'mixed').
 
-        def _sale_filter(sale_type: str) -> Any:
+        Forward sales count when completed OR later voided by a full refund —
+        the sale economically happened; its refund is counted under returns. So
+        gross and refunds stay consistent (a same-shift full refund shows
+        gross=amount AND refunds=amount, not gross=0/refunds=amount)."""
+
+        fwd_statuses = ("completed", "voided")
+
+        def _fwd() -> Any:
+            return and_(
+                Sale.shift_id == shift_id,
+                Sale.status.in_(fwd_statuses),
+                Sale.sale_type == "sale",
+            )
+
+        def _ret() -> Any:
             return and_(
                 Sale.shift_id == shift_id,
                 Sale.status == "completed",
-                Sale.sale_type == sale_type,
+                Sale.sale_type == "return",
             )
 
         sales_stmt = select(func.coalesce(func.sum(Sale.total_amount), 0), func.count()).where(
-            _sale_filter("sale")
+            _fwd()
         )
         total_sales, sales_count = (await self.session.execute(sales_stmt)).one()
 
         refunds_stmt = select(func.coalesce(func.sum(Sale.total_amount), 0), func.count()).where(
-            _sale_filter("return")
+            _ret()
         )
         total_refunds, returns_count = (await self.session.execute(refunds_stmt)).one()
 
@@ -249,7 +263,7 @@ class POSRepository:
             select(func.coalesce(func.sum(SaleItem.discount_amount), 0))
             .select_from(SaleItem)
             .join(Sale, Sale.id == SaleItem.sale_id)
-            .where(_sale_filter("sale"))
+            .where(_fwd())
         )
         total_discounts = (await self.session.execute(disc_stmt)).scalar_one()
 
@@ -262,7 +276,7 @@ class POSRepository:
             )
             .select_from(Sale)
             .join(SalePayment, SalePayment.sale_id == Sale.id, isouter=True)
-            .where(_sale_filter("sale"))
+            .where(_fwd())
             .group_by(Sale.id, Sale.total_amount)
             .subquery()
         )
@@ -425,10 +439,15 @@ class POSRepository:
         branch_id: UUID | None,
     ) -> dict[str, Any]:
         """Detail rows + period totals for the accountant summary over
-        [date_from, date_to]. Totals use the same status='completed' basis as
-        the Z-report; the payment breakdown buckets each forward sale by its
-        method (≥2 distinct → 'mixed'), identical to z_report_aggregates, so a
-        single shift's range reconciles with its Z-report.
+        [date_from, date_to]. A forward sale counts toward gross/discounts/
+        payment-breakdown if it has completed_at — INCLUDING one later voided by
+        a full refund (the sale economically happened; its refund is counted
+        separately under returns). This keeps `net = gross − discounts −
+        refunds` equal to the money actually kept: a sale fully refunded in the
+        same period nets to 0, not −refund. The payment breakdown buckets each
+        forward sale by its method (≥2 distinct → 'mixed'), identical to
+        z_report_aggregates, so a single shift's range reconciles with its
+        Z-report.
         """
         base = ["s.tenant_id = :tid", "s.completed_at IS NOT NULL"]
         params: dict[str, Any] = {"tid": str(tenant_id), "dfrom": date_from, "dto": date_to}
@@ -438,7 +457,9 @@ class POSRepository:
             base.append("s.branch_id = :branch")
             params["branch"] = str(branch_id)
         where = " AND ".join(base)
-        fwd_done = f"{where} AND s.sale_type = 'sale' AND s.status = 'completed'"
+        # Forward sales = sale_type='sale' with completed_at set (base already
+        # requires it), so completed + voided-by-refund both count.
+        fwd_done = f"{where} AND s.sale_type = 'sale'"
 
         # --- detail rows: every receipt in range, any status/type ---
         rows_sql = text(
@@ -470,13 +491,11 @@ class POSRepository:
             f"""
             SELECT
               COALESCE(SUM(s.total_amount) FILTER (
-                WHERE s.sale_type = 'sale' AND s.status = 'completed'), 0) AS gross_sales,
+                WHERE s.sale_type = 'sale'), 0) AS gross_sales,
               COALESCE(SUM(s.total_amount) FILTER (
-                WHERE s.sale_type = 'return' AND s.status = 'completed'), 0) AS total_refunds,
-              COUNT(*) FILTER (
-                WHERE s.sale_type = 'sale' AND s.status = 'completed') AS sales_count,
-              COUNT(*) FILTER (
-                WHERE s.sale_type = 'return' AND s.status = 'completed') AS returns_count
+                WHERE s.sale_type = 'return'), 0) AS total_refunds,
+              COUNT(*) FILTER (WHERE s.sale_type = 'sale') AS sales_count,
+              COUNT(*) FILTER (WHERE s.sale_type = 'return') AS returns_count
             FROM sale s WHERE {where}
             """
         )
@@ -491,7 +510,7 @@ class POSRepository:
         )
         total_discounts = (await self.session.execute(disc_sql, params)).scalar_one()
 
-        # --- payment breakdown over forward completed sales ---
+        # --- payment breakdown over forward sales (completed + voided) ---
         bd_sql = text(
             f"""
             SELECT method, COALESCE(SUM(amt), 0) AS total FROM (
@@ -523,3 +542,44 @@ class POSRepository:
             "returns_count": int(t["returns_count"]),
             "payment_breakdown": breakdown,
         }
+
+    async def stock_on_date(
+        self,
+        *,
+        tenant_id: UUID,
+        on_date: Any,
+        branch_id: UUID | None,
+    ) -> list[dict[str, Any]]:
+        """Per-batch stock as of `on_date`, summed from the batch_movement
+        ledger (Σ qty_delta for movements dated ≤ on_date). The ledger is the
+        source of truth (the trigger keeps batch.qty_remaining == Σ qty_delta),
+        so this is a faithful historical reconstruction, not just 'today'. Only
+        batches with a positive balance on the date are returned."""
+        clauses = ["b.tenant_id = :tid"]
+        params: dict[str, Any] = {"tid": str(tenant_id), "on_date": on_date}
+        if branch_id is not None:
+            clauses.append("b.branch_id = :branch")
+            params["branch"] = str(branch_id)
+        where = " AND ".join(clauses)
+
+        sql = text(
+            f"""
+            SELECT
+              tc.brand_name AS name,
+              tc.inn AS inn,
+              br.name AS branch_name,
+              b.batch_number, b.expires_at, b.purchase_price, b.currency,
+              SUM(bm.qty_delta) AS qty
+            FROM batch b
+            JOIN batch_movement bm
+              ON bm.batch_id = b.id AND bm.created_at::date <= :on_date
+            LEFT JOIN tenant_catalog tc ON tc.id = b.catalog_id
+            LEFT JOIN branch br ON br.id = b.branch_id
+            WHERE {where}
+            GROUP BY b.id, tc.brand_name, tc.inn, br.name,
+                     b.batch_number, b.expires_at, b.purchase_price, b.currency
+            HAVING SUM(bm.qty_delta) > 0
+            ORDER BY tc.brand_name NULLS LAST, b.expires_at
+            """
+        )
+        return [dict(r) for r in (await self.session.execute(sql, params)).mappings().all()]
