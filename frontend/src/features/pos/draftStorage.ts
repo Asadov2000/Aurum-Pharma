@@ -6,9 +6,9 @@
 
 export const draftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
 
-// No server-side draft-lifetime setting exists yet (tenant_settings has no
-// draft_sale_lifetime_min), so we enforce a sane idle TTL on the device. The
-// savedAt stamp refreshes on every cart change, so this is an *idle* timeout.
+// Fallback idle-TTL (minutes) when tenant settings haven't loaded yet. The real
+// limit comes from tenant_settings.draft_sale_lifetime_min, passed into
+// loadDraft. The savedAt stamp refreshes on every cart change → idle timeout.
 export const DRAFT_TTL_MIN = 30;
 
 export interface SavedDraft {
@@ -23,7 +23,7 @@ export interface DraftInit {
   expired: boolean;
 }
 
-export function loadDraft(registerId: string): DraftInit {
+export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): DraftInit {
   try {
     const raw = window.localStorage.getItem(draftKey(registerId));
     if (raw) {
@@ -31,7 +31,7 @@ export function loadDraft(registerId: string): DraftInit {
       if (parsed && typeof parsed.saleId === "string") {
         const savedAt = typeof parsed.savedAt === "number" ? parsed.savedAt : 0;
         const ageMin = (Date.now() - savedAt) / 60_000;
-        if (ageMin > DRAFT_TTL_MIN) {
+        if (ageMin > ttlMin) {
           // Stale: clear it and flag the cashier instead of reopening blind.
           window.localStorage.removeItem(draftKey(registerId));
           return { saleId: null, nameById: {}, expired: true };

@@ -67,6 +67,7 @@ export interface TenantSettings {
   session_admin_minutes: number;
   session_pos_minutes: number;
   pin_mode_enabled: boolean;
+  draft_sale_lifetime_min: number;
   prescription_warning_text: string;
   updated_at: string;
 }
@@ -78,6 +79,7 @@ export interface TenantSettingsUpdatePayload {
   session_admin_minutes?: number;
   session_pos_minutes?: number;
   pin_mode_enabled?: boolean;
+  draft_sale_lifetime_min?: number;
   prescription_warning_text?: string;
 }
 

@@ -100,6 +100,11 @@ class TenantSettings(Base):
     pin_mode_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # Minutes a POS draft sale survives idle in the cashier's browser before it
+    # is dropped on restore instead of silently reopened. Bounded 5..240.
+    draft_sale_lifetime_min: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("30")
+    )
     prescription_warning_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

@@ -48,6 +48,7 @@ const schema = z
     session_admin_minutes: z.number().int().min(30).max(1440),
     session_pos_minutes: z.number().int().min(30).max(1440),
     pin_mode_enabled: z.boolean(),
+    draft_sale_lifetime_min: z.number().int().min(5).max(240),
     prescription_warning_text: z.string(),
   })
   .refine((v) => v.yellow >= v.orange && v.orange >= v.red, {
@@ -73,6 +74,7 @@ export function SettingsPage(): JSX.Element {
       session_admin_minutes: 60,
       session_pos_minutes: 480,
       pin_mode_enabled: false,
+      draft_sale_lifetime_min: 30,
       prescription_warning_text: "",
     },
   });
@@ -88,6 +90,7 @@ export function SettingsPage(): JSX.Element {
       session_admin_minutes: data.session_admin_minutes,
       session_pos_minutes: data.session_pos_minutes,
       pin_mode_enabled: data.pin_mode_enabled,
+      draft_sale_lifetime_min: data.draft_sale_lifetime_min,
       prescription_warning_text: data.prescription_warning_text,
     });
   }, [data, form]);
@@ -115,6 +118,7 @@ export function SettingsPage(): JSX.Element {
         session_admin_minutes: d.session_admin_minutes,
         session_pos_minutes: d.session_pos_minutes,
         pin_mode_enabled: d.pin_mode_enabled,
+        draft_sale_lifetime_min: d.draft_sale_lifetime_min,
         prescription_warning_text: d.prescription_warning_text,
       });
       setOkBanner(true);
@@ -243,6 +247,18 @@ export function SettingsPage(): JSX.Element {
               max={1440}
               {...form.register("session_pos_minutes", { valueAsNumber: true })}
             />
+          </div>
+          <div>
+            <Label htmlFor="draft_sale_lifetime_min">Жизнь черновика чека (минут)</Label>
+            <Input
+              id="draft_sale_lifetime_min"
+              type="number"
+              min={5}
+              max={240}
+              invalid={Boolean(form.formState.errors.draft_sale_lifetime_min)}
+              {...form.register("draft_sale_lifetime_min", { valueAsNumber: true })}
+            />
+            <FormError>{form.formState.errors.draft_sale_lifetime_min?.message}</FormError>
           </div>
           <div className="col-span-2">
             <Switch

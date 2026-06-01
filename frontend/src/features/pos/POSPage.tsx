@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 
 import { Card, CardContent, Label, Select, Switch } from "@/components/ui";
-import { useRegistersQuery } from "@/features/foundation/queries";
+import { useRegistersQuery, useTenantSettingsQuery } from "@/features/foundation/queries";
 import { cn } from "@/lib/utils";
 
+import { DRAFT_TTL_MIN } from "./draftStorage";
 import { ModeToggle } from "./ModeToggle";
 import { SaleArea } from "./SaleArea";
 import { usePosMode } from "./usePosMode";
@@ -14,6 +15,10 @@ const SOUND_KEY = "pos:beep";
 export function POSPage(): JSX.Element {
   const { mode, pref, setPref } = usePosMode();
   const registers = useRegistersQuery(null, false);
+  // POS draft TTL comes from tenant settings; fall back until they load (or if
+  // the user can't read them).
+  const settings = useTenantSettingsQuery();
+  const draftTtlMin = settings.data?.draft_sale_lifetime_min ?? DRAFT_TTL_MIN;
   const [registerId, setRegisterId] = useState<string>(() => {
     return window.localStorage.getItem(STORAGE_KEY) ?? "";
   });
@@ -83,7 +88,14 @@ export function POSPage(): JSX.Element {
         </div>
       </div>
 
-      {registerId && <SaleArea registerId={registerId} mode={mode} soundOn={soundOn} />}
+      {registerId && (
+        <SaleArea
+          registerId={registerId}
+          mode={mode}
+          soundOn={soundOn}
+          draftTtlMin={draftTtlMin}
+        />
+      )}
     </div>
   );
 }

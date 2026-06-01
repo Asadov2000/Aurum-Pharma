@@ -15,7 +15,6 @@ import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
 import { beep } from "./beep";
 import {
-  DRAFT_TTL_MIN,
   type DraftInit,
   clearDraft as clearDraftStorage,
   loadDraft,
@@ -52,10 +51,12 @@ export function SaleArea({
   registerId,
   mode,
   soundOn,
+  draftTtlMin,
 }: {
   registerId: string;
   mode: PosMode;
   soundOn: boolean;
+  draftTtlMin: number;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
@@ -64,7 +65,13 @@ export function SaleArea({
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
       {hasShift ? (
         // Key by register so switching registers restores that one's draft.
-        <ActiveWorkspace key={registerId} registerId={registerId} mode={mode} soundOn={soundOn} />
+        <ActiveWorkspace
+          key={registerId}
+          registerId={registerId}
+          mode={mode}
+          soundOn={soundOn}
+          draftTtlMin={draftTtlMin}
+        />
       ) : (
         <>
           <div className="lg:col-span-7">
@@ -85,15 +92,17 @@ function ActiveWorkspace({
   registerId,
   mode,
   soundOn,
+  draftTtlMin,
 }: {
   registerId: string;
   mode: PosMode;
   soundOn: boolean;
+  draftTtlMin: number;
 }): JSX.Element {
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
 
-  const [init] = useState<DraftInit>(() => loadDraft(registerId));
+  const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin));
   const [saleId, setSaleId] = useState<string | null>(init.saleId);
   const [nameById, setNameById] = useState<Record<string, string>>(init.nameById);
   const [staleNotice, setStaleNotice] = useState<boolean>(init.expired);
@@ -373,7 +382,7 @@ function ActiveWorkspace({
 
         {staleNotice && (
           <p className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
-            Прошлый черновик устарел (более {DRAFT_TTL_MIN} мин) и был очищен — начните новую
+            Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую
             продажу.
           </p>
         )}
