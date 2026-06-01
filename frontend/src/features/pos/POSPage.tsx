@@ -35,17 +35,28 @@ export function POSPage(): JSX.Element {
     }
   };
 
-  // Auto-select the first active register the first time the user lands.
+  // Register auto-selection:
+  // - exactly one register → pick it (the cashier never chooses manually);
+  // - two or more → the cashier must choose, so we only restore a still-valid
+  //   last choice and otherwise leave the selector blank;
+  // - zero → leave blank (the "no register" hint shows below).
   useEffect(() => {
-    if (!registerId && registers.data && registers.data.length > 0) {
-      const first = registers.data[0];
-      if (first) setRegisterId(first.id);
+    const list = registers.data;
+    if (!list) return;
+    if (list.length === 1) {
+      const only = list[0];
+      if (only && registerId !== only.id) setRegisterId(only.id);
+    } else if (list.length >= 2 && registerId && !list.some((r) => r.id === registerId)) {
+      setRegisterId("");
     }
   }, [registers.data, registerId]);
 
   useEffect(() => {
     if (registerId) window.localStorage.setItem(STORAGE_KEY, registerId);
   }, [registerId]);
+
+  const registerList = registers.data;
+  const onlyRegister = registerList?.length === 1 ? registerList[0] : undefined;
 
   return (
     <div className={cn("space-y-4", mode === "touch" ? "pos--touch" : "pos--keyboard")}>
@@ -62,26 +73,37 @@ export function POSPage(): JSX.Element {
           </div>
           <Card className="shrink-0">
             <CardContent className="flex items-end gap-3 py-3">
-              <div>
-                <Label htmlFor="register">Касса</Label>
-                <Select
-                  id="register"
-                  value={registerId}
-                  onChange={(e) => setRegisterId(e.target.value)}
-                  className="w-56"
-                >
-                  <option value="">— выберите —</option>
-                  {registers.data?.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              {registers.data?.length === 0 && (
+              {registerList && registerList.length === 0 ? (
                 <p className="text-sm text-foreground-muted">
                   Нет активных касс. Создайте кассу в разделе «Кассы».
                 </p>
+              ) : (
+                <div>
+                  <Label htmlFor="register">Касса</Label>
+                  {onlyRegister ? (
+                    // Single register — auto-selected, shown filled & inactive.
+                    <div
+                      id="register"
+                      className="flex h-10 w-56 items-center rounded-md border border-input bg-surface px-3 text-sm text-foreground"
+                    >
+                      {onlyRegister.name}
+                    </div>
+                  ) : (
+                    <Select
+                      id="register"
+                      value={registerId}
+                      onChange={(e) => setRegisterId(e.target.value)}
+                      className="w-56"
+                    >
+                      <option value="">— выберите —</option>
+                      {registerList?.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>

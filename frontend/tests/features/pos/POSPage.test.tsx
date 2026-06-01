@@ -102,13 +102,33 @@ describe("POSPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("auto-selects the first register and shows the open-shift form when no shift is active", async () => {
+  it("auto-selects the only register (no manual choice) and shows the open-shift form", async () => {
     listRegisters.mockResolvedValue([REGISTER]);
     getCurrentShift.mockResolvedValue(null);
     renderPage();
     expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Открыть смену/i })).toBeInTheDocument();
+    // No dropdown to choose from — the single register is filled in directly.
+    expect(screen.queryByText("— выберите —")).not.toBeInTheDocument();
+    expect(screen.getByText(REGISTER.name)).toBeInTheDocument();
     expect(window.localStorage.getItem("pos:lastRegisterId")).toBe(REGISTER.id);
+  });
+
+  it("requires a manual choice when two or more registers exist", async () => {
+    const second = { ...REGISTER, id: "r-2", name: "Касса 2" };
+    listRegisters.mockResolvedValue([REGISTER, second]);
+    getCurrentShift.mockResolvedValue(null);
+    renderPage();
+    // Wait for the register options to load (placeholder + both registers).
+    await screen.findByRole("option", { name: "Касса 2" });
+    expect(screen.getByText("— выберите —")).toBeInTheDocument();
+    // Nothing is auto-selected, so the open-shift form is not shown yet.
+    expect(screen.queryByLabelText(/Касса на начало смены/i)).not.toBeInTheDocument();
+
+    // Choosing a register proceeds to the shift form.
+    fireEvent.change(screen.getByLabelText("Касса"), { target: { value: second.id } });
+    expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
+    expect(window.localStorage.getItem("pos:lastRegisterId")).toBe(second.id);
   });
 
   it("opens the shift with the entered opening cash", async () => {
