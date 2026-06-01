@@ -4,6 +4,7 @@ import {
   type PaymentAddPayload,
   type PrescriptionLog,
   type PrescriptionLogPayload,
+  type ReceiptData,
   type Sale,
   type SaleDetails,
   type SaleItem,
@@ -99,5 +100,20 @@ export async function addPrescription(
     `/sales/${saleId}/prescription`,
     payload,
   );
+  return data;
+}
+
+// ---- receipt (print / PDF) ----
+
+export async function getReceipt(saleId: string): Promise<ReceiptData> {
+  const { data } = await api.get<ReceiptData>(`/sales/${saleId}/receipt`);
+  return data;
+}
+
+/** Fetch the server-rendered PDF (authed) as a blob for download/preview. */
+export async function getReceiptPdf(saleId: string): Promise<Blob> {
+  const { data } = await api.get<Blob>(`/sales/${saleId}/receipt.pdf`, {
+    responseType: "blob",
+  });
   return data;
 }

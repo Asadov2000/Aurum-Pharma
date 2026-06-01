@@ -219,3 +219,47 @@ class SaleList(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# ---- receipt (print / PDF) ----
+
+
+class ReceiptLine(BaseModel):
+    """One printed line of a receipt — resolved name, no raw UUIDs."""
+
+    position: int
+    name: str
+    qty: Decimal
+    unit_price: Decimal
+    discount_amount: Decimal
+    total_price: Decimal
+
+
+class ReceiptPayment(BaseModel):
+    method: str
+    amount: Decimal
+
+
+class ReceiptData(BaseModel):
+    """Everything the print view / PDF needs, fully resolved server-side."""
+
+    sale_id: UUID
+    is_refund: bool
+    status: str
+    # header
+    pharmacy_name: str
+    branch_name: str
+    branch_address: str | None
+    branch_license: str | None
+    # meta
+    receipt_number: str | None
+    datetime: datetime | None
+    cashier_name: str | None
+    # body
+    items: list[ReceiptLine]
+    discount_total: Decimal
+    total: Decimal
+    currency: str
+    payments: list[ReceiptPayment]
+    paid_total: Decimal
+    change: Decimal

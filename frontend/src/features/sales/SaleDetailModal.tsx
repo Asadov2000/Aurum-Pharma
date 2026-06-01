@@ -12,6 +12,7 @@ import {
   TR,
 } from "@/components/ui";
 import { paymentMethodLabel } from "@/features/pos/labels";
+import { ReceiptPrintModal } from "@/features/pos/ReceiptPrintModal";
 import { type PaymentMethod } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
 
@@ -30,6 +31,7 @@ export function SaleDetailModal({
   // the parent sale (when viewing a return), so navigation stays in-modal.
   const [currentId, setCurrentId] = useState(row.id);
   const [refundOpen, setRefundOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
   const { data, isLoading, error } = useSaleDetailsQuery(currentId);
 
   // If we navigated to a different sale than the row we opened from, the
@@ -132,6 +134,9 @@ export function SaleDetailModal({
           </div>
 
           <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPrintOpen(true)}>
+              🖨 Печать чека
+            </Button>
             {/* Refund only from a completed forward sale that has none yet. */}
             {data.sale_type === "sale" &&
               data.status === "completed" &&
@@ -153,6 +158,14 @@ export function SaleDetailModal({
             setRefundOpen(false);
             setCurrentId(returnSaleId); // show the fresh return receipt
           }}
+        />
+      )}
+
+      {printOpen && data && (
+        <ReceiptPrintModal
+          saleId={currentId}
+          registerId={data.register_id}
+          onClose={() => setPrintOpen(false)}
         />
       )}
     </Modal>

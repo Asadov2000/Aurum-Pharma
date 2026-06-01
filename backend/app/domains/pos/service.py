@@ -19,6 +19,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import anyio
 import structlog
 from sqlalchemy.exc import IntegrityError, InternalError
 
@@ -28,8 +29,9 @@ from app.core.errors import (
     NotFoundError,
 )
 from app.core.time import utc_now
+from app.domains.auth.models import AppUser
 from app.domains.catalog.models import TenantCatalog
-from app.domains.foundation.models import Tenant
+from app.domains.foundation.models import Branch, Tenant
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
@@ -40,7 +42,9 @@ from app.domains.pos.models import (
     SalePayment,
     Shift,
 )
+from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
 from app.domains.pos.repository import POSRepository
+from app.domains.pos.schemas import ReceiptData, ReceiptLine, ReceiptPayment
 
 logger = structlog.get_logger("pos.service")
 
@@ -206,6 +210,68 @@ class POSService:
         items = await self.repo.list_items(sale.id)
         payments = await self.repo.list_payments(sale.id)
         return sale, items, payments
+
+    # ---- receipt (print / PDF) ----
+
+    async def build_receipt(self, sale_id: UUID) -> ReceiptData:
+        """Assemble everything a printed receipt needs, fully resolved (names,
+        not UUIDs). Shared by the JSON print view and the PDF generator. RLS
+        scopes every fetch to the caller's tenant."""
+        sale = await self.get_sale(sale_id)
+        items = await self.repo.list_items(sale.id)
+        payments = await self.repo.list_payments(sale.id)
+
+        tenant = await self.repo.session.get(Tenant, sale.tenant_id)
+        branch = await self.repo.session.get(Branch, sale.branch_id)
+        cashier = await self.repo.session.get(AppUser, sale.cashier_user_id)
+
+        lines: list[ReceiptLine] = []
+        for it in items:
+            catalog = await self.repo.session.get(TenantCatalog, it.catalog_id)
+            lines.append(
+                ReceiptLine(
+                    position=it.position,
+                    name=catalog.brand_name if catalog is not None else str(it.catalog_id),
+                    qty=it.qty,
+                    unit_price=it.unit_price,
+                    discount_amount=it.discount_amount,
+                    total_price=it.total_price,
+                )
+            )
+
+        discount_total = sum((it.discount_amount for it in items), Decimal("0"))
+        paid_total = sum((p.amount for p in payments), Decimal("0"))
+        change = paid_total - sale.total_amount
+        if change < 0:
+            change = Decimal("0")
+
+        return ReceiptData(
+            sale_id=sale.id,
+            is_refund=sale.sale_type == "return",
+            status=sale.status,
+            pharmacy_name=tenant.name if tenant is not None else "",
+            branch_name=branch.name if branch is not None else "",
+            branch_address=branch.address if branch is not None else None,
+            branch_license=branch.license_number if branch is not None else None,
+            receipt_number=sale.receipt_number,
+            datetime=sale.completed_at or sale.created_at,
+            cashier_name=cashier.full_name if cashier is not None else None,
+            items=lines,
+            discount_total=discount_total,
+            total=sale.total_amount,
+            currency=sale.currency,
+            payments=[ReceiptPayment(method=p.payment_method, amount=p.amount) for p in payments],
+            paid_total=paid_total,
+            change=change,
+        )
+
+    async def get_receipt_pdf(self, sale_id: UUID) -> bytes:
+        """Lazily render (and cache in MinIO) the receipt PDF. Completed sales
+        are immutable, so a cached PDF stays valid forever; drafts render fresh
+        each time and are never cached. The blocking render + MinIO IO runs in a
+        worker thread so it doesn't stall the event loop."""
+        data = await self.build_receipt(sale_id)
+        return await anyio.to_thread.run_sync(get_or_render_receipt_pdf, data)
 
     @staticmethod
     def _assert_draft(sale: Sale) -> None:

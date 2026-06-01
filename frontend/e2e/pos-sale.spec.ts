@@ -106,6 +106,20 @@ test.describe("POS sale (owner)", () => {
     await completeBtn.click();
     await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
 
+    // ---- Print: open the receipt view and verify the totals match ----
+    await page.getByRole("button", { name: /Печать чека/ }).click();
+    const receipt = page.locator(".receipt-print");
+    await expect(receipt).toBeVisible({ timeout: 15_000 });
+    await expect(receipt.getByText("КАССОВЫЙ ЧЕК")).toBeVisible();
+    // FEFO split the 7 units into two lines, so the name appears twice.
+    await expect(receipt.getByText(new RegExp(item.brand_name)).first()).toBeVisible();
+    // ИТОГО line carries the 140.00 total.
+    await expect(receipt.getByText("ИТОГО")).toBeVisible();
+    await expect(receipt.getByText(/140\.00/).first()).toBeVisible();
+    // Width selector persists per device/register.
+    await page.getByLabel("Ширина чека").selectOption("58");
+    await page.getByRole("button", { name: "Закрыть", exact: true }).click();
+
     // ---- Check that batches are drained: total qty_remaining = 10 - 7 = 3 ----
     await page.goto("/batches");
     await page.getByLabel(/^Точка$/).selectOption({ label: branch.name });

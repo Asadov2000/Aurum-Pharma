@@ -10,6 +10,7 @@ import { BarcodeListener } from "./BarcodeListener";
 import { CartList } from "./CartList";
 import { PaymentPanel } from "./PaymentPanel";
 import { PrescriptionModal } from "./PrescriptionModal";
+import { ReceiptPrintModal } from "./ReceiptPrintModal";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
 import { beep } from "./beep";
@@ -102,6 +103,7 @@ function ActiveWorkspace({
   const [payingMethod, setPayingMethod] = useState<PaymentMethod | null>(null);
   const [numpad, setNumpad] = useState<NumPadState | null>(null);
   const [flash, setFlash] = useState<FlashTone | null>(null);
+  const [printOpen, setPrintOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const flashTimer = useRef<number | undefined>(undefined);
 
@@ -410,6 +412,7 @@ function ActiveWorkspace({
           onPayTile={onPayTile}
           onComplete={() => void onComplete()}
           completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
+          onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
           touch={touch}
           completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
         />
@@ -437,6 +440,14 @@ function ActiveWorkspace({
             onClose={() => setNumpad(null)}
           />
         </Suspense>
+      )}
+
+      {printOpen && saleId && (
+        <ReceiptPrintModal
+          saleId={saleId}
+          registerId={registerId}
+          onClose={() => setPrintOpen(false)}
+        />
       )}
     </>
   );

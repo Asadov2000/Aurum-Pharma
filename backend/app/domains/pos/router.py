@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -29,6 +29,7 @@ from app.domains.pos.schemas import (
     PaymentRead,
     PrescriptionLogCreate,
     PrescriptionLogRead,
+    ReceiptData,
     RefundCreate,
     SaleCreate,
     SaleDetails,
@@ -200,6 +201,36 @@ async def get_sale(
         **SaleRead.model_validate(sale).model_dump(),
         items=[SaleItemRead.model_validate(i) for i in items],
         payments=[PaymentRead.model_validate(p) for p in payments],
+    )
+
+
+@router.get("/sales/{sale_id}/receipt", response_model=ReceiptData)
+async def get_receipt(
+    sale_id: UUID,
+    _user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[POSService, Depends(_service)],
+) -> ReceiptData:
+    """Fully-resolved receipt data for the browser print view (item names,
+    cashier, branch header). RLS scopes it to the caller's tenant."""
+    return await service.build_receipt(sale_id)
+
+
+@router.get(
+    "/sales/{sale_id}/receipt.pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def get_receipt_pdf(
+    sale_id: UUID,
+    _user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[POSService, Depends(_service)],
+) -> Response:
+    """Server-rendered PDF (A4), lazily generated and cached in MinIO."""
+    pdf = await service.get_receipt_pdf(sale_id)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="receipt-{sale_id}.pdf"'},
     )
 
 

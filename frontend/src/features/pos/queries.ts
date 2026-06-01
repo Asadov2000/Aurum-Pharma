@@ -9,6 +9,7 @@ import {
   createSale,
   deleteSaleItem,
   getCurrentShift,
+  getReceipt,
   getSale,
   openShift,
   updateSaleItem,
@@ -23,6 +24,7 @@ import {
 export const posKeys = {
   shift: (registerId: string) => ["pos", "shift", registerId] as const,
   sale: (saleId: string) => ["pos", "sale", saleId] as const,
+  receipt: (saleId: string) => ["pos", "receipt", saleId] as const,
 };
 
 // ---- shift ----
@@ -70,6 +72,14 @@ export function useSaleQuery(saleId: string | null) {
 export function useCreateSale() {
   return useMutation({
     mutationFn: (registerId: string) => createSale(registerId),
+  });
+}
+
+export function useReceiptQuery(saleId: string | null) {
+  return useQuery({
+    queryKey: posKeys.receipt(saleId ?? ""),
+    queryFn: () => getReceipt(saleId as string),
+    enabled: saleId !== null && saleId !== "",
   });
 }
 

@@ -27,6 +27,7 @@ export function PaymentPanel({
   onPayTile,
   onComplete,
   completedReceiptNumber,
+  onPrint,
   touch,
   completeHint,
 }: {
@@ -41,6 +42,7 @@ export function PaymentPanel({
   onPayTile: (method: PaymentMethod) => void;
   onComplete: () => void;
   completedReceiptNumber: string | null;
+  onPrint?: () => void;
   touch?: boolean;
   completeHint?: string;
 }): JSX.Element {
@@ -126,8 +128,13 @@ export function PaymentPanel({
       )}
 
       {!isDraft && completedReceiptNumber && (
-        <div className="rounded-xl border border-success/40 bg-success-subtle p-4 text-center text-success-foreground">
-          ✅ Чек № {completedReceiptNumber} оформлен
+        <div className="space-y-3 rounded-xl border border-success/40 bg-success-subtle p-4 text-center">
+          <p className="text-success-foreground">✅ Чек № {completedReceiptNumber} оформлен</p>
+          {onPrint && (
+            <Button size="xl" variant="secondary" className="w-full" onClick={onPrint}>
+              🖨 Печать чека
+            </Button>
+          )}
         </div>
       )}
     </div>

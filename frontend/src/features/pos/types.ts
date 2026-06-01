@@ -120,3 +120,41 @@ export interface PrescriptionLog extends PrescriptionLogPayload {
   sale_id: string;
   created_at: string;
 }
+
+// ---- receipt (print / PDF) ----
+
+export interface ReceiptLine {
+  position: number;
+  name: string;
+  qty: string;
+  unit_price: string;
+  discount_amount: string;
+  total_price: string;
+}
+
+export interface ReceiptPayment {
+  method: PaymentMethod;
+  amount: string;
+}
+
+export interface ReceiptData {
+  sale_id: string;
+  is_refund: boolean;
+  status: SaleStatus;
+  pharmacy_name: string;
+  branch_name: string;
+  branch_address: string | null;
+  branch_license: string | null;
+  receipt_number: string | null;
+  datetime: string | null;
+  cashier_name: string | null;
+  items: ReceiptLine[];
+  discount_total: string;
+  total: string;
+  currency: string;
+  payments: ReceiptPayment[];
+  paid_total: string;
+  change: string;
+}
+
+export type ReceiptWidth = "58" | "80" | "A4";
