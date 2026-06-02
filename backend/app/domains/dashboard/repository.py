@@ -20,7 +20,11 @@ class DashboardRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def today_sales(self, tenant_id: UUID) -> dict[str, Any]:
+    async def today_sales(self, tenant_id: UUID, *, tz: str = "Asia/Dushanbe") -> dict[str, Any]:
+        # Gross sales for the local "today", matching the sales-summary report:
+        # a forward sale counts once it has completed_at (so a sale refunded the
+        # same day — now status='voided' — stays in gross); test sales excluded;
+        # the day boundary is the tenant timezone, not UTC.
         row = (
             (
                 await self.session.execute(
@@ -29,11 +33,12 @@ class DashboardRepository:
                         "COUNT(*) AS receipts, "
                         "COALESCE(MAX(currency), 'TJS') AS currency "
                         "FROM sale "
-                        "WHERE tenant_id = :tid AND status = 'completed' "
-                        "AND sale_type = 'sale' "
-                        "AND completed_at::date = CURRENT_DATE"
+                        "WHERE tenant_id = :tid AND sale_type = 'sale' "
+                        "AND is_test = false AND completed_at IS NOT NULL "
+                        "AND (completed_at AT TIME ZONE :tz)::date "
+                        "    = (now() AT TIME ZONE :tz)::date"
                     ),
-                    {"tid": str(tenant_id)},
+                    {"tid": str(tenant_id), "tz": tz},
                 )
             )
             .mappings()

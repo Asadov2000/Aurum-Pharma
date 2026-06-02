@@ -23,6 +23,7 @@ from app.domains.dashboard.schemas import (
     FinanceSection,
     TodaySection,
 )
+from app.domains.foundation.repository import FoundationRepository
 
 logger = structlog.get_logger("dashboard.service")
 
@@ -57,8 +58,14 @@ class DashboardService:
             )
         return summary
 
+    async def _report_tz(self, tenant_id: UUID) -> str:
+        """Tenant's report timezone — the local day boundary for 'today' tiles.
+        Falls back to Asia/Dushanbe if settings are somehow missing."""
+        settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
+        return settings.report_timezone if settings is not None else "Asia/Dushanbe"
+
     async def _compute(self, tenant_id: UUID) -> DashboardSummary:
-        sales = await self.repo.today_sales(tenant_id)
+        sales = await self.repo.today_sales(tenant_id, tz=await self._report_tz(tenant_id))
         shifts = await self.repo.active_shifts(tenant_id)
         batches = await self.repo.expiring_batches(tenant_id)
         licenses = await self.repo.expiring_licenses(tenant_id)
