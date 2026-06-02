@@ -3,7 +3,7 @@ and the empty → valid-file case."""
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -13,8 +13,13 @@ from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 
 
-def _today():  # type: ignore[no-untyped-def]
-    return datetime.now(UTC).date()
+async def _today(db: AsyncSession) -> date:
+    # Reports interpret dates in the tenant tz (Asia/Dushanbe by default), so
+    # "today" here must be the local date — not UTC, which disagrees by a day
+    # between 19:00–23:59 UTC.
+    return (
+        await db.execute(text("SELECT (now() AT TIME ZONE 'Asia/Dushanbe')::date"))
+    ).scalar_one()
 
 
 async def _sell(service: POSService, s, qty: Decimal, paid: Decimal) -> None:  # type: ignore[no-untyped-def]
@@ -39,7 +44,7 @@ async def test_stock_on_date_value_and_totals(db_session: AsyncSession, pos_scaf
     await _sell(service, s, qty=Decimal("30"), paid=Decimal("300"))
 
     data = await service.build_stock_on_date(
-        tenant_id=s["tenant"].id, on_date=_today(), branch_id=None
+        tenant_id=s["tenant"].id, on_date=await _today(db_session), branch_id=None
     )
     assert len(data.rows) == 1
     row = data.rows[0]
@@ -72,7 +77,7 @@ async def test_stock_on_date_excludes_movements_after_the_date(
         {"b": str(s["batch"].id)},
     )
 
-    today = _today()
+    today = await _today(db_session)
     # 3 days ago: only the incoming counts → full 100 (the later sale is excluded).
     historical = await service.build_stock_on_date(
         tenant_id=s["tenant"].id, on_date=today - timedelta(days=3), branch_id=None
@@ -92,7 +97,7 @@ async def test_stock_on_date_excludes_movements_after_the_date(
 async def test_stock_on_date_empty_is_valid_file(db_session: AsyncSession, pos_scaffold) -> None:
     s = await pos_scaffold(batch_qty=100)
     service = POSService(POSRepository(db_session))
-    today = _today()
+    today = await _today(db_session)
 
     # 10 days before the only (incoming) movement → nothing on hand.
     data = await service.build_stock_on_date(

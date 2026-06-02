@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.pos.repository import POSRepository
@@ -109,7 +110,11 @@ async def test_filter_by_date_range(db_session: AsyncSession, pos_scaffold) -> N
     service = POSService(POSRepository(db_session))
     await _sell(service, s)
 
-    today = date.today()
+    # list_sales interprets the range in the tenant tz (Asia/Dushanbe), so
+    # "today" must be the local date, not UTC (they differ 19:00–23:59 UTC).
+    today = (
+        await db_session.execute(text("SELECT (now() AT TIME ZONE 'Asia/Dushanbe')::date"))
+    ).scalar_one()
     # Today is in range.
     _, in_range = await service.list_sales(
         tenant_id=s["tenant"].id,

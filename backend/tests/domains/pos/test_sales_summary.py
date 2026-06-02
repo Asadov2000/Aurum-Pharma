@@ -3,7 +3,7 @@ empty-period file."""
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -15,8 +15,13 @@ from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 
 
-def _today():  # type: ignore[no-untyped-def]
-    return datetime.now(UTC).date()
+async def _today(db: AsyncSession) -> date:
+    # Reports interpret dates in the tenant tz (Asia/Dushanbe by default), so
+    # "today" here must be the local date — not UTC, which disagrees by a day
+    # between 19:00–23:59 UTC.
+    return (
+        await db.execute(text("SELECT (now() AT TIME ZONE 'Asia/Dushanbe')::date"))
+    ).scalar_one()
 
 
 async def _complete_sale(service: POSService, s, *, qty, payments):  # type: ignore[no-untyped-def]
@@ -57,7 +62,7 @@ async def test_sales_summary_aggregates_and_breakdown(
         cashier_user_id=s["cashier"].id,
     )
 
-    today = _today()
+    today = await _today(db_session)
     data = await service.build_sales_summary(
         tenant_id=s["tenant"].id, date_from=today, date_to=today, branch_id=None
     )
@@ -93,7 +98,7 @@ async def test_sales_summary_range_excludes_sales_outside_period(
     )
     await _complete_sale(service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))])
 
-    today = _today()
+    today = await _today(db_session)
     # A window entirely before today must not see today's sale.
     past = await service.build_sales_summary(
         tenant_id=s["tenant"].id,
@@ -138,7 +143,7 @@ async def test_sales_summary_full_refund_nets_to_zero(
         cashier_user_id=s["cashier"].id,
     )
 
-    today = _today()
+    today = await _today(db_session)
     data = await service.build_sales_summary(
         tenant_id=s["tenant"].id, date_from=today, date_to=today, branch_id=None
     )
@@ -158,7 +163,7 @@ async def test_sales_summary_full_refund_nets_to_zero(
 async def test_sales_summary_rejects_inverted_range(db_session: AsyncSession, pos_scaffold) -> None:
     s = await pos_scaffold()
     service = POSService(POSRepository(db_session))
-    today = _today()
+    today = await _today(db_session)
     with pytest.raises(BusinessRuleError):
         await service.get_sales_summary_xlsx(
             tenant_id=s["tenant"].id,
@@ -173,7 +178,7 @@ async def test_sales_summary_empty_period_is_valid_zero_file(
 ) -> None:
     s = await pos_scaffold()
     service = POSService(POSRepository(db_session))
-    today = _today()
+    today = await _today(db_session)
 
     data = await service.build_sales_summary(
         tenant_id=s["tenant"].id, date_from=today, date_to=today, branch_id=None
@@ -247,7 +252,7 @@ async def test_sales_summary_excludes_test_sales(db_session: AsyncSession, pos_s
         text("UPDATE sale SET is_test = true WHERE id = :id"), {"id": str(test_sale.id)}
     )
 
-    today = _today()
+    today = await _today(db_session)
     data = await service.build_sales_summary(
         tenant_id=s["tenant"].id, date_from=today, date_to=today, branch_id=None
     )
