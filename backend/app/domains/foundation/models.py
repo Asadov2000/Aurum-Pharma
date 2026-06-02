@@ -105,6 +105,11 @@ class TenantSettings(Base):
     draft_sale_lifetime_min: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("30")
     )
+    # IANA timezone used to interpret report date ranges (the pharmacy's local
+    # time). Default Asia/Dushanbe (UTC+5, no DST).
+    report_timezone: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'Asia/Dushanbe'")
+    )
     prescription_warning_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

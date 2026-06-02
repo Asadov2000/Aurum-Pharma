@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError
@@ -137,6 +138,39 @@ async def test_z_report_full_refund_counts_sale_and_return(
     assert z.sales_count == 1
     assert z.returns_count == 1
     assert z.payment_breakdown.cash == Decimal("100.00")
+
+
+async def test_z_report_excludes_test_sales(db_session: AsyncSession, pos_scaffold) -> None:
+    """is_test sales never reach the Z-report money totals or breakdown."""
+    s = await pos_scaffold(sale_price=Decimal("10"))
+    service = POSService(POSRepository(db_session))
+    await service.open_shift(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        opened_by_user_id=s["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    await _complete_sale(service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))])
+    test_sale, _ = await _complete_sale(
+        service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))]
+    )
+    await db_session.execute(
+        text("UPDATE sale SET is_test = true WHERE id = :id"), {"id": str(test_sale.id)}
+    )
+
+    shift = await service.repo.get_open_shift_for_register(s["register"].id)
+    assert shift is not None
+    await service.close_shift(
+        shift_id=shift.id,
+        closing_cash_actual=Decimal("10"),
+        closed_by_user_id=s["cashier"].id,
+        notes=None,
+    )
+
+    z = await service.build_z_report(shift.id)
+    assert z.total_sales == Decimal("10.00")  # only the real sale
+    assert z.sales_count == 1
+    assert z.payment_breakdown.cash == Decimal("10.00")
 
 
 async def test_z_report_xlsx_rejects_open_shift(db_session: AsyncSession, pos_scaffold) -> None:

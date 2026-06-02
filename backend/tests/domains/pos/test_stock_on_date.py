@@ -3,7 +3,7 @@ and the empty → valid-file case."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -107,3 +107,31 @@ async def test_stock_on_date_empty_is_valid_file(db_session: AsyncSession, pos_s
     )
     assert xlsx[:2] == b"PK"
     assert len(xlsx) > 500
+
+
+async def test_stock_on_date_uses_tenant_timezone(db_session: AsyncSession, pos_scaffold) -> None:
+    """A movement at 01:00 Dushanbe (= 20:00 UTC the previous day) counts toward
+    the local day's stock, not the previous UTC day. Default tz Asia/Dushanbe."""
+    s = await pos_scaffold(batch_qty=100)
+    service = POSService(POSRepository(db_session))
+    # Incoming at 2026-06-15 01:00 Dushanbe == 2026-06-14 20:00 UTC.
+    await db_session.execute(
+        text(
+            "UPDATE batch_movement SET created_at = '2026-06-14 20:00:00+00' "
+            "WHERE batch_id = :b AND movement_type = 'incoming'"
+        ),
+        {"b": str(s["batch"].id)},
+    )
+
+    # Local day 2026-06-15 sees the incoming → stock present.
+    on_15 = await service.build_stock_on_date(
+        tenant_id=s["tenant"].id, on_date=date(2026, 6, 15), branch_id=None
+    )
+    assert len(on_15.rows) == 1
+    assert on_15.rows[0].qty == Decimal("100.000")
+
+    # The previous UTC day (06-14) must NOT see it (it's local 06-15).
+    on_14 = await service.build_stock_on_date(
+        tenant_id=s["tenant"].id, on_date=date(2026, 6, 14), branch_id=None
+    )
+    assert on_14.rows == []

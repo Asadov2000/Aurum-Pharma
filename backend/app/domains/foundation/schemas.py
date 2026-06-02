@@ -94,6 +94,7 @@ class TenantSettingsRead(BaseModel):
     session_pos_minutes: int
     pin_mode_enabled: bool
     draft_sale_lifetime_min: int
+    report_timezone: str
     prescription_warning_text: str
     updated_at: datetime
 
@@ -106,6 +107,7 @@ class TenantSettingsUpdate(BaseModel):
     session_pos_minutes: int | None = Field(default=None, ge=30, le=1440)
     pin_mode_enabled: bool | None = None
     draft_sale_lifetime_min: int | None = Field(default=None, ge=5, le=240)
+    report_timezone: str | None = Field(default=None, min_length=1, max_length=64)
     prescription_warning_text: str | None = None
 
     @field_validator("expired_sale_mode")

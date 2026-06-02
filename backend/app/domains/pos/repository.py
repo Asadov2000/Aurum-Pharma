@@ -179,11 +179,18 @@ class POSRepository:
 
     async def shift_totals(self, shift_id: UUID) -> dict[str, Any]:
         """Aggregates payments grouped by method for sales in this shift,
-        plus sales_count / returns_count."""
+        plus sales_count / returns_count. Test (is_test) sales are excluded —
+        they never represent real money."""
         payment_sum_stmt = (
             select(SalePayment.payment_method, func.coalesce(func.sum(SalePayment.amount), 0))
             .join(Sale, Sale.id == SalePayment.sale_id)
-            .where(and_(Sale.shift_id == shift_id, Sale.status == "completed"))
+            .where(
+                and_(
+                    Sale.shift_id == shift_id,
+                    Sale.status == "completed",
+                    Sale.is_test.is_(False),
+                )
+            )
             .group_by(SalePayment.payment_method)
         )
         result = await self.session.execute(payment_sum_stmt)
@@ -203,6 +210,7 @@ class POSRepository:
                     Sale.shift_id == shift_id,
                     Sale.status == "completed",
                     Sale.sale_type == "sale",
+                    Sale.is_test.is_(False),
                 )
             )
         )
@@ -214,6 +222,7 @@ class POSRepository:
                     Sale.shift_id == shift_id,
                     Sale.status == "completed",
                     Sale.sale_type == "return",
+                    Sale.is_test.is_(False),
                 )
             )
         )
@@ -231,7 +240,8 @@ class POSRepository:
         Forward sales count when completed OR later voided by a full refund —
         the sale economically happened; its refund is counted under returns. So
         gross and refunds stay consistent (a same-shift full refund shows
-        gross=amount AND refunds=amount, not gross=0/refunds=amount)."""
+        gross=amount AND refunds=amount, not gross=0/refunds=amount). Test
+        (is_test) sales are excluded — they aren't real money."""
 
         fwd_statuses = ("completed", "voided")
 
@@ -240,6 +250,7 @@ class POSRepository:
                 Sale.shift_id == shift_id,
                 Sale.status.in_(fwd_statuses),
                 Sale.sale_type == "sale",
+                Sale.is_test.is_(False),
             )
 
         def _ret() -> Any:
@@ -247,6 +258,7 @@ class POSRepository:
                 Sale.shift_id == shift_id,
                 Sale.status == "completed",
                 Sale.sale_type == "return",
+                Sale.is_test.is_(False),
             )
 
         sales_stmt = select(func.coalesce(func.sum(Sale.total_amount), 0), func.count()).where(
@@ -330,18 +342,20 @@ class POSRepository:
         max_total: Decimal | None,
         page: int,
         page_size: int,
+        tz: str = "Asia/Dushanbe",
     ) -> tuple[list[dict[str, Any]], int]:
         """One query joins sale → branch/register/cashier for resolved names,
         aggregates payment methods, builds a short item preview, and derives
         is_refund / has_refund / refund_receipt_number from the parent↔child
         sale link. Only receipts (completed/voided, completed_at set) appear —
-        drafts have no receipt_number.
+        drafts have no receipt_number. Test (is_test) sales are excluded — they
+        aren't real receipts. Date filters use the tenant timezone `tz`.
 
         `has_refund` is true when at least one completed return-sale points at
         this row; `refund_receipt_number` is that return's receipt. Deriving
         these avoids a denormalized column that could drift.
         """
-        clauses = ["s.tenant_id = :tid", "s.completed_at IS NOT NULL"]
+        clauses = ["s.tenant_id = :tid", "s.completed_at IS NOT NULL", "s.is_test = false"]
         params: dict[str, Any] = {"tid": str(tenant_id)}
 
         if cashier_id is not None:
@@ -357,11 +371,13 @@ class POSRepository:
             clauses.append("s.receipt_number = :receipt")
             params["receipt"] = receipt_number
         if date_from is not None:
-            clauses.append("s.completed_at::date >= :dfrom")
+            clauses.append("(s.completed_at AT TIME ZONE :tz)::date >= :dfrom")
             params["dfrom"] = date_from
+            params["tz"] = tz
         if date_to is not None:
-            clauses.append("s.completed_at::date <= :dto")
+            clauses.append("(s.completed_at AT TIME ZONE :tz)::date <= :dto")
             params["dto"] = date_to
+            params["tz"] = tz
         if min_total is not None:
             clauses.append("s.total_amount >= :mintot")
             params["mintot"] = min_total
@@ -437,6 +453,7 @@ class POSRepository:
         date_from: Any,
         date_to: Any,
         branch_id: UUID | None,
+        tz: str = "Asia/Dushanbe",
     ) -> dict[str, Any]:
         """Detail rows + period totals for the accountant summary over
         [date_from, date_to]. A forward sale counts toward gross/discounts/
@@ -448,11 +465,19 @@ class POSRepository:
         forward sale by its method (≥2 distinct → 'mixed'), identical to
         z_report_aggregates, so a single shift's range reconciles with its
         Z-report.
+
+        Dates are interpreted in the tenant timezone `tz` (so a 01:00 Dushanbe
+        sale lands on the local day), and test (is_test) sales are excluded.
         """
-        base = ["s.tenant_id = :tid", "s.completed_at IS NOT NULL"]
-        params: dict[str, Any] = {"tid": str(tenant_id), "dfrom": date_from, "dto": date_to}
-        base.append("s.completed_at::date >= :dfrom")
-        base.append("s.completed_at::date <= :dto")
+        base = ["s.tenant_id = :tid", "s.completed_at IS NOT NULL", "s.is_test = false"]
+        params: dict[str, Any] = {
+            "tid": str(tenant_id),
+            "dfrom": date_from,
+            "dto": date_to,
+            "tz": tz,
+        }
+        base.append("(s.completed_at AT TIME ZONE :tz)::date >= :dfrom")
+        base.append("(s.completed_at AT TIME ZONE :tz)::date <= :dto")
         if branch_id is not None:
             base.append("s.branch_id = :branch")
             params["branch"] = str(branch_id)
@@ -549,14 +574,16 @@ class POSRepository:
         tenant_id: UUID,
         on_date: Any,
         branch_id: UUID | None,
+        tz: str = "Asia/Dushanbe",
     ) -> list[dict[str, Any]]:
         """Per-batch stock as of `on_date`, summed from the batch_movement
         ledger (Σ qty_delta for movements dated ≤ on_date). The ledger is the
         source of truth (the trigger keeps batch.qty_remaining == Σ qty_delta),
         so this is a faithful historical reconstruction, not just 'today'. Only
-        batches with a positive balance on the date are returned."""
+        batches with a positive balance on the date are returned. The movement
+        date is taken in the tenant timezone `tz`."""
         clauses = ["b.tenant_id = :tid"]
-        params: dict[str, Any] = {"tid": str(tenant_id), "on_date": on_date}
+        params: dict[str, Any] = {"tid": str(tenant_id), "on_date": on_date, "tz": tz}
         if branch_id is not None:
             clauses.append("b.branch_id = :branch")
             params["branch"] = str(branch_id)
@@ -572,7 +599,7 @@ class POSRepository:
               SUM(bm.qty_delta) AS qty
             FROM batch b
             JOIN batch_movement bm
-              ON bm.batch_id = b.id AND bm.created_at::date <= :on_date
+              ON bm.batch_id = b.id AND (bm.created_at AT TIME ZONE :tz)::date <= :on_date
             LEFT JOIN tenant_catalog tc ON tc.id = b.catalog_id
             LEFT JOIN branch br ON br.id = b.branch_id
             WHERE {where}

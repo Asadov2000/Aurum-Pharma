@@ -3,10 +3,11 @@ empty-period file."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError
@@ -186,3 +187,86 @@ async def test_sales_summary_empty_period_is_valid_zero_file(
     )
     assert xlsx[:2] == b"PK"  # valid workbook, not an error
     assert len(xlsx) > 500
+
+
+async def test_sales_summary_dates_use_tenant_timezone(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    """A 01:00 Dushanbe sale (= 20:00 UTC the previous day) belongs to the local
+    day, not the previous UTC day. Default tz is Asia/Dushanbe."""
+    s = await pos_scaffold(sale_price=Decimal("10"))
+    service = POSService(POSRepository(db_session))
+    await service.open_shift(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        opened_by_user_id=s["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    sale, _ = await _complete_sale(service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))])
+    # 2026-06-15 01:00 Dushanbe == 2026-06-14 20:00 UTC.
+    await db_session.execute(
+        text("UPDATE sale SET completed_at = '2026-06-14 20:00:00+00' WHERE id = :id"),
+        {"id": str(sale.id)},
+    )
+
+    local_day = await service.build_sales_summary(
+        tenant_id=s["tenant"].id,
+        date_from=date(2026, 6, 15),
+        date_to=date(2026, 6, 15),
+        branch_id=None,
+    )
+    assert local_day.gross_sales == Decimal("10.00")
+    assert local_day.sales_count == 1
+
+    prev_utc_day = await service.build_sales_summary(
+        tenant_id=s["tenant"].id,
+        date_from=date(2026, 6, 14),
+        date_to=date(2026, 6, 14),
+        branch_id=None,
+    )
+    assert prev_utc_day.gross_sales == Decimal("0")
+    assert prev_utc_day.sales_count == 0
+
+
+async def test_sales_summary_excludes_test_sales(db_session: AsyncSession, pos_scaffold) -> None:
+    """is_test sales are not real money — excluded from totals and the receipt
+    list; the normal sale is counted."""
+    s = await pos_scaffold(sale_price=Decimal("10"))
+    service = POSService(POSRepository(db_session))
+    await service.open_shift(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        opened_by_user_id=s["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    await _complete_sale(service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))])
+    test_sale, _ = await _complete_sale(
+        service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))]
+    )
+    await db_session.execute(
+        text("UPDATE sale SET is_test = true WHERE id = :id"), {"id": str(test_sale.id)}
+    )
+
+    today = _today()
+    data = await service.build_sales_summary(
+        tenant_id=s["tenant"].id, date_from=today, date_to=today, branch_id=None
+    )
+    assert data.gross_sales == Decimal("10.00")  # only the real sale
+    assert data.sales_count == 1
+    assert len(data.rows) == 1
+
+    rows, total = await service.list_sales(
+        tenant_id=s["tenant"].id,
+        cashier_id=None,
+        branch_id=None,
+        register_id=None,
+        receipt_number=None,
+        date_from=None,
+        date_to=None,
+        has_refund=None,
+        min_total=None,
+        max_total=None,
+        page=1,
+        page_size=50,
+    )
+    assert total == 1  # the test sale is hidden from receipt search

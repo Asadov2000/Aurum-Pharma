@@ -183,6 +183,12 @@ class POSService:
             raise NotFoundError("Sale not found")
         return sale
 
+    async def _report_tz(self, tenant_id: UUID) -> str:
+        """Tenant's report timezone (date ranges are interpreted in local time).
+        Falls back to Asia/Dushanbe if settings are somehow missing."""
+        settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
+        return settings.report_timezone if settings is not None else "Asia/Dushanbe"
+
     async def list_sales(
         self,
         *,
@@ -212,6 +218,7 @@ class POSService:
             max_total=max_total,
             page=page,
             page_size=page_size,
+            tz=await self._report_tz(tenant_id),
         )
 
     async def get_sale_details(
@@ -354,7 +361,11 @@ class POSService:
         branch_id: UUID | None,
     ) -> SalesSummaryData:
         agg = await self.repo.sales_summary(
-            tenant_id=tenant_id, date_from=date_from, date_to=date_to, branch_id=branch_id
+            tenant_id=tenant_id,
+            date_from=date_from,
+            date_to=date_to,
+            branch_id=branch_id,
+            tz=await self._report_tz(tenant_id),
         )
         foundation = FoundationRepository(self.repo.session)
 
@@ -446,7 +457,10 @@ class POSService:
         branch_id: UUID | None,
     ) -> StockOnDateData:
         raw = await self.repo.stock_on_date(
-            tenant_id=tenant_id, on_date=on_date, branch_id=branch_id
+            tenant_id=tenant_id,
+            on_date=on_date,
+            branch_id=branch_id,
+            tz=await self._report_tz(tenant_id),
         )
         foundation = FoundationRepository(self.repo.session)
 
