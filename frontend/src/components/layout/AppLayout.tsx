@@ -4,39 +4,15 @@ import { Button } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/features/auth/hooks";
 
-import { HomeIcon, Sidebar, type NavItem } from "./Sidebar";
-
-function buildNav(isSupport: boolean, hasTenant: boolean): NavItem[] {
-  const items: NavItem[] = [{ to: "/", label: "Главная", icon: <HomeIcon /> }];
-  if (isSupport) {
-    items.push({ to: "/admin/tenants", label: "Тенанты" });
-  }
-  if (hasTenant) {
-    items.push({ to: "/onboarding", label: "Старт" });
-    items.push({ to: "/branches", label: "Точки" });
-    items.push({ to: "/registers", label: "Кассы" });
-    items.push({ to: "/users", label: "Пользователи" });
-    items.push({ to: "/roles", label: "Роли" });
-    items.push({ to: "/catalog", label: "Каталог" });
-    items.push({ to: "/suppliers", label: "Поставщики" });
-    items.push({ to: "/incoming", label: "Приходы" });
-    items.push({ to: "/batches", label: "Партии" });
-    items.push({ to: "/pos", label: "Касса" });
-    items.push({ to: "/sales", label: "Чеки" });
-    items.push({ to: "/billing", label: "Биллинг" });
-    items.push({ to: "/reports", label: "Отчёты" });
-    items.push({ to: "/audit", label: "Аудит" });
-    items.push({ to: "/notifications", label: "Уведомления" });
-    items.push({ to: "/settings", label: "Настройки" });
-  }
-  return items;
-}
+import { Sidebar } from "./Sidebar";
+import { buildNav } from "./nav";
 
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
   const hasTenant = Boolean(user?.home_tenant_id);
-  const items = buildNav(isSupport, hasTenant);
+  const canSeeDashboard = isSupport || (user?.permissions ?? []).includes("reports.view");
+  const items = buildNav(isSupport, hasTenant, canSeeDashboard);
 
   return (
     <div className="grid min-h-screen grid-cols-[220px_1fr] bg-background">

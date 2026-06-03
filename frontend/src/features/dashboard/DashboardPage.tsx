@@ -44,7 +44,32 @@ export function DashboardPage(): JSX.Element {
   // Support users (developer/administrator) have no home tenant, so the
   // tenant-scoped summary would 400. Skip the query and show a profile panel.
   const hasTenant = Boolean(user?.home_tenant_id);
-  const { data, isLoading, error } = useDashboardSummary(hasTenant);
+  // The summary endpoint needs reports.view (owner/admin/dev). Skip the query
+  // for users who'd only get a 403 — e.g. sellers — and show a friendly note.
+  const canView =
+    Boolean(user?.is_developer || user?.is_administrator) ||
+    (user?.permissions ?? []).includes("reports.view");
+  const { data, isLoading, error } = useDashboardSummary(hasTenant && canView);
+
+  if (hasTenant && !canView) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold text-foreground">Главная</h1>
+        <Card>
+          <CardContent className="space-y-2 py-6 text-sm text-foreground-secondary">
+            <p>Сводка по аптеке доступна владельцу и администратору.</p>
+            <p className="text-foreground-muted">
+              Ваш раздел —{" "}
+              <Link to="/pos" className="text-primary hover:underline">
+                Касса
+              </Link>
+              .
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (!hasTenant) {
     return (

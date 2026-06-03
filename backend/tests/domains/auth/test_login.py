@@ -220,4 +220,8 @@ async def test_login_code_endpoint_returns_202(auth_client: AsyncClient) -> None
         "/api/v1/auth/login/code", json={"email": "via-http@aurum.tj"}
     )
     assert response.status_code == 202
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    # In development the endpoint also returns dev_code (UI prefill); it must
+    # never be a real-prod concern, but here we just assert the field exists.
+    assert "dev_code" in body

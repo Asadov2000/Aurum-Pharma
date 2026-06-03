@@ -64,3 +64,6 @@ class MeResponse(BaseModel):
     # role_id keyed by branch_id (or the literal "tenant" for tenant-wide
     # assignments). Empty when the request has no tenant_id in the token.
     branch_assignments: dict[str, str] = {}
+    # Effective permission codes (resolved from roles, cached in Redis). Lets the
+    # UI hide nav/actions the user can't use. Not in the JWT — sent in the body.
+    permissions: list[str] = []

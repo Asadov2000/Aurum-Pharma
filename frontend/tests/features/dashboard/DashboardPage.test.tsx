@@ -79,7 +79,12 @@ const SUMMARY = {
 describe("DashboardPage", () => {
   beforeEach(() => {
     getDashboardSummary.mockReset();
-    mockUser = { home_tenant_id: "t-1", full_name: "Owner", email: "owner@aurum.tj" };
+    mockUser = {
+      home_tenant_id: "t-1",
+      full_name: "Owner",
+      email: "owner@aurum.tj",
+      permissions: ["reports.view"],
+    };
   });
   afterEach(() => {
     vi.restoreAllMocks();

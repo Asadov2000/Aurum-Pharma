@@ -12,7 +12,6 @@ import {
   Input,
   Label,
   Select,
-  Switch,
   Textarea,
 } from "@/components/ui";
 
@@ -47,7 +46,6 @@ const schema = z
     refund_reason_mode: z.enum(["required", "required_with_text", "optional", "off"]),
     session_admin_minutes: z.number().int().min(30).max(1440),
     session_pos_minutes: z.number().int().min(30).max(1440),
-    pin_mode_enabled: z.boolean(),
     draft_sale_lifetime_min: z.number().int().min(5).max(240),
     prescription_warning_text: z.string(),
   })
@@ -73,7 +71,6 @@ export function SettingsPage(): JSX.Element {
       refund_reason_mode: "optional",
       session_admin_minutes: 60,
       session_pos_minutes: 480,
-      pin_mode_enabled: false,
       draft_sale_lifetime_min: 30,
       prescription_warning_text: "",
     },
@@ -89,7 +86,6 @@ export function SettingsPage(): JSX.Element {
       refund_reason_mode: data.refund_reason_mode,
       session_admin_minutes: data.session_admin_minutes,
       session_pos_minutes: data.session_pos_minutes,
-      pin_mode_enabled: data.pin_mode_enabled,
       draft_sale_lifetime_min: data.draft_sale_lifetime_min,
       prescription_warning_text: data.prescription_warning_text,
     });
@@ -117,7 +113,6 @@ export function SettingsPage(): JSX.Element {
         refund_reason_mode: d.refund_reason_mode,
         session_admin_minutes: d.session_admin_minutes,
         session_pos_minutes: d.session_pos_minutes,
-        pin_mode_enabled: d.pin_mode_enabled,
         draft_sale_lifetime_min: d.draft_sale_lifetime_min,
         prescription_warning_text: d.prescription_warning_text,
       });
@@ -260,12 +255,8 @@ export function SettingsPage(): JSX.Element {
             />
             <FormError>{form.formState.errors.draft_sale_lifetime_min?.message}</FormError>
           </div>
-          <div className="col-span-2">
-            <Switch
-              label="PIN-режим на кассе (переключение продавцов)"
-              {...form.register("pin_mode_enabled")}
-            />
-          </div>
+          {/* PIN-режим скрыт до реализации backend-аутентификации по PIN
+              (пост-пилот). Поле в настройках сохраняет своё значение в БД. */}
         </CardContent>
       </Card>
 

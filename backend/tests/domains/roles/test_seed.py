@@ -9,14 +9,15 @@ from app.domains.roles.models import Permission, Role, RolePermission
 
 
 async def test_seed_permissions_count(db_session: AsyncSession) -> None:
-    """41 distinct permissions across 13 groups."""
+    """43 distinct permissions across 14 groups (41 base in 13 groups + the
+    sales.view.own / sales.view.tenant 'sales' group from migration 0014)."""
     count = (await db_session.execute(select(func.count()).select_from(Permission))).scalar_one()
-    assert count == 41
+    assert count == 43
 
     groups = (
         await db_session.execute(select(func.count(func.distinct(Permission.group_code))))
     ).scalar_one()
-    assert groups == 13
+    assert groups == 14  # +'sales' group from migration 0014
 
 
 async def test_seed_system_roles_exist(db_session: AsyncSession) -> None:

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import UUID
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError
 from app.core.time import utc_now
+from app.domains.catalog.models import TenantCatalog
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
 
@@ -18,6 +21,22 @@ SAMPLE_CSV = (
     b"Paracetamol,paracetamol,GSK,500mg,20 tablets,otc,8.75,2222222222222\n"
     b"Amiksin,tilorone,Lekko,125mg,6 tablets,otc,99.00,\n"
 )
+
+
+async def _count_items(
+    db: AsyncSession, tenant_id: UUID, *, import_job_id: UUID | None = None
+) -> int:
+    """Count this tenant's live catalog rows directly. Test sessions run on the
+    BYPASSRLS pool with no app.tenant_id GUC, so service.search() would see
+    every tenant's rows in the shared dev DB — we scope explicitly instead."""
+    stmt = (
+        select(func.count())
+        .select_from(TenantCatalog)
+        .where(TenantCatalog.tenant_id == tenant_id, TenantCatalog.deleted_at.is_(None))
+    )
+    if import_job_id is not None:
+        stmt = stmt.where(TenantCatalog.import_job_id == import_job_id)
+    return int((await db.execute(stmt)).scalar_one())
 
 
 async def test_import_preview_returns_stats(
@@ -91,12 +110,10 @@ async def test_import_process_creates_items(
     assert result.valid_rows == 3
     assert result.expires_at_for_rollback is not None
 
-    # All three items should be on disk and tagged with the import job id.
-    items, total = await service.search(
-        q=None, category=None, dispensing_type=None, page=1, page_size=50
-    )
-    assert total == 3
-    assert all(i.import_job_id == job.id for i in items)
+    # All three items are on disk, tagged with this import job (scoped to the
+    # job, so accumulated rows in the shared dev DB don't affect the count).
+    assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 3
+    assert await _count_items(db_session, tenant.id) == 3
 
 
 async def test_import_rollback_soft_deletes(
@@ -120,11 +137,9 @@ async def test_import_rollback_soft_deletes(
     rolled = await service.rollback_import(job.id)
     assert rolled.status == "rolled_back"
 
-    items, total = await service.search(
-        q=None, category=None, dispensing_type=None, page=1, page_size=50
-    )
-    assert total == 0
-    assert items == []
+    # The job's rows are soft-deleted, so none of this tenant's items remain.
+    assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 0
+    assert await _count_items(db_session, tenant.id) == 0
 
 
 async def test_import_rollback_blocked_after_24h(
@@ -184,8 +199,7 @@ async def test_import_duplicate_skip_strategy(
     )
     await service.process_import(job_id=job.id, raw=SAMPLE_CSV)
 
-    _, total = await service.search(
-        q=None, category=None, dispensing_type=None, page=1, page_size=50
-    )
     # Existing Aspirin + 2 new (Paracetamol, Amiksin); the dup is skipped.
-    assert total == 3
+    assert await _count_items(db_session, tenant.id) == 3
+    # Only the 2 non-duplicate rows are tagged with this import job.
+    assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 2

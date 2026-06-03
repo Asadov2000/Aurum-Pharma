@@ -15,6 +15,7 @@ export interface MeResponse {
   status: string;
   last_login_at: string | null;
   branch_assignments: Record<string, string>;
+  permissions: string[];
 }
 
 export interface LoginCodeRequest {
