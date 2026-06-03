@@ -3,6 +3,7 @@ import { test, request } from "@playwright/test";
 import {
   apiContext,
   apiLogin,
+  catalogSearchKey,
   clearLoginRateLimit,
   expect,
   loginInBrowser,
@@ -25,9 +26,10 @@ test.describe("Catalog flow (owner)", () => {
     await page.getByLabel(/Базовая цена/).fill("12.50");
     await page.getByRole("button", { name: /^Создать$/ }).click();
 
-    // Modal closes and the row appears. Catalog page uses a trigram search
-    // so we type the new name into the filter to scope the table.
-    await page.getByLabel(/Поиск/).fill(name);
+    // Modal closes and the row appears. Catalog page uses a trigram search;
+    // search by the unique name tail so accumulated same-prefix rows don't
+    // push the new item off page 1 (the shared test DB carries many).
+    await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
     await expect(page.getByRole("cell", { name })).toBeVisible({ timeout: 15_000 });
   });
 
@@ -48,7 +50,9 @@ test.describe("Catalog flow (owner)", () => {
 
     await loginInBrowser(page, OWNER);
     await page.goto("/catalog");
-    await page.getByLabel(/Поиск/).fill(name);
+    // Search by the unique tail (not the shared "E2E Barcode-" prefix) so the
+    // new item is the only trigram match and lands on page 1.
+    await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
     await expect(page.getByRole("cell", { name })).toBeVisible({ timeout: 15_000 });
 
     // Open the edit modal — BarcodesPanel is rendered next to the form.
@@ -71,7 +75,7 @@ test.describe("Catalog flow (owner)", () => {
     const apiAnon = await request.newContext();
     const tokens = await apiLogin(apiAnon, OWNER);
     const api = await apiContext(tokens.access_token);
-    const needle = `Zzunique-${Date.now().toString(36)}`;
+    const needle = uniqueName("Zzunique");
     const createRes = await api.post("catalog", {
       data: { brand_name: needle, dispensing_type: "otc", storage_type: "normal" },
     });
@@ -82,8 +86,10 @@ test.describe("Catalog flow (owner)", () => {
     await loginInBrowser(page, OWNER);
     await page.goto("/catalog");
 
-    // Type three chars from the needle — debounce is 300ms; assertion waits.
-    await page.getByLabel(/Поиск/).fill(needle.slice(0, 6));
+    // Search the unique tail (debounce is 300ms; assertion waits). Using the
+    // distinctive suffix keeps the trigram result to this one row regardless of
+    // how many similar test items the shared DB has accumulated.
+    await page.getByLabel(/Поиск/).fill(catalogSearchKey(needle));
     await expect(page.getByRole("cell", { name: needle })).toBeVisible({ timeout: 15_000 });
   });
 });

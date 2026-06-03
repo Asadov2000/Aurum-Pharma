@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, current_user, get_db, require_permission
+from app.core.deps import CurrentUser, get_db, require_permission
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.schemas import (
     BatchDetails,
@@ -32,7 +32,10 @@ async def _service(
 
 @router.get("", response_model=BatchList)
 async def list_batches(
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    # reports.view (owner/admin/dev): batch rows carry purchase_price (margins),
+    # which must not be visible to sellers. POS doesn't read /batches — FEFO
+    # picks batches server-side — so the cashier flow is unaffected.
+    _user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[InventoryService, Depends(_service)],
     catalog_id: Annotated[UUID | None, Query()] = None,
     branch_id: Annotated[UUID | None, Query()] = None,
@@ -60,7 +63,7 @@ async def list_batches(
 @router.get("/{batch_id}", response_model=BatchDetails)
 async def get_batch(
     batch_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> BatchDetails:
     batch = await service.get_batch(batch_id)
@@ -74,7 +77,7 @@ async def get_batch(
 @router.get("/{batch_id}/movements", response_model=list[MovementRead])
 async def list_movements(
     batch_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> list[MovementRead]:
     movements = await service.list_movements(batch_id)

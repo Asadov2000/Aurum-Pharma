@@ -14,6 +14,7 @@ from openpyxl.styles import Font
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.domains.pos.schemas import SalesSummaryData
+from app.domains.pos.xlsx_safe import xlsx_safe
 
 _TITLE_FONT = Font(bold=True, size=14)
 _SECTION_FONT = Font(bold=True, size=11)
@@ -62,7 +63,7 @@ def _summary_sheet(ws: Worksheet, data: SalesSummaryData) -> None:
     def kv(label: str, value: object, *, is_money: bool = False, bold: bool = False) -> None:
         nonlocal row
         lc = ws.cell(row=row, column=1, value=label)
-        vc = ws.cell(row=row, column=2, value=value)
+        vc = ws.cell(row=row, column=2, value=xlsx_safe(value))
         if bold:
             lc.font = _HEAD_FONT
             vc.font = _HEAD_FONT
@@ -126,7 +127,7 @@ def _detail_sheet(ws: Worksheet, data: SalesSummaryData) -> None:
             _STATUS_LABEL.get(r.kind, r.kind),
         ]
         for col, value in enumerate(values, start=1):
-            cell = ws.cell(row=i, column=col, value=value)
+            cell = ws.cell(row=i, column=col, value=xlsx_safe(value))
             if col in money_cols:
                 cell.number_format = money
 

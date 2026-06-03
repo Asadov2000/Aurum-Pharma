@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("aurum.config")
+
+# Example/dev values that must never reach production.
+_DEFAULT_DB_PASSWORDS = ("aurum_app_pw", "aurum_support_pw", ":postgres@")
 
 
 class Settings(BaseSettings):
@@ -46,6 +52,39 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Aurum Pharma"
     LOG_LEVEL: str = "INFO"
+
+    @model_validator(mode="after")
+    def _guard_production_secrets(self) -> Settings:
+        """Fail fast if production would start with default/placeholder secrets.
+        Development/staging are unaffected — they keep working with the defaults
+        used in docker-compose and tests."""
+        if self.ENVIRONMENT != "production":
+            return self
+
+        problems: list[str] = []
+        if len(self.JWT_SECRET) < 32 or "change-me" in self.JWT_SECRET.lower():
+            problems.append("JWT_SECRET must be a strong secret (≥32 chars, not the placeholder)")
+        if "minioadmin" in (self.MINIO_ACCESS_KEY, self.MINIO_SECRET_KEY):
+            problems.append(
+                "MINIO_ACCESS_KEY/MINIO_SECRET_KEY must not be the default 'minioadmin'"
+            )
+        for name, url in (
+            ("DATABASE_URL_APP", self.DATABASE_URL_APP),
+            ("DATABASE_URL_SUPPORT", self.DATABASE_URL_SUPPORT),
+        ):
+            if any(p in url for p in _DEFAULT_DB_PASSWORDS):
+                problems.append(f"{name} uses a default/example DB password")
+        if problems:
+            raise ValueError(
+                "Refusing to start in production with insecure config:\n- " + "\n- ".join(problems)
+            )
+
+        # Non-fatal: object-storage traffic should be encrypted in production.
+        if not self.MINIO_SECURE:
+            logger.warning(
+                "MINIO_SECURE=false in production — object storage traffic is unencrypted"
+            )
+        return self
 
 
 @lru_cache

@@ -15,6 +15,7 @@ from openpyxl.styles import Font
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.domains.pos.schemas import StockOnDateData
+from app.domains.pos.xlsx_safe import xlsx_safe
 
 _HEAD_FONT = Font(bold=True)
 _TITLE_FONT = Font(bold=True, size=14)
@@ -60,7 +61,7 @@ def render_stock_on_date_xlsx(data: StockOnDateData) -> bytes:
             float(row.value),
         ]
         for col, value in enumerate(values, start=1):
-            cell = ws.cell(row=r, column=col, value=value)
+            cell = ws.cell(row=r, column=col, value=xlsx_safe(value))
             if col in money_cols:
                 cell.number_format = money
         r += 1

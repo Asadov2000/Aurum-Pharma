@@ -39,6 +39,7 @@ from app.domains.suppliers import router as suppliers_router
 from app.middleware.auth_context import AuthContextMiddleware
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.request_id import RequestIdMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 configure_logging()
 logger = get_logger("main")
@@ -76,6 +77,12 @@ app.add_middleware(
 
 app.add_middleware(AuthContextMiddleware)
 app.add_middleware(RequestIdMiddleware)
+# Outermost: stamps security headers on every response. Production-only so
+# dev/test/e2e are untouched; CSP ships Report-Only (see middleware docstring).
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    enabled=settings.ENVIRONMENT == "production",
+)
 
 register_error_handlers(app)
 

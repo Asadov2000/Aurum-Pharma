@@ -21,6 +21,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.core.storage import ensure_bucket, get_object, put_object
 from app.domains.pos.schemas import ZReportData
+from app.domains.pos.xlsx_safe import xlsx_safe
 
 _TITLE_FONT = Font(bold=True, size=14)
 _SECTION_FONT = Font(bold=True, size=11)
@@ -55,7 +56,7 @@ def render_z_report_xlsx(data: ZReportData) -> bytes:
     def kv(label: str, value: object, *, is_money: bool = False) -> None:
         nonlocal row
         ws.cell(row=row, column=1, value=label).font = _LABEL_FONT
-        cell = ws.cell(row=row, column=2, value=value)
+        cell = ws.cell(row=row, column=2, value=xlsx_safe(value))
         if is_money:
             cell.number_format = money
             cell.alignment = Alignment(horizontal="right")
