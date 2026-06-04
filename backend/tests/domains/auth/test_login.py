@@ -222,6 +222,35 @@ async def test_login_code_endpoint_returns_202(auth_client: AsyncClient) -> None
     assert response.status_code == 202
     body = response.json()
     assert body["status"] == "ok"
-    # In development the endpoint also returns dev_code (UI prefill); it must
-    # never be a real-prod concern, but here we just assert the field exists.
-    assert "dev_code" in body
+    # In development the endpoint returns dev_code (UI prefill) — a real 6-digit
+    # code. The production gate below proves it is withheld outside development.
+    assert body["dev_code"] is not None
+    assert len(body["dev_code"]) == 6 and body["dev_code"].isdigit()
+
+
+async def test_login_code_endpoint_hides_code_in_production(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Returning the login code in the HTTP body would let any caller bypass
+    e-mail delivery entirely. Outside development the endpoint must withhold it —
+    the code goes only through the normal channel."""
+    import sys
+    from types import SimpleNamespace
+
+    # Reach the module via sys.modules: the auth package re-exports `router`
+    # (the APIRouter), so attribute access app.domains.auth.router would hit the
+    # router object, not this module.
+    router_module = sys.modules["app.domains.auth.router"]
+
+    for env in ("production", "staging"):
+        monkeypatch.setattr(
+            router_module, "get_settings", lambda env=env: SimpleNamespace(ENVIRONMENT=env)
+        )
+        response = await auth_client.post(
+            "/api/v1/auth/login/code", json={"email": f"prod-{env}@aurum.tj"}
+        )
+        assert response.status_code == 202
+        body = response.json()
+        assert body["status"] == "ok"
+        assert body["dev_code"] is None, f"dev_code leaked in {env}"

@@ -14,7 +14,7 @@ asyncpg = "0.30.*"
 alembic = "1.14.*"
 pydantic = { extras = ["email"], version = "2.10.*" }
 pydantic-settings = "2.6.*"
-python-jose = { extras = ["cryptography"], version = "3.3.*" }
+python-jose = { extras = ["cryptography"], version = "3.4.*" }
 passlib = { extras = ["bcrypt"], version = "1.7.*" }
 # passlib 1.7 still reads bcrypt.__about__.__version__, removed in bcrypt 4.x —
 # stay on 3.x until passlib publishes a fix.

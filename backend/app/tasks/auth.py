@@ -11,6 +11,7 @@ from datetime import timedelta
 
 import structlog
 
+from app.core.config import get_settings
 from app.core.db import SupportSessionLocal
 from app.core.time import utc_now
 from app.domains.auth.repository import AuthRepository
@@ -21,8 +22,17 @@ logger = structlog.get_logger("tasks.auth")
 
 @celery_app.task(name="auth.send_email_code")  # type: ignore[misc]
 def send_email_code(email: str, code: str) -> None:
-    """Phase 1 stub — emits the code to logs so devs can copy it from stdout."""
-    logger.info("send_email_code", email=email, code=code)
+    """Phase 1 stub — no real SMTP yet (wired up in phase 2; signature unchanged).
+
+    A login code is a credential. In development we emit it to logs so devs can
+    copy it from stdout; in staging/production the plaintext code is NEVER
+    logged — only the dispatch attempt is recorded. This keeps the code on the
+    normal channel and out of log aggregators in production.
+    """
+    if get_settings().ENVIRONMENT == "development":
+        logger.info("send_email_code", email=email, code=code)
+    else:
+        logger.info("send_email_code", email=email)
 
 
 async def _expire_email_codes_async() -> int:
