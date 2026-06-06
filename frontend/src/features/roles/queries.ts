@@ -4,16 +4,21 @@ import {
   archiveUser,
   blockUser,
   createAssignment,
+  createRole,
   inviteUser,
   listPermissions,
   listRoles,
+  listTemplates,
   listUsers,
   revokeAssignment,
+  updateRole,
   updateUser,
 } from "./api";
 import {
   type AssignmentCreatePayload,
   type InviteUserPayload,
+  type RoleCreatePayload,
+  type RoleUpdatePayload,
   type UserUpdatePayload,
 } from "./types";
 
@@ -21,6 +26,7 @@ export const rolesKeys = {
   users: ["roles", "users"] as const,
   roles: ["roles", "roles"] as const,
   permissions: ["roles", "permissions"] as const,
+  templates: ["roles", "templates"] as const,
 };
 
 export function useUsersQuery(enabled = true) {
@@ -44,6 +50,35 @@ export function usePermissionsQuery(enabled = true) {
     queryKey: rolesKeys.permissions,
     queryFn: listPermissions,
     enabled,
+  });
+}
+
+export function useTemplatesQuery(enabled = true) {
+  return useQuery({
+    queryKey: rolesKeys.templates,
+    queryFn: listTemplates,
+    enabled,
+  });
+}
+
+export function useCreateRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: RoleCreatePayload) => createRole(payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.roles });
+    },
+  });
+}
+
+export function useUpdateRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; payload: RoleUpdatePayload }) =>
+      updateRole(args.id, args.payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.roles });
+    },
   });
 }
 

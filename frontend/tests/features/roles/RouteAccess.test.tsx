@@ -20,6 +20,9 @@ vi.mock("@/features/roles/api", () => ({
   listUsers: vi.fn(async () => []),
   listRoles: vi.fn(async () => []),
   listPermissions: vi.fn(async () => []),
+  listTemplates: vi.fn(async () => []),
+  createRole: vi.fn(),
+  updateRole: vi.fn(),
   inviteUser: vi.fn(),
   updateUser: vi.fn(),
   blockUser: vi.fn(),
@@ -41,6 +44,12 @@ const OWNER = {
   home_tenant_id: "t-1",
   full_name: "Owner",
   permissions: ["users.view", "roles.assign"],
+};
+// An owner who can also build roles (holds roles.create).
+const OWNER_BUILDER = {
+  home_tenant_id: "t-1",
+  full_name: "Owner",
+  permissions: ["users.view", "roles.assign", "roles.create"],
 };
 
 describe("UsersPage — route access by users.view", () => {
@@ -74,13 +83,21 @@ describe("RolesPage — route access by users.view", () => {
     mockUser = SELLER;
     renderPage(<RolesPage />);
     expect(screen.getByText(/Управление ролями доступно/)).toBeInTheDocument();
-    expect(screen.queryByText(/Системные роли защищены/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Роли аптеки")).not.toBeInTheDocument();
   });
 
-  it("lets an owner (users.view) onto /roles", async () => {
+  it("lets an owner (users.view) onto /roles but hides the builder without roles.create", async () => {
     mockUser = OWNER;
     renderPage(<RolesPage />);
-    expect(await screen.findByText(/Системные роли защищены/)).toBeInTheDocument();
+    expect(await screen.findByText("Роли аптеки")).toBeInTheDocument();
     expect(screen.queryByText(/Управление ролями доступно/)).not.toBeInTheDocument();
+    // No roles.create → no builder entry point.
+    expect(screen.queryByText("+ Создать роль")).not.toBeInTheDocument();
+  });
+
+  it("shows the builder («Создать роль») to a user with roles.create", async () => {
+    mockUser = OWNER_BUILDER;
+    renderPage(<RolesPage />);
+    expect(await screen.findByText("+ Создать роль")).toBeInTheDocument();
   });
 });

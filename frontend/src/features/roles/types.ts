@@ -21,6 +21,29 @@ export interface Role {
   permissions: string[];
 }
 
+export interface RoleTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  is_system: boolean;
+  is_active: boolean;
+  permissions: string[];
+}
+
+export interface RoleCreatePayload {
+  name: string;
+  description?: string | null;
+  level: number;
+  permissions: string[];
+}
+
+export interface RoleUpdatePayload {
+  name?: string;
+  description?: string | null;
+  level?: number;
+  permissions?: string[];
+}
+
 export interface Assignment {
   id: string;
   user_id: string;

@@ -6,6 +6,9 @@ import {
   type InviteUserPayload,
   type Permission,
   type Role,
+  type RoleCreatePayload,
+  type RoleTemplate,
+  type RoleUpdatePayload,
   type UserUpdatePayload,
   type UserWithAssignments,
 } from "./types";
@@ -17,6 +20,21 @@ export async function listPermissions(): Promise<Permission[]> {
 
 export async function listRoles(): Promise<Role[]> {
   const { data } = await api.get<Role[]>("/roles");
+  return data;
+}
+
+export async function listTemplates(): Promise<RoleTemplate[]> {
+  const { data } = await api.get<RoleTemplate[]>("/templates");
+  return data;
+}
+
+export async function createRole(payload: RoleCreatePayload): Promise<Role> {
+  const { data } = await api.post<Role>("/roles", payload);
+  return data;
+}
+
+export async function updateRole(roleId: string, payload: RoleUpdatePayload): Promise<Role> {
+  const { data } = await api.patch<Role>(`/roles/${roleId}`, payload);
   return data;
 }
 
