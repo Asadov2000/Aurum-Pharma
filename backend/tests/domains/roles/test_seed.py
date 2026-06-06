@@ -36,6 +36,14 @@ async def test_seed_permissions_count(db_session: AsyncSession) -> None:
     assert groups == 14  # +'sales' group from migration 0014
 
 
+async def test_every_permission_has_a_description(db_session: AsyncSession) -> None:
+    """Migration 0021 backfilled a human-readable tooltip for every permission
+    (used by the role builder); none should be left NULL/blank."""
+    rows = (await db_session.execute(select(Permission.code, Permission.description))).all()
+    missing = [code for code, description in rows if not (description or "").strip()]
+    assert not missing, f"permissions missing a description: {missing}"
+
+
 async def test_seed_system_roles_exist(db_session: AsyncSession) -> None:
     """Only developer / administrator remain system roles — owner / seller were
     demoted to tenant roles (migration 0020) and live on as templates."""
