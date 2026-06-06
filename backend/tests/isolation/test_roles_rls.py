@@ -53,7 +53,7 @@ async def test_user_assignment_isolated_between_tenants(
     tenant_ids: list[str] = []
     user_ids: list[str] = []
     try:
-        # ---- seed two tenants + one user-assignment each (system seller role) ----
+        # ---- seed two tenants + one user-assignment each (system administrator role) ----
         async with support_engine_iso.begin() as conn:
             t_rows = await conn.execute(
                 text(
@@ -76,9 +76,9 @@ async def test_user_assignment_isolated_between_tenants(
             )
             user_ids = [str(row[0]) for row in u_rows.fetchall()]
 
-            seller_id = (
+            role_id = (
                 await conn.execute(
-                    text("SELECT id FROM role WHERE is_system = true AND name = 'seller'")
+                    text("SELECT id FROM role WHERE is_system = true AND name = 'administrator'")
                 )
             ).scalar_one()
 
@@ -92,7 +92,7 @@ async def test_user_assignment_isolated_between_tenants(
                     "ub": user_ids[1],
                     "ta": tenant_ids[0],
                     "tb": tenant_ids[1],
-                    "r": str(seller_id),
+                    "r": str(role_id),
                 },
             )
 
@@ -133,7 +133,7 @@ async def test_user_assignment_isolated_between_tenants(
                 )
             ).fetchall()
             names = [r[0] for r in rows]
-            assert names == ["developer", "administrator", "owner", "seller"]
+            assert names == ["developer", "administrator"]
     finally:
         if user_ids or tenant_ids:
             async with support_engine_iso.begin() as conn:

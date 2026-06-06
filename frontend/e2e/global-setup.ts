@@ -24,16 +24,21 @@ function psql(sql: string): string {
 }
 
 export default async function globalSetup(): Promise<void> {
-  // (1) Ensure owner has an active owner-role assignment.
+  // (1) Ensure owner@ has an active assignment to its tenant's «Владелец» role.
+  //     owner/seller were demoted from system roles to per-tenant roles
+  //     (migration 0020), so we match the tenant-scoped role by name, not the
+  //     old system 'owner'. role_id is corrected on conflict for safety.
   psql(`
     INSERT INTO user_assignment (user_id, tenant_id, role_id, is_active, password_required)
     SELECT u.id, u.home_tenant_id, r.id, true, false
     FROM app_user u, role r
     WHERE u.email = 'owner@aurum.tj'
-      AND r.name = 'owner'
-      AND r.is_system = true
+      AND r.name = 'Владелец'
+      AND r.is_system = false
+      AND r.tenant_id = u.home_tenant_id
       AND u.home_tenant_id IS NOT NULL
-    ON CONFLICT (user_id, tenant_id, branch_id) DO UPDATE SET is_active = true
+    ON CONFLICT (user_id, tenant_id, branch_id)
+      DO UPDATE SET is_active = true, role_id = EXCLUDED.role_id
   `);
 
   // (2) Cache Demo Pharmacy id for specs that need cross-process seed data.

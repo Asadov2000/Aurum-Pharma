@@ -156,7 +156,8 @@ async def test_update_system_role_forbidden(
     actor = await make_user(email="dev-sys@aurum.tj", home_tenant_id=tenant.id)
     service = RolesService(RolesRepository(db_session))
 
-    # Even a developer (level 1, support) cannot edit a seeded system role here.
+    # Even a developer (level 1, support) cannot edit a seeded system role here
+    # (administrator remains a system role after the owner/seller demotion).
     with pytest.raises(PermissionDeniedError):
         await service.update_role(
             actor_level=1,
@@ -164,7 +165,7 @@ async def test_update_system_role_forbidden(
             actor_permissions=set(),
             actor_is_support=True,
             tenant_id=tenant.id,
-            role_id=system_roles["seller"].id,
+            role_id=system_roles["administrator"].id,
             name="Взлом",
             description=None,
             level=None,

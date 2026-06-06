@@ -1,6 +1,6 @@
 """Role templates: the global recommendation library.
 
-Covers: the two seeded presets carry exactly the current owner/seller sets,
+Covers: the two seeded presets carry the expected owner/seller-shaped sets,
 GET /templates is gated by roles.create (seller refused, owner allowed), and a
 template cannot be used to dodge the create_role anti-escalation subset rule.
 """
@@ -26,24 +26,29 @@ from app.domains.roles.service import RolesService
 from app.main import app
 
 
-async def test_templates_match_current_owner_and_seller_sets(
-    db_session: AsyncSession, system_roles
-) -> None:
+async def test_templates_carry_expected_sets(db_session: AsyncSession) -> None:
     service = RolesService(RolesRepository(db_session))
-    by_name = {t.name: codes for t, codes in await service.list_templates_with_permissions()}
+    by_name = {t.name: set(codes) for t, codes in await service.list_templates_with_permissions()}
 
     assert "Владелец" in by_name
     assert "Кассир" in by_name
 
-    owner_codes = sorted(await service.repo.get_role_permissions(system_roles["owner"].id))
-    seller_codes = sorted(await service.repo.get_role_permissions(system_roles["seller"].id))
+    vladelec = by_name["Владелец"]
+    kassir = by_name["Кассир"]
 
-    assert sorted(by_name["Владелец"]) == owner_codes
-    assert sorted(by_name["Кассир"]) == seller_codes
+    # Owner-shaped preset: management reach, but never the cross-tenant audit.
+    assert "users.invite" in vladelec
+    assert "pos.sell" in vladelec
+    assert "audit.view.global" not in vladelec
+    # Cashier-shaped preset: sells, but cannot manage staff.
+    assert "pos.sell" in kassir
+    assert "users.invite" not in kassir
+    # The owner preset is a strict superset of the cashier one.
+    assert kassir < vladelec
 
 
 async def test_templates_endpoint_gated_by_roles_create(
-    db_session: AsyncSession, client: AsyncClient, system_roles
+    db_session: AsyncSession, client: AsyncClient, make_tenant_role
 ) -> None:
     async def _override() -> AsyncIterator[AsyncSession]:
         yield db_session
@@ -74,12 +79,13 @@ async def test_templates_endpoint_gated_by_roles_create(
         await db_session.refresh(seller)
         await db_session.refresh(owner)
 
-        # The owner system role carries roles.create (migration 0018).
+        # A tenant «Владелец» role (from the template) carries roles.create.
+        owner_role = await make_tenant_role(tenant_id=tenant.id, template_name="Владелец", level=3)
         db_session.add(
             UserAssignment(
                 user_id=owner.id,
                 tenant_id=tenant.id,
-                role_id=system_roles["owner"].id,
+                role_id=owner_role.id,
                 is_active=True,
             )
         )

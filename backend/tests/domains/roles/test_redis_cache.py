@@ -15,11 +15,12 @@ async def test_cache_populated_on_first_read(
     db_session: AsyncSession,
     redis: Redis,
     make_tenant,
-    system_roles,
+    make_tenant_role,
     make_user,
 ) -> None:
     tenant = await make_tenant()
     actor = await make_user(email="cache-actor@aurum.tj")
+    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
     service = RolesService(RolesRepository(db_session), redis=redis)
 
     user, _, _ = await service.invite_user(
@@ -28,7 +29,7 @@ async def test_cache_populated_on_first_read(
         tenant_id=tenant.id,
         email="cache@aurum.tj",
         full_name="C",
-        role_id=system_roles["seller"].id,
+        role_id=seller_role.id,
         branch_id=None,
         password_required=False,
     )
@@ -46,12 +47,14 @@ async def test_assignment_change_invalidates_cache(
     db_session: AsyncSession,
     redis: Redis,
     make_tenant,
-    system_roles,
+    make_tenant_role,
     make_user,
 ) -> None:
     tenant = await make_tenant()
     actor = await make_user(email="cache-inv-actor@aurum.tj")
     target = await make_user(email="cache-inv-target@aurum.tj")
+    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
+    owner_role = await make_tenant_role(tenant_id=tenant.id, template_name="Владелец", level=3)
     service = RolesService(RolesRepository(db_session), redis=redis)
 
     initial = await service.assign_role(
@@ -59,7 +62,7 @@ async def test_assignment_change_invalidates_cache(
         actor_id=actor.id,
         tenant_id=tenant.id,
         target_user_id=target.id,
-        role_id=system_roles["seller"].id,
+        role_id=seller_role.id,
         branch_id=None,
         password_required=False,
     )
@@ -83,7 +86,7 @@ async def test_assignment_change_invalidates_cache(
         actor_id=actor.id,
         tenant_id=tenant.id,
         target_user_id=target.id,
-        role_id=system_roles["owner"].id,
+        role_id=owner_role.id,
         branch_id=None,
         password_required=False,
     )

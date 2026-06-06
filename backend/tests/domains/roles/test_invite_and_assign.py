@@ -11,10 +11,11 @@ from app.domains.roles.service import RolesService
 
 
 async def test_invite_creates_user_and_assignment(
-    db_session: AsyncSession, make_tenant, system_roles, make_user
+    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
 ) -> None:
     tenant = await make_tenant()
     actor = await make_user(email="actor1@aurum.tj")
+    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
     service = RolesService(RolesRepository(db_session))
 
     user, assignment, first_invite = await service.invite_user(
@@ -23,7 +24,7 @@ async def test_invite_creates_user_and_assignment(
         tenant_id=tenant.id,
         email="newhire@aurum.tj",
         full_name="New Hire",
-        role_id=system_roles["seller"].id,
+        role_id=seller_role.id,
         branch_id=None,
         password_required=False,
     )
@@ -32,14 +33,15 @@ async def test_invite_creates_user_and_assignment(
     assert user.status == "invited"
     assert assignment.user_id == user.id
     assert assignment.tenant_id == tenant.id
-    assert assignment.role_id == system_roles["seller"].id
+    assert assignment.role_id == seller_role.id
 
 
 async def test_invite_existing_user_creates_assignment_only(
-    db_session: AsyncSession, make_tenant, system_roles, make_user
+    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
 ) -> None:
     tenant = await make_tenant()
     existing = await make_user(email="existing@aurum.tj")
+    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
     service = RolesService(RolesRepository(db_session))
 
     user, assignment, first_invite = await service.invite_user(
@@ -48,7 +50,7 @@ async def test_invite_existing_user_creates_assignment_only(
         tenant_id=tenant.id,
         email="existing@aurum.tj",
         full_name="Existing User",
-        role_id=system_roles["seller"].id,
+        role_id=seller_role.id,
         branch_id=None,
         password_required=False,
     )
@@ -118,10 +120,11 @@ async def test_developer_can_grant_anything(
 
 
 async def test_duplicate_assignment_returns_conflict(
-    db_session: AsyncSession, make_tenant, system_roles, make_user
+    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
 ) -> None:
     tenant = await make_tenant()
     actor = await make_user(email="dup-actor@aurum.tj")
+    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
     service = RolesService(RolesRepository(db_session))
 
     await service.invite_user(
@@ -130,7 +133,7 @@ async def test_duplicate_assignment_returns_conflict(
         tenant_id=tenant.id,
         email="dup@aurum.tj",
         full_name="Dup",
-        role_id=system_roles["seller"].id,
+        role_id=seller_role.id,
         branch_id=None,
         password_required=False,
     )
@@ -141,17 +144,18 @@ async def test_duplicate_assignment_returns_conflict(
             tenant_id=tenant.id,
             email="dup@aurum.tj",
             full_name="Dup",
-            role_id=system_roles["seller"].id,
+            role_id=seller_role.id,
             branch_id=None,
             password_required=False,
         )
 
 
 async def test_effective_permissions_match_role_set(
-    db_session: AsyncSession, make_tenant, system_roles, make_user
+    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
 ) -> None:
     tenant = await make_tenant()
     actor = await make_user(email="eff-actor@aurum.tj")
+    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
     service = RolesService(RolesRepository(db_session))
 
     user, _, _ = await service.invite_user(
@@ -160,7 +164,7 @@ async def test_effective_permissions_match_role_set(
         tenant_id=tenant.id,
         email="effective@aurum.tj",
         full_name="E",
-        role_id=system_roles["seller"].id,
+        role_id=seller_role.id,
         branch_id=None,
         password_required=False,
     )
