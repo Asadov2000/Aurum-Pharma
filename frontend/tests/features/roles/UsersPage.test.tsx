@@ -34,6 +34,13 @@ vi.mock("@/features/foundation/api", () => ({
   deleteRegister: vi.fn(),
 }));
 
+// The page now gates itself behind users.view; render as an owner who holds it
+// so the user/role queries stay enabled (the access gate is covered separately
+// in RouteAccess.test.tsx).
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => ({ user: { home_tenant_id: "t-1", permissions: ["users.view"] } }),
+}));
+
 import { UsersPage } from "@/features/roles/UsersPage";
 
 function renderPage() {

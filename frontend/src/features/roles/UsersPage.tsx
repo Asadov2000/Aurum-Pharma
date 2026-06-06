@@ -12,6 +12,8 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { AccessDeniedCard } from "@/components/AccessDeniedCard";
+import { useAuth } from "@/features/auth/hooks";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { AssignmentsPanel } from "./AssignmentsPanel";
@@ -42,10 +44,17 @@ const statusLabel: Record<UserStatus, string> = {
 };
 
 export function UsersPage(): JSX.Element {
+  const { user } = useAuth();
+  const hasTenant = Boolean(user?.home_tenant_id);
+  // Team management is gated by users.view on the backend (owner/admin/dev).
+  const canManage =
+    Boolean(user?.is_developer || user?.is_administrator) ||
+    (user?.permissions ?? []).includes("users.view");
+
   const [inviting, setInviting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const users = useUsersQuery();
-  const roles = useRolesQuery();
+  const users = useUsersQuery(hasTenant && canManage);
+  const roles = useRolesQuery(hasTenant && canManage);
   const blockMutation = useBlockUser();
   const archiveMutation = useArchiveUser();
 
@@ -74,6 +83,17 @@ export function UsersPage(): JSX.Element {
       window.alert(describeApiError(err, "Не удалось архивировать"));
     }
   };
+
+  // A tenant user without users.view (e.g. a seller) gets a friendly note
+  // instead of a screen that only 403s. Support users (no tenant) fall through.
+  if (hasTenant && !canManage) {
+    return (
+      <AccessDeniedCard
+        title="Пользователи"
+        message="Управление сотрудниками доступно владельцу и администратору."
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">

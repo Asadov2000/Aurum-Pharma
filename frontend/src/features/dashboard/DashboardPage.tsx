@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 
+import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
   Badge,
   Card,
@@ -53,21 +54,10 @@ export function DashboardPage(): JSX.Element {
 
   if (hasTenant && !canView) {
     return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-semibold text-foreground">Главная</h1>
-        <Card>
-          <CardContent className="space-y-2 py-6 text-sm text-foreground-secondary">
-            <p>Сводка по аптеке доступна владельцу и администратору.</p>
-            <p className="text-foreground-muted">
-              Ваш раздел —{" "}
-              <Link to="/pos" className="text-primary hover:underline">
-                Касса
-              </Link>
-              .
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <AccessDeniedCard
+        title="Главная"
+        message="Сводка по аптеке доступна владельцу и администратору."
+      />
     );
   }
 

@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 
+import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { usePermissionsQuery, useRolesQuery } from "./queries";
@@ -21,8 +23,15 @@ const levelLabel = (lvl: number) => {
 };
 
 export function RolesPage(): JSX.Element {
-  const roles = useRolesQuery();
-  const perms = usePermissionsQuery();
+  const { user } = useAuth();
+  const hasTenant = Boolean(user?.home_tenant_id);
+  // Same gate as «Пользователи» — team management lives behind users.view.
+  const canManage =
+    Boolean(user?.is_developer || user?.is_administrator) ||
+    (user?.permissions ?? []).includes("users.view");
+
+  const roles = useRolesQuery(canManage);
+  const perms = usePermissionsQuery(canManage);
 
   // Build a code → name map for nicer permission rendering.
   const permName = useMemo(() => {
@@ -30,6 +39,17 @@ export function RolesPage(): JSX.Element {
     perms.data?.forEach((p) => m.set(p.code, p.name));
     return m;
   }, [perms.data]);
+
+  // A tenant user without users.view (e.g. a seller) gets a friendly note
+  // instead of the screen. Support users (no tenant) fall through.
+  if (hasTenant && !canManage) {
+    return (
+      <AccessDeniedCard
+        title="Роли"
+        message="Управление ролями доступно владельцу и администратору."
+      />
+    );
+  }
 
   if (roles.error) {
     return (

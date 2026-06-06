@@ -11,8 +11,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
   const hasTenant = Boolean(user?.home_tenant_id);
-  const canSeeDashboard = isSupport || (user?.permissions ?? []).includes("reports.view");
-  const items = buildNav(isSupport, hasTenant, canSeeDashboard);
+  const perms = user?.permissions ?? [];
+  const canSeeDashboard = isSupport || perms.includes("reports.view");
+  // «Пользователи» / «Роли» live behind users.view (owner/admin/dev).
+  const canManageTeam = isSupport || perms.includes("users.view");
+  const items = buildNav(isSupport, hasTenant, canSeeDashboard, canManageTeam);
 
   return (
     <div className="grid min-h-screen grid-cols-[220px_1fr] bg-background">

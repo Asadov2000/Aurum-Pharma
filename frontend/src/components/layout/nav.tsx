@@ -6,6 +6,7 @@ export function buildNav(
   isSupport: boolean,
   hasTenant: boolean,
   canSeeDashboard: boolean,
+  canManageTeam: boolean,
 ): NavItem[] {
   // «Главная» is the owner dashboard (gated by reports.view on the backend).
   // Hide it from users who'd only get a 403 — e.g. sellers.
@@ -19,8 +20,13 @@ export function buildNav(
     items.push({ to: "/onboarding", label: "Старт" });
     items.push({ to: "/branches", label: "Точки" });
     items.push({ to: "/registers", label: "Кассы" });
-    items.push({ to: "/users", label: "Пользователи" });
-    items.push({ to: "/roles", label: "Роли" });
+    // «Пользователи» / «Роли» — team management, gated by users.view on the
+    // backend. Hide them from users who lack it (e.g. sellers) so they don't
+    // see a menu item that would only 403.
+    if (canManageTeam) {
+      items.push({ to: "/users", label: "Пользователи" });
+      items.push({ to: "/roles", label: "Роли" });
+    }
     items.push({ to: "/catalog", label: "Каталог" });
     items.push({ to: "/suppliers", label: "Поставщики" });
     items.push({ to: "/incoming", label: "Приходы" });
