@@ -24,7 +24,13 @@ from uuid import UUID
 import structlog
 from redis.asyncio import Redis
 
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.errors import (
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from app.domains.auth.models import AppUser
 from app.domains.roles.models import Permission, Role, UserAssignment
 from app.domains.roles.repository import RolesRepository
@@ -58,6 +64,126 @@ class RolesService:
             codes = await self.repo.get_role_permissions(role.id)
             out.append((role, codes))
         return out
+
+    # -------------------------------------------------------------------------
+    # Role builder — create / edit custom (tenant) roles
+    # -------------------------------------------------------------------------
+
+    async def create_role(
+        self,
+        *,
+        actor_level: int,
+        actor_id: UUID,
+        actor_permissions: set[str],
+        actor_is_support: bool,
+        tenant_id: UUID,
+        name: str,
+        description: str | None,
+        level: int,
+        permission_codes: list[str],
+    ) -> tuple[Role, list[str]]:
+        self._assert_can_define_role(actor_level=actor_level, target_level=level)
+        codes = await self._validated_role_permissions(
+            actor_permissions=actor_permissions,
+            actor_is_support=actor_is_support,
+            requested=permission_codes,
+        )
+        if await self.repo.get_role_by_name(name, tenant_id=tenant_id) is not None:
+            raise ConflictError("A role with this name already exists")
+
+        role = await self.repo.insert_role(
+            tenant_id=tenant_id,
+            name=name,
+            description=description,
+            level=level,
+            is_system=False,
+            created_by=actor_id,
+            updated_by=actor_id,
+        )
+        await self.repo.set_role_permissions(role.id, codes)
+        return role, sorted(codes)
+
+    async def update_role(
+        self,
+        *,
+        actor_level: int,
+        actor_id: UUID,
+        actor_permissions: set[str],
+        actor_is_support: bool,
+        tenant_id: UUID,
+        role_id: UUID,
+        name: str | None,
+        description: str | None,
+        level: int | None,
+        permission_codes: list[str] | None,
+    ) -> tuple[Role, list[str]]:
+        role = await self.repo.get_role(role_id)
+        if role is None:
+            raise NotFoundError("Role not found")
+        if role.is_system:
+            # Explicit 403 first — system roles are visible to every tenant
+            # (tenant_id NULL), so this guard must precede the ownership check.
+            raise PermissionDeniedError("System roles cannot be modified")
+        if role.tenant_id != tenant_id:
+            raise NotFoundError("Role not found")  # another tenant's role — hide it
+
+        # The actor must outrank the role as it currently stands, and — if the
+        # level is being changed — the new level too.
+        self._assert_can_define_role(actor_level=actor_level, target_level=role.level)
+        if level is not None:
+            self._assert_can_define_role(actor_level=actor_level, target_level=level)
+
+        if name is not None and name != role.name:
+            clash = await self.repo.get_role_by_name(name, tenant_id=tenant_id)
+            if clash is not None and clash.id != role.id:
+                raise ConflictError("A role with this name already exists")
+
+        fields: dict[str, object] = {"updated_by": actor_id}
+        if name is not None:
+            fields["name"] = name
+        if description is not None:
+            fields["description"] = description
+        if level is not None:
+            fields["level"] = level
+        role = await self.repo.update_role(role, **fields)
+
+        if permission_codes is not None:
+            codes = await self._validated_role_permissions(
+                actor_permissions=actor_permissions,
+                actor_is_support=actor_is_support,
+                requested=permission_codes,
+            )
+            await self.repo.set_role_permissions(role.id, codes)
+
+        return role, await self.repo.get_role_permissions(role.id)
+
+    async def _validated_role_permissions(
+        self,
+        *,
+        actor_permissions: set[str],
+        actor_is_support: bool,
+        requested: list[str],
+    ) -> list[str]:
+        """Dedupe + validate the codes a role is being given: every code must
+        exist and be active, and (unless the actor is dev/admin) must be one the
+        actor already holds — you cannot grant reach you don't have yourself."""
+        codes = list(dict.fromkeys(requested))  # de-dupe, keep order
+        if codes:
+            existing = await self.repo.existing_active_permission_codes(codes)
+            unknown = [c for c in codes if c not in existing]
+            if unknown:
+                raise ValidationError(
+                    "Unknown or inactive permission codes",
+                    details={"permissions": unknown},
+                )
+        if not actor_is_support:
+            extra = sorted(set(codes) - actor_permissions)
+            if extra:
+                raise PermissionDeniedError(
+                    "Cannot grant permissions you do not hold yourself",
+                    details={"permissions": extra},
+                )
+        return codes
 
     # -------------------------------------------------------------------------
     # Users in tenant
@@ -305,5 +431,18 @@ class RolesService:
         if target_level < actor_level:
             raise BusinessRuleError(
                 "Cannot assign role of higher privilege than your own",
+                details={"actor_level": actor_level, "target_level": target_level},
+            )
+
+    @staticmethod
+    def _assert_can_define_role(*, actor_level: int, target_level: int) -> None:
+        """Defining (creating / editing) a custom role is stricter than
+        assigning one: the role must be *strictly* weaker than the actor (a
+        higher numeric level; 1 = developer … 4 = seller). Equal-or-stronger
+        would let an actor mint a role with their own — or greater — reach, so
+        it is refused with a 403."""
+        if target_level <= actor_level:
+            raise PermissionDeniedError(
+                "Cannot create or edit a role at or above your own level",
                 details={"actor_level": actor_level, "target_level": target_level},
             )

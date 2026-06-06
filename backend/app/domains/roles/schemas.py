@@ -36,6 +36,29 @@ class RoleWithPermissions(RoleRead):
     permissions: list[str]
 
 
+class RoleCreate(BaseModel):
+    """Create a custom (tenant) role. `level` must be strictly weaker than the
+    actor's own (higher number = weaker; 4 = seller), and every code in
+    `permissions` must be one the actor already holds — both enforced in the
+    service."""
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    level: int = Field(ge=1, le=4)
+    permissions: list[str] = Field(default_factory=list)
+
+
+class RoleUpdate(BaseModel):
+    """Patch a custom (tenant) role. All fields optional; `permissions=None`
+    leaves the set untouched, `permissions=[]` clears it. System roles are
+    rejected in the service."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    level: int | None = Field(default=None, ge=1, le=4)
+    permissions: list[str] | None = None
+
+
 class AssignmentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

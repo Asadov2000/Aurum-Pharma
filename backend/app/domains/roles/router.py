@@ -11,12 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, current_user, get_db, get_redis, require_permission
 from app.core.errors import BusinessRuleError
+from app.domains.roles.models import Role
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.schemas import (
     AssignmentCreate,
     AssignmentRead,
     InviteUserRequest,
     PermissionRead,
+    RoleCreate,
+    RoleUpdate,
     RoleWithPermissions,
     UserUpdate,
     UserWithAssignments,
@@ -42,6 +45,19 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     return user.tenant_id
 
 
+def _role_with_permissions(role: Role, codes: list[str]) -> RoleWithPermissions:
+    return RoleWithPermissions(
+        id=role.id,
+        tenant_id=role.tenant_id,
+        name=role.name,
+        description=role.description,
+        level=role.level,
+        is_system=role.is_system,
+        is_active=role.is_active,
+        permissions=codes,
+    )
+
+
 # -----------------------------------------------------------------------------
 # Catalogue
 # -----------------------------------------------------------------------------
@@ -64,19 +80,50 @@ async def list_roles(
     pairs = await service.list_roles_with_permissions()
     out: list[RoleWithPermissions] = []
     for role, codes in pairs:
-        out.append(
-            RoleWithPermissions(
-                id=role.id,
-                tenant_id=role.tenant_id,
-                name=role.name,
-                description=role.description,
-                level=role.level,
-                is_system=role.is_system,
-                is_active=role.is_active,
-                permissions=codes,
-            )
-        )
+        out.append(_role_with_permissions(role, codes))
     return out
+
+
+@router.post("/roles", response_model=RoleWithPermissions, status_code=status.HTTP_201_CREATED)
+async def create_role(
+    payload: RoleCreate,
+    user: Annotated[CurrentUser, Depends(require_permission("roles.create"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> RoleWithPermissions:
+    role, codes = await service.create_role(
+        actor_level=user.level,
+        actor_id=user.user_id,
+        actor_permissions=user.permissions,
+        actor_is_support=user.is_developer or user.is_administrator,
+        tenant_id=_current_tenant_or_400(user),
+        name=payload.name,
+        description=payload.description,
+        level=payload.level,
+        permission_codes=payload.permissions,
+    )
+    return _role_with_permissions(role, codes)
+
+
+@router.patch("/roles/{role_id}", response_model=RoleWithPermissions)
+async def update_role(
+    role_id: UUID,
+    payload: RoleUpdate,
+    user: Annotated[CurrentUser, Depends(require_permission("roles.update"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> RoleWithPermissions:
+    role, codes = await service.update_role(
+        actor_level=user.level,
+        actor_id=user.user_id,
+        actor_permissions=user.permissions,
+        actor_is_support=user.is_developer or user.is_administrator,
+        tenant_id=_current_tenant_or_400(user),
+        role_id=role_id,
+        name=payload.name,
+        description=payload.description,
+        level=payload.level,
+        permission_codes=payload.permissions,
+    )
+    return _role_with_permissions(role, codes)
 
 
 # -----------------------------------------------------------------------------

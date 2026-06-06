@@ -56,6 +56,36 @@ class RolesRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def insert_role(self, **fields: Any) -> Role:
+        role = Role(**fields)
+        self.session.add(role)
+        await self.session.flush()
+        await self.session.refresh(role)
+        return role
+
+    async def update_role(self, role: Role, **fields: Any) -> Role:
+        for key, value in fields.items():
+            setattr(role, key, value)
+        await self.session.flush()
+        await self.session.refresh(role)
+        return role
+
+    async def set_role_permissions(self, role_id: UUID, codes: list[str]) -> None:
+        """Replace the role's permission set wholesale."""
+        await self.session.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
+        for code in codes:
+            self.session.add(RolePermission(role_id=role_id, permission_code=code))
+        await self.session.flush()
+
+    async def existing_active_permission_codes(self, codes: list[str]) -> set[str]:
+        if not codes:
+            return set()
+        stmt = select(Permission.code).where(
+            Permission.code.in_(codes), Permission.is_active.is_(True)
+        )
+        result = await self.session.execute(stmt)
+        return set(result.scalars().all())
+
     # -------------------------------------------------------------------------
     # user_assignment
     # -------------------------------------------------------------------------
