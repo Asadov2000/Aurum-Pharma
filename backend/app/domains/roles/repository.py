@@ -9,7 +9,14 @@ from sqlalchemy import and_, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.models import AppUser
-from app.domains.roles.models import Permission, Role, RolePermission, UserAssignment
+from app.domains.roles.models import (
+    Permission,
+    Role,
+    RolePermission,
+    RoleTemplate,
+    RoleTemplatePermission,
+    UserAssignment,
+)
 
 
 class RolesRepository:
@@ -85,6 +92,26 @@ class RolesRepository:
         )
         result = await self.session.execute(stmt)
         return set(result.scalars().all())
+
+    # -------------------------------------------------------------------------
+    # role_template (global recommendation library)
+    # -------------------------------------------------------------------------
+
+    async def list_templates(self) -> list[RoleTemplate]:
+        stmt = (
+            select(RoleTemplate).where(RoleTemplate.is_active.is_(True)).order_by(RoleTemplate.name)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_template_permissions(self, template_id: UUID) -> list[str]:
+        stmt = (
+            select(RoleTemplatePermission.permission_code)
+            .where(RoleTemplatePermission.template_id == template_id)
+            .order_by(RoleTemplatePermission.permission_code)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     # -------------------------------------------------------------------------
     # user_assignment

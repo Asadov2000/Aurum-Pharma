@@ -32,7 +32,7 @@ from app.core.errors import (
     ValidationError,
 )
 from app.domains.auth.models import AppUser
-from app.domains.roles.models import Permission, Role, UserAssignment
+from app.domains.roles.models import Permission, Role, RoleTemplate, UserAssignment
 from app.domains.roles.repository import RolesRepository
 
 logger = structlog.get_logger("roles.service")
@@ -63,6 +63,14 @@ class RolesService:
         for role in roles:
             codes = await self.repo.get_role_permissions(role.id)
             out.append((role, codes))
+        return out
+
+    async def list_templates_with_permissions(self) -> list[tuple[RoleTemplate, list[str]]]:
+        templates = await self.repo.list_templates()
+        out: list[tuple[RoleTemplate, list[str]]] = []
+        for template in templates:
+            codes = await self.repo.get_template_permissions(template.id)
+            out.append((template, codes))
         return out
 
     # -------------------------------------------------------------------------

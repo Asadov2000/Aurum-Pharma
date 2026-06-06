@@ -21,6 +21,7 @@ from app.domains.roles.schemas import (
     RoleCreate,
     RoleUpdate,
     RoleWithPermissions,
+    TemplateWithPermissions,
     UserUpdate,
     UserWithAssignments,
 )
@@ -124,6 +125,28 @@ async def update_role(
         permission_codes=payload.permissions,
     )
     return _role_with_permissions(role, codes)
+
+
+@router.get("/templates", response_model=list[TemplateWithPermissions])
+async def list_templates(
+    _user: Annotated[CurrentUser, Depends(require_permission("roles.create"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> list[TemplateWithPermissions]:
+    """Global role presets for the builder — same gate as creating a role.
+    A template only pre-fills the form; anti-escalation still applies on
+    POST /roles, so a preset can never grant reach the actor lacks."""
+    pairs = await service.list_templates_with_permissions()
+    return [
+        TemplateWithPermissions(
+            id=template.id,
+            name=template.name,
+            description=template.description,
+            is_system=template.is_system,
+            is_active=template.is_active,
+            permissions=codes,
+        )
+        for template, codes in pairs
+    ]
 
 
 # -----------------------------------------------------------------------------

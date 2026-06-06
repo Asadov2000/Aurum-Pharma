@@ -94,6 +94,47 @@ class RolePermission(Base):
     )
 
 
+class RoleTemplate(Base):
+    """A reusable role preset (recommendation library). Global — like the
+    permission catalogue, every tenant sees the same templates, no RLS. A
+    template is owned by no one and nothing is assigned to it; it only
+    pre-fills the role builder. Creating a real role still goes through
+    POST /roles, where anti-escalation applies."""
+
+    __tablename__ = "role_template"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (UniqueConstraint("name", name="uq_role_template_name"),)
+
+
+class RoleTemplatePermission(Base):
+    __tablename__ = "role_template_permission"
+
+    template_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("role_template.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    permission_code: Mapped[str] = mapped_column(
+        Text, ForeignKey("permission.code"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class UserAssignment(Base):
     __tablename__ = "user_assignment"
 

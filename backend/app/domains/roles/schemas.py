@@ -59,6 +59,23 @@ class RoleUpdate(BaseModel):
     permissions: list[str] | None = None
 
 
+class TemplateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    description: str | None
+    is_system: bool
+    is_active: bool
+
+
+class TemplateWithPermissions(TemplateRead):
+    """A role preset: name + description + recommended permission set. Only a
+    hint for the builder — it grants nothing on its own."""
+
+    permissions: list[str]
+
+
 class AssignmentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
