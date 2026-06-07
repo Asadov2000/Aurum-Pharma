@@ -4,6 +4,8 @@ import {
   type Branch,
   type BranchCreatePayload,
   type BranchUpdatePayload,
+  type OwnerCreatePayload,
+  type OwnerProvision,
   type Register,
   type RegisterCreatePayload,
   type RegisterUpdatePayload,
@@ -31,6 +33,14 @@ export async function updateTenant(
   payload: TenantUpdatePayload,
 ): Promise<Tenant> {
   const { data } = await api.patch<Tenant>(`/admin/tenants/${tenantId}`, payload);
+  return data;
+}
+
+export async function createTenantOwner(
+  tenantId: string,
+  payload: OwnerCreatePayload,
+): Promise<OwnerProvision> {
+  const { data } = await api.post<OwnerProvision>(`/admin/tenants/${tenantId}/owner`, payload);
   return data;
 }
 

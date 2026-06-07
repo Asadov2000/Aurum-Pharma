@@ -38,6 +38,18 @@ export interface TenantCreatePayload {
   legal_address?: string | null;
 }
 
+export interface OwnerCreatePayload {
+  email: string;
+  full_name: string;
+}
+
+export interface OwnerProvision {
+  user_id: string;
+  email: string;
+  home_tenant_id: string;
+  role_id: string;
+}
+
 export interface TenantUpdatePayload {
   name?: string;
   legal_name?: string | null;

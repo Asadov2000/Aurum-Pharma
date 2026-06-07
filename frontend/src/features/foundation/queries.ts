@@ -4,6 +4,7 @@ import {
   createBranch,
   createRegister,
   createTenant,
+  createTenantOwner,
   deleteBranch,
   deleteRegister,
   getTenantSettings,
@@ -18,6 +19,7 @@ import {
 import {
   type BranchCreatePayload,
   type BranchUpdatePayload,
+  type OwnerCreatePayload,
   type RegisterCreatePayload,
   type RegisterUpdatePayload,
   type TenantCreatePayload,
@@ -59,6 +61,17 @@ export function useUpdateTenant() {
   return useMutation({
     mutationFn: (args: { id: string; payload: TenantUpdatePayload }) =>
       updateTenant(args.id, args.payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: foundationKeys.tenants });
+    },
+  });
+}
+
+export function useCreateTenantOwner() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { tenantId: string; payload: OwnerCreatePayload }) =>
+      createTenantOwner(args.tenantId, args.payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: foundationKeys.tenants });
     },

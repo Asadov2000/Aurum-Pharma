@@ -24,6 +24,8 @@ from app.domains.foundation.schemas import (
     BranchCreate,
     BranchRead,
     BranchUpdate,
+    OwnerCreate,
+    OwnerProvisionRead,
     RegisterCreate,
     RegisterRead,
     RegisterUpdate,
@@ -34,6 +36,8 @@ from app.domains.foundation.schemas import (
     TenantUpdate,
 )
 from app.domains.foundation.service import FoundationService
+from app.domains.roles.repository import RolesRepository
+from app.domains.roles.service import RolesService
 
 
 async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> FoundationService:
@@ -120,6 +124,43 @@ async def update_tenant(
 ) -> TenantRead:
     tenant = await service.update_tenant(tenant_id, fields=payload.model_dump(exclude_none=True))
     return TenantRead.model_validate(tenant)
+
+
+@admin_router.post(
+    "/tenants/{tenant_id}/owner",
+    response_model=OwnerProvisionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_tenant_owner(
+    tenant_id: UUID,
+    payload: OwnerCreate,
+    user: Annotated[CurrentUser, Depends(require_support)],
+    service: Annotated[FoundationService, Depends(_service)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OwnerProvisionRead:
+    """Onboard the first owner of a tenant: create the owner account, instantiate
+    the tenant «Владелец» role from the global template, and assign it — all in
+    one transaction (get_db wraps the request; any error rolls everything back,
+    so there is never an owner without a role). Support-only."""
+    tenant = await service.get_tenant(tenant_id)  # NotFoundError → 404
+    if tenant.status == "archived":
+        raise BusinessRuleError(
+            "Аптека в архиве — нельзя добавить владельца",
+            details={"status": tenant.status},
+        )
+    roles = RolesService(RolesRepository(db))
+    owner, role = await roles.provision_owner(
+        tenant_id=tenant_id,
+        email=str(payload.email),
+        full_name=payload.full_name,
+        actor_id=user.user_id,
+    )
+    return OwnerProvisionRead(
+        user_id=owner.id,
+        email=owner.email,
+        home_tenant_id=tenant_id,
+        role_id=role.id,
+    )
 
 
 # =============================================================================

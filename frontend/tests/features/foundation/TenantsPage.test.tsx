@@ -4,10 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listTenants = vi.fn();
 const createTenant = vi.fn();
+const createTenantOwner = vi.fn();
 
 vi.mock("@/features/foundation/api", () => ({
   listTenants: (...a: unknown[]) => listTenants(...a),
   createTenant: (...a: unknown[]) => createTenant(...a),
+  createTenantOwner: (...a: unknown[]) => createTenantOwner(...a),
   updateTenant: vi.fn(),
   getTenantSettings: vi.fn(),
   updateTenantSettings: vi.fn(),
@@ -55,6 +57,7 @@ describe("TenantsPage", () => {
   beforeEach(() => {
     listTenants.mockReset();
     createTenant.mockReset();
+    createTenantOwner.mockReset();
   });
 
   afterEach(() => {
@@ -79,26 +82,43 @@ describe("TenantsPage", () => {
     listTenants.mockResolvedValueOnce([]);
     renderPage();
     await screen.findByText(/Пока нет ни одного тенанта/i);
-    fireEvent.click(screen.getByRole("button", { name: /Новый тенант/i }));
-    const submit = await screen.findByRole("button", { name: /^Создать$/i });
+    fireEvent.click(screen.getByRole("button", { name: /Новая аптека/i }));
+    const submit = await screen.findByRole("button", { name: /Создать аптеку и владельца/i });
     fireEvent.click(submit);
+    // Pharmacy AND owner fields are required.
     expect(await screen.findByText(/Введите название/i)).toBeInTheDocument();
+    expect(screen.getByText(/Введите ФИО владельца/i)).toBeInTheDocument();
+    expect(screen.getByText(/Некорректный email владельца/i)).toBeInTheDocument();
     expect(createTenant).not.toHaveBeenCalled();
+    expect(createTenantOwner).not.toHaveBeenCalled();
   });
 
-  it("submits a new tenant with trimmed payload", async () => {
+  it("creates pharmacy + owner and shows the login-code helper", async () => {
     listTenants.mockResolvedValue([]);
     createTenant.mockResolvedValueOnce(SAMPLE);
+    createTenantOwner.mockResolvedValueOnce({
+      user_id: "u-1",
+      email: "vladelec@shifo.tj",
+      home_tenant_id: SAMPLE.id,
+      role_id: "r-1",
+    });
     renderPage();
     await screen.findByText(/Пока нет ни одного тенанта/i);
-    fireEvent.click(screen.getByRole("button", { name: /Новый тенант/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Новая аптека/i }));
     fireEvent.change(await screen.findByLabelText("Название"), {
       target: { value: " Demo Pharmacy " },
     });
     fireEvent.change(screen.getByLabelText(/Контактный email/i), {
       target: { value: "owner@aurum.tj" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Создать$/i }));
+    fireEvent.change(screen.getByLabelText(/ФИО владельца/i), {
+      target: { value: "Владелец Аптеки" },
+    });
+    fireEvent.change(screen.getByLabelText(/Email владельца/i), {
+      target: { value: "vladelec@shifo.tj" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Создать аптеку и владельца/i }));
+
     await waitFor(() => {
       expect(createTenant).toHaveBeenCalledTimes(1);
     });
@@ -110,5 +130,13 @@ describe("TenantsPage", () => {
         inn_or_tin: null,
       }),
     );
+    expect(createTenantOwner).toHaveBeenCalledWith(SAMPLE.id, {
+      email: "vladelec@shifo.tj",
+      full_name: "Владелец Аптеки",
+    });
+    // Success panel: owner email + login-code helper.
+    expect(await screen.findByText(/Аптека и владелец созданы/i)).toBeInTheDocument();
+    expect(screen.getByText("vladelec@shifo.tj")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Получить код входа/i })).toBeInTheDocument();
   });
 });

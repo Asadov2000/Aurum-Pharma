@@ -47,7 +47,7 @@ export function TenantsPage(): JSX.Element {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Тенанты</h1>
-        <Button onClick={() => setCreating(true)}>+ Новый тенант</Button>
+        <Button onClick={() => setCreating(true)}>+ Новая аптека</Button>
       </div>
       {error && (
         <p className="text-sm text-danger">
@@ -97,7 +97,7 @@ export function TenantsPage(): JSX.Element {
           setCreating(false);
           setEditing(null);
         }}
-        title={editing ? `Редактирование: ${editing.name}` : "Новый тенант"}
+        title={editing ? `Редактирование: ${editing.name}` : "Новая аптека"}
       >
         <TenantForm
           tenant={editing}

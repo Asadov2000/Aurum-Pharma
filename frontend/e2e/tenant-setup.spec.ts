@@ -15,17 +15,23 @@ test.describe("Tenant setup (dev)", () => {
     clearLoginRateLimit(DEV.email);
   });
 
-  test("creates a tenant and the row shows up on /admin/tenants", async ({ page }) => {
+  test("creates a pharmacy + owner and the row shows up on /admin/tenants", async ({ page }) => {
     await loginInBrowser(page, DEV);
     await page.goto("/admin/tenants");
 
     const name = uniqueName("E2E Tenant");
     const email = `${name.toLowerCase().replace(/\s+/g, "-")}@e2e.aurum.tj`;
+    const ownerEmail = `owner-${name.toLowerCase().replace(/\s+/g, "-")}@e2e.aurum.tj`;
 
-    await page.getByRole("button", { name: /\+ Новый тенант/ }).click();
+    await page.getByRole("button", { name: /\+ Новая аптека/ }).click();
     await page.getByLabel("Название", { exact: true }).fill(name);
     await page.getByLabel("Контактный email").fill(email);
-    await page.getByRole("button", { name: /^Создать$/ }).click();
+    await page.getByLabel("ФИО владельца").fill("Владелец Тест");
+    await page.getByLabel("Email владельца").fill(ownerEmail);
+    await page.getByRole("button", { name: /Создать аптеку и владельца/ }).click();
+
+    await expect(page.getByText(/Аптека и владелец созданы/)).toBeVisible();
+    await page.getByRole("button", { name: /^Готово$/ }).click();
 
     await expect(page.getByRole("cell", { name })).toBeVisible();
     await expect(page.getByRole("cell", { name: email })).toBeVisible();

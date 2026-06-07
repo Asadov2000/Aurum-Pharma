@@ -64,6 +64,20 @@ class TenantRead(BaseModel):
     updated_at: datetime
 
 
+class OwnerCreate(BaseModel):
+    """Provision the first owner of a tenant (support-level onboarding)."""
+
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=200)
+
+
+class OwnerProvisionRead(BaseModel):
+    user_id: UUID
+    email: str
+    home_tenant_id: UUID
+    role_id: UUID
+
+
 # -----------------------------------------------------------------------------
 # Tenant settings
 # -----------------------------------------------------------------------------

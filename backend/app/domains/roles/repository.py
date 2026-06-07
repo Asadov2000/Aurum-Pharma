@@ -104,6 +104,13 @@ class RolesRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_template_by_name(self, name: str) -> RoleTemplate | None:
+        stmt = select(RoleTemplate).where(
+            RoleTemplate.name == name, RoleTemplate.is_active.is_(True)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_template_permissions(self, template_id: UUID) -> list[str]:
         stmt = (
             select(RoleTemplatePermission.permission_code)

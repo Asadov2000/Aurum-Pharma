@@ -40,6 +40,13 @@ logger = structlog.get_logger("roles.service")
 PERMS_CACHE_TTL_SECONDS = 5 * 60
 PERMS_CACHE_PREFIX = "auth:perms"
 
+# Owner provisioning: a tenant's «Владелец» role is instantiated from the global
+# «Владелец» template (seeded in migration 0019). The template has no slug/code,
+# so its name is the stable key. Level 3 = owner tier (1=dev … 4=seller).
+OWNER_TEMPLATE_NAME = "Владелец"
+OWNER_ROLE_NAME = "Владелец"
+OWNER_ROLE_LEVEL = 3
+
 
 def perms_cache_key(user_id: UUID, tenant_id: UUID) -> str:
     return f"{PERMS_CACHE_PREFIX}:{user_id}:{tenant_id}"
@@ -72,6 +79,68 @@ class RolesService:
             codes = await self.repo.get_template_permissions(template.id)
             out.append((template, codes))
         return out
+
+    # -------------------------------------------------------------------------
+    # Owner provisioning (support-level: dev/admin onboards a new pharmacy)
+    # -------------------------------------------------------------------------
+
+    async def provision_owner(
+        self,
+        *,
+        tenant_id: UUID,
+        email: str,
+        full_name: str,
+        actor_id: UUID | None = None,
+    ) -> tuple[AppUser, Role]:
+        """Create the first owner of a tenant and give them a tenant «Владелец»
+        role instantiated from the global template. Support-level operation —
+        the anti-escalation subset check is intentionally bypassed (the source is
+        the trusted system template), so this goes straight through the repo, not
+        create_role. Caller runs it inside one transaction (all-or-nothing)."""
+        if await self.repo.get_user_by_email(email) is not None:
+            raise ConflictError("Пользователь с таким email уже существует")
+
+        user = await self.repo.insert_user(
+            email=email,
+            full_name=full_name,
+            home_tenant_id=tenant_id,
+            is_developer=False,
+            is_administrator=False,
+            status="active",
+        )
+        role = await self._ensure_tenant_owner_role(tenant_id, actor_id)
+        await self.repo.insert_assignment(
+            user_id=user.id,
+            tenant_id=tenant_id,
+            branch_id=None,
+            role_id=role.id,
+            password_required=False,
+            created_by=actor_id,
+        )
+        logger.info("owner_provisioned", tenant_id=str(tenant_id), user_id=str(user.id))
+        return user, role
+
+    async def _ensure_tenant_owner_role(self, tenant_id: UUID, actor_id: UUID | None) -> Role:
+        """Reuse the tenant's «Владелец» role if present, else instantiate it from
+        the global template (full permission set copied verbatim)."""
+        existing = await self.repo.get_role_by_name(OWNER_ROLE_NAME, tenant_id=tenant_id)
+        if existing is not None:
+            return existing
+        template = await self.repo.get_template_by_name(OWNER_TEMPLATE_NAME)
+        if template is None:
+            raise NotFoundError("Шаблон роли «Владелец» не найден")
+        codes = await self.repo.get_template_permissions(template.id)
+        role = await self.repo.insert_role(
+            tenant_id=tenant_id,
+            name=OWNER_ROLE_NAME,
+            description=template.description,
+            level=OWNER_ROLE_LEVEL,
+            is_system=False,
+            created_by=actor_id,
+            updated_by=actor_id,
+        )
+        await self.repo.set_role_permissions(role.id, codes)
+        return role
 
     # -------------------------------------------------------------------------
     # Role builder — create / edit custom (tenant) roles
