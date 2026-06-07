@@ -41,9 +41,10 @@ export default async function globalSetup(): Promise<void> {
       DO UPDATE SET is_active = true, role_id = EXCLUDED.role_id
   `);
 
-  // (2) Cache Demo Pharmacy id for specs that need cross-process seed data.
+  // (2) Cache the demo tenant id for specs that need cross-process seed data.
+  // The demo seeder renames it to «Аптека Шифо»; accept either name.
   const tenantId = psql(
-    "SELECT id FROM tenant WHERE name = 'Demo Pharmacy' LIMIT 1",
+    "SELECT id FROM tenant WHERE name IN ('Аптека Шифо', 'Demo Pharmacy') ORDER BY name LIMIT 1",
   );
   if (!tenantId) {
     throw new Error("Demo Pharmacy tenant missing — re-run the initial seed");

@@ -49,8 +49,13 @@ async def test_search_by_inn_trigram(db_session: AsyncSession, make_tenant) -> N
     items, _ = await service.search(
         q="пара", category=None, dispensing_type=None, page=1, page_size=50
     )
-    assert len(items) == 1
-    assert items[0].inn == "Парацетамол"
+    # search() is RLS-scoped in production, but tests run on the BYPASSRLS
+    # support pool with no app.tenant_id GUC, so they also see other tenants
+    # (incl. the demo seeder's «Парацетамол»). Scope the assertion to this
+    # test's own tenant rather than the global result count.
+    mine = [i for i in items if i.tenant_id == tenant.id]
+    assert len(mine) == 1
+    assert mine[0].inn == "Парацетамол"
 
 
 async def test_search_filter_by_category(db_session: AsyncSession, make_tenant) -> None:
