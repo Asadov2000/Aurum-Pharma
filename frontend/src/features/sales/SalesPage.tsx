@@ -2,9 +2,10 @@ import { useState } from "react";
 
 import {
   Badge,
-  Button,
+  FilterBar,
   Input,
   Label,
+  Pagination,
   Select,
   SkeletonRows,
   Table,
@@ -57,7 +58,6 @@ export function SalesPage(): JSX.Element {
   });
 
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const resetPage = () => setPage(1);
 
@@ -68,7 +68,7 @@ export function SalesPage(): JSX.Element {
         <span className="text-sm text-foreground-muted">всего: {total}</span>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-3">
+      <FilterBar>
         <div>
           <Label htmlFor="receipt">№ чека</Label>
           <Input
@@ -164,7 +164,7 @@ export function SalesPage(): JSX.Element {
             <option value="false">Без возврата</option>
           </Select>
         </div>
-      </div>
+      </FilterBar>
 
       {error && (
         <p className="text-sm text-danger">
@@ -226,31 +226,7 @@ export function SalesPage(): JSX.Element {
             </TBody>
           </Table>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-foreground-muted">
-                Страница {page} из {totalPages}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={page === 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  ←
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  →
-                </Button>
-              </div>
-            </div>
-          )}
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </>
       )}
 

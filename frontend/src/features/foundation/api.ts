@@ -19,7 +19,9 @@ import {
 // ---- Tenants (admin) -------------------------------------------------------
 
 export async function listTenants(): Promise<Tenant[]> {
-  const { data } = await api.get<Tenant[]>("/admin/tenants");
+  // Server supports limit/offset (no search); fetch a wide page and let the UI
+  // search + paginate on the client. 500 is the backend's max.
+  const { data } = await api.get<Tenant[]>("/admin/tenants", { params: { limit: 500 } });
   return data;
 }
 

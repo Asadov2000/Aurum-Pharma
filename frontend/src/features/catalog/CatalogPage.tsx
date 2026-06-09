@@ -3,9 +3,12 @@ import { useEffect, useState } from "react";
 import {
   Badge,
   Button,
+  ConfirmDialog,
+  FilterBar,
   Input,
   Label,
   Modal,
+  Pagination,
   Select,
   SkeletonRows,
   Table,
@@ -35,6 +38,8 @@ export function CatalogPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<CatalogItem | null>(null);
   const [importing, setImporting] = useState(false);
+  const [confirmItem, setConfirmItem] = useState<CatalogItem | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   // 300ms debounce so we don't fire on every keystroke.
   useEffect(() => {
@@ -54,14 +59,15 @@ export function CatalogPage(): JSX.Element {
   const deleteMutation = useDeleteCatalogItem();
 
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const onDelete = async (item: CatalogItem) => {
-    if (!window.confirm(`Архивировать позицию «${item.brand_name}»?`)) return;
+  const doArchive = async () => {
+    if (!confirmItem) return;
+    setConfirmError(null);
     try {
-      await deleteMutation.mutateAsync(item.id);
+      await deleteMutation.mutateAsync(confirmItem.id);
+      setConfirmItem(null);
     } catch (err) {
-      window.alert(describeApiError(err, "Не удалось архивировать"));
+      setConfirmError(describeApiError(err, "Не удалось архивировать"));
     }
   };
 
@@ -77,7 +83,7 @@ export function CatalogPage(): JSX.Element {
         </div>
       </div>
 
-      <div className="flex items-end gap-4">
+      <FilterBar>
         <div className="flex-1">
           <Label htmlFor="q">Поиск (название, МНН, производитель)</Label>
           <Input
@@ -106,7 +112,7 @@ export function CatalogPage(): JSX.Element {
             ))}
           </Select>
         </div>
-      </div>
+      </FilterBar>
 
       {error && (
         <p className="text-sm text-danger">
@@ -183,8 +189,7 @@ export function CatalogPage(): JSX.Element {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => void onDelete(it)}
-                        isLoading={deleteMutation.isPending}
+                        onClick={() => setConfirmItem(it)}
                       >
                         Архив
                       </Button>
@@ -194,32 +199,7 @@ export function CatalogPage(): JSX.Element {
               ))}
             </TBody>
           </Table>
-          <div className="flex items-center justify-between text-sm text-foreground-secondary">
-            <span>
-              Всего: <span className="font-medium">{total}</span>
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                ← Назад
-              </Button>
-              <span>
-                Стр. {page} / {totalPages}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Вперёд →
-              </Button>
-            </div>
-          </div>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </>
       )}
 
@@ -254,6 +234,25 @@ export function CatalogPage(): JSX.Element {
       >
         <ImportWizard onClose={() => setImporting(false)} />
       </Modal>
+
+      <ConfirmDialog
+        open={confirmItem !== null}
+        title="Архивировать позицию"
+        message={
+          <>
+            Архивировать «{confirmItem?.brand_name}»? Позицию можно будет вернуть позже.
+            {confirmError && <span className="mt-2 block text-danger">{confirmError}</span>}
+          </>
+        }
+        confirmLabel="Архивировать"
+        variant="danger"
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => void doArchive()}
+        onCancel={() => {
+          setConfirmItem(null);
+          setConfirmError(null);
+        }}
+      />
     </div>
   );
 }

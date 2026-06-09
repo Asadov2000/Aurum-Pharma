@@ -67,7 +67,7 @@ describe("TenantsPage", () => {
   it("renders the empty state when API returns no tenants", async () => {
     listTenants.mockResolvedValueOnce([]);
     renderPage();
-    expect(await screen.findByText(/Пока нет ни одного тенанта/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Пока нет ни одной аптеки/i)).toBeInTheDocument();
   });
 
   it("renders tenants returned from the API", async () => {
@@ -81,7 +81,7 @@ describe("TenantsPage", () => {
   it("validates required fields when submitting an empty create form", async () => {
     listTenants.mockResolvedValueOnce([]);
     renderPage();
-    await screen.findByText(/Пока нет ни одного тенанта/i);
+    await screen.findByText(/Пока нет ни одной аптеки/i);
     fireEvent.click(screen.getByRole("button", { name: /Новая аптека/i }));
     const submit = await screen.findByRole("button", { name: /Создать аптеку и владельца/i });
     fireEvent.click(submit);
@@ -103,7 +103,7 @@ describe("TenantsPage", () => {
       role_id: "r-1",
     });
     renderPage();
-    await screen.findByText(/Пока нет ни одного тенанта/i);
+    await screen.findByText(/Пока нет ни одной аптеки/i);
     fireEvent.click(screen.getByRole("button", { name: /Новая аптека/i }));
     fireEvent.change(await screen.findByLabelText("Название"), {
       target: { value: " Demo Pharmacy " },

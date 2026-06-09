@@ -2,9 +2,9 @@ import { useState } from "react";
 
 import {
   Badge,
-  Button,
   Input,
   Label,
+  Pagination,
   Select,
   Table,
   TableEmpty,
@@ -57,7 +57,6 @@ export function AuditPage(): JSX.Element {
   });
 
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-4">
@@ -220,31 +219,7 @@ export function AuditPage(): JSX.Element {
             </TBody>
           </Table>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-foreground-muted">
-                Страница {page} из {totalPages}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={page === 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  ←
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  →
-                </Button>
-              </div>
-            </div>
-          )}
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </>
       )}
 

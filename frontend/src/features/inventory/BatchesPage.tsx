@@ -3,9 +3,12 @@ import { useState } from "react";
 import {
   Badge,
   Button,
+  FilterBar,
   Label,
   Modal,
+  Pagination,
   Select,
+  SkeletonRows,
   Switch,
   Table,
   TableEmpty,
@@ -45,7 +48,6 @@ export function BatchesPage(): JSX.Element {
   });
 
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const branchNameById = (id: string): string =>
     branches.data?.find((b) => b.id === id)?.name ?? id.slice(0, 8);
@@ -59,7 +61,7 @@ export function BatchesPage(): JSX.Element {
         </span>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4">
+      <FilterBar>
         <div className="w-72">
           <Label htmlFor="catalog">Товар</Label>
           <CatalogPicker
@@ -118,7 +120,7 @@ export function BatchesPage(): JSX.Element {
             setPage(1);
           }}
         />
-      </div>
+      </FilterBar>
 
       {error && (
         <p className="text-sm text-danger">
@@ -127,7 +129,7 @@ export function BatchesPage(): JSX.Element {
       )}
 
       {isLoading ? (
-        <p className="text-sm text-foreground-muted">Загрузка…</p>
+        <SkeletonRows rows={6} />
       ) : !data || data.items.length === 0 ? (
         <TableEmpty>
           {branchId || catalogId || expiry || showEmpty
@@ -151,9 +153,8 @@ export function BatchesPage(): JSX.Element {
             <TBody>
               {data.items.map((b) => (
                 <TR key={b.id}>
-                  <TD className="font-mono text-xs">
+                  <TD className="font-mono text-xs" title={`id: ${b.id}`}>
                     {b.batch_number ?? "—"}
-                    <div className="text-foreground-muted">id: {b.id.slice(0, 8)}</div>
                   </TD>
                   <TD>{branchNameById(b.branch_id)}</TD>
                   <TD>
@@ -188,32 +189,7 @@ export function BatchesPage(): JSX.Element {
               ))}
             </TBody>
           </Table>
-          <div className="flex items-center justify-between text-sm text-foreground-secondary">
-            <span>
-              Всего: <span className="font-medium">{total}</span>
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                ← Назад
-              </Button>
-              <span>
-                Стр. {page} / {totalPages}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Вперёд →
-              </Button>
-            </div>
-          </div>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </>
       )}
 

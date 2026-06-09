@@ -3,7 +3,9 @@ import { useState } from "react";
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Modal,
+  SkeletonRows,
   Table,
   TableEmpty,
   TBody,
@@ -53,6 +55,8 @@ export function UsersPage(): JSX.Element {
 
   const [inviting, setInviting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ type: "block" | "archive"; user: Row } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const users = useUsersQuery(hasTenant && canManage);
   const roles = useRolesQuery(hasTenant && canManage);
   const blockMutation = useBlockUser();
@@ -66,21 +70,21 @@ export function UsersPage(): JSX.Element {
 
   const roleName = (id: string) => roles.data?.find((r) => r.id === id)?.name ?? id.slice(0, 8);
 
-  const onBlock = async (u: Row) => {
-    if (!window.confirm(`Заблокировать пользователя «${u.full_name}»?`)) return;
-    try {
-      await blockMutation.mutateAsync(u.id);
-    } catch (err) {
-      window.alert(describeApiError(err, "Не удалось заблокировать"));
-    }
+  const ask = (type: "block" | "archive", u: Row) => {
+    setActionError(null);
+    setPending({ type, user: u });
   };
 
-  const onArchive = async (u: Row) => {
-    if (!window.confirm(`Архивировать пользователя «${u.full_name}»? Действие необратимо.`)) return;
+  const runPending = async () => {
+    if (!pending) return;
+    setActionError(null);
+    const mutation = pending.type === "block" ? blockMutation : archiveMutation;
+    const fail = pending.type === "block" ? "Не удалось заблокировать" : "Не удалось архивировать";
     try {
-      await archiveMutation.mutateAsync(u.id);
+      await mutation.mutateAsync(pending.user.id);
+      setPending(null);
     } catch (err) {
-      window.alert(describeApiError(err, "Не удалось архивировать"));
+      setActionError(describeApiError(err, fail));
     }
   };
 
@@ -107,7 +111,7 @@ export function UsersPage(): JSX.Element {
         </p>
       )}
       {users.isLoading ? (
-        <p className="text-sm text-foreground-muted">Загрузка…</p>
+        <SkeletonRows rows={6} />
       ) : !users.data || users.data.length === 0 ? (
         <TableEmpty>Пока нет пользователей</TableEmpty>
       ) : (
@@ -155,12 +159,12 @@ export function UsersPage(): JSX.Element {
                       Роли
                     </Button>
                     {u.status !== "blocked" && u.status !== "archived" && (
-                      <Button variant="ghost" size="sm" onClick={() => void onBlock(u)}>
+                      <Button variant="ghost" size="sm" onClick={() => ask("block", u)}>
                         Блок
                       </Button>
                     )}
                     {u.status !== "archived" && (
-                      <Button variant="ghost" size="sm" onClick={() => void onArchive(u)}>
+                      <Button variant="ghost" size="sm" onClick={() => ask("archive", u)}>
                         Архив
                       </Button>
                     )}
@@ -185,6 +189,32 @@ export function UsersPage(): JSX.Element {
           <AssignmentsPanel user={editing} onClose={() => setEditingId(null)} />
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={pending !== null}
+        title={pending?.type === "block" ? "Заблокировать сотрудника" : "Архивировать сотрудника"}
+        message={
+          <>
+            {pending?.type === "block" ? (
+              <>
+                Заблокировать «{pending?.user.full_name}»? Он не сможет войти, пока вы не снимете
+                блокировку.
+              </>
+            ) : (
+              <>Архивировать «{pending?.user.full_name}»? Действие необратимо.</>
+            )}
+            {actionError && <span className="mt-2 block text-danger">{actionError}</span>}
+          </>
+        }
+        confirmLabel={pending?.type === "block" ? "Заблокировать" : "Архивировать"}
+        variant="danger"
+        isLoading={blockMutation.isPending || archiveMutation.isPending}
+        onConfirm={() => void runPending()}
+        onCancel={() => {
+          setPending(null);
+          setActionError(null);
+        }}
+      />
     </div>
   );
 }

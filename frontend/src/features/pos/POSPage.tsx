@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Card, CardContent, Label, Select, Switch } from "@/components/ui";
+import { Card, CardContent, Input, Label, Select, Switch } from "@/components/ui";
 import { useRegistersQuery, useTenantSettingsQuery } from "@/features/foundation/queries";
 import { cn } from "@/lib/utils";
 
@@ -81,13 +81,14 @@ export function POSPage(): JSX.Element {
                 <div>
                   <Label htmlFor="register">Касса</Label>
                   {onlyRegister ? (
-                    // Single register — auto-selected, shown filled & inactive.
-                    <div
+                    // Single register — auto-selected, shown as a disabled field.
+                    <Input
                       id="register"
-                      className="flex h-10 w-56 items-center rounded-md border border-input bg-surface px-3 text-sm text-foreground"
-                    >
-                      {onlyRegister.name}
-                    </div>
+                      className="w-56"
+                      value={onlyRegister.name}
+                      readOnly
+                      disabled
+                    />
                   ) : (
                     <Select
                       id="register"

@@ -108,9 +108,9 @@ describe("POSPage", () => {
     renderPage();
     expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Открыть смену/i })).toBeInTheDocument();
-    // No dropdown to choose from — the single register is filled in directly.
+    // No dropdown to choose from — the single register is shown in a disabled field.
     expect(screen.queryByText("— выберите —")).not.toBeInTheDocument();
-    expect(screen.getByText(REGISTER.name)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(REGISTER.name)).toBeInTheDocument();
     expect(window.localStorage.getItem("pos:lastRegisterId")).toBe(REGISTER.id);
   });
 
