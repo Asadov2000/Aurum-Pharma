@@ -64,6 +64,7 @@ class TemplateRead(BaseModel):
 
     id: UUID
     name: str
+    slug: str
     description: str | None
     is_system: bool
     is_active: bool
@@ -101,6 +102,13 @@ class UserInfo(BaseModel):
 
 class UserWithAssignments(UserInfo):
     assignments: list[AssignmentRead]
+
+
+class UserListResponse(BaseModel):
+    items: list[UserWithAssignments]
+    total: int
+    page: int
+    page_size: int
 
 
 class InviteUserRequest(BaseModel):

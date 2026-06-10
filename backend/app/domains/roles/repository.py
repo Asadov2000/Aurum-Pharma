@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, select, update
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.models import AppUser
@@ -63,6 +63,20 @@ class RolesRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def permissions_for_roles(self, role_ids: list[UUID]) -> dict[UUID, list[str]]:
+        """All permission codes for many roles in one query → {role_id: [codes]}."""
+        if not role_ids:
+            return {}
+        stmt = (
+            select(RolePermission.role_id, RolePermission.permission_code)
+            .where(RolePermission.role_id.in_(role_ids))
+            .order_by(RolePermission.permission_code)
+        )
+        out: dict[UUID, list[str]] = {}
+        for role_id, code in (await self.session.execute(stmt)).all():
+            out.setdefault(role_id, []).append(code)
+        return out
+
     async def insert_role(self, **fields: Any) -> Role:
         role = Role(**fields)
         self.session.add(role)
@@ -104,9 +118,9 @@ class RolesRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_template_by_name(self, name: str) -> RoleTemplate | None:
+    async def get_template_by_slug(self, slug: str) -> RoleTemplate | None:
         stmt = select(RoleTemplate).where(
-            RoleTemplate.name == name, RoleTemplate.is_active.is_(True)
+            RoleTemplate.slug == slug, RoleTemplate.is_active.is_(True)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -120,6 +134,20 @@ class RolesRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def permissions_for_templates(self, template_ids: list[UUID]) -> dict[UUID, list[str]]:
+        """All permission codes for many templates in one query → {tpl_id: [codes]}."""
+        if not template_ids:
+            return {}
+        stmt = (
+            select(RoleTemplatePermission.template_id, RoleTemplatePermission.permission_code)
+            .where(RoleTemplatePermission.template_id.in_(template_ids))
+            .order_by(RoleTemplatePermission.permission_code)
+        )
+        out: dict[UUID, list[str]] = {}
+        for template_id, code in (await self.session.execute(stmt)).all():
+            out.setdefault(template_id, []).append(code)
+        return out
+
     # -------------------------------------------------------------------------
     # user_assignment
     # -------------------------------------------------------------------------
@@ -130,6 +158,19 @@ class RolesRepository:
         stmt = select(UserAssignment).where(UserAssignment.user_id == user_id)
         if tenant_id is not None:
             stmt = stmt.where(UserAssignment.tenant_id == tenant_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def assignments_for_users(
+        self, user_ids: list[UUID], *, tenant_id: UUID
+    ) -> list[UserAssignment]:
+        """Assignments for many users in one query (kills the per-user N+1)."""
+        if not user_ids:
+            return []
+        stmt = select(UserAssignment).where(
+            UserAssignment.user_id.in_(user_ids),
+            UserAssignment.tenant_id == tenant_id,
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -212,14 +253,29 @@ class RolesRepository:
         await self.session.refresh(user)
         return user
 
-    async def list_users_for_tenant(self, tenant_id: UUID) -> list[AppUser]:
-        """Distinct users that have at least one assignment in this tenant."""
+    async def count_users_for_tenant(self, tenant_id: UUID) -> int:
+        """Distinct users with at least one assignment in this tenant."""
+        stmt = (
+            select(func.count(func.distinct(AppUser.id)))
+            .select_from(AppUser)
+            .join(UserAssignment, UserAssignment.user_id == AppUser.id)
+            .where(UserAssignment.tenant_id == tenant_id)
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def list_users_for_tenant(
+        self, tenant_id: UUID, *, limit: int, offset: int
+    ) -> list[AppUser]:
+        """One page of distinct users with an assignment in this tenant, in a
+        stable order (full_name, email) so pages don't shuffle."""
         stmt = (
             select(AppUser)
             .join(UserAssignment, UserAssignment.user_id == AppUser.id)
             .where(UserAssignment.tenant_id == tenant_id)
-            .order_by(AppUser.created_at.asc())
+            .order_by(AppUser.full_name.asc(), AppUser.email.asc())
             .distinct()
+            .limit(limit)
+            .offset(offset)
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

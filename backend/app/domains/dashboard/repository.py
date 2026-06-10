@@ -8,12 +8,16 @@ work the same way). The expiry CASE mirrors v_batch_with_expiry_status
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.time import local_day_range
 
 
 class DashboardRepository:
@@ -24,7 +28,10 @@ class DashboardRepository:
         # Gross sales for the local "today", matching the sales-summary report:
         # a forward sale counts once it has completed_at (so a sale refunded the
         # same day — now status='voided' — stays in gross); test sales excluded;
-        # the day boundary is the tenant timezone, not UTC.
+        # the day boundary is the tenant timezone, not UTC. Sargable half-open
+        # range on completed_at uses ix_sale_tenant(tenant_id, completed_at).
+        today_local = datetime.now(ZoneInfo(tz)).date()
+        start, end = local_day_range(today_local, tz)
         row = (
             (
                 await self.session.execute(
@@ -34,11 +41,10 @@ class DashboardRepository:
                         "COALESCE(MAX(currency), 'TJS') AS currency "
                         "FROM sale "
                         "WHERE tenant_id = :tid AND sale_type = 'sale' "
-                        "AND is_test = false AND completed_at IS NOT NULL "
-                        "AND (completed_at AT TIME ZONE :tz)::date "
-                        "    = (now() AT TIME ZONE :tz)::date"
+                        "AND is_test = false "
+                        "AND completed_at >= :start AND completed_at < :end"
                     ),
-                    {"tid": str(tenant_id), "tz": tz},
+                    {"tid": str(tenant_id), "start": start, "end": end},
                 )
             )
             .mappings()

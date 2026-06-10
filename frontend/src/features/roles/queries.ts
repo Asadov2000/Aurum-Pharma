@@ -29,10 +29,10 @@ export const rolesKeys = {
   templates: ["roles", "templates"] as const,
 };
 
-export function useUsersQuery(enabled = true) {
+export function useUsersQuery(enabled = true, page = 1, pageSize = 50) {
   return useQuery({
-    queryKey: rolesKeys.users,
-    queryFn: listUsers,
+    queryKey: [...rolesKeys.users, page, pageSize] as const,
+    queryFn: () => listUsers(page, pageSize),
     enabled,
   });
 }

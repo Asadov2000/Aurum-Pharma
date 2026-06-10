@@ -5,6 +5,7 @@ import {
   Button,
   ConfirmDialog,
   Modal,
+  Pagination,
   SkeletonRows,
   Table,
   TableEmpty,
@@ -30,6 +31,8 @@ import { type UserStatus, type UserWithAssignments } from "./types";
 
 // UserWithAssignments is used implicitly via the query data + onBlock/onArchive args.
 type Row = UserWithAssignments;
+
+const PAGE_SIZE = 50;
 
 const statusTone: Record<UserStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
   invited: "info",
@@ -57,16 +60,17 @@ export function UsersPage(): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, setPending] = useState<{ type: "block" | "archive"; user: Row } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const users = useUsersQuery(hasTenant && canManage);
+  const [page, setPage] = useState(1);
+  const users = useUsersQuery(hasTenant && canManage, page, PAGE_SIZE);
   const roles = useRolesQuery(hasTenant && canManage);
   const blockMutation = useBlockUser();
   const archiveMutation = useArchiveUser();
 
+  const rows = users.data?.items ?? [];
+
   // Always derive the editing target from the latest query data so the
   // AssignmentsPanel re-renders with fresh assignments after mutations.
-  const editing = editingId
-    ? users.data?.find((u) => u.id === editingId) ?? null
-    : null;
+  const editing = editingId ? rows.find((u) => u.id === editingId) ?? null : null;
 
   const roleName = (id: string) => roles.data?.find((r) => r.id === id)?.name ?? id.slice(0, 8);
 
@@ -112,10 +116,11 @@ export function UsersPage(): JSX.Element {
       )}
       {users.isLoading ? (
         <SkeletonRows rows={6} />
-      ) : !users.data || users.data.length === 0 ? (
+      ) : rows.length === 0 ? (
         <TableEmpty>Пока нет пользователей</TableEmpty>
       ) : (
-        <Table>
+        <>
+          <Table>
           <THead>
             <TR>
               <TH>Имя</TH>
@@ -127,7 +132,7 @@ export function UsersPage(): JSX.Element {
             </TR>
           </THead>
           <TBody>
-            {users.data.map((u) => {
+            {rows.map((u) => {
               const activeAssignments = u.assignments.filter((a) => a.is_active);
               return (
                 <TR key={u.id}>
@@ -173,7 +178,14 @@ export function UsersPage(): JSX.Element {
               );
             })}
           </TBody>
-        </Table>
+          </Table>
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={users.data?.total ?? 0}
+            onPage={setPage}
+          />
+        </>
       )}
 
       <Modal open={inviting} onClose={() => setInviting(false)} title="Пригласить пользователя">

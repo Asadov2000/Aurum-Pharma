@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import and_, case, distinct, func, literal, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import local_day_range
 from app.domains.inventory.models import Batch
 from app.domains.pos.models import (
     PrescriptionLog,
@@ -371,13 +372,13 @@ class POSRepository:
             clauses.append("s.receipt_number = :receipt")
             params["receipt"] = receipt_number
         if date_from is not None:
-            clauses.append("(s.completed_at AT TIME ZONE :tz)::date >= :dfrom")
-            params["dfrom"] = date_from
-            params["tz"] = tz
+            start, _ = local_day_range(date_from, tz)
+            clauses.append("s.completed_at >= :dfrom_ts")
+            params["dfrom_ts"] = start
         if date_to is not None:
-            clauses.append("(s.completed_at AT TIME ZONE :tz)::date <= :dto")
-            params["dto"] = date_to
-            params["tz"] = tz
+            _, end = local_day_range(date_to, tz)  # exclusive end = next local day
+            clauses.append("s.completed_at < :dto_ts")
+            params["dto_ts"] = end
         if min_total is not None:
             clauses.append("s.total_amount >= :mintot")
             params["mintot"] = min_total
@@ -469,15 +470,16 @@ class POSRepository:
         Dates are interpreted in the tenant timezone `tz` (so a 01:00 Dushanbe
         sale lands on the local day), and test (is_test) sales are excluded.
         """
+        start, _ = local_day_range(date_from, tz)
+        _, end = local_day_range(date_to, tz)  # exclusive end = start of day after date_to
         base = ["s.tenant_id = :tid", "s.completed_at IS NOT NULL", "s.is_test = false"]
         params: dict[str, Any] = {
             "tid": str(tenant_id),
-            "dfrom": date_from,
-            "dto": date_to,
-            "tz": tz,
+            "dfrom_ts": start,
+            "dto_ts": end,
         }
-        base.append("(s.completed_at AT TIME ZONE :tz)::date >= :dfrom")
-        base.append("(s.completed_at AT TIME ZONE :tz)::date <= :dto")
+        base.append("s.completed_at >= :dfrom_ts")
+        base.append("s.completed_at < :dto_ts")
         if branch_id is not None:
             base.append("s.branch_id = :branch")
             params["branch"] = str(branch_id)
@@ -582,8 +584,11 @@ class POSRepository:
         so this is a faithful historical reconstruction, not just 'today'. Only
         batches with a positive balance on the date are returned. The movement
         date is taken in the tenant timezone `tz`."""
+        # "as of end of on_date" = movements strictly before the start of the
+        # next local day → sargable on batch_movement(created_at).
+        _, on_end = local_day_range(on_date, tz)
         clauses = ["b.tenant_id = :tid"]
-        params: dict[str, Any] = {"tid": str(tenant_id), "on_date": on_date, "tz": tz}
+        params: dict[str, Any] = {"tid": str(tenant_id), "on_end": on_end}
         if branch_id is not None:
             clauses.append("b.branch_id = :branch")
             params["branch"] = str(branch_id)
@@ -599,7 +604,7 @@ class POSRepository:
               SUM(bm.qty_delta) AS qty
             FROM batch b
             JOIN batch_movement bm
-              ON bm.batch_id = b.id AND (bm.created_at AT TIME ZONE :tz)::date <= :on_date
+              ON bm.batch_id = b.id AND bm.created_at < :on_end
             LEFT JOIN tenant_catalog tc ON tc.id = b.catalog_id
             LEFT JOIN branch br ON br.id = b.branch_id
             WHERE {where}

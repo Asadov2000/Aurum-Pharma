@@ -17,7 +17,7 @@ vi.mock("@/features/auth/hooks", () => ({
 
 // Keep the network out of the unit test — every roles API call resolves empty.
 vi.mock("@/features/roles/api", () => ({
-  listUsers: vi.fn(async () => []),
+  listUsers: vi.fn(async () => ({ items: [], total: 0, page: 1, page_size: 50 })),
   listRoles: vi.fn(async () => []),
   listPermissions: vi.fn(async () => []),
   listTemplates: vi.fn(async () => []),

@@ -120,7 +120,7 @@ async def test_owner_role_matches_template_permissions(
         role_id = resp.json()["role_id"]
 
         repo = RolesRepository(db_session)
-        template = await repo.get_template_by_name("Владелец")
+        template = await repo.get_template_by_slug("owner")
         assert template is not None
         tpl_codes = sorted(await repo.get_template_permissions(template.id))
         role_codes = sorted(await repo.get_role_permissions(role_id))

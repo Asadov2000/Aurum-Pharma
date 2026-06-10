@@ -41,9 +41,10 @@ PERMS_CACHE_TTL_SECONDS = 5 * 60
 PERMS_CACHE_PREFIX = "auth:perms"
 
 # Owner provisioning: a tenant's «Владелец» role is instantiated from the global
-# «Владелец» template (seeded in migration 0019). The template has no slug/code,
-# so its name is the stable key. Level 3 = owner tier (1=dev … 4=seller).
-OWNER_TEMPLATE_NAME = "Владелец"
+# owner template (seeded in 0019, slug added in 0023). Looked up by the stable
+# slug, not the display name. Level 3 = owner tier (1=dev … 4=seller).
+OWNER_TEMPLATE_SLUG = "owner"
+CASHIER_TEMPLATE_SLUG = "cashier"
 OWNER_ROLE_NAME = "Владелец"
 OWNER_ROLE_LEVEL = 3
 
@@ -66,19 +67,13 @@ class RolesService:
 
     async def list_roles_with_permissions(self) -> list[tuple[Role, list[str]]]:
         roles = await self.repo.list_roles()
-        out: list[tuple[Role, list[str]]] = []
-        for role in roles:
-            codes = await self.repo.get_role_permissions(role.id)
-            out.append((role, codes))
-        return out
+        perms = await self.repo.permissions_for_roles([r.id for r in roles])
+        return [(role, perms.get(role.id, [])) for role in roles]
 
     async def list_templates_with_permissions(self) -> list[tuple[RoleTemplate, list[str]]]:
         templates = await self.repo.list_templates()
-        out: list[tuple[RoleTemplate, list[str]]] = []
-        for template in templates:
-            codes = await self.repo.get_template_permissions(template.id)
-            out.append((template, codes))
-        return out
+        perms = await self.repo.permissions_for_templates([t.id for t in templates])
+        return [(template, perms.get(template.id, [])) for template in templates]
 
     # -------------------------------------------------------------------------
     # Owner provisioning (support-level: dev/admin onboards a new pharmacy)
@@ -126,7 +121,7 @@ class RolesService:
         existing = await self.repo.get_role_by_name(OWNER_ROLE_NAME, tenant_id=tenant_id)
         if existing is not None:
             return existing
-        template = await self.repo.get_template_by_name(OWNER_TEMPLATE_NAME)
+        template = await self.repo.get_template_by_slug(OWNER_TEMPLATE_SLUG)
         if template is None:
             raise NotFoundError("Шаблон роли «Владелец» не найден")
         codes = await self.repo.get_template_permissions(template.id)
@@ -266,13 +261,17 @@ class RolesService:
     # Users in tenant
     # -------------------------------------------------------------------------
 
-    async def list_users(self, tenant_id: UUID) -> list[tuple[AppUser, list[UserAssignment]]]:
-        users = await self.repo.list_users_for_tenant(tenant_id)
-        out: list[tuple[AppUser, list[UserAssignment]]] = []
-        for user in users:
-            assignments = await self.repo.list_assignments_for_user(user.id, tenant_id=tenant_id)
-            out.append((user, assignments))
-        return out
+    async def list_users(
+        self, tenant_id: UUID, *, page: int = 1, page_size: int = 50
+    ) -> tuple[list[tuple[AppUser, list[UserAssignment]]], int]:
+        total = await self.repo.count_users_for_tenant(tenant_id)
+        users = await self.repo.list_users_for_tenant(
+            tenant_id, limit=page_size, offset=(page - 1) * page_size
+        )
+        by_user: dict[UUID, list[UserAssignment]] = {}
+        for a in await self.repo.assignments_for_users([u.id for u in users], tenant_id=tenant_id):
+            by_user.setdefault(a.user_id, []).append(a)
+        return [(u, by_user.get(u.id, [])) for u in users], total
 
     # -------------------------------------------------------------------------
     # Invite + assignments — anti-escalation enforced here

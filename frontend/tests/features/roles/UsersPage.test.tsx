@@ -83,6 +83,13 @@ const USER_ACTIVE = {
   ],
 };
 
+const usersResp = (items: unknown[]) => ({
+  items,
+  total: items.length,
+  page: 1,
+  page_size: 50,
+});
+
 describe("UsersPage", () => {
   beforeEach(() => {
     listUsers.mockReset();
@@ -95,14 +102,14 @@ describe("UsersPage", () => {
   });
 
   it("renders an empty state when there are no users", async () => {
-    listUsers.mockResolvedValueOnce([]);
+    listUsers.mockResolvedValueOnce(usersResp([]));
     listRoles.mockResolvedValueOnce([ROLE]);
     renderPage();
     expect(await screen.findByText(/Пока нет пользователей/i)).toBeInTheDocument();
   });
 
   it("renders the role name from the role registry, not the raw id", async () => {
-    listUsers.mockResolvedValueOnce([USER_ACTIVE]);
+    listUsers.mockResolvedValueOnce(usersResp([USER_ACTIVE]));
     listRoles.mockResolvedValueOnce([ROLE]);
     renderPage();
     expect(await screen.findByText("User One")).toBeInTheDocument();
@@ -111,7 +118,7 @@ describe("UsersPage", () => {
   });
 
   it("rejects the invite form when required fields are empty", async () => {
-    listUsers.mockResolvedValueOnce([]);
+    listUsers.mockResolvedValueOnce(usersResp([]));
     listRoles.mockResolvedValueOnce([ROLE]);
     renderPage();
     await screen.findByText(/Пока нет пользователей/i);
@@ -123,7 +130,7 @@ describe("UsersPage", () => {
   });
 
   it("invites a user with the selected role", async () => {
-    listUsers.mockResolvedValue([]);
+    listUsers.mockResolvedValue(usersResp([]));
     listRoles.mockResolvedValue([ROLE]);
     inviteUser.mockResolvedValueOnce({ id: "a-new" });
     renderPage();
@@ -147,5 +154,24 @@ describe("UsersPage", () => {
         password_required: false,
       }),
     );
+  });
+
+  it("renders pagination and advances the page", async () => {
+    listUsers.mockResolvedValue({
+      items: [USER_ACTIVE],
+      total: 120,
+      page: 1,
+      page_size: 50,
+    });
+    listRoles.mockResolvedValue([ROLE]);
+    renderPage();
+    expect(await screen.findByText("User One")).toBeInTheDocument();
+    expect(screen.getByText("Всего:")).toBeInTheDocument();
+    expect(screen.getByText("120")).toBeInTheDocument();
+    const next = screen.getByRole("button", { name: /Вперёд/ });
+    expect(next).not.toBeDisabled();
+    fireEvent.click(next);
+    // Advancing the page refetches with page=2.
+    await waitFor(() => expect(listUsers).toHaveBeenCalledWith(2, 50));
   });
 });

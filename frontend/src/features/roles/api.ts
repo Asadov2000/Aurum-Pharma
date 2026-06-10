@@ -9,8 +9,8 @@ import {
   type RoleCreatePayload,
   type RoleTemplate,
   type RoleUpdatePayload,
+  type UserListResponse,
   type UserUpdatePayload,
-  type UserWithAssignments,
 } from "./types";
 
 export async function listPermissions(): Promise<Permission[]> {
@@ -38,8 +38,10 @@ export async function updateRole(roleId: string, payload: RoleUpdatePayload): Pr
   return data;
 }
 
-export async function listUsers(): Promise<UserWithAssignments[]> {
-  const { data } = await api.get<UserWithAssignments[]>("/users");
+export async function listUsers(page = 1, pageSize = 50): Promise<UserListResponse> {
+  const { data } = await api.get<UserListResponse>("/users", {
+    params: { page, page_size: pageSize },
+  });
   return data;
 }
 

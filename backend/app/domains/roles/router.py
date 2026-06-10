@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from app.domains.roles.schemas import (
     RoleUpdate,
     RoleWithPermissions,
     TemplateWithPermissions,
+    UserListResponse,
     UserUpdate,
     UserWithAssignments,
 )
@@ -140,6 +141,7 @@ async def list_templates(
         TemplateWithPermissions(
             id=template.id,
             name=template.name,
+            slug=template.slug,
             description=template.description,
             is_system=template.is_system,
             is_active=template.is_active,
@@ -154,27 +156,28 @@ async def list_templates(
 # -----------------------------------------------------------------------------
 
 
-@router.get("/users", response_model=list[UserWithAssignments])
+@router.get("/users", response_model=UserListResponse)
 async def list_users(
     user: Annotated[CurrentUser, Depends(require_permission("users.view"))],
     service: Annotated[RolesService, Depends(_service)],
-) -> list[UserWithAssignments]:
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> UserListResponse:
     tenant_id = _current_tenant_or_400(user)
-    pairs = await service.list_users(tenant_id)
-    out: list[UserWithAssignments] = []
-    for u, assignments in pairs:
-        out.append(
-            UserWithAssignments(
-                id=u.id,
-                email=u.email,
-                full_name=u.full_name,
-                phone=u.phone,
-                status=u.status,
-                last_login_at=u.last_login_at,
-                assignments=[AssignmentRead.model_validate(a) for a in assignments],
-            )
+    pairs, total = await service.list_users(tenant_id, page=page, page_size=page_size)
+    items = [
+        UserWithAssignments(
+            id=u.id,
+            email=u.email,
+            full_name=u.full_name,
+            phone=u.phone,
+            status=u.status,
+            last_login_at=u.last_login_at,
+            assignments=[AssignmentRead.model_validate(a) for a in assignments],
         )
-    return out
+        for u, assignments in pairs
+    ]
+    return UserListResponse(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.post(

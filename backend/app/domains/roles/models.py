@@ -109,6 +109,9 @@ class RoleTemplate(Base):
         server_default=text("gen_random_uuid()"),
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    # Stable lookup key (slug), e.g. 'owner' / 'cashier' — survives renaming the
+    # display name. Backfilled + made NOT NULL in migration 0023.
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
@@ -116,7 +119,10 @@ class RoleTemplate(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 
-    __table_args__ = (UniqueConstraint("name", name="uq_role_template_name"),)
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_role_template_name"),
+        UniqueConstraint("slug", name="uq_role_template_slug"),
+    )
 
 
 class RoleTemplatePermission(Base):

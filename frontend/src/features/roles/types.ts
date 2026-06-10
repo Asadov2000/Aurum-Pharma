@@ -66,6 +66,13 @@ export interface UserWithAssignments {
   assignments: Assignment[];
 }
 
+export interface UserListResponse {
+  items: UserWithAssignments[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface InviteUserPayload {
   email: string;
   full_name: string;
