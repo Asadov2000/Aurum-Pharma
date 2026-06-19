@@ -18,7 +18,7 @@ from datetime import timedelta
 import structlog
 from sqlalchemy import select, update
 
-from app.core.db import SupportSessionLocal
+from app.core.db import WorkerSessionLocal
 from app.core.time import utc_now
 from app.domains.foundation.models import Tenant
 from app.domains.onboarding.models import OnboardingChecklist
@@ -36,7 +36,7 @@ async def _auto_start_trials_async() -> dict[str, int]:
     cutoff = now - SETUP_GRACE
     started = 0
     skipped = 0
-    async with SupportSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         async with db.begin():
             stmt = select(Tenant).where(
                 Tenant.status == "setup",

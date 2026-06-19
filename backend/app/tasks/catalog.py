@@ -12,7 +12,7 @@ import asyncio
 
 import structlog
 
-from app.core.db import SupportSessionLocal, support_engine
+from app.core.db import WorkerSessionLocal
 from app.core.storage import get_object
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
@@ -24,14 +24,7 @@ logger = structlog.get_logger("tasks.catalog")
 async def _run_import(job_id: str) -> dict[str, int]:
     from uuid import UUID
 
-    # Celery runs each task in a fresh event loop (asyncio.run). The support
-    # engine's asyncpg pool may still hold connections bound to a previous
-    # loop; reusing one raises "got Future attached to a different loop" on the
-    # first query. Drop the pool so the session checks out a connection on the
-    # current loop. Imports are infrequent, so the extra connect is negligible.
-    await support_engine.dispose()
-
-    async with SupportSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         async with db.begin():
             repo = CatalogRepository(db)
             service = CatalogService(repo)

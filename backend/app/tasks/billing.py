@@ -12,7 +12,7 @@ import asyncio
 
 import structlog
 
-from app.core.db import SupportSessionLocal
+from app.core.db import WorkerSessionLocal
 from app.domains.billing.repository import BillingRepository
 from app.domains.billing.service import BillingService
 from app.tasks.celery_app import celery_app
@@ -21,21 +21,21 @@ logger = structlog.get_logger("tasks.billing")
 
 
 async def _generate_invoices() -> int:
-    async with SupportSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         async with db.begin():
             service = BillingService(BillingRepository(db))
             return await service.generate_monthly_invoices()
 
 
 async def _process_trial_endings() -> int:
-    async with SupportSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         async with db.begin():
             service = BillingService(BillingRepository(db))
             return await service.process_trial_endings()
 
 
 async def _process_grace_endings() -> int:
-    async with SupportSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         async with db.begin():
             service = BillingService(BillingRepository(db))
             return await service.process_grace_endings()
@@ -44,7 +44,7 @@ async def _process_grace_endings() -> int:
 async def _recalc(tenant_id: str) -> None:
     from uuid import UUID
 
-    async with SupportSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         async with db.begin():
             service = BillingService(BillingRepository(db))
             await service.recalculate_on_branch_change(UUID(tenant_id))

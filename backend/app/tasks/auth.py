@@ -12,7 +12,7 @@ from datetime import timedelta
 import structlog
 
 from app.core.config import get_settings
-from app.core.db import SupportSessionLocal
+from app.core.db import WorkerSessionLocal
 from app.core.time import utc_now
 from app.domains.auth.repository import AuthRepository
 from app.tasks.celery_app import celery_app
@@ -36,7 +36,7 @@ def send_email_code(email: str, code: str) -> None:
 
 
 async def _expire_email_codes_async() -> int:
-    async with SupportSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         async with db.begin():
             repo = AuthRepository(db)
             removed = await repo.delete_expired_email_codes(
@@ -53,7 +53,7 @@ def expire_email_codes() -> int:
 
 
 async def _expire_sessions_async() -> int:
-    async with SupportSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         async with db.begin():
             repo = AuthRepository(db)
             removed = await repo.delete_expired_sessions(older_than=utc_now() - timedelta(days=30))

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
@@ -44,6 +45,24 @@ AppSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
 
 SupportSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     support_engine,
+    expire_on_commit=False,
+    class_=AsyncSession,
+)
+
+# Worker engine (Celery tasks). Each task runs in its own short-lived event
+# loop (asyncio.run), so a pooled connection would outlive its loop and asyncpg
+# would raise "got Future attached to a different loop". NullPool opens a fresh
+# connection per checkout and closes it on return, so nothing crosses loops.
+# Uses the support role (BYPASSRLS) like the tasks need; the pooled
+# support_engine stays dedicated to the request path (see deps.get_db).
+worker_engine: AsyncEngine = create_async_engine(
+    settings.DATABASE_URL_SUPPORT,
+    echo=False,
+    poolclass=NullPool,
+)
+
+WorkerSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
+    worker_engine,
     expire_on_commit=False,
     class_=AsyncSession,
 )
