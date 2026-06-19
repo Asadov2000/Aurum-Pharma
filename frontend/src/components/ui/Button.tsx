@@ -38,7 +38,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={disabled || isLoading}
       // Focus ring is provided globally by :focus-visible (see index.css).
       className={cn(
-        "inline-flex items-center justify-center rounded-md font-medium transition-colors duration-fast",
+        "inline-flex items-center justify-center gap-2 rounded-md font-semibold transition-colors duration-fast",
         "disabled:cursor-not-allowed",
         variantClasses[variant],
         sizeClasses[size],

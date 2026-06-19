@@ -11,68 +11,69 @@
 @layer base {
   :root,
   [data-theme="light"] {
-    /* surfaces & text */
-    --background: 210 40% 98%;
+    /* surfaces & text — cool clean slate, faint teal cast */
+    --background: 195 30% 97%;
     --surface: 0 0% 100%;
     --surface-raised: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 213 27% 84%;
-    --ring: 174 84% 31%;
-    --foreground: 222 47% 11%;
-    --foreground-secondary: 215 25% 27%;
-    --foreground-muted: 215 20% 55%;
+    --border: 205 25% 89%;
+    --input: 207 22% 80%;
+    --ring: 174 72% 31%;
+    --foreground: 202 45% 11%;
+    --foreground-secondary: 205 25% 27%;
+    --foreground-muted: 205 16% 42%;
 
-    /* primary — medical teal */
-    --primary: 174 84% 31%;
+    /* primary — deep, confident medical teal (AA with white) */
+    --primary: 174 76% 24%;
     --primary-foreground: 0 0% 100%;
 
     /* semantic: base / subtle background / readable foreground */
-    --success: 142 72% 32%;
-    --success-subtle: 141 79% 93%;
-    --success-foreground: 142 72% 24%;
-    --warning: 32 95% 38%;
-    --warning-subtle: 48 96% 89%;
-    --warning-foreground: 26 84% 31%;
-    --danger: 0 72% 48%;
-    --danger-subtle: 0 93% 94%;
-    --danger-foreground: 0 70% 38%;
-    --info: 221 83% 50%;
-    --info-subtle: 214 95% 93%;
-    --info-foreground: 226 71% 40%;
+    --success: 152 62% 30%;
+    --success-subtle: 150 56% 93%;
+    --success-foreground: 154 66% 22%;
+    --warning: 28 82% 37%;
+    --warning-subtle: 42 96% 90%;
+    --warning-foreground: 26 82% 29%;
+    --danger: 1 68% 45%;
+    --danger-subtle: 2 80% 95%;
+    --danger-foreground: 2 70% 40%;
+    --info: 211 80% 40%;
+    --info-subtle: 211 90% 94%;
+    --info-foreground: 213 76% 37%;
 
     /* modal scrim */
-    --overlay: 222 47% 11%;
+    --overlay: 202 45% 11%;
     --overlay-opacity: 0.45;
   }
 
   [data-theme="dark"] {
-    --background: 222 47% 8%;
-    --surface: 219 43% 12%;
-    --surface-raised: 220 45% 16%;
-    --border: 222 33% 21%;
-    --input: 219 33% 26%;
-    --ring: 173 80% 45%;
-    --foreground: 215 38% 93%;
-    --foreground-secondary: 217 25% 73%;
-    --foreground-muted: 215 16% 55%;
+    /* deep cool slate — never pure black (avoids the harsh dark default) */
+    --background: 205 38% 8%;
+    --surface: 205 33% 11%;
+    --surface-raised: 205 30% 15%;
+    --border: 205 22% 22%;
+    --input: 205 18% 30%;
+    --ring: 173 70% 44%;
+    --foreground: 200 30% 94%;
+    --foreground-secondary: 205 20% 74%;
+    --foreground-muted: 205 15% 58%;
 
-    --primary: 173 80% 42%;
-    --primary-foreground: 168 91% 8%;
+    --primary: 172 66% 42%;
+    --primary-foreground: 174 80% 8%;
 
-    --success: 142 65% 45%;
-    --success-subtle: 145 40% 15%;
-    --success-foreground: 141 73% 73%;
-    --warning: 38 92% 50%;
-    --warning-subtle: 38 60% 14%;
-    --warning-foreground: 45 96% 64%;
-    --danger: 0 84% 62%;
-    --danger-subtle: 0 45% 16%;
-    --danger-foreground: 0 93% 82%;
-    --info: 217 91% 62%;
-    --info-subtle: 218 50% 17%;
-    --info-foreground: 213 96% 80%;
+    --success: 152 58% 48%;
+    --success-subtle: 152 38% 15%;
+    --success-foreground: 150 65% 75%;
+    --warning: 36 90% 52%;
+    --warning-subtle: 36 48% 15%;
+    --warning-foreground: 42 95% 68%;
+    --danger: 2 78% 63%;
+    --danger-subtle: 2 40% 18%;
+    --danger-foreground: 2 90% 81%;
+    --info: 211 85% 63%;
+    --info-subtle: 211 44% 18%;
+    --info-foreground: 211 90% 81%;
 
-    --overlay: 222 60% 4%;
+    --overlay: 205 50% 3%;
     --overlay-opacity: 0.6;
   }
 
@@ -84,6 +85,19 @@
 
   body {
     @apply bg-background text-foreground;
+    /* Tabular figures everywhere: money, quantities and totals line up in
+       columns without touching individual screens. This app is data-dense. */
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Headings inherit the display family + tight tracking app-wide, so the new
+     type voice propagates from the foundation without editing screen layouts. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: theme("fontFamily.display");
+    letter-spacing: -0.011em;
   }
 
   /* Keyboard-visible focus ring everywhere, without a ring on mouse clicks. */

@@ -26,17 +26,18 @@ export default {
         primary: {
           DEFAULT: withAlpha("--primary"),
           foreground: withAlpha("--primary-foreground"),
-          // Fixed medical-teal ramp for occasional direct use / charts.
-          50: "#f0fdfa",
-          100: "#ccfbf1",
-          200: "#99f6e4",
-          300: "#5eead4",
-          400: "#2dd4bf",
-          500: "#14b8a6",
-          600: "#0d9488",
-          700: "#0f766e",
-          800: "#115e59",
-          900: "#134e4a",
+          // Fixed deep-teal brand ramp for occasional direct use / charts.
+          50: "#ecfdf7",
+          100: "#cff5ea",
+          200: "#a1ead7",
+          300: "#67d8bf",
+          400: "#33bda4",
+          500: "#13a087",
+          600: "#0d8070",
+          700: "#0e6a5e",
+          800: "#10544c",
+          900: "#10443e",
+          950: "#04302c",
         },
         success: {
           DEFAULT: withAlpha("--success"),
@@ -60,6 +61,7 @@ export default {
         },
       },
       fontFamily: {
+        // Body / UI workhorse.
         sans: [
           "Inter",
           "system-ui",
@@ -70,19 +72,29 @@ export default {
           "Arial",
           "sans-serif",
         ],
+        // Display: headings/titles. Geometric, calm, confident — never decorative.
+        display: [
+          "Sora",
+          "Inter",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "sans-serif",
+        ],
       },
-      // Soft, low-contrast elevation — never harsh.
+      // Soft, low-contrast elevation — never harsh. Tinted with the cool slate
+      // ink so shadows read as depth, not grey smudge.
       boxShadow: {
-        sm: "0 1px 2px 0 hsl(222 47% 11% / 0.04), 0 1px 3px 0 hsl(222 47% 11% / 0.06)",
-        md: "0 2px 4px -1px hsl(222 47% 11% / 0.06), 0 4px 8px -2px hsl(222 47% 11% / 0.08)",
-        lg: "0 4px 8px -2px hsl(222 47% 11% / 0.08), 0 12px 24px -4px hsl(222 47% 11% / 0.10)",
-        xl: "0 8px 16px -4px hsl(222 47% 11% / 0.10), 0 24px 48px -8px hsl(222 47% 11% / 0.14)",
+        sm: "0 1px 2px 0 hsl(202 45% 11% / 0.05), 0 1px 3px 0 hsl(202 45% 11% / 0.06)",
+        md: "0 2px 4px -1px hsl(202 45% 11% / 0.06), 0 4px 10px -2px hsl(202 45% 11% / 0.08)",
+        lg: "0 6px 12px -3px hsl(202 45% 11% / 0.08), 0 16px 28px -6px hsl(202 45% 11% / 0.12)",
+        xl: "0 10px 20px -5px hsl(202 45% 11% / 0.12), 0 28px 52px -10px hsl(202 45% 11% / 0.16)",
       },
       borderRadius: {
-        sm: "0.25rem",
-        md: "0.375rem",
-        lg: "0.5rem",
-        xl: "0.75rem",
+        sm: "0.375rem",
+        md: "0.5rem",
+        lg: "0.75rem",
+        xl: "1rem",
       },
       transitionDuration: {
         fast: "150ms",
