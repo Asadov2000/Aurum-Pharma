@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str = "aurum"
     MINIO_SECURE: bool = False
 
+    # Upper bound for catalog import uploads (CSV/XLSX). Bigger files are
+    # rejected at the upload endpoint with a friendly 422.
+    MAX_IMPORT_FILE_MB: int = 10
+
     EMAIL_HOST: str = "localhost"
     EMAIL_PORT: int = 587
     EMAIL_USER: str = ""

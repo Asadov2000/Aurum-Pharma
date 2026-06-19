@@ -27,13 +27,12 @@ const statusBadgeTone = (s: ImportJob["status"]):
   | "warning"
   | "danger" => {
   switch (s) {
-    case "uploaded":
-    case "previewing":
-    case "ready":
+    case "pending":
+    case "validating":
       return "info";
-    case "running":
+    case "importing":
       return "warning";
-    case "completed":
+    case "success":
       return "success";
     case "failed":
       return "danger";
@@ -61,17 +60,16 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
     jobId ? 2000 : undefined,
   );
   const job = jobQuery.data ?? null;
-  const isPolling = job?.status === "running";
+  const isPolling = job?.status === "importing";
 
   const onPick = async (file: File | null) => {
     if (!file) return;
     setTopError(null);
-    // Backend parser is CSV-only (openpyxl arrives in Phase 2). Reject
-    // .xlsx upfront so the user sees a friendly message instead of an
-    // opaque server error from the CSV parser choking on a zip stream.
+    // We accept .csv and .xlsx. The legacy binary .xls format can't be read
+    // by openpyxl — reject it upfront with the same message the backend uses.
     const lower = file.name.toLowerCase();
-    if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
-      setTopError("XLSX пока не поддерживается. Сохраните таблицу как CSV (UTF-8) и попробуйте снова.");
+    if (lower.endsWith(".xls") && !lower.endsWith(".xlsx")) {
+      setTopError("Поддерживаются файлы .xlsx и .csv; пересохраните файл как .xlsx");
       return;
     }
     try {
@@ -118,16 +116,18 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
     return (
       <div className="space-y-4">
         <p className="text-sm text-foreground-secondary">
-          Загрузите CSV-файл с позициями каталога (UTF-8 или Windows-1251).
-          Файл уйдёт в MinIO; на следующем шаге сервер построит превью.
+          Загрузите файл с позициями каталога — CSV (UTF-8 или Windows-1251)
+          или Excel (.xlsx). Файл уйдёт в MinIO; на следующем шаге сервер
+          построит превью.
         </p>
         <p className="text-xs text-foreground-muted">
-          XLSX пока не поддерживается — появится в Этапе 2 вместе с openpyxl.
+          Обязательна только колонка «brand_name». Старый формат .xls не
+          поддерживается — пересохраните как .xlsx.
         </p>
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.xlsx,text/csv"
           onChange={(e) => void onPick(e.target.files?.[0] ?? null)}
           className="block w-full text-sm"
         />
@@ -196,7 +196,7 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
               id="strategy"
               value={strategy}
               onChange={(e) => setStrategy(e.target.value as DuplicateStrategy)}
-              disabled={job.status === "running" || job.status === "completed"}
+              disabled={job.status === "importing" || job.status === "success"}
               className="w-44"
             >
               {strategyOptions.map((s) => (
@@ -208,17 +208,17 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {job.status === "uploaded" && (
+          {job.status === "pending" && (
             <Button onClick={() => void onPreview()} isLoading={preview.isPending}>
               Подготовить превью
             </Button>
           )}
-          {(job.status === "ready" || job.status === "failed") && (
+          {job.status === "validating" && (
             <Button onClick={() => void onConfirm()} isLoading={confirm.isPending}>
               Запустить импорт
             </Button>
           )}
-          {job.status === "completed" && !job.rolled_back_at && (
+          {job.status === "success" && !job.rolled_back_at && (
             <Button
               variant="secondary"
               onClick={() => void onRollback()}

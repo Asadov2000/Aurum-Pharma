@@ -20,9 +20,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.deps import CurrentUser, current_user, get_db, require_permission
-from app.core.errors import BusinessRuleError
+from app.core.errors import BusinessRuleError, ValidationError
 from app.core.storage import put_object
+from app.domains.catalog.import_parser import XLS_UNSUPPORTED_MESSAGE
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.schemas import (
     BarcodeCreate,
@@ -197,7 +199,16 @@ async def import_upload(
     file: UploadFile = File(...),  # noqa: B008 — FastAPI File() pattern
 ) -> ImportJobRead:
     tenant_id = _current_tenant_or_400(user)
+
+    name = (file.filename or "").lower()
+    if name.endswith(".xls"):  # legacy binary format — openpyxl can't read it
+        raise ValidationError(XLS_UNSUPPORTED_MESSAGE)
+
     data = await file.read()
+    max_mb = get_settings().MAX_IMPORT_FILE_MB
+    if len(data) > max_mb * 1024 * 1024:
+        raise ValidationError(f"Файл больше {max_mb} МБ — уменьшите его и попробуйте снова")
+
     object_name = new_import_object_name(tenant_id)
     source_path = put_object(
         object_name=object_name,

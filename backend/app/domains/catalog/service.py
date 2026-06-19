@@ -19,7 +19,7 @@ import structlog
 
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.core.time import utc_now
-from app.domains.catalog.import_parser import parse_csv
+from app.domains.catalog.import_parser import parse_import
 from app.domains.catalog.models import (
     Barcode,
     CatalogImportJob,
@@ -172,7 +172,7 @@ class CatalogService:
                 "Cannot preview an import that is already running or finished",
                 details={"status": job.status},
             )
-        rows, errors = parse_csv(raw)
+        rows, errors = parse_import(raw, job.source_filename)
         await self.repo.update_job(
             job,
             status="validating",
@@ -224,7 +224,7 @@ class CatalogService:
         import_job_id so rollback can find it later."""
         job = await self._get_job_or_404(job_id)
         try:
-            rows, errors = parse_csv(raw)
+            rows, errors = parse_import(raw, job.source_filename)
         except ValueError as exc:
             await self.repo.update_job(
                 job,
