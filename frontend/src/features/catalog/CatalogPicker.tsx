@@ -13,6 +13,9 @@ interface Props {
   clearable?: boolean;
   placeholder?: string;
   invalid?: boolean;
+  /** POS speed-up: while the results dropdown is open, pressing 1–9 picks that
+   *  result. Opt-in so name/code filters elsewhere keep digits as plain input. */
+  selectByNumber?: boolean;
 }
 
 // Lightweight typeahead over /api/v1/catalog. Defers fetching until the
@@ -26,6 +29,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     clearable = false,
     placeholder = "Начните вводить название…",
     invalid = false,
+    selectByNumber = false,
   },
   ref,
 ): JSX.Element {
@@ -58,6 +62,12 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     onChange("", "");
   };
 
+  const choose = (it: { id: string; brand_name: string }) => {
+    onChange(it.id, it.brand_name);
+    setText(it.brand_name);
+    setOpen(false);
+  };
+
   return (
     <div ref={containerRef} className="relative">
       <Input
@@ -67,6 +77,19 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
         onChange={(e) => {
           setText(e.target.value);
           setOpen(true);
+        }}
+        onKeyDown={(e) => {
+          if (!selectByNumber || !open) return;
+          const items = data?.items;
+          if (!items || items.length === 0) return;
+          if (/^[1-9]$/.test(e.key)) {
+            const n = Number(e.key);
+            const it = n <= items.length ? items[n - 1] : undefined;
+            if (it) {
+              e.preventDefault();
+              choose(it);
+            }
+          }
         }}
         placeholder={placeholder}
         invalid={invalid}
@@ -93,17 +116,18 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
           {data?.items.length === 0 ? (
             <p className="px-3 py-2 text-sm italic text-foreground-muted">Ничего не найдено</p>
           ) : (
-            data?.items.map((it) => (
+            data?.items.map((it, idx) => (
               <button
                 key={it.id}
                 type="button"
-                onClick={() => {
-                  onChange(it.id, it.brand_name);
-                  setText(it.brand_name);
-                  setOpen(false);
-                }}
+                onClick={() => choose(it)}
                 className="block w-full px-3 py-2 text-left text-sm hover:bg-foreground/[0.03]"
               >
+                {selectByNumber && idx < 9 && (
+                  <span className="mr-2 font-mono tabular-nums text-foreground-muted">
+                    {idx + 1}
+                  </span>
+                )}
                 <span className="font-medium">{it.brand_name}</span>
                 {it.dosage && <span className="ml-2 text-foreground-muted">{it.dosage}</span>}
                 {it.manufacturer && (

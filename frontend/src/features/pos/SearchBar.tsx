@@ -1,4 +1,4 @@
-import { forwardRef, useState } from "react";
+import { forwardRef, useRef, useState } from "react";
 
 import { Button } from "@/components/ui";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
@@ -23,6 +23,10 @@ export const SearchBar = forwardRef<
   const [catalogId, setCatalogId] = useState("");
   const [name, setName] = useState("");
   const [qty, setQty] = useState("1");
+  // Remounting the picker after an add clears its text → next search starts
+  // fresh and the empty field lets the global Enter shortcut pay (see SaleArea).
+  const [pickerKey, setPickerKey] = useState(0);
+  const qtyRef = useRef<HTMLInputElement>(null);
 
   const submit = () => {
     const q = Number(qty);
@@ -31,6 +35,7 @@ export const SearchBar = forwardRef<
     setCatalogId("");
     setName("");
     setQty("1");
+    setPickerKey((k) => k + 1);
   };
 
   return (
@@ -38,17 +43,26 @@ export const SearchBar = forwardRef<
       <div className="flex items-end gap-2">
         <div className="min-w-0 flex-1">
           <CatalogPicker
+            key={pickerKey}
             ref={ref}
             value={catalogId}
             onChange={(id, brand) => {
               setCatalogId(id);
               setName(brand);
+              // Picking a product jumps straight to the quantity field, so the
+              // cashier goes name → choose → number → Enter without the mouse.
+              if (id) {
+                qtyRef.current?.focus();
+                qtyRef.current?.select();
+              }
             }}
             placeholder="Поиск товара по названию…"
             clearable
+            selectByNumber
           />
         </div>
         <input
+          ref={qtyRef}
           type="text"
           inputMode="numeric"
           value={qty}

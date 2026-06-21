@@ -69,6 +69,11 @@ test.describe("Shift close → Z-report", () => {
     await opt.click();
     await page.getByRole("textbox", { name: "Количество" }).fill("1");
     await page.getByRole("button", { name: "Добавить" }).click();
+    // Wait for the line to land before paying — until totalDue > 0 the payment
+    // tiles stay disabled, so clicking "Наличные" too early races the add. The
+    // createSale+addItem round-trip can be slow under full-suite load, so give
+    // it generous headroom (the test's overall budget is 120s).
+    await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
     // One-tap cash tile pays the full remaining balance. Wait for it to settle
     // before completing, else "Завершить" reads a stale remaining and errors.
     await page.getByRole("button", { name: "Наличные" }).click();

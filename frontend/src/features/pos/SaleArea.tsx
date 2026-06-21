@@ -289,11 +289,19 @@ function ActiveWorkspace({
     setNumpad(null);
   };
 
+  // Enter on a ready receipt pays the remaining balance in cash — the most
+  // common tender — in one keystroke (F3→Enter no longer required). F3/F4 and
+  // the sums/logic are unchanged; the handler below guards it so it never fires
+  // while typing in a field or with a dialog open.
+  const onEnterPayCash = () => {
+    if (isDraft && totalDue > 0 && remaining > 0.001) onPayTile("cash");
+  };
+
   // Keyboard shortcuts. Ref holds the latest handlers so we bind the listener
   // once. F-keys are ignored while any modal/keypad (role="dialog") is open so
   // they don't fire actions hidden behind it.
-  const actionsRef = useRef({ onNewSale, onComplete });
-  actionsRef.current = { onNewSale, onComplete };
+  const actionsRef = useRef({ onNewSale, onComplete, onEnterPayCash });
+  actionsRef.current = { onNewSale, onComplete, onEnterPayCash };
 
   useEffect(() => {
     if (!keyboard) return;
@@ -302,6 +310,12 @@ function ActiveWorkspace({
       const el = document.activeElement as HTMLElement | null;
       const typing =
         !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      // A field holding text owns its own Enter (qty → add, search → typing).
+      // An empty field (or no field) lets Enter fall through to "pay cash".
+      const fieldHasContent =
+        !!el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA") &&
+        ((el as HTMLInputElement).value ?? "").trim() !== "";
       switch (e.key) {
         case "F2":
           if (dialogOpen) return;
@@ -323,6 +337,11 @@ function ActiveWorkspace({
           if (dialogOpen || typing) return;
           e.preventDefault();
           searchRef.current?.focus();
+          break;
+        case "Enter":
+          if (dialogOpen || fieldHasContent) return;
+          e.preventDefault();
+          actionsRef.current.onEnterPayCash();
           break;
         case "Escape":
           if (!dialogOpen) setTopError(null);
