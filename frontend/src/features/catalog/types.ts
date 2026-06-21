@@ -22,6 +22,9 @@ export interface CatalogItem {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Additive: available stock at the searched branch (POS passes branch_id).
+  // Null/absent when searched without a branch.
+  stock_available?: string | null;
 }
 
 export interface Barcode {
@@ -81,6 +84,8 @@ export interface CatalogSearchParams {
   dispensing_type?: DispensingType;
   page?: number;
   page_size?: number;
+  /** When set (POS register's branch), results carry stock_available. */
+  branch_id?: string;
 }
 
 // ---- import ----

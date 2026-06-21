@@ -99,6 +99,9 @@ class CatalogItemRead(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    # Additive: available stock at a branch, populated only when the search is
+    # called with branch_id (e.g. the POS register's branch). Null otherwise.
+    stock_available: Decimal | None = None
 
 
 class CatalogItemWithBarcodes(CatalogItemRead):

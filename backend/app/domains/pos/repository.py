@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -90,6 +91,27 @@ class POSRepository:
         stmt = select(SaleItem).where(SaleItem.sale_id == sale_id).order_by(SaleItem.position.asc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_items_with_batch(
+        self, sale_id: UUID
+    ) -> list[tuple[SaleItem, str | None, date | None, int | None]]:
+        """Read-only enrichment for the sale view: each line plus its batch
+        number, expiry and days-to-expiry (PG `date - date` → int days). One
+        join, no extra logic — the FEFO-chosen batch_id is already on the row.
+        Left join so a line never disappears if its batch is gone."""
+        stmt = (
+            select(
+                SaleItem,
+                Batch.batch_number,
+                Batch.expires_at,
+                (Batch.expires_at - func.current_date()),
+            )
+            .join(Batch, Batch.id == SaleItem.batch_id, isouter=True)
+            .where(SaleItem.sale_id == sale_id)
+            .order_by(SaleItem.position.asc())
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [(r[0], r[1], r[2], r[3]) for r in rows]
 
     async def get_item(self, item_id: UUID) -> SaleItem | None:
         return await self.session.get(SaleItem, item_id)

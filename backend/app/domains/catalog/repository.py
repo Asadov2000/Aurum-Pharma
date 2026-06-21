@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -11,11 +12,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
 from app.domains.catalog.models import Barcode, CatalogImportJob, TenantCatalog
+from app.domains.inventory.models import Batch
 
 
 class CatalogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def stock_by_catalog(
+        self, *, branch_id: UUID, catalog_ids: list[UUID]
+    ) -> dict[UUID, Decimal]:
+        """Available stock per catalog item at one branch, in a single grouped,
+        sargable query (filters on indexed columns, no functions, no N+1).
+        Mirrors the page of search results passed in `catalog_ids`."""
+        if not catalog_ids:
+            return {}
+        stmt = (
+            select(Batch.catalog_id, func.coalesce(func.sum(Batch.qty_remaining), 0))
+            .where(
+                Batch.branch_id == branch_id,
+                Batch.is_blocked.is_(False),
+                Batch.catalog_id.in_(catalog_ids),
+            )
+            .group_by(Batch.catalog_id)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {cid: Decimal(str(total)) for cid, total in rows}
 
     # -------------------------------------------------------------------------
     # tenant_catalog

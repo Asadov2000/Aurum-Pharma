@@ -1,10 +1,45 @@
 import { type ReactNode } from "react";
 
 import { Button, TableEmpty } from "@/components/ui";
+import { expiryStatusFromDays } from "@/features/inventory/labels";
+import { type ExpiryStatus } from "@/features/inventory/types";
 import { cn } from "@/lib/utils";
 
 import { QtyStepper } from "./QtyStepper";
 import { type SaleItem } from "./types";
+
+// Inline text colour per expiry bucket, reusing the shared ExpiryStatus/porogi:
+// red/expired → danger, orange/yellow → warning, normal → muted.
+const expiryTextClass: Record<ExpiryStatus, string> = {
+  expired: "text-danger",
+  red: "text-danger",
+  orange: "text-warning-foreground",
+  yellow: "text-warning-foreground",
+  normal: "text-foreground-muted",
+};
+
+/** Batch number + expiry date + a coloured days-to-expiry hint for a cart line.
+ *  Also disambiguates two lines of the same product (FEFO split). */
+function BatchExpiry({ item, fallback }: { item: SaleItem; fallback?: string }): JSX.Element | null {
+  const status = expiryStatusFromDays(item.days_to_expiry);
+  const date = item.expires_at ? new Date(item.expires_at).toLocaleDateString("ru-RU") : null;
+  const label = item.batch_number ?? fallback ?? null;
+  if (!label && !date && item.days_to_expiry == null) return null;
+  return (
+    <div className="truncate text-xs text-foreground-muted">
+      {label && <span className="font-mono">{label}</span>}
+      {label && date && " · "}
+      {date && <span>до {date}</span>}
+      {status && item.days_to_expiry != null && (
+        <span className={cn("ml-1", expiryTextClass[status])}>
+          {item.days_to_expiry >= 0
+            ? `(через ${item.days_to_expiry} дн.)`
+            : `(просрочена ${-item.days_to_expiry} дн.)`}
+        </span>
+      )}
+    </div>
+  );
+}
 
 interface CartGroup {
   catalogId: string;
@@ -128,6 +163,7 @@ export function CartList({
                 <p className="text-xs text-foreground-muted">
                   {Number(first.unit_price).toFixed(2)} {currency} / шт
                 </p>
+                <BatchExpiry item={first} />
               </div>
               {lineControls(first, g.name)}
             </li>
@@ -164,8 +200,9 @@ export function CartList({
                   className={cn("flex items-center gap-3 px-4", touch ? "py-3" : "py-2.5")}
                 >
                   <div className="min-w-0 flex-1">
+                    <BatchExpiry item={it} fallback={`Партия ${idx + 1}`} />
                     <p className="text-xs text-foreground-muted">
-                      Партия {idx + 1} · {Number(it.unit_price).toFixed(2)} {currency} / шт
+                      {Number(it.unit_price).toFixed(2)} {currency} / шт
                     </p>
                   </div>
                   {lineControls(it, g.name)}

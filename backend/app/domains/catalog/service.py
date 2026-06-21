@@ -12,6 +12,7 @@ duplicate-handling branches.
 from __future__ import annotations
 
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -89,14 +90,23 @@ class CatalogService:
         dispensing_type: str | None,
         page: int,
         page_size: int,
-    ) -> tuple[list[TenantCatalog], int]:
-        return await self.repo.search(
+        branch_id: UUID | None = None,
+    ) -> tuple[list[TenantCatalog], int, dict[UUID, Decimal]]:
+        items, total = await self.repo.search(
             q=q,
             category=category,
             dispensing_type=dispensing_type,
             page=page,
             page_size=page_size,
         )
+        # Available stock per result is computed only when a branch is given
+        # (POS), in one grouped query over this page — never per-item (no N+1).
+        stock: dict[UUID, Decimal] = {}
+        if branch_id is not None and items:
+            stock = await self.repo.stock_by_catalog(
+                branch_id=branch_id, catalog_ids=[i.id for i in items]
+            )
+        return items, total, stock
 
     # -------------------------------------------------------------------------
     # Barcodes

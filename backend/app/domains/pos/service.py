@@ -223,9 +223,9 @@ class POSService:
 
     async def get_sale_details(
         self, sale_id: UUID
-    ) -> tuple[Sale, list[SaleItem], list[SalePayment]]:
+    ) -> tuple[Sale, list[tuple[SaleItem, str | None, date | None, int | None]], list[SalePayment]]:
         sale = await self.get_sale(sale_id)
-        items = await self.repo.list_items(sale.id)
+        items = await self.repo.list_items_with_batch(sale.id)
         payments = await self.repo.list_payments(sale.id)
         return sale, items, payments
 

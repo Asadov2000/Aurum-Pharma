@@ -283,7 +283,16 @@ async def get_sale(
     sale, items, payments = await service.get_sale_details(sale_id)
     return SaleDetails(
         **SaleRead.model_validate(sale).model_dump(),
-        items=[SaleItemRead.model_validate(i) for i in items],
+        items=[
+            SaleItemRead.model_validate(si).model_copy(
+                update={
+                    "batch_number": batch_number,
+                    "expires_at": expires_at,
+                    "days_to_expiry": days_to_expiry,
+                }
+            )
+            for (si, batch_number, expires_at, days_to_expiry) in items
+        ],
         payments=[PaymentRead.model_validate(p) for p in payments],
     )
 

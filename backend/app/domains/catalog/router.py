@@ -69,16 +69,23 @@ async def list_catalog(
     dispensing_type: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    branch_id: Annotated[UUID | None, Query()] = None,
 ) -> CatalogList:
-    items, total = await service.search(
+    items, total, stock = await service.search(
         q=q,
         category=category,
         dispensing_type=dispensing_type,
         page=page,
         page_size=page_size,
+        branch_id=branch_id,
     )
     return CatalogList(
-        items=[CatalogItemRead.model_validate(i) for i in items],
+        items=[
+            CatalogItemRead.model_validate(i).model_copy(
+                update={"stock_available": stock.get(i.id)}
+            )
+            for i in items
+        ],
         total=total,
         page=page,
         page_size=page_size,

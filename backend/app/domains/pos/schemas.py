@@ -103,6 +103,11 @@ class SaleItemRead(BaseModel):
     currency: str
     discount_amount: Decimal
     position: int
+    # Additive read-only enrichment from the line's FEFO-chosen batch, so the
+    # cashier can see which batch/expiry each line drew from. Null if unresolved.
+    batch_number: str | None = None
+    expires_at: date | None = None
+    days_to_expiry: int | None = None
 
 
 class SaleItemAdded(BaseModel):

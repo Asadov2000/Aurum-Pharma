@@ -21,6 +21,7 @@ export async function listCatalog(params: CatalogSearchParams): Promise<CatalogL
       dispensing_type: params.dispensing_type || undefined,
       page: params.page ?? 1,
       page_size: params.page_size ?? 50,
+      branch_id: params.branch_id || undefined,
     },
   });
   return data;

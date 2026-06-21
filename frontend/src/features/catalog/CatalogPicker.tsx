@@ -13,6 +13,8 @@ interface Props {
   clearable?: boolean;
   placeholder?: string;
   invalid?: boolean;
+  /** When set (POS register's branch), each result shows its available stock. */
+  branchId?: string;
 }
 
 // Lightweight typeahead over /api/v1/catalog. Defers fetching until the
@@ -30,6 +32,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     clearable = false,
     placeholder = "Начните вводить название…",
     invalid = false,
+    branchId,
   },
   ref,
 ): JSX.Element {
@@ -45,7 +48,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
   }, [text]);
 
   const { data } = useCatalogQuery(
-    { q: debounced, page: 1, page_size: 10 },
+    { q: debounced, page: 1, page_size: 10, branch_id: branchId },
     debounced.length >= 2,
   );
 
@@ -137,14 +140,28 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
                 onMouseEnter={() => setHighlight(idx)}
                 onClick={() => choose(it)}
                 className={
-                  "block w-full px-3 py-2 text-left text-sm " +
+                  "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm " +
                   (idx === highlight ? "bg-foreground/[0.06]" : "hover:bg-foreground/[0.03]")
                 }
               >
-                <span className="font-medium">{it.brand_name}</span>
-                {it.dosage && <span className="ml-2 text-foreground-muted">{it.dosage}</span>}
-                {it.manufacturer && (
-                  <span className="ml-2 text-xs text-foreground-muted">· {it.manufacturer}</span>
+                <span className="min-w-0 truncate">
+                  <span className="font-medium">{it.brand_name}</span>
+                  {it.dosage && <span className="ml-2 text-foreground-muted">{it.dosage}</span>}
+                  {it.manufacturer && (
+                    <span className="ml-2 text-xs text-foreground-muted">· {it.manufacturer}</span>
+                  )}
+                </span>
+                {branchId && it.stock_available != null && (
+                  <span
+                    className={
+                      "shrink-0 font-mono tabular-nums text-xs " +
+                      (Number(it.stock_available) <= 0
+                        ? "text-danger"
+                        : "text-foreground-muted")
+                    }
+                  >
+                    {Number(it.stock_available) <= 0 ? "нет" : `${Number(it.stock_available)} шт`}
+                  </span>
                 )}
               </button>
             ))

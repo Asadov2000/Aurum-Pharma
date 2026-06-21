@@ -67,6 +67,7 @@ export function SaleArea({
         <ActiveWorkspace
           key={registerId}
           registerId={registerId}
+          branchId={shiftQuery.data?.branch_id ?? null}
           mode={mode}
           soundOn={soundOn}
           draftTtlMin={draftTtlMin}
@@ -89,11 +90,13 @@ export function SaleArea({
 
 function ActiveWorkspace({
   registerId,
+  branchId,
   mode,
   soundOn,
   draftTtlMin,
 }: {
   registerId: string;
+  branchId: string | null;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
@@ -401,7 +404,13 @@ function ActiveWorkspace({
         )}
 
         {isDraft && (
-          <SearchBar ref={searchRef} onAdd={onAdd} busy={addItem.isPending} touch={touch} />
+          <SearchBar
+            ref={searchRef}
+            onAdd={onAdd}
+            busy={addItem.isPending}
+            touch={touch}
+            branchId={branchId ?? undefined}
+          />
         )}
 
         <CartList

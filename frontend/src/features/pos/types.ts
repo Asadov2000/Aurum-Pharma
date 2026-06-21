@@ -60,6 +60,10 @@ export interface SaleItem {
   currency: string;
   discount_amount: string;
   position: number;
+  // Additive read-only enrichment from the line's FEFO-chosen batch.
+  batch_number?: string | null;
+  expires_at?: string | null;
+  days_to_expiry?: number | null;
 }
 
 export interface Payment {

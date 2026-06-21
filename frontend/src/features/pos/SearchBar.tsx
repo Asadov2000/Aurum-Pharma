@@ -18,8 +18,9 @@ export const SearchBar = forwardRef<
     busy?: boolean;
     scanner?: ScannerStatus;
     touch?: boolean;
+    branchId?: string;
   }
->(function SearchBar({ onAdd, busy, scanner = "ready", touch }, ref) {
+>(function SearchBar({ onAdd, busy, scanner = "ready", touch, branchId }, ref) {
   const [catalogId, setCatalogId] = useState("");
   const [name, setName] = useState("");
   const [qty, setQty] = useState("1");
@@ -58,6 +59,7 @@ export const SearchBar = forwardRef<
             }}
             placeholder="Поиск товара по названию…"
             clearable
+            branchId={branchId}
           />
         </div>
         <input

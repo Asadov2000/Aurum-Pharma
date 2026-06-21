@@ -27,7 +27,7 @@ async def test_search_by_brand_trigram(db_session: AsyncSession, make_tenant) ->
     await service.create_item(tenant_id=tenant.id, fields={"brand_name": "Амиксин"})
     await service.create_item(tenant_id=tenant.id, fields={"brand_name": "Парацетамол"})
 
-    items, total = await service.search(
+    items, total, _ = await service.search(
         q="амикс", category=None, dispensing_type=None, page=1, page_size=50
     )
     names = [i.brand_name for i in items]
@@ -46,7 +46,7 @@ async def test_search_by_inn_trigram(db_session: AsyncSession, make_tenant) -> N
         tenant_id=tenant.id, fields={"brand_name": "Brand B", "inn": "Ибупрофен"}
     )
 
-    items, _ = await service.search(
+    items, _, _ = await service.search(
         q="пара", category=None, dispensing_type=None, page=1, page_size=50
     )
     # search() is RLS-scoped in production, but tests run on the BYPASSRLS
@@ -68,7 +68,7 @@ async def test_search_filter_by_category(db_session: AsyncSession, make_tenant) 
         tenant_id=tenant.id, fields={"brand_name": "Brand B", "category": "Antibiotics"}
     )
 
-    items, _ = await service.search(
+    items, _, _ = await service.search(
         q=None,
         category="Vitamins",
         dispensing_type=None,
@@ -114,7 +114,7 @@ async def test_soft_delete_hides_from_search(db_session: AsyncSession, make_tena
 
     await service.soft_delete_item(item.id)
 
-    items, total = await service.search(
+    items, total, _ = await service.search(
         q="todelete", category=None, dispensing_type=None, page=1, page_size=50
     )
     assert items == []
