@@ -58,7 +58,6 @@ export const SearchBar = forwardRef<
             }}
             placeholder="Поиск товара по названию…"
             clearable
-            selectByNumber
           />
         </div>
         <input

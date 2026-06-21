@@ -22,4 +22,17 @@ describe("SearchBar — keyboard focus flow", () => {
     const qty = screen.getByLabelText("Количество");
     await waitFor(() => expect(qty).toHaveFocus());
   });
+
+  it("moves focus to the quantity field when a product is picked with Enter", async () => {
+    render(<SearchBar onAdd={vi.fn()} />);
+    const input = screen.getByPlaceholderText(/Поиск товара/);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Асп" } });
+
+    await screen.findByRole("button", { name: /Аспирин/ });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const qty = screen.getByLabelText("Количество");
+    await waitFor(() => expect(qty).toHaveFocus());
+  });
 });

@@ -13,14 +13,15 @@ interface Props {
   clearable?: boolean;
   placeholder?: string;
   invalid?: boolean;
-  /** POS speed-up: while the results dropdown is open, pressing 1–9 picks that
-   *  result. Opt-in so name/code filters elsewhere keep digits as plain input. */
-  selectByNumber?: boolean;
 }
 
 // Lightweight typeahead over /api/v1/catalog. Defers fetching until the
 // user types something — a blank input does NOT spam the server. The
 // forwarded ref points at the text input (POS focuses it via "/").
+//
+// Keyboard: digits are plain input (so dosages like "500" type normally).
+// Selection is standard typeahead — ↑/↓ move the highlight (first result is
+// highlighted by default), Enter picks the highlighted result.
 export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function CatalogPicker(
   {
     value,
@@ -29,13 +30,13 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     clearable = false,
     placeholder = "Начните вводить название…",
     invalid = false,
-    selectByNumber = false,
   },
   ref,
 ): JSX.Element {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(initialLabel ?? "");
   const [debounced, setDebounced] = useState("");
+  const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,6 +48,13 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     { q: debounced, page: 1, page_size: 10 },
     debounced.length >= 2,
   );
+
+  const items = data?.items ?? [];
+
+  // New results → highlight the first one again (set up the "type → Enter" flow).
+  useEffect(() => {
+    setHighlight(0);
+  }, [debounced]);
 
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
@@ -68,6 +76,8 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     setOpen(false);
   };
 
+  const listOpen = open && debounced.length >= 2;
+
   return (
     <div ref={containerRef} className="relative">
       <Input
@@ -79,12 +89,15 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
           setOpen(true);
         }}
         onKeyDown={(e) => {
-          if (!selectByNumber || !open) return;
-          const items = data?.items;
-          if (!items || items.length === 0) return;
-          if (/^[1-9]$/.test(e.key)) {
-            const n = Number(e.key);
-            const it = n <= items.length ? items[n - 1] : undefined;
+          if (!listOpen || items.length === 0) return;
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlight((h) => Math.min(h + 1, items.length - 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((h) => Math.max(h - 1, 0));
+          } else if (e.key === "Enter") {
+            const it = items[highlight] ?? items[0];
             if (it) {
               e.preventDefault();
               choose(it);
@@ -111,23 +124,23 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
           Выбрано: <span className="font-mono">{value.slice(0, 8)}</span>
         </p>
       )}
-      {open && debounced.length >= 2 && (
+      {listOpen && (
         <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-surface shadow-lg">
-          {data?.items.length === 0 ? (
+          {items.length === 0 ? (
             <p className="px-3 py-2 text-sm italic text-foreground-muted">Ничего не найдено</p>
           ) : (
-            data?.items.map((it, idx) => (
+            items.map((it, idx) => (
               <button
                 key={it.id}
                 type="button"
+                data-active={idx === highlight ? "true" : undefined}
+                onMouseEnter={() => setHighlight(idx)}
                 onClick={() => choose(it)}
-                className="block w-full px-3 py-2 text-left text-sm hover:bg-foreground/[0.03]"
+                className={
+                  "block w-full px-3 py-2 text-left text-sm " +
+                  (idx === highlight ? "bg-foreground/[0.06]" : "hover:bg-foreground/[0.03]")
+                }
               >
-                {selectByNumber && idx < 9 && (
-                  <span className="mr-2 font-mono tabular-nums text-foreground-muted">
-                    {idx + 1}
-                  </span>
-                )}
                 <span className="font-medium">{it.brand_name}</span>
                 {it.dosage && <span className="ml-2 text-foreground-muted">{it.dosage}</span>}
                 {it.manufacturer && (
