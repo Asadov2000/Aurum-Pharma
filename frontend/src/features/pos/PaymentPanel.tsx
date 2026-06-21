@@ -28,6 +28,8 @@ export function PaymentPanel({
   onComplete,
   completedReceiptNumber,
   onPrint,
+  onNewSale,
+  newSaleHint,
   touch,
   completeHint,
 }: {
@@ -43,6 +45,8 @@ export function PaymentPanel({
   onComplete: () => void;
   completedReceiptNumber: string | null;
   onPrint?: () => void;
+  onNewSale?: () => void;
+  newSaleHint?: string;
   touch?: boolean;
   completeHint?: string;
 }): JSX.Element {
@@ -57,13 +61,19 @@ export function PaymentPanel({
           {totalDue.toFixed(2)}
         </p>
         <p className="text-sm text-foreground-muted">{currency}</p>
-        {totalPaid > 0 && (
-          <p className="mt-2 text-sm text-foreground-secondary">
-            Оплачено <span className="font-mono">{totalPaid.toFixed(2)}</span> · Остаток{" "}
-            <span className={cn("font-mono", settled ? "text-success-foreground" : "text-warning-foreground")}>
-              {Math.max(0, remaining).toFixed(2)}
+        {totalDue > 0 && (
+          <div className="mt-3 flex justify-center gap-6 text-sm">
+            <span className="text-foreground-secondary">
+              Оплачено{" "}
+              <span className="font-mono tabular-nums text-foreground">
+                {totalPaid.toFixed(2)}
+              </span>
             </span>
-          </p>
+            <span className={cn(settled ? "text-success-foreground" : "text-warning-foreground")}>
+              Остаток{" "}
+              <span className="font-mono tabular-nums">{Math.max(0, remaining).toFixed(2)}</span>
+            </span>
+          </div>
         )}
       </div>
 
@@ -129,10 +139,17 @@ export function PaymentPanel({
 
       {!isDraft && completedReceiptNumber && (
         <div className="space-y-3 rounded-xl border border-success/40 bg-success-subtle p-4 text-center">
-          <p className="text-success-foreground">✅ Чек № {completedReceiptNumber} оформлен</p>
+          <p className="font-medium text-success-foreground">
+            ✅ Чек № {completedReceiptNumber} оформлен
+          </p>
           {onPrint && (
             <Button size="xl" variant="secondary" className="w-full" onClick={onPrint}>
               🖨 Печать чека
+            </Button>
+          )}
+          {onNewSale && (
+            <Button size="xl" className="w-full" onClick={onNewSale} title={newSaleHint}>
+              + Новая продажа
             </Button>
           )}
         </div>

@@ -20,8 +20,8 @@ export function QtyStepper({
 }): JSX.Element {
   const dec = () => onChange(Math.max(1, value - 1));
   const inc = () => onChange(value + 1);
-  const btn = size === "lg" ? "h-14 w-14 text-2xl" : "h-9 w-9 text-lg";
-  const val = size === "lg" ? "w-16 text-2xl" : "w-10 text-base";
+  const btn = size === "lg" ? "h-14 w-14 text-2xl" : "h-10 w-10 text-lg";
+  const val = size === "lg" ? "w-16 text-2xl" : "w-12 text-base";
 
   return (
     <div className="inline-flex items-center gap-1">

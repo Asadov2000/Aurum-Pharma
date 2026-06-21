@@ -1,7 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 
-import { Button } from "@/components/ui";
 import { findByBarcode } from "@/features/catalog/api";
 import { describeApiError } from "@/lib/errorMessages";
 import { cn } from "@/lib/utils";
@@ -351,6 +350,12 @@ function ActiveWorkspace({
         />
       )}
 
+      {/* Shift status strip — full width on top, so the selling columns get
+          the space (it lived in the right column before). */}
+      <div className="lg:col-span-12">
+        <ShiftBar registerId={registerId} mode={mode} />
+      </div>
+
       {/* LEFT — search + cart */}
       <div className="space-y-3 lg:col-span-7">
         <div className="flex items-center justify-between gap-3">
@@ -362,22 +367,11 @@ function ActiveWorkspace({
               </span>
             )}
           </h2>
-          <div className="flex items-center gap-2">
-            {requiresRx && (
-              <span className="rounded-full bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning-foreground">
-                требуется рецепт
-              </span>
-            )}
-            {!isDraft && (
-              <Button
-                variant="secondary"
-                onClick={onNewSale}
-                title={keyboard ? "Новая продажа (F2)" : undefined}
-              >
-                + Новая продажа
-              </Button>
-            )}
-          </div>
+          {requiresRx && (
+            <span className="rounded-full bg-warning-subtle px-2.5 py-0.5 text-xs font-medium text-warning-foreground ring-1 ring-inset ring-warning/30">
+              требуется рецепт
+            </span>
+          )}
         </div>
 
         {staleNotice && (
@@ -406,25 +400,28 @@ function ActiveWorkspace({
         {topError && <p className="text-sm text-danger">{topError}</p>}
       </div>
 
-      {/* RIGHT — shift + payment */}
-      <div className="space-y-4 lg:col-span-5">
-        <ShiftBar registerId={registerId} mode={mode} />
-        <PaymentPanel
-          totalDue={totalDue}
-          totalPaid={totalPaid}
-          remaining={remaining}
-          currency={currency}
-          payments={payments}
-          isDraft={isDraft}
-          completing={completeSale.isPending}
-          payingMethod={payingMethod}
-          onPayTile={onPayTile}
-          onComplete={() => void onComplete()}
-          completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
-          onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
-          touch={touch}
-          completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
-        />
+      {/* RIGHT — payment, sticky so it's always in view */}
+      <div className="lg:col-span-5">
+        <div className="space-y-4 lg:sticky lg:top-4">
+          <PaymentPanel
+            totalDue={totalDue}
+            totalPaid={totalPaid}
+            remaining={remaining}
+            currency={currency}
+            payments={payments}
+            isDraft={isDraft}
+            completing={completeSale.isPending}
+            payingMethod={payingMethod}
+            onPayTile={onPayTile}
+            onComplete={() => void onComplete()}
+            completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
+            onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
+            onNewSale={onNewSale}
+            newSaleHint={keyboard ? "Новая продажа (F2)" : undefined}
+            touch={touch}
+            completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
+          />
+        </div>
       </div>
 
       {saleId && (

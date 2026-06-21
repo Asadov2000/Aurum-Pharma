@@ -127,30 +127,31 @@ export function ShiftBar({
 
   return (
     <>
-      <Card>
-        <CardContent className="flex flex-wrap items-center gap-4 py-4">
-          <Badge tone="success">Смена открыта</Badge>
-          <div className="text-sm">
-            <p className="text-xs text-foreground-muted">Открыта</p>
-            <p>{new Date(shift.opened_at).toLocaleString("ru-RU")}</p>
-          </div>
-          <div className="text-sm">
-            <p className="text-xs text-foreground-muted">Начальная касса</p>
-            <p className="font-mono">
-              {Number(shift.opening_cash).toFixed(2)} {shift.currency}
-            </p>
-          </div>
-          <div className="ml-auto">
-            <Button
-              variant="secondary"
-              onClick={() => setCloseOpen(true)}
-              title={mode === "keyboard" ? "Закрыть смену (F9)" : undefined}
-            >
-              Закрыть смену
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Slim status strip — compact so it doesn't crowd the selling area. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm shadow-sm">
+        <Badge tone="success">Смена открыта</Badge>
+        <span className="text-foreground-muted">
+          Открыта{" "}
+          <span className="text-foreground-secondary">
+            {new Date(shift.opened_at).toLocaleString("ru-RU")}
+          </span>
+        </span>
+        <span className="text-foreground-muted">
+          Начальная касса{" "}
+          <span className="font-mono tabular-nums text-foreground-secondary">
+            {Number(shift.opening_cash).toFixed(2)} {shift.currency}
+          </span>
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="ml-auto"
+          onClick={() => setCloseOpen(true)}
+          title={mode === "keyboard" ? "Закрыть смену (F9)" : undefined}
+        >
+          Закрыть смену
+        </Button>
+      </div>
 
       <Modal open={closeOpen} onClose={() => setCloseOpen(false)} title="Закрытие смены">
         <div className="space-y-3">

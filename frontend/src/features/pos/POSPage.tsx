@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Card, CardContent, Input, Label, Select, Switch } from "@/components/ui";
+import { Input, Label, Select, Switch } from "@/components/ui";
 import { useRegistersQuery, useTenantSettingsQuery } from "@/features/foundation/queries";
 import { cn } from "@/lib/utils";
 
@@ -60,54 +60,52 @@ export function POSPage(): JSX.Element {
 
   return (
     <div className={cn("space-y-4", mode === "touch" ? "pos--touch" : "pos--keyboard")}>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-foreground">Касса</h1>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex flex-col gap-1">
-            <ModeToggle pref={pref} setPref={setPref} />
-            <Switch
-              label="Звук сканера"
-              checked={soundOn}
-              onChange={(e) => toggleSound(e.target.checked)}
-            />
-          </div>
-          <Card className="shrink-0">
-            <CardContent className="flex items-end gap-3 py-3">
-              {registerList && registerList.length === 0 ? (
-                <p className="text-sm text-foreground-muted">
-                  Нет активных касс. Создайте кассу в разделе «Кассы».
-                </p>
+      {/* Compact settings strip — register + POS mode + scanner sound on one
+          slim row, so it doesn't eat the cashier's vertical space. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-sm">
+        <h1 className="text-xl font-semibold text-foreground">Касса</h1>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {registerList && registerList.length === 0 ? (
+            <p className="text-sm text-foreground-muted">
+              Нет активных касс. Создайте кассу в разделе «Кассы».
+            </p>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Label htmlFor="register" className="mb-0 text-xs text-foreground-muted">
+                Касса
+              </Label>
+              {onlyRegister ? (
+                // Single register — auto-selected, shown as a disabled field.
+                <Input
+                  id="register"
+                  className="h-9 w-48"
+                  value={onlyRegister.name}
+                  readOnly
+                  disabled
+                />
               ) : (
-                <div>
-                  <Label htmlFor="register">Касса</Label>
-                  {onlyRegister ? (
-                    // Single register — auto-selected, shown as a disabled field.
-                    <Input
-                      id="register"
-                      className="w-56"
-                      value={onlyRegister.name}
-                      readOnly
-                      disabled
-                    />
-                  ) : (
-                    <Select
-                      id="register"
-                      value={registerId}
-                      onChange={(e) => setRegisterId(e.target.value)}
-                      className="w-56"
-                    >
-                      <option value="">— выберите —</option>
-                      {registerList?.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </div>
+                <Select
+                  id="register"
+                  value={registerId}
+                  onChange={(e) => setRegisterId(e.target.value)}
+                  className="h-9 w-48"
+                >
+                  <option value="">— выберите —</option>
+                  {registerList?.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </Select>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          )}
+          <ModeToggle pref={pref} setPref={setPref} />
+          <Switch
+            label="Звук сканера"
+            checked={soundOn}
+            onChange={(e) => toggleSound(e.target.checked)}
+          />
         </div>
       </div>
 

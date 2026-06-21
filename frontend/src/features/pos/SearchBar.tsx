@@ -34,7 +34,7 @@ export const SearchBar = forwardRef<
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 rounded-xl border border-border bg-surface p-3 shadow-sm">
       <div className="flex items-end gap-2">
         <div className="min-w-0 flex-1">
           <CatalogPicker
