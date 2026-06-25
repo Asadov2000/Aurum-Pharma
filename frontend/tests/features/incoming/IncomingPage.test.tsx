@@ -115,7 +115,7 @@ describe("IncomingPage", () => {
     listSuppliers.mockReset();
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders an empty-state hint when there are no documents", async () => {

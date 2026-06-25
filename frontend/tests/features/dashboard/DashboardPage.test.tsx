@@ -87,7 +87,7 @@ describe("DashboardPage", () => {
     };
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders all four sections with data", async () => {

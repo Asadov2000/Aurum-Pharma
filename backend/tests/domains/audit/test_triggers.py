@@ -126,10 +126,12 @@ async def test_scrub_hides_sensitive_fields() -> None:
             "email": "x@aurum.tj",
             "password_hash": "$2b$12$abcdef",
             "totp_secret": "JBSWY3DPEHPK3PXP",
+            "profile": {"phone": "+992000000000"},
         },
         new_values={
             "email": "x@aurum.tj",
             "password_hash": "$2b$12$newhash",
+            "purchase_price": "3.00",
         },
         changed_fields={"password_hash": "$2b$12$newhash"},
     )
@@ -139,9 +141,10 @@ async def test_scrub_hides_sensitive_fields() -> None:
     assert scrubbed["old_values"]["password_hash"] == "***"
     assert scrubbed["old_values"]["totp_secret"] == "***"
     assert scrubbed["new_values"]["password_hash"] == "***"
+    assert scrubbed["new_values"]["email"] == "***"
+    assert scrubbed["new_values"]["purchase_price"] == "***"
+    assert scrubbed["old_values"]["profile"]["phone"] == "***"
     assert scrubbed["changed_fields"]["password_hash"] == "***"
-    # Non-sensitive fields stay intact
-    assert scrubbed["old_values"]["email"] == "x@aurum.tj"
 
 
 async def test_service_search_filters_by_tenant(db_session: AsyncSession) -> None:

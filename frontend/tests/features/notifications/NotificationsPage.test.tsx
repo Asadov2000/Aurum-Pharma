@@ -58,7 +58,7 @@ describe("NotificationsPage", () => {
     patchSubscriptions.mockReset();
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders the inbox with severity badge and event title", async () => {

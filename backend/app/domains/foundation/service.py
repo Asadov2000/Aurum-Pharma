@@ -44,7 +44,7 @@ class FoundationService:
         onboarding = OnboardingService(OnboardingRepository(self.repo.session))
         await onboarding.on_tenant_created(tenant.id)
 
-        logger.info("tenant_created", tenant_id=str(tenant.id), name=tenant.name)
+        logger.info("tenant_created", tenant_id=str(tenant.id))
         return tenant
 
     async def list_tenants(self, *, limit: int = 100, offset: int = 0) -> list[Tenant]:

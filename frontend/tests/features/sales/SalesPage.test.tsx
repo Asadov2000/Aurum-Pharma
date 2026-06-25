@@ -58,7 +58,7 @@ describe("SalesPage", () => {
     refundSale.mockReset();
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders an empty state when there are no receipts", async () => {

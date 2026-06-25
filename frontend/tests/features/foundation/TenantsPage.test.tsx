@@ -61,7 +61,7 @@ describe("TenantsPage", () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders the empty state when API returns no tenants", async () => {

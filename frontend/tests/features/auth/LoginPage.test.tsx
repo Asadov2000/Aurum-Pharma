@@ -42,7 +42,7 @@ describe("LoginPage", () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("rejects an empty email and does not call the API", async () => {

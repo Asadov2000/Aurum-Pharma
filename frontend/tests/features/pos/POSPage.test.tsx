@@ -27,7 +27,7 @@ vi.mock("@/features/foundation/api", () => ({
   listTenants: vi.fn(),
   createTenant: vi.fn(),
   updateTenant: vi.fn(),
-  getTenantSettings: vi.fn(),
+  getTenantSettings: vi.fn().mockResolvedValue({ draft_sale_lifetime_min: 60 }),
   updateTenantSettings: vi.fn(),
   createBranch: vi.fn(),
   updateBranch: vi.fn(),
@@ -91,7 +91,7 @@ describe("POSPage", () => {
     listRegisters.mockReset();
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("hints to create a register when none exist", async () => {

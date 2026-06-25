@@ -147,7 +147,6 @@ class InventoryService:
             "write_off",
             batch_id=str(batch.id),
             qty=str(qty),
-            reason=reason,
         )
         return wo
 

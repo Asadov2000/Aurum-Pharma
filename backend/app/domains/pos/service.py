@@ -725,8 +725,6 @@ class POSService:
         logger.info(
             "sale_completed",
             sale_id=str(sale.id),
-            receipt_number=receipt,
-            total=str(sale.total_amount),
             is_test=sale.is_test,
         )
         return completed

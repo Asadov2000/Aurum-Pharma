@@ -5,12 +5,14 @@ import { HomeIcon, type NavItem } from "./Sidebar";
 export function buildNav(
   isSupport: boolean,
   hasTenant: boolean,
-  canSeeDashboard: boolean,
-  canManageTeam: boolean,
+  permissions: readonly string[],
 ): NavItem[] {
+  const can = (code: string): boolean => isSupport || permissions.includes(code);
+  const canAny = (codes: readonly string[]): boolean => codes.some((code) => can(code));
+
   // «Главная» is the owner dashboard (gated by reports.view on the backend).
   // Hide it from users who'd only get a 403 — e.g. sellers.
-  const items: NavItem[] = canSeeDashboard
+  const items: NavItem[] = can("reports.view")
     ? [{ to: "/", label: "Главная", icon: <HomeIcon /> }]
     : [];
   if (isSupport) {
@@ -23,21 +25,29 @@ export function buildNav(
     // «Пользователи» / «Роли» — team management, gated by users.view on the
     // backend. Hide them from users who lack it (e.g. sellers) so they don't
     // see a menu item that would only 403.
-    if (canManageTeam) {
+    if (can("users.view")) {
       items.push({ to: "/users", label: "Пользователи" });
       items.push({ to: "/roles", label: "Роли" });
     }
-    items.push({ to: "/catalog", label: "Каталог" });
-    items.push({ to: "/suppliers", label: "Поставщики" });
-    items.push({ to: "/incoming", label: "Приходы" });
-    items.push({ to: "/batches", label: "Партии" });
-    items.push({ to: "/pos", label: "Касса" });
-    items.push({ to: "/sales", label: "Чеки" });
-    items.push({ to: "/billing", label: "Биллинг" });
-    items.push({ to: "/reports", label: "Отчёты" });
-    items.push({ to: "/audit", label: "Аудит" });
+    if (can("catalog.view")) items.push({ to: "/catalog", label: "Каталог" });
+    if (can("suppliers.view")) items.push({ to: "/suppliers", label: "Поставщики" });
+    if (can("incoming.view")) items.push({ to: "/incoming", label: "Приходы" });
+    if (can("reports.view")) items.push({ to: "/batches", label: "Партии" });
+    if (canAny(["pos.shift_open", "pos.sell", "pos.shift_close"])) {
+      items.push({ to: "/pos", label: "Касса" });
+    }
+    if (canAny(["sales.view.own", "sales.view.tenant"])) {
+      items.push({ to: "/sales", label: "Чеки" });
+    }
+    if (can("reports.view")) {
+      items.push({ to: "/billing", label: "Биллинг" });
+      items.push({ to: "/reports", label: "Отчёты" });
+    }
+    if (canAny(["audit.view.own", "audit.view.tenant", "audit.view.global"])) {
+      items.push({ to: "/audit", label: "Аудит" });
+    }
     items.push({ to: "/notifications", label: "Уведомления" });
-    items.push({ to: "/settings", label: "Настройки" });
+    if (can("settings.update")) items.push({ to: "/settings", label: "Настройки" });
   }
   return items;
 }

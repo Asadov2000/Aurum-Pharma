@@ -12,10 +12,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
   const hasTenant = Boolean(user?.home_tenant_id);
   const perms = user?.permissions ?? [];
-  const canSeeDashboard = isSupport || perms.includes("reports.view");
-  // «Пользователи» / «Роли» live behind users.view (owner/admin/dev).
-  const canManageTeam = isSupport || perms.includes("users.view");
-  const items = buildNav(isSupport, hasTenant, canSeeDashboard, canManageTeam);
+  const items = buildNav(isSupport, hasTenant, perms);
 
   // Clean identity: a recognizable name + a quiet caption. We have no role name
   // in the payload, so the caption is the support role (dev/admin) when set, or

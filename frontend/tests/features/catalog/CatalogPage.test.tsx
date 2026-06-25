@@ -59,7 +59,7 @@ describe("CatalogPage", () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("shows the empty state when no items match", async () => {

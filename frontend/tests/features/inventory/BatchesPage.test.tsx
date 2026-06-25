@@ -66,7 +66,7 @@ describe("BatchesPage", () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("shows an empty-state hint when no batches exist", async () => {

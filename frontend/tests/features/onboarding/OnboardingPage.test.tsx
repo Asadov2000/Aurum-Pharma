@@ -66,14 +66,14 @@ describe("OnboardingPage", () => {
     getChecklist.mockReset();
     submitWizardStep.mockReset();
     startTrial.mockReset();
+    getChecklist.mockResolvedValue(CHECKLIST_BELOW_100);
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("shows current progress: 2 of 8 with check on completed steps", async () => {
     getWizard.mockResolvedValueOnce(WIZARD);
-    getChecklist.mockResolvedValueOnce(CHECKLIST_BELOW_100);
     renderPage();
     expect(await screen.findByText(/2 из 8/i)).toBeInTheDocument();
     expect(screen.getByText("Профиль аптеки")).toBeInTheDocument();
@@ -83,7 +83,6 @@ describe("OnboardingPage", () => {
 
   it("hides Start-trial button when catalog has <100 items", async () => {
     getWizard.mockResolvedValueOnce(WIZARD);
-    getChecklist.mockResolvedValueOnce(CHECKLIST_BELOW_100);
     renderPage();
     await screen.findByText(/2 из 8/i);
     expect(screen.queryByRole("button", { name: /Запустить пробный период/i })).toBeNull();
@@ -113,7 +112,6 @@ describe("OnboardingPage", () => {
 
   it("submits the step with a noted_at payload when 'Отметить' clicked", async () => {
     getWizard.mockResolvedValueOnce(WIZARD);
-    getChecklist.mockResolvedValueOnce(CHECKLIST_BELOW_100);
     submitWizardStep.mockResolvedValueOnce({ ...WIZARD, steps_completed: [1, 2, 3] });
     renderPage();
     await screen.findByText(/2 из 8/i);

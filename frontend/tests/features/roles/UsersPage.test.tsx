@@ -95,22 +95,21 @@ describe("UsersPage", () => {
     listUsers.mockReset();
     listRoles.mockReset();
     inviteUser.mockReset();
+    listRoles.mockResolvedValue([ROLE]);
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders an empty state when there are no users", async () => {
     listUsers.mockResolvedValueOnce(usersResp([]));
-    listRoles.mockResolvedValueOnce([ROLE]);
     renderPage();
     expect(await screen.findByText(/Пока нет пользователей/i)).toBeInTheDocument();
   });
 
   it("renders the role name from the role registry, not the raw id", async () => {
     listUsers.mockResolvedValueOnce(usersResp([USER_ACTIVE]));
-    listRoles.mockResolvedValueOnce([ROLE]);
     renderPage();
     expect(await screen.findByText("User One")).toBeInTheDocument();
     expect(await screen.findByText("Кассир")).toBeInTheDocument();
@@ -119,7 +118,6 @@ describe("UsersPage", () => {
 
   it("rejects the invite form when required fields are empty", async () => {
     listUsers.mockResolvedValueOnce(usersResp([]));
-    listRoles.mockResolvedValueOnce([ROLE]);
     renderPage();
     await screen.findByText(/Пока нет пользователей/i);
     fireEvent.click(screen.getByRole("button", { name: /\+ Пригласить/i }));

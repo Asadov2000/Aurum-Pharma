@@ -46,7 +46,7 @@ describe("AuditPage", () => {
     searchAudit.mockReset();
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("defaults to 'my' scope and renders an empty hint when nothing returned", async () => {

@@ -3,9 +3,23 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getZReport = vi.fn();
+const getSalesSummaryXlsx = vi.fn();
+const getStockOnDateXlsx = vi.fn();
+const getZReportXlsx = vi.fn();
+const listBranches = vi.fn();
 
 vi.mock("@/features/reports/api", () => ({
   getZReport: (...a: unknown[]) => getZReport(...a),
+  getSalesSummaryXlsx: (...a: unknown[]) => getSalesSummaryXlsx(...a),
+  getStockOnDateXlsx: (...a: unknown[]) => getStockOnDateXlsx(...a),
+}));
+
+vi.mock("@/features/pos/api", () => ({
+  getZReportXlsx: (...a: unknown[]) => getZReportXlsx(...a),
+}));
+
+vi.mock("@/features/foundation/api", () => ({
+  listBranches: (...a: unknown[]) => listBranches(...a),
 }));
 
 import { ReportsPage } from "@/features/reports/ReportsPage";
@@ -42,9 +56,14 @@ describe("ReportsPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
     getZReport.mockReset();
+    getSalesSummaryXlsx.mockReset();
+    getStockOnDateXlsx.mockReset();
+    getZReportXlsx.mockReset();
+    listBranches.mockReset();
+    listBranches.mockResolvedValue([]);
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("disables 'Загрузить' until a shift_id is typed", () => {

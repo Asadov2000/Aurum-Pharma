@@ -46,7 +46,7 @@ describe("SuppliersPage", () => {
     createSupplier.mockReset();
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders the empty state when no suppliers exist", async () => {

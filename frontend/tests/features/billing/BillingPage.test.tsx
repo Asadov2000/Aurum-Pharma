@@ -67,7 +67,7 @@ describe("BillingPage", () => {
     getInvoice.mockReset();
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("shows a hint when there is no subscription yet", async () => {

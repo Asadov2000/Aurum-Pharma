@@ -120,13 +120,13 @@ class AuthService:
 
         # Anti-enumeration: dispatch the email even when the user does not
         # exist (the worker will silently drop it; clients see no difference).
-        # In phase 1 there is no real SMTP — the Celery task just logs the code
-        # via structlog. Lazy import avoids a circular dependency through
+        # In phase 1 there is no real SMTP yet; the router returns dev_code in
+        # development only. Lazy import avoids a circular dependency through
         # app.tasks.celery_app on first module load.
         from app.tasks.auth import send_email_code
 
         send_email_code.delay(email_lower, code)
-        logger.info("login_code_issued", email=email_lower)
+        logger.info("login_code_issued")
         return code
 
     # -------------------------------------------------------------------------

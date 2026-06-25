@@ -108,7 +108,7 @@ describe("SaleArea — Enter pays cash", () => {
     addPayment.mockReset();
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("Enter on a ready draft records a cash payment for the remaining balance", async () => {

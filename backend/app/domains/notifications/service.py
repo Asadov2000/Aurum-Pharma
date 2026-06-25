@@ -201,7 +201,6 @@ class NotificationsService:
                 "delivery_attempt",
                 delivery_id=str(delivery.id),
                 channel=delivery.channel,
-                recipient=delivery.recipient,
                 attempt=attempts,
             )
             return await self.repo.update_delivery(

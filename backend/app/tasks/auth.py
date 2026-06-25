@@ -1,6 +1,7 @@
 """Celery tasks for the auth domain.
 
-Phase 1: send_email_code only logs through structlog (no real SMTP yet).
+Phase 1 has no real SMTP yet. The login endpoint returns `dev_code` only in
+development; the worker records dispatch attempts without logging credentials.
 A real provider is wired up in phase 2; the call signature does not change.
 """
 
@@ -24,15 +25,11 @@ logger = structlog.get_logger("tasks.auth")
 def send_email_code(email: str, code: str) -> None:
     """Phase 1 stub — no real SMTP yet (wired up in phase 2; signature unchanged).
 
-    A login code is a credential. In development we emit it to logs so devs can
-    copy it from stdout; in staging/production the plaintext code is NEVER
-    logged — only the dispatch attempt is recorded. This keeps the code on the
-    normal channel and out of log aggregators in production.
+    A login code is a credential and email is PII, so neither goes to logs. In
+    development the API response carries `dev_code`; production SMTP will use
+    this same task signature without changing callers.
     """
-    if get_settings().ENVIRONMENT == "development":
-        logger.info("send_email_code", email=email, code=code)
-    else:
-        logger.info("send_email_code", email=email)
+    logger.info("send_email_code", environment=get_settings().ENVIRONMENT)
 
 
 async def _expire_email_codes_async() -> int:

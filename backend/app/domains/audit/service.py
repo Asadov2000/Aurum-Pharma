@@ -6,16 +6,16 @@ action types — VIEW, EXPORT, IMPERSONATE — that the rest of the app
 calls when a human deliberately looks at, exports, or impersonates a
 sensitive resource.
 
-PII filter: before returning any audit row to a client, scrub the
-hashes (password / TOTP / refresh-token) and code material from
-old_values / new_values / changed_fields. The list lives in one
-constant so it's grep-able.
+PII filter: before returning any audit row to a client, scrub credentials,
+contact fields, patient/person fields, and business-sensitive purchase prices
+from old_values / new_values / changed_fields / metadata. The trigger's raw
+DB history stays intact; client-facing audit payloads are redacted.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import structlog
@@ -33,7 +33,23 @@ SENSITIVE_FIELDS: set[str] = {
     "code_hash",
     "code_salt",
     "jwt_secret",
+    "email",
+    "email_lower",
+    "phone",
+    "recipient",
+    "full_name",
+    "owner_full_name",
+    "patient_name",
+    "doctor_name",
+    "contact_person",
+    "purchase_price",
 }
+SENSITIVE_SUFFIXES: tuple[str, ...] = ("_email", "_phone")
+
+
+def _is_sensitive_field(key: str) -> bool:
+    key_lower = key.lower()
+    return key_lower in SENSITIVE_FIELDS or key_lower.endswith(SENSITIVE_SUFFIXES)
 
 
 class AuditService:
@@ -130,14 +146,23 @@ class AuditService:
         The trigger's recorded values stay in the DB intact (that's the
         whole point of an audit log); only the API response is scrubbed."""
 
+        def _hide_value(value: Any) -> Any:
+            if isinstance(value, dict):
+                out: dict[str, Any] = {}
+                for key, item in value.items():
+                    if isinstance(key, str) and _is_sensitive_field(key) and item is not None:
+                        out[key] = "***"
+                    else:
+                        out[key] = _hide_value(item)
+                return out
+            if isinstance(value, list):
+                return [_hide_value(item) for item in value]
+            return value
+
         def _hide(blob: dict[str, Any] | None) -> dict[str, Any] | None:
             if blob is None:
                 return None
-            out = dict(blob)
-            for key in SENSITIVE_FIELDS:
-                if key in out and out[key] is not None:
-                    out[key] = "***"
-            return out
+            return cast(dict[str, Any], _hide_value(blob))
 
         return {
             "id": entry.id,
@@ -151,6 +176,6 @@ class AuditService:
             "changed_fields": _hide(entry.changed_fields),
             "ip_address": entry.ip_address,
             "user_agent": entry.user_agent,
-            "metadata": entry.metadata_json,
+            "metadata": _hide(entry.metadata_json),
             "created_at": entry.created_at,
         }
