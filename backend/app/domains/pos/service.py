@@ -21,6 +21,7 @@ from uuid import UUID
 
 import anyio
 import structlog
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InternalError
 
 from app.core.errors import (
@@ -78,19 +79,29 @@ class POSService:
         opened_by_user_id: UUID,
         opening_cash: Decimal,
     ) -> Shift:
+        register_result = await self.repo.session.execute(
+            select(Register).where(Register.id == register_id).with_for_update()
+        )
+        register = register_result.scalar_one_or_none()
+        if register is None or register.tenant_id != tenant_id:
+            raise NotFoundError("Register not found")
+        if not register.is_active:
+            raise BusinessRuleError("Register is inactive")
+        branch_result = await self.repo.session.execute(
+            select(Branch).where(Branch.id == register.branch_id).with_for_update()
+        )
+        branch = branch_result.scalar_one_or_none()
+        if branch is None or branch.tenant_id != tenant_id:
+            raise NotFoundError("Branch not found")
+        if not branch.is_active:
+            raise BusinessRuleError("Branch is inactive")
+
         existing = await self.repo.get_open_shift_for_register(register_id)
         if existing is not None:
             raise ConflictError(
                 "Register already has an open shift",
                 details={"shift_id": str(existing.id)},
             )
-        # branch_id comes from the register row — fetched directly to avoid
-        # a cross-domain dep on foundation.service.
-        register = await self.repo.session.get(Register, register_id)
-        if register is None or register.tenant_id != tenant_id:
-            raise NotFoundError("Register not found")
-        if not register.is_active:
-            raise BusinessRuleError("Register is inactive")
         return await self.repo.create_shift(
             tenant_id=tenant_id,
             branch_id=register.branch_id,

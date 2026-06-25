@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
+from app.domains.pos.repository import POSRepository
+from app.domains.pos.service import POSService
 
 
 async def test_register_crud(db_session: AsyncSession, make_tenant) -> None:
@@ -65,3 +69,43 @@ async def test_register_on_inactive_branch_rejected(db_session: AsyncSession, ma
             tenant_id=tenant.id,
             fields={"branch_id": dead.id, "name": "on-dead"},
         )
+
+
+async def test_register_deactivation_rejects_open_shift_but_allows_closed_shift(
+    db_session: AsyncSession, make_tenant, make_user
+) -> None:
+    tenant = await make_tenant()
+    service = FoundationService(FoundationRepository(db_session))
+    pos = POSService(POSRepository(db_session))
+    branch = await service.create_branch(tenant_id=tenant.id, fields={"name": "B"})
+    register = await service.create_register(
+        tenant_id=tenant.id,
+        fields={"branch_id": branch.id, "name": "Register with open shift"},
+    )
+    cashier = await make_user(home_tenant_id=tenant.id)
+
+    await pos.open_shift(
+        tenant_id=tenant.id,
+        register_id=register.id,
+        opened_by_user_id=cashier.id,
+        opening_cash=Decimal("0"),
+    )
+
+    with pytest.raises(BusinessRuleError, match="open shift"):
+        await service.soft_delete_register(register.id)
+    with pytest.raises(BusinessRuleError, match="open shift"):
+        await service.update_register(register.id, fields={"is_active": False})
+
+    await db_session.refresh(register)
+    assert register.is_active is True
+
+    open_shift = await pos.get_current_shift(user_id=cashier.id, register_id=register.id)
+    assert open_shift is not None
+    await pos.close_shift(
+        shift_id=open_shift.id,
+        closing_cash_actual=Decimal("0"),
+        closed_by_user_id=cashier.id,
+    )
+
+    deleted = await service.soft_delete_register(register.id)
+    assert deleted.is_active is False

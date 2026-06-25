@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
@@ -96,6 +96,11 @@ class FoundationRepository:
     async def get_branch(self, branch_id: UUID) -> Branch | None:
         return await self.session.get(Branch, branch_id)
 
+    async def get_branch_for_update(self, branch_id: UUID) -> Branch | None:
+        stmt = select(Branch).where(Branch.id == branch_id).with_for_update()
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def update_branch(self, branch: Branch, **fields: Any) -> Branch:
         for key, value in fields.items():
             setattr(branch, key, value)
@@ -111,6 +116,13 @@ class FoundationRepository:
         )
         result = await self.session.execute(stmt)
         return int(result.scalar_one())
+
+    async def has_open_shift_for_branch(self, branch_id: UUID) -> bool:
+        result = await self.session.execute(
+            text("SELECT 1 FROM shift WHERE branch_id = :branch_id AND status = 'open' LIMIT 1"),
+            {"branch_id": str(branch_id)},
+        )
+        return result.scalar_one_or_none() is not None
 
     # -------------------------------------------------------------------------
     # register
@@ -138,9 +150,23 @@ class FoundationRepository:
     async def get_register(self, register_id: UUID) -> Register | None:
         return await self.session.get(Register, register_id)
 
+    async def get_register_for_update(self, register_id: UUID) -> Register | None:
+        stmt = select(Register).where(Register.id == register_id).with_for_update()
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def update_register(self, register: Register, **fields: Any) -> Register:
         for key, value in fields.items():
             setattr(register, key, value)
         await self.session.flush()
         await self.session.refresh(register)
         return register
+
+    async def has_open_shift_for_register(self, register_id: UUID) -> bool:
+        result = await self.session.execute(
+            text(
+                "SELECT 1 FROM shift WHERE register_id = :register_id AND status = 'open' LIMIT 1"
+            ),
+            {"register_id": str(register_id)},
+        )
+        return result.scalar_one_or_none() is not None

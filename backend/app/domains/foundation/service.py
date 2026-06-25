@@ -5,7 +5,7 @@ Key invariants enforced here:
 - A tenant must keep at least one active branch — soft-deleting / deactivating
   the last one is rejected.
 - A register may only point to a branch that belongs to the same tenant.
-- TODO(pos): once shifts exist, refuse to delete a branch that has open shifts.
+- A branch or register with an open shift cannot be deactivated.
 """
 
 from __future__ import annotations
@@ -124,12 +124,19 @@ class FoundationService:
         fields: dict[str, object],
         updated_by: UUID | None = None,
     ) -> Branch:
-        branch = await self.get_branch(branch_id)
+        if fields.get("is_active") is False:
+            branch = await self.repo.get_branch_for_update(branch_id)
+            if branch is None:
+                raise NotFoundError("Branch not found")
+        else:
+            branch = await self.get_branch(branch_id)
         # Guard the "last active branch" rule on deactivation only.
         if fields.get("is_active") is False and branch.is_active:
             active = await self.repo.count_active_branches(branch.tenant_id)
             if active <= 1:
                 raise BusinessRuleError("Cannot deactivate the last active branch of the tenant")
+            if await self.repo.has_open_shift_for_branch(branch.id):
+                raise BusinessRuleError("Cannot deactivate a branch with an open shift")
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_branch(branch, **fields)
@@ -137,7 +144,6 @@ class FoundationService:
     async def soft_delete_branch(
         self, branch_id: UUID, *, updated_by: UUID | None = None
     ) -> Branch:
-        # TODO(pos): forbid deletion when the branch has open shifts.
         return await self.update_branch(
             branch_id, fields={"is_active": False}, updated_by=updated_by
         )
@@ -192,7 +198,18 @@ class FoundationService:
         fields: dict[str, object],
         updated_by: UUID | None = None,
     ) -> Register:
-        register = await self.get_register(register_id)
+        if fields.get("is_active") is False:
+            register = await self.repo.get_register_for_update(register_id)
+            if register is None:
+                raise NotFoundError("Register not found")
+        else:
+            register = await self.get_register(register_id)
+        if (
+            fields.get("is_active") is False
+            and register.is_active
+            and await self.repo.has_open_shift_for_register(register.id)
+        ):
+            raise BusinessRuleError("Cannot deactivate a register with an open shift")
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_register(register, **fields)
