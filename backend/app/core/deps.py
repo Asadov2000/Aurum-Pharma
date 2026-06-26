@@ -65,6 +65,7 @@ class CurrentUser:
     is_administrator: bool
     permissions: set[str] = field(default_factory=set)
     branch_assignments: dict[str, str] = field(default_factory=dict)
+    assignment_levels: dict[str, int] = field(default_factory=dict)
 
     @property
     def level(self) -> int:
@@ -77,8 +78,8 @@ class CurrentUser:
             return 1
         if self.is_administrator:
             return 2
-        if "users.invite" in self.permissions or "roles.assign" in self.permissions:
-            return 3
+        if self.assignment_levels:
+            return min(self.assignment_levels.values())
         return 4
 
     @property
@@ -142,6 +143,7 @@ async def current_user(
 
     permissions: set[str] = set()
     branch_assignments: dict[str, str] = {}
+    assignment_levels: dict[str, int] = {}
 
     if tenant_id is not None:
         # Local import — roles depends on auth at module level, can't import
@@ -154,11 +156,16 @@ async def current_user(
 
         # branch_assignments: {branch_id_str | "tenant": role_id_str}
         assignments = await service.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
+        active_assignments = [a for a in assignments if a.is_active]
+        roles_by_id = await service.repo.roles_by_ids([a.role_id for a in active_assignments])
         for a in assignments:
             if not a.is_active:
                 continue
             key = str(a.branch_id) if a.branch_id is not None else "tenant"
             branch_assignments[key] = str(a.role_id)
+            role = roles_by_id.get(a.role_id)
+            if role is not None:
+                assignment_levels[key] = role.level
 
     return CurrentUser(
         user_id=user_id,
@@ -167,6 +174,7 @@ async def current_user(
         is_administrator=is_admin,
         permissions=permissions,
         branch_assignments=branch_assignments,
+        assignment_levels=assignment_levels,
     )
 
 

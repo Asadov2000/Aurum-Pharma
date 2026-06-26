@@ -24,6 +24,7 @@ describe("roles labels + level helpers", () => {
   it("currentUserLevel mirrors the backend CurrentUser.level", () => {
     expect(currentUserLevel({ is_developer: true })).toBe(1);
     expect(currentUserLevel({ is_administrator: true })).toBe(2);
+    expect(currentUserLevel({ level: 4, permissions: ["roles.assign"] })).toBe(4);
     expect(currentUserLevel({ permissions: ["users.invite"] })).toBe(3);
     expect(currentUserLevel({ permissions: ["roles.assign"] })).toBe(3);
     expect(currentUserLevel({ permissions: ["pos.sell"] })).toBe(4);

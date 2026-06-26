@@ -83,11 +83,12 @@ test.describe("Incoming flow (owner)", () => {
     await page.goto("/batches");
     await page.getByLabel(/^Точка$/).selectOption({ label: branch.name });
     // The brand_name is not on the batch row directly (UI shows batch_number),
-    // but qty_remaining = 10 with branch filter scoped to a brand-new branch
-    // is a clean unique-row assertion.
-    await expect(page.getByText("10", { exact: false }).first()).toBeVisible({
-      timeout: 15_000,
-    });
+    // so assert the visible table row for this branch and its 10 / 10 stock.
+    const batchRow = page
+      .getByRole("row")
+      .filter({ hasText: branch.name })
+      .filter({ hasText: /10(?:\.0+)?\s*\/\s*10(?:\.0+)?/ });
+    await expect(batchRow.first()).toBeVisible({ timeout: 15_000 });
   });
 });
 

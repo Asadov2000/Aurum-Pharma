@@ -106,6 +106,7 @@ async def me(
 ) -> MeResponse:
     info = await service.get_user_info(user.user_id)
     me_data = MeResponse.model_validate(info)
+    me_data.level = user.level
     me_data.branch_assignments = user.branch_assignments
     me_data.permissions = sorted(user.permissions)
     return me_data

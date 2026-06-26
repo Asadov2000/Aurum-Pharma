@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
-    "test": "vitest run",
+    "test": "vitest run tests",
     "e2e": "playwright test --reporter=list",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"

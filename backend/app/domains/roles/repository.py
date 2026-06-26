@@ -44,6 +44,13 @@ class RolesRepository:
     async def get_role(self, role_id: UUID) -> Role | None:
         return await self.session.get(Role, role_id)
 
+    async def roles_by_ids(self, role_ids: list[UUID]) -> dict[UUID, Role]:
+        if not role_ids:
+            return {}
+        stmt = select(Role).where(Role.id.in_(role_ids))
+        result = await self.session.execute(stmt)
+        return {role.id: role for role in result.scalars().all()}
+
     async def get_role_by_name(self, name: str, *, tenant_id: UUID | None = None) -> Role | None:
         stmt = select(Role).where(
             and_(
@@ -97,6 +104,19 @@ class RolesRepository:
         for code in codes:
             self.session.add(RolePermission(role_id=role_id, permission_code=code))
         await self.session.flush()
+
+    async def active_user_ids_for_role(self, role_id: UUID, *, tenant_id: UUID) -> list[UUID]:
+        stmt = (
+            select(UserAssignment.user_id)
+            .where(
+                UserAssignment.role_id == role_id,
+                UserAssignment.tenant_id == tenant_id,
+                UserAssignment.is_active.is_(True),
+            )
+            .distinct()
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def existing_active_permission_codes(self, codes: list[str]) -> set[str]:
         if not codes:

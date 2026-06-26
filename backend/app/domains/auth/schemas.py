@@ -61,6 +61,7 @@ class MeResponse(BaseModel):
     home_tenant_id: UUID | None
     status: str
     last_login_at: datetime | None
+    level: int = 4
     # role_id keyed by branch_id (or the literal "tenant" for tenant-wide
     # assignments). Empty when the request has no tenant_id in the token.
     branch_assignments: dict[str, str] = {}

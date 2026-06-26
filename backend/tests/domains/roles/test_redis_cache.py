@@ -7,6 +7,7 @@ import json
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.roles.models import Role, RolePermission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService, perms_cache_key
 
@@ -92,3 +93,52 @@ async def test_assignment_change_invalidates_cache(
     )
     perms_after = await service.get_effective_permissions(target.id, tenant.id)
     assert "users.invite" in perms_after
+
+
+async def test_role_permission_change_invalidates_assigned_users_cache(
+    db_session: AsyncSession,
+    redis: Redis,
+    make_tenant,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    actor = await make_user(email="cache-role-actor@aurum.tj")
+    target = await make_user(email="cache-role-target@aurum.tj")
+    role = Role(tenant_id=tenant.id, name="Cache mutable role", level=4, is_system=False)
+    db_session.add(role)
+    await db_session.flush()
+    await db_session.refresh(role)
+    db_session.add(RolePermission(role_id=role.id, permission_code="pos.sell"))
+    await db_session.flush()
+    service = RolesService(RolesRepository(db_session), redis=redis)
+
+    await service.assign_role(
+        actor_level=2,
+        actor_id=actor.id,
+        tenant_id=tenant.id,
+        target_user_id=target.id,
+        role_id=role.id,
+        branch_id=None,
+        password_required=False,
+    )
+    perms = await service.get_effective_permissions(target.id, tenant.id)
+    assert "pos.sell" in perms
+    assert await redis.get(perms_cache_key(target.id, tenant.id)) is not None
+
+    await service.update_role(
+        actor_level=2,
+        actor_id=actor.id,
+        actor_permissions=set(),
+        actor_is_support=True,
+        tenant_id=tenant.id,
+        role_id=role.id,
+        name=None,
+        description=None,
+        level=None,
+        permission_codes=["catalog.view"],
+    )
+
+    assert await redis.get(perms_cache_key(target.id, tenant.id)) is None
+    perms_after = await service.get_effective_permissions(target.id, tenant.id)
+    assert "catalog.view" in perms_after
+    assert "pos.sell" not in perms_after

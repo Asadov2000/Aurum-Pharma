@@ -25,6 +25,7 @@ test.describe("Catalog flow (owner)", () => {
     await page.getByLabel("Торговое название").fill(name);
     await page.getByLabel(/Базовая цена/).fill("12.50");
     await page.getByRole("button", { name: /^Создать$/ }).click();
+    await expect(page.getByRole("dialog")).toBeHidden({ timeout: 15_000 });
 
     // Modal closes and the row appears. Catalog page uses a trigram search;
     // search by the unique name tail so accumulated same-prefix rows don't

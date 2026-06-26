@@ -201,6 +201,13 @@ class RolesService:
 
         # The actor must outrank the role as it currently stands, and — if the
         # level is being changed — the new level too.
+        should_invalidate = level is not None or permission_codes is not None
+        affected_user_ids = (
+            await self.repo.active_user_ids_for_role(role.id, tenant_id=tenant_id)
+            if should_invalidate
+            else []
+        )
+
         self._assert_can_define_role(actor_level=actor_level, target_level=role.level)
         if level is not None:
             self._assert_can_define_role(actor_level=actor_level, target_level=level)
@@ -226,6 +233,9 @@ class RolesService:
                 requested=permission_codes,
             )
             await self.repo.set_role_permissions(role.id, codes)
+
+        if affected_user_ids:
+            await self.invalidate_users_perms(affected_user_ids, tenant_id)
 
         return role, await self.repo.get_role_permissions(role.id)
 
@@ -487,6 +497,17 @@ class RolesService:
             return
         await self.redis.delete(perms_cache_key(user_id, tenant_id))
         logger.info("perms_cache_invalidated", user_id=str(user_id), tenant_id=str(tenant_id))
+
+    async def invalidate_users_perms(self, user_ids: list[UUID], tenant_id: UUID) -> None:
+        if self.redis is None or not user_ids:
+            return
+        keys = [perms_cache_key(user_id, tenant_id) for user_id in set(user_ids)]
+        await self.redis.delete(*keys)
+        logger.info(
+            "perms_cache_invalidated_for_role_users",
+            tenant_id=str(tenant_id),
+            users=len(keys),
+        )
 
     async def invalidate_user_perms_all_tenants(self, user_id: UUID) -> None:
         """Drop every cached entry for this user across all tenants (used at

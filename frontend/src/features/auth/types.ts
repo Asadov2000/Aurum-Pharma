@@ -14,6 +14,7 @@ export interface MeResponse {
   home_tenant_id: string | null;
   status: string;
   last_login_at: string | null;
+  level: number;
   branch_assignments: Record<string, string>;
   permissions: string[];
 }

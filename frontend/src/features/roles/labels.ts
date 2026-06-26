@@ -40,6 +40,7 @@ export function groupLabel(code: string): string {
 interface LevelUser {
   is_developer?: boolean;
   is_administrator?: boolean;
+  level?: number;
   permissions?: string[];
 }
 
@@ -48,6 +49,7 @@ interface LevelUser {
 export function currentUserLevel(user: LevelUser | null | undefined): number {
   if (user?.is_developer) return 1;
   if (user?.is_administrator) return 2;
+  if (typeof user?.level === "number") return user.level;
   const perms = user?.permissions ?? [];
   if (perms.includes("users.invite") || perms.includes("roles.assign")) return 3;
   return 4;
