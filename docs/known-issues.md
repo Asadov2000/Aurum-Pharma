@@ -4,14 +4,6 @@
 по поведению системы — реальный код; этот список нужен, чтобы не терять
 отклонения между задачами.
 
-## 2026-06-25 — Raw audit_log хранит полные снимки строк
-
-**Где:** `backend/alembic/versions/0010_audit.py`, `backend/app/domains/audit/service.py`
-**Что не так:** триггерный аудит сохраняет `old_values` / `new_values` как raw JSONB. API теперь маскирует PII и закупочные цены перед отдачей клиенту, но в самой БД raw-значения остаются.
-**Обход:** доступ к БД только через роли и RLS; клиентские ответы проходят через `AuditService.scrub()`.
-**Решение:** перед production решить политику для raw-аудита: оставить как защищённый системный журнал, либо добавить field-level encryption/redaction для отдельных полей.
-**Owner:** Security Engineer
-
 ## 2026-06-25 — Scope drift: role builder уже в MVP
 
 **Где:** `frontend/src/features/roles/RoleBuilderModal.tsx`, `backend/app/domains/roles/*`, миграции `0018..0023`

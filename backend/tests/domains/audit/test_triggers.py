@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -10,8 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.audit.models import AuditLog
 from app.domains.audit.repository import AuditRepository
 from app.domains.audit.service import AuditService
+from app.domains.catalog.repository import CatalogRepository
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
+from app.domains.inventory.repository import InventoryRepository
 
 
 async def test_insert_creates_audit_record(db_session: AsyncSession) -> None:
@@ -39,6 +43,7 @@ async def test_insert_creates_audit_record(db_session: AsyncSession) -> None:
     assert len(rows) >= 1
     assert rows[0].new_values is not None
     assert rows[0].new_values.get("name") == "AuditTenant"
+    assert rows[0].new_values.get("contact_email") == "***"
 
 
 async def test_update_logs_only_changed_fields(db_session: AsyncSession) -> None:
@@ -112,6 +117,70 @@ async def test_delete_creates_record_with_old_values(db_session: AsyncSession) -
     assert rows[0].old_values.get("name") == "B1"
 
 
+async def test_trigger_redacts_sensitive_fields_at_rest(db_session: AsyncSession) -> None:
+    foundation = FoundationService(FoundationRepository(db_session))
+    tenant = await foundation.create_tenant(
+        payload={
+            "name": "RawAudit",
+            "contact_email": f"raw-{uuid4().hex[:6]}@aurum.tj",
+        }
+    )
+    branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
+    catalog = await CatalogRepository(db_session).create_item(
+        tenant_id=tenant.id,
+        brand_name="Audit Mask Drug",
+        inn="auditium",
+        dispensing_type="otc",
+        storage_type="normal",
+        base_price=Decimal("7.00"),
+    )
+    batch = await InventoryRepository(db_session).create_batch(
+        tenant_id=tenant.id,
+        branch_id=branch.id,
+        catalog_id=catalog.id,
+        batch_number="MASK-1",
+        expires_at=date(2030, 1, 1),
+        purchase_price=Decimal("3.00"),
+        sale_price=Decimal("5.00"),
+        qty_initial=Decimal("10"),
+        qty_remaining=Decimal("10"),
+    )
+
+    inserted = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.table_name == "batch",
+                AuditLog.record_id == batch.id,
+                AuditLog.action == "INSERT",
+            )
+        )
+    ).scalar_one()
+    assert inserted.new_values is not None
+    assert inserted.new_values["purchase_price"] == "***"
+    assert inserted.new_values["sale_price"] != "***"
+
+    batch.purchase_price = Decimal("4.00")
+    batch.sale_price = Decimal("6.00")
+    await db_session.flush()
+
+    updated = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.table_name == "batch",
+                AuditLog.record_id == batch.id,
+                AuditLog.action == "UPDATE",
+            )
+        )
+    ).scalar_one()
+    assert updated.old_values is not None
+    assert updated.new_values is not None
+    assert updated.changed_fields is not None
+    assert updated.old_values["purchase_price"] == "***"
+    assert updated.new_values["purchase_price"] == "***"
+    assert updated.changed_fields["purchase_price"] == "***"
+    assert updated.changed_fields["sale_price"] != "***"
+
+
 async def test_scrub_hides_sensitive_fields() -> None:
     """The service-level scrub() must replace sensitive fields with '***'
     without losing the rest of the payload."""
@@ -126,12 +195,13 @@ async def test_scrub_hides_sensitive_fields() -> None:
             "email": "x@aurum.tj",
             "password_hash": "$2b$12$abcdef",
             "totp_secret": "JBSWY3DPEHPK3PXP",
-            "profile": {"phone": "+992000000000"},
+            "profile": {"phone": "+992000000000", "contact_email": "p@aurum.tj"},
         },
         new_values={
             "email": "x@aurum.tj",
             "password_hash": "$2b$12$newhash",
             "purchase_price": "3.00",
+            "doctor_license": "D-123",
         },
         changed_fields={"password_hash": "$2b$12$newhash"},
     )
@@ -143,7 +213,9 @@ async def test_scrub_hides_sensitive_fields() -> None:
     assert scrubbed["new_values"]["password_hash"] == "***"
     assert scrubbed["new_values"]["email"] == "***"
     assert scrubbed["new_values"]["purchase_price"] == "***"
+    assert scrubbed["new_values"]["doctor_license"] == "***"
     assert scrubbed["old_values"]["profile"]["phone"] == "***"
+    assert scrubbed["old_values"]["profile"]["contact_email"] == "***"
     assert scrubbed["changed_fields"]["password_hash"] == "***"
 
 
@@ -176,7 +248,7 @@ async def test_explicit_log_view_writes_row(db_session: AsyncSession) -> None:
         user_id=None,
         table_name="batch",
         record_id=rec_id,
-        metadata={"reason": "show_purchase_price"},
+        metadata={"reason": "show_purchase_price", "purchase_price": "3.00"},
     )
     assert entry.action == "VIEW"
     assert entry.record_id == rec_id
@@ -186,3 +258,5 @@ async def test_explicit_log_view_writes_row(db_session: AsyncSession) -> None:
     ).scalar_one_or_none()
     assert found is not None
     assert found.action == "VIEW"
+    assert found.metadata_json is not None
+    assert found.metadata_json["purchase_price"] == "***"
