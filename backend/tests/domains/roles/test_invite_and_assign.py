@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, ConflictError
+from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 
@@ -117,6 +117,28 @@ async def test_developer_can_grant_anything(
         password_required=False,
     )
     assert assignment.role_id == system_roles["developer"].id
+
+
+async def test_cannot_assign_role_from_another_tenant(
+    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
+) -> None:
+    tenant_a = await make_tenant()
+    tenant_b = await make_tenant()
+    actor = await make_user(email="cross-tenant-role@aurum.tj")
+    other_role = await make_tenant_role(tenant_id=tenant_b.id, template_name="Кассир", level=4)
+    service = RolesService(RolesRepository(db_session))
+
+    with pytest.raises(NotFoundError):
+        await service.invite_user(
+            actor_level=1,
+            actor_id=actor.id,
+            tenant_id=tenant_a.id,
+            email="wrong-role@aurum.tj",
+            full_name="Wrong Role",
+            role_id=other_role.id,
+            branch_id=None,
+            password_required=False,
+        )
 
 
 async def test_duplicate_assignment_returns_conflict(

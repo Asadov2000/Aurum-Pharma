@@ -87,6 +87,7 @@ describe("RoleBuilderModal", () => {
       {
         id: "tpl1",
         name: "Кассир",
+        slug: "cashier",
         description: null,
         is_system: true,
         is_active: true,
@@ -108,6 +109,17 @@ describe("RoleBuilderModal", () => {
   it("shows only the functions the current user holds (anti-escalation)", async () => {
     // A limited user holding only pos.sell must not even see users.invite.
     mockUser = { home_tenant_id: "t-1", permissions: ["pos.sell"] };
+    renderModal();
+    expect(await screen.findByText("Продажа")).toBeInTheDocument();
+    expect(screen.queryByText("Приглашение сотрудника")).not.toBeInTheDocument();
+  });
+
+  it("hides functions above the role level", async () => {
+    mockUser = {
+      home_tenant_id: "t-1",
+      level: 3,
+      permissions: ["pos.sell", "users.invite"],
+    };
     renderModal();
     expect(await screen.findByText("Продажа")).toBeInTheDocument();
     expect(screen.queryByText("Приглашение сотрудника")).not.toBeInTheDocument();

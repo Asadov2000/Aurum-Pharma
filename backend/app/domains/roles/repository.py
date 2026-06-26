@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.models import AppUser
@@ -36,8 +36,12 @@ class RolesRepository:
     # role
     # -------------------------------------------------------------------------
 
-    async def list_roles(self) -> list[Role]:
+    async def list_roles(self, *, tenant_id: UUID | None = None) -> list[Role]:
         stmt = select(Role).order_by(Role.level, Role.name)
+        if tenant_id is None:
+            stmt = stmt.where(Role.tenant_id.is_(None))
+        else:
+            stmt = stmt.where(or_(Role.tenant_id.is_(None), Role.tenant_id == tenant_id))
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -126,6 +130,15 @@ class RolesRepository:
         )
         result = await self.session.execute(stmt)
         return set(result.scalars().all())
+
+    async def active_permission_levels(self, codes: list[str]) -> dict[str, int]:
+        if not codes:
+            return {}
+        stmt = select(Permission.code, Permission.min_level_required).where(
+            Permission.code.in_(codes), Permission.is_active.is_(True)
+        )
+        result = await self.session.execute(stmt)
+        return dict(result.tuples().all())
 
     # -------------------------------------------------------------------------
     # role_template (global recommendation library)

@@ -89,7 +89,7 @@ async def list_roles(
     ],
     service: Annotated[RolesService, Depends(_service)],
 ) -> list[RoleWithPermissions]:
-    pairs = await service.list_roles_with_permissions()
+    pairs = await service.list_roles_with_permissions(tenant_id=_user.tenant_id)
     out: list[RoleWithPermissions] = []
     for role, codes in pairs:
         out.append(_role_with_permissions(role, codes))

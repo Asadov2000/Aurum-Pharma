@@ -24,6 +24,7 @@ export interface Role {
 export interface RoleTemplate {
   id: string;
   name: string;
+  slug: string;
   description: string | null;
   is_system: boolean;
   is_active: boolean;

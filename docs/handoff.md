@@ -444,7 +444,7 @@
 
 ### 5.1 Что делать
 
-4 фиксированные системные роли с базовыми permissions, назначение ролей пользователям. **БЕЗ конструктора, БЕЗ override** — это Этап 2.
+Support-роли, tenant-роли, шаблоны ролей, конструктор кастомных ролей и назначение ролей пользователям. **Per-user override не входит в Этап 1**.
 
 ### 5.2 Промпт
 
@@ -456,16 +456,20 @@
 > **Включи:**
 > 1. Миграция 0004: `permission`, `role`, `role_permission`, `user_assignment`
 > 2. **Seed данных в той же миграции** (через `op.bulk_insert`):
->    - Все ~35 permissions из `spec-v3.md` раздел 4.2
->    - 4 системных роли: `developer (level=1)`, `administrator (level=2)`, `owner (level=3)`, `seller (level=4)` со `tenant_id=NULL`
->    - `role_permission` для системных ролей по матрице из `spec-v3.md` раздел 4.3
+>    - Все 45 permissions из `spec-v3.md` раздел 4.2
+>    - начальные системные роли: `developer (level=1)`, `administrator (level=2)`, `owner (level=3)`, `seller (level=4)`
+>    - последующие миграции `0019..0023` добавляют `role_template`, переводят `owner`/`seller` в tenant-scoped роли `Владелец`/`Кассир`, добавляют `slug` шаблонов
+>    - `role_permission` для ролей по матрице из `spec-v3.md` раздел 4.3
 > 3. Домен `app/domains/roles/`:
 >    - Модели
->    - Схемы (read-only для permissions/roles в Этапе 1; запись только для user_assignment)
+>    - Схемы для permissions, roles, role templates, user_assignment
 >    - Repository, Service
 > 4. Эндпоинты:
->    - `GET /api/v1/permissions` — список (доступен всем авторизованным)
->    - `GET /api/v1/roles` — список ролей (системных + кастомных тенанта — но в Этапе 1 кастомных нет)
+>    - `GET /api/v1/permissions` — список (permission: `users.view` или `roles.assign` или `roles.create` или `roles.update`)
+>    - `GET /api/v1/roles` — список системных support-ролей и ролей текущего тенанта (та же gate-логика, что у `/permissions`)
+>    - `POST /api/v1/roles` — создать кастомную tenant-role (permission: `roles.create`)
+>    - `PATCH /api/v1/roles/{id}` — изменить кастомную tenant-role (permission: `roles.update`)
+>    - `GET /api/v1/templates` — шаблоны `Владелец`/`Кассир` для конструктора ролей
 >    - `GET /api/v1/users` — список сотрудников тенанта с их назначениями (permission: `users.view`)
 >    - `POST /api/v1/users/invite` — пригласить нового сотрудника (permission: `users.invite`)
 >      - Создаёт app_user со status='invited' (если не существует) + user_assignment
@@ -480,6 +484,7 @@
 >    - Administrator НЕ может назначить developer
 >    - Developer может всё
 >    - Эта проверка — в service.py, чёткая ошибка `BusinessRuleError("Cannot assign role of higher level than your own")`
+>    - Для конструктора правило строже: нельзя создать/редактировать роль своего уровня или выше; permission-set должен быть подмножеством прав актёра, кроме support-пользователей; каждый permission должен подходить уровню роли (`min_level_required >= role.level`)
 > 6. **Эффективные права в Redis:**
 >    - При логине / назначении роли — расчёт `effective_permissions = role_permissions` (в Этапе 1 без override)
 >    - Сохранение в Redis: ключ `auth:perms:{user_id}:{tenant_id}`, TTL 5 минут
@@ -487,7 +492,7 @@
 >    - При login — загрузка кеша или пересчёт
 > 7. Расширь `current_user` dep (`app/core/deps.py`) — теперь populates permissions из Redis или БД
 > 8. Тесты (минимум 8):
->    - test_seed_permissions_count (проверка что seed создал ~35 permissions)
+>    - test_seed_permissions_count (проверка что seed создал 45 permissions)
 >    - test_seed_system_roles (4 роли с правильными уровнями и permissions)
 >    - test_invite_user_creates_app_user_and_assignment
 >    - test_assign_role_to_existing_user
@@ -495,6 +500,8 @@
 >    - test_anti_escalation_admin_cannot_create_developer
 >    - test_developer_can_assign_anything
 >    - test_redis_cache_invalidation_on_role_change
+>    - test_owner_creates_tenant_role_from_subset
+>    - test_template_cannot_bypass_anti_escalation
 >    - test_isolation: owner тенанта A не видит users тенанта B
 >
 > Чек-лист, коммит, push.
@@ -502,8 +509,9 @@
 ### 5.3 Acceptance criteria
 
 - [ ] Миграция 0004 + seed работают
-- [ ] В БД 35+ permissions и 4 системные роли
+- [ ] В БД 45 permissions, 2 support-роли, tenant-роли и шаблоны ролей
 - [ ] Эндпоинты управления пользователями работают
+- [ ] Конструктор ролей работает через `POST/PATCH /roles` и `GET /templates`
 - [ ] Anti-escalation реально блокирует (тест!)
 - [ ] Redis-кеш инвалидируется при изменении назначения
 - [ ] `current_user.permissions` правильно загружается из Redis или БД
@@ -1034,7 +1042,7 @@ Frontend-домены в том же порядке:
 
 1. **frontend/auth** — login страница, AuthGuard, useAuth hook
 2. **frontend/foundation** — admin tenants, settings page, branches + registers CRUD
-3. **frontend/roles** — users list, invite modal, assignments
+3. **frontend/roles** — users list, invite modal, assignments, roles screen, role builder, templates
 4. **frontend/catalog** — list + search, item card, Excel import flow
 5. **frontend/inventory** — batches list с цветами, write-off modal
 6. **frontend/suppliers** + **frontend/incoming** — список поставщиков, форма прихода

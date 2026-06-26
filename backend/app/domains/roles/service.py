@@ -65,8 +65,10 @@ class RolesService:
     async def list_permissions(self) -> list[Permission]:
         return await self.repo.list_permissions()
 
-    async def list_roles_with_permissions(self) -> list[tuple[Role, list[str]]]:
-        roles = await self.repo.list_roles()
+    async def list_roles_with_permissions(
+        self, tenant_id: UUID | None = None
+    ) -> list[tuple[Role, list[str]]]:
+        roles = await self.repo.list_roles(tenant_id=tenant_id)
         perms = await self.repo.permissions_for_roles([r.id for r in roles])
         return [(role, perms.get(role.id, [])) for role in roles]
 
@@ -158,6 +160,7 @@ class RolesService:
         codes = await self._validated_role_permissions(
             actor_permissions=actor_permissions,
             actor_is_support=actor_is_support,
+            target_level=level,
             requested=permission_codes,
         )
         if await self.repo.get_role_by_name(name, tenant_id=tenant_id) is not None:
@@ -226,10 +229,18 @@ class RolesService:
             fields["level"] = level
         role = await self.repo.update_role(role, **fields)
 
+        target_level = level if level is not None else role.level
+        if level is not None and permission_codes is None:
+            await self._assert_permissions_fit_role_level(
+                await self.repo.get_role_permissions(role.id),
+                target_level=target_level,
+            )
+
         if permission_codes is not None:
             codes = await self._validated_role_permissions(
                 actor_permissions=actor_permissions,
                 actor_is_support=actor_is_support,
+                target_level=target_level,
                 requested=permission_codes,
             )
             await self.repo.set_role_permissions(role.id, codes)
@@ -244,19 +255,29 @@ class RolesService:
         *,
         actor_permissions: set[str],
         actor_is_support: bool,
+        target_level: int,
         requested: list[str],
     ) -> list[str]:
         """Dedupe + validate the codes a role is being given: every code must
-        exist and be active, and (unless the actor is dev/admin) must be one the
-        actor already holds — you cannot grant reach you don't have yourself."""
+        exist and be active, must fit the target role's level, and (unless the
+        actor is dev/admin) must be one the actor already holds — you cannot
+        grant reach you don't have yourself."""
         codes = list(dict.fromkeys(requested))  # de-dupe, keep order
         if codes:
-            existing = await self.repo.existing_active_permission_codes(codes)
-            unknown = [c for c in codes if c not in existing]
+            levels = await self.repo.active_permission_levels(codes)
+            unknown = [c for c in codes if c not in levels]
             if unknown:
                 raise ValidationError(
                     "Unknown or inactive permission codes",
                     details={"permissions": unknown},
+                )
+            too_strong = sorted(
+                code for code, min_level in levels.items() if min_level < target_level
+            )
+            if too_strong:
+                raise PermissionDeniedError(
+                    "Cannot grant permissions above the role level",
+                    details={"permissions": too_strong, "role_level": target_level},
                 )
         if not actor_is_support:
             extra = sorted(set(codes) - actor_permissions)
@@ -266,6 +287,19 @@ class RolesService:
                     details={"permissions": extra},
                 )
         return codes
+
+    async def _assert_permissions_fit_role_level(
+        self, codes: list[str], *, target_level: int
+    ) -> None:
+        if not codes:
+            return
+        levels = await self.repo.active_permission_levels(codes)
+        too_strong = sorted(code for code, min_level in levels.items() if min_level < target_level)
+        if too_strong:
+            raise PermissionDeniedError(
+                "Cannot keep permissions above the role level",
+                details={"permissions": too_strong, "role_level": target_level},
+            )
 
     # -------------------------------------------------------------------------
     # Users in tenant
@@ -302,6 +336,7 @@ class RolesService:
         target_role = await self.repo.get_role(role_id)
         if target_role is None or not target_role.is_active:
             raise NotFoundError("Role not found")
+        self._assert_role_belongs_to_tenant(target_role, tenant_id)
         self._assert_can_assign(actor_level=actor_level, target_level=target_role.level)
 
         user = await self.repo.get_user_by_email(email)
@@ -367,6 +402,7 @@ class RolesService:
         target_role = await self.repo.get_role(role_id)
         if target_role is None or not target_role.is_active:
             raise NotFoundError("Role not found")
+        self._assert_role_belongs_to_tenant(target_role, tenant_id)
         self._assert_can_assign(actor_level=actor_level, target_level=target_role.level)
 
         target_user = await self.repo.get_user(target_user_id)
@@ -530,6 +566,11 @@ class RolesService:
                 "Cannot assign role of higher privilege than your own",
                 details={"actor_level": actor_level, "target_level": target_level},
             )
+
+    @staticmethod
+    def _assert_role_belongs_to_tenant(role: Role, tenant_id: UUID) -> None:
+        if role.tenant_id is not None and role.tenant_id != tenant_id:
+            raise NotFoundError("Role not found")
 
     @staticmethod
     def _assert_can_define_role(*, actor_level: int, target_level: int) -> None:

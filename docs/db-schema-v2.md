@@ -478,11 +478,12 @@ CREATE INDEX ix_permission_group ON permission (group_code);
 -- permission — глобальная, RLS не нужен.
 
 -- =============================================================================
--- ROLE (системные роли + НЕТ кастомных в Этапе 1)
+-- ROLE (system support roles + tenant-scoped owner/cashier/custom roles)
 -- =============================================================================
 CREATE TABLE role (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  -- NULL для системных (developer, administrator, owner, seller)
+  -- NULL для системных support-ролей (developer, administrator);
+  -- tenant_id для ролей аптеки: Владелец, Кассир, кастомные роли.
   tenant_id           UUID REFERENCES tenant(id) ON DELETE CASCADE,
   name                TEXT NOT NULL,
   description         TEXT,
@@ -515,6 +516,32 @@ CREATE TABLE role_permission (
 
 -- role_permission — наследует видимость от role через RLS на parent.
 -- Само по себе не имеет tenant_id, RLS не нужен.
+
+-- =============================================================================
+-- ROLE_TEMPLATE (global recommendation library for role builder)
+-- =============================================================================
+CREATE TABLE role_template (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                TEXT NOT NULL,
+  slug                TEXT NOT NULL,
+  description         TEXT,
+  is_system           BOOLEAN NOT NULL DEFAULT true,
+  is_active           BOOLEAN NOT NULL DEFAULT true,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_role_template_name UNIQUE (name)
+);
+CREATE UNIQUE INDEX uq_role_template_slug ON role_template (slug);
+
+CREATE TABLE role_template_permission (
+  template_id         UUID NOT NULL REFERENCES role_template(id) ON DELETE CASCADE,
+  permission_code     TEXT NOT NULL REFERENCES permission(code),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (template_id, permission_code)
+);
+
+-- role_template — глобальная библиотека рекомендаций без RLS.
+-- Шаблон сам ничего не выдаёт: POST /roles всё равно применяет anti-escalation.
+-- Сервис дополнительно проверяет, что permission.min_level_required >= role.level.
 
 -- =============================================================================
 -- USER_ASSIGNMENT (привязка пользователя к тенанту + точке + роли)
@@ -553,13 +580,14 @@ CREATE POLICY tenant_isolation ON user_assignment
 
 ```python
 # В alembic upgrade() после CREATE TABLE — INSERT базовых permissions
-# Полный список ~35 permissions — см. spec-v3.md раздел 4.2
+# Полный список 45 permissions — см. spec-v3.md раздел 4.2
 
-# Базовые системные роли:
-# 1. developer (level=1) — все permissions
-# 2. administrator (level=2) — все min_level >= 2
-# 3. owner (level=3) — все min_level >= 3 (кроме audit.view.global)
-# 4. seller (level=4) — catalog.view, batches.view, pos.*, audit.view.own
+# Текущая модель ролей:
+# 1. developer (level=1, system) — все permissions
+# 2. administrator (level=2, system) — все min_level >= 2
+# 3. Владелец (level=3, tenant role from owner template) — min_level >= 3, кроме global
+# 4. Кассир (level=4, tenant role from cashier template) — касса + базовый просмотр
+# 5. custom tenant roles — создаются владельцем через role builder, без per-user override
 ```
 
 ---
@@ -1521,7 +1549,7 @@ GROUP BY s.id;
 |---|---|---|
 | **auth** | app_user, session, email_code, login_attempt | 4 |
 | **foundation** | tenant, tenant_settings, branch, register | 4 |
-| **roles** | permission, role, role_permission, user_assignment | 4 |
+| **roles** | permission, role, role_permission, role_template, role_template_permission, user_assignment | 6 |
 | **catalog** | master_catalog, tenant_catalog, barcode, catalog_import_job | 4 |
 | **inventory** | batch, batch_movement, write_off | 3 |
 | **suppliers/incoming** | supplier, incoming_document, incoming_item, supplier_return | 4 |
@@ -1530,9 +1558,9 @@ GROUP BY s.id;
 | **audit** | audit_log | 1 |
 | **onboarding** | wizard_state, onboarding_checklist | 2 |
 | **notifications** | notification, notification_subscription, notification_delivery | 3 |
-| **ВСЕГО** | | **38** |
+| **ВСЕГО** | | **40** |
 
-**Сократили со ~80 до 38 таблиц** через:
+**Сократили со ~80 до 40 таблиц** через:
 - Объединение role + role_permission + user_assignment без override (− 1 таблица)
 - Удаление импорт-инфраструктуры под 1С/ERP (− 3 таблицы)
 - Удаление support-тикетной системы (− 5 таблиц)

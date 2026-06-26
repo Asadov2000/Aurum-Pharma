@@ -39,15 +39,6 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
   const userPerms = useMemo(() => new Set(user?.permissions ?? []), [user?.permissions]);
 
-  // Anti-escalation: only show functions the current user actually holds (a
-  // dev/admin holds everything). You literally cannot tick what you lack.
-  const visible = useMemo(() => {
-    const all = permsQuery.data ?? [];
-    return all.filter((p) => p.is_active && (isSupport || userPerms.has(p.code)));
-  }, [permsQuery.data, isSupport, userPerms]);
-  const visibleCodes = useMemo(() => new Set(visible.map((p) => p.code)), [visible]);
-  const groups = useMemo(() => groupBy(visible), [visible]);
-
   // Allowed levels: strictly weaker than the actor's own. On edit the level is
   // fixed to the role's current tier.
   const allowedLevels = useMemo(
@@ -58,12 +49,26 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
   const [level, setLevel] = useState<number>(
-    mode === "edit" && role ? role.level : (allowedLevels.at(-1) ?? 4),
+    mode === "edit" && role ? role.level : (allowedLevels[0] ?? 4),
   );
   const [templateId, setTemplateId] = useState("");
   const [checked, setChecked] = useState<Set<string>>(() => new Set(role?.permissions ?? []));
   const [nameError, setNameError] = useState<string | null>(null);
   const [topError, setTopError] = useState<string | null>(null);
+
+  // Anti-escalation: only show functions the current user actually holds (a
+  // dev/admin holds everything) and functions that fit the selected role level.
+  const visible = useMemo(() => {
+    const all = permsQuery.data ?? [];
+    return all.filter(
+      (p) =>
+        p.is_active &&
+        p.min_level_required >= level &&
+        (isSupport || userPerms.has(p.code)),
+    );
+  }, [permsQuery.data, isSupport, level, userPerms]);
+  const visibleCodes = useMemo(() => new Set(visible.map((p) => p.code)), [visible]);
+  const groups = useMemo(() => groupBy(visible), [visible]);
 
   const toggle = (code: string) =>
     setChecked((prev) => {
@@ -94,7 +99,9 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
     setNameError(null);
     setTopError(null);
     // Only ever submit functions the actor can grant (defence in depth).
-    const codes = [...checked].filter((c) => isSupport || userPerms.has(c));
+    const codes = [...checked].filter(
+      (c) => visibleCodes.has(c) && (isSupport || userPerms.has(c)),
+    );
     try {
       if (mode === "edit" && role) {
         await updateRole.mutateAsync({

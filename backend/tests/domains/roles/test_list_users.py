@@ -56,3 +56,30 @@ async def test_list_users_empty_tenant(db_session: AsyncSession, make_tenant) ->
     pairs, total = await service.list_users(tenant.id, page=1, page_size=50)
     assert pairs == []
     assert total == 0
+
+
+async def test_list_roles_filters_to_current_tenant(
+    db_session: AsyncSession, make_tenant, make_tenant_role
+) -> None:
+    tenant_a = await make_tenant()
+    tenant_b = await make_tenant()
+    role_a = await make_tenant_role(
+        tenant_id=tenant_a.id,
+        template_name="Кассир",
+        level=4,
+        name="Кассир A",
+    )
+    role_b = await make_tenant_role(
+        tenant_id=tenant_b.id,
+        template_name="Кассир",
+        level=4,
+        name="Кассир B",
+    )
+    service = RolesService(RolesRepository(db_session))
+
+    visible_ids = {
+        role.id for role, _codes in await service.list_roles_with_permissions(tenant_id=tenant_a.id)
+    }
+
+    assert role_a.id in visible_ids
+    assert role_b.id not in visible_ids
