@@ -22,9 +22,12 @@ import structlog
 
 from app.core.errors import BusinessRuleError, NotFoundError
 from app.core.time import utc_now
+from app.domains.catalog.models import TenantCatalog
+from app.domains.foundation.models import Branch
 from app.domains.incoming.models import IncomingDocument, IncomingItem
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.inventory.repository import InventoryRepository
+from app.domains.suppliers.models import Supplier
 
 logger = structlog.get_logger("incoming.service")
 
@@ -42,6 +45,11 @@ class IncomingService:
         fields: dict[str, Any],
         created_by: UUID | None = None,
     ) -> IncomingDocument:
+        await self._assert_document_refs_in_tenant(
+            tenant_id=tenant_id,
+            branch_id=fields.get("branch_id"),
+            supplier_id=fields.get("supplier_id"),
+        )
         payload = {**fields, "tenant_id": tenant_id, "status": "draft"}
         if created_by is not None:
             payload["created_by"] = created_by
@@ -83,6 +91,11 @@ class IncomingService:
     ) -> IncomingDocument:
         doc = await self.get_document(document_id)
         self._assert_draft(doc)
+        await self._assert_document_refs_in_tenant(
+            tenant_id=doc.tenant_id,
+            branch_id=fields.get("branch_id"),
+            supplier_id=fields.get("supplier_id"),
+        )
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_document(doc, **fields)
@@ -92,6 +105,7 @@ class IncomingService:
     async def add_item(self, document_id: UUID, *, fields: dict[str, Any]) -> IncomingItem:
         doc = await self.get_document(document_id)
         self._assert_draft(doc)
+        await self._assert_catalog_in_tenant(fields["catalog_id"], tenant_id=doc.tenant_id)
         payload = {**fields, "document_id": doc.id, "tenant_id": doc.tenant_id}
         item = await self.repo.create_item(**payload)
         await self._recompute_total(doc)
@@ -102,6 +116,8 @@ class IncomingService:
     ) -> IncomingItem:
         doc = await self.get_document(document_id)
         self._assert_draft(doc)
+        if "catalog_id" in fields:
+            await self._assert_catalog_in_tenant(fields["catalog_id"], tenant_id=doc.tenant_id)
         item = await self.repo.get_item(item_id)
         if item is None or item.document_id != document_id:
             raise NotFoundError("Item not found")
@@ -190,6 +206,27 @@ class IncomingService:
                 "Cannot modify a document that is already accepted or rejected",
                 details={"status": doc.status},
             )
+
+    async def _assert_document_refs_in_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID | None,
+        supplier_id: UUID | None,
+    ) -> None:
+        if branch_id is not None:
+            branch = await self.repo.session.get(Branch, branch_id)
+            if branch is None or branch.tenant_id != tenant_id:
+                raise NotFoundError("Branch not found")
+        if supplier_id is not None:
+            supplier = await self.repo.session.get(Supplier, supplier_id)
+            if supplier is None or supplier.tenant_id != tenant_id:
+                raise NotFoundError("Supplier not found")
+
+    async def _assert_catalog_in_tenant(self, catalog_id: UUID, *, tenant_id: UUID) -> None:
+        item = await self.repo.session.get(TenantCatalog, catalog_id)
+        if item is None or item.tenant_id != tenant_id:
+            raise NotFoundError("Catalog item not found")
 
     async def _recompute_total(self, doc: IncomingDocument) -> None:
         total = await self.repo.total_amount(doc.id)

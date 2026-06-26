@@ -9,7 +9,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError
+from app.core.errors import BusinessRuleError, NotFoundError
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.service import IncomingService
 from app.domains.inventory.repository import InventoryRepository
@@ -88,6 +88,56 @@ async def test_supplier_return_warns_on_wrong_supplier(db_session: AsyncSession,
     assert sr.supplier_id == other_supplier.id
     assert warning is not None
     assert "different supplier" in warning.lower()
+
+
+async def test_supplier_return_refs_must_match_tenant(db_session: AsyncSession, scaffold) -> None:
+    tenant, supplier, batch_id = await _accept_doc_with_batch(db_session, scaffold, qty=5)
+    other_tenant, other_branch, other_item, other_supplier = await scaffold()
+    incoming = IncomingService(IncomingRepository(db_session))
+    other_doc = await incoming.create_document(
+        tenant_id=other_tenant.id,
+        fields={
+            "branch_id": other_branch.id,
+            "supplier_id": other_supplier.id,
+            "document_date": date.today(),
+        },
+    )
+    await incoming.add_item(
+        other_doc.id,
+        fields={
+            "catalog_id": other_item.id,
+            "expires_at": date.today() + timedelta(days=180),
+            "qty": Decimal("1"),
+            "purchase_price": Decimal("4.00"),
+            "sale_price": Decimal("10.00"),
+        },
+    )
+    await incoming.accept(other_doc.id)
+    service = SuppliersService(SuppliersRepository(db_session))
+
+    with pytest.raises(NotFoundError, match="Supplier not found"):
+        await service.create_return(
+            tenant_id=tenant.id,
+            supplier_id=other_supplier.id,
+            batch_id=batch_id,
+            qty=Decimal("1"),
+            reason="wrong tenant supplier",
+            comment=None,
+            source_document_id=None,
+            actor_id=None,
+        )
+
+    with pytest.raises(NotFoundError, match="Incoming document not found"):
+        await service.create_return(
+            tenant_id=tenant.id,
+            supplier_id=supplier.id,
+            batch_id=batch_id,
+            qty=Decimal("1"),
+            reason="wrong tenant source",
+            comment=None,
+            source_document_id=other_doc.id,
+            actor_id=None,
+        )
 
 
 async def test_supplier_return_overdraw_blocked(db_session: AsyncSession, scaffold) -> None:

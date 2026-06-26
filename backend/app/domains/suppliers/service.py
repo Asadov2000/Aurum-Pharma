@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InternalError
 
 from app.core.errors import BusinessRuleError, NotFoundError
+from app.domains.incoming.models import IncomingDocument
 from app.domains.inventory.models import Batch
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.suppliers.models import Supplier, SupplierReturn
@@ -83,6 +84,13 @@ class SuppliersService:
         """Returns (supplier_return, warning_or_none)."""
         # Validate supplier and batch exist
         supplier = await self.get_supplier(supplier_id)
+        if supplier.tenant_id != tenant_id:
+            raise NotFoundError("Supplier not found")
+        if source_document_id is not None:
+            await self._assert_source_document_in_tenant(
+                source_document_id,
+                tenant_id=tenant_id,
+            )
 
         inv_repo = InventoryRepository(self.repo.session)
         batch = await inv_repo.get_batch(batch_id)
@@ -171,6 +179,16 @@ class SuppliersService:
                 "the return is recorded anyway."
             )
         return None
+
+    async def _assert_source_document_in_tenant(
+        self,
+        source_document_id: UUID,
+        *,
+        tenant_id: UUID,
+    ) -> None:
+        doc = await self.repo.session.get(IncomingDocument, source_document_id)
+        if doc is None or doc.tenant_id != tenant_id:
+            raise NotFoundError("Incoming document not found")
 
 
 # Keep imports referenced for the type-checkers / linters.

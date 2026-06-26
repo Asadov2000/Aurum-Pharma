@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError
+from app.core.errors import BusinessRuleError, NotFoundError
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.service import IncomingService
 from app.domains.inventory.models import Batch
@@ -30,6 +30,47 @@ async def test_create_incoming_draft(db_session: AsyncSession, scaffold) -> None
     )
     assert doc.status == "draft"
     assert doc.total_amount == Decimal("0.00")
+
+
+async def test_incoming_document_refs_must_match_tenant(db_session: AsyncSession, scaffold) -> None:
+    tenant, branch, _item, supplier = await scaffold()
+    other_tenant, other_branch, _other_item, other_supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+
+    with pytest.raises(NotFoundError, match="Branch not found"):
+        await service.create_document(
+            tenant_id=tenant.id,
+            fields={
+                "branch_id": other_branch.id,
+                "supplier_id": supplier.id,
+                "document_date": date.today(),
+            },
+        )
+
+    with pytest.raises(NotFoundError, match="Supplier not found"):
+        await service.create_document(
+            tenant_id=tenant.id,
+            fields={
+                "branch_id": branch.id,
+                "supplier_id": other_supplier.id,
+                "document_date": date.today(),
+            },
+        )
+
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+    with pytest.raises(NotFoundError, match="Branch not found"):
+        await service.update_document(doc.id, fields={"branch_id": other_branch.id})
+    with pytest.raises(NotFoundError, match="Supplier not found"):
+        await service.update_document(doc.id, fields={"supplier_id": other_supplier.id})
+
+    assert other_tenant.id != tenant.id
 
 
 async def test_add_items_recomputes_total(db_session: AsyncSession, scaffold) -> None:
@@ -68,6 +109,48 @@ async def test_add_items_recomputes_total(db_session: AsyncSession, scaffold) ->
     fresh = await service.get_document(doc.id)
     # 10 * 5.00 + 3 * 4.50 = 50.00 + 13.50 = 63.50
     assert fresh.total_amount == Decimal("63.50")
+
+
+async def test_incoming_item_catalog_must_match_document_tenant(
+    db_session: AsyncSession, scaffold
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    _other_tenant, _other_branch, other_item, _other_supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+
+    with pytest.raises(NotFoundError, match="Catalog item not found"):
+        await service.add_item(
+            doc.id,
+            fields={
+                "catalog_id": other_item.id,
+                "expires_at": date.today() + timedelta(days=180),
+                "qty": Decimal("10"),
+                "purchase_price": Decimal("5.00"),
+                "sale_price": Decimal("12.00"),
+            },
+        )
+
+    created = await service.add_item(
+        doc.id,
+        fields={
+            "catalog_id": item.id,
+            "expires_at": date.today() + timedelta(days=180),
+            "qty": Decimal("10"),
+            "purchase_price": Decimal("5.00"),
+            "sale_price": Decimal("12.00"),
+        },
+    )
+    with pytest.raises(NotFoundError, match="Catalog item not found"):
+        await service.update_item(doc.id, created.id, fields={"catalog_id": other_item.id})
 
 
 async def test_accept_creates_batches_with_correct_qty(db_session: AsyncSession, scaffold) -> None:
