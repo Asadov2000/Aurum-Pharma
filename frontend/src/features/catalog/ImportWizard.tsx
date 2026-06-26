@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-import { Badge, Button, Label, Select } from "@/components/ui";
+import { Badge, Button, ConfirmDialog, Label, Select } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
 
 import {
@@ -47,6 +47,7 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
   const [jobId, setJobId] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<DuplicateStrategy>("skip");
   const [topError, setTopError] = useState<string | null>(null);
+  const [rollbackOpen, setRollbackOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const upload = useUploadImport();
@@ -102,10 +103,10 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
 
   const onRollback = async () => {
     if (!jobId) return;
-    if (!window.confirm("Откатить импорт? Все добавленные позиции будут помечены удалёнными.")) return;
     setTopError(null);
     try {
       await rollback.mutateAsync(jobId);
+      setRollbackOpen(false);
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось откатить"));
     }
@@ -143,7 +144,8 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
 
   // ---- step 2+ : we have a job ----
   return (
-    <div className="space-y-4">
+    <>
+      <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-sm">
           <p className="font-medium text-foreground">{job.source_filename}</p>
@@ -221,7 +223,7 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
           {job.status === "success" && !job.rolled_back_at && (
             <Button
               variant="secondary"
-              onClick={() => void onRollback()}
+              onClick={() => setRollbackOpen(true)}
               isLoading={rollback.isPending}
             >
               Откатить
@@ -232,7 +234,18 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
           </Button>
         </div>
       </div>
-    </div>
+      </div>
+      <ConfirmDialog
+        open={rollbackOpen}
+        title="Откатить импорт"
+        message="Все добавленные этим импортом позиции будут помечены удалёнными."
+        confirmLabel="Откатить"
+        variant="danger"
+        isLoading={rollback.isPending}
+        onConfirm={() => void onRollback()}
+        onCancel={() => setRollbackOpen(false)}
+      />
+    </>
   );
 }
 

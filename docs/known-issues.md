@@ -12,14 +12,6 @@
 **Решение:** перед production решить политику для raw-аудита: оставить как защищённый системный журнал, либо добавить field-level encryption/redaction для отдельных полей.
 **Owner:** Security Engineer
 
-## 2026-06-25 — Native browser dialogs в части UI
-
-**Где:** `frontend/src/features/*` (`window.confirm`, `window.alert`)
-**Что не так:** часть действий использует системные диалоги браузера вместо `ConfirmDialog`, что выбивается из дизайн-системы и хуже контролируется в UX.
-**Обход:** функционально работает; критичные сценарии покрыты тестами.
-**Решение:** заменить по фичам на `ConfirmDialog` / inline error states, начиная с приходов, каталога, точек и касс.
-**Owner:** Frontend UX Engineer
-
 ## 2026-06-25 — Scope drift: role builder уже в MVP
 
 **Где:** `frontend/src/features/roles/RoleBuilderModal.tsx`, `backend/app/domains/roles/*`, миграции `0018..0023`

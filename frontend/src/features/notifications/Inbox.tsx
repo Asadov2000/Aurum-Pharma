@@ -22,6 +22,7 @@ import { type Notification, type Severity } from "./types";
 export function Inbox(): JSX.Element {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [severity, setSeverity] = useState<Severity | "">("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data, isLoading, error } = useNotificationsQuery({
     unread_only: unreadOnly,
@@ -35,10 +36,11 @@ export function Inbox(): JSX.Element {
   const unreadCount = (data ?? []).filter((n) => n.read_at === null).length;
 
   const onMarkAll = async () => {
+    setActionError(null);
     try {
       await markAll.mutateAsync();
     } catch (err) {
-      window.alert(describeApiError(err, "Не удалось отметить"));
+      setActionError(describeApiError(err, "Не удалось отметить"));
     }
   };
 
@@ -87,6 +89,7 @@ export function Inbox(): JSX.Element {
           {describeApiError(error, "Не удалось загрузить уведомления")}
         </p>
       )}
+      {actionError && <p className="text-sm text-danger">{actionError}</p>}
 
       {isLoading ? (
         <p className="text-sm text-foreground-muted">Загрузка…</p>

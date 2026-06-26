@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Label,
   Modal,
   Select,
@@ -37,6 +38,8 @@ export function RegistersPage(): JSX.Element {
   const [includeInactive, setIncludeInactive] = useState(false);
   const [editing, setEditing] = useState<Register | null>(null);
   const [creating, setCreating] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Register | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const branches = useBranchesQuery(true);
   const { data, isLoading, error } = useRegistersQuery(
@@ -48,12 +51,14 @@ export function RegistersPage(): JSX.Element {
   const branchNameById = (id: string): string =>
     branches.data?.find((b) => b.id === id)?.name ?? id.slice(0, 8);
 
-  const handleDelete = async (r: Register) => {
-    if (!window.confirm(`Деактивировать кассу «${r.name}»?`)) return;
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleteError(null);
     try {
-      await deleteMutation.mutateAsync(r.id);
+      await deleteMutation.mutateAsync(pendingDelete.id);
+      setPendingDelete(null);
     } catch (err) {
-      window.alert(describeApiError(err, "Не удалось деактивировать"));
+      setDeleteError(describeApiError(err, "Не удалось деактивировать"));
     }
   };
 
@@ -127,7 +132,10 @@ export function RegistersPage(): JSX.Element {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => void handleDelete(r)}
+                      onClick={() => {
+                        setDeleteError(null);
+                        setPendingDelete(r);
+                      }}
                       isLoading={deleteMutation.isPending}
                     >
                       Удалить
@@ -155,6 +163,24 @@ export function RegistersPage(): JSX.Element {
           }}
         />
       </Modal>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Деактивировать кассу"
+        message={
+          <>
+            Деактивировать кассу «{pendingDelete?.name}»?
+            {deleteError && <span className="mt-2 block text-danger">{deleteError}</span>}
+          </>
+        }
+        confirmLabel="Деактивировать"
+        variant="danger"
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => {
+          setPendingDelete(null);
+          setDeleteError(null);
+        }}
+      />
     </div>
   );
 }

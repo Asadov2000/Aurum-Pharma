@@ -73,8 +73,10 @@ test.describe("Incoming flow (owner)", () => {
     await expect(page.getByText("10", { exact: false }).first()).toBeVisible();
 
     // ---- UI: accept → batch lands on /batches ----
-    page.once("dialog", (d) => void d.accept());
     await page.getByRole("button", { name: /Принять/ }).click();
+    const acceptDialog = page.getByRole("dialog").filter({ hasText: /Принять приход/ });
+    await expect(acceptDialog).toBeVisible();
+    await acceptDialog.getByRole("button", { name: /^Принять$/ }).click();
 
     // Status badge flips to "Принят" (or similar accepted-label).
     await expect(page.getByText(/Принят/)).toBeVisible({ timeout: 15_000 });

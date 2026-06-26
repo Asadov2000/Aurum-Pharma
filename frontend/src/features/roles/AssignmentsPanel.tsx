@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Badge, Button, FormError, Label, Select, Switch } from "@/components/ui";
+import { Badge, Button, ConfirmDialog, FormError, Label, Select, Switch } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 
@@ -34,6 +34,8 @@ export function AssignmentsPanel({
   const revokeAssignment = useRevokeAssignment();
   const [topError, setTopError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [pendingRevokeId, setPendingRevokeId] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   const form = useForm<FormValues>({
     defaultValues: { role_id: "", branch_id: "", password_required: false },
@@ -69,12 +71,14 @@ export function AssignmentsPanel({
     }
   });
 
-  const onRevoke = async (assignmentId: string) => {
-    if (!window.confirm("Отозвать роль?")) return;
+  const confirmRevoke = async () => {
+    if (!pendingRevokeId) return;
+    setRevokeError(null);
     try {
-      await revokeAssignment.mutateAsync({ userId: user.id, assignmentId });
+      await revokeAssignment.mutateAsync({ userId: user.id, assignmentId: pendingRevokeId });
+      setPendingRevokeId(null);
     } catch (err) {
-      window.alert(describeApiError(err, "Не удалось отозвать"));
+      setRevokeError(describeApiError(err, "Не удалось отозвать"));
     }
   };
 
@@ -109,7 +113,10 @@ export function AssignmentsPanel({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => void onRevoke(a.id)}
+                    onClick={() => {
+                      setRevokeError(null);
+                      setPendingRevokeId(a.id);
+                    }}
                     isLoading={revokeAssignment.isPending}
                   >
                     Отозвать
@@ -174,6 +181,25 @@ export function AssignmentsPanel({
           Закрыть
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={pendingRevokeId !== null}
+        title="Отозвать роль"
+        message={
+          <>
+            Роль перестанет действовать для этого пользователя.
+            {revokeError && <span className="mt-2 block text-danger">{revokeError}</span>}
+          </>
+        }
+        confirmLabel="Отозвать"
+        variant="danger"
+        isLoading={revokeAssignment.isPending}
+        onConfirm={() => void confirmRevoke()}
+        onCancel={() => {
+          setPendingRevokeId(null);
+          setRevokeError(null);
+        }}
+      />
     </div>
   );
 }

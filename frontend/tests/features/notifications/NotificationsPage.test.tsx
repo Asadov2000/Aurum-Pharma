@@ -92,6 +92,21 @@ describe("NotificationsPage", () => {
     expect(btn).toBeDisabled();
   });
 
+  it("shows an inline error when marking all notifications fails", async () => {
+    listNotifications.mockResolvedValue([UNREAD]);
+    markAllRead.mockRejectedValueOnce(new Error("network"));
+    renderPage();
+    await screen.findByText("Лицензия скоро истекает");
+    const btn = screen.getByRole("button", { name: /Отметить все/i });
+
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(markAllRead).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByText(/Не удалось отметить/i)).toBeInTheDocument();
+  });
+
   it("switches to Subscriptions tab and shows the known event catalog", async () => {
     listNotifications.mockResolvedValueOnce([]);
     listSubscriptions.mockResolvedValueOnce([]);

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Badge, Button, FormError, Input, Label, Select } from "@/components/ui";
+import { Badge, Button, ConfirmDialog, FormError, Input, Label, Select } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { barcodeLabel, barcodeOptions } from "./labels";
@@ -20,6 +20,8 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
   const addMutation = useAddBarcode();
   const deleteMutation = useDeleteBarcode();
   const [topError, setTopError] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const form = useForm<FormValues>({
     defaultValues: { code: "", code_type: "ean13" },
@@ -49,12 +51,14 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
     }
   });
 
-  const onDelete = async (barcodeId: string) => {
-    if (!window.confirm("Удалить штрихкод?")) return;
+  const confirmDelete = async () => {
+    if (!pendingDeleteId) return;
+    setDeleteError(null);
     try {
-      await deleteMutation.mutateAsync({ itemId, barcodeId });
+      await deleteMutation.mutateAsync({ itemId, barcodeId: pendingDeleteId });
+      setPendingDeleteId(null);
     } catch (err) {
-      window.alert(describeApiError(err, "Не удалось удалить"));
+      setDeleteError(describeApiError(err, "Не удалось удалить"));
     }
   };
 
@@ -79,7 +83,10 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => void onDelete(b.id)}
+                onClick={() => {
+                  setDeleteError(null);
+                  setPendingDeleteId(b.id);
+                }}
                 isLoading={deleteMutation.isPending}
               >
                 Удалить
@@ -114,6 +121,24 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
         </Button>
       </form>
       {topError && <p className="text-sm text-danger">{topError}</p>}
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        title="Удалить штрихкод"
+        message={
+          <>
+            Штрихкод будет удалён из карточки товара.
+            {deleteError && <span className="mt-2 block text-danger">{deleteError}</span>}
+          </>
+        }
+        confirmLabel="Удалить"
+        variant="danger"
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => {
+          setPendingDeleteId(null);
+          setDeleteError(null);
+        }}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Modal,
   Switch,
   Table,
@@ -29,15 +30,19 @@ export function BranchesPage(): JSX.Element {
   const [includeInactive, setIncludeInactive] = useState(false);
   const [editing, setEditing] = useState<Branch | null>(null);
   const [creating, setCreating] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Branch | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const { data, isLoading, error } = useBranchesQuery(includeInactive);
   const deleteMutation = useDeleteBranch();
 
-  const handleDelete = async (b: Branch) => {
-    if (!window.confirm(`Деактивировать точку «${b.name}»?`)) return;
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleteError(null);
     try {
-      await deleteMutation.mutateAsync(b.id);
+      await deleteMutation.mutateAsync(pendingDelete.id);
+      setPendingDelete(null);
     } catch (err) {
-      window.alert(describeApiError(err, "Не удалось деактивировать"));
+      setDeleteError(describeApiError(err, "Не удалось деактивировать"));
     }
   };
 
@@ -102,7 +107,10 @@ export function BranchesPage(): JSX.Element {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => void handleDelete(b)}
+                      onClick={() => {
+                        setDeleteError(null);
+                        setPendingDelete(b);
+                      }}
                       isLoading={deleteMutation.isPending}
                     >
                       Удалить
@@ -130,6 +138,24 @@ export function BranchesPage(): JSX.Element {
           }}
         />
       </Modal>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Деактивировать точку"
+        message={
+          <>
+            Деактивировать точку «{pendingDelete?.name}»?
+            {deleteError && <span className="mt-2 block text-danger">{deleteError}</span>}
+          </>
+        }
+        confirmLabel="Деактивировать"
+        variant="danger"
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => {
+          setPendingDelete(null);
+          setDeleteError(null);
+        }}
+      />
     </div>
   );
 }
