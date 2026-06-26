@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.deps import CurrentUser, current_user, get_db, require_permission
+from app.core.deps import CurrentUser, get_db, require_permission
 from app.core.errors import BusinessRuleError, ValidationError
 from app.core.storage import put_object
 from app.domains.catalog.import_parser import XLS_UNSUPPORTED_MESSAGE
@@ -62,7 +62,7 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
 
 @router.get("", response_model=CatalogList)
 async def list_catalog(
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
     service: Annotated[CatalogService, Depends(_service)],
     q: Annotated[str | None, Query()] = None,
     category: Annotated[str | None, Query()] = None,
@@ -109,7 +109,7 @@ async def create_catalog_item(
 @router.get("/by-barcode/{code}", response_model=CatalogItemRead)
 async def get_by_barcode(
     code: str,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> CatalogItemRead:
     item = await service.find_item_by_barcode(code)
@@ -119,7 +119,7 @@ async def get_by_barcode(
 @router.get("/{item_id}", response_model=CatalogItemWithBarcodes)
 async def get_catalog_item(
     item_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> CatalogItemWithBarcodes:
     item, barcodes = await service.get_item_with_barcodes(item_id)
@@ -261,7 +261,7 @@ async def import_confirm(
 @router.get("/import/{job_id}", response_model=ImportJobRead)
 async def import_status(
     job_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[CurrentUser, Depends(require_permission("catalog.create"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> ImportJobRead:
     job = await service.get_job(job_id)

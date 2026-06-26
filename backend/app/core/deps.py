@@ -164,6 +164,21 @@ def require_permission(code: str):  # type: ignore[no-untyped-def]
     return _checker
 
 
+def require_any_permission(*codes: str):  # type: ignore[no-untyped-def]
+    """Dependency factory for routes that allow several equivalent permissions."""
+
+    async def _checker(
+        user: Annotated[CurrentUser, Depends(current_user)],
+    ) -> CurrentUser:
+        if user.is_developer or user.is_administrator:
+            return user
+        if any(code in user.permissions for code in codes):
+            return user
+        raise PermissionDeniedError(f"Missing one of permissions: {', '.join(codes)}")
+
+    return _checker
+
+
 async def require_writable_tenant(
     user: Annotated[CurrentUser, Depends(current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],

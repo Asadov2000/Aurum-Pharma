@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, current_user, get_db, get_redis, require_permission
+from app.core.deps import CurrentUser, get_db, get_redis, require_any_permission, require_permission
 from app.core.errors import BusinessRuleError
 from app.domains.roles.models import Role
 from app.domains.roles.repository import RolesRepository
@@ -67,7 +67,12 @@ def _role_with_permissions(role: Role, codes: list[str]) -> RoleWithPermissions:
 
 @router.get("/permissions", response_model=list[PermissionRead])
 async def list_permissions(
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[
+        CurrentUser,
+        Depends(
+            require_any_permission("users.view", "roles.assign", "roles.create", "roles.update")
+        ),
+    ],
     service: Annotated[RolesService, Depends(_service)],
 ) -> list[PermissionRead]:
     perms = await service.list_permissions()
@@ -76,7 +81,12 @@ async def list_permissions(
 
 @router.get("/roles", response_model=list[RoleWithPermissions])
 async def list_roles(
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[
+        CurrentUser,
+        Depends(
+            require_any_permission("users.view", "roles.assign", "roles.create", "roles.update")
+        ),
+    ],
     service: Annotated[RolesService, Depends(_service)],
 ) -> list[RoleWithPermissions]:
     pairs = await service.list_roles_with_permissions()

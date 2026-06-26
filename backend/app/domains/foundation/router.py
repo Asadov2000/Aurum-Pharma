@@ -17,7 +17,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, current_user, get_db, require_permission
+from app.core.deps import (
+    CurrentUser,
+    current_user,
+    get_db,
+    require_any_permission,
+    require_permission,
+)
 from app.core.errors import AuthenticationError, BusinessRuleError, PermissionDeniedError
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.schemas import (
@@ -203,7 +209,18 @@ async def update_tenant_settings(
 
 @tenant_router.get("/branches", response_model=list[BranchRead])
 async def list_branches(
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[
+        CurrentUser,
+        Depends(
+            require_any_permission(
+                "branches.view",
+                "registers.view",
+                "pos.shift_open",
+                "pos.shift_close",
+                "pos.sell",
+            )
+        ),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
     include_inactive: bool = Query(False),
 ) -> list[BranchRead]:
@@ -228,7 +245,18 @@ async def create_branch(
 @tenant_router.get("/branches/{branch_id}", response_model=BranchRead)
 async def get_branch(
     branch_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[
+        CurrentUser,
+        Depends(
+            require_any_permission(
+                "branches.view",
+                "registers.view",
+                "pos.shift_open",
+                "pos.shift_close",
+                "pos.sell",
+            )
+        ),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> BranchRead:
     branch = await service.get_branch(branch_id)
@@ -268,7 +296,17 @@ async def delete_branch(
 
 @tenant_router.get("/registers", response_model=list[RegisterRead])
 async def list_registers(
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[
+        CurrentUser,
+        Depends(
+            require_any_permission(
+                "registers.view",
+                "pos.shift_open",
+                "pos.shift_close",
+                "pos.sell",
+            )
+        ),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
     branch_id: Annotated[UUID | None, Query()] = None,
     include_inactive: Annotated[bool, Query()] = False,
@@ -294,7 +332,17 @@ async def create_register(
 @tenant_router.get("/registers/{register_id}", response_model=RegisterRead)
 async def get_register(
     register_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[
+        CurrentUser,
+        Depends(
+            require_any_permission(
+                "registers.view",
+                "pos.shift_open",
+                "pos.shift_close",
+                "pos.sell",
+            )
+        ),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterRead:
     register = await service.get_register(register_id)

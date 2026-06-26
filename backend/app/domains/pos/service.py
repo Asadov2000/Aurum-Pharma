@@ -28,6 +28,7 @@ from app.core.errors import (
     BusinessRuleError,
     ConflictError,
     NotFoundError,
+    PermissionDeniedError,
 )
 from app.core.time import utc_now
 from app.domains.auth.models import AppUser
@@ -233,20 +234,34 @@ class POSService:
         )
 
     async def get_sale_details(
-        self, sale_id: UUID
+        self,
+        sale_id: UUID,
+        *,
+        viewer_id: UUID | None = None,
+        can_view_tenant: bool = False,
     ) -> tuple[Sale, list[tuple[SaleItem, str | None, date | None, int | None]], list[SalePayment]]:
         sale = await self.get_sale(sale_id)
+        if viewer_id is not None:
+            self._assert_sale_viewable(sale, viewer_id=viewer_id, can_view_tenant=can_view_tenant)
         items = await self.repo.list_items_with_batch(sale.id)
         payments = await self.repo.list_payments(sale.id)
         return sale, items, payments
 
     # ---- receipt (print / PDF) ----
 
-    async def build_receipt(self, sale_id: UUID) -> ReceiptData:
+    async def build_receipt(
+        self,
+        sale_id: UUID,
+        *,
+        viewer_id: UUID | None = None,
+        can_view_tenant: bool = False,
+    ) -> ReceiptData:
         """Assemble everything a printed receipt needs, fully resolved (names,
         not UUIDs). Shared by the JSON print view and the PDF generator. RLS
         scopes every fetch to the caller's tenant."""
         sale = await self.get_sale(sale_id)
+        if viewer_id is not None:
+            self._assert_sale_viewable(sale, viewer_id=viewer_id, can_view_tenant=can_view_tenant)
         items = await self.repo.list_items(sale.id)
         payments = await self.repo.list_payments(sale.id)
 
@@ -294,12 +309,20 @@ class POSService:
             change=change,
         )
 
-    async def get_receipt_pdf(self, sale_id: UUID) -> bytes:
+    async def get_receipt_pdf(
+        self,
+        sale_id: UUID,
+        *,
+        viewer_id: UUID | None = None,
+        can_view_tenant: bool = False,
+    ) -> bytes:
         """Lazily render (and cache in MinIO) the receipt PDF. Completed sales
         are immutable, so a cached PDF stays valid forever; drafts render fresh
         each time and are never cached. The blocking render + MinIO IO runs in a
         worker thread so it doesn't stall the event loop."""
-        data = await self.build_receipt(sale_id)
+        data = await self.build_receipt(
+            sale_id, viewer_id=viewer_id, can_view_tenant=can_view_tenant
+        )
         return await anyio.to_thread.run_sync(get_or_render_receipt_pdf, data)
 
     # ---- Z-report (shift close XLSX) ----
@@ -538,6 +561,18 @@ class POSService:
                 "Sale is no longer editable",
                 details={"status": sale.status},
             )
+
+    @staticmethod
+    def _assert_sale_viewable(
+        sale: Sale,
+        *,
+        viewer_id: UUID,
+        can_view_tenant: bool,
+    ) -> None:
+        if can_view_tenant:
+            return
+        if sale.cashier_user_id != viewer_id:
+            raise PermissionDeniedError("Cannot view another cashier's sale")
 
     # ---- items ----
 

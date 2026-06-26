@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
     CurrentUser,
-    current_user,
     get_db,
+    require_any_permission,
     require_permission,
     require_writable_tenant,
 )
@@ -60,6 +60,10 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     return user.tenant_id
 
 
+def _can_view_tenant_sales(user: CurrentUser) -> bool:
+    return user.is_developer or user.is_administrator or "sales.view.tenant" in user.permissions
+
+
 # =============================================================================
 # Shifts
 # =============================================================================
@@ -87,7 +91,10 @@ async def open_shift(
 
 @router.get("/shifts/current", response_model=ShiftRead | None)
 async def get_current_shift(
-    user: Annotated[CurrentUser, Depends(current_user)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission("pos.shift_open", "pos.shift_close", "pos.sell")),
+    ],
     service: Annotated[POSService, Depends(_service)],
     register_id: Annotated[UUID, Query()],
 ) -> ShiftRead | None:
@@ -248,7 +255,7 @@ async def list_sales(
     # Scope: anyone with sales.view.tenant (owner/admin/dev) sees every
     # receipt and may filter by cashier; a seller (own-only) is pinned to
     # their own receipts regardless of the cashier_id query param.
-    if "sales.view.tenant" in user.permissions:
+    if _can_view_tenant_sales(user):
         effective_cashier = cashier_id
     else:
         effective_cashier = user.user_id
@@ -277,10 +284,17 @@ async def list_sales(
 @router.get("/sales/{sale_id}", response_model=SaleDetails)
 async def get_sale(
     sale_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission("sales.view.own", "sales.view.tenant")),
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleDetails:
-    sale, items, payments = await service.get_sale_details(sale_id)
+    sale, items, payments = await service.get_sale_details(
+        sale_id,
+        viewer_id=user.user_id,
+        can_view_tenant=_can_view_tenant_sales(user),
+    )
     return SaleDetails(
         **SaleRead.model_validate(sale).model_dump(),
         items=[
@@ -300,12 +314,19 @@ async def get_sale(
 @router.get("/sales/{sale_id}/receipt", response_model=ReceiptData)
 async def get_receipt(
     sale_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission("sales.view.own", "sales.view.tenant")),
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> ReceiptData:
     """Fully-resolved receipt data for the browser print view (item names,
     cashier, branch header). RLS scopes it to the caller's tenant."""
-    return await service.build_receipt(sale_id)
+    return await service.build_receipt(
+        sale_id,
+        viewer_id=user.user_id,
+        can_view_tenant=_can_view_tenant_sales(user),
+    )
 
 
 @router.get(
@@ -315,11 +336,18 @@ async def get_receipt(
 )
 async def get_receipt_pdf(
     sale_id: UUID,
-    _user: Annotated[CurrentUser, Depends(current_user)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission("sales.view.own", "sales.view.tenant")),
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> Response:
     """Server-rendered PDF (A4), lazily generated and cached in MinIO."""
-    pdf = await service.get_receipt_pdf(sale_id)
+    pdf = await service.get_receipt_pdf(
+        sale_id,
+        viewer_id=user.user_id,
+        can_view_tenant=_can_view_tenant_sales(user),
+    )
     return Response(
         content=pdf,
         media_type="application/pdf",
