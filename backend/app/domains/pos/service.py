@@ -120,11 +120,15 @@ class POSService:
         shift_id: UUID,
         closing_cash_actual: Decimal,
         closed_by_user_id: UUID,
+        can_manage_tenant: bool = False,
         notes: str | None = None,
     ) -> Shift:
         shift = await self.repo.get_shift(shift_id)
         if shift is None:
             raise NotFoundError("Shift not found")
+        self._assert_shift_owned_or_managed(
+            shift, actor_id=closed_by_user_id, can_manage_tenant=can_manage_tenant
+        )
         if shift.status != "open":
             raise BusinessRuleError("Shift is not open", details={"status": shift.status})
         totals = await self.repo.shift_totals(shift_id)
@@ -574,6 +578,30 @@ class POSService:
         if sale.cashier_user_id != viewer_id:
             raise PermissionDeniedError("Cannot view another cashier's sale")
 
+    @staticmethod
+    def _assert_sale_owned_or_managed(
+        sale: Sale,
+        *,
+        actor_id: UUID | None,
+        can_manage_tenant: bool,
+    ) -> None:
+        if actor_id is None or can_manage_tenant:
+            return
+        if sale.cashier_user_id != actor_id:
+            raise PermissionDeniedError("Cannot modify another cashier's sale")
+
+    @staticmethod
+    def _assert_shift_owned_or_managed(
+        shift: Shift,
+        *,
+        actor_id: UUID,
+        can_manage_tenant: bool,
+    ) -> None:
+        if can_manage_tenant:
+            return
+        if shift.opened_by_user_id != actor_id:
+            raise PermissionDeniedError("Cannot close another cashier's shift")
+
     # ---- items ----
 
     async def add_item(
@@ -582,10 +610,15 @@ class POSService:
         sale_id: UUID,
         catalog_id: UUID,
         qty: Decimal,
+        actor_id: UUID | None = None,
+        can_manage_tenant: bool = False,
         today: date | None = None,
     ) -> tuple[list[SaleItem], bool]:
         """Returns (created items, requires_prescription_log)."""
         sale = await self.get_sale(sale_id)
+        self._assert_sale_owned_or_managed(
+            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+        )
         self._assert_draft(sale)
 
         catalog = await self.repo.session.get(TenantCatalog, catalog_id)
@@ -631,8 +664,19 @@ class POSService:
         requires_rx = catalog.dispensing_type == "prescription"
         return created, requires_rx
 
-    async def update_item(self, *, sale_id: UUID, item_id: UUID, qty: Decimal) -> SaleItem:
+    async def update_item(
+        self,
+        *,
+        sale_id: UUID,
+        item_id: UUID,
+        qty: Decimal,
+        actor_id: UUID | None = None,
+        can_manage_tenant: bool = False,
+    ) -> SaleItem:
         sale = await self.get_sale(sale_id)
+        self._assert_sale_owned_or_managed(
+            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+        )
         self._assert_draft(sale)
         item = await self.repo.get_item(item_id)
         if item is None or item.sale_id != sale_id:
@@ -642,8 +686,18 @@ class POSService:
         await self._recompute_total(sale)
         return updated
 
-    async def delete_item(self, *, sale_id: UUID, item_id: UUID) -> None:
+    async def delete_item(
+        self,
+        *,
+        sale_id: UUID,
+        item_id: UUID,
+        actor_id: UUID | None = None,
+        can_manage_tenant: bool = False,
+    ) -> None:
         sale = await self.get_sale(sale_id)
+        self._assert_sale_owned_or_managed(
+            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+        )
         self._assert_draft(sale)
         rows = await self.repo.delete_item(item_id, sale_id=sale_id)
         if rows == 0:
@@ -663,9 +717,14 @@ class POSService:
         sale_id: UUID,
         payment_method: str,
         amount: Decimal,
+        actor_id: UUID | None = None,
+        can_manage_tenant: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> SalePayment:
         sale = await self.get_sale(sale_id)
+        self._assert_sale_owned_or_managed(
+            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+        )
         self._assert_draft(sale)
         return await self.repo.insert_payment(
             tenant_id=sale.tenant_id,
@@ -683,8 +742,12 @@ class POSService:
         sale_id: UUID,
         fields: dict[str, Any],
         actor_id: UUID | None,
+        can_manage_tenant: bool = False,
     ) -> PrescriptionLog:
         sale = await self.get_sale(sale_id)
+        self._assert_sale_owned_or_managed(
+            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+        )
         if sale.status == "voided":
             raise ConflictError("Sale is voided")
         payload = {
@@ -699,8 +762,17 @@ class POSService:
     # Complete — the critical path
     # =========================================================================
 
-    async def complete(self, *, sale_id: UUID) -> Sale:
+    async def complete(
+        self,
+        *,
+        sale_id: UUID,
+        actor_id: UUID | None = None,
+        can_manage_tenant: bool = False,
+    ) -> Sale:
         sale = await self.get_sale(sale_id)
+        self._assert_sale_owned_or_managed(
+            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+        )
         self._assert_draft(sale)
 
         items = await self.repo.list_items(sale.id)

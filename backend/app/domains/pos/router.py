@@ -113,6 +113,7 @@ async def close_shift(
         shift_id=shift_id,
         closing_cash_actual=payload.closing_cash_actual,
         closed_by_user_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
         notes=payload.notes,
     )
     return ShiftRead.model_validate(shift)
@@ -363,11 +364,15 @@ async def get_receipt_pdf(
 async def add_sale_item(
     sale_id: UUID,
     payload: SaleItemAdd,
-    _user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleItemAdded:
     created, requires_rx = await service.add_item(
-        sale_id=sale_id, catalog_id=payload.catalog_id, qty=payload.qty
+        sale_id=sale_id,
+        catalog_id=payload.catalog_id,
+        qty=payload.qty,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
     )
     return SaleItemAdded(
         items=[SaleItemRead.model_validate(i) for i in created],
@@ -383,10 +388,16 @@ async def update_sale_item(
     sale_id: UUID,
     item_id: UUID,
     payload: SaleItemPatch,
-    _user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleItemRead:
-    item = await service.update_item(sale_id=sale_id, item_id=item_id, qty=payload.qty)
+    item = await service.update_item(
+        sale_id=sale_id,
+        item_id=item_id,
+        qty=payload.qty,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
+    )
     return SaleItemRead.model_validate(item)
 
 
@@ -394,10 +405,15 @@ async def update_sale_item(
 async def delete_sale_item(
     sale_id: UUID,
     item_id: UUID,
-    _user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> dict[str, str]:
-    await service.delete_item(sale_id=sale_id, item_id=item_id)
+    await service.delete_item(
+        sale_id=sale_id,
+        item_id=item_id,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
+    )
     return {"status": "deleted"}
 
 
@@ -409,13 +425,15 @@ async def delete_sale_item(
 async def add_payment(
     sale_id: UUID,
     payload: PaymentAdd,
-    _user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> PaymentRead:
     payment = await service.add_payment(
         sale_id=sale_id,
         payment_method=payload.payment_method,
         amount=payload.amount,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
         metadata=payload.metadata,
     )
     return PaymentRead.model_validate(payment)
@@ -424,10 +442,14 @@ async def add_payment(
 @router.post("/sales/{sale_id}/complete", response_model=SaleRead)
 async def complete_sale(
     sale_id: UUID,
-    _user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleRead:
-    sale = await service.complete(sale_id=sale_id)
+    sale = await service.complete(
+        sale_id=sale_id,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
+    )
     return SaleRead.model_validate(sale)
 
 
@@ -446,6 +468,7 @@ async def add_prescription(
         sale_id=sale_id,
         fields=payload.model_dump(exclude_none=True),
         actor_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
     )
     return PrescriptionLogRead.model_validate(pl)
 
