@@ -58,6 +58,7 @@ async def create_supplier_return(
         comment=payload.comment,
         source_document_id=payload.source_document_id,
         actor_id=user.user_id,
+        allowed_branch_ids=user.branch_scope,
     )
     return SupplierReturnCreated(
         **SupplierReturnRead.model_validate(sr).model_dump(),
@@ -67,14 +68,17 @@ async def create_supplier_return(
 
 @router.get("/returns", response_model=list[SupplierReturnRead])
 async def list_supplier_returns(
-    _user: Annotated[CurrentUser, Depends(require_permission("suppliers.view"))],
+    user: Annotated[CurrentUser, Depends(require_permission("suppliers.view"))],
     service: Annotated[SuppliersService, Depends(_service)],
     supplier_id: Annotated[UUID | None, Query()] = None,
     date_from: Annotated[datetime | None, Query()] = None,
     date_to: Annotated[datetime | None, Query()] = None,
 ) -> list[SupplierReturnRead]:
     items = await service.list_returns(
-        supplier_id=supplier_id, date_from=date_from, date_to=date_to
+        supplier_id=supplier_id,
+        date_from=date_from,
+        date_to=date_to,
+        allowed_branch_ids=user.branch_scope,
     )
     return [SupplierReturnRead.model_validate(i) for i in items]
 

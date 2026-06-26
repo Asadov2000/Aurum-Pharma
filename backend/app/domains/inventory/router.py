@@ -35,7 +35,7 @@ async def list_batches(
     # reports.view (owner/admin/dev): batch rows carry purchase_price (margins),
     # which must not be visible to sellers. POS doesn't read /batches — FEFO
     # picks batches server-side — so the cashier flow is unaffected.
-    _user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[InventoryService, Depends(_service)],
     catalog_id: Annotated[UUID | None, Query()] = None,
     branch_id: Annotated[UUID | None, Query()] = None,
@@ -44,6 +44,9 @@ async def list_batches(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> BatchList:
+    branch_scope = user.branch_scope
+    if branch_scope is not None and branch_id is not None and branch_id not in branch_scope:
+        return BatchList(items=[], total=0, page=page, page_size=page_size)
     rows, total = await service.list_batches(
         catalog_id=catalog_id,
         branch_id=branch_id,
@@ -51,6 +54,7 @@ async def list_batches(
         show_empty=show_empty,
         page=page,
         page_size=page_size,
+        branch_ids=branch_scope,
     )
     return BatchList(
         items=[BatchWithExpiry(**row) for row in rows],
@@ -63,11 +67,15 @@ async def list_batches(
 @router.get("/{batch_id}", response_model=BatchDetails)
 async def get_batch(
     batch_id: UUID,
-    _user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> BatchDetails:
-    batch = await service.get_batch(batch_id)
-    recent = await service.list_movements(batch_id, limit=20)
+    batch = await service.get_batch(batch_id, allowed_branch_ids=user.branch_scope)
+    recent = await service.list_movements(
+        batch_id,
+        limit=20,
+        allowed_branch_ids=user.branch_scope,
+    )
     return BatchDetails(
         **BatchRead.model_validate(batch).model_dump(),
         recent_movements=[MovementRead.model_validate(m) for m in recent],
@@ -77,10 +85,10 @@ async def get_batch(
 @router.get("/{batch_id}/movements", response_model=list[MovementRead])
 async def list_movements(
     batch_id: UUID,
-    _user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> list[MovementRead]:
-    movements = await service.list_movements(batch_id)
+    movements = await service.list_movements(batch_id, allowed_branch_ids=user.branch_scope)
     return [MovementRead.model_validate(m) for m in movements]
 
 
@@ -101,5 +109,6 @@ async def create_write_off(
         reason=payload.reason,
         comment=payload.comment,
         actor_id=user.user_id,
+        allowed_branch_ids=user.branch_scope,
     )
     return WriteOffRead.model_validate(wo)

@@ -19,10 +19,14 @@ from app.domains.catalog.service import CatalogService
 from app.domains.foundation.models import Tenant
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
+from app.domains.incoming.repository import IncomingRepository
+from app.domains.incoming.service import IncomingService
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 from app.domains.roles.models import Role, RolePermission, UserAssignment
+from app.domains.suppliers.repository import SuppliersRepository
+from app.domains.suppliers.service import SuppliersService
 from app.main import app
 
 REPORT_READ_PATHS = ["/api/v1/batches", "/api/v1/billing/invoices"]
@@ -89,6 +93,7 @@ async def _assign_permissions(
     tenant_id: UUID,
     user_id: UUID,
     permission_codes: set[str],
+    branch_id: UUID | None = None,
 ) -> None:
     role = Role(
         tenant_id=tenant_id,
@@ -101,7 +106,14 @@ async def _assign_permissions(
     await db_session.refresh(role)
     for code in permission_codes:
         db_session.add(RolePermission(role_id=role.id, permission_code=code))
-    db_session.add(UserAssignment(user_id=user_id, tenant_id=tenant_id, role_id=role.id))
+    db_session.add(
+        UserAssignment(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            role_id=role.id,
+        )
+    )
     await db_session.flush()
 
 
@@ -146,6 +158,212 @@ async def test_sensitive_reads_require_reports_view(
 
         admin_resp = await client.get(path, headers={"Authorization": f"Bearer {admin_token}"})
         assert admin_resp.status_code == 200, path
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    await _override_db(db_session)
+    try:
+        foundation = FoundationService(FoundationRepository(db_session))
+        pos = POSService(POSRepository(db_session))
+        nick = uuid4().hex[:8]
+        tenant = await foundation.create_tenant(
+            payload={"name": f"Branch Sec {nick}", "contact_email": f"branch-{nick}@aurum.tj"}
+        )
+        await foundation.update_tenant(tenant.id, fields={"status": "active"})
+        branch_a = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "A"})
+        branch_b = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "B"})
+        register_a = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": branch_a.id, "name": "A-1"},
+        )
+        register_b = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": branch_b.id, "name": "B-1"},
+        )
+
+        branch_user = AppUser(
+            email=f"branch-user-{nick}@aurum.tj",
+            full_name="Branch User",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        peer = AppUser(
+            email=f"branch-peer-{nick}@aurum.tj",
+            full_name="Branch Peer",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        db_session.add_all([branch_user, peer])
+        await db_session.flush()
+        await db_session.refresh(branch_user)
+        await db_session.refresh(peer)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=branch_user.id,
+            branch_id=branch_a.id,
+            permission_codes={
+                "branches.view",
+                "registers.view",
+                "pos.shift_open",
+                "pos.sell",
+                "sales.view.tenant",
+            },
+        )
+
+        headers = {"Authorization": f"Bearer {_token(branch_user)}"}
+
+        branches_resp = await client.get("/api/v1/branches", headers=headers)
+        assert branches_resp.status_code == 200
+        assert [item["id"] for item in branches_resp.json()] == [str(branch_a.id)]
+
+        other_branch_resp = await client.get(f"/api/v1/branches/{branch_b.id}", headers=headers)
+        assert other_branch_resp.status_code == 403
+
+        registers_resp = await client.get("/api/v1/registers", headers=headers)
+        assert registers_resp.status_code == 200
+        assert [item["id"] for item in registers_resp.json()] == [str(register_a.id)]
+
+        other_registers_resp = await client.get(
+            f"/api/v1/registers?branch_id={branch_b.id}",
+            headers=headers,
+        )
+        assert other_registers_resp.status_code == 200
+        assert other_registers_resp.json() == []
+
+        own_shift_resp = await client.post(
+            "/api/v1/shifts/open",
+            headers=headers,
+            json={"register_id": str(register_a.id), "opening_cash": "0"},
+        )
+        assert own_shift_resp.status_code == 201
+
+        other_shift_resp = await client.post(
+            "/api/v1/shifts/open",
+            headers=headers,
+            json={"register_id": str(register_b.id), "opening_cash": "0"},
+        )
+        assert other_shift_resp.status_code == 403
+
+        await pos.open_shift(
+            tenant_id=tenant.id,
+            register_id=register_b.id,
+            opened_by_user_id=peer.id,
+            opening_cash=Decimal("0"),
+        )
+        sale_a = await pos.create_sale(
+            tenant_id=tenant.id,
+            register_id=register_a.id,
+            cashier_user_id=peer.id,
+        )
+        sale_b = await pos.create_sale(
+            tenant_id=tenant.id,
+            register_id=register_b.id,
+            cashier_user_id=peer.id,
+        )
+
+        own_branch_sale_resp = await client.get(f"/api/v1/sales/{sale_a.id}", headers=headers)
+        assert own_branch_sale_resp.status_code == 200
+
+        other_branch_sale_resp = await client.get(f"/api/v1/sales/{sale_b.id}", headers=headers)
+        assert other_branch_sale_resp.status_code == 403
+
+        create_other_sale_resp = await client.post(
+            "/api/v1/sales",
+            headers=headers,
+            json={"register_id": str(register_b.id)},
+        )
+        assert create_other_sale_resp.status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_branch_scoped_incoming_user_cannot_use_other_branch(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    await _override_db(db_session)
+    try:
+        foundation = FoundationService(FoundationRepository(db_session))
+        suppliers = SuppliersService(SuppliersRepository(db_session))
+        incoming = IncomingService(IncomingRepository(db_session))
+        nick = uuid4().hex[:8]
+        tenant = await foundation.create_tenant(
+            payload={
+                "name": f"Incoming Sec {nick}",
+                "contact_email": f"incoming-{nick}@aurum.tj",
+            }
+        )
+        await foundation.update_tenant(tenant.id, fields={"status": "active"})
+        branch_a = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "A"})
+        branch_b = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "B"})
+        supplier = await suppliers.create_supplier(
+            tenant_id=tenant.id,
+            fields={"name": f"Supplier {nick}"},
+        )
+        branch_user = AppUser(
+            email=f"incoming-user-{nick}@aurum.tj",
+            full_name="Incoming User",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        db_session.add(branch_user)
+        await db_session.flush()
+        await db_session.refresh(branch_user)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=branch_user.id,
+            branch_id=branch_a.id,
+            permission_codes={"incoming.view", "incoming.create"},
+        )
+
+        other_doc = await incoming.create_document(
+            tenant_id=tenant.id,
+            fields={
+                "branch_id": branch_b.id,
+                "supplier_id": supplier.id,
+                "document_date": date.today(),
+                "document_number": f"OTHER-{nick}",
+            },
+        )
+
+        headers = {"Authorization": f"Bearer {_token(branch_user)}"}
+        own_payload = {
+            "branch_id": str(branch_a.id),
+            "supplier_id": str(supplier.id),
+            "document_date": date.today().isoformat(),
+            "document_number": f"OWN-{nick}",
+        }
+        own_resp = await client.post("/api/v1/incoming", headers=headers, json=own_payload)
+        assert own_resp.status_code == 201
+        own_doc_id = own_resp.json()["id"]
+
+        other_create_resp = await client.post(
+            "/api/v1/incoming",
+            headers=headers,
+            json={**own_payload, "branch_id": str(branch_b.id)},
+        )
+        assert other_create_resp.status_code == 403
+
+        list_resp = await client.get("/api/v1/incoming", headers=headers)
+        assert list_resp.status_code == 200
+        assert [item["id"] for item in list_resp.json()] == [own_doc_id]
+
+        get_other_resp = await client.get(f"/api/v1/incoming/{other_doc.id}", headers=headers)
+        assert get_other_resp.status_code == 403
+
+        move_to_other_resp = await client.patch(
+            f"/api/v1/incoming/{own_doc_id}",
+            headers=headers,
+            json={"branch_id": str(branch_b.id)},
+        )
+        assert move_to_other_resp.status_code == 403
     finally:
         app.dependency_overrides.pop(get_db, None)
 

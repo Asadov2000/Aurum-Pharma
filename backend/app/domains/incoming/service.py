@@ -20,7 +20,7 @@ from uuid import UUID
 
 import structlog
 
-from app.core.errors import BusinessRuleError, NotFoundError
+from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
 from app.core.time import utc_now
 from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Branch
@@ -44,12 +44,16 @@ class IncomingService:
         tenant_id: UUID,
         fields: dict[str, Any],
         created_by: UUID | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingDocument:
         await self._assert_document_refs_in_tenant(
             tenant_id=tenant_id,
             branch_id=fields.get("branch_id"),
             supplier_id=fields.get("supplier_id"),
         )
+        branch_id = fields.get("branch_id")
+        if isinstance(branch_id, UUID):
+            self._assert_branch_allowed(branch_id, allowed_branch_ids=allowed_branch_ids)
         payload = {**fields, "tenant_id": tenant_id, "status": "draft"}
         if created_by is not None:
             payload["created_by"] = created_by
@@ -72,14 +76,28 @@ class IncomingService:
             date_to=date_to,
         )
 
-    async def get_document(self, document_id: UUID) -> IncomingDocument:
+    async def get_document(
+        self,
+        document_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> IncomingDocument:
         doc = await self.repo.get_document(document_id)
         if doc is None:
             raise NotFoundError("Incoming document not found")
+        self._assert_branch_allowed(doc.branch_id, allowed_branch_ids=allowed_branch_ids)
         return doc
 
-    async def list_items(self, document_id: UUID) -> list[IncomingItem]:
-        await self.get_document(document_id)  # 404 if missing
+    async def list_items(
+        self,
+        document_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> list[IncomingItem]:
+        await self.get_document(
+            document_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
         return await self.repo.list_items(document_id)
 
     async def update_document(
@@ -88,22 +106,32 @@ class IncomingService:
         *,
         fields: dict[str, Any],
         updated_by: UUID | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingDocument:
-        doc = await self.get_document(document_id)
+        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
         self._assert_draft(doc)
         await self._assert_document_refs_in_tenant(
             tenant_id=doc.tenant_id,
             branch_id=fields.get("branch_id"),
             supplier_id=fields.get("supplier_id"),
         )
+        branch_id = fields.get("branch_id")
+        if isinstance(branch_id, UUID):
+            self._assert_branch_allowed(branch_id, allowed_branch_ids=allowed_branch_ids)
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_document(doc, **fields)
 
     # ---- items ----
 
-    async def add_item(self, document_id: UUID, *, fields: dict[str, Any]) -> IncomingItem:
-        doc = await self.get_document(document_id)
+    async def add_item(
+        self,
+        document_id: UUID,
+        *,
+        fields: dict[str, Any],
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> IncomingItem:
+        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
         self._assert_draft(doc)
         await self._assert_catalog_in_tenant(fields["catalog_id"], tenant_id=doc.tenant_id)
         payload = {**fields, "document_id": doc.id, "tenant_id": doc.tenant_id}
@@ -112,9 +140,14 @@ class IncomingService:
         return item
 
     async def update_item(
-        self, document_id: UUID, item_id: UUID, *, fields: dict[str, Any]
+        self,
+        document_id: UUID,
+        item_id: UUID,
+        *,
+        fields: dict[str, Any],
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingItem:
-        doc = await self.get_document(document_id)
+        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
         self._assert_draft(doc)
         if "catalog_id" in fields:
             await self._assert_catalog_in_tenant(fields["catalog_id"], tenant_id=doc.tenant_id)
@@ -125,8 +158,14 @@ class IncomingService:
         await self._recompute_total(doc)
         return updated
 
-    async def delete_item(self, document_id: UUID, item_id: UUID) -> None:
-        doc = await self.get_document(document_id)
+    async def delete_item(
+        self,
+        document_id: UUID,
+        item_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> None:
+        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
         self._assert_draft(doc)
         rows = await self.repo.delete_item(item_id, document_id=document_id)
         if rows == 0:
@@ -135,8 +174,14 @@ class IncomingService:
 
     # ---- accept / reject ----
 
-    async def accept(self, document_id: UUID, *, actor_id: UUID | None = None) -> IncomingDocument:
-        doc = await self.get_document(document_id)
+    async def accept(
+        self,
+        document_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> IncomingDocument:
+        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
         self._assert_draft(doc)
         items = await self.repo.list_items(document_id)
         if not items:
@@ -190,8 +235,14 @@ class IncomingService:
         logger.info("incoming_accepted", document_id=str(doc.id), items=len(items))
         return doc
 
-    async def reject(self, document_id: UUID, *, actor_id: UUID | None = None) -> IncomingDocument:
-        doc = await self.get_document(document_id)
+    async def reject(
+        self,
+        document_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> IncomingDocument:
+        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
         self._assert_draft(doc)
         await self.repo.update_document(doc, status="rejected", updated_by=actor_id)
         logger.info("incoming_rejected", document_id=str(doc.id))
@@ -206,6 +257,15 @@ class IncomingService:
                 "Cannot modify a document that is already accepted or rejected",
                 details={"status": doc.status},
             )
+
+    @staticmethod
+    def _assert_branch_allowed(
+        branch_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> None:
+        if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("Branch access denied")
 
     async def _assert_document_refs_in_tenant(
         self,

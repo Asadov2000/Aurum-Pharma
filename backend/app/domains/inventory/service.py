@@ -24,7 +24,7 @@ from uuid import UUID
 import structlog
 from sqlalchemy.exc import IntegrityError, InternalError
 
-from app.core.errors import BusinessRuleError, NotFoundError
+from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.models import Batch, BatchMovement, WriteOff
 from app.domains.inventory.repository import InventoryRepository
@@ -55,10 +55,16 @@ class InventoryService:
     # Batch reads
     # -------------------------------------------------------------------------
 
-    async def get_batch(self, batch_id: UUID) -> Batch:
+    async def get_batch(
+        self,
+        batch_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> Batch:
         batch = await self.repo.get_batch(batch_id)
         if batch is None:
             raise NotFoundError("Batch not found")
+        self._assert_branch_allowed(batch.branch_id, allowed_branch_ids=allowed_branch_ids)
         return batch
 
     async def list_batches(
@@ -70,10 +76,12 @@ class InventoryService:
         show_empty: bool,
         page: int,
         page_size: int,
+        branch_ids: set[UUID] | None = None,
     ) -> tuple[list[dict[str, object]], int]:
         return await self.repo.search_with_expiry(
             catalog_id=catalog_id,
             branch_id=branch_id,
+            branch_ids=branch_ids,
             expiry_status=expiry_status,
             show_empty=show_empty,
             page=page,
@@ -81,9 +89,13 @@ class InventoryService:
         )
 
     async def list_movements(
-        self, batch_id: UUID, *, limit: int | None = None
+        self,
+        batch_id: UUID,
+        *,
+        limit: int | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> list[BatchMovement]:
-        await self.get_batch(batch_id)  # 404 if missing
+        await self.get_batch(batch_id, allowed_branch_ids=allowed_branch_ids)  # 404 if missing
         return await self.repo.list_movements(batch_id, limit=limit)
 
     # -------------------------------------------------------------------------
@@ -98,8 +110,9 @@ class InventoryService:
         reason: str,
         comment: str | None,
         actor_id: UUID | None,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> WriteOff:
-        batch = await self.get_batch(batch_id)
+        batch = await self.get_batch(batch_id, allowed_branch_ids=allowed_branch_ids)
         if batch.is_blocked:
             raise BusinessRuleError("Cannot write off a blocked batch")
         amount = (batch.purchase_price * qty).quantize(Decimal("0.01"))
@@ -149,6 +162,15 @@ class InventoryService:
             qty=str(qty),
         )
         return wo
+
+    @staticmethod
+    def _assert_branch_allowed(
+        branch_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> None:
+        if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("Branch access denied")
 
     # -------------------------------------------------------------------------
     # FEFO — first-expires-first-out picker used by the POS domain

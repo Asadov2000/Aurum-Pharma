@@ -81,6 +81,32 @@ class CurrentUser:
             return 3
         return 4
 
+    @property
+    def has_tenant_branch_access(self) -> bool:
+        return self.is_developer or self.is_administrator or "tenant" in self.branch_assignments
+
+    @property
+    def assigned_branch_ids(self) -> set[UUID]:
+        branch_ids: set[UUID] = set()
+        for key in self.branch_assignments:
+            if key == "tenant":
+                continue
+            try:
+                branch_ids.add(UUID(key))
+            except ValueError:
+                continue
+        return branch_ids
+
+    @property
+    def branch_scope(self) -> set[UUID] | None:
+        if self.has_tenant_branch_access:
+            return None
+        return self.assigned_branch_ids
+
+    def can_access_branch(self, branch_id: UUID) -> bool:
+        branch_scope = self.branch_scope
+        return branch_scope is None or branch_id in branch_scope
+
 
 async def current_user(
     db: Annotated[AsyncSession, Depends(get_db)],

@@ -18,7 +18,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InternalError
 
-from app.core.errors import BusinessRuleError, NotFoundError
+from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
 from app.domains.incoming.models import IncomingDocument
 from app.domains.inventory.models import Batch
 from app.domains.inventory.repository import InventoryRepository
@@ -80,6 +80,7 @@ class SuppliersService:
         comment: str | None,
         source_document_id: UUID | None,
         actor_id: UUID | None,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> tuple[SupplierReturn, str | None]:
         """Returns (supplier_return, warning_or_none)."""
         # Validate supplier and batch exist
@@ -96,6 +97,8 @@ class SuppliersService:
         batch = await inv_repo.get_batch(batch_id)
         if batch is None or batch.tenant_id != tenant_id:
             raise NotFoundError("Batch not found")
+        if allowed_branch_ids is not None and batch.branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("Branch access denied")
 
         # Soft check: was this batch really supplied by this supplier?
         warning = await self._cross_supplier_warning(batch_id=batch_id, supplier_id=supplier_id)
@@ -151,9 +154,13 @@ class SuppliersService:
         supplier_id: UUID | None = None,
         date_from: date | datetime | None = None,
         date_to: date | datetime | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> list[SupplierReturn]:
         return await self.repo.list_returns(
-            supplier_id=supplier_id, date_from=date_from, date_to=date_to
+            supplier_id=supplier_id,
+            date_from=date_from,
+            date_to=date_to,
+            branch_ids=allowed_branch_ids,
         )
 
     # ---- helpers ----

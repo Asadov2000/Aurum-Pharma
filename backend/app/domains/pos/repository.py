@@ -348,6 +348,24 @@ class POSRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    @staticmethod
+    def _append_branch_scope_clause(
+        clauses: list[str],
+        params: dict[str, Any],
+        branch_ids: set[UUID] | None,
+    ) -> None:
+        if branch_ids is None:
+            return
+        if not branch_ids:
+            clauses.append("1 = 0")
+            return
+        branch_keys: list[str] = []
+        for idx, allowed_branch_id in enumerate(sorted(branch_ids, key=str)):
+            key = f"allowed_branch_{idx}"
+            branch_keys.append(f":{key}")
+            params[key] = str(allowed_branch_id)
+        clauses.append(f"s.branch_id IN ({', '.join(branch_keys)})")
+
     # -------- sales listing (receipt search) --------
 
     async def list_sales(
@@ -363,6 +381,7 @@ class POSRepository:
         has_refund: bool | None,
         min_total: Decimal | None,
         max_total: Decimal | None,
+        branch_ids: set[UUID] | None = None,
         page: int,
         page_size: int,
         tz: str = "Asia/Dushanbe",
@@ -387,6 +406,7 @@ class POSRepository:
         if branch_id is not None:
             clauses.append("s.branch_id = :branch")
             params["branch"] = str(branch_id)
+        self._append_branch_scope_clause(clauses, params, branch_ids)
         if register_id is not None:
             clauses.append("s.register_id = :register")
             params["register"] = str(register_id)

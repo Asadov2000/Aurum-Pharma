@@ -42,6 +42,7 @@ class InventoryRepository:
         *,
         catalog_id: UUID | None,
         branch_id: UUID | None,
+        branch_ids: set[UUID] | None,
         expiry_status: str | None,
         show_empty: bool,
         page: int,
@@ -73,6 +74,16 @@ class InventoryRepository:
         if branch_id is not None:
             clauses.append("AND b.branch_id = :branch_id")
             params["branch_id"] = branch_id
+        if branch_ids is not None:
+            if not branch_ids:
+                clauses.append("AND 1 = 0")
+            else:
+                branch_keys: list[str] = []
+                for idx, allowed_branch_id in enumerate(sorted(branch_ids, key=str)):
+                    key = f"allowed_branch_{idx}"
+                    branch_keys.append(f":{key}")
+                    params[key] = allowed_branch_id
+                clauses.append(f"AND b.branch_id IN ({', '.join(branch_keys)})")
         if expiry_status:
             clauses.append("AND b.expiry_status = :expiry_status")
             params["expiry_status"] = expiry_status

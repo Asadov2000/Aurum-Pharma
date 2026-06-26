@@ -209,7 +209,7 @@ async def update_tenant_settings(
 
 @tenant_router.get("/branches", response_model=list[BranchRead])
 async def list_branches(
-    _user: Annotated[
+    user: Annotated[
         CurrentUser,
         Depends(
             require_any_permission(
@@ -225,6 +225,9 @@ async def list_branches(
     include_inactive: bool = Query(False),
 ) -> list[BranchRead]:
     branches = await service.list_branches(include_inactive=include_inactive)
+    branch_scope = user.branch_scope
+    if branch_scope is not None:
+        branches = [b for b in branches if b.id in branch_scope]
     return [BranchRead.model_validate(b) for b in branches]
 
 
@@ -234,6 +237,8 @@ async def create_branch(
     user: Annotated[CurrentUser, Depends(require_permission("branches.create"))],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> BranchRead:
+    if not user.has_tenant_branch_access:
+        raise PermissionDeniedError("Tenant branch access required")
     branch = await service.create_branch(
         tenant_id=_current_tenant_or_400(user),
         fields=payload.model_dump(exclude_none=True),
@@ -245,7 +250,7 @@ async def create_branch(
 @tenant_router.get("/branches/{branch_id}", response_model=BranchRead)
 async def get_branch(
     branch_id: UUID,
-    _user: Annotated[
+    user: Annotated[
         CurrentUser,
         Depends(
             require_any_permission(
@@ -260,6 +265,8 @@ async def get_branch(
     service: Annotated[FoundationService, Depends(_service)],
 ) -> BranchRead:
     branch = await service.get_branch(branch_id)
+    if not user.can_access_branch(branch.id):
+        raise PermissionDeniedError("Branch access denied")
     return BranchRead.model_validate(branch)
 
 
@@ -270,6 +277,8 @@ async def update_branch(
     user: Annotated[CurrentUser, Depends(require_permission("branches.update"))],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> BranchRead:
+    if not user.can_access_branch(branch_id):
+        raise PermissionDeniedError("Branch access denied")
     branch = await service.update_branch(
         branch_id,
         fields=payload.model_dump(exclude_none=True),
@@ -287,6 +296,8 @@ async def delete_branch(
     user: Annotated[CurrentUser, Depends(require_permission("branches.delete"))],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> BranchRead:
+    if not user.can_access_branch(branch_id):
+        raise PermissionDeniedError("Branch access denied")
     branch = await service.soft_delete_branch(branch_id, updated_by=user.user_id)
     return BranchRead.model_validate(branch)
 
@@ -296,7 +307,7 @@ async def delete_branch(
 
 @tenant_router.get("/registers", response_model=list[RegisterRead])
 async def list_registers(
-    _user: Annotated[
+    user: Annotated[
         CurrentUser,
         Depends(
             require_any_permission(
@@ -311,7 +322,12 @@ async def list_registers(
     branch_id: Annotated[UUID | None, Query()] = None,
     include_inactive: Annotated[bool, Query()] = False,
 ) -> list[RegisterRead]:
+    branch_scope = user.branch_scope
+    if branch_scope is not None and branch_id is not None and branch_id not in branch_scope:
+        return []
     registers = await service.list_registers(branch_id=branch_id, include_inactive=include_inactive)
+    if branch_scope is not None:
+        registers = [r for r in registers if r.branch_id in branch_scope]
     return [RegisterRead.model_validate(r) for r in registers]
 
 
@@ -321,6 +337,8 @@ async def create_register(
     user: Annotated[CurrentUser, Depends(require_permission("registers.create"))],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterRead:
+    if not user.can_access_branch(payload.branch_id):
+        raise PermissionDeniedError("Branch access denied")
     register = await service.create_register(
         tenant_id=_current_tenant_or_400(user),
         fields=payload.model_dump(exclude_none=True),
@@ -332,7 +350,7 @@ async def create_register(
 @tenant_router.get("/registers/{register_id}", response_model=RegisterRead)
 async def get_register(
     register_id: UUID,
-    _user: Annotated[
+    user: Annotated[
         CurrentUser,
         Depends(
             require_any_permission(
@@ -346,6 +364,8 @@ async def get_register(
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterRead:
     register = await service.get_register(register_id)
+    if not user.can_access_branch(register.branch_id):
+        raise PermissionDeniedError("Register access denied")
     return RegisterRead.model_validate(register)
 
 
@@ -356,6 +376,9 @@ async def update_register(
     user: Annotated[CurrentUser, Depends(require_permission("registers.update"))],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterRead:
+    existing = await service.get_register(register_id)
+    if not user.can_access_branch(existing.branch_id):
+        raise PermissionDeniedError("Register access denied")
     register = await service.update_register(
         register_id,
         fields=payload.model_dump(exclude_none=True),
@@ -370,6 +393,9 @@ async def delete_register(
     user: Annotated[CurrentUser, Depends(require_permission("registers.delete"))],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterRead:
+    existing = await service.get_register(register_id)
+    if not user.can_access_branch(existing.branch_id):
+        raise PermissionDeniedError("Register access denied")
     register = await service.soft_delete_register(register_id, updated_by=user.user_id)
     return RegisterRead.model_validate(register)
 

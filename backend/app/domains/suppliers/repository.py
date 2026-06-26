@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.inventory.models import Batch
 from app.domains.suppliers.models import Supplier, SupplierReturn
 
 
@@ -58,9 +59,15 @@ class SuppliersRepository:
         supplier_id: UUID | None = None,
         date_from: date | datetime | None = None,
         date_to: date | datetime | None = None,
+        branch_ids: set[UUID] | None = None,
     ) -> list[SupplierReturn]:
         stmt = select(SupplierReturn)
         clauses: list[Any] = []
+        if branch_ids is not None:
+            if not branch_ids:
+                return []
+            stmt = stmt.join(Batch, Batch.id == SupplierReturn.batch_id)
+            clauses.append(Batch.branch_id.in_(branch_ids))
         if supplier_id is not None:
             clauses.append(SupplierReturn.supplier_id == supplier_id)
         if date_from is not None:

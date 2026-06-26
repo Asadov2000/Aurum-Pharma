@@ -79,6 +79,7 @@ class POSService:
         register_id: UUID,
         opened_by_user_id: UUID,
         opening_cash: Decimal,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> Shift:
         register_result = await self.repo.session.execute(
             select(Register).where(Register.id == register_id).with_for_update()
@@ -94,6 +95,7 @@ class POSService:
         branch = branch_result.scalar_one_or_none()
         if branch is None or branch.tenant_id != tenant_id:
             raise NotFoundError("Branch not found")
+        self._assert_branch_allowed(branch.id, allowed_branch_ids=allowed_branch_ids)
         if not branch.is_active:
             raise BusinessRuleError("Branch is inactive")
 
@@ -111,8 +113,17 @@ class POSService:
             opening_cash=opening_cash,
         )
 
-    async def get_current_shift(self, *, user_id: UUID, register_id: UUID) -> Shift | None:
-        return await self.repo.get_open_shift_for_user(user_id, register_id)
+    async def get_current_shift(
+        self,
+        *,
+        user_id: UUID,
+        register_id: UUID,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> Shift | None:
+        shift = await self.repo.get_open_shift_for_user(user_id, register_id)
+        if shift is not None:
+            self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
+        return shift
 
     async def close_shift(
         self,
@@ -121,13 +132,19 @@ class POSService:
         closing_cash_actual: Decimal,
         closed_by_user_id: UUID,
         can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
         notes: str | None = None,
     ) -> Shift:
         shift = await self.repo.get_shift(shift_id)
         if shift is None:
             raise NotFoundError("Shift not found")
+        self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
         self._assert_shift_owned_or_managed(
-            shift, actor_id=closed_by_user_id, can_manage_tenant=can_manage_tenant
+            shift,
+            actor_id=closed_by_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         if shift.status != "open":
             raise BusinessRuleError("Shift is not open", details={"status": shift.status})
@@ -147,10 +164,16 @@ class POSService:
             notes=notes,
         )
 
-    async def z_report(self, shift_id: UUID) -> dict[str, Any]:
+    async def z_report(
+        self,
+        shift_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> dict[str, Any]:
         shift = await self.repo.get_shift(shift_id)
         if shift is None:
             raise NotFoundError("Shift not found")
+        self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
         totals = shift.totals or await self.repo.shift_totals(shift_id)
         return {
             "shift_id": shift.id,
@@ -177,10 +200,12 @@ class POSService:
         tenant_id: UUID,
         register_id: UUID,
         cashier_user_id: UUID,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> Sale:
         shift = await self.repo.get_open_shift_for_register(register_id)
         if shift is None:
             raise BusinessRuleError("No open shift for this register")
+        self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
         # is_test if the tenant is still in 'setup'.
         tenant = await self.repo.session.get(Tenant, tenant_id)
         is_test = bool(tenant is not None and tenant.status == "setup")
@@ -218,6 +243,7 @@ class POSService:
         has_refund: bool | None,
         min_total: Decimal | None,
         max_total: Decimal | None,
+        branch_ids: set[UUID] | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -232,6 +258,7 @@ class POSService:
             has_refund=has_refund,
             min_total=min_total,
             max_total=max_total,
+            branch_ids=branch_ids,
             page=page,
             page_size=page_size,
             tz=await self._report_tz(tenant_id),
@@ -243,10 +270,18 @@ class POSService:
         *,
         viewer_id: UUID | None = None,
         can_view_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_view_branch_ids: set[UUID] | None = None,
     ) -> tuple[Sale, list[tuple[SaleItem, str | None, date | None, int | None]], list[SalePayment]]:
         sale = await self.get_sale(sale_id)
         if viewer_id is not None:
-            self._assert_sale_viewable(sale, viewer_id=viewer_id, can_view_tenant=can_view_tenant)
+            self._assert_sale_viewable(
+                sale,
+                viewer_id=viewer_id,
+                can_view_tenant=can_view_tenant,
+                allowed_branch_ids=allowed_branch_ids,
+                allowed_view_branch_ids=allowed_view_branch_ids,
+            )
         items = await self.repo.list_items_with_batch(sale.id)
         payments = await self.repo.list_payments(sale.id)
         return sale, items, payments
@@ -259,13 +294,21 @@ class POSService:
         *,
         viewer_id: UUID | None = None,
         can_view_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_view_branch_ids: set[UUID] | None = None,
     ) -> ReceiptData:
         """Assemble everything a printed receipt needs, fully resolved (names,
         not UUIDs). Shared by the JSON print view and the PDF generator. RLS
         scopes every fetch to the caller's tenant."""
         sale = await self.get_sale(sale_id)
         if viewer_id is not None:
-            self._assert_sale_viewable(sale, viewer_id=viewer_id, can_view_tenant=can_view_tenant)
+            self._assert_sale_viewable(
+                sale,
+                viewer_id=viewer_id,
+                can_view_tenant=can_view_tenant,
+                allowed_branch_ids=allowed_branch_ids,
+                allowed_view_branch_ids=allowed_view_branch_ids,
+            )
         items = await self.repo.list_items(sale.id)
         payments = await self.repo.list_payments(sale.id)
 
@@ -319,23 +362,35 @@ class POSService:
         *,
         viewer_id: UUID | None = None,
         can_view_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_view_branch_ids: set[UUID] | None = None,
     ) -> bytes:
         """Lazily render (and cache in MinIO) the receipt PDF. Completed sales
         are immutable, so a cached PDF stays valid forever; drafts render fresh
         each time and are never cached. The blocking render + MinIO IO runs in a
         worker thread so it doesn't stall the event loop."""
         data = await self.build_receipt(
-            sale_id, viewer_id=viewer_id, can_view_tenant=can_view_tenant
+            sale_id,
+            viewer_id=viewer_id,
+            can_view_tenant=can_view_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_view_branch_ids=allowed_view_branch_ids,
         )
         return await anyio.to_thread.run_sync(get_or_render_receipt_pdf, data)
 
     # ---- Z-report (shift close XLSX) ----
 
-    async def build_z_report(self, shift_id: UUID) -> ZReportData:
+    async def build_z_report(
+        self,
+        shift_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> ZReportData:
         """Assemble the shift summary (names resolved) for the XLSX export."""
         shift = await self.repo.get_shift(shift_id)
         if shift is None:
             raise NotFoundError("Shift not found")
+        self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
 
         tenant = await self.repo.session.get(Tenant, shift.tenant_id)
         branch = await self.repo.session.get(Branch, shift.branch_id)
@@ -374,18 +429,24 @@ class POSService:
             difference_reason=shift.notes,
         )
 
-    async def get_z_report_xlsx(self, shift_id: UUID) -> bytes:
+    async def get_z_report_xlsx(
+        self,
+        shift_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> bytes:
         """Lazily render + cache the Z-report XLSX in MinIO. Only closed shifts
         qualify — an open shift's totals are incomplete."""
         shift = await self.repo.get_shift(shift_id)
         if shift is None:
             raise NotFoundError("Shift not found")
+        self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
         if shift.status != "closed":
             raise BusinessRuleError(
                 "Z-report is available only after the shift is closed",
                 details={"status": shift.status},
             )
-        data = await self.build_z_report(shift_id)
+        data = await self.build_z_report(shift_id, allowed_branch_ids=allowed_branch_ids)
         return await anyio.to_thread.run_sync(get_or_render_z_report_xlsx, data)
 
     # ---- sales summary (accountant XLSX, arbitrary range) ----
@@ -572,8 +633,13 @@ class POSService:
         *,
         viewer_id: UUID,
         can_view_tenant: bool,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_view_branch_ids: set[UUID] | None = None,
     ) -> None:
         if can_view_tenant:
+            return
+        POSService._assert_branch_allowed(sale.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if allowed_view_branch_ids is not None and sale.branch_id in allowed_view_branch_ids:
             return
         if sale.cashier_user_id != viewer_id:
             raise PermissionDeniedError("Cannot view another cashier's sale")
@@ -584,8 +650,15 @@ class POSService:
         *,
         actor_id: UUID | None,
         can_manage_tenant: bool,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> None:
-        if actor_id is None or can_manage_tenant:
+        if can_manage_tenant:
+            return
+        POSService._assert_branch_allowed(sale.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if actor_id is None:
+            return
+        if allowed_manage_branch_ids is not None and sale.branch_id in allowed_manage_branch_ids:
             return
         if sale.cashier_user_id != actor_id:
             raise PermissionDeniedError("Cannot modify another cashier's sale")
@@ -596,11 +669,23 @@ class POSService:
         *,
         actor_id: UUID,
         can_manage_tenant: bool,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> None:
         if can_manage_tenant:
             return
+        if allowed_manage_branch_ids is not None and shift.branch_id in allowed_manage_branch_ids:
+            return
         if shift.opened_by_user_id != actor_id:
             raise PermissionDeniedError("Cannot close another cashier's shift")
+
+    @staticmethod
+    def _assert_branch_allowed(
+        branch_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> None:
+        if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("Branch access denied")
 
     # ---- items ----
 
@@ -612,12 +697,18 @@ class POSService:
         qty: Decimal,
         actor_id: UUID | None = None,
         can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
         today: date | None = None,
     ) -> tuple[list[SaleItem], bool]:
         """Returns (created items, requires_prescription_log)."""
         sale = await self.get_sale(sale_id)
         self._assert_sale_owned_or_managed(
-            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
 
@@ -672,10 +763,16 @@ class POSService:
         qty: Decimal,
         actor_id: UUID | None = None,
         can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> SaleItem:
         sale = await self.get_sale(sale_id)
         self._assert_sale_owned_or_managed(
-            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
         item = await self.repo.get_item(item_id)
@@ -693,10 +790,16 @@ class POSService:
         item_id: UUID,
         actor_id: UUID | None = None,
         can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> None:
         sale = await self.get_sale(sale_id)
         self._assert_sale_owned_or_managed(
-            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
         rows = await self.repo.delete_item(item_id, sale_id=sale_id)
@@ -719,11 +822,17 @@ class POSService:
         amount: Decimal,
         actor_id: UUID | None = None,
         can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SalePayment:
         sale = await self.get_sale(sale_id)
         self._assert_sale_owned_or_managed(
-            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
         return await self.repo.insert_payment(
@@ -743,10 +852,16 @@ class POSService:
         fields: dict[str, Any],
         actor_id: UUID | None,
         can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> PrescriptionLog:
         sale = await self.get_sale(sale_id)
         self._assert_sale_owned_or_managed(
-            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         if sale.status == "voided":
             raise ConflictError("Sale is voided")
@@ -768,10 +883,16 @@ class POSService:
         sale_id: UUID,
         actor_id: UUID | None = None,
         can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> Sale:
         sale = await self.get_sale(sale_id)
         self._assert_sale_owned_or_managed(
-            sale, actor_id=actor_id, can_manage_tenant=can_manage_tenant
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
 
@@ -878,6 +999,7 @@ class POSService:
         reason: str | None,
         comment: str | None,
         cashier_user_id: UUID,
+        allowed_branch_ids: set[UUID] | None = None,
     ) -> Sale:
         """Create a `sale_type='return'` document tied to `parent_sale_id`.
 
@@ -896,6 +1018,7 @@ class POSService:
             )
         if parent.sale_type != "sale":
             raise BusinessRuleError("Only forward sales can be refunded")
+        self._assert_branch_allowed(parent.branch_id, allowed_branch_ids=allowed_branch_ids)
 
         parent_items = {i.id: i for i in await self.repo.list_items(parent_sale_id)}
         # Already-refunded qty per parent item (sum across previous returns).
