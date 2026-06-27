@@ -28,10 +28,10 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const initial = name.charAt(0).toUpperCase();
 
   return (
-    <div className="grid min-h-screen grid-cols-[240px_1fr] bg-background">
+    <div className="grid min-h-screen grid-cols-[240px_minmax(0,1fr)] bg-background">
       <Sidebar items={items} />
       <div className="flex min-w-0 flex-col">
-        <header className="flex items-center justify-between gap-4 border-b border-border bg-surface px-6 py-3">
+        <header className="sticky top-0 z-sticky flex items-center justify-between gap-4 border-b border-border bg-surface/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-surface/85">
           <div className="flex min-w-0 items-center gap-3">
             <span
               aria-hidden="true"
@@ -48,12 +48,17 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
           </div>
           <div className="flex shrink-0 items-center gap-3">
             <ThemeToggle />
-            <Button variant="secondary" size="sm" onClick={() => void logout()}>
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-label="Выйти из аккаунта"
+              onClick={() => void logout()}
+            >
               Выйти
             </Button>
           </div>
         </header>
-        <main className="flex-1 px-6 py-6">{children}</main>
+        <main className="min-w-0 flex-1 px-6 py-6">{children}</main>
       </div>
     </div>
   );

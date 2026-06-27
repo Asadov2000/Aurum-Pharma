@@ -30,20 +30,24 @@ export function Sidebar({ items }: { items: NavItem[] }): JSX.Element {
   const claimed = new Set(SECTIONS.flatMap((s) => s.routes));
 
   const renderLink = (item: NavItem): JSX.Element => {
-    const active = location.pathname === item.to;
+    const active =
+      location.pathname === item.to ||
+      (item.to !== "/" && location.pathname.startsWith(`${item.to}/`));
     return (
       <Link
         key={item.to}
         to={item.to}
+        title={item.label}
+        aria-current={active ? "page" : undefined}
         className={cn(
-          "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-fast",
+          "group flex min-h-9 min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
           active
             ? "bg-primary text-primary-foreground shadow-sm"
             : "text-foreground-secondary hover:bg-foreground/5 hover:text-foreground",
         )}
       >
         <NavIcon to={item.to} />
-        <span>{item.label}</span>
+        <span className="truncate">{item.label}</span>
       </Link>
     );
   };
@@ -53,7 +57,10 @@ export function Sidebar({ items }: { items: NavItem[] }): JSX.Element {
   const leftovers = items.filter((i) => !claimed.has(i.to));
 
   return (
-    <nav className="flex h-full flex-col border-r border-border bg-surface px-3 py-4">
+    <nav
+      aria-label="Основная навигация"
+      className="sticky top-0 flex h-screen flex-col border-r border-border bg-surface px-3 py-4"
+    >
       <div className="flex shrink-0 items-center gap-2.5 px-2 pb-4">
         <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground">
           <svg
@@ -69,12 +76,12 @@ export function Sidebar({ items }: { items: NavItem[] }): JSX.Element {
             <path d="M12 5v14M5 12h14" />
           </svg>
         </span>
-        <span className="font-display text-lg font-semibold tracking-tight text-foreground">
+        <span className="font-display text-lg font-semibold text-foreground">
           Aurum Pharma
         </span>
       </div>
 
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto">
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-1">
         {SECTIONS.map((section, idx) => {
           const present = section.routes
             .map((to) => byRoute.get(to))
@@ -83,7 +90,7 @@ export function Sidebar({ items }: { items: NavItem[] }): JSX.Element {
           return (
             <div key={section.caption ?? `top-${idx}`} className="flex flex-col gap-0.5">
               {section.caption && (
-                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
+                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase text-foreground-muted">
                   {section.caption}
                 </div>
               )}

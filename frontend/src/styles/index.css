@@ -90,14 +90,14 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Headings inherit the display family + tight tracking app-wide, so the new
-     type voice propagates from the foundation without editing screen layouts. */
+  /* Headings inherit the display family app-wide. Keep letter spacing at 0:
+     compact operational UIs need predictable text metrics. */
   h1,
   h2,
   h3,
   h4 {
     font-family: theme("fontFamily.display");
-    letter-spacing: -0.011em;
+    letter-spacing: 0;
   }
 
   /* Keyboard-visible focus ring everywhere, without a ring on mouse clicks. */

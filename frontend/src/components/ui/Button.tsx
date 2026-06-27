@@ -28,17 +28,36 @@ const sizeClasses: Record<Size, string> = {
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = "primary", size = "md", isLoading, disabled, className, children, type, ...rest },
+  {
+    variant = "primary",
+    size = "md",
+    isLoading,
+    disabled,
+    className,
+    children,
+    type,
+    "aria-label": ariaLabel,
+    ...rest
+  },
   ref,
 ) {
+  const textLabel =
+    typeof children === "string" || typeof children === "number"
+      ? String(children)
+      : undefined;
+  const loadingLabel = ariaLabel ?? textLabel;
+  const mirrorLabelInCss = isLoading && textLabel !== undefined;
+
   return (
     <button
       ref={ref}
       type={type ?? "button"}
       disabled={disabled || isLoading}
+      aria-busy={isLoading || undefined}
+      aria-label={isLoading ? loadingLabel : ariaLabel}
       // Focus ring is provided globally by :focus-visible (see index.css).
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-md font-semibold transition-colors duration-fast",
+        "relative inline-flex items-center justify-center gap-2 rounded-md font-semibold transition-colors duration-fast",
         "disabled:cursor-not-allowed",
         variantClasses[variant],
         sizeClasses[size],
@@ -46,7 +65,23 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       )}
       {...rest}
     >
-      {isLoading ? <span aria-label="loading">…</span> : children}
+      {isLoading && (
+        <span
+          aria-hidden="true"
+          className="absolute h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+        />
+      )}
+      <span
+        aria-hidden={isLoading || undefined}
+        data-label={mirrorLabelInCss ? textLabel : undefined}
+        className={cn(
+          "inline-flex items-center gap-2",
+          isLoading && "invisible",
+          mirrorLabelInCss && "before:content-[attr(data-label)]",
+        )}
+      >
+        {mirrorLabelInCss ? null : children}
+      </span>
     </button>
   );
 });
