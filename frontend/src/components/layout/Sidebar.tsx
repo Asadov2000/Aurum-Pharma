@@ -11,6 +11,13 @@ export interface NavItem {
   icon?: ReactNode;
 }
 
+interface SidebarProps {
+  items: NavItem[];
+  mode?: "desktop" | "drawer";
+  onNavigate?: () => void;
+  closeButton?: ReactNode;
+}
+
 /** Visual grouping for the flat list buildNav returns. Order here defines the
  *  sidebar order; gating is unchanged — only items buildNav actually returns
  *  get rendered, and empty sections are skipped. */
@@ -24,7 +31,12 @@ const SECTIONS: { caption?: string; routes: string[] }[] = [
   { caption: "Администрирование", routes: ["/admin/tenants"] },
 ];
 
-export function Sidebar({ items }: { items: NavItem[] }): JSX.Element {
+export function Sidebar({
+  items,
+  mode = "desktop",
+  onNavigate,
+  closeButton,
+}: SidebarProps): JSX.Element {
   const location = useRouterState({ select: (s) => s.location });
   const byRoute = new Map(items.map((i) => [i.to, i]));
   const claimed = new Set(SECTIONS.flatMap((s) => s.routes));
@@ -39,6 +51,7 @@ export function Sidebar({ items }: { items: NavItem[] }): JSX.Element {
         to={item.to}
         title={item.label}
         aria-current={active ? "page" : undefined}
+        onClick={onNavigate}
         className={cn(
           "group flex min-h-9 min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
           active
@@ -59,26 +72,32 @@ export function Sidebar({ items }: { items: NavItem[] }): JSX.Element {
   return (
     <nav
       aria-label="Основная навигация"
-      className="sticky top-0 flex h-screen flex-col border-r border-border bg-surface px-3 py-4"
+      className={cn(
+        "flex flex-col border-r border-border bg-surface px-3 py-4",
+        mode === "desktop" ? "sticky top-0 h-screen" : "h-full shadow-xl",
+      )}
     >
-      <div className="flex shrink-0 items-center gap-2.5 px-2 pb-4">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
+      <div className="flex shrink-0 items-center justify-between gap-3 px-2 pb-4">
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </span>
+          <span className="truncate font-display text-lg font-semibold text-foreground">
+            Aurum Pharma
+          </span>
         </span>
-        <span className="font-display text-lg font-semibold text-foreground">
-          Aurum Pharma
-        </span>
+        {closeButton}
       </div>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-1">
