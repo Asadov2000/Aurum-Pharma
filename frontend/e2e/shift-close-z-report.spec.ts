@@ -76,7 +76,9 @@ test.describe("Shift close → Z-report", () => {
     await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
     // One-tap cash tile pays the full remaining balance. Wait for it to settle
     // before completing, else "Завершить" reads a stale remaining and errors.
-    await page.getByRole("button", { name: "Наличные" }).click();
+    const cashPayment = page.getByRole("button", { name: "Наличные" });
+    await expect(cashPayment).toBeEnabled({ timeout: 30_000 });
+    await cashPayment.click();
     await expect(page.getByText(/Оплачено 50\.00/)).toBeVisible();
     await page.getByRole("button", { name: /Завершить продажу/ }).click();
     await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });

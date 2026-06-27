@@ -85,7 +85,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       )}
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-sticky flex items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-surface/85 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <Button
               variant="secondary"
               size="sm"
@@ -97,26 +97,27 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             </Button>
             <span
               aria-hidden="true"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-sm font-semibold text-primary"
+              className="hidden h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-sm font-semibold text-primary sm:grid"
             >
               {initial}
             </span>
-            <div className="min-w-0 leading-tight">
+            <div className="hidden min-w-0 leading-tight sm:block">
               <div className="truncate text-sm font-semibold text-foreground">{name}</div>
               {caption && (
                 <div className="truncate text-xs text-foreground-muted">{caption}</div>
               )}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <ThemeToggle />
             <Button
               variant="secondary"
               size="sm"
-              aria-label="Выйти из аккаунта"
+              className="h-8 w-8 px-0 sm:w-auto sm:px-3"
               onClick={() => void logout()}
             >
-              Выйти
+              <LogoutIcon />
+              <span className="sr-only sm:not-sr-only">Выйти</span>
             </Button>
           </div>
         </header>
@@ -156,6 +157,26 @@ function CloseIcon(): JSX.Element {
       aria-hidden="true"
     >
       <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+function LogoutIcon(): JSX.Element {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
     </svg>
   );
 }

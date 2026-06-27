@@ -23,11 +23,12 @@ interface SidebarProps {
  *  get rendered, and empty sections are skipped. */
 const SECTIONS: { caption?: string; routes: string[] }[] = [
   { routes: ["/"] }, // «Главная» — standalone, no caption
+  { caption: "Запуск", routes: ["/onboarding"] },
   { caption: "Продажи", routes: ["/pos", "/sales"] },
   { caption: "Склад", routes: ["/catalog", "/batches", "/incoming", "/suppliers"] },
   { caption: "Аналитика", routes: ["/reports", "/audit"] },
   { caption: "Управление", routes: ["/users", "/roles", "/branches", "/registers"] },
-  { caption: "Система", routes: ["/billing", "/notifications", "/settings", "/onboarding"] },
+  { caption: "Система", routes: ["/billing", "/notifications", "/settings"] },
   { caption: "Администрирование", routes: ["/admin/tenants"] },
 ];
 
