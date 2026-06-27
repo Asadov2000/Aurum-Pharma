@@ -11,23 +11,27 @@ docker-стека** — без моков. Это safety-net перед депл
 | `auth.spec.ts` | вход dev/owner, неверный код, выход | оба |
 | `tenant-setup.spec.ts` | создание тенанта, смена статуса, billing-drawer (подписка→счёт→платёж) | dev |
 | `catalog-flow.spec.ts` | создание позиции, штрихкод, trigram-поиск | owner |
+| `catalog-import.spec.ts` | импорт `.xlsx` через wizard и проверка строк в каталоге | owner |
 | `incoming-flow.spec.ts` | приход draft → позиция → приёмка → партия в `/batches` | owner |
+| `owner-onboarding.spec.ts` | создание аптеки и владельца, вход нового владельца по коду | dev |
 | `pos-sale.spec.ts` | смена → продажа → **FEFO split 5+2** → оплата → чек → списание партий | owner |
+| `reports-export.spec.ts` | чек PDF, Z-report XLSX, продажи XLSX, остатки XLSX | owner |
 | `shift-close-z-report.spec.ts` | смена → продажа → закрытие → `/reports` → бейдж «недостача» | owner |
 
-Всего **6 spec-файлов / 14 тестов**.
+Всего **9 spec-файлов / 16 тестов**.
 
 ## Предусловия
 
 1. Поднят весь стек:
    ```bash
    docker compose up -d
-   docker compose ps   # все healthy
+   docker compose ps   # running; healthcheck есть не у всех сервисов
    ```
 2. Бэкенд в режиме `ENVIRONMENT=development` — тогда `/auth/login/code`
    возвращает `dev_code` в ответе, и тесты логинятся без чтения почты.
-3. В БД есть посев из основного README: пользователи `dev@aurum.tj` /
-   `Devdev1234` и `owner@aurum.tj` / `Owner1234`, тенант «Demo Pharmacy».
+3. В БД есть базовый dev-seed: пользователи `dev@aurum.tj`,
+   `admin@aurum.tj`, `owner@aurum.tj`, активный demo-тенант «Аптека Шифо»
+   или «Demo Pharmacy».
 4. Зависимости фронта установлены на **хосте** (не в контейнере — Alpine
    не поддерживается Playwright):
    ```bash
@@ -43,6 +47,20 @@ cd frontend
 pnpm e2e            # headless, reporter=list
 pnpm e2e:ui         # интерактивный UI-режим Playwright
 pnpm e2e:report     # открыть HTML-отчёт после прогона
+```
+
+Если host-`pnpm` пытается переустановить зависимости перед тестами, запускай
+Playwright напрямую:
+
+```powershell
+cd frontend
+.\node_modules\.bin\playwright.cmd test --reporter=list
+```
+
+На Windows можно запустить E2E вместе с локальной smoke-проверкой:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1 -RunE2E
 ```
 
 Один конкретный файл:
