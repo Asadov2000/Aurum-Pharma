@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -10,6 +10,9 @@ import { buildNav } from "./nav";
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileDrawerRef = useRef<HTMLDivElement>(null);
+  const mobileCloseButtonRef = useRef<HTMLButtonElement>(null);
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
   const hasTenant = Boolean(user?.home_tenant_id);
   const perms = user?.permissions ?? [];
@@ -31,17 +34,68 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   useEffect(() => {
     if (!mobileNavOpen) return undefined;
 
+    const previousActiveElement =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const mobileMenuButton = mobileMenuButtonRef.current;
+    const focusableSelector = [
+      "a[href]",
+      "button:not([disabled])",
+      "textarea:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(",");
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setMobileNavOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const drawer = mobileDrawerRef.current;
+      if (!drawer) {
+        return;
+      }
+      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+        (el) => el.offsetParent !== null && el.tabIndex >= 0,
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        return;
+      }
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     const previousOverflow = document.body.style.overflow;
+    const focusFrame = window.requestAnimationFrame(() => {
+      mobileCloseButtonRef.current?.focus();
+    });
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKeyDown);
+      if (previousActiveElement && document.contains(previousActiveElement)) {
+        previousActiveElement.focus();
+      } else {
+        mobileMenuButton?.focus();
+      }
     };
   }, [mobileNavOpen]);
 
@@ -59,6 +113,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             onClick={() => setMobileNavOpen(false)}
           />
           <div
+            ref={mobileDrawerRef}
             role="dialog"
             aria-modal="true"
             aria-label="Меню приложения"
@@ -70,6 +125,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
               onNavigate={() => setMobileNavOpen(false)}
               closeButton={
                 <Button
+                  ref={mobileCloseButtonRef}
                   variant="ghost"
                   size="sm"
                   className="h-8 w-8 px-0"
@@ -87,6 +143,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         <header className="sticky top-0 z-sticky flex items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-surface/85 sm:px-6">
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <Button
+              ref={mobileMenuButtonRef}
               variant="secondary"
               size="sm"
               className="h-9 w-9 shrink-0 px-0 lg:hidden"

@@ -46,6 +46,43 @@ test.describe("Auth", () => {
     }
   });
 
+  test("mobile drawer keeps keyboard focus inside and restores it on Escape", async ({
+    page,
+  }) => {
+    const api = await request.newContext();
+    try {
+      const tokens = await apiLogin(api, OWNER);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto("/login");
+      await page.evaluate((t) => {
+        window.localStorage.setItem("aurum.access_token", t.access_token);
+        window.localStorage.setItem("aurum.refresh_token", t.refresh_token);
+      }, tokens);
+      await page.goto("/");
+
+      const openMenu = page.getByRole("button", { name: "Открыть меню" });
+      await expect(openMenu).toBeVisible();
+      await openMenu.focus();
+      await openMenu.click();
+
+      const dialog = page.getByRole("dialog", { name: "Меню приложения" });
+      const closeMenu = dialog.getByRole("button", { name: "Закрыть меню", exact: true });
+      await expect(dialog).toBeVisible();
+      await expect(closeMenu).toBeFocused();
+
+      await page.keyboard.press("Shift+Tab");
+      await expect
+        .poll(() => dialog.evaluate((el) => el.contains(document.activeElement)))
+        .toBe(true);
+
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect(openMenu).toBeFocused();
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("invalid code surfaces a friendly error", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Email").fill(DEV.email);
