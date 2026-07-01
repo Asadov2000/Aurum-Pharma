@@ -101,6 +101,12 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
 
   return (
     <div className="min-h-screen bg-background lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
+      >
+        Перейти к содержимому
+      </a>
       <div className="hidden lg:block">
         <Sidebar items={items} />
       </div>
@@ -178,7 +184,13 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             </Button>
           </div>
         </header>
-        <main className="min-w-0 flex-1 px-4 py-4 sm:px-6 sm:py-6">{children}</main>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="min-w-0 flex-1 px-4 py-4 sm:px-6 sm:py-6"
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

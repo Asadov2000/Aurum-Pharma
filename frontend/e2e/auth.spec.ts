@@ -46,6 +46,34 @@ test.describe("Auth", () => {
     }
   });
 
+  test("skip link moves keyboard users straight to main content", async ({ page }) => {
+    const api = await request.newContext();
+    try {
+      const tokens = await apiLogin(api, OWNER);
+      await page.goto("/login");
+      await page.evaluate((t) => {
+        window.localStorage.setItem("aurum.access_token", t.access_token);
+        window.localStorage.setItem("aurum.refresh_token", t.refresh_token);
+      }, tokens);
+      await page.goto("/");
+      await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      });
+
+      const skipLink = page.getByRole("link", { name: "Перейти к содержимому" });
+      await page.keyboard.press("Tab");
+      await expect(skipLink).toBeFocused();
+
+      await page.keyboard.press("Enter");
+      await expect(page.locator("main#main-content")).toBeFocused();
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("mobile drawer keeps keyboard focus inside and restores it on Escape", async ({
     page,
   }) => {

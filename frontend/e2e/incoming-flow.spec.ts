@@ -81,11 +81,20 @@ test.describe("Incoming flow (owner)", () => {
     // Status badge flips to "Принят" (or similar accepted-label).
     await expect(page.getByText(/Принят/)).toBeVisible({ timeout: 15_000 });
 
-    // Hop over to /batches and filter by branch → see the freshly-made batch.
+    // Hop over to /batches and filter by the unique catalog item → see the
+    // freshly-made batch. Branch options are loaded separately and can lag
+    // under full-suite load; the catalog picker searches the exact seeded item.
     await page.goto("/batches");
-    await page.getByLabel(/^Точка$/).selectOption({ label: branch.name });
+    const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
+    await batchCatalogPicker.fill(searchKey);
+    const batchCatalogOption = page.getByRole("button", {
+      name: new RegExp(item.brand_name),
+    });
+    await expect(batchCatalogOption).toBeVisible({ timeout: 15_000 });
+    await batchCatalogOption.click();
+
     // The brand_name is not on the batch row directly (UI shows batch_number),
-    // so assert the visible table row for this branch and its 10 / 10 stock.
+    // so assert the visible table row for the created branch and its 10 / 10 stock.
     const batchRow = page
       .getByRole("row")
       .filter({ hasText: branch.name })

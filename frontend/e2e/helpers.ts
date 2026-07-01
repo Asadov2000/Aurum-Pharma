@@ -100,7 +100,7 @@ export async function loginInBrowser(
   try {
     const tokens = await apiLogin(api, creds);
     // Must navigate to an origin first or localStorage is unreachable.
-    await page.goto("/login");
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
     await page.evaluate((t) => {
       window.localStorage.setItem("aurum.access_token", t.access_token);
       window.localStorage.setItem("aurum.refresh_token", t.refresh_token);

@@ -122,7 +122,13 @@ test.describe("POS sale (owner)", () => {
 
     // ---- Check that batches are drained: total qty_remaining = 10 - 7 = 3 ----
     await page.goto("/batches");
-    await page.getByLabel(/^Точка$/).selectOption({ label: branch.name });
+    const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
+    await batchCatalogPicker.fill(searchKey);
+    const batchCatalogOption = page.getByRole("button", {
+      name: new RegExp(item.brand_name),
+    });
+    await expect(batchCatalogOption).toBeVisible({ timeout: 15_000 });
+    await batchCatalogOption.click();
     // FEFO drained FEFO-A entirely (qty → 0); the page hides empty batches
     // by default, so flip the toggle on first.
     // Switch UI hides the real <input> behind a styled span — Playwright's
