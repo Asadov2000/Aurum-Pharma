@@ -1,5 +1,3 @@
-import { execSync } from "node:child_process";
-
 import {
   expect,
   type APIRequestContext,
@@ -7,7 +5,13 @@ import {
   request,
 } from "@playwright/test";
 
+import { dockerExec } from "./docker";
+
 export const API = process.env.E2E_API_URL ?? "http://localhost:8000/api/v1";
+
+function sqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
 
 /**
  * Wipe per-minute rate-limit records for a given login email. The backend
@@ -19,12 +23,11 @@ export function clearLoginRateLimit(email: string): void {
   // Drop both buckets the backend checks (1/min AND 10/hr). Tests run dozens
   // of logins within minutes — leaving the hour bucket alone hits the cap
   // long before the suite finishes.
+  const emailLiteral = sqlLiteral(email);
   const sql =
-    `DELETE FROM email_code WHERE email_lower='${email}'; ` +
-    `DELETE FROM login_attempt WHERE email_lower='${email}' AND outcome IN ('blocked','code_requested');`;
-  execSync(`docker exec aurum-postgres psql -U postgres -d aurum -c "${sql}"`, {
-    encoding: "utf8",
-  });
+    `DELETE FROM email_code WHERE email_lower=${emailLiteral}; ` +
+    `DELETE FROM login_attempt WHERE email_lower=${emailLiteral} AND outcome IN ('blocked','code_requested');`;
+  dockerExec("aurum-postgres", ["psql", "-U", "postgres", "-d", "aurum", "-c", sql]);
 }
 export const TENANT_ID = process.env.E2E_TENANT_ID ?? "";
 

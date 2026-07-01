@@ -13,17 +13,24 @@
 // 2. Resolve and cache the Demo tenant UUID for downstream specs via
 //    process.env.E2E_TENANT_ID.
 
-import { execSync } from "node:child_process";
-
-const PSQL_PREFIX = `docker exec aurum-postgres psql -U postgres -d aurum -At -c`;
+import { assertDockerAvailable, dockerExec } from "./docker";
 
 function psql(sql: string): string {
-  return execSync(`${PSQL_PREFIX} "${sql.replace(/"/g, '\\"')}"`, {
-    encoding: "utf8",
-  }).trim();
+  return dockerExec("aurum-postgres", [
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "aurum",
+    "-At",
+    "-c",
+    sql,
+  ]).trim();
 }
 
 export default async function globalSetup(): Promise<void> {
+  assertDockerAvailable();
+
   // (1) Ensure owner@ has an active assignment to its tenant's «Владелец» role.
   //     owner/seller were demoted from system roles to per-tenant roles
   //     (migration 0020), so we match the tenant-scoped role by name, not the
@@ -57,7 +64,7 @@ export default async function globalSetup(): Promise<void> {
   // (before we created the user_assignment in step 1) and 403 on every
   // tenant-scoped write.
   try {
-    execSync(`docker exec aurum-redis redis-cli FLUSHDB`, { encoding: "utf8" });
+    dockerExec("aurum-redis", ["redis-cli", "FLUSHDB"]);
   } catch {
     // Redis container not running — most specs will fail later anyway.
   }
