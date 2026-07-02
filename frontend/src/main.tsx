@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 
 import { bootstrapAuth } from "@/features/auth/bootstrap";
+import { registerPwaServiceWorker } from "@/lib/pwa";
 import { queryClient } from "@/lib/query";
 import { applyTheme, getThemePreference, watchSystemTheme } from "@/lib/theme";
 import { router } from "@/router";
@@ -15,6 +16,7 @@ bootstrapAuth();
 // from the stored preference and keep "system" in sync with the OS.
 applyTheme(getThemePreference());
 watchSystemTheme();
+registerPwaServiceWorker();
 
 const root = document.getElementById("root");
 if (!root) {

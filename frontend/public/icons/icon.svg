@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Aurum Pharma">
+  <rect width="512" height="512" rx="96" fill="#0e7568" />
+  <circle cx="362" cy="150" r="74" fill="#d7a64a" />
+  <path
+    d="M238 112h70v112h112v70H308v112h-70V294H126v-70h112V112Z"
+    fill="#ffffff"
+  />
+  <path d="M124 390h264v34H124v-34Z" fill="#ffffff" opacity="0.88" />
+</svg>
