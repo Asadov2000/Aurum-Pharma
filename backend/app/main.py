@@ -13,8 +13,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
 from app.core.config import get_settings
@@ -122,3 +123,8 @@ async def healthz() -> dict[str, object]:
 
     status = "ok" if db_ok and redis_ok else "degraded"
     return {"status": status, "db": db_ok, "redis": redis_ok}
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
