@@ -1,13 +1,16 @@
 import { test, request } from "@playwright/test";
 
 import {
+  addPosItemToCart,
   apiContext,
   catalogSearchKey,
   apiLogin,
   clearLoginRateLimit,
+  completePosSale,
   expect,
   loginInBrowser,
   OWNER,
+  payPosSaleCash,
   seedAcceptedBatch,
   seedBranch,
   seedCatalogItem,
@@ -81,30 +84,23 @@ test.describe("POS sale (owner)", () => {
     // The redesigned register shows the search directly (the draft is created
     // lazily on the first add — no "+ Новая продажа" step up front).
     // Pick the catalog item and ask for 7 units → FEFO splits 5 + 2.
-    const pickerInput = page.getByPlaceholder(/Поиск товара/);
     const searchKey = catalogSearchKey(item.brand_name);
-    await pickerInput.fill(searchKey);
-    const option = page.getByRole("button", { name: new RegExp(item.brand_name) });
-    await expect(option).toBeVisible({ timeout: 15_000 });
-    await option.click();
-    await page.getByRole("textbox", { name: "Количество" }).fill("7");
-    await page.getByRole("button", { name: "Добавить" }).click();
-
-    // Two cart rows — FEFO split into positions 1 and 2.
-    await expect(page.getByTestId("cart-item")).toHaveCount(2, { timeout: 15_000 });
+    await addPosItemToCart(page, {
+      brandName: item.brand_name,
+      qty: "7",
+      expectedCartItems: 2,
+      searchKey,
+    });
 
     // Two items × 20 TJS each line = 140 TJS total to settle.
-    const completeBtn = page.getByRole("button", { name: /Завершить продажу/ });
     await expect(page.getByText(/К оплате/)).toBeVisible();
     await expect(page.getByText("140.00", { exact: false }).first()).toBeVisible();
 
     // One-tap cash tile pays the full remaining balance.
-    await page.getByRole("button", { name: "Наличные" }).click();
-    await expect(page.getByText(/Оплачено 140\.00/)).toBeVisible();
+    await payPosSaleCash(page, "140.00");
 
     // Complete — the completion banner appears.
-    await completeBtn.click();
-    await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
+    await completePosSale(page);
 
     // ---- Print: open the receipt view and verify the totals match ----
     await page.getByRole("button", { name: /Печать чека/ }).click();

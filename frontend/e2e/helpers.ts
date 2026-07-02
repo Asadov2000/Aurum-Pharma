@@ -145,8 +145,49 @@ export function catalogSearchKey(brandName: string): string {
   return parts.length >= 2 ? parts.slice(-2).join("-") : brandName;
 }
 
+export async function addPosItemToCart(
+  page: Page,
+  args: {
+    brandName: string;
+    qty: string;
+    expectedCartItems: number;
+    searchKey?: string;
+  },
+): Promise<void> {
+  const picker = page.getByPlaceholder(/Поиск товара/);
+  await picker.fill(args.searchKey ?? catalogSearchKey(args.brandName));
+  const option = page.getByRole("button", {
+    name: new RegExp(escapeRegex(args.brandName)),
+  });
+  await expect(option).toBeVisible({ timeout: 15_000 });
+  await option.click();
+  await page.getByRole("textbox", { name: "Количество" }).fill(args.qty);
+  await page.getByRole("button", { name: "Добавить" }).click();
+  await expect(page.getByTestId("cart-item")).toHaveCount(args.expectedCartItems, {
+    timeout: 30_000,
+  });
+}
+
+export async function payPosSaleCash(page: Page, expectedPaidAmount: string): Promise<void> {
+  const cashPayment = page.getByRole("button", { name: "Наличные" });
+  await expect(cashPayment).toBeEnabled({ timeout: 30_000 });
+  await cashPayment.click();
+  await expect(
+    page.getByText(new RegExp(`Оплачено ${escapeRegex(expectedPaidAmount)}`)),
+  ).toBeVisible();
+}
+
+export async function completePosSale(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /Завершить продажу/ }).click();
+  await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // ---------------------------------------------------------------------------

@@ -1,13 +1,15 @@
 import { test, request } from "@playwright/test";
 
 import {
+  addPosItemToCart,
   apiContext,
-  catalogSearchKey,
   apiLogin,
   clearLoginRateLimit,
+  completePosSale,
   expect,
   loginInBrowser,
   OWNER,
+  payPosSaleCash,
   seedAcceptedBatch,
   seedBranch,
   seedCatalogItem,
@@ -61,27 +63,13 @@ test.describe("Shift close → Z-report", () => {
     await expect(page.getByText("Смена открыта")).toBeVisible();
 
     // Complete a 50 TJS cash sale (draft is created lazily on first add).
-    const picker = page.getByPlaceholder(/Поиск товара/);
-    const searchKey = catalogSearchKey(item.brand_name);
-    await picker.fill(searchKey);
-    const opt = page.getByRole("button", { name: new RegExp(item.brand_name) });
-    await expect(opt).toBeVisible({ timeout: 15_000 });
-    await opt.click();
-    await page.getByRole("textbox", { name: "Количество" }).fill("1");
-    await page.getByRole("button", { name: "Добавить" }).click();
-    // Wait for the line to land before paying — until totalDue > 0 the payment
-    // tiles stay disabled, so clicking "Наличные" too early races the add. The
-    // createSale+addItem round-trip can be slow under full-suite load, so give
-    // it generous headroom (the test's overall budget is 120s).
-    await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
-    // One-tap cash tile pays the full remaining balance. Wait for it to settle
-    // before completing, else "Завершить" reads a stale remaining and errors.
-    const cashPayment = page.getByRole("button", { name: "Наличные" });
-    await expect(cashPayment).toBeEnabled({ timeout: 30_000 });
-    await cashPayment.click();
-    await expect(page.getByText(/Оплачено 50\.00/)).toBeVisible();
-    await page.getByRole("button", { name: /Завершить продажу/ }).click();
-    await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
+    await addPosItemToCart(page, {
+      brandName: item.brand_name,
+      qty: "1",
+      expectedCartItems: 1,
+    });
+    await payPosSaleCash(page, "50.00");
+    await completePosSale(page);
 
     // Close the shift, declaring 140 cash (expected 150 = 100 + 50 sale).
     await page.getByRole("button", { name: "Закрыть смену" }).click();

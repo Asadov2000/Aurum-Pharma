@@ -1,13 +1,15 @@
 import { test, request } from "@playwright/test";
 
 import {
+  addPosItemToCart,
   apiContext,
-  catalogSearchKey,
   apiLogin,
   clearLoginRateLimit,
+  completePosSale,
   expect,
   loginInBrowser,
   OWNER,
+  payPosSaleCash,
   seedAcceptedBatch,
   seedBranch,
   seedCatalogItem,
@@ -57,20 +59,13 @@ test.describe("Reports export", () => {
     await expect(page.getByText("Смена открыта")).toBeVisible();
 
     // Sell 1 unit, cash, complete.
-    const picker = page.getByPlaceholder(/Поиск товара/);
-    await picker.fill(catalogSearchKey(item.brand_name));
-    const opt = page.getByRole("button", { name: new RegExp(item.brand_name) });
-    await expect(opt).toBeVisible({ timeout: 15_000 });
-    await opt.click();
-    await page.getByRole("textbox", { name: "Количество" }).fill("1");
-    await page.getByRole("button", { name: "Добавить" }).click();
-    await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
-    const cashPayment = page.getByRole("button", { name: "Наличные" });
-    await expect(cashPayment).toBeEnabled({ timeout: 30_000 });
-    await cashPayment.click();
-    await expect(page.getByText(/Оплачено 50\.00/)).toBeVisible();
-    await page.getByRole("button", { name: /Завершить продажу/ }).click();
-    await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
+    await addPosItemToCart(page, {
+      brandName: item.brand_name,
+      qty: "1",
+      expectedCartItems: 1,
+    });
+    await payPosSaleCash(page, "50.00");
+    await completePosSale(page);
 
     // (1) Receipt PDF: open the print view, download the server PDF.
     await page.getByRole("button", { name: /Печать чека/ }).click();
