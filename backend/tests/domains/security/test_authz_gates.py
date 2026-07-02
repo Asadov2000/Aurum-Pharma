@@ -623,3 +623,139 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
         assert manager_resp.status_code == 200
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+async def test_readonly_tenant_blocks_pos_mutations(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    await _override_db(db_session)
+    try:
+        foundation = FoundationService(FoundationRepository(db_session))
+        pos = POSService(POSRepository(db_session))
+        nick = uuid4().hex[:8]
+        tenant = await foundation.create_tenant(
+            payload={"name": f"Readonly POS {nick}", "contact_email": f"ro-pos-{nick}@aurum.tj"}
+        )
+        await foundation.update_tenant(tenant.id, fields={"status": "active"})
+        branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
+        register = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": branch.id, "name": "Cashbox"},
+        )
+        item = await _create_stocked_item(db_session, tenant_id=tenant.id, branch_id=branch.id)
+
+        cashier = AppUser(
+            email=f"readonly-cashier-{nick}@aurum.tj",
+            full_name="Readonly Cashier",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        db_session.add(cashier)
+        await db_session.flush()
+        await db_session.refresh(cashier)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=cashier.id,
+            permission_codes={
+                "pos.shift_open",
+                "pos.shift_close",
+                "pos.sell",
+                "pos.handle_prescription",
+                "pos.refund",
+            },
+        )
+
+        shift = await pos.open_shift(
+            tenant_id=tenant.id,
+            register_id=register.id,
+            opened_by_user_id=cashier.id,
+            opening_cash=Decimal("0"),
+        )
+        draft_sale = await pos.create_sale(
+            tenant_id=tenant.id,
+            register_id=register.id,
+            cashier_user_id=cashier.id,
+        )
+        draft_items, _ = await pos.add_item(
+            sale_id=draft_sale.id,
+            catalog_id=item.id,
+            qty=Decimal("1"),
+        )
+
+        completed_sale = await pos.create_sale(
+            tenant_id=tenant.id,
+            register_id=register.id,
+            cashier_user_id=cashier.id,
+        )
+        completed_items, _ = await pos.add_item(
+            sale_id=completed_sale.id,
+            catalog_id=item.id,
+            qty=Decimal("1"),
+        )
+        await pos.add_payment(
+            sale_id=completed_sale.id,
+            payment_method="cash",
+            amount=Decimal("10.00"),
+        )
+        await pos.complete(sale_id=completed_sale.id)
+
+        await foundation.update_tenant(tenant.id, fields={"status": "readonly"})
+
+        headers = {"Authorization": f"Bearer {_token(cashier)}"}
+        readonly_requests: list[tuple[str, str, dict[str, object] | None]] = [
+            (
+                "POST",
+                "/api/v1/shifts/open",
+                {"register_id": str(register.id), "opening_cash": "0"},
+            ),
+            (
+                "POST",
+                f"/api/v1/shifts/{shift.id}/close",
+                {"closing_cash_actual": "0"},
+            ),
+            ("POST", "/api/v1/sales", {"register_id": str(register.id)}),
+            (
+                "POST",
+                f"/api/v1/sales/{draft_sale.id}/items",
+                {"catalog_id": str(item.id), "qty": "1"},
+            ),
+            (
+                "PATCH",
+                f"/api/v1/sales/{draft_sale.id}/items/{draft_items[0].id}",
+                {"qty": "2"},
+            ),
+            ("DELETE", f"/api/v1/sales/{draft_sale.id}/items/{draft_items[0].id}", None),
+            (
+                "POST",
+                f"/api/v1/sales/{draft_sale.id}/payments",
+                {"payment_method": "cash", "amount": "10.00"},
+            ),
+            ("POST", f"/api/v1/sales/{draft_sale.id}/complete", None),
+            (
+                "POST",
+                f"/api/v1/sales/{draft_sale.id}/prescription",
+                {"prescription_number": "RX-READONLY"},
+            ),
+            (
+                "POST",
+                f"/api/v1/sales/{completed_sale.id}/refund",
+                {
+                    "items": [{"sale_item_id": str(completed_items[0].id), "qty": "1"}],
+                    "reason": "readonly guard",
+                },
+            ),
+        ]
+
+        for method, path, payload in readonly_requests:
+            if payload is None:
+                response = await client.request(method, path, headers=headers)
+            else:
+                response = await client.request(method, path, headers=headers, json=payload)
+            assert response.status_code == 422, f"{method} {path}: {response.text}"
+            body = response.json()
+            assert body["error"]["code"] == "business_rule_violation"
+            assert body["error"]["details"] == {"status": "readonly"}
+    finally:
+        app.dependency_overrides.pop(get_db, None)

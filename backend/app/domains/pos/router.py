@@ -136,7 +136,11 @@ async def get_current_shift(
     return ShiftRead.model_validate(shift) if shift is not None else None
 
 
-@router.post("/shifts/{shift_id}/close", response_model=ShiftRead)
+@router.post(
+    "/shifts/{shift_id}/close",
+    response_model=ShiftRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
 async def close_shift(
     shift_id: UUID,
     payload: ShiftCloseRequest,
@@ -411,6 +415,7 @@ async def get_receipt_pdf(
     "/sales/{sale_id}/items",
     response_model=SaleItemAdded,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
 )
 async def add_sale_item(
     sale_id: UUID,
@@ -436,6 +441,7 @@ async def add_sale_item(
 @router.patch(
     "/sales/{sale_id}/items/{item_id}",
     response_model=SaleItemRead,
+    dependencies=[Depends(require_writable_tenant)],
 )
 async def update_sale_item(
     sale_id: UUID,
@@ -456,7 +462,10 @@ async def update_sale_item(
     return SaleItemRead.model_validate(item)
 
 
-@router.delete("/sales/{sale_id}/items/{item_id}")
+@router.delete(
+    "/sales/{sale_id}/items/{item_id}",
+    dependencies=[Depends(require_writable_tenant)],
+)
 async def delete_sale_item(
     sale_id: UUID,
     item_id: UUID,
@@ -478,6 +487,7 @@ async def delete_sale_item(
     "/sales/{sale_id}/payments",
     response_model=PaymentRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
 )
 async def add_payment(
     sale_id: UUID,
@@ -498,7 +508,11 @@ async def add_payment(
     return PaymentRead.model_validate(payment)
 
 
-@router.post("/sales/{sale_id}/complete", response_model=SaleRead)
+@router.post(
+    "/sales/{sale_id}/complete",
+    response_model=SaleRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
 async def complete_sale(
     sale_id: UUID,
     user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
@@ -518,6 +532,7 @@ async def complete_sale(
     "/sales/{sale_id}/prescription",
     response_model=PrescriptionLogRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
 )
 async def add_prescription(
     sale_id: UUID,
