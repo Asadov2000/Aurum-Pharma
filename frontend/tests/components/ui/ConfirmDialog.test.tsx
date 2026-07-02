@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConfirmDialog } from "@/components/ui";
@@ -52,5 +53,66 @@ describe("ConfirmDialog", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves focus into the dialog and traps Tab navigation", () => {
+    render(
+      <ConfirmDialog
+        open
+        title="Confirm action"
+        message="This cannot be undone."
+        confirmLabel="Confirm"
+        cancelLabel="Cancel"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Confirm action" });
+    const buttons = Array.from(dialog.querySelectorAll("button"));
+    const firstButton = buttons[0];
+    const lastButton = buttons.at(-1);
+
+    expect(firstButton).toHaveFocus();
+
+    lastButton?.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(firstButton).toHaveFocus();
+
+    firstButton?.focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(lastButton).toHaveFocus();
+  });
+
+  it("restores focus to the opener when closed", () => {
+    function Harness(): JSX.Element {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open dialog
+          </button>
+          <ConfirmDialog
+            open={open}
+            title="Confirm action"
+            message="This cannot be undone."
+            confirmLabel="Confirm"
+            cancelLabel="Cancel"
+            onConfirm={vi.fn()}
+            onCancel={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    const opener = screen.getByRole("button", { name: "Open dialog" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(screen.getByRole("dialog", { name: "Confirm action" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(opener).toHaveFocus();
   });
 });

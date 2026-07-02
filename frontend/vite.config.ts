@@ -25,6 +25,9 @@ export default defineConfig({
     // import @playwright/test and throw if collected here — they run via
     // `pnpm e2e`, so keep vitest scoped to tests/.
     include: ["tests/**/*.{test,spec}.{ts,tsx}"],
+    // Forked workers exit cleanly on Docker Desktop + Windows. The default
+    // threads pool can leave Vitest hanging after all tests finish.
+    pool: "forks",
     // Run test files sequentially. On this dev machine (Docker Desktop +
     // Windows) parallel workers starve each other and Testing Library's
     // findBy* queries time out non-deterministically. Sequential is slower

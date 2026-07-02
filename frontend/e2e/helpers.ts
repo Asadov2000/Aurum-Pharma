@@ -64,6 +64,7 @@ export async function apiLogin(
     clearLoginRateLimit(creds.email);
     const codeRes = await api.post(`${API}/auth/login/code`, {
       data: { email: creds.email },
+      timeout: 30_000,
     });
     if (codeRes.status() === 429) {
       lastErr = "429 after bucket clear";
@@ -81,6 +82,7 @@ export async function apiLogin(
     }
     const verifyRes = await api.post(`${API}/auth/login/verify`, {
       data: { email: creds.email, code: dev_code, password: creds.password },
+      timeout: 30_000,
     });
     if (!verifyRes.ok()) {
       throw new Error(`/auth/login/verify → ${verifyRes.status()} ${await verifyRes.text()}`);

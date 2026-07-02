@@ -12,7 +12,7 @@ test.describe("Auth", () => {
   test("dev logs in via the UI and lands on a support page", async ({ page }) => {
     // We use the UI form because that path itself must work — sidebar items
     // and route guard wiring all key off this flow.
-    await page.goto("/login");
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Email").fill(DEV.email);
     await page.getByRole("button", { name: /Получить код/ }).click();
 
@@ -30,7 +30,7 @@ test.describe("Auth", () => {
     const api = await request.newContext();
     try {
       const tokens = await apiLogin(api, OWNER);
-      await page.goto("/login");
+      await page.goto("/login", { waitUntil: "domcontentloaded" });
       await page.evaluate((t) => {
         window.localStorage.setItem("aurum.access_token", t.access_token);
         window.localStorage.setItem("aurum.refresh_token", t.refresh_token);
@@ -50,7 +50,7 @@ test.describe("Auth", () => {
     const api = await request.newContext();
     try {
       const tokens = await apiLogin(api, OWNER);
-      await page.goto("/login");
+      await page.goto("/login", { waitUntil: "domcontentloaded" });
       await page.evaluate((t) => {
         window.localStorage.setItem("aurum.access_token", t.access_token);
         window.localStorage.setItem("aurum.refresh_token", t.refresh_token);
@@ -81,7 +81,7 @@ test.describe("Auth", () => {
     try {
       const tokens = await apiLogin(api, OWNER);
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto("/login");
+      await page.goto("/login", { waitUntil: "domcontentloaded" });
       await page.evaluate((t) => {
         window.localStorage.setItem("aurum.access_token", t.access_token);
         window.localStorage.setItem("aurum.refresh_token", t.refresh_token);
@@ -112,7 +112,7 @@ test.describe("Auth", () => {
   });
 
   test("invalid code surfaces a friendly error", async ({ page }) => {
-    await page.goto("/login");
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Email").fill(DEV.email);
     await page.getByRole("button", { name: /Получить код/ }).click();
 
