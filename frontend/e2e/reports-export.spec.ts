@@ -64,7 +64,10 @@ test.describe("Reports export", () => {
     await opt.click();
     await page.getByRole("textbox", { name: "Количество" }).fill("1");
     await page.getByRole("button", { name: "Добавить" }).click();
-    await page.getByRole("button", { name: "Наличные" }).click();
+    await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
+    const cashPayment = page.getByRole("button", { name: "Наличные" });
+    await expect(cashPayment).toBeEnabled({ timeout: 30_000 });
+    await cashPayment.click();
     await expect(page.getByText(/Оплачено 50\.00/)).toBeVisible();
     await page.getByRole("button", { name: /Завершить продажу/ }).click();
     await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
