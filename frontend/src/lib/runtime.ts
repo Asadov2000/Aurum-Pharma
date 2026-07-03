@@ -1,3 +1,5 @@
+import { hasDesktopBridge, type DesktopBridgeTarget } from "@/lib/desktopBridge";
+
 export const DESKTOP_USER_AGENT_TOKEN = "AurumPharmaDesktop";
 
 export type RuntimeSurface = "browser" | "pwa" | "windows-desktop";
@@ -6,11 +8,8 @@ type RuntimeNavigator = Navigator & {
   readonly standalone?: boolean;
 };
 
-export interface RuntimeDetectionTarget {
+export interface RuntimeDetectionTarget extends DesktopBridgeTarget {
   readonly navigator: RuntimeNavigator;
-  readonly chrome?: {
-    readonly webview?: unknown;
-  };
   matchMedia(query: string): MediaQueryList;
 }
 
@@ -37,7 +36,7 @@ export function applyRuntimeSurfaceAttribute(
 
 function isWindowsDesktop(target: RuntimeDetectionTarget): boolean {
   return (
-    target.chrome?.webview !== undefined ||
+    hasDesktopBridge(target) ||
     target.navigator.userAgent.includes(DESKTOP_USER_AGENT_TOKEN)
   );
 }

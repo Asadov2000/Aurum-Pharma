@@ -31,6 +31,12 @@ describe("detectRuntimeSurface", () => {
     ).toBe("windows-desktop");
   });
 
+  it("detects the app-owned Windows desktop bridge", () => {
+    expect(detectRuntimeSurface(createTarget({ hasAurumDesktopBridge: true }))).toBe(
+      "windows-desktop",
+    );
+  });
+
   it("detects the Windows desktop user-agent token", () => {
     expect(
       detectRuntimeSurface(
@@ -57,6 +63,7 @@ describe("applyRuntimeSurfaceAttribute", () => {
 
 function createTarget(
   options: {
+    hasAurumDesktopBridge?: boolean;
     hasWebViewBridge?: boolean;
     iosStandalone?: boolean;
     standaloneDisplay?: boolean;
@@ -69,6 +76,7 @@ function createTarget(
   } as Navigator & { readonly standalone?: boolean };
 
   return {
+    aurumDesktop: options.hasAurumDesktopBridge ? {} : undefined,
     chrome: options.hasWebViewBridge ? { webview: {} } : undefined,
     matchMedia: (query: string) =>
       createMediaQueryList(
