@@ -111,6 +111,26 @@ export function notifyDesktopReady(target: DesktopBridgeTarget = window): boolea
   return postDesktopMessage({ type: "aurum.desktop.ready" }, target);
 }
 
+export function requestDesktopReceiptPrint(
+  saleId: string,
+  target: DesktopBridgeTarget = window,
+): boolean {
+  const normalizedSaleId = saleId.trim();
+  if (!normalizedSaleId || !supportsCapability("receipt-print", target)) {
+    return false;
+  }
+
+  return postDesktopMessage(
+    {
+      payload: {
+        saleId: normalizedSaleId,
+      },
+      type: "aurum.receipt.print",
+    },
+    target,
+  );
+}
+
 function tryPostMessage(
   postMessage: (message: DesktopBridgeMessage) => void,
   message: DesktopBridgeMessage,
@@ -143,4 +163,16 @@ function normalizeCapabilities(
   }
 
   return [...unique].sort();
+}
+
+function supportsCapability(
+  capability: DesktopBridgeCapability,
+  target: DesktopBridgeTarget,
+): boolean {
+  const bridge = getDesktopBridge(target);
+  if (bridge?.capabilities === undefined) {
+    return hasDesktopBridge(target);
+  }
+
+  return hasDesktopCapability(capability, target);
 }

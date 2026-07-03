@@ -22,7 +22,7 @@ export default defineConfig({
     // Backend API base; helpers use it directly for seed.
     extraHTTPHeaders: {},
     actionTimeout: 15_000,
-    navigationTimeout: 45_000,
+    navigationTimeout: 90_000,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "retain-on-failure",

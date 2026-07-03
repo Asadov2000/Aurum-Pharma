@@ -5,6 +5,7 @@ import {
   hasDesktopCapability,
   notifyDesktopReady,
   postDesktopMessage,
+  requestDesktopReceiptPrint,
   type DesktopBridgeTarget,
 } from "@/lib/desktopBridge";
 import { describe, expect, it, vi } from "vitest";
@@ -113,6 +114,65 @@ describe("desktopBridge", () => {
 
     expect(notifyDesktopReady(target)).toBe(true);
     expect(postMessage).toHaveBeenCalledWith({ type: "aurum.desktop.ready" });
+  });
+
+  it("requests native receipt printing with a normalized sale id", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["receipt-print"],
+        postMessage,
+      },
+    });
+
+    expect(requestDesktopReceiptPrint(" sale-1 ", target)).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      payload: { saleId: "sale-1" },
+      type: "aurum.receipt.print",
+    });
+  });
+
+  it("does not request receipt printing with an empty sale id", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["receipt-print"],
+        postMessage,
+      },
+    });
+
+    expect(requestDesktopReceiptPrint("   ", target)).toBe(false);
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not request receipt printing when the app-owned bridge lacks the capability", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["file-export"],
+        postMessage,
+      },
+    });
+
+    expect(requestDesktopReceiptPrint("sale-1", target)).toBe(false);
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("allows receipt printing through a raw WebView2 bridge without capability metadata", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      chrome: {
+        webview: {
+          postMessage,
+        },
+      },
+    });
+
+    expect(requestDesktopReceiptPrint("sale-1", target)).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      payload: { saleId: "sale-1" },
+      type: "aurum.receipt.print",
+    });
   });
 
   it("returns false when no desktop bridge can receive a message", () => {

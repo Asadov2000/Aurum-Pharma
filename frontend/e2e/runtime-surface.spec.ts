@@ -34,8 +34,13 @@ test.describe("Runtime surface", () => {
     await expect(page.getByTestId("server-status-banner")).toHaveCount(0);
 
     try {
-      await page.context().setOffline(true);
-      await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+      await page.evaluate(() => {
+        Object.defineProperty(window.navigator, "onLine", {
+          configurable: true,
+          value: false,
+        });
+        window.dispatchEvent(new Event("offline"));
+      });
 
       const banner = page.getByTestId("offline-status-banner");
       await expect(banner).toBeVisible();
@@ -44,7 +49,13 @@ test.describe("Runtime surface", () => {
         page.locator("main#main-content").getByTestId("offline-status-banner"),
       ).toHaveCount(0);
     } finally {
-      await page.context().setOffline(false);
+      await page.evaluate(() => {
+        Object.defineProperty(window.navigator, "onLine", {
+          configurable: true,
+          value: true,
+        });
+        window.dispatchEvent(new Event("online"));
+      });
     }
   });
 });
