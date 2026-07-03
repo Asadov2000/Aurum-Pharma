@@ -1,9 +1,12 @@
-/**
- * Trigger a browser download for an in-memory Blob (e.g. an authed PDF/XLSX
- * fetched via axios). The browser/OS opens it in the right app; we can't
- * auto-open Excel from the web, so a download is the closest we get.
- */
+import { requestDesktopFileExport } from "@/lib/desktopBridge";
+
 export function downloadBlob(blob: Blob, filename: string): void {
+  requestDesktopFileExport({
+    fileName: filename,
+    mimeType: blob.type,
+    sizeBytes: blob.size,
+  });
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

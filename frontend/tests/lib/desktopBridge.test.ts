@@ -1,6 +1,7 @@
 import {
   DESKTOP_BARCODE_MAX_LENGTH,
   DESKTOP_BARCODE_SCANNED_EVENT,
+  DESKTOP_FILE_NAME_MAX_LENGTH,
   dispatchDesktopBarcodeScan,
   getDesktopBridge,
   getDesktopBridgeInfo,
@@ -8,8 +9,10 @@ import {
   hasDesktopCapability,
   notifyDesktopReady,
   normalizeDesktopBarcode,
+  normalizeDesktopFileName,
   postDesktopMessage,
   requestDesktopCashDrawerOpen,
+  requestDesktopFileExport,
   requestDesktopReceiptPrint,
   type DesktopBridgeTarget,
 } from "@/lib/desktopBridge";
@@ -267,6 +270,95 @@ describe("desktopBridge", () => {
     });
   });
 
+  it("requests native file export with safe metadata", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["file-export"],
+        postMessage,
+      },
+    });
+
+    expect(
+      requestDesktopFileExport(
+        {
+          fileName: " sales<summary>.xlsx ",
+          mimeType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          sizeBytes: 42,
+        },
+        target,
+      ),
+    ).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      payload: {
+        fileName: "sales_summary_.xlsx",
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        sizeBytes: 42,
+      },
+      type: "aurum.file-export.request",
+    });
+  });
+
+  it("omits invalid optional file export metadata", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["file-export"],
+        postMessage,
+      },
+    });
+
+    expect(
+      requestDesktopFileExport(
+        {
+          fileName: "report.xlsx",
+          mimeType: "not-a-mime-type",
+          sizeBytes: -1,
+        },
+        target,
+      ),
+    ).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      payload: {
+        fileName: "report.xlsx",
+      },
+      type: "aurum.file-export.request",
+    });
+  });
+
+  it("does not request native file export when capability is absent", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["receipt-print"],
+        postMessage,
+      },
+    });
+
+    expect(requestDesktopFileExport({ fileName: "report.xlsx" }, target)).toBe(false);
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("allows native file export through a raw WebView2 bridge", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      chrome: {
+        webview: {
+          postMessage,
+        },
+      },
+    });
+
+    expect(requestDesktopFileExport({ fileName: "report.xlsx" }, target)).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      payload: {
+        fileName: "report.xlsx",
+      },
+      type: "aurum.file-export.request",
+    });
+  });
+
   it("returns false when no desktop bridge can receive a message", () => {
     expect(postDesktopMessage({ type: "aurum.desktop.ready" }, createTarget())).toBe(
       false,
@@ -289,6 +381,17 @@ describe("desktopBridge", () => {
     expect(normalizeDesktopBarcode(" 4600123456789 ")).toBe("4600123456789");
     expect(normalizeDesktopBarcode("   ")).toBeNull();
     expect(normalizeDesktopBarcode("1".repeat(DESKTOP_BARCODE_MAX_LENGTH + 1))).toBeNull();
+  });
+
+  it("normalizes desktop export file names", () => {
+    expect(normalizeDesktopFileName(" report<>:\"/\\|?*.xlsx ")).toBe(
+      "report_________.xlsx",
+    );
+    expect(normalizeDesktopFileName("CON")).toBeNull();
+    expect(normalizeDesktopFileName("   ")).toBeNull();
+    expect(
+      normalizeDesktopFileName("x".repeat(DESKTOP_FILE_NAME_MAX_LENGTH + 1)),
+    ).toBeNull();
   });
 
   it("dispatches normalized desktop barcode scans", () => {
