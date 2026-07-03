@@ -6,6 +6,7 @@ import { useAuth } from "@/features/auth/hooks";
 
 import { OfflineStatusBanner } from "./OfflineStatusBanner";
 import { PwaInstallButton } from "./PwaInstallButton";
+import { PwaUpdateBanner } from "./PwaUpdateBanner";
 import { RuntimeSurfaceBadge } from "./RuntimeSurfaceBadge";
 import { ServerStatusBanner } from "./ServerStatusBanner";
 import { Sidebar } from "./Sidebar";
@@ -193,6 +194,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
           </header>
           <OfflineStatusBanner />
           <ServerStatusBanner />
+          <PwaUpdateBanner />
         </div>
         <main
           id="main-content"

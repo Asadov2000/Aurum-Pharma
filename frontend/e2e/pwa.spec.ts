@@ -61,6 +61,8 @@ test.describe("PWA metadata", () => {
     expect(source).toContain('url.pathname.startsWith("/api/")');
     expect(source).toContain('url.pathname === "/sw.js"');
     expect(source).toContain("STATIC_ASSET_PATTERN.test(url.pathname)");
+    expect(source).toContain("self.skipWaiting()");
+    expect(source).toContain("self.clients.claim()");
     expect(source).not.toContain("navigate");
     expect(source).not.toContain("index.html");
     expect(source).not.toContain("cache.addAll");
