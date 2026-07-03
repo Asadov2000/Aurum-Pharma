@@ -24,6 +24,62 @@ test.describe("Runtime surface", () => {
     ).toHaveCount(0);
   });
 
+  test("detects the Windows desktop bridge and notifies the host", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.addInitScript(() => {
+      type DesktopMessage = {
+        readonly type?: string;
+      };
+      type DesktopTarget = Window & {
+        __aurumDesktopMessages?: DesktopMessage[];
+        aurumDesktop?: {
+          readonly appVersion: string;
+          readonly capabilities: readonly string[];
+          readonly platform: "windows";
+          postMessage(message: DesktopMessage): void;
+        };
+      };
+
+      const target = window as DesktopTarget;
+      target.__aurumDesktopMessages = [];
+      target.aurumDesktop = {
+        appVersion: "0.1.0-e2e",
+        capabilities: [
+          "receipt-print",
+          "barcode-scanner",
+          "cash-drawer",
+          "file-export",
+        ],
+        platform: "windows",
+        postMessage(message) {
+          target.__aurumDesktopMessages?.push(message);
+        },
+      };
+    });
+
+    await loginInBrowser(page, OWNER);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-runtime-surface",
+      "windows-desktop",
+    );
+    await expect(page.getByTestId("runtime-surface-badge")).toHaveText("Windows");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const target = window as Window & {
+            readonly __aurumDesktopMessages?: Array<{ readonly type?: string }>;
+          };
+
+          return (target.__aurumDesktopMessages ?? []).map((message) => message.type);
+        }),
+      )
+      .toContain("aurum.desktop.ready");
+  });
+
   test("shows the online-only warning when the browser goes offline", async ({
     page,
   }) => {
