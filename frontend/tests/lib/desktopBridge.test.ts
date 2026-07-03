@@ -3,6 +3,7 @@ import {
   getDesktopBridgeInfo,
   hasDesktopBridge,
   hasDesktopCapability,
+  notifyDesktopReady,
   postDesktopMessage,
   type DesktopBridgeTarget,
 } from "@/lib/desktopBridge";
@@ -99,6 +100,18 @@ describe("desktopBridge", () => {
     });
 
     expect(postDesktopMessage({ type: "aurum.desktop.ready" }, target)).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({ type: "aurum.desktop.ready" });
+  });
+
+  it("notifies the desktop host when the web app is ready", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        postMessage,
+      },
+    });
+
+    expect(notifyDesktopReady(target)).toBe(true);
     expect(postMessage).toHaveBeenCalledWith({ type: "aurum.desktop.ready" });
   });
 

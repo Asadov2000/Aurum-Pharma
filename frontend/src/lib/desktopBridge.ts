@@ -107,6 +107,10 @@ export function postDesktopMessage(
   return false;
 }
 
+export function notifyDesktopReady(target: DesktopBridgeTarget = window): boolean {
+  return postDesktopMessage({ type: "aurum.desktop.ready" }, target);
+}
+
 function tryPostMessage(
   postMessage: (message: DesktopBridgeMessage) => void,
   message: DesktopBridgeMessage,
