@@ -42,3 +42,4 @@ Frontend уже имеет контракт определения среды з
 - `frontend/src/components/layout/PwaInstallButton.tsx` показывает кнопку установки только после браузерного события `beforeinstallprompt`.
 - `frontend/e2e/runtime-surface.spec.ts` проверяет этот контракт в реальном браузере.
 - `frontend/src/lib/api.ts` в production без `VITE_API_URL` использует same-origin fallback `/api/v1`; локальный fallback `http://localhost:8000/api/v1` остаётся только для dev-режима.
+- `docs/desktop-bridge.md` фиксирует точный контракт сообщений между frontend и будущей WinUI 3 + WebView2 оболочкой.
