@@ -22,4 +22,27 @@ test.describe("Runtime surface", () => {
       page.locator("main#main-content").getByTestId("runtime-surface-badge"),
     ).toHaveCount(0);
   });
+
+  test("shows the online-only warning when the browser goes offline", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("offline-status-banner")).toHaveCount(0);
+
+    try {
+      await page.context().setOffline(true);
+      await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+
+      const banner = page.getByTestId("offline-status-banner");
+      await expect(banner).toBeVisible();
+      await expect(banner).toContainText("Касса работает только онлайн");
+      await expect(
+        page.locator("main#main-content").getByTestId("offline-status-banner"),
+      ).toHaveCount(0);
+    } finally {
+      await page.context().setOffline(false);
+    }
+  });
 });

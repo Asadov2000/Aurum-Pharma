@@ -4,6 +4,7 @@ import { Button } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/features/auth/hooks";
 
+import { OfflineStatusBanner } from "./OfflineStatusBanner";
 import { PwaInstallButton } from "./PwaInstallButton";
 import { RuntimeSurfaceBadge } from "./RuntimeSurfaceBadge";
 import { Sidebar } from "./Sidebar";
@@ -148,7 +149,8 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         </div>
       )}
       <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-sticky flex items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-surface/85 sm:px-6">
+        <div className="sticky top-0 z-sticky">
+          <header className="flex items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-surface/85 sm:px-6">
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <Button
               ref={mobileMenuButtonRef}
@@ -187,7 +189,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
               <span className="sr-only sm:not-sr-only">Выйти</span>
             </Button>
           </div>
-        </header>
+          </header>
+          <OfflineStatusBanner />
+        </div>
         <main
           id="main-content"
           tabIndex={-1}

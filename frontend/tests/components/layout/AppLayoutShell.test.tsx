@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const authMock = vi.hoisted(() => ({
   logout: vi.fn(),
@@ -44,6 +44,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 
 describe("AppLayout shell", () => {
   beforeEach(() => {
+    setOnlineStatus(true);
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn().mockImplementation((query: string) => ({
@@ -59,10 +60,14 @@ describe("AppLayout shell", () => {
     });
   });
 
+  afterEach(() => {
+    setOnlineStatus(true);
+  });
+
   it("renders the runtime badge in the header instead of page content", () => {
     render(
       <AppLayout>
-        <section>Рабочая область</section>
+        <section>Page content</section>
       </AppLayout>,
     );
 
@@ -75,6 +80,32 @@ describe("AppLayout shell", () => {
       badge,
     );
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
-    expect(within(main).getByText("Рабочая область")).toBeInTheDocument();
+    expect(within(main).getByText("Page content")).toBeInTheDocument();
+  });
+
+  it("renders the offline banner in the shell instead of page content", () => {
+    setOnlineStatus(false);
+    render(
+      <AppLayout>
+        <section>Page content</section>
+      </AppLayout>,
+    );
+
+    const banner = screen.getByTestId("offline-status-banner");
+    const stickyShell = banner.closest(".sticky");
+    const main = screen.getByRole("main");
+
+    expect(stickyShell).not.toBeNull();
+    expect(within(stickyShell as HTMLElement).getByTestId("offline-status-banner")).toBe(
+      banner,
+    );
+    expect(within(main).queryByTestId("offline-status-banner")).not.toBeInTheDocument();
   });
 });
+
+function setOnlineStatus(isOnline: boolean): void {
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    value: isOnline,
+  });
+}
