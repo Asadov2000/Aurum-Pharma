@@ -83,6 +83,35 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-setup.ps1 -Apply
 
 После зелёного readiness-аудита можно создавать первый WinUI 3 проект.
 
+## Создание первого WinUI host-проекта
+
+Сначала проверь dry-run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-scaffold.ps1
+```
+
+Он ничего не создаёт. После зелёного readiness-аудита реальное создание:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-scaffold.ps1 -Create
+```
+
+Стандартный выбор проекта:
+
+- папка: `desktop/AurumPharma.Desktop`;
+- имя проекта: `AurumPharma.Desktop`;
+- framework: `net10.0`;
+- packaging: packaged WinUI 3 app.
+
+Скрипт не перезаписывает существующую папку без `-Force`. После scaffold он
+запускает `dotnet build` для созданного `.csproj`. Если нужен прямой `.exe`
+launch-flow, можно создать unpackaged вариант:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-scaffold.ps1 -Create -Unpackaged
+```
+
 ## Глобальный объект
 
 Предпочтительный вариант для Windows-host:
