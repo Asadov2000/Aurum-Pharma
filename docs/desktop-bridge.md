@@ -56,6 +56,33 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-readiness.ps1 -F
 генерируем: сначала нужно поставить WinUI prerequisites через Visual Studio /
 Windows App SDK setup.
 
+## Установка WinUI prerequisites
+
+Сначала посмотри план без изменений системы:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-setup.ps1
+```
+
+В обычном режиме скрипт только запускает readiness-аудит и показывает, какую
+команду он применит. Он не ставит Visual Studio и не меняет настройки Windows.
+
+Реальная установка запускается только явным флагом:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-setup.ps1 -Apply
+```
+
+Это применит `infra/windows/winui-prerequisites.yaml` через `winget configure`.
+Ожидаемый эффект:
+
+- включение Developer Mode;
+- установка или обновление Visual Studio Community;
+- установка Managed Desktop, Universal и Windows App SDK C# компонентов;
+- повторный строгий readiness-аудит после установки.
+
+После зелёного readiness-аудита можно создавать первый WinUI 3 проект.
+
 ## Глобальный объект
 
 Предпочтительный вариант для Windows-host:
