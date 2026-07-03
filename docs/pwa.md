@@ -31,3 +31,9 @@ Frontend подготовлен как installable PWA (устанавливае
 - один backend;
 - меньше риска расхождений между web и desktop;
 - позже можно добавить desktop-интеграции: принтер, автозапуск, проверка сети, системные уведомления.
+
+Frontend уже имеет контракт определения среды запуска:
+
+- `frontend/src/lib/runtime.ts` различает `browser`, `pwa`, `windows-desktop`.
+- Будущая WinUI 3 + WebView2 оболочка должна либо иметь bridge `window.chrome.webview`, либо добавлять user-agent token `AurumPharmaDesktop`.
+- При старте frontend пишет результат в `document.documentElement.dataset.runtimeSurface`, чтобы позже можно было безопасно добавлять desktop-специфичное поведение без развилки интерфейса.

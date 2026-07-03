@@ -6,6 +6,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { bootstrapAuth } from "@/features/auth/bootstrap";
 import { registerPwaServiceWorker } from "@/lib/pwa";
 import { queryClient } from "@/lib/query";
+import { applyRuntimeSurfaceAttribute } from "@/lib/runtime";
 import { applyTheme, getThemePreference, watchSystemTheme } from "@/lib/theme";
 import { router } from "@/router";
 import "@/styles/index.css";
@@ -16,6 +17,7 @@ bootstrapAuth();
 // from the stored preference and keep "system" in sync with the OS.
 applyTheme(getThemePreference());
 watchSystemTheme();
+applyRuntimeSurfaceAttribute();
 registerPwaServiceWorker();
 
 const root = document.getElementById("root");
