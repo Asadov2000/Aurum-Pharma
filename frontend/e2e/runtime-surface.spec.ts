@@ -7,6 +7,7 @@ test.describe("Runtime surface", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await loginInBrowser(page, OWNER);
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("server-status-banner")).toHaveCount(0);
 
     await expect(page.locator("html")).toHaveAttribute(
       "data-runtime-surface",
@@ -30,6 +31,7 @@ test.describe("Runtime surface", () => {
     await loginInBrowser(page, OWNER);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("offline-status-banner")).toHaveCount(0);
+    await expect(page.getByTestId("server-status-banner")).toHaveCount(0);
 
     try {
       await page.context().setOffline(true);

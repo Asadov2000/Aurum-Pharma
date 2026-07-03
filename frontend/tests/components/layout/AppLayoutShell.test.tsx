@@ -40,6 +40,10 @@ vi.mock("@tanstack/react-router", () => ({
   }) => select({ location: { pathname: "/pos" } }),
 }));
 
+vi.mock("@/components/layout/ServerStatusBanner", () => ({
+  ServerStatusBanner: () => null,
+}));
+
 import { AppLayout } from "@/components/layout/AppLayout";
 
 describe("AppLayout shell", () => {

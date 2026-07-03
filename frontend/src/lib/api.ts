@@ -22,10 +22,10 @@ export function resolveApiBaseUrl(env: ApiBaseUrlEnv): string {
   return env.DEV ? DEV_API_BASE_URL : SAME_ORIGIN_API_BASE_URL;
 }
 
-const baseURL = resolveApiBaseUrl(import.meta.env);
+export const apiBaseUrl = resolveApiBaseUrl(import.meta.env);
 
 export const api: AxiosInstance = axios.create({
-  baseURL,
+  baseURL: apiBaseUrl,
   headers: {
     "Content-Type": "application/json",
   },
