@@ -112,6 +112,9 @@ launch-flow, можно создать unpackaged вариант:
 powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-scaffold.ps1 -Create -Unpackaged
 ```
 
+После создания проекта host-side реализация идёт по
+`docs/desktop-host-implementation.md`.
+
 ## Глобальный объект
 
 Предпочтительный вариант для Windows-host:
