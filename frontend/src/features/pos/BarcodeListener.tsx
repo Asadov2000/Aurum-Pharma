@@ -1,5 +1,11 @@
 import { useEffect, useRef } from "react";
 
+import {
+  DESKTOP_BARCODE_SCANNED_EVENT,
+  normalizeDesktopBarcode,
+  type DesktopBarcodeScanEvent,
+} from "@/lib/desktopBridge";
+
 import { emptyScanBuffer, feedScanKey } from "./barcodeScan";
 
 const isEditable = (el: Element | null): boolean =>
@@ -53,11 +59,20 @@ export function BarcodeListener({
       sinkRef.current?.focus();
     };
 
+    const onDesktopBarcode = (event: DesktopBarcodeScanEvent) => {
+      const code = normalizeDesktopBarcode(event.detail.code);
+      if (!code) return;
+      onScanRef.current(code);
+      sinkRef.current?.focus();
+    };
+
     window.addEventListener("keydown", onKey);
     window.addEventListener("click", onClick);
+    window.addEventListener(DESKTOP_BARCODE_SCANNED_EVENT, onDesktopBarcode);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("click", onClick);
+      window.removeEventListener(DESKTOP_BARCODE_SCANNED_EVENT, onDesktopBarcode);
     };
   }, [enabled]);
 

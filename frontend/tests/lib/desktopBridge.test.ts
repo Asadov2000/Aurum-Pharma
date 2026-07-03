@@ -1,9 +1,13 @@
 import {
+  DESKTOP_BARCODE_MAX_LENGTH,
+  DESKTOP_BARCODE_SCANNED_EVENT,
+  dispatchDesktopBarcodeScan,
   getDesktopBridge,
   getDesktopBridgeInfo,
   hasDesktopBridge,
   hasDesktopCapability,
   notifyDesktopReady,
+  normalizeDesktopBarcode,
   postDesktopMessage,
   requestDesktopReceiptPrint,
   type DesktopBridgeTarget,
@@ -191,6 +195,39 @@ describe("desktopBridge", () => {
     });
 
     expect(postDesktopMessage({ type: "aurum.desktop.ready" }, target)).toBe(false);
+  });
+
+  it("normalizes desktop barcode values", () => {
+    expect(normalizeDesktopBarcode(" 4600123456789 ")).toBe("4600123456789");
+    expect(normalizeDesktopBarcode("   ")).toBeNull();
+    expect(normalizeDesktopBarcode("1".repeat(DESKTOP_BARCODE_MAX_LENGTH + 1))).toBeNull();
+  });
+
+  it("dispatches normalized desktop barcode scans", () => {
+    const listener = vi.fn();
+    window.addEventListener(DESKTOP_BARCODE_SCANNED_EVENT, listener);
+
+    try {
+      expect(dispatchDesktopBarcodeScan(" 4600123456789 ")).toBe(true);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener.mock.calls[0]?.[0]).toMatchObject({
+        detail: { code: "4600123456789" },
+      });
+    } finally {
+      window.removeEventListener(DESKTOP_BARCODE_SCANNED_EVENT, listener);
+    }
+  });
+
+  it("does not dispatch empty desktop barcode scans", () => {
+    const listener = vi.fn();
+    window.addEventListener(DESKTOP_BARCODE_SCANNED_EVENT, listener);
+
+    try {
+      expect(dispatchDesktopBarcodeScan("   ")).toBe(false);
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(DESKTOP_BARCODE_SCANNED_EVENT, listener);
+    }
   });
 });
 

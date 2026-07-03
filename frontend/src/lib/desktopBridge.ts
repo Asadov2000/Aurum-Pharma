@@ -1,4 +1,6 @@
 export const DESKTOP_BRIDGE_GLOBAL = "aurumDesktop";
+export const DESKTOP_BARCODE_SCANNED_EVENT = "aurum-desktop-barcode-scanned";
+export const DESKTOP_BARCODE_MAX_LENGTH = 256;
 
 export type DesktopBridgeCapability =
   | "barcode-scanner"
@@ -17,6 +19,12 @@ export type DesktopBridgeMessage =
         readonly saleId: string;
       };
     };
+
+export interface DesktopBarcodeScanDetail {
+  readonly code: string;
+}
+
+export type DesktopBarcodeScanEvent = CustomEvent<DesktopBarcodeScanDetail>;
 
 export interface AurumDesktopBridge {
   readonly appVersion?: string;
@@ -44,6 +52,10 @@ export interface DesktopBridgeInfo {
 }
 
 declare global {
+  interface WindowEventMap {
+    "aurum-desktop-barcode-scanned": DesktopBarcodeScanEvent;
+  }
+
   interface Window {
     readonly aurumDesktop?: AurumDesktopBridge;
     readonly chrome?: {
@@ -129,6 +141,31 @@ export function requestDesktopReceiptPrint(
     },
     target,
   );
+}
+
+export function dispatchDesktopBarcodeScan(
+  rawCode: string,
+  target: EventTarget = window,
+): boolean {
+  const code = normalizeDesktopBarcode(rawCode);
+  if (!code) {
+    return false;
+  }
+
+  return target.dispatchEvent(
+    new CustomEvent(DESKTOP_BARCODE_SCANNED_EVENT, {
+      detail: { code },
+    }),
+  );
+}
+
+export function normalizeDesktopBarcode(rawCode: string): string | null {
+  const code = rawCode.trim();
+  if (!code || code.length > DESKTOP_BARCODE_MAX_LENGTH) {
+    return null;
+  }
+
+  return code;
 }
 
 function tryPostMessage(
