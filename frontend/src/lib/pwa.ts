@@ -1,3 +1,21 @@
+export type PwaInstallOutcome = "accepted" | "dismissed";
+
+export interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: readonly string[];
+  readonly userChoice: Promise<{
+    readonly outcome: PwaInstallOutcome;
+    readonly platform: string;
+  }>;
+  prompt(): Promise<void>;
+}
+
+declare global {
+  interface WindowEventMap {
+    beforeinstallprompt: BeforeInstallPromptEvent;
+    appinstalled: Event;
+  }
+}
+
 export function registerPwaServiceWorker(): void {
   if (import.meta.env.DEV) {
     return;

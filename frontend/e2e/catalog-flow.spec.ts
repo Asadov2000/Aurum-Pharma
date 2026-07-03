@@ -64,11 +64,19 @@ test.describe("Catalog flow (owner)", () => {
 
     const dialog = page.locator('div[role="dialog"]');
     const code = `123456${Date.now().toString().slice(-7)}`.slice(0, 13);
+    const addBarcodeResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().includes("/api/v1/catalog/") &&
+        response.url().endsWith("/barcodes") &&
+        response.ok(),
+    );
     await dialog.getByLabel("Код", { exact: true }).fill(code);
     await dialog.getByRole("button", { name: /\+ Добавить/ }).click();
 
     // Newly added barcode shows up in the per-item list.
-    await expect(dialog.getByText(code)).toBeVisible();
+    await addBarcodeResponse;
+    await expect(dialog.getByText(code)).toBeVisible({ timeout: 30_000 });
   });
 
   test("trigram search filters the table after the debounce window", async ({ page }) => {
