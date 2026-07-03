@@ -28,6 +28,34 @@ Frontend считает запуск Windows-приложением, если в
 
 Код находится в `frontend/src/lib/runtime.ts` и `frontend/src/lib/desktopBridge.ts`.
 
+## Проверка готовности Windows-host
+
+Перед созданием WinUI 3 проекта запусти read-only аудит:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-readiness.ps1
+```
+
+Скрипт ничего не устанавливает и не меняет в системе. Он проверяет:
+
+- версию Windows;
+- Developer Mode;
+- установленные .NET SDK;
+- наличие шаблона `dotnet new winui`;
+- Visual Studio workloads для WinUI;
+- Windows SDK;
+- MSBuild.
+
+Для строгой проверки, где отсутствие компонента должно давать exit code `1`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-readiness.ps1 -FailOnMissing
+```
+
+Если `dotnet new list winui` не видит шаблон, Windows-приложение пока не
+генерируем: сначала нужно поставить WinUI prerequisites через Visual Studio /
+Windows App SDK setup.
+
 ## Глобальный объект
 
 Предпочтительный вариант для Windows-host:
