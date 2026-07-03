@@ -9,6 +9,7 @@ import {
   notifyDesktopReady,
   normalizeDesktopBarcode,
   postDesktopMessage,
+  requestDesktopCashDrawerOpen,
   requestDesktopReceiptPrint,
   type DesktopBridgeTarget,
 } from "@/lib/desktopBridge";
@@ -176,6 +177,93 @@ describe("desktopBridge", () => {
     expect(postMessage).toHaveBeenCalledWith({
       payload: { saleId: "sale-1" },
       type: "aurum.receipt.print",
+    });
+  });
+
+  it("requests opening the cash drawer with normalized context", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["cash-drawer"],
+        postMessage,
+      },
+    });
+
+    expect(
+      requestDesktopCashDrawerOpen(
+        {
+          reason: "sale-completed",
+          registerId: " register-1 ",
+          saleId: " sale-1 ",
+        },
+        target,
+      ),
+    ).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      payload: {
+        reason: "sale-completed",
+        registerId: "register-1",
+        saleId: "sale-1",
+      },
+      type: "aurum.cash-drawer.open",
+    });
+  });
+
+  it("opens the cash drawer manually without blank optional ids", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["cash-drawer"],
+        postMessage,
+      },
+    });
+
+    expect(
+      requestDesktopCashDrawerOpen(
+        {
+          registerId: "   ",
+          saleId: "",
+        },
+        target,
+      ),
+    ).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      payload: {
+        reason: "manual",
+      },
+      type: "aurum.cash-drawer.open",
+    });
+  });
+
+  it("does not request opening the cash drawer when capability is absent", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      aurumDesktop: {
+        capabilities: ["receipt-print"],
+        postMessage,
+      },
+    });
+
+    expect(requestDesktopCashDrawerOpen({ reason: "manual" }, target)).toBe(false);
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("allows opening the cash drawer through a raw WebView2 bridge", () => {
+    const postMessage = vi.fn();
+    const target = createTarget({
+      chrome: {
+        webview: {
+          postMessage,
+        },
+      },
+    });
+
+    expect(requestDesktopCashDrawerOpen({ reason: "manual" }, target)).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      payload: {
+        reason: "manual",
+      },
+      type: "aurum.cash-drawer.open",
     });
   });
 

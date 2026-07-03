@@ -8,6 +8,8 @@ export type DesktopBridgeCapability =
   | "file-export"
   | "receipt-print";
 
+export type DesktopCashDrawerReason = "manual" | "sale-completed";
+
 export type DesktopBridgeMessage =
   | {
       readonly type: "aurum.desktop.ready";
@@ -18,6 +20,10 @@ export type DesktopBridgeMessage =
       readonly payload: {
         readonly saleId: string;
       };
+    }
+  | {
+      readonly type: "aurum.cash-drawer.open";
+      readonly payload: DesktopCashDrawerOpenPayload;
     };
 
 export interface DesktopBarcodeScanDetail {
@@ -25,6 +31,18 @@ export interface DesktopBarcodeScanDetail {
 }
 
 export type DesktopBarcodeScanEvent = CustomEvent<DesktopBarcodeScanDetail>;
+
+export interface DesktopCashDrawerOpenPayload {
+  readonly reason: DesktopCashDrawerReason;
+  readonly registerId?: string;
+  readonly saleId?: string;
+}
+
+export interface DesktopCashDrawerOpenRequest {
+  readonly reason?: DesktopCashDrawerReason;
+  readonly registerId?: string;
+  readonly saleId?: string;
+}
 
 export interface AurumDesktopBridge {
   readonly appVersion?: string;
@@ -143,6 +161,31 @@ export function requestDesktopReceiptPrint(
   );
 }
 
+export function requestDesktopCashDrawerOpen(
+  request: DesktopCashDrawerOpenRequest = {},
+  target: DesktopBridgeTarget = window,
+): boolean {
+  if (!supportsCapability("cash-drawer", target)) {
+    return false;
+  }
+
+  const registerId = normalizeOptionalText(request.registerId);
+  const saleId = normalizeOptionalText(request.saleId);
+  const payload: DesktopCashDrawerOpenPayload = {
+    reason: request.reason ?? "manual",
+    ...(registerId ? { registerId } : {}),
+    ...(saleId ? { saleId } : {}),
+  };
+
+  return postDesktopMessage(
+    {
+      payload,
+      type: "aurum.cash-drawer.open",
+    },
+    target,
+  );
+}
+
 export function dispatchDesktopBarcodeScan(
   rawCode: string,
   target: EventTarget = window,
@@ -166,6 +209,11 @@ export function normalizeDesktopBarcode(rawCode: string): string | null {
   }
 
   return code;
+}
+
+function normalizeOptionalText(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
 }
 
 function tryPostMessage(
