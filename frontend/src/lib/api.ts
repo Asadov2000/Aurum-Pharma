@@ -5,7 +5,24 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from "axios";
 
-const baseURL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
+const DEV_API_BASE_URL = "http://localhost:8000/api/v1";
+const SAME_ORIGIN_API_BASE_URL = "/api/v1";
+
+interface ApiBaseUrlEnv {
+  readonly DEV: boolean;
+  readonly VITE_API_URL?: string;
+}
+
+export function resolveApiBaseUrl(env: ApiBaseUrlEnv): string {
+  const configuredUrl = env.VITE_API_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  return env.DEV ? DEV_API_BASE_URL : SAME_ORIGIN_API_BASE_URL;
+}
+
+const baseURL = resolveApiBaseUrl(import.meta.env);
 
 export const api: AxiosInstance = axios.create({
   baseURL,

@@ -39,3 +39,4 @@ Frontend уже имеет контракт определения среды з
 - При старте frontend пишет результат в `document.documentElement.dataset.runtimeSurface`, чтобы позже можно было безопасно добавлять desktop-специфичное поведение без развилки интерфейса.
 - `frontend/src/components/layout/RuntimeSurfaceBadge.tsx` показывает компактный диагностический бейдж режима запуска в общей верхней панели.
 - `frontend/e2e/runtime-surface.spec.ts` проверяет этот контракт в реальном браузере.
+- `frontend/src/lib/api.ts` в production без `VITE_API_URL` использует same-origin fallback `/api/v1`; локальный fallback `http://localhost:8000/api/v1` остаётся только для dev-режима.
