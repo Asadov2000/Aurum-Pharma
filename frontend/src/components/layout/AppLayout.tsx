@@ -4,6 +4,7 @@ import { Button } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/features/auth/hooks";
 
+import { RuntimeSurfaceBadge } from "./RuntimeSurfaceBadge";
 import { Sidebar } from "./Sidebar";
 import { buildNav } from "./nav";
 
@@ -172,6 +173,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <RuntimeSurfaceBadge />
             <ThemeToggle />
             <Button
               variant="secondary"

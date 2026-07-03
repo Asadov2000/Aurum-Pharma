@@ -37,3 +37,4 @@ Frontend уже имеет контракт определения среды з
 - `frontend/src/lib/runtime.ts` различает `browser`, `pwa`, `windows-desktop`.
 - Будущая WinUI 3 + WebView2 оболочка должна либо иметь bridge `window.chrome.webview`, либо добавлять user-agent token `AurumPharmaDesktop`.
 - При старте frontend пишет результат в `document.documentElement.dataset.runtimeSurface`, чтобы позже можно было безопасно добавлять desktop-специфичное поведение без развилки интерфейса.
+- `frontend/src/components/layout/RuntimeSurfaceBadge.tsx` показывает компактный диагностический бейдж режима запуска в общей верхней панели.
