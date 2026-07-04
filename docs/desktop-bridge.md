@@ -267,3 +267,4 @@ window.dispatchEvent(
 - `frontend/tests/features/pos/BarcodeListener.test.tsx`;
 - `frontend/e2e/runtime-surface.spec.ts`;
 - `frontend/e2e/reports-export.spec.ts` (`aurum.file-export.request` для XLSX-экспортов).
+- `frontend/e2e/pos-sale.spec.ts` (`aurum-desktop-barcode-scanned` в POS-корзину).

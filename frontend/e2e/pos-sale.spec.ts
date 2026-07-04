@@ -27,6 +27,68 @@ test.describe("POS sale (owner)", () => {
     clearLoginRateLimit(OWNER.email);
   });
 
+  test("adds an item to the cart from a desktop barcode scanner event", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+
+    const branch = await seedBranch(api, uniqueName("SCAN-Branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("SCAN-Cash"));
+    const supplier = await seedSupplier(api, uniqueName("SCAN-Supp"));
+    const item = await seedCatalogItem(api, uniqueName("SCAN-Med"), "18.00");
+    const barcode = `460${Date.now().toString().slice(-10)}`;
+    const barcodeRes = await api.post(`catalog/${item.id}/barcodes`, {
+      data: { code: barcode, code_type: "ean13" },
+    });
+    if (!barcodeRes.ok()) {
+      throw new Error(
+        `POST catalog/{id}/barcodes → ${barcodeRes.status()} ${await barcodeRes.text()}`,
+      );
+    }
+    await seedAcceptedBatch(api, {
+      branchId: branch.id,
+      supplierId: supplier.id,
+      catalogId: item.id,
+      qty: "3",
+      purchasePrice: "12.00",
+      salePrice: "18.00",
+      expiresAt: isoDateInDays(90),
+      batchNumber: "SCAN-A",
+    });
+    await apiAnon.dispose();
+    await api.dispose();
+
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos");
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await page.getByLabel("Касса на начало смены").fill("100");
+    await page.getByRole("button", { name: "Открыть смену" }).click();
+    await expect(page.getByText("Смена открыта")).toBeVisible();
+    await expect(page.locator('[data-barcode-sink="true"]')).toBeAttached();
+
+    const barcodeLookup = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/catalog/by-barcode/${barcode}`) &&
+        response.ok(),
+    );
+    await page.evaluate((code) => {
+      window.dispatchEvent(
+        new CustomEvent("aurum-desktop-barcode-scanned", {
+          detail: { code },
+        }),
+      );
+    }, ` ${barcode} `);
+
+    await barcodeLookup;
+    await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.getByTestId("cart-item").getByText(item.brand_name)).toBeVisible();
+    await expect(page.getByText("18.00", { exact: false }).first()).toBeVisible();
+  });
+
   test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({
     page,
   }) => {
