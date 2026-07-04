@@ -264,5 +264,6 @@ window.dispatchEvent(
 - `frontend/tests/lib/desktopBridge.test.ts`;
 - `frontend/tests/lib/download.test.ts`;
 - `frontend/tests/lib/runtime.test.ts`;
+- `frontend/tests/features/pos/BarcodeListener.test.tsx`;
 - `frontend/e2e/runtime-surface.spec.ts`;
 - `frontend/e2e/reports-export.spec.ts`.

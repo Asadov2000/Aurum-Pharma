@@ -1127,7 +1127,7 @@ CELERY_RESULT_BACKEND=redis://redis:6379/2
 DEFAULT_PRICE_TJS=550
 
 # Frontend (vite reads VITE_-prefixed)
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_URL=http://localhost:8000/api/v1
 
 # Windows fix
 WATCHFILES_FORCE_POLLING=true
