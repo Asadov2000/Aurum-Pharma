@@ -1,6 +1,8 @@
-import { test } from "@playwright/test";
+import { test, type Page } from "@playwright/test";
 
 import { expect, loginInBrowser, OWNER } from "./helpers";
+
+const DESKTOP_USER_AGENT_TOKEN = "AurumPharmaDesktop";
 
 test.describe("Runtime surface", () => {
   test("marks a normal browser session in the app shell", async ({ page }) => {
@@ -62,22 +64,58 @@ test.describe("Runtime surface", () => {
     await loginInBrowser(page, OWNER);
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    await expect(page.locator("html")).toHaveAttribute(
-      "data-runtime-surface",
-      "windows-desktop",
-    );
-    await expect(page.getByTestId("runtime-surface-badge")).toHaveText("Windows");
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const target = window as Window & {
-            readonly __aurumDesktopMessages?: Array<{ readonly type?: string }>;
-          };
+    await expectWindowsDesktopShell(page);
+    await expectDesktopMessageType(page, "aurum.desktop.ready");
+  });
 
-          return (target.__aurumDesktopMessages ?? []).map((message) => message.type);
-        }),
-      )
-      .toContain("aurum.desktop.ready");
+  test("detects a raw WebView2 bridge before aurumDesktop is injected", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.addInitScript(() => {
+      type DesktopMessage = {
+        readonly type?: string;
+      };
+      type WebViewTarget = Window & {
+        __aurumDesktopMessages?: DesktopMessage[];
+      };
+
+      const target = window as WebViewTarget;
+      target.__aurumDesktopMessages = [];
+      Object.defineProperty(target, "chrome", {
+        configurable: true,
+        value: {
+          webview: {
+            postMessage(message: DesktopMessage) {
+              target.__aurumDesktopMessages?.push(message);
+            },
+          },
+        },
+      });
+    });
+
+    await loginInBrowser(page, OWNER);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+
+    await expectWindowsDesktopShell(page);
+    await expectDesktopMessageType(page, "aurum.desktop.ready");
+  });
+
+  test("detects the Windows desktop user-agent token", async ({ browser }) => {
+    const context = await browser.newContext({
+      userAgent: `Mozilla/5.0 ${DESKTOP_USER_AGENT_TOKEN}`,
+    });
+    const page = await context.newPage();
+
+    try {
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await loginInBrowser(page, OWNER);
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+
+      await expectWindowsDesktopShell(page);
+    } finally {
+      await context.close();
+    }
   });
 
   test("shows the online-only warning when the browser goes offline", async ({
@@ -115,3 +153,28 @@ test.describe("Runtime surface", () => {
     }
   });
 });
+
+async function expectWindowsDesktopShell(page: Page): Promise<void> {
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-runtime-surface",
+    "windows-desktop",
+  );
+  await expect(page.getByTestId("runtime-surface-badge")).toHaveText("Windows");
+}
+
+async function expectDesktopMessageType(
+  page: Page,
+  expectedType: string,
+): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const target = window as Window & {
+          readonly __aurumDesktopMessages?: Array<{ readonly type?: string }>;
+        };
+
+        return (target.__aurumDesktopMessages ?? []).map((message) => message.type);
+      }),
+    )
+    .toContain(expectedType);
+}
