@@ -266,4 +266,4 @@ window.dispatchEvent(
 - `frontend/tests/lib/runtime.test.ts`;
 - `frontend/tests/features/pos/BarcodeListener.test.tsx`;
 - `frontend/e2e/runtime-surface.spec.ts`;
-- `frontend/e2e/reports-export.spec.ts`.
+- `frontend/e2e/reports-export.spec.ts` (`aurum.file-export.request` для XLSX-экспортов).

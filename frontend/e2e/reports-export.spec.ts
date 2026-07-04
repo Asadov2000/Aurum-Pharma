@@ -1,4 +1,4 @@
-import { test, request } from "@playwright/test";
+import { test, request, type Page } from "@playwright/test";
 
 import {
   addPosItemToCart,
@@ -24,6 +24,34 @@ import {
 test.describe("Reports export", () => {
   test.beforeEach(() => {
     clearLoginRateLimit(OWNER.email);
+  });
+
+  test("notifies the desktop host when downloading a sales-summary XLSX", async ({
+    page,
+  }) => {
+    await installDesktopFileExportBridge(page);
+    await page.route("**/api/v1/reports/sales-summary.xlsx**", async (route) => {
+      await route.fulfill({
+        body: "xlsx",
+        contentType: XLSX_MIME_TYPE,
+        status: 200,
+      });
+    });
+
+    await loginInBrowser(page, OWNER);
+    await page.goto("/reports");
+    await page.locator("#summary_from").fill("2026-05-01");
+    await page.locator("#summary_to").fill("2026-05-31");
+
+    const summaryDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: /Скачать сводный отчёт/ }).click();
+    expect((await summaryDownload).suggestedFilename()).toBe(
+      "sales-summary-2026-05-01_2026-05-31.xlsx",
+    );
+    await expectDesktopFileExport(
+      page,
+      /^sales-summary-2026-05-01_2026-05-31\.xlsx$/,
+    );
   });
 
   test("downloads receipt PDF, Z-report, sales-summary and stock XLSX", async ({ page }) => {
@@ -95,6 +123,81 @@ test.describe("Reports export", () => {
     expect((await stockDownload).suggestedFilename()).toMatch(/\.xlsx$/);
   });
 });
+
+const XLSX_MIME_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+type DesktopMessage = {
+  readonly type?: string;
+  readonly payload?: {
+    readonly fileName?: string;
+    readonly mimeType?: string;
+    readonly sizeBytes?: number;
+  };
+};
+
+async function installDesktopFileExportBridge(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type DesktopMessage = {
+      readonly type?: string;
+      readonly payload?: {
+        readonly fileName?: string;
+        readonly mimeType?: string;
+        readonly sizeBytes?: number;
+      };
+    };
+    type DesktopTarget = Window & {
+      __aurumDesktopMessages?: DesktopMessage[];
+      aurumDesktop?: {
+        readonly appVersion: string;
+        readonly capabilities: readonly string[];
+        readonly platform: "windows";
+        postMessage(message: DesktopMessage): void;
+      };
+    };
+
+    const target = window as DesktopTarget;
+    target.__aurumDesktopMessages = [];
+    target.aurumDesktop = {
+      appVersion: "0.1.0-e2e",
+      capabilities: ["file-export"],
+      platform: "windows",
+      postMessage(message) {
+        target.__aurumDesktopMessages?.push(message);
+      },
+    };
+  });
+}
+
+async function expectDesktopFileExport(
+  page: Page,
+  expectedFileName: RegExp,
+): Promise<void> {
+  await expect
+    .poll(() => getDesktopFileExportMessages(page))
+    .toContainEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          fileName: expect.stringMatching(expectedFileName),
+          mimeType: expect.stringContaining(XLSX_MIME_TYPE),
+          sizeBytes: expect.any(Number),
+        }),
+        type: "aurum.file-export.request",
+      }),
+    );
+}
+
+async function getDesktopFileExportMessages(page: Page): Promise<DesktopMessage[]> {
+  return page.evaluate(() => {
+    const target = window as Window & {
+      readonly __aurumDesktopMessages?: DesktopMessage[];
+    };
+
+    return (target.__aurumDesktopMessages ?? []).filter(
+      (message) => message.type === "aurum.file-export.request",
+    );
+  });
+}
 
 function isoDateInDays(days: number): string {
   const d = new Date();

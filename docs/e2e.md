@@ -16,11 +16,11 @@ docker-стека** — без моков. Это safety-net перед депл
 | `owner-onboarding.spec.ts` | создание аптеки и владельца, вход нового владельца по коду | dev |
 | `pos-sale.spec.ts` | смена → продажа → **FEFO split 5+2** → оплата → чек → списание партий | owner |
 | `pwa.spec.ts` | manifest, install-иконки, service worker без кеширования API/HTML | public |
-| `reports-export.spec.ts` | чек PDF, Z-report XLSX, продажи XLSX, остатки XLSX | owner |
+| `reports-export.spec.ts` | чек PDF, Z-report XLSX, продажи XLSX, остатки XLSX, desktop file-export metadata | owner |
 | `runtime-surface.spec.ts` | browser-режим, Windows desktop bridge/user-agent detection, ready-handshake, offline-warning | owner |
 | `shift-close-z-report.spec.ts` | смена → продажа → закрытие → `/reports` → бейдж «недостача» | owner |
 
-Всего **11 spec-файлов / 26 тестов**.
+Всего **11 spec-файлов / 27 тестов**.
 
 ## Предусловия
 
