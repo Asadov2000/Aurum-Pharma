@@ -14,7 +14,7 @@ docker-стека** — без моков. Это safety-net перед депл
 | `catalog-import.spec.ts` | импорт `.xlsx` через wizard и проверка строк в каталоге | owner |
 | `incoming-flow.spec.ts` | приход draft → позиция → приёмка → партия в `/batches` | owner |
 | `owner-onboarding.spec.ts` | создание аптеки и владельца, вход нового владельца по коду | dev |
-| `pos-sale.spec.ts` | desktop barcode scanner → корзина, смена → продажа → **FEFO split 5+2** → оплата → чек → списание партий | owner |
+| `pos-sale.spec.ts` | desktop barcode scanner → корзина, смена → продажа → **FEFO split 5+2** → оплата → desktop cash-drawer → чек → списание партий | owner |
 | `pwa.spec.ts` | manifest, install-иконки, service worker без кеширования API/HTML | public |
 | `reports-export.spec.ts` | чек PDF, Z-report XLSX, продажи XLSX, остатки XLSX, desktop file-export metadata | owner |
 | `runtime-surface.spec.ts` | browser-режим, Windows desktop bridge/user-agent detection, ready-handshake, offline-warning | owner |

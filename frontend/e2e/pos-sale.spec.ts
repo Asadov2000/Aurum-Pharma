@@ -1,4 +1,4 @@
-import { test, request } from "@playwright/test";
+import { test, request, type Page } from "@playwright/test";
 
 import {
   addPosItemToCart,
@@ -134,6 +134,7 @@ test.describe("POS sale (owner)", () => {
     await api.dispose();
 
     // ---- UI ----
+    await installDesktopCashDrawerBridge(page);
     await loginInBrowser(page, OWNER);
     await page.goto("/pos");
     await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
@@ -163,6 +164,7 @@ test.describe("POS sale (owner)", () => {
 
     // Complete — the completion banner appears.
     await completePosSale(page);
+    await expectDesktopCashDrawerOpen(page, register.id);
 
     // ---- Print: open the receipt view and verify the totals match ----
     await page.getByRole("button", { name: /Печать чека/ }).click();
@@ -202,4 +204,74 @@ function isoDateInDays(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+type DesktopMessage = {
+  readonly type?: string;
+  readonly payload?: {
+    readonly reason?: string;
+    readonly registerId?: string;
+    readonly saleId?: string;
+  };
+};
+
+async function installDesktopCashDrawerBridge(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type DesktopMessage = {
+      readonly type?: string;
+      readonly payload?: {
+        readonly reason?: string;
+        readonly registerId?: string;
+        readonly saleId?: string;
+      };
+    };
+    type DesktopTarget = Window & {
+      __aurumDesktopMessages?: DesktopMessage[];
+      aurumDesktop?: {
+        readonly appVersion: string;
+        readonly capabilities: readonly string[];
+        readonly platform: "windows";
+        postMessage(message: DesktopMessage): void;
+      };
+    };
+
+    const target = window as DesktopTarget;
+    target.__aurumDesktopMessages = [];
+    target.aurumDesktop = {
+      appVersion: "0.1.0-e2e",
+      capabilities: ["cash-drawer"],
+      platform: "windows",
+      postMessage(message) {
+        target.__aurumDesktopMessages?.push(message);
+      },
+    };
+  });
+}
+
+async function expectDesktopCashDrawerOpen(
+  page: Page,
+  registerId: string,
+): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const target = window as Window & {
+          readonly __aurumDesktopMessages?: DesktopMessage[];
+        };
+
+        return (target.__aurumDesktopMessages ?? []).filter(
+          (message) => message.type === "aurum.cash-drawer.open",
+        );
+      }),
+    )
+    .toContainEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          reason: "sale-completed",
+          registerId,
+          saleId: expect.any(String),
+        }),
+        type: "aurum.cash-drawer.open",
+      }),
+    );
 }

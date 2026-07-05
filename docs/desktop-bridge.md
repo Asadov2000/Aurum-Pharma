@@ -200,6 +200,9 @@ Frontend отправляет после старта приложения.
 - `sale-completed` — открытие после завершения продажи.
 
 `registerId` и `saleId` опциональные. Пустые значения не отправляются.
+POS отправляет `reason = "sale-completed"` только после успешного завершения
+продажи с наличной оплатой. Продажи, оплаченные картой или переводом, не должны
+открывать денежный ящик.
 
 ### `aurum.file-export.request`
 
@@ -264,7 +267,9 @@ window.dispatchEvent(
 - `frontend/tests/lib/desktopBridge.test.ts`;
 - `frontend/tests/lib/download.test.ts`;
 - `frontend/tests/lib/runtime.test.ts`;
+- `frontend/tests/features/pos/SaleAreaEnterPay.test.tsx`;
 - `frontend/tests/features/pos/BarcodeListener.test.tsx`;
 - `frontend/e2e/runtime-surface.spec.ts`;
 - `frontend/e2e/reports-export.spec.ts` (`aurum.file-export.request` для XLSX-экспортов).
-- `frontend/e2e/pos-sale.spec.ts` (`aurum-desktop-barcode-scanned` в POS-корзину).
+- `frontend/e2e/pos-sale.spec.ts` (`aurum-desktop-barcode-scanned` в POS-корзину,
+  `aurum.cash-drawer.open` после наличной продажи).

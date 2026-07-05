@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { isAxiosError } from "axios";
 
 import { findByBarcode } from "@/features/catalog/api";
+import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
 import { cn } from "@/lib/utils";
 
@@ -117,6 +118,7 @@ function ActiveWorkspace({
   const [printOpen, setPrintOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const flashTimer = useRef<number | undefined>(undefined);
+  const completingRef = useRef(false);
 
   const createSale = useCreateSale();
   const addItem = useAddSaleItem();
@@ -248,7 +250,7 @@ function ActiveWorkspace({
   };
 
   const onComplete = async () => {
-    if (!saleId) return;
+    if (!saleId || completingRef.current || completeSale.isPending) return;
     if (requiresRx) {
       setPrescriptionOpen(true);
       return;
@@ -258,15 +260,25 @@ function ActiveWorkspace({
       return;
     }
     setTopError(null);
+    completingRef.current = true;
     try {
       await completeSale.mutateAsync(saleId);
+      if (payments.some((payment) => payment.payment_method === "cash")) {
+        requestDesktopCashDrawerOpen({
+          reason: "sale-completed",
+          registerId,
+          saleId,
+        });
+      }
       clearDraft();
     } catch (err) {
+      completingRef.current = false;
       setTopError(describeApiError(err, "Не удалось завершить продажу"));
     }
   };
 
   const onNewSale = () => {
+    completingRef.current = false;
     clearDraft();
     setSaleId(null);
     setNameById({});
