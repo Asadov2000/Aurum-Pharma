@@ -28,19 +28,19 @@ export async function verifyLoginCode(payload: LoginVerifyRequest): Promise<Toke
   return data;
 }
 
-export async function refreshTokensRequest(refreshToken: string): Promise<TokenPair> {
+export async function refreshTokensRequest(): Promise<TokenPair> {
   const { data } = await api.post<TokenPair>(
     "/auth/refresh",
-    { refresh_token: refreshToken },
+    null,
     withoutAuth(),
   );
   return data;
 }
 
-export async function logoutRequest(refreshToken: string): Promise<void> {
+export async function logoutRequest(): Promise<void> {
   await api.post(
     "/auth/logout",
-    { refresh_token: refreshToken },
+    null,
     withoutAuth(),
   );
 }

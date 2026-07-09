@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | null {
   const accessToken = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
+  const hydrated = useAuthStore((s) => s.hydrated);
   const setUser = useAuthStore((s) => s.setUser);
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
@@ -19,10 +20,10 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
   }, [data, setUser]);
 
   useEffect(() => {
-    if (accessToken === null) {
+    if (hydrated && accessToken === null) {
       navigate({ to: "/login", search: { from: location.pathname } });
     }
-  }, [accessToken, navigate, location.pathname]);
+  }, [hydrated, accessToken, navigate, location.pathname]);
 
   useEffect(() => {
     if (error) {
@@ -31,7 +32,7 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
     }
   }, [error, clear, navigate, location.pathname]);
 
-  if (accessToken === null) return null;
+  if (!hydrated || accessToken === null) return null;
   if (isLoading && user === null) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-foreground-muted">

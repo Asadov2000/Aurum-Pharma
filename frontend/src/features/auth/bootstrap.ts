@@ -7,23 +7,24 @@ import { useAuthStore } from "@/stores/auth";
 
 import { refreshTokensRequest } from "./api";
 
+async function refreshSessionFromCookie(): Promise<string | null> {
+  try {
+    const tokens = await refreshTokensRequest();
+    useAuthStore.getState().setTokens(tokens);
+    return tokens.access_token;
+  } catch {
+    useAuthStore.getState().clear();
+    return null;
+  }
+}
+
 export function bootstrapAuth(): void {
   configureAuthHooks({
     getAccessToken: () => useAuthStore.getState().accessToken,
-    refreshTokens: async () => {
-      const refresh = useAuthStore.getState().refreshToken;
-      if (!refresh) return null;
-      try {
-        const tokens = await refreshTokensRequest(refresh);
-        useAuthStore.getState().setTokens(tokens);
-        return tokens.access_token;
-      } catch {
-        useAuthStore.getState().clear();
-        return null;
-      }
-    },
+    refreshTokens: refreshSessionFromCookie,
     onAuthFailure: () => {
       useAuthStore.getState().clear();
     },
   });
+  void refreshSessionFromCookie();
 }

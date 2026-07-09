@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 7
+    REFRESH_COOKIE_NAME: str = "aurum_refresh_token"
+    REFRESH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
+    # None means "secure in production, HTTP-friendly in local development".
+    REFRESH_COOKIE_SECURE: bool | None = None
 
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
@@ -57,6 +61,14 @@ class Settings(BaseSettings):
     APP_NAME: str = "Aurum Pharma"
     LOG_LEVEL: str = "INFO"
 
+    @property
+    def refresh_cookie_secure(self) -> bool:
+        return (
+            self.REFRESH_COOKIE_SECURE
+            if self.REFRESH_COOKIE_SECURE is not None
+            else self.ENVIRONMENT == "production"
+        )
+
     @model_validator(mode="after")
     def _guard_production_secrets(self) -> Settings:
         """Fail fast if production would start with default/placeholder secrets.
@@ -78,6 +90,8 @@ class Settings(BaseSettings):
         ):
             if any(p in url for p in _DEFAULT_DB_PASSWORDS):
                 problems.append(f"{name} uses a default/example DB password")
+        if self.REFRESH_COOKIE_SAMESITE == "none" and not self.refresh_cookie_secure:
+            problems.append("REFRESH_COOKIE_SAMESITE=none requires REFRESH_COOKIE_SECURE=true")
         if problems:
             raise ValueError(
                 "Refusing to start in production with insecure config:\n- " + "\n- ".join(problems)

@@ -7,28 +7,34 @@ describe("auth/storage", () => {
     window.localStorage.clear();
   });
 
-  it("round-trips a token pair", () => {
+  it("does not persist tokens and removes legacy auth keys", () => {
+    window.localStorage.setItem("aurum.access_token", "legacy-access");
+    window.localStorage.setItem("aurum.refresh_token", "legacy-refresh");
     saveTokens({
       access_token: "a.b.c",
-      refresh_token: "r.r.r",
       token_type: "bearer",
       expires_in: 900,
     });
-    expect(loadTokens()).toEqual({ access: "a.b.c", refresh: "r.r.r" });
+    expect(loadTokens()).toEqual({ access: null });
+    expect(window.localStorage.getItem("aurum.access_token")).toBeNull();
+    expect(window.localStorage.getItem("aurum.refresh_token")).toBeNull();
   });
 
   it("clearTokens wipes everything", () => {
+    window.localStorage.setItem("aurum.access_token", "legacy-access");
+    window.localStorage.setItem("aurum.refresh_token", "legacy-refresh");
     saveTokens({
       access_token: "x",
-      refresh_token: "y",
       token_type: "bearer",
       expires_in: 1,
     });
     clearTokens();
-    expect(loadTokens()).toEqual({ access: null, refresh: null });
+    expect(loadTokens()).toEqual({ access: null });
+    expect(window.localStorage.getItem("aurum.access_token")).toBeNull();
+    expect(window.localStorage.getItem("aurum.refresh_token")).toBeNull();
   });
 
   it("loadTokens returns nulls for an empty store", () => {
-    expect(loadTokens()).toEqual({ access: null, refresh: null });
+    expect(loadTokens()).toEqual({ access: null });
   });
 });

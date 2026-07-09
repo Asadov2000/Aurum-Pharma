@@ -26,6 +26,7 @@ export const apiBaseUrl = resolveApiBaseUrl(import.meta.env);
 
 export const api: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },

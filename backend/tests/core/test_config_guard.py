@@ -1,5 +1,4 @@
-"""Production secret fail-fast: refuse to start with default secrets in
-production, but keep development working with the docker-compose defaults."""
+"""Production config guard tests."""
 
 from __future__ import annotations
 
@@ -24,14 +23,14 @@ def _build(**overrides: object) -> Settings:
         "MINIO_SECRET_KEY": "real-secret",
     }
     base.update(overrides)
-    # _env_file=None: ignore the container's .env so the test is hermetic.
     return Settings(_env_file=None, **base)  # type: ignore[arg-type]
 
 
 def test_production_rejects_default_jwt_secret() -> None:
     with pytest.raises(ValidationError, match="JWT_SECRET"):
         _build(
-            ENVIRONMENT="production", JWT_SECRET="change-me-to-a-long-random-string-min-32-bytes"
+            ENVIRONMENT="production",
+            JWT_SECRET="change-me-to-a-long-random-string-min-32-bytes",
         )
 
 
@@ -43,7 +42,9 @@ def test_production_rejects_short_jwt_secret() -> None:
 def test_production_rejects_default_minio_creds() -> None:
     with pytest.raises(ValidationError, match="minioadmin"):
         _build(
-            ENVIRONMENT="production", MINIO_ACCESS_KEY="minioadmin", MINIO_SECRET_KEY="minioadmin"
+            ENVIRONMENT="production",
+            MINIO_ACCESS_KEY="minioadmin",
+            MINIO_SECRET_KEY="minioadmin",
         )
 
 
@@ -53,12 +54,21 @@ def test_production_rejects_default_db_password() -> None:
 
 
 def test_production_accepts_strong_secrets() -> None:
-    s = _build(ENVIRONMENT="production")  # all strong → no raise
+    s = _build(ENVIRONMENT="production")
     assert s.ENVIRONMENT == "production"
+    assert s.refresh_cookie_secure is True
+
+
+def test_production_rejects_cross_site_refresh_cookie_without_secure_flag() -> None:
+    with pytest.raises(ValidationError, match="REFRESH_COOKIE_SAMESITE"):
+        _build(
+            ENVIRONMENT="production",
+            REFRESH_COOKIE_SAMESITE="none",
+            REFRESH_COOKIE_SECURE=False,
+        )
 
 
 def test_development_allows_defaults() -> None:
-    # Dev keeps working with the docker-compose defaults — guard is skipped.
     s = _build(
         ENVIRONMENT="development",
         JWT_SECRET="change-me-to-a-long-random-string-min-32-bytes",
@@ -68,3 +78,4 @@ def test_development_allows_defaults() -> None:
         DATABASE_URL_SUPPORT=_DEV_DB_SUPPORT,
     )
     assert s.ENVIRONMENT == "development"
+    assert s.refresh_cookie_secure is False

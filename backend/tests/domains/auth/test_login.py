@@ -254,3 +254,74 @@ async def test_login_code_endpoint_hides_code_in_production(
         body = response.json()
         assert body["status"] == "ok"
         assert body["dev_code"] is None, f"dev_code leaked in {env}"
+
+
+async def test_login_verify_sets_httponly_refresh_cookie(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="cookie-login@aurum.tj")
+    await _seed_code(db_session, user.email, code="123456")
+
+    response = await auth_client.post(
+        "/api/v1/auth/login/verify",
+        json={"email": user.email, "code": "123456"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["access_token"]
+    assert body["refresh_token"] is None
+    set_cookie = response.headers["set-cookie"]
+    assert "aurum_refresh_token=" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "Path=/api/v1/auth" in set_cookie
+    assert "SameSite=lax" in set_cookie
+
+
+async def test_refresh_endpoint_rotates_cookie_session(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="cookie-refresh@aurum.tj")
+    await _seed_code(db_session, user.email, code="123456")
+    login = await auth_client.post(
+        "/api/v1/auth/login/verify",
+        json={"email": user.email, "code": "123456"},
+    )
+    assert login.status_code == 200
+
+    response = await auth_client.post(
+        "/api/v1/auth/refresh",
+        headers={"Origin": "http://localhost:5173"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["access_token"]
+    assert body["refresh_token"] is None
+    assert "aurum_refresh_token=" in response.headers["set-cookie"]
+
+
+async def test_refresh_endpoint_blocks_untrusted_origin_for_cookie_session(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="cookie-origin@aurum.tj")
+    await _seed_code(db_session, user.email, code="123456")
+    login = await auth_client.post(
+        "/api/v1/auth/login/verify",
+        json={"email": user.email, "code": "123456"},
+    )
+    assert login.status_code == 200
+
+    response = await auth_client.post(
+        "/api/v1/auth/refresh",
+        headers={"Origin": "https://evil.example"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"

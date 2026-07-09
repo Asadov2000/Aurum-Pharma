@@ -7,7 +7,6 @@ import { type LoginVerifyRequest } from "./types";
 
 export function useAuth() {
   const accessToken = useAuthStore((s) => s.accessToken);
-  const refreshToken = useAuthStore((s) => s.refreshToken);
   const user = useAuthStore((s) => s.user);
   const hydrated = useAuthStore((s) => s.hydrated);
   const setTokens = useAuthStore((s) => s.setTokens);
@@ -23,15 +22,13 @@ export function useAuth() {
   );
 
   const logout = useCallback(async () => {
-    if (refreshToken) {
-      try {
-        await logoutRequest(refreshToken);
-      } catch {
-        // Whatever the server says, the client-side session is over.
-      }
+    try {
+      await logoutRequest();
+    } catch {
+      // Whatever the server says, the client-side session is over.
     }
     clear();
-  }, [refreshToken, clear]);
+  }, [clear]);
 
   return {
     isAuthenticated: accessToken !== null,

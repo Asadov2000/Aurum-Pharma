@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Body, Depends, Request, Response, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, current_user, get_db, get_redis
+from app.core.errors import AuthenticationError
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
     LoginCodeRequest,
@@ -25,6 +26,8 @@ from app.domains.auth.service import AuthService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
+_REFRESH_COOKIE_PATH = "/api/v1/auth"
+
 
 def _client_ip(request: Request) -> str:
     # Trust the closest source first. When the API sits behind a reverse proxy
@@ -32,6 +35,53 @@ def _client_ip(request: Request) -> str:
     if request.client and request.client.host:
         return request.client.host
     return "0.0.0.0"
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        max_age=settings.REFRESH_TOKEN_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.refresh_cookie_secure,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+        path=_REFRESH_COOKIE_PATH,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    settings = get_settings()
+    response.delete_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        httponly=True,
+        secure=settings.refresh_cookie_secure,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+        path=_REFRESH_COOKIE_PATH,
+    )
+
+
+def _refresh_token_from_request(request: Request, payload_token: str | None = None) -> str:
+    if payload_token:
+        return payload_token
+    token = request.cookies.get(get_settings().REFRESH_COOKIE_NAME)
+    if not token:
+        raise AuthenticationError("Refresh session is missing")
+    return token
+
+
+def _assert_cookie_refresh_origin(request: Request) -> None:
+    """Defense-in-depth for cookie-auth refresh/logout endpoints.
+
+    SameSite cookies block common cross-site cases, but an explicit Origin check
+    makes the boundary visible in app code and catches permissive edge mistakes.
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    allowed = set(get_settings().CORS_ORIGINS)
+    if origin not in allowed:
+        raise AuthenticationError("Refresh session origin is not allowed")
 
 
 async def _service(
@@ -64,6 +114,7 @@ async def request_login_code(
 async def verify_login_code(
     payload: LoginCodeVerify,
     request: Request,
+    response: Response,
     service: Annotated[AuthService, Depends(_service)],
 ) -> TokenResponse:
     access, refresh, expires = await service.verify_login_code(
@@ -73,29 +124,53 @@ async def verify_login_code(
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
-    return TokenResponse(access_token=access, refresh_token=refresh, expires_in=expires)
+    _set_refresh_cookie(response, refresh)
+    return TokenResponse(access_token=access, expires_in=expires)
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_tokens(
-    payload: RefreshRequest,
     request: Request,
+    response: Response,
     service: Annotated[AuthService, Depends(_service)],
+    payload: Annotated[RefreshRequest | None, Body()] = None,
 ) -> TokenResponse:
+    using_cookie = payload is None or not payload.refresh_token
+    if using_cookie:
+        _assert_cookie_refresh_origin(request)
+    refresh_token = _refresh_token_from_request(
+        request,
+        payload.refresh_token if payload is not None else None,
+    )
     access, refresh, expires = await service.refresh(
-        refresh_token=payload.refresh_token,
+        refresh_token=refresh_token,
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
-    return TokenResponse(access_token=access, refresh_token=refresh, expires_in=expires)
+    _set_refresh_cookie(response, refresh)
+    return TokenResponse(access_token=access, expires_in=expires)
 
 
 @router.post("/logout", response_model=LogoutResponse)
 async def logout(
-    payload: LogoutRequest,
+    request: Request,
+    response: Response,
     service: Annotated[AuthService, Depends(_service)],
+    payload: Annotated[LogoutRequest | None, Body()] = None,
 ) -> LogoutResponse:
-    await service.logout(payload.refresh_token)
+    try:
+        refresh_token = _refresh_token_from_request(
+            request,
+            payload.refresh_token if payload is not None else None,
+        )
+    except AuthenticationError:
+        refresh_token = None
+    if refresh_token:
+        using_cookie = payload is None or not payload.refresh_token
+        if using_cookie:
+            _assert_cookie_refresh_origin(request)
+        await service.logout(refresh_token)
+    _clear_refresh_cookie(response)
     return LogoutResponse()
 
 

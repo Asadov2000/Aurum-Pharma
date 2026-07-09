@@ -39,12 +39,16 @@ export interface Creds {
 export const DEV: Creds = { email: "dev@aurum.tj", password: "Devdev1234" };
 export const OWNER: Creds = { email: "owner@aurum.tj", password: "Owner1234" };
 
-interface TokenPair {
+export interface TokenPair {
   access_token: string;
-  refresh_token: string;
+  refresh_token?: string | null;
+  refresh_cookie?: string;
   token_type: string;
   expires_in: number;
 }
+
+const REFRESH_COOKIE_NAME = "aurum_refresh_token";
+const REFRESH_COOKIE_PATH = "/api/v1/auth";
 
 /**
  * Backend rate-limit on the email-code endpoint is 1/min, 10/hr per email.
@@ -87,15 +91,15 @@ export async function apiLogin(
     if (!verifyRes.ok()) {
       throw new Error(`/auth/login/verify → ${verifyRes.status()} ${await verifyRes.text()}`);
     }
-    return (await verifyRes.json()) as TokenPair;
+    const body = (await verifyRes.json()) as TokenPair;
+    return { ...body, refresh_cookie: verifyRes.headers()["set-cookie"] };
   }
   throw new Error(`apiLogin failed: ${lastErr}`);
 }
 
 /**
- * Drop straight into the app as the given user by injecting tokens directly
- * into localStorage — much faster than driving the login form and dodges the
- * email-code rate limit on every spec.
+ * Drop straight into the app as the given user by installing the httpOnly
+ * refresh cookie and keeping the access token in browser memory.
  */
 export async function loginInBrowser(
   page: Page,
@@ -104,16 +108,43 @@ export async function loginInBrowser(
   const api = await request.newContext();
   try {
     const tokens = await apiLogin(api, creds);
-    // Must navigate to an origin first or localStorage is unreachable.
-    await page.goto("/login", { waitUntil: "domcontentloaded" });
-    await page.evaluate((t) => {
-      window.localStorage.setItem("aurum.access_token", t.access_token);
-      window.localStorage.setItem("aurum.refresh_token", t.refresh_token);
-    }, tokens);
+    await installBrowserSession(page, tokens);
     return tokens;
   } finally {
     await api.dispose();
   }
+}
+
+export async function installBrowserSession(page: Page, tokens: TokenPair): Promise<void> {
+  const value = refreshCookieValue(tokens.refresh_cookie);
+  const apiUrl = new URL(API);
+  if (page.url() !== "about:blank") {
+    await page.goto("about:blank");
+  }
+  await page.context().clearCookies();
+  await page.context().addCookies([
+    {
+      name: REFRESH_COOKIE_NAME,
+      value,
+      domain: apiUrl.hostname,
+      path: REFRESH_COOKIE_PATH,
+      httpOnly: true,
+      secure: apiUrl.protocol === "https:",
+      sameSite: "Lax",
+    },
+  ]);
+}
+
+function refreshCookieValue(setCookieHeader: string | undefined): string {
+  if (!setCookieHeader) {
+    throw new Error("Missing refresh Set-Cookie header from /auth/login/verify");
+  }
+  const escapedName = REFRESH_COOKIE_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`(?:^|,\\s*)${escapedName}=([^;]+)`).exec(setCookieHeader);
+  if (!match?.[1]) {
+    throw new Error("Refresh Set-Cookie header does not contain aurum_refresh_token");
+  }
+  return match[1];
 }
 
 /**

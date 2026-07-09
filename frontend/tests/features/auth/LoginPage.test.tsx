@@ -75,7 +75,6 @@ describe("LoginPage", () => {
     requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: null });
     verifyLoginCode.mockResolvedValueOnce({
       access_token: "A",
-      refresh_token: "R",
       token_type: "bearer",
       expires_in: 900,
     });

@@ -1,6 +1,14 @@
 import { expect, request, test } from "@playwright/test";
 
-import { API, clearLoginRateLimit, DEV, loginInBrowser, uniqueName } from "./helpers";
+import {
+  API,
+  clearLoginRateLimit,
+  DEV,
+  installBrowserSession,
+  loginInBrowser,
+  type TokenPair,
+  uniqueName,
+} from "./helpers";
 
 // The real client-onboarding path: a developer creates a pharmacy AND its owner
 // account in one flow, then the brand-new owner logs in BY CODE (no password —
@@ -37,7 +45,7 @@ test.describe("Owner onboarding (dev)", () => {
     // ---- log in AS the new owner, BY CODE, with NO password ----
     clearLoginRateLimit(ownerEmail);
     const api = await request.newContext();
-    let tokens: { access_token: string; refresh_token: string };
+    let tokens: TokenPair;
     try {
       const codeRes = await api.post(`${API}/auth/login/code`, {
         data: { email: ownerEmail },
@@ -50,17 +58,16 @@ test.describe("Owner onboarding (dev)", () => {
         data: { email: ownerEmail, code: dev_code }, // no password — owner has none
       });
       expect(verifyRes.ok()).toBeTruthy();
-      tokens = (await verifyRes.json()) as { access_token: string; refresh_token: string };
+      tokens = {
+        ...((await verifyRes.json()) as TokenPair),
+        refresh_cookie: verifyRes.headers()["set-cookie"],
+      };
     } finally {
       await api.dispose();
     }
 
     // ---- land on the owner's own workspace ----
-    await page.goto("/login");
-    await page.evaluate((t) => {
-      window.localStorage.setItem("aurum.access_token", t.access_token);
-      window.localStorage.setItem("aurum.refresh_token", t.refresh_token);
-    }, tokens);
+    await installBrowserSession(page, tokens);
     await page.goto("/");
 
     // The «Владелец» role gives the full owner permission set → tenant items
