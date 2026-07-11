@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/v1", tags=["roles"])
 
 
 async def _service(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> RolesService:
     return RolesService(RolesRepository(db), redis=redis)

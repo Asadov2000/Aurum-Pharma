@@ -46,7 +46,9 @@ from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> FoundationService:
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> FoundationService:
     return FoundationService(FoundationRepository(db))
 
 
@@ -142,7 +144,7 @@ async def create_tenant_owner(
     payload: OwnerCreate,
     user: Annotated[CurrentUser, Depends(require_support)],
     service: Annotated[FoundationService, Depends(_service)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> OwnerProvisionRead:
     """Onboard the first owner of a tenant: create the owner account, instantiate
     the tenant «Владелец» role from the global template, and assign it — all in

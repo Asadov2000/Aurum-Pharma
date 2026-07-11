@@ -20,7 +20,9 @@ from app.domains.audit.service import AuditService
 router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> AuditService:
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> AuditService:
     return AuditService(AuditRepository(db))
 
 

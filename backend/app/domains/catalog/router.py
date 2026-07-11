@@ -42,7 +42,9 @@ from app.domains.catalog.service import CatalogService, new_import_object_name
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> CatalogService:
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> CatalogService:
     return CatalogService(CatalogRepository(db))
 
 

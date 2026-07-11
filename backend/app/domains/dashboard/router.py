@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
 async def _service(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> DashboardService:
     return DashboardService(DashboardRepository(db), redis=redis)

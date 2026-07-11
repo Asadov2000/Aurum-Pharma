@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
 
 async def _service(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> NotificationsService:
     return NotificationsService(NotificationsRepository(db))
 

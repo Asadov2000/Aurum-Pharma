@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/v1/batches", tags=["inventory"])
 
 
 async def _service(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> InventoryService:
     return InventoryService(InventoryRepository(db))
 

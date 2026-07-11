@@ -26,7 +26,9 @@ from app.domains.incoming.service import IncomingService
 router = APIRouter(prefix="/api/v1/incoming", tags=["incoming"])
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> IncomingService:
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> IncomingService:
     return IncomingService(IncomingRepository(db))
 
 

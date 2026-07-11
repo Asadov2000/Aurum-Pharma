@@ -50,7 +50,9 @@ from app.domains.pos.service import POSService
 router = APIRouter(prefix="/api/v1", tags=["pos"])
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> POSService:
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> POSService:
     return POSService(POSRepository(db))
 
 

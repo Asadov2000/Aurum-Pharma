@@ -21,7 +21,9 @@ from app.domains.onboarding.service import OnboardingService
 router = APIRouter(prefix="/api/v1/onboarding", tags=["onboarding"])
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> OnboardingService:
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> OnboardingService:
     return OnboardingService(OnboardingRepository(db))
 
 

@@ -25,7 +25,9 @@ from app.domains.suppliers.service import SuppliersService
 router = APIRouter(prefix="/api/v1/suppliers", tags=["suppliers"])
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> SuppliersService:
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> SuppliersService:
     return SuppliersService(SuppliersRepository(db))
 
 

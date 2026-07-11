@@ -30,7 +30,9 @@ from app.domains.billing.schemas import (
 from app.domains.billing.service import BillingService
 
 
-async def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> BillingService:
+async def _service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> BillingService:
     return BillingService(BillingRepository(db))
 
 

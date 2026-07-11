@@ -27,6 +27,11 @@ from app.core.security import decode_access_token
 
 
 async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
+    """Yield an RLS-scoped transaction that must finish before the response.
+
+    Always inject this dependency with ``scope="function"`` so the transaction
+    commits before a client can issue a follow-up request.
+    """
     tenant_id = getattr(request.state, "tenant_id", None)
     user_id = getattr(request.state, "user_id", None)
     is_support = bool(getattr(request.state, "is_support_session", False))
@@ -110,7 +115,7 @@ class CurrentUser:
 
 
 async def current_user(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
     redis: Annotated[Redis, Depends(get_redis)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentUser:
@@ -215,7 +220,7 @@ def require_any_permission(*codes: str):  # type: ignore[no-untyped-def]
 
 async def require_writable_tenant(
     user: Annotated[CurrentUser, Depends(current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> CurrentUser:
     """Block mutating endpoints when the tenant is read-only.
 

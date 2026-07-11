@@ -85,7 +85,7 @@ def _assert_cookie_refresh_origin(request: Request) -> None:
 
 
 async def _service(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> AuthService:
     return AuthService(AuthRepository(db), redis=redis)
