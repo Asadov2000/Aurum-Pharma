@@ -444,8 +444,7 @@ class POSRepository:
 
         params["limit"] = page_size
         params["offset"] = (page - 1) * page_size
-        rows_sql = text(
-            f"""
+        rows_sql = text(f"""
             SELECT
               s.id, s.receipt_number, s.completed_at, s.status,
               s.total_amount, s.currency, s.parent_sale_id,
@@ -484,8 +483,7 @@ class POSRepository:
             WHERE {where}
             ORDER BY s.completed_at DESC
             LIMIT :limit OFFSET :offset
-            """
-        )
+            """)
         rows = (await self.session.execute(rows_sql, params)).mappings().all()
         return [dict(r) for r in rows], total
 
@@ -531,8 +529,7 @@ class POSRepository:
         fwd_done = f"{where} AND s.sale_type = 'sale'"
 
         # --- detail rows: every receipt in range, any status/type ---
-        rows_sql = text(
-            f"""
+        rows_sql = text(f"""
             SELECT
               s.completed_at, s.receipt_number, s.status, s.sale_type,
               s.total_amount AS gross, s.currency,
@@ -551,13 +548,11 @@ class POSRepository:
             LEFT JOIN app_user u ON u.id = s.cashier_user_id
             WHERE {where}
             ORDER BY s.completed_at ASC
-            """
-        )
+            """)
         rows = [dict(r) for r in (await self.session.execute(rows_sql, params)).mappings().all()]
 
         # --- headline totals ---
-        totals_sql = text(
-            f"""
+        totals_sql = text(f"""
             SELECT
               COALESCE(SUM(s.total_amount) FILTER (
                 WHERE s.sale_type = 'sale'), 0) AS gross_sales,
@@ -566,22 +561,18 @@ class POSRepository:
               COUNT(*) FILTER (WHERE s.sale_type = 'sale') AS sales_count,
               COUNT(*) FILTER (WHERE s.sale_type = 'return') AS returns_count
             FROM sale s WHERE {where}
-            """
-        )
+            """)
         t = (await self.session.execute(totals_sql, params)).mappings().one()
 
-        disc_sql = text(
-            f"""
+        disc_sql = text(f"""
             SELECT COALESCE(SUM(si.discount_amount), 0) AS d
             FROM sale_item si JOIN sale s ON s.id = si.sale_id
             WHERE {fwd_done}
-            """
-        )
+            """)
         total_discounts = (await self.session.execute(disc_sql, params)).scalar_one()
 
         # --- payment breakdown over forward sales (completed + voided) ---
-        bd_sql = text(
-            f"""
+        bd_sql = text(f"""
             SELECT method, COALESCE(SUM(amt), 0) AS total FROM (
               SELECT s.total_amount AS amt,
                      CASE WHEN COUNT(DISTINCT p.payment_method) > 1 THEN 'mixed'
@@ -590,8 +581,7 @@ class POSRepository:
               WHERE {fwd_done}
               GROUP BY s.id, s.total_amount
             ) q GROUP BY method
-            """
-        )
+            """)
         breakdown: dict[str, Decimal] = {
             "cash": Decimal("0"),
             "card": Decimal("0"),
@@ -636,8 +626,7 @@ class POSRepository:
             params["branch"] = str(branch_id)
         where = " AND ".join(clauses)
 
-        sql = text(
-            f"""
+        sql = text(f"""
             SELECT
               tc.brand_name AS name,
               tc.inn AS inn,
@@ -654,6 +643,5 @@ class POSRepository:
                      b.batch_number, b.expires_at, b.purchase_price, b.currency
             HAVING SUM(bm.qty_delta) > 0
             ORDER BY tc.brand_name NULLS LAST, b.expires_at
-            """
-        )
+            """)
         return [dict(r) for r in (await self.session.execute(sql, params)).mappings().all()]
