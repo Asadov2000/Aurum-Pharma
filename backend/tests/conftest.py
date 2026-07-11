@@ -15,7 +15,9 @@ which overrides `get_db` to share the same in-flight SAVEPOINT.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
+from urllib.parse import urlparse
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -29,13 +31,37 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from app.core.config import get_settings
-from app.core.deps import get_redis
-from app.main import app
+_LOCAL_TEST_DATABASE_URL_APP = (
+    "postgresql+asyncpg://aurum_app:aurum_app_pw@postgres-test:5432/aurum_test"
+)
+_LOCAL_TEST_DATABASE_URL_SUPPORT = (
+    "postgresql+asyncpg://aurum_support:aurum_support_pw@postgres-test:5432/aurum_test"
+)
+
+
+def _require_disposable_test_database(url: str, variable_name: str) -> None:
+    database_name = urlparse(url).path.removeprefix("/")
+    if not database_name.endswith("_test"):
+        raise RuntimeError(f"{variable_name} must point to a database ending in '_test'")
+
+
+_test_database_url_app = os.getenv("TEST_DATABASE_URL_APP", _LOCAL_TEST_DATABASE_URL_APP)
+_test_database_url_support = os.getenv(
+    "TEST_DATABASE_URL_SUPPORT", _LOCAL_TEST_DATABASE_URL_SUPPORT
+)
+_require_disposable_test_database(_test_database_url_app, "TEST_DATABASE_URL_APP")
+_require_disposable_test_database(_test_database_url_support, "TEST_DATABASE_URL_SUPPORT")
+
+# Configure the application before importing it: every engine created during
+# test collection must point at the disposable test database, never shared dev.
+os.environ["DATABASE_URL_APP"] = _test_database_url_app
+os.environ["DATABASE_URL_SUPPORT"] = _test_database_url_support
 
 
 @pytest_asyncio.fixture
 async def db_engine() -> AsyncIterator[AsyncEngine]:
+    from app.core.config import get_settings
+
     settings = get_settings()
     engine = create_async_engine(
         settings.DATABASE_URL_SUPPORT,
@@ -85,6 +111,10 @@ async def redis() -> AsyncIterator[Redis]:
     Also overrides FastAPI's `get_redis` dependency so HTTP handlers in the
     same test reuse the same client (otherwise they'd hit the module-level
     `redis_client` which keeps state across test loops)."""
+    from app.core.config import get_settings
+    from app.core.deps import get_redis
+    from app.main import app
+
     settings = get_settings()
     client = from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
 
@@ -107,6 +137,8 @@ async def redis() -> AsyncIterator[Redis]:
 
 @pytest_asyncio.fixture
 async def client(redis: Redis) -> AsyncIterator[AsyncClient]:
+    from app.main import app
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac

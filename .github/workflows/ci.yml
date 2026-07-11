@@ -6,10 +6,30 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
-    name: Backend (ruff, black, mypy, pytest)
+    name: Backend quality gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+      ENVIRONMENT: development
+      DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
+      DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
+      TEST_DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
+      TEST_DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-only-secret-do-not-use-outside-tests-123456
+      CORS_ORIGINS: '["http://localhost:5173"]'
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
 
     services:
       postgres:
@@ -21,10 +41,10 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres"
+          --health-cmd "pg_isready -U postgres -d aurum_test"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 20
       redis:
         image: redis:7-alpine
         ports:
@@ -33,14 +53,15 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     defaults:
       run:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
@@ -50,8 +71,34 @@ jobs:
       - name: Install Poetry
         run: pipx install poetry==1.8.4
 
-      - name: Install dependencies
-        run: poetry install --no-root --with dev
+      - name: Cache Poetry environment
+        uses: actions/cache@v4
+        with:
+          path: backend/.venv
+          key: ${{ runner.os }}-python-3.12-poetry-${{ hashFiles('backend/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-python-3.12-poetry-
+
+      - name: Validate dependency lock
+        run: poetry check --lock
+
+      - name: Install locked dependencies
+        run: poetry install --no-root --with dev --sync
+
+      - name: Create PostgreSQL app and support roles
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+        run: |
+          test -n "$POSTGRES_SERVICE_ID"
+          docker exec -i \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_DB=aurum_test \
+            -e AURUM_APP_PASSWORD=aurum_app_pw \
+            -e AURUM_SUPPORT_PASSWORD=aurum_support_pw \
+            "$POSTGRES_SERVICE_ID" sh -s < ../infra/postgres/init.sh
+
+      - name: Apply migrations
+        run: poetry run alembic upgrade head
 
       - name: Ruff
         run: poetry run ruff check app tests
@@ -63,27 +110,20 @@ jobs:
         run: poetry run mypy app
 
       - name: Pytest
-        env:
-          ENVIRONMENT: development
-          DATABASE_URL_APP: postgresql+asyncpg://postgres:postgres@localhost:5432/aurum_test
-          DATABASE_URL_SUPPORT: postgresql+asyncpg://postgres:postgres@localhost:5432/aurum_test
-          REDIS_URL: redis://localhost:6379/0
-          JWT_SECRET: ci-test-secret-do-not-use-in-prod
-          CORS_ORIGINS: '["http://localhost:5173"]'
-          MINIO_ACCESS_KEY: minioadmin
-          MINIO_SECRET_KEY: minioadmin
-        run: poetry run pytest tests/ -v
+        run: poetry run pytest tests/ -q
 
   frontend:
-    name: Frontend (typecheck, lint)
+    name: Frontend quality gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     defaults:
       run:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -94,12 +134,113 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
-      - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck
         run: pnpm typecheck
 
       - name: Lint
         run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+  e2e:
+    name: Chromium E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [backend, frontend]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Prepare development environment
+        run: cp .env.example .env
+
+      - name: Start isolated application stack
+        run: |
+          docker compose up -d --build postgres redis minio backend frontend
+          docker compose ps
+
+      - name: Migrate and seed disposable E2E database
+        run: |
+          docker compose exec -T backend alembic upgrade head
+          docker compose exec -T -e AURUM_E2E_SEED=1 backend python -m app.seed_e2e
+          docker compose exec -T backend python -m app.seed_demo
+
+      - name: Restart frontend and wait for HTTP readiness
+        shell: bash
+        run: |
+          docker compose restart frontend
+
+          wait_for_url() {
+            local name="$1"
+            local url="$2"
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent --show-error "$url" > /dev/null; then
+                echo "$name is ready"
+                return 0
+              fi
+              if [ "$attempt" -eq 60 ]; then
+                echo "$name did not become ready: $url"
+                return 1
+              fi
+              sleep 2
+            done
+          }
+
+          wait_for_url "Backend" "http://localhost:8000/healthz"
+          wait_for_url "Frontend" "http://localhost:5173"
+
+      - name: Run Playwright E2E
+        working-directory: frontend
+        env:
+          CI: "true"
+        run: pnpm e2e
+
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=250 postgres redis minio backend frontend
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop isolated application stack
+        if: always()
+        run: docker compose down -v --remove-orphans

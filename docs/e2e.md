@@ -77,17 +77,16 @@ pnpm exec playwright test e2e/pos-sale.spec.ts --reporter=list
   проверяют глобальное состояние БД. Скриншот + видео + trace сохраняются
   **только при падении**.
 - **`e2e/global-setup.ts`** — один раз перед всеми тестами:
-  1. назначает `owner@aurum.tj` системную роль **owner** в Demo Pharmacy
-     (без этого все tenant-scoped операции отдают 403 — у owner не было
-     ни одной `user_assignment`);
+  1. проверяет активное назначение tenant-роли **«Владелец»** для
+     `owner@aurum.tj` в Demo Pharmacy;
   2. кэширует UUID тенанта в `E2E_TENANT_ID`;
   3. **сбрасывает Redis** (`auth:perms:*`) — иначе owner может войти в
      устаревший пустой permission-кэш с TTL 5 мин и получать 403;
   4. чистит rate-limit на логин-код.
 - **`e2e/helpers.ts`** — общие утилиты:
   - `apiLogin()` — логин через API (быстрее формы, обходит rate-limit);
-  - `loginInBrowser()` — инъекция токенов прямо в `localStorage`, чтобы
-    не гонять форму в каждом тесте;
+  - `loginInBrowser()` — устанавливает защищённую `httpOnly` refresh-cookie;
+    access-токен остаётся только в памяти приложения;
   - `clearLoginRateLimit()` — чистит оба бакета (1/мин и 10/час), которые
     бэкенд проверяет на `/auth/login/code`;
   - `seedBranch / seedRegister / seedSupplier / seedCatalogItem /
