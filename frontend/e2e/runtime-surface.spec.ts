@@ -124,17 +124,12 @@ test.describe("Runtime surface", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await loginInBrowser(page, OWNER);
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("runtime-surface-badge")).toBeVisible();
     await expect(page.getByTestId("offline-status-banner")).toHaveCount(0);
     await expect(page.getByTestId("server-status-banner")).toHaveCount(0);
 
     try {
-      await page.evaluate(() => {
-        Object.defineProperty(window.navigator, "onLine", {
-          configurable: true,
-          value: false,
-        });
-        window.dispatchEvent(new Event("offline"));
-      });
+      await page.context().setOffline(true);
 
       const banner = page.getByTestId("offline-status-banner");
       await expect(banner).toBeVisible();
@@ -143,13 +138,7 @@ test.describe("Runtime surface", () => {
         page.locator("main#main-content").getByTestId("offline-status-banner"),
       ).toHaveCount(0);
     } finally {
-      await page.evaluate(() => {
-        Object.defineProperty(window.navigator, "onLine", {
-          configurable: true,
-          value: true,
-        });
-        window.dispatchEvent(new Event("online"));
-      });
+      await page.context().setOffline(false);
     }
   });
 });

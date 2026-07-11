@@ -1,7 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Run against the real docker-compose stack: frontend on 5173, backend on 8000.
-// Both must be up before `pnpm e2e` — see docs/e2e.md.
+const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
+
+// Defaults target the local dev stack. `pnpm e2e:isolated` overrides the URLs
+// and Docker container IDs so tests never mutate shared development data.
 export default defineConfig({
   testDir: "./e2e",
   // Generous timeouts: the dev Vite server in Docker can take several
@@ -18,7 +20,7 @@ export default defineConfig({
   retries: 2,
   reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL,
     // Backend API base; helpers use it directly for seed.
     extraHTTPHeaders: {},
     actionTimeout: 15_000,

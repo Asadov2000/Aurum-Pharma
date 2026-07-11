@@ -47,16 +47,24 @@ E2E (сквозные браузерные тесты) запускаются с
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1 -RunE2E
 ```
 
-Причина: `frontend/e2e/global-setup.ts` использует Docker CLI, а Playwright
-браузеры должны запускаться на хосте. Скрипт запускает
-`frontend/node_modules/.bin/playwright.cmd` напрямую, без автопереустановки
-зависимостей перед тестами. Поэтому перед E2E на хосте должны быть установлены
+После проверки общей dev-среды параметр `-RunE2E` поднимает отдельный стек
+`aurum-e2e-local`, выполняет тесты и в блоке `finally` удаляет только его
+контейнеры и тома. Общая dev-БД и Redis при этом не изменяются.
+
+Playwright и браузер запускаются на хосте, поэтому там должны быть установлены
 зависимости frontend:
 
 ```powershell
 cd frontend
 pnpm install
 pnpm exec playwright install chromium
+```
+
+Только изолированный E2E без предварительной smoke-проверки:
+
+```powershell
+cd frontend
+pnpm e2e:isolated
 ```
 
 ## Что означает ошибка по базовым seed-аккаунтам

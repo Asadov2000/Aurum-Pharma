@@ -5,7 +5,7 @@ import {
   request,
 } from "@playwright/test";
 
-import { dockerExec } from "./docker";
+import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
 
 export const API = process.env.E2E_API_URL ?? "http://localhost:8000/api/v1";
 
@@ -27,7 +27,15 @@ export function clearLoginRateLimit(email: string): void {
   const sql =
     `DELETE FROM email_code WHERE email_lower=${emailLiteral}; ` +
     `DELETE FROM login_attempt WHERE email_lower=${emailLiteral} AND outcome IN ('blocked','code_requested');`;
-  dockerExec("aurum-postgres", ["psql", "-U", "postgres", "-d", "aurum", "-c", sql]);
+  dockerExec(E2E_POSTGRES_CONTAINER, [
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    E2E_POSTGRES_DB,
+    "-c",
+    sql,
+  ]);
 }
 export const TENANT_ID = process.env.E2E_TENANT_ID ?? "";
 

@@ -1,0 +1,108 @@
+x-backend-environment: &backend-environment
+  ENVIRONMENT: development
+  DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@postgres:5432/aurum
+  DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/aurum
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: e2e-only-secret-do-not-use-outside-tests-123456
+  CORS_ORIGINS: '["http://localhost:15173"]'
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
+  MINIO_BUCKET: aurum
+  MINIO_SECURE: "false"
+  PYTHONPATH: /app
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aurum
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      AURUM_APP_PASSWORD: aurum_app_pw
+      AURUM_SUPPORT_PASSWORD: aurum_support_pw
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aurum"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: "no"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: "no"
+
+  backend:
+    image: aurum-pharma-e2e-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment: *backend-environment
+    ports:
+      - "18000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    restart: "no"
+
+  celery-worker:
+    image: aurum-pharma-e2e-celery-worker:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=warning
+    restart: "no"
+
+  frontend:
+    image: aurum-pharma-e2e-frontend:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_URL: http://localhost:18000/api/v1
+    ports:
+      - "15173:5173"
+    command: pnpm dev --host 0.0.0.0
+    restart: "no"
+
+volumes:
+  postgres-data:
+  minio-data:

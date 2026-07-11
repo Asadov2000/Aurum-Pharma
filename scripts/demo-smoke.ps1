@@ -218,25 +218,13 @@ if ($RunE2E) {
         Stop-Smoke "Playwright CLI is not installed on the host. Run: cd frontend; pnpm install; pnpm exec playwright install chromium"
     }
 
-    Invoke-Checked "Restarting frontend before E2E" @("docker", "compose", "restart", "frontend")
-    Wait-HttpOk "Frontend after restart" "http://localhost:5173"
-
-    Write-Step "Running Playwright E2E from host"
-    Push-Location "frontend"
-    $previousCi = $env:CI
-    try {
-        $env:CI = "true"
-        Invoke-Checked "Playwright E2E" @($playwrightCmd, "test", "--reporter=list")
-    }
-    finally {
-        if ($null -eq $previousCi) {
-            Remove-Item Env:\CI -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:CI = $previousCi
-        }
-        Pop-Location
-    }
+    $isolatedE2E = Join-Path $RepoRoot "scripts\e2e-isolated.ps1"
+    Invoke-Checked "Running Playwright E2E in a disposable stack" @(
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $isolatedE2E
+    )
 }
 else {
     Write-Host ""

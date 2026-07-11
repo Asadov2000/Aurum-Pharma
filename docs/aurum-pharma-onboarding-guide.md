@@ -278,9 +278,8 @@ docker compose exec frontend pnpm build
 E2E:
 
 ```powershell
-docker compose restart frontend
 cd frontend
-pnpm e2e
+pnpm e2e:isolated
 ```
 
 Что покрыто E2E:
@@ -295,7 +294,7 @@ pnpm e2e
 - report exports;
 - PWA/runtime/desktop bridge.
 
-Риск: CI сейчас не запускает весь frontend test/build и Playwright E2E. Это надо усилить до релиза.
+CI запускает backend quality gate, frontend test/build и полный Playwright E2E. Локальный E2E использует отдельный одноразовый стек и не загрязняет dev-БД.
 
 Ещё один фронтенд-риск: отчёт по списаниям в `ReportsPage` ожидает отдельный backend endpoint. Это не блокирует текущие продажи, но важно для полного отчётного контура.
 
@@ -333,7 +332,7 @@ pnpm e2e
 Обязательное перед пилотом:
 
 1. Прогнать полный checklist на чистой/staging среде.
-2. Усилить CI: frontend unit tests, frontend build, Playwright E2E, миграции.
+2. Сделать зелёные CI-проверки обязательными для `main` и каждого релизного тега.
 3. Подключить реальную SMTP-доставку login/invite кодов.
 4. Настроить production secrets: JWT, DB, MinIO, Redis, CORS, TLS.
 5. Настроить backup/restore PostgreSQL и MinIO.

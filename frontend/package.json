@@ -12,6 +12,7 @@
     "format": "prettier --write .",
     "test": "vitest run tests",
     "e2e": "playwright test --reporter=list",
+    "e2e:isolated": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/e2e-isolated.ps1",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"
   },

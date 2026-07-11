@@ -13,15 +13,21 @@
 // 2. Resolve and cache the Demo tenant UUID for downstream specs via
 //    process.env.E2E_TENANT_ID.
 
-import { assertDockerAvailable, dockerExec } from "./docker";
+import {
+  assertDockerAvailable,
+  dockerExec,
+  E2E_POSTGRES_CONTAINER,
+  E2E_POSTGRES_DB,
+  E2E_REDIS_CONTAINER,
+} from "./docker";
 
 function psql(sql: string): string {
-  return dockerExec("aurum-postgres", [
+  return dockerExec(E2E_POSTGRES_CONTAINER, [
     "psql",
     "-U",
     "postgres",
     "-d",
-    "aurum",
+    E2E_POSTGRES_DB,
     "-At",
     "-c",
     sql,
@@ -64,7 +70,7 @@ export default async function globalSetup(): Promise<void> {
   // (before we created the user_assignment in step 1) and 403 on every
   // tenant-scoped write.
   try {
-    dockerExec("aurum-redis", ["redis-cli", "FLUSHDB"]);
+    dockerExec(E2E_REDIS_CONTAINER, ["redis-cli", "FLUSHDB"]);
   } catch {
     // Redis container not running — most specs will fail later anyway.
   }

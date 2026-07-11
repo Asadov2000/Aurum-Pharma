@@ -1,8 +1,13 @@
 import { execFileSync, spawnSync } from "node:child_process";
 
+export const E2E_POSTGRES_CONTAINER =
+  process.env.E2E_POSTGRES_CONTAINER ?? "aurum-postgres";
+export const E2E_REDIS_CONTAINER = process.env.E2E_REDIS_CONTAINER ?? "aurum-redis";
+export const E2E_POSTGRES_DB = process.env.E2E_POSTGRES_DB ?? "aurum";
+
 const hostOnlyMessage = [
   "E2E tests must be started from the host machine, not from the frontend container.",
-  "Run: cd frontend && pnpm e2e",
+  "Run: cd frontend && pnpm e2e:isolated",
   "Reason: global setup seeds Docker Postgres/Redis containers with `docker exec`,",
   "and the frontend Alpine container intentionally does not include Docker CLI.",
 ].join("\n");

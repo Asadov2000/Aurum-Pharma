@@ -24,17 +24,8 @@ docker-стека** — без моков. Это safety-net перед депл
 
 ## Предусловия
 
-1. Поднят весь стек:
-   ```bash
-   docker compose up -d
-   docker compose ps   # running; healthcheck есть не у всех сервисов
-   ```
-2. Бэкенд в режиме `ENVIRONMENT=development` — тогда `/auth/login/code`
-   возвращает `dev_code` в ответе, и тесты логинятся без чтения почты.
-3. В БД есть базовый dev-seed: пользователи `dev@aurum.tj`,
-   `admin@aurum.tj`, `owner@aurum.tj`, активный demo-тенант «Аптека Шифо»
-   или «Demo Pharmacy».
-4. Зависимости фронта установлены на **хосте** (не в контейнере — Alpine
+1. Docker Desktop запущен, порты `15173` и `18000` свободны.
+2. Зависимости фронта установлены на **хосте** (не в контейнере — Alpine
    не поддерживается Playwright):
    ```bash
    cd frontend
@@ -42,21 +33,23 @@ docker-стека** — без моков. Это safety-net перед депл
    pnpm exec playwright install chromium
    ```
 
-## Запуск
-
-```bash
-cd frontend
-pnpm e2e            # headless, reporter=list
-pnpm e2e:ui         # интерактивный UI-режим Playwright
-pnpm e2e:report     # открыть HTML-отчёт после прогона
-```
-
-Если host-`pnpm` пытается переустановить зависимости перед тестами, запускай
-Playwright напрямую:
+## Безопасный локальный запуск
 
 ```powershell
 cd frontend
-.\node_modules\.bin\playwright.cmd test --reporter=list
+pnpm e2e:isolated
+```
+
+Команда поднимает отдельный Docker Compose проект `aurum-e2e-local`, применяет
+миграции, создаёт seed-данные, запускает 28 тестов и в любом случае удаляет его
+контейнеры и тома. Используются отдельные порты: frontend `15173`, backend
+`18000`; общая dev-БД и dev-Redis не затрагиваются.
+
+HTML-отчёт после прогона:
+
+```powershell
+cd frontend
+pnpm e2e:report
 ```
 
 На Windows можно запустить E2E вместе с локальной smoke-проверкой:
@@ -65,14 +58,32 @@ cd frontend
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1 -RunE2E
 ```
 
-Один конкретный файл:
+## Прямой запуск по выбранной среде
+
+`pnpm e2e` и `pnpm e2e:ui` используют адреса dev-стека по умолчанию. Такой
+запуск создаёт тестовые записи в выбранной БД и очищает выбранную Redis DB,
+поэтому локально предпочитай `pnpm e2e:isolated`. Прямой режим нужен CI и
+осознанной диагностике уже поднятой одноразовой среды.
+
+Переменные прямого режима:
+
+| Переменная | Значение по умолчанию |
+|---|---|
+| `E2E_BASE_URL` | `http://localhost:5173` |
+| `E2E_API_URL` | `http://localhost:8000/api/v1` |
+| `E2E_POSTGRES_CONTAINER` | `aurum-postgres` |
+| `E2E_POSTGRES_DB` | `aurum` |
+| `E2E_REDIS_CONTAINER` | `aurum-redis` |
+
+Один конкретный файл в прямом режиме:
+
 ```bash
 pnpm exec playwright test e2e/pos-sale.spec.ts --reporter=list
 ```
 
 ## Как это устроено
 
-- **`playwright.config.ts`** — `baseURL=http://localhost:5173`, один воркер
+- **`playwright.config.ts`** — `baseURL` берётся из `E2E_BASE_URL`, один воркер
   (`workers: 1`, `fullyParallel: false`), потому что POS/inventory-тесты
   проверяют глобальное состояние БД. Скриншот + видео + trace сохраняются
   **только при падении**.
@@ -92,9 +103,10 @@ pnpm exec playwright test e2e/pos-sale.spec.ts --reporter=list
   - `seedBranch / seedRegister / seedSupplier / seedCatalogItem /
     seedAcceptedBatch` — создают данные **через API** (UI для setup'а
     медленный и хрупкий).
-- **Изоляция:** каждый тест создаёт свои данные с уникальными именами
-  (`uniqueName()` = префикс + timestamp). `afterAll` ничего не удаляет —
-  работаем аддитивно, детерминизм не страдает.
+- **Изоляция:** локальный сценарий создаёт одноразовые БД, Redis и MinIO. Внутри
+  одного прогона каждый тест создаёт данные с уникальными именами
+  (`uniqueName()` = префикс + timestamp), а после прогона весь одноразовый стек
+  удаляется.
 
 ## Известные ограничения
 
@@ -102,9 +114,9 @@ pnpm exec playwright test e2e/pos-sale.spec.ts --reporter=list
   понадобится кросс-браузерность.
 - **Запуск с хоста, не из контейнера.** Контейнер фронта на Alpine (musl),
   а Playwright-браузеры собраны под glibc.
-- **Rate-limit на логин** требует прямого доступа к Postgres через
-  `docker exec aurum-postgres psql` — тесты предполагают, что контейнер
-  называется `aurum-postgres` (имя из docker-compose).
+- **Rate-limit на логин** требует Docker CLI на хосте: global setup выполняет
+  `docker exec` в контейнерах Postgres и Redis. Имена контейнеров задаются через
+  `E2E_POSTGRES_CONTAINER` и `E2E_REDIS_CONTAINER`.
 
 ## Найденные и починенные баги
 
