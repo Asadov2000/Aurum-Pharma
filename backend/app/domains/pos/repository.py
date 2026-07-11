@@ -7,10 +7,11 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, distinct, func, literal, select, text
+from sqlalchemy import BigInteger, and_, case, cast, distinct, func, literal, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import local_day_range
+from app.domains.foundation.models import Register
 from app.domains.inventory.models import Batch
 from app.domains.pos.models import (
     PrescriptionLog,
@@ -32,6 +33,17 @@ class POSRepository:
             select(Shift)
             .where(and_(Shift.register_id == register_id, Shift.status == "open"))
             .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def lock_open_shift_for_register(self, register_id: UUID) -> Shift | None:
+        stmt = (
+            select(Shift)
+            .where(and_(Shift.register_id == register_id, Shift.status == "open"))
+            .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -61,6 +73,16 @@ class POSRepository:
     async def get_shift(self, shift_id: UUID) -> Shift | None:
         return await self.session.get(Shift, shift_id)
 
+    async def lock_shift(self, shift_id: UUID) -> Shift | None:
+        stmt = (
+            select(Shift)
+            .where(Shift.id == shift_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def update_shift(self, shift: Shift, **fields: Any) -> Shift:
         for k, v in fields.items():
             setattr(shift, k, v)
@@ -79,6 +101,37 @@ class POSRepository:
 
     async def get_sale(self, sale_id: UUID) -> Sale | None:
         return await self.session.get(Sale, sale_id)
+
+    async def lock_sale(self, sale_id: UUID) -> Sale | None:
+        stmt = (
+            select(Sale)
+            .where(Sale.id == sale_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_sale_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> Sale | None:
+        stmt = select(Sale).where(
+            Sale.tenant_id == tenant_id,
+            Sale.operation_id == operation_id,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def lock_operation_id(self, operation_id: UUID) -> None:
+        await self.session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(" "hashtextextended(CAST(:operation_id AS TEXT), 0))"
+            ),
+            {"operation_id": str(operation_id)},
+        )
 
     async def update_sale(self, sale: Sale, **fields: Any) -> Sale:
         for k, v in fields.items():
@@ -182,23 +235,54 @@ class POSRepository:
 
     # -------- receipt / aggregations --------
 
-    async def next_receipt_number(self, shift_id: UUID) -> str:
-        """Sequential per shift: count of completed sales in this shift + 1.
-        Padded to 6 digits so the string sorts."""
-        stmt = (
-            select(func.count())
-            .select_from(Sale)
-            .where(
-                and_(
-                    Sale.shift_id == shift_id,
-                    Sale.status == "completed",
-                    Sale.receipt_number.is_not(None),
-                )
-            )
+    async def allocate_receipt_number(self, register_id: UUID) -> tuple[int, str] | None:
+        """Allocate a register-wide number while holding the register row lock.
+
+        Historical demo data may have reset receipt_number on every shift. The
+        internal receipt_seq was backfilled uniquely, while numeric legacy
+        numbers are also considered so a newly displayed number never reuses
+        one of them.
+        """
+        register_stmt = select(Register.id).where(Register.id == register_id).with_for_update()
+        register_id_result = await self.session.execute(register_stmt)
+        if register_id_result.scalar_one_or_none() is None:
+            return None
+
+        numeric_receipt = case(
+            (
+                Sale.receipt_number.op("~")(r"^[0-9]{1,18}$"),
+                cast(Sale.receipt_number, BigInteger),
+            ),
+            else_=0,
         )
-        result = await self.session.execute(stmt)
-        n = int(result.scalar_one()) + 1
-        return f"{n:06d}"
+        stmt = select(
+            func.greatest(
+                func.coalesce(func.max(Sale.receipt_seq), 0),
+                func.coalesce(func.max(numeric_receipt), 0),
+            )
+            + 1
+        ).where(Sale.register_id == register_id)
+        seq = int((await self.session.execute(stmt)).scalar_one())
+        return seq, f"{seq:06d}"
+
+    async def refunded_quantities(self, parent_sale_id: UUID) -> dict[UUID, Decimal]:
+        stmt = (
+            select(SaleItem.parent_sale_item_id, func.sum(SaleItem.qty))
+            .join(Sale, Sale.id == SaleItem.sale_id)
+            .where(
+                Sale.parent_sale_id == parent_sale_id,
+                Sale.sale_type == "return",
+                Sale.status == "completed",
+                SaleItem.parent_sale_item_id.is_not(None),
+            )
+            .group_by(SaleItem.parent_sale_item_id)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {
+            parent_item_id: Decimal(str(qty))
+            for parent_item_id, qty in rows
+            if parent_item_id is not None
+        }
 
     async def shift_totals(self, shift_id: UUID) -> dict[str, Any]:
         """Aggregates payments grouped by method for sales in this shift,

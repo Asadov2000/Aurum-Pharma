@@ -46,6 +46,7 @@ export interface RefundLine {
 }
 
 export interface RefundPayload {
+  operation_id: string;
   items: RefundLine[];
   reason?: string | null;
   comment?: string | null;

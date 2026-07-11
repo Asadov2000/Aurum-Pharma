@@ -53,6 +53,8 @@ async def test_partial_refund_does_not_void_parent(db_session: AsyncSession, pos
     assert ret.sale_type == "return"
     assert ret.parent_sale_id == parent.id
     assert ret.status == "completed"
+    return_items = await POSRepository(db_session).list_items(ret.id)
+    assert return_items[0].parent_sale_item_id == item.id
 
     # Parent stays completed — partial refund
     await db_session.refresh(parent)
@@ -84,6 +86,40 @@ async def test_full_refund_voids_parent(db_session: AsyncSession, pos_scaffold) 
     assert parent.voided_by_sale_id == ret.id
 
 
+async def test_voided_sale_receipt_number_is_never_reused(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, s, parent, item = await _open_shift_and_sell(db_session, pos_scaffold, qty=2)
+    returned = await service.refund(
+        parent_sale_id=parent.id,
+        items=[(item.id, item.qty)],
+        reason="full return",
+        comment=None,
+        cashier_user_id=s["cashier"].id,
+    )
+
+    next_sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=next_sale.id,
+        catalog_id=s["item"].id,
+        qty=Decimal("1"),
+    )
+    await service.add_payment(
+        sale_id=next_sale.id,
+        payment_method="cash",
+        amount=Decimal("10"),
+    )
+    completed = await service.complete(sale_id=next_sale.id)
+
+    assert parent.receipt_number == "000001"
+    assert returned.receipt_number == "000002"
+    assert completed.receipt_number == "000003"
+
+
 async def test_refund_more_than_sold_blocked(db_session: AsyncSession, pos_scaffold) -> None:
     import pytest
 
@@ -95,6 +131,24 @@ async def test_refund_more_than_sold_blocked(db_session: AsyncSession, pos_scaff
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("99"))],
             reason="bug",
+            comment=None,
+            cashier_user_id=s["cashier"].id,
+        )
+
+
+async def test_duplicate_refund_lines_are_validated_as_one_quantity(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    import pytest
+
+    from app.core.errors import BusinessRuleError
+
+    service, s, parent, item = await _open_shift_and_sell(db_session, pos_scaffold, qty=3)
+    with pytest.raises(BusinessRuleError):
+        await service.refund(
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("2")), (item.id, Decimal("2"))],
+            reason="duplicate input",
             comment=None,
             cashier_user_id=s["cashier"].id,
         )

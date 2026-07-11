@@ -141,6 +141,7 @@ class SaleRead(BaseModel):
     parent_sale_id: UUID | None
     status: str
     receipt_number: str | None
+    operation_id: UUID | None
     is_test: bool
     total_amount: Decimal
     currency: str
@@ -185,6 +186,7 @@ class RefundItem(BaseModel):
 
 
 class RefundCreate(BaseModel):
+    operation_id: UUID
     items: list[RefundItem] = Field(min_length=1)
     reason: str | None = None
     comment: str | None = None

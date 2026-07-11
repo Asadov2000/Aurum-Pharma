@@ -14,10 +14,12 @@ Critical invariants:
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import anyio
 import structlog
@@ -136,7 +138,7 @@ class POSService:
         allowed_manage_branch_ids: set[UUID] | None = None,
         notes: str | None = None,
     ) -> Shift:
-        shift = await self.repo.get_shift(shift_id)
+        shift = await self.repo.lock_shift(shift_id)
         if shift is None:
             raise NotFoundError("Shift not found")
         self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
@@ -146,6 +148,14 @@ class POSService:
             can_manage_tenant=can_manage_tenant,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
+        if shift.status == "closed":
+            if (
+                shift.closed_by_user_id == closed_by_user_id
+                and shift.closing_cash_actual == closing_cash_actual
+                and shift.notes == notes
+            ):
+                return shift
+            raise BusinessRuleError("Shift is already closed")
         if shift.status != "open":
             raise BusinessRuleError("Shift is not open", details={"status": shift.status})
         totals = await self.repo.shift_totals(shift_id)
@@ -202,7 +212,7 @@ class POSService:
         cashier_user_id: UUID,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> Sale:
-        shift = await self.repo.get_open_shift_for_register(register_id)
+        shift = await self.repo.lock_open_shift_for_register(register_id)
         if shift is None:
             raise BusinessRuleError("No open shift for this register")
         self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
@@ -223,6 +233,26 @@ class POSService:
         if sale is None:
             raise NotFoundError("Sale not found")
         return sale
+
+    async def _lock_sale(self, sale_id: UUID) -> Sale:
+        sale = await self.repo.lock_sale(sale_id)
+        if sale is None:
+            raise NotFoundError("Sale not found")
+        return sale
+
+    async def _lock_open_shift(self, shift_id: UUID, *, error_message: str) -> Shift:
+        shift = await self.repo.lock_shift(shift_id)
+        if shift is None:
+            raise NotFoundError("Shift not found")
+        if shift.status != "open":
+            raise BusinessRuleError(error_message, details={"status": shift.status})
+        return shift
+
+    async def _allocate_receipt(self, register_id: UUID) -> tuple[int, str]:
+        allocation = await self.repo.allocate_receipt_number(register_id)
+        if allocation is None:
+            raise NotFoundError("Register not found")
+        return allocation
 
     async def _report_tz(self, tenant_id: UUID) -> str:
         """Tenant's report timezone (date ranges are interpreted in local time).
@@ -702,7 +732,7 @@ class POSService:
         today: date | None = None,
     ) -> tuple[list[SaleItem], bool]:
         """Returns (created items, requires_prescription_log)."""
-        sale = await self.get_sale(sale_id)
+        sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
             actor_id=actor_id,
@@ -766,7 +796,7 @@ class POSService:
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> SaleItem:
-        sale = await self.get_sale(sale_id)
+        sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
             actor_id=actor_id,
@@ -793,7 +823,7 @@ class POSService:
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> None:
-        sale = await self.get_sale(sale_id)
+        sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
             actor_id=actor_id,
@@ -826,7 +856,7 @@ class POSService:
         allowed_manage_branch_ids: set[UUID] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SalePayment:
-        sale = await self.get_sale(sale_id)
+        sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
             actor_id=actor_id,
@@ -855,7 +885,7 @@ class POSService:
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> PrescriptionLog:
-        sale = await self.get_sale(sale_id)
+        sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
             actor_id=actor_id,
@@ -863,8 +893,7 @@ class POSService:
             allowed_branch_ids=allowed_branch_ids,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
-        if sale.status == "voided":
-            raise ConflictError("Sale is voided")
+        self._assert_draft(sale)
         payload = {
             **fields,
             "tenant_id": sale.tenant_id,
@@ -886,7 +915,7 @@ class POSService:
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> Sale:
-        sale = await self.get_sale(sale_id)
+        sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
             actor_id=actor_id,
@@ -894,7 +923,14 @@ class POSService:
             allowed_branch_ids=allowed_branch_ids,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
+        if sale.status in {"completed", "voided"} and sale.receipt_number is not None:
+            return sale
         self._assert_draft(sale)
+
+        await self._lock_open_shift(
+            sale.shift_id,
+            error_message="Cannot complete a sale in a closed shift",
+        )
 
         items = await self.repo.list_items(sale.id)
         if not items:
@@ -920,7 +956,8 @@ class POSService:
             for item in items:
                 per_batch[item.batch_id] = per_batch.get(item.batch_id, Decimal("0")) + item.qty
 
-            for batch_id, qty in per_batch.items():
+            for batch_id in sorted(per_batch, key=str):
+                qty = per_batch[batch_id]
                 locked = await self.repo.lock_batch(batch_id)
                 if locked is None:
                     raise NotFoundError("Batch disappeared mid-checkout")
@@ -941,6 +978,7 @@ class POSService:
                         qty_delta=-qty,
                         source_table="sale",
                         source_id=sale.id,
+                        operation_key=f"pos:sale:{sale.id}:sale:{batch_id}",
                     )
                 except (IntegrityError, InternalError) as exc:
                     # Belt-and-braces: trigger / CHECK will refuse a negative
@@ -954,12 +992,13 @@ class POSService:
                     raise
                 await self.repo.session.refresh(locked)
 
-        receipt = await self.repo.next_receipt_number(sale.shift_id)
+        receipt_seq, receipt = await self._allocate_receipt(sale.register_id)
         completed = await self.repo.update_sale(
             sale,
             status="completed",
             completed_at=utc_now(),
             receipt_number=receipt,
+            receipt_seq=receipt_seq,
         )
         logger.info(
             "sale_completed",
@@ -991,42 +1030,72 @@ class POSService:
     # Refund
     # =========================================================================
 
-    async def refund(
+    @staticmethod
+    def _refund_operation_hash(
+        *,
+        parent_sale_id: UUID,
+        items: dict[UUID, Decimal],
+        reason: str | None,
+        comment: str | None,
+    ) -> str:
+        payload = {
+            "parent_sale_id": str(parent_sale_id),
+            "items": [
+                [str(item_id), format(qty.normalize(), "f")]
+                for item_id, qty in sorted(items.items(), key=lambda pair: str(pair[0]))
+            ],
+            "reason": reason,
+            "comment": comment,
+        }
+        canonical = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+    @staticmethod
+    def _aggregate_refund_items(items: list[tuple[UUID, Decimal]]) -> dict[UUID, Decimal]:
+        per_item: dict[UUID, Decimal] = {}
+        for item_id, qty in items:
+            if qty <= 0:
+                raise BusinessRuleError("Refund quantity must be positive")
+            per_item[item_id] = per_item.get(item_id, Decimal("0")) + qty
+        if not per_item:
+            raise BusinessRuleError("Refund must contain at least one item")
+        return per_item
+
+    async def _find_existing_refund(
+        self,
+        *,
+        parent: Sale,
+        operation_id: UUID,
+        operation_hash: str,
+    ) -> Sale | None:
+        existing = await self.repo.get_sale_by_operation_id(
+            tenant_id=parent.tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is None:
+            return None
+        if (
+            existing.sale_type != "return"
+            or existing.parent_sale_id != parent.id
+            or existing.operation_hash != operation_hash
+        ):
+            raise ConflictError("Operation ID was already used for another refund")
+        return existing
+
+    async def _validate_refund_items(
         self,
         *,
         parent_sale_id: UUID,
-        items: list[tuple[UUID, Decimal]],
-        reason: str | None,
-        comment: str | None,
-        cashier_user_id: UUID,
-        allowed_branch_ids: set[UUID] | None = None,
-    ) -> Sale:
-        """Create a `sale_type='return'` document tied to `parent_sale_id`.
-
-        `items` is a list of (sale_item_id, qty). Each item must:
-          - belong to the parent sale,
-          - have qty <= original item qty - already refunded.
-
-        On success the parent gets `voided_at`/`voided_by_sale_id` only if
-        the refund covers EVERY original line in full.
-        """
-        parent = await self.get_sale(parent_sale_id)
-        if parent.status != "completed":
-            raise BusinessRuleError(
-                "Can only refund a completed sale",
-                details={"status": parent.status},
-            )
-        if parent.sale_type != "sale":
-            raise BusinessRuleError("Only forward sales can be refunded")
-        self._assert_branch_allowed(parent.branch_id, allowed_branch_ids=allowed_branch_ids)
-
+        per_item: dict[UUID, Decimal],
+    ) -> tuple[dict[UUID, SaleItem], dict[UUID, Decimal]]:
         parent_items = {i.id: i for i in await self.repo.list_items(parent_sale_id)}
-        # Already-refunded qty per parent item (sum across previous returns).
         already_refunded = await self._already_refunded(parent_sale_id)
-
-        # Validate the requested refund lines.
-        per_item: dict[UUID, Decimal] = {}
-        for item_id, qty in items:
+        for item_id, qty in per_item.items():
             if item_id not in parent_items:
                 raise NotFoundError("Sale item not found in this sale")
             available = parent_items[item_id].qty - already_refunded.get(item_id, Decimal("0"))
@@ -1039,14 +1108,116 @@ class POSService:
                         "available": str(available),
                     },
                 )
-            per_item[item_id] = per_item.get(item_id, Decimal("0")) + qty
+        return parent_items, already_refunded
+
+    async def _insert_refund_items_and_movements(
+        self,
+        *,
+        parent: Sale,
+        return_sale: Sale,
+        parent_items: dict[UUID, SaleItem],
+        per_item: dict[UUID, Decimal],
+    ) -> Decimal:
+        total = Decimal("0")
+        returned_by_batch: dict[UUID, Decimal] = {}
+        ordered_items = sorted(
+            per_item.items(),
+            key=lambda pair: parent_items[pair[0]].position,
+        )
+        for item_id, qty in ordered_items:
+            parent_item = parent_items[item_id]
+            total_price = (parent_item.unit_price * qty).quantize(Decimal("0.01"))
+            position = await self.repo.next_item_position(return_sale.id)
+            await self.repo.insert_item(
+                tenant_id=parent.tenant_id,
+                sale_id=return_sale.id,
+                parent_sale_item_id=parent_item.id,
+                catalog_id=parent_item.catalog_id,
+                batch_id=parent_item.batch_id,
+                qty=qty,
+                unit_price=parent_item.unit_price,
+                total_price=total_price,
+                position=position,
+            )
+            total += total_price
+            returned_by_batch[parent_item.batch_id] = (
+                returned_by_batch.get(parent_item.batch_id, Decimal("0")) + qty
+            )
+
+        if parent.is_test:
+            return total
+
+        inv_repo = InventoryRepository(self.repo.session)
+        for batch_id in sorted(returned_by_batch, key=str):
+            await inv_repo.insert_movement(
+                tenant_id=parent.tenant_id,
+                batch_id=batch_id,
+                movement_type="sale_return",
+                qty_delta=returned_by_batch[batch_id],
+                source_table="sale",
+                source_id=return_sale.id,
+                operation_key=f"pos:sale:{return_sale.id}:return:{batch_id}",
+            )
+        return total
+
+    async def refund(
+        self,
+        *,
+        parent_sale_id: UUID,
+        items: list[tuple[UUID, Decimal]],
+        reason: str | None,
+        comment: str | None,
+        cashier_user_id: UUID,
+        operation_id: UUID | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> Sale:
+        """Create a `sale_type='return'` document tied to `parent_sale_id`.
+
+        `items` is a list of (sale_item_id, qty). Each item must:
+          - belong to the parent sale,
+          - have qty <= original item qty - already refunded.
+
+        On success the parent gets `voided_at`/`voided_by_sale_id` only if
+        the refund covers EVERY original line in full.
+        """
+        per_item = self._aggregate_refund_items(items)
+        effective_operation_id = operation_id or uuid4()
+        operation_hash = self._refund_operation_hash(
+            parent_sale_id=parent_sale_id,
+            items=per_item,
+            reason=reason,
+            comment=comment,
+        )
+        await self.repo.lock_operation_id(effective_operation_id)
+
+        parent = await self._lock_sale(parent_sale_id)
+        self._assert_branch_allowed(parent.branch_id, allowed_branch_ids=allowed_branch_ids)
+        existing = await self._find_existing_refund(
+            parent=parent,
+            operation_id=effective_operation_id,
+            operation_hash=operation_hash,
+        )
+        if existing is not None:
+            return existing
+
+        if parent.status != "completed":
+            raise BusinessRuleError(
+                "Can only refund a completed sale",
+                details={"status": parent.status},
+            )
+        if parent.sale_type != "sale":
+            raise BusinessRuleError("Only forward sales can be refunded")
+
+        parent_items, already_refunded = await self._validate_refund_items(
+            parent_sale_id=parent_sale_id,
+            per_item=per_item,
+        )
 
         # Create the return-sale shell + item rows + +qty movements.
-        shift = await self.repo.get_shift(parent.shift_id)
-        if shift is None or shift.status != "open":
-            raise BusinessRuleError(
-                "Refunds require an open shift on the original register",
-            )
+        shift = await self._lock_open_shift(
+            parent.shift_id,
+            error_message="Refunds require an open shift on the original register",
+        )
         return_sale = await self.repo.create_sale(
             tenant_id=parent.tenant_id,
             branch_id=parent.branch_id,
@@ -1057,35 +1228,16 @@ class POSService:
             cashier_user_id=cashier_user_id,
             status="draft",
             is_test=parent.is_test,
+            operation_id=effective_operation_id,
+            operation_hash=operation_hash,
         )
 
-        inv_repo = InventoryRepository(self.repo.session)
-        total = Decimal("0")
-        for item_id, qty in per_item.items():
-            parent_item = parent_items[item_id]
-            unit_price = parent_item.unit_price
-            total_price = (unit_price * qty).quantize(Decimal("0.01"))
-            position = await self.repo.next_item_position(return_sale.id)
-            await self.repo.insert_item(
-                tenant_id=parent.tenant_id,
-                sale_id=return_sale.id,
-                catalog_id=parent_item.catalog_id,
-                batch_id=parent_item.batch_id,
-                qty=qty,
-                unit_price=unit_price,
-                total_price=total_price,
-                position=position,
-            )
-            total += total_price
-            if not parent.is_test:
-                await inv_repo.insert_movement(
-                    tenant_id=parent.tenant_id,
-                    batch_id=parent_item.batch_id,
-                    movement_type="sale_return",
-                    qty_delta=qty,
-                    source_table="sale",
-                    source_id=return_sale.id,
-                )
+        total = await self._insert_refund_items_and_movements(
+            parent=parent,
+            return_sale=return_sale,
+            parent_items=parent_items,
+            per_item=per_item,
+        )
 
         # Single refund payment (cash by default). Reason/comment go into
         # the metadata blob — keeps the SQL surface small.
@@ -1096,12 +1248,13 @@ class POSService:
             amount=total,
             metadata_json={"reason": reason, "comment": comment},
         )
-        receipt = await self.repo.next_receipt_number(shift.id)
+        receipt_seq, receipt = await self._allocate_receipt(parent.register_id)
         await self.repo.update_sale(
             return_sale,
             status="completed",
             completed_at=utc_now(),
             receipt_number=receipt,
+            receipt_seq=receipt_seq,
             total_amount=total,
         )
 
@@ -1125,35 +1278,7 @@ class POSService:
         return return_sale
 
     async def _already_refunded(self, parent_sale_id: UUID) -> dict[UUID, Decimal]:
-        """For each parent sale_item, sum of qty already refunded across all
-        prior return-sales. Identifies parent items by (catalog_id, batch_id)
-        match — refunds quote those columns from the original line."""
-        from sqlalchemy import select
-
-        # Previous return sales for this parent
-        prev_returns_stmt = select(Sale).where(
-            Sale.parent_sale_id == parent_sale_id,
-            Sale.status == "completed",
-        )
-        prev_returns = (await self.repo.session.execute(prev_returns_stmt)).scalars().all()
-        if not prev_returns:
-            return {}
-
-        refunded: dict[UUID, Decimal] = {}
-        # For each return, pair its items with parent items by catalog+batch.
-        parent_items = await self.repo.list_items(parent_sale_id)
-        parent_by_key: dict[tuple[UUID, UUID], UUID] = {
-            (it.catalog_id, it.batch_id): it.id for it in parent_items
-        }
-        for ret in prev_returns:
-            ret_items = await self.repo.list_items(ret.id)
-            for it in ret_items:
-                key = (it.catalog_id, it.batch_id)
-                parent_item_id = parent_by_key.get(key)
-                if parent_item_id is None:
-                    continue
-                refunded[parent_item_id] = refunded.get(parent_item_id, Decimal("0")) + it.qty
-        return refunded
+        return await self.repo.refunded_quantities(parent_sale_id)
 
     @staticmethod
     def _is_fully_refunded(

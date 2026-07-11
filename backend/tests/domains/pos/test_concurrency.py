@@ -1,0 +1,314 @@
+"""Real PostgreSQL concurrency checks for the POS transaction boundary."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from datetime import date, timedelta
+from decimal import Decimal
+from uuid import UUID, uuid4
+
+import pytest_asyncio
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+from app.core.errors import BusinessRuleError
+from app.domains.auth.models import AppUser
+from app.domains.catalog.repository import CatalogRepository
+from app.domains.catalog.service import CatalogService
+from app.domains.foundation.models import Tenant
+from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.service import FoundationService
+from app.domains.inventory.models import Batch, BatchMovement
+from app.domains.inventory.repository import InventoryRepository
+from app.domains.pos.models import Sale, Shift
+from app.domains.pos.repository import POSRepository
+from app.domains.pos.service import POSService
+
+
+@dataclass(frozen=True)
+class CommittedPOS:
+    tenant_id: UUID
+    register_id: UUID
+    catalog_id: UUID
+    batch_id: UUID
+    cashier_id: UUID
+    shift_id: UUID
+    initial_qty: Decimal
+
+
+@pytest_asyncio.fixture
+async def committed_pos(
+    db_engine: AsyncEngine,
+) -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], CommittedPOS]]:
+    factory = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
+    initial_qty = Decimal("20")
+
+    async with factory.begin() as session:
+        foundation = FoundationService(FoundationRepository(session))
+        catalog = CatalogService(CatalogRepository(session))
+        inventory = InventoryRepository(session)
+        nick = uuid4().hex[:8]
+
+        tenant = await foundation.create_tenant(
+            payload={"name": f"Concurrency {nick}", "contact_email": f"c-{nick}@aurum.tj"}
+        )
+        await foundation.update_tenant(tenant.id, fields={"status": "active"})
+        branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
+        register = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": branch.id, "name": "Register"},
+        )
+        item = await catalog.create_item(
+            tenant_id=tenant.id,
+            fields={"brand_name": f"Drug {nick}", "dispensing_type": "otc"},
+        )
+        batch = await inventory.create_batch(
+            tenant_id=tenant.id,
+            branch_id=branch.id,
+            catalog_id=item.id,
+            expires_at=date.today() + timedelta(days=180),
+            purchase_price=Decimal("3"),
+            sale_price=Decimal("10"),
+            qty_initial=initial_qty,
+            qty_remaining=Decimal("0"),
+        )
+        await inventory.insert_movement(
+            tenant_id=tenant.id,
+            batch_id=batch.id,
+            movement_type="incoming",
+            qty_delta=initial_qty,
+        )
+        cashier = AppUser(
+            email=f"cashier-{nick}@aurum.tj",
+            full_name="Concurrency Cashier",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        session.add(cashier)
+        await session.flush()
+        shift = await POSService(POSRepository(session)).open_shift(
+            tenant_id=tenant.id,
+            register_id=register.id,
+            opened_by_user_id=cashier.id,
+            opening_cash=Decimal("0"),
+        )
+
+        context = CommittedPOS(
+            tenant_id=tenant.id,
+            register_id=register.id,
+            catalog_id=item.id,
+            batch_id=batch.id,
+            cashier_id=cashier.id,
+            shift_id=shift.id,
+            initial_qty=initial_qty,
+        )
+
+    try:
+        yield factory, context
+    finally:
+        async with factory.begin() as session:
+            await session.execute(delete(Tenant).where(Tenant.id == context.tenant_id))
+            await session.execute(delete(AppUser).where(AppUser.id == context.cashier_id))
+
+
+async def _create_paid_sale(
+    factory: async_sessionmaker[AsyncSession],
+    context: CommittedPOS,
+    *,
+    qty: Decimal,
+) -> tuple[UUID, UUID]:
+    async with factory.begin() as session:
+        service = POSService(POSRepository(session))
+        sale = await service.create_sale(
+            tenant_id=context.tenant_id,
+            register_id=context.register_id,
+            cashier_user_id=context.cashier_id,
+        )
+        items, _ = await service.add_item(
+            sale_id=sale.id,
+            catalog_id=context.catalog_id,
+            qty=qty,
+        )
+        await service.add_payment(
+            sale_id=sale.id,
+            payment_method="cash",
+            amount=qty * Decimal("10"),
+        )
+        return sale.id, items[0].id
+
+
+async def _complete(
+    factory: async_sessionmaker[AsyncSession],
+    sale_id: UUID,
+) -> tuple[UUID, str | None]:
+    async with factory.begin() as session:
+        sale = await POSService(POSRepository(session)).complete(sale_id=sale_id)
+        return sale.id, sale.receipt_number
+
+
+async def _refund(
+    factory: async_sessionmaker[AsyncSession],
+    context: CommittedPOS,
+    *,
+    parent_sale_id: UUID,
+    parent_item_id: UUID,
+    qty: Decimal,
+    operation_id: UUID,
+) -> UUID:
+    async with factory.begin() as session:
+        sale = await POSService(POSRepository(session)).refund(
+            parent_sale_id=parent_sale_id,
+            items=[(parent_item_id, qty)],
+            reason="concurrency",
+            comment=None,
+            cashier_user_id=context.cashier_id,
+            operation_id=operation_id,
+        )
+        return sale.id
+
+
+async def _movement_count(session: AsyncSession, sale_id: UUID, movement_type: str) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(BatchMovement)
+        .where(
+            BatchMovement.source_id == sale_id,
+            BatchMovement.movement_type == movement_type,
+        )
+    )
+    return int((await session.execute(stmt)).scalar_one())
+
+
+async def test_complete_is_idempotent_under_concurrent_requests(committed_pos) -> None:
+    factory, context = committed_pos
+    sale_id, _ = await _create_paid_sale(factory, context, qty=Decimal("2"))
+
+    first, second = await asyncio.gather(
+        _complete(factory, sale_id),
+        _complete(factory, sale_id),
+    )
+
+    assert first == second
+    async with factory() as session:
+        assert await _movement_count(session, sale_id, "sale") == 1
+        batch = await session.get(Batch, context.batch_id)
+        assert batch is not None
+        assert batch.qty_remaining == context.initial_qty - Decimal("2")
+
+
+async def test_concurrent_completes_allocate_unique_register_receipts(committed_pos) -> None:
+    factory, context = committed_pos
+    sale_a, _ = await _create_paid_sale(factory, context, qty=Decimal("1"))
+    sale_b, _ = await _create_paid_sale(factory, context, qty=Decimal("1"))
+
+    results = await asyncio.gather(_complete(factory, sale_a), _complete(factory, sale_b))
+
+    assert {receipt for _, receipt in results} == {"000001", "000002"}
+    async with factory() as session:
+        seqs = (
+            await session.execute(select(Sale.receipt_seq).where(Sale.id.in_([sale_a, sale_b])))
+        ).scalars()
+        assert set(seqs.all()) == {1, 2}
+
+
+async def test_concurrent_refunds_cannot_exceed_original_quantity(committed_pos) -> None:
+    factory, context = committed_pos
+    parent_id, item_id = await _create_paid_sale(factory, context, qty=Decimal("5"))
+    await _complete(factory, parent_id)
+
+    results = await asyncio.gather(
+        _refund(
+            factory,
+            context,
+            parent_sale_id=parent_id,
+            parent_item_id=item_id,
+            qty=Decimal("3"),
+            operation_id=uuid4(),
+        ),
+        _refund(
+            factory,
+            context,
+            parent_sale_id=parent_id,
+            parent_item_id=item_id,
+            qty=Decimal("3"),
+            operation_id=uuid4(),
+        ),
+        return_exceptions=True,
+    )
+
+    assert sum(isinstance(result, UUID) for result in results) == 1
+    assert sum(isinstance(result, BusinessRuleError) for result in results) == 1
+
+
+async def test_concurrent_refund_retry_has_one_effect(committed_pos) -> None:
+    factory, context = committed_pos
+    parent_id, item_id = await _create_paid_sale(factory, context, qty=Decimal("5"))
+    await _complete(factory, parent_id)
+    operation_id = uuid4()
+
+    first, second = await asyncio.gather(
+        _refund(
+            factory,
+            context,
+            parent_sale_id=parent_id,
+            parent_item_id=item_id,
+            qty=Decimal("2"),
+            operation_id=operation_id,
+        ),
+        _refund(
+            factory,
+            context,
+            parent_sale_id=parent_id,
+            parent_item_id=item_id,
+            qty=Decimal("2"),
+            operation_id=operation_id,
+        ),
+    )
+
+    assert first == second
+    async with factory() as session:
+        assert await _movement_count(session, first, "sale_return") == 1
+        batch = await session.get(Batch, context.batch_id)
+        assert batch is not None
+        assert batch.qty_remaining == context.initial_qty - Decimal("3")
+
+
+async def test_close_and_complete_race_has_consistent_result(committed_pos) -> None:
+    factory, context = committed_pos
+    sale_id, _ = await _create_paid_sale(factory, context, qty=Decimal("1"))
+
+    async def close_shift() -> None:
+        async with factory.begin() as session:
+            await POSService(POSRepository(session)).close_shift(
+                shift_id=context.shift_id,
+                closing_cash_actual=Decimal("10"),
+                closed_by_user_id=context.cashier_id,
+            )
+
+    results = await asyncio.gather(
+        _complete(factory, sale_id),
+        close_shift(),
+        return_exceptions=True,
+    )
+    assert not any(
+        isinstance(result, Exception) and not isinstance(result, BusinessRuleError)
+        for result in results
+    )
+
+    async with factory() as session:
+        sale = await session.get(Sale, sale_id)
+        shift = await session.get(Shift, context.shift_id)
+        assert sale is not None
+        assert shift is not None
+        assert shift.status == "closed"
+        if sale.status == "completed":
+            assert shift.totals is not None
+            assert shift.totals["sales_count"] == 1
+            assert await _movement_count(session, sale_id, "sale") == 1
+        else:
+            assert sale.status == "draft"
+            assert shift.totals is not None
+            assert shift.totals["sales_count"] == 0
+            assert await _movement_count(session, sale_id, "sale") == 0

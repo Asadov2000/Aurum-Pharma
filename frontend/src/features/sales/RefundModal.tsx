@@ -33,6 +33,7 @@ export function RefundModal({
   onRefunded: (returnSaleId: string) => void;
 }): JSX.Element {
   const refund = useRefundSale();
+  const [operationId] = useState(() => crypto.randomUUID());
   const [topError, setTopError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [comment, setComment] = useState("");
@@ -74,6 +75,7 @@ export function RefundModal({
       const returnSale = await refund.mutateAsync({
         parentSaleId: sale.id,
         payload: {
+          operation_id: operationId,
           items: chosen,
           reason: reason.trim() || null,
           comment: comment.trim() || null,

@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -75,6 +76,9 @@ class Sale(Base):
     parent_sale_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
     receipt_number: Mapped[str | None] = mapped_column(Text)
+    receipt_seq: Mapped[int | None] = mapped_column(BigInteger)
+    operation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    operation_hash: Mapped[str | None] = mapped_column(Text)
     is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, server_default=text("0")
@@ -93,6 +97,15 @@ class Sale(Base):
     __table_args__ = (
         CheckConstraint("sale_type IN ('sale','return')", name="ck_sale_type"),
         CheckConstraint("status IN ('draft','completed','voided')", name="ck_sale_status"),
+        CheckConstraint("receipt_seq IS NULL OR receipt_seq > 0", name="ck_sale_receipt_seq"),
+        CheckConstraint(
+            "(operation_id IS NULL) = (operation_hash IS NULL)",
+            name="ck_sale_operation_pair",
+        ),
+        CheckConstraint(
+            "operation_hash IS NULL OR operation_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_sale_operation_hash",
+        ),
     )
 
 
@@ -109,6 +122,10 @@ class SaleItem(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("sale.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    parent_sale_item_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("sale_item.id", deferrable=True, initially="DEFERRED"),
     )
     catalog_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     batch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
@@ -128,6 +145,10 @@ class SaleItem(Base):
         CheckConstraint("qty > 0", name="ck_si_qty"),
         CheckConstraint("unit_price >= 0", name="ck_si_unit_price"),
         CheckConstraint("total_price >= 0", name="ck_si_total_price"),
+        CheckConstraint(
+            "parent_sale_item_id IS NULL OR parent_sale_item_id <> id",
+            name="ck_si_parent_not_self",
+        ),
     )
 
 

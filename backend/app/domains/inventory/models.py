@@ -81,6 +81,7 @@ class BatchMovement(Base):
     qty_delta: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
     source_table: Mapped[str | None] = mapped_column(Text)
     source_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    operation_key: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

@@ -84,6 +84,7 @@ export interface Sale {
   parent_sale_id: string | null;
   status: SaleStatus;
   receipt_number: string | null;
+  operation_id?: string | null;
   is_test: boolean;
   total_amount: string;
   currency: string;

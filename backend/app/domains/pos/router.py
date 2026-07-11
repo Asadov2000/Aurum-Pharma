@@ -571,6 +571,7 @@ async def refund_sale(
         reason=payload.reason,
         comment=payload.comment,
         cashier_user_id=user.user_id,
+        operation_id=payload.operation_id,
         allowed_branch_ids=user.branch_scope,
     )
     return SaleRead.model_validate(return_sale)
