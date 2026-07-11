@@ -17,6 +17,7 @@ import {
 import {
   type PaymentAddPayload,
   type PrescriptionLogPayload,
+  type SaleDetails,
   type ShiftClosePayload,
   type ShiftOpenPayload,
 } from "./types";
@@ -70,8 +71,13 @@ export function useSaleQuery(saleId: string | null) {
 }
 
 export function useCreateSale() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (registerId: string) => createSale(registerId),
+    onSuccess: (data) => {
+      const draft: SaleDetails = { ...data, items: [], payments: [] };
+      qc.setQueryData(posKeys.sale(data.id), draft);
+    },
   });
 }
 
@@ -88,9 +94,8 @@ export function useAddSaleItem() {
   return useMutation({
     mutationFn: (args: { saleId: string; catalogId: string; qty: string }) =>
       addSaleItem(args.saleId, args.catalogId, args.qty),
-    onSuccess: (_data, vars) => {
-      void qc.invalidateQueries({ queryKey: posKeys.sale(vars.saleId) });
-    },
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: posKeys.sale(vars.saleId), exact: true }),
   });
 }
 
