@@ -19,6 +19,16 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
+POLICIES_USING_SUPPORT_FLAG_SQL = """
+SELECT count(*)
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND (
+    COALESCE(qual, '') LIKE '%is_support_session%'
+    OR COALESCE(with_check, '') LIKE '%is_support_session%'
+  )
+"""
+
 
 @pytest_asyncio.fixture
 async def support_engine_iso() -> AsyncIterator[AsyncEngine]:
@@ -42,8 +52,14 @@ async def app_engine_iso() -> AsyncIterator[AsyncEngine]:
 
 async def _set_tenant(conn: AsyncConnection, tenant_id: str) -> None:
     await conn.execute(
-        text("SELECT set_config('app.tenant_id', :v, false)"),
+        text("SELECT set_config('app.tenant_id', :v, true)"),
         {"v": tenant_id},
+    )
+
+
+async def _set_support_flag(conn: AsyncConnection) -> None:
+    await conn.execute(
+        text("SELECT set_config('app.support_session', 'true', true)"),
     )
 
 
@@ -72,7 +88,7 @@ async def test_tenant_a_does_not_see_branches_of_tenant_b(
             )
 
         # ---- read via app pool as Tenant A ----
-        async with app_engine_iso.connect() as app_conn:
+        async with app_engine_iso.begin() as app_conn:
             await _set_tenant(app_conn, tenant_ids[0])
             rows = (
                 await app_conn.execute(
@@ -84,7 +100,7 @@ async def test_tenant_a_does_not_see_branches_of_tenant_b(
         assert names_a == ["A-main"], f"Tenant A should only see A-main, saw {names_a}"
 
         # ---- read via app pool as Tenant B ----
-        async with app_engine_iso.connect() as app_conn:
+        async with app_engine_iso.begin() as app_conn:
             await _set_tenant(app_conn, tenant_ids[1])
             rows = (
                 await app_conn.execute(
@@ -96,7 +112,7 @@ async def test_tenant_a_does_not_see_branches_of_tenant_b(
         assert names_b == ["B-main"], f"Tenant B should only see B-main, saw {names_b}"
 
         # ---- read via app pool with NO tenant context — should see nothing ----
-        async with app_engine_iso.connect() as app_conn:
+        async with app_engine_iso.begin() as app_conn:
             rows = (
                 await app_conn.execute(
                     text("SELECT name FROM branch WHERE tenant_id = ANY(:ids)"),
@@ -104,6 +120,50 @@ async def test_tenant_a_does_not_see_branches_of_tenant_b(
                 )
             ).fetchall()
         assert rows == [], f"unset tenant should see no rows, saw {rows}"
+
+        # A custom GUC is caller-controlled. Setting it from aurum_app must
+        # never activate the support bypass or expose Tenant B.
+        async with app_engine_iso.begin() as app_conn:
+            await _set_tenant(app_conn, tenant_ids[0])
+            await _set_support_flag(app_conn)
+            context = (
+                await app_conn.execute(
+                    text("SELECT session_user AS db_role, is_support_session() AS is_support")
+                )
+            ).one()
+            rows = (
+                await app_conn.execute(
+                    text("SELECT name FROM branch WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+            ).fetchall()
+        names_with_forged_support = sorted(row[0] for row in rows)
+        assert context.db_role == "aurum_app"
+        assert context.is_support is False
+        assert names_with_forged_support == ["A-main"]
+
+        # The support login remains identifiable and uses its PostgreSQL
+        # BYPASSRLS attribute rather than a caller-controlled policy branch.
+        async with support_engine_iso.begin() as support_conn:
+            await _set_support_flag(support_conn)
+            context = (
+                await support_conn.execute(
+                    text("SELECT session_user AS db_role, is_support_session() AS is_support")
+                )
+            ).one()
+            rows = (
+                await support_conn.execute(
+                    text("SELECT name FROM branch WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+            ).fetchall()
+            policies_using_flag = (
+                await support_conn.execute(text(POLICIES_USING_SUPPORT_FLAG_SQL))
+            ).scalar_one()
+        assert context.db_role == "aurum_support"
+        assert context.is_support is True
+        assert sorted(row[0] for row in rows) == ["A-main", "B-main"]
+        assert policies_using_flag == 0
     finally:
         # Clean up via support pool — RLS would block deletes from the app side.
         if tenant_ids:
@@ -118,5 +178,9 @@ async def test_tenant_a_does_not_see_branches_of_tenant_b(
                 )
                 await conn.execute(
                     text("DELETE FROM tenant WHERE id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM audit_log WHERE tenant_id = ANY(:ids)"),
                     {"ids": tenant_ids},
                 )
