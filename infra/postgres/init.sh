@@ -9,7 +9,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     CREATE ROLE aurum_support WITH LOGIN PASSWORD '${AURUM_SUPPORT_PASSWORD}' BYPASSRLS;
 
     GRANT ALL PRIVILEGES ON DATABASE ${POSTGRES_DB} TO aurum_app, aurum_support;
-    GRANT ALL ON SCHEMA public TO aurum_app, aurum_support;
+    -- Runtime code may use objects in public, but only the migration/support
+    -- role may create or replace them. This keeps SECURITY DEFINER functions
+    -- out of reach of the application role.
+    ALTER SCHEMA public OWNER TO aurum_support;
+    REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+    GRANT USAGE ON SCHEMA public TO aurum_app;
+    GRANT ALL ON SCHEMA public TO aurum_support;
 
     -- DEFAULT PRIVILEGES are scoped to the role that *creates* the object.
     -- Migrations run as aurum_support, so we set defaults FOR THAT ROLE

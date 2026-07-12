@@ -6,9 +6,11 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, ConflictError
+from app.domains.audit.models import AuditLog
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
@@ -180,11 +182,37 @@ async def test_prescription_required_for_rx_items(db_session: AsyncSession, pos_
         await service.complete(sale_id=sale.id)
 
     # After logging it, complete passes
-    await service.add_prescription(
+    prescription = await service.add_prescription(
         sale_id=sale.id,
-        fields={"prescription_number": "RX-001", "doctor_name": "Dr Who"},
+        fields={
+            "prescription_number": "RX-001",
+            "doctor_name": "Dr Who",
+            "doctor_license": "LIC-001",
+            "patient_name": "Patient Name",
+            "notes": "Sensitive patient note",
+        },
         actor_id=s["cashier"].id,
     )
+    audit_entry = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.table_name == "prescription_log",
+                AuditLog.record_id == prescription.id,
+                AuditLog.action == "INSERT",
+            )
+        )
+    ).scalar_one()
+    assert audit_entry.new_values is not None
+    for field in (
+        "prescription_number",
+        "doctor_name",
+        "doctor_license",
+        "patient_name",
+        "notes",
+    ):
+        assert audit_entry.new_values[field] == "***"
+    assert audit_entry.new_values["sale_id"] == str(sale.id)
+
     completed = await service.complete(sale_id=sale.id)
     assert completed.status == "completed"
 

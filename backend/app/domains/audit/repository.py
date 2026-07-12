@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import Text, and_, bindparam, func, select
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audit.models import AuditLog
@@ -16,11 +18,50 @@ class AuditRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def insert_entry(self, **fields: Any) -> AuditLog:
-        entry = AuditLog(**fields)
-        self.session.add(entry)
-        await self.session.flush()
-        await self.session.refresh(entry)
+    async def insert_entry(
+        self,
+        *,
+        tenant_id: UUID | None,
+        user_id: UUID | None,
+        action: str,
+        table_name: str,
+        record_id: UUID | None,
+        metadata_json: dict[str, Any] | None,
+    ) -> AuditLog:
+        entry_id = (
+            await self.session.execute(
+                select(
+                    func.append_audit_event(
+                        bindparam(
+                            "audit_tenant_id",
+                            tenant_id,
+                            type_=PG_UUID(as_uuid=True),
+                        ),
+                        bindparam(
+                            "audit_user_id",
+                            user_id,
+                            type_=PG_UUID(as_uuid=True),
+                        ),
+                        bindparam("audit_action", action, type_=Text()),
+                        bindparam("audit_table_name", table_name, type_=Text()),
+                        bindparam(
+                            "audit_record_id",
+                            record_id,
+                            type_=PG_UUID(as_uuid=True),
+                        ),
+                        bindparam(
+                            "audit_metadata",
+                            metadata_json,
+                            type_=JSONB(),
+                        ),
+                        type_=PG_UUID(as_uuid=True),
+                    )
+                )
+            )
+        ).scalar_one()
+        entry = await self.session.get(AuditLog, entry_id)
+        if entry is None:
+            raise RuntimeError("Appended audit event is not visible in its tenant context")
         return entry
 
     async def search(
