@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.notifications.models import (
@@ -14,6 +15,12 @@ from app.domains.notifications.models import (
     NotificationDelivery,
     NotificationSubscription,
 )
+
+
+@dataclass(frozen=True)
+class ResolvedSubscription:
+    channels: list[str]
+    is_enabled: bool
 
 
 class NotificationsRepository:
@@ -112,6 +119,33 @@ class NotificationsRepository:
             NotificationSubscription, {"user_id": user_id, "event_type": event_type}
         )
 
+    async def resolve_subscription(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        event_type: str,
+    ) -> ResolvedSubscription | None:
+        result = await self.session.execute(
+            text(
+                "SELECT channels, is_enabled "
+                "FROM public.resolve_notification_subscription("
+                ":tenant_id, :user_id, :event_type)"
+            ),
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "event_type": event_type,
+            },
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return ResolvedSubscription(
+            channels=cast(list[str], row["channels"]),
+            is_enabled=bool(row["is_enabled"]),
+        )
+
     async def upsert_subscription(
         self,
         *,
@@ -138,12 +172,12 @@ class NotificationsRepository:
 
     # ---- deliveries ----
 
-    async def insert_delivery(self, **fields: Any) -> NotificationDelivery:
-        d = NotificationDelivery(**fields)
-        self.session.add(d)
-        await self.session.flush()
-        await self.session.refresh(d)
-        return d
+    async def insert_delivery(self, *, notification_id: UUID, channel: str) -> UUID:
+        result = await self.session.execute(
+            text("SELECT public.enqueue_notification_delivery(" ":notification_id, :channel)"),
+            {"notification_id": notification_id, "channel": channel},
+        )
+        return cast(UUID, result.scalar_one())
 
     async def list_pending_deliveries(self, *, limit: int = 50) -> list[NotificationDelivery]:
         stmt = (

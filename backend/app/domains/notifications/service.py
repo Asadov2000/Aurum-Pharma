@@ -34,7 +34,6 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
-from app.domains.auth.models import AppUser
 from app.domains.notifications.models import (
     Notification,
     NotificationDelivery,
@@ -125,7 +124,11 @@ class NotificationsService:
     ) -> Notification | None:
         """Returns the created Notification, or None if the user opted
         out of this event_type (is_enabled=False)."""
-        sub = await self.repo.get_subscription(user_id=user_id, event_type=event_type)
+        sub = await self.repo.resolve_subscription(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            event_type=event_type,
+        )
         if sub is not None and not sub.is_enabled:
             logger.info(
                 "notify_skipped_opt_out",
@@ -145,14 +148,11 @@ class NotificationsService:
             severity=severity,
         )
 
-        # Out-of-band channels — queue deliveries. Pulling the recipient from
-        # AppUser here so the worker doesn't need to re-resolve it.
-        user = await self.repo.session.get(AppUser, user_id)
+        # Queue out-of-band channels through a constrained database function.
         for channel in channels:
             if channel == "in_app":
                 continue
-            recipient = self._recipient_for(channel, user)
-            if recipient is None:
+            if channel != "email":
                 logger.info(
                     "notify_no_recipient",
                     channel=channel,
@@ -162,7 +162,6 @@ class NotificationsService:
             await self.repo.insert_delivery(
                 notification_id=notification.id,
                 channel=channel,
-                recipient=recipient,
             )
 
         logger.info(
@@ -173,16 +172,6 @@ class NotificationsService:
             channels=channels,
         )
         return notification
-
-    @staticmethod
-    def _recipient_for(channel: str, user: AppUser | None) -> str | None:
-        if user is None:
-            return None
-        if channel == "email":
-            return user.email
-        # telegram / sms recipients live in user_profile fields that exist
-        # only in phase 2. Until then we cannot dispatch them.
-        return None
 
     # =========================================================================
     # Worker-side: try to send a pending delivery

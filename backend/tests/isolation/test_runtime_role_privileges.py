@@ -27,7 +27,6 @@ CRUD_TABLES = {
     "invoice",
     "login_attempt",
     "notification",
-    "notification_delivery",
     "notification_subscription",
     "onboarding_checklist",
     "payment",
@@ -60,7 +59,7 @@ READ_ONLY_TABLES = {
     "subscription_plan",
 }
 
-NO_ACCESS_TABLES = {"alembic_version"}
+NO_ACCESS_TABLES = {"alembic_version", "notification_delivery"}
 
 RUNTIME_VIEWS = {
     "v_active_subscription",
@@ -72,7 +71,9 @@ CUSTOM_FUNCTIONS = {
     "audit_redact_jsonb",
     "current_app_user_id",
     "current_tenant_id",
+    "enqueue_notification_delivery",
     "is_support_session",
+    "resolve_notification_subscription",
     "trg_audit_log",
     "trg_set_created_meta",
     "trg_set_updated_meta",
@@ -83,7 +84,9 @@ APP_EXECUTABLE_FUNCTIONS = {
     "append_audit_event",
     "current_app_user_id",
     "current_tenant_id",
+    "enqueue_notification_delivery",
     "is_support_session",
+    "resolve_notification_subscription",
 }
 
 APP_EXECUTABLE_EXTENSION_FUNCTIONS = {
@@ -236,7 +239,18 @@ SELECT
   ) AS app_can_execute,
   pg_catalog.has_function_privilege(
     'aurum_app', routines.oid, 'EXECUTE WITH GRANT OPTION'
-  ) AS is_grantable
+  ) AS is_grantable,
+  EXISTS (
+    SELECT 1
+    FROM pg_catalog.aclexplode(
+      COALESCE(
+        routines.proacl,
+        pg_catalog.acldefault('f'::"char", routines.proowner)
+      )
+    ) AS privileges
+    WHERE privileges.grantee = 0
+      AND privileges.privilege_type = 'EXECUTE'
+  ) AS public_can_execute
 FROM pg_catalog.pg_proc AS routines
 JOIN pg_catalog.pg_namespace AS schemas
   ON schemas.oid = routines.pronamespace
@@ -377,7 +391,12 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         row["proname"] for row in function_privileges if row["app_can_execute"]
     } == APP_EXECUTABLE_FUNCTIONS
     assert all(row["is_grantable"] is False for row in function_privileges)
-    assert executable_definers == ["append_audit_event"]
+    assert all(row["public_can_execute"] is False for row in function_privileges)
+    assert executable_definers == [
+        "append_audit_event",
+        "enqueue_notification_delivery",
+        "resolve_notification_subscription",
+    ]
     assert {
         (row["extname"], row["signature"]) for row in extension_privileges if row["app_can_execute"]
     } == APP_EXECUTABLE_EXTENSION_FUNCTIONS
