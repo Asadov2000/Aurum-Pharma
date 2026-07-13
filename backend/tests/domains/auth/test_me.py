@@ -50,6 +50,48 @@ async def test_me_with_garbage_token_returns_401(auth_client: AsyncClient) -> No
     assert response.status_code == 401
 
 
+async def test_me_rejects_token_after_user_is_blocked(
+    auth_client: AsyncClient,
+    make_user,
+) -> None:
+    user = await make_user(email="blocked-me@aurum.tj", status="blocked")
+    token = create_access_token(
+        user.id,
+        tenant_id=user.home_tenant_id,
+        is_developer=False,
+        is_administrator=False,
+    )
+
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+async def test_me_rejects_stale_support_claims(
+    auth_client: AsyncClient,
+    make_user,
+) -> None:
+    user = await make_user(email="stale-support@aurum.tj")
+    token = create_access_token(
+        user.id,
+        tenant_id=user.home_tenant_id,
+        is_developer=True,
+        is_administrator=False,
+    )
+
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
 async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
     auth_client: AsyncClient,
     db_session: AsyncSession,

@@ -146,6 +146,17 @@ async def current_user(
     is_dev = bool(claims.get("is_developer", False))
     is_admin = bool(claims.get("is_administrator", False))
 
+    # JWTs are short-lived snapshots, but blocking and support-role removal
+    # must take effect immediately. Re-check the global identity before any
+    # permission or tenant data is loaded.
+    from app.domains.auth.repository import AuthRepository
+
+    identity = await AuthRepository(db).get_user_by_id(user_id)
+    if identity is None or identity.status not in ("invited", "active"):
+        raise AuthenticationError("User is inactive")
+    if identity.is_developer is not is_dev or identity.is_administrator is not is_admin:
+        raise AuthenticationError("Session claims are outdated")
+
     permissions: set[str] = set()
     branch_assignments: dict[str, str] = {}
     assignment_levels: dict[str, int] = {}

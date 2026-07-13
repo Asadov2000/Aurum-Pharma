@@ -255,6 +255,21 @@ async def indirect_scope_rows(
                 )
             ).scalar_one()
             user_ids.append(str(recipient_user_id))
+            unassigned_user_id = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO app_user "
+                        "(email, full_name, home_tenant_id) "
+                        "VALUES (:email, :full_name, :tenant_id) RETURNING id"
+                    ),
+                    {
+                        "email": f"rls-unassigned-{token}@example.invalid",
+                        "full_name": "RLS unassigned",
+                        "tenant_id": tenant_ids[0],
+                    },
+                )
+            ).scalar_one()
+            user_ids.append(str(unassigned_user_id))
             recipient_notification_id = (
                 await conn.execute(
                     text(
@@ -291,13 +306,14 @@ async def indirect_scope_rows(
                 await conn.execute(
                     text(
                         "INSERT INTO user_assignment "
-                        "(user_id, tenant_id, role_id) "
-                        "VALUES (:user_id, :tenant_id, :role_id)"
+                        "(user_id, tenant_id, role_id, password_required) "
+                        "VALUES (:user_id, :tenant_id, :role_id, :password_required)"
                     ),
                     {
                         "user_id": user_ids[user_index],
                         "tenant_id": tenant_ids[tenant_index],
                         "role_id": role_ids[tenant_index],
+                        "password_required": user_index == 0,
                     },
                 )
 
@@ -337,6 +353,20 @@ async def indirect_scope_rows(
                     )
                 ).scalar_one()
                 delivery_ids.append(str(delivery_id))
+
+            await conn.execute(
+                text(
+                    "INSERT INTO role_permission (role_id, permission_code) "
+                    "SELECT :role_id, permissions.code "
+                    "FROM permission AS permissions "
+                    "WHERE permissions.code = ANY(CAST(:codes AS TEXT[])) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {
+                    "role_id": role_ids[0],
+                    "codes": ["users.invite", "users.block", "roles.assign"],
+                },
+            )
 
             await conn.execute(
                 text(
@@ -484,7 +514,336 @@ async def test_indirect_scope_reads_are_isolated(
                 )
             ).scalar_one(),
         )
-    assert support_counts == (2, 3, 2)
+    assert support_counts == (5, 3, 2)
+
+
+async def test_identity_directory_and_notifications_are_recipient_scoped(
+    app_engine_iso: AsyncEngine,
+    indirect_scope_rows: IndirectScopeRows,
+) -> None:
+    rows = indirect_scope_rows
+    async with app_engine_iso.begin() as conn:
+        await _set_app_context(
+            conn,
+            tenant_id=rows.tenant_ids[0],
+            user_id=rows.user_ids[0],
+        )
+        directory_user_ids = {
+            str(row[0])
+            for row in (
+                await conn.execute(
+                    text("SELECT id FROM app_user " "WHERE id = ANY(CAST(:ids AS UUID[]))"),
+                    {"ids": rows.user_ids},
+                )
+            ).all()
+        }
+        visible_notification_ids = {
+            str(row[0])
+            for row in (
+                await conn.execute(
+                    text("SELECT id FROM notification " "WHERE id = ANY(CAST(:ids AS UUID[]))"),
+                    {"ids": rows.notification_ids},
+                )
+            ).all()
+        }
+        marked = (
+            await conn.execute(
+                text(
+                    "SELECT public.mark_scoped_notification_read("
+                    ":notification_id, :user_id, pg_catalog.now())"
+                ),
+                {
+                    "notification_id": rows.notification_ids[0],
+                    "user_id": rows.user_ids[0],
+                },
+            )
+        ).scalar_one()
+
+    assert directory_user_ids == {rows.user_ids[0], rows.user_ids[2]}
+    assert visible_notification_ids == {rows.notification_ids[0]}
+    assert marked == 1
+
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[0],
+        statement=(
+            "SELECT public.mark_scoped_notification_read("
+            ":notification_id, :target_user_id, pg_catalog.now())"
+        ),
+        params={
+            "notification_id": rows.notification_ids[2],
+            "target_user_id": rows.user_ids[2],
+        },
+    )
+
+
+async def test_runtime_cannot_write_identity_assignment_or_notification_tables(
+    app_engine_iso: AsyncEngine,
+    indirect_scope_rows: IndirectScopeRows,
+) -> None:
+    rows = indirect_scope_rows
+    statements = (
+        (
+            "SELECT password_hash FROM app_user WHERE id = :user_id",
+            {"user_id": rows.user_ids[0]},
+        ),
+        (
+            "INSERT INTO app_user (email, full_name, home_tenant_id) "
+            "VALUES (:email, 'Blocked direct insert', :tenant_id)",
+            {
+                "email": f"blocked-direct-{rows.token}@example.invalid",
+                "tenant_id": rows.tenant_ids[0],
+            },
+        ),
+        (
+            "UPDATE app_user SET is_developer = true WHERE id = :user_id",
+            {"user_id": rows.user_ids[0]},
+        ),
+        (
+            "DELETE FROM app_user WHERE id = :user_id",
+            {"user_id": rows.user_ids[2]},
+        ),
+        (
+            "INSERT INTO user_assignment (user_id, tenant_id, role_id) "
+            "VALUES (:user_id, :tenant_id, :role_id)",
+            {
+                "user_id": rows.user_ids[3],
+                "tenant_id": rows.tenant_ids[0],
+                "role_id": rows.role_ids[0],
+            },
+        ),
+        (
+            "UPDATE user_assignment SET is_active = false " "WHERE user_id = :user_id",
+            {"user_id": rows.user_ids[0]},
+        ),
+        (
+            "DELETE FROM user_assignment WHERE user_id = :user_id",
+            {"user_id": rows.user_ids[0]},
+        ),
+        (
+            "INSERT INTO notification (tenant_id, user_id, event_type, title) "
+            "VALUES (:tenant_id, :user_id, 'security.direct', 'Blocked')",
+            {
+                "tenant_id": rows.tenant_ids[0],
+                "user_id": rows.user_ids[0],
+            },
+        ),
+        (
+            "UPDATE notification SET read_at = pg_catalog.now() " "WHERE id = :notification_id",
+            {"notification_id": rows.notification_ids[0]},
+        ),
+        (
+            "DELETE FROM notification WHERE id = :notification_id",
+            {"notification_id": rows.notification_ids[0]},
+        ),
+    )
+
+    for statement, params in statements:
+        await _assert_rls_denied(
+            app_engine_iso,
+            tenant_id=rows.tenant_ids[0],
+            user_id=rows.user_ids[0],
+            statement=statement,
+            params=params,
+        )
+
+
+async def test_auth_lookup_resolves_password_requirement_without_tenant_context(
+    app_engine_iso: AsyncEngine,
+    indirect_scope_rows: IndirectScopeRows,
+) -> None:
+    rows = indirect_scope_rows
+    email = f"rls-user-a-{rows.token}@example.invalid"
+
+    async with app_engine_iso.begin() as conn:
+        login_record = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT id, status, password_required "
+                        "FROM public.lookup_auth_user_by_email(:email)"
+                    ),
+                    {"email": email},
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert str(login_record["id"]) == rows.user_ids[0]
+    assert login_record["status"] == "invited"
+    assert login_record["password_required"] is True
+
+    async with app_engine_iso.connect() as conn:
+        transaction = await conn.begin()
+        try:
+            with pytest.raises(DBAPIError) as raised:
+                await conn.execute(
+                    text("SELECT * FROM public.lookup_auth_user_by_id(" ":user_id, NULL)"),
+                    {"user_id": rows.user_ids[0]},
+                )
+            assert _sqlstate(raised.value) == "42501"
+        finally:
+            if transaction.is_active:
+                await transaction.rollback()
+
+    async with app_engine_iso.begin() as conn:
+        await _set_app_context(
+            conn,
+            tenant_id=rows.tenant_ids[0],
+            user_id=rows.user_ids[0],
+        )
+        own_identity = (
+            await conn.execute(
+                text("SELECT id FROM public.lookup_auth_user_by_id(" ":user_id, NULL)"),
+                {"user_id": rows.user_ids[0]},
+            )
+        ).scalar_one()
+
+    assert str(own_identity) == rows.user_ids[0]
+
+
+async def test_runtime_assignment_function_blocks_system_role_escalation(
+    support_engine_iso: AsyncEngine,
+    app_engine_iso: AsyncEngine,
+    indirect_scope_rows: IndirectScopeRows,
+) -> None:
+    rows = indirect_scope_rows
+    async with support_engine_iso.begin() as conn:
+        system_role_id = str(
+            (
+                await conn.execute(
+                    text("SELECT id FROM role " "WHERE is_system AND name = 'developer'")
+                )
+            ).scalar_one()
+        )
+
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[0],
+        statement=(
+            "SELECT * FROM public.create_tenant_user_assignment("
+            ":tenant_id, :target_user_id, NULL, :role_id, false)"
+        ),
+        params={
+            "tenant_id": rows.tenant_ids[0],
+            "target_user_id": rows.user_ids[3],
+            "role_id": system_role_id,
+        },
+    )
+
+    async with app_engine_iso.begin() as conn:
+        await _set_app_context(
+            conn,
+            tenant_id=rows.tenant_ids[0],
+            user_id=rows.user_ids[0],
+        )
+        found_user_id = (
+            await conn.execute(
+                text("SELECT public.find_invitable_user_id(:tenant_id, :email)"),
+                {
+                    "tenant_id": rows.tenant_ids[0],
+                    "email": f"rls-unassigned-{rows.token}@example.invalid",
+                },
+            )
+        ).scalar_one()
+        assignment = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT user_id, tenant_id, role_id "
+                        "FROM public.create_tenant_user_assignment("
+                        ":tenant_id, :target_user_id, NULL, :role_id, false)"
+                    ),
+                    {
+                        "tenant_id": rows.tenant_ids[0],
+                        "target_user_id": rows.user_ids[3],
+                        "role_id": rows.role_ids[0],
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert str(found_user_id) == rows.user_ids[3]
+    assert str(assignment["user_id"]) == rows.user_ids[3]
+    assert str(assignment["tenant_id"]) == rows.tenant_ids[0]
+    assert str(assignment["role_id"]) == rows.role_ids[0]
+
+
+async def test_blocking_user_revokes_sessions_immediately(
+    support_engine_iso: AsyncEngine,
+    app_engine_iso: AsyncEngine,
+    indirect_scope_rows: IndirectScopeRows,
+) -> None:
+    rows = indirect_scope_rows
+    refresh_hash = f"security-block-{rows.token}"
+    async with support_engine_iso.begin() as conn:
+        session_id = str(
+            (
+                await conn.execute(
+                    text(
+                        "INSERT INTO session "
+                        "(user_id, refresh_token_hash, expires_at) "
+                        "VALUES (:user_id, :refresh_hash, "
+                        "pg_catalog.now() + INTERVAL '1 day') RETURNING id"
+                    ),
+                    {
+                        "user_id": rows.user_ids[2],
+                        "refresh_hash": refresh_hash,
+                    },
+                )
+            ).scalar_one()
+        )
+
+    async with app_engine_iso.begin() as conn:
+        await _set_app_context(
+            conn,
+            tenant_id=rows.tenant_ids[0],
+            user_id=rows.user_ids[0],
+        )
+        changed = (
+            await conn.execute(
+                text(
+                    "SELECT public.set_tenant_user_status("
+                    ":tenant_id, :target_user_id, 'blocked', pg_catalog.now())"
+                ),
+                {
+                    "tenant_id": rows.tenant_ids[0],
+                    "target_user_id": rows.user_ids[2],
+                },
+            )
+        ).scalar_one()
+
+    async with support_engine_iso.begin() as conn:
+        state = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT app_user.status, auth_session.revoked_at, "
+                        "auth_session.revoked_reason "
+                        "FROM app_user "
+                        "JOIN session AS auth_session "
+                        "ON auth_session.user_id = app_user.id "
+                        "WHERE app_user.id = :user_id AND auth_session.id = :session_id"
+                    ),
+                    {
+                        "user_id": rows.user_ids[2],
+                        "session_id": session_id,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert changed is True
+    assert state["status"] == "blocked"
+    assert state["revoked_at"] is not None
+    assert state["revoked_reason"] == "user_blocked"
 
 
 async def test_role_and_subscription_writes_are_isolated(

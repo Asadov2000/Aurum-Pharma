@@ -33,7 +33,6 @@ from app.core.errors import (
     PermissionDeniedError,
 )
 from app.core.time import utc_now
-from app.domains.auth.models import AppUser
 from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Branch, Register, Tenant
 from app.domains.foundation.repository import FoundationRepository
@@ -344,7 +343,7 @@ class POSService:
 
         tenant = await self.repo.session.get(Tenant, sale.tenant_id)
         branch = await self.repo.session.get(Branch, sale.branch_id)
-        cashier = await self.repo.session.get(AppUser, sale.cashier_user_id)
+        cashier_name = await self.repo.get_user_display_name(sale.cashier_user_id)
 
         lines: list[ReceiptLine] = []
         for it in items:
@@ -376,7 +375,7 @@ class POSService:
             branch_license=branch.license_number if branch is not None else None,
             receipt_number=sale.receipt_number,
             datetime=sale.completed_at or sale.created_at,
-            cashier_name=cashier.full_name if cashier is not None else None,
+            cashier_name=cashier_name,
             items=lines,
             discount_total=discount_total,
             total=sale.total_amount,
@@ -425,7 +424,7 @@ class POSService:
         tenant = await self.repo.session.get(Tenant, shift.tenant_id)
         branch = await self.repo.session.get(Branch, shift.branch_id)
         register = await self.repo.session.get(Register, shift.register_id)
-        cashier = await self.repo.session.get(AppUser, shift.opened_by_user_id)
+        cashier_name = await self.repo.get_user_display_name(shift.opened_by_user_id)
         agg = await self.repo.z_report_aggregates(shift_id)
         bd = agg["payment_breakdown"]
 
@@ -435,7 +434,7 @@ class POSService:
             pharmacy_name=tenant.name if tenant is not None else "",
             branch_name=branch.name if branch is not None else "",
             register_name=register.name if register is not None else "",
-            cashier_name=cashier.full_name if cashier is not None else None,
+            cashier_name=cashier_name,
             opened_at=shift.opened_at,
             closed_at=shift.closed_at,
             sales_count=agg["sales_count"],

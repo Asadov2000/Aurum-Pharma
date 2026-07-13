@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, select, text, update
+from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.notifications.models import (
@@ -29,15 +29,43 @@ class NotificationsRepository:
 
     # ---- notifications ----
 
-    async def create_notification(self, **fields: Any) -> Notification:
-        n = Notification(**fields)
-        self.session.add(n)
-        await self.session.flush()
-        await self.session.refresh(n)
-        return n
+    async def create_notification(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        event_type: str,
+        title: str,
+        body: str | None,
+        data: dict[str, Any] | None,
+        severity: str,
+    ) -> Notification:
+        stmt = select(Notification).from_statement(
+            text(
+                "SELECT * FROM public.create_scoped_notification("
+                ":tenant_id, :user_id, :event_type, :title, :body, :data, :severity)"
+            )
+        )
+        result = await self.session.execute(
+            stmt,
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "event_type": event_type,
+                "title": title,
+                "body": body,
+                "data": data,
+                "severity": severity,
+            },
+        )
+        return cast(Notification, result.scalar_one())
 
     async def get_notification(self, notification_id: UUID) -> Notification | None:
-        return await self.session.get(Notification, notification_id)
+        return await self.session.get(
+            Notification,
+            notification_id,
+            populate_existing=True,
+        )
 
     async def list_for_user(
         self,
@@ -57,36 +85,26 @@ class NotificationsRepository:
             stmt.order_by(Notification.created_at.desc())
             .limit(page_size)
             .offset((page - 1) * page_size)
+            .execution_options(populate_existing=True)
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def mark_read(self, *, notification_id: UUID, user_id: UUID, when: datetime) -> int:
         result = await self.session.execute(
-            update(Notification)
-            .where(
-                and_(
-                    Notification.id == notification_id,
-                    Notification.user_id == user_id,
-                    Notification.read_at.is_(None),
-                )
-            )
-            .values(read_at=when)
+            text(
+                "SELECT public.mark_scoped_notification_read(" ":notification_id, :user_id, :when)"
+            ),
+            {"notification_id": notification_id, "user_id": user_id, "when": when},
         )
-        return result.rowcount or 0  # type: ignore[attr-defined]
+        return int(result.scalar_one())
 
     async def mark_all_read(self, *, user_id: UUID, when: datetime) -> int:
         result = await self.session.execute(
-            update(Notification)
-            .where(
-                and_(
-                    Notification.user_id == user_id,
-                    Notification.read_at.is_(None),
-                )
-            )
-            .values(read_at=when)
+            text("SELECT public.mark_all_scoped_notifications_read(" ":user_id, :when)"),
+            {"user_id": user_id, "when": when},
         )
-        return result.rowcount or 0  # type: ignore[attr-defined]
+        return int(result.scalar_one())
 
     async def delete_old_read(self, *, older_than: datetime) -> int:
         from sqlalchemy import delete

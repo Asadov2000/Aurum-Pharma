@@ -237,6 +237,7 @@ async def block_user(
 ) -> dict[str, str]:
     await service.block_user(
         actor_level=user.level,
+        actor_id=user.user_id,
         tenant_id=_current_tenant_or_400(user),
         target_user_id=user_id,
     )
@@ -251,6 +252,7 @@ async def soft_delete_user(
 ) -> dict[str, str]:
     await service.soft_delete_user(
         actor_level=user.level,
+        actor_id=user.user_id,
         tenant_id=_current_tenant_or_400(user),
         target_user_id=user_id,
     )

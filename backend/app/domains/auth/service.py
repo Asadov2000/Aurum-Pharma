@@ -36,7 +36,7 @@ from app.core.time import utc_now
 from app.domains.auth.repository import AuthRepository
 
 if TYPE_CHECKING:
-    from app.domains.auth.models import AppUser
+    from app.domains.auth.repository import AuthUserRecord
 
 logger = structlog.get_logger("auth.service")
 settings = get_settings()
@@ -216,19 +216,9 @@ class AuthService:
             # The schema says only support creates users in phase 1.
             raise NotFoundError("User does not exist")
 
-        # Password check. We require a password when EITHER:
-        #   1) the user has a password_hash set, OR
-        #   2) any active user_assignment in the user's home tenant has
-        #      password_required = true.
-        needs_password = bool(user.password_hash)
-        if not needs_password and user.home_tenant_id is not None:
-            from app.domains.roles.repository import RolesRepository
-
-            roles_repo = RolesRepository(self.repo.session)
-            assignments = await roles_repo.list_assignments_for_user(
-                user.id, tenant_id=user.home_tenant_id
-            )
-            needs_password = any(a.password_required and a.is_active for a in assignments)
+        # The database lookup resolves assignment.password_required without a
+        # tenant GUC because login happens before an authenticated context exists.
+        needs_password = bool(user.password_hash) or user.password_required
         if needs_password:
             password_ok = bool(
                 password and user.password_hash and verify_password(password, user.password_hash)
@@ -278,7 +268,7 @@ class AuthService:
         if s is None:
             raise AuthenticationError("Invalid or expired refresh token")
 
-        user = await self.repo.get_user_by_id(s.user_id)
+        user = await self.repo.get_user_by_id(s.user_id, session_id=s.id)
         if user is None or user.status not in ("invited", "active"):
             await self.repo.revoke_session(s.id, reason="user_inactive", when=now)
             raise AuthenticationError("Invalid or expired refresh token")
@@ -319,7 +309,7 @@ class AuthService:
     # 5. /me
     # -------------------------------------------------------------------------
 
-    async def get_user_info(self, user_id: UUID) -> AppUser:
+    async def get_user_info(self, user_id: UUID) -> AuthUserRecord:
         user = await self.repo.get_user_by_id(user_id)
         if user is None:
             raise NotFoundError("User not found")
@@ -332,7 +322,7 @@ class AuthService:
     async def _issue_tokens(
         self,
         *,
-        user: AppUser,
+        user: AuthUserRecord,
         ip_address: str | None,
         user_agent: str | None,
     ) -> tuple[str, str, int]:

@@ -67,20 +67,15 @@ async def test_admin_create_tenant_endpoint(auth_client: AsyncClient, support_to
 
 
 async def test_admin_endpoints_reject_non_support(
-    auth_client: AsyncClient, tenant_admin_token
+    auth_client: AsyncClient,
+    make_user,
 ) -> None:
-    """A regular tenant administrator (is_administrator=True at *tenant* level)
-    is still a support-privileged identity in phase 1, so the dependency lets
-    them through. To exercise the rejection path we need a user with neither
-    flag — meaning a plain owner/seller. Verify by issuing a token with both
-    flags off."""
+    """An active regular user is authenticated but cannot enter support APIs."""
     from app.core.security import create_access_token
 
-    # Mint a token that is neither developer nor administrator.
+    regular_user = await make_user()
     token = create_access_token(
-        # any UUID-shaped subject works for permission gating
-        # (the route never loads the user from DB)
-        user_id=__import__("uuid").UUID("11111111-1111-1111-1111-111111111111"),
+        user_id=regular_user.id,
         tenant_id=None,
         is_developer=False,
         is_administrator=False,

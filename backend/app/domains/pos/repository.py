@@ -11,6 +11,7 @@ from sqlalchemy import BigInteger, and_, case, cast, distinct, func, literal, se
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import local_day_range
+from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Register
 from app.domains.inventory.models import Batch
 from app.domains.pos.models import (
@@ -25,6 +26,10 @@ from app.domains.pos.models import (
 class POSRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_user_display_name(self, user_id: UUID) -> str | None:
+        result = await self.session.execute(select(AppUser.full_name).where(AppUser.id == user_id))
+        return result.scalar_one_or_none()
 
     # -------- shift --------
 

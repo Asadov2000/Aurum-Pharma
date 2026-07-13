@@ -15,7 +15,6 @@ from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
 
 CRUD_TABLES = {
-    "app_user",
     "barcode",
     "batch",
     "batch_movement",
@@ -26,7 +25,6 @@ CRUD_TABLES = {
     "incoming_item",
     "invoice",
     "login_attempt",
-    "notification",
     "notification_subscription",
     "onboarding_checklist",
     "payment",
@@ -45,7 +43,6 @@ CRUD_TABLES = {
     "tenant_catalog",
     "tenant_settings",
     "tenant_subscription",
-    "user_assignment",
     "wizard_state",
     "write_off",
 }
@@ -53,13 +50,26 @@ CRUD_TABLES = {
 READ_ONLY_TABLES = {
     "audit_log",
     "master_catalog",
+    "notification",
     "permission",
     "role_template",
     "role_template_permission",
     "subscription_plan",
+    "user_assignment",
 }
 
-NO_ACCESS_TABLES = {"alembic_version", "notification_delivery"}
+NO_ACCESS_TABLES = {"alembic_version", "app_user", "notification_delivery"}
+
+APP_USER_SAFE_COLUMNS = {
+    "id",
+    "email",
+    "email_lower",
+    "full_name",
+    "phone",
+    "home_tenant_id",
+    "status",
+    "last_login_at",
+}
 
 RUNTIME_VIEWS = {
     "v_active_subscription",
@@ -71,23 +81,54 @@ CUSTOM_FUNCTIONS = {
     "audit_redact_jsonb",
     "current_app_user_id",
     "current_tenant_id",
+    "create_invited_app_user",
+    "create_scoped_notification",
+    "create_tenant_user_assignment",
+    "deactivate_tenant_user_assignment",
     "enqueue_notification_delivery",
+    "find_invitable_user_id",
     "is_support_session",
+    "lookup_auth_user_by_email",
+    "lookup_auth_user_by_id",
+    "mark_all_scoped_notifications_read",
+    "mark_scoped_notification_read",
+    "reactivate_tenant_user_assignment",
     "resolve_notification_subscription",
+    "set_tenant_user_status",
+    "tenant_actor_has_permission",
+    "touch_auth_user_last_login",
     "trg_audit_log",
     "trg_set_created_meta",
     "trg_set_updated_meta",
     "trg_update_batch_qty",
+    "update_tenant_user_profile",
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
     "append_audit_event",
     "current_app_user_id",
     "current_tenant_id",
+    "create_invited_app_user",
+    "create_scoped_notification",
+    "create_tenant_user_assignment",
+    "deactivate_tenant_user_assignment",
     "enqueue_notification_delivery",
+    "find_invitable_user_id",
     "is_support_session",
+    "lookup_auth_user_by_email",
+    "lookup_auth_user_by_id",
+    "mark_all_scoped_notifications_read",
+    "mark_scoped_notification_read",
+    "reactivate_tenant_user_assignment",
     "resolve_notification_subscription",
+    "set_tenant_user_status",
+    "touch_auth_user_last_login",
+    "update_tenant_user_profile",
 }
+
+APP_EXECUTABLE_SECURITY_DEFINERS = sorted(
+    APP_EXECUTABLE_FUNCTIONS - {"current_app_user_id", "current_tenant_id", "is_support_session"}
+)
 
 APP_EXECUTABLE_EXTENSION_FUNCTIONS = {
     ("pg_trgm", "public.similarity_op(text, text)"),
@@ -323,6 +364,22 @@ WHERE schemas.nspname = 'public'
 ORDER BY relations.relname, checks.privilege
 """
 
+APP_USER_COLUMN_PRIVILEGES_SQL = """
+SELECT
+  attributes.attname,
+  pg_catalog.has_column_privilege(
+    'aurum_app', 'public.app_user', attributes.attname, 'SELECT'
+  ) AS can_select,
+  pg_catalog.has_column_privilege(
+    'aurum_app', 'public.app_user', attributes.attname, 'UPDATE'
+  ) AS can_update
+FROM pg_catalog.pg_attribute AS attributes
+WHERE attributes.attrelid = 'public.app_user'::REGCLASS
+  AND attributes.attnum > 0
+  AND NOT attributes.attisdropped
+ORDER BY attributes.attname
+"""
+
 
 @pytest_asyncio.fixture
 async def support_engine_privileges() -> AsyncIterator[AsyncEngine]:
@@ -362,6 +419,8 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         extension_privileges = list(extension_result.mappings())
         sequence_result = await conn.execute(text(RUNTIME_SEQUENCE_PRIVILEGES_SQL))
         sequence_privileges = list(sequence_result.tuples())
+        app_user_column_result = await conn.execute(text(APP_USER_COLUMN_PRIVILEGES_SQL))
+        app_user_column_privileges = list(app_user_column_result.mappings())
 
     expected_relations = {
         **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
@@ -392,16 +451,16 @@ async def test_runtime_role_has_only_row_level_table_privileges(
     } == APP_EXECUTABLE_FUNCTIONS
     assert all(row["is_grantable"] is False for row in function_privileges)
     assert all(row["public_can_execute"] is False for row in function_privileges)
-    assert executable_definers == [
-        "append_audit_event",
-        "enqueue_notification_delivery",
-        "resolve_notification_subscription",
-    ]
+    assert executable_definers == APP_EXECUTABLE_SECURITY_DEFINERS
     assert {
         (row["extname"], row["signature"]) for row in extension_privileges if row["app_can_execute"]
     } == APP_EXECUTABLE_EXTENSION_FUNCTIONS
     assert all(row["is_grantable"] is False for row in extension_privileges)
     assert sequence_privileges == []
+    assert {
+        row["attname"] for row in app_user_column_privileges if row["can_select"]
+    } == APP_USER_SAFE_COLUMNS
+    assert all(row["can_update"] is False for row in app_user_column_privileges)
 
 
 async def _assert_insufficient_privilege(engine: AsyncEngine, statement: str) -> None:

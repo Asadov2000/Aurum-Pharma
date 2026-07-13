@@ -33,7 +33,7 @@ from app.core.errors import (
 )
 from app.domains.auth.models import AppUser
 from app.domains.roles.models import Permission, Role, RoleTemplate, UserAssignment
-from app.domains.roles.repository import RolesRepository
+from app.domains.roles.repository import DirectoryUser, RolesRepository
 
 logger = structlog.get_logger("roles.service")
 
@@ -94,7 +94,7 @@ class RolesService:
         the anti-escalation subset check is intentionally bypassed (the source is
         the trusted system template), so this goes straight through the repo, not
         create_role. Caller runs it inside one transaction (all-or-nothing)."""
-        if await self.repo.get_user_by_email(email) is not None:
+        if await self.repo.get_user_by_email_support(email) is not None:
             raise ConflictError("Пользователь с таким email уже существует")
 
         user = await self.repo.insert_user(
@@ -112,7 +112,6 @@ class RolesService:
             branch_id=None,
             role_id=role.id,
             password_required=False,
-            created_by=actor_id,
         )
         logger.info("owner_provisioned", tenant_id=str(tenant_id), user_id=str(user.id))
         return user, role
@@ -307,7 +306,7 @@ class RolesService:
 
     async def list_users(
         self, tenant_id: UUID, *, page: int = 1, page_size: int = 50
-    ) -> tuple[list[tuple[AppUser, list[UserAssignment]]], int]:
+    ) -> tuple[list[tuple[DirectoryUser, list[UserAssignment]]], int]:
         total = await self.repo.count_users_for_tenant(tenant_id)
         users = await self.repo.list_users_for_tenant(
             tenant_id, limit=page_size, offset=(page - 1) * page_size
@@ -332,20 +331,19 @@ class RolesService:
         role_id: UUID,
         branch_id: UUID | None,
         password_required: bool,
-    ) -> tuple[AppUser, UserAssignment, bool]:
+    ) -> tuple[DirectoryUser, UserAssignment, bool]:
         target_role = await self.repo.get_role(role_id)
         if target_role is None or not target_role.is_active:
             raise NotFoundError("Role not found")
         self._assert_role_belongs_to_tenant(target_role, tenant_id)
         self._assert_can_assign(actor_level=actor_level, target_level=target_role.level)
 
-        user = await self.repo.get_user_by_email(email)
-        if user is None:
-            user = await self.repo.insert_user(
+        user_id = await self.repo.find_invitable_user_id(tenant_id=tenant_id, email=email)
+        if user_id is None:
+            user_id = await self.repo.insert_invited_user(
+                tenant_id=tenant_id,
                 email=email,
                 full_name=full_name,
-                home_tenant_id=tenant_id,
-                status="invited",
             )
             first_invite = True
         else:
@@ -354,7 +352,7 @@ class RolesService:
         # One assignment per (user, tenant, branch). If an *active* one is
         # already there → conflict. If an *inactive* one exists (e.g. user
         # was previously offboarded) → reactivate it with the new role.
-        existing = await self.repo.list_assignments_for_user(user.id, tenant_id=tenant_id)
+        existing = await self.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
         assignment = None
         for a in existing:
             if a.branch_id == branch_id:
@@ -362,22 +360,25 @@ class RolesService:
                     raise ConflictError("User already has an active assignment for this branch")
                 assignment = await self.repo.reactivate_assignment(
                     a.id,
+                    tenant_id=tenant_id,
                     role_id=role_id,
                     password_required=password_required,
-                    updated_by=actor_id,
                 )
                 break
 
         if assignment is None:
             assignment = await self.repo.insert_assignment(
-                user_id=user.id,
+                user_id=user_id,
                 tenant_id=tenant_id,
                 branch_id=branch_id,
                 role_id=role_id,
                 password_required=password_required,
-                created_by=actor_id,
             )
-        await self.invalidate_user_perms(user.id, tenant_id)
+        await self.invalidate_user_perms(user_id, tenant_id)
+
+        user = await self.repo.get_user(user_id)
+        if user is None:
+            raise NotFoundError("User not found")
 
         if first_invite:
             # Lazy import — Celery task module pulls celery_app which imports
@@ -417,9 +418,9 @@ class RolesService:
                     raise ConflictError("User already has an active assignment for this branch")
                 assignment = await self.repo.reactivate_assignment(
                     a.id,
+                    tenant_id=tenant_id,
                     role_id=role_id,
                     password_required=password_required,
-                    updated_by=actor_id,
                 )
                 break
 
@@ -430,7 +431,6 @@ class RolesService:
                 branch_id=branch_id,
                 role_id=role_id,
                 password_required=password_required,
-                created_by=actor_id,
             )
         await self.invalidate_user_perms(target_user_id, tenant_id)
         return assignment
@@ -455,46 +455,78 @@ class RolesService:
         if role is not None:
             self._assert_can_assign(actor_level=actor_level, target_level=role.level)
 
-        await self.repo.deactivate_assignment(assignment_id)
+        await self.repo.deactivate_assignment(assignment_id, tenant_id=tenant_id)
         await self.invalidate_user_perms(target_user_id, tenant_id)
 
-    async def block_user(self, *, actor_level: int, tenant_id: UUID, target_user_id: UUID) -> None:
+    async def block_user(
+        self,
+        *,
+        actor_level: int,
+        actor_id: UUID,
+        tenant_id: UUID,
+        target_user_id: UUID,
+    ) -> None:
+        if actor_id == target_user_id:
+            raise BusinessRuleError("You cannot block your own account")
         # Anti-escalation: block requires the actor's level <= every
         # assignment's role level in this tenant.
         assignments = await self.repo.list_assignments_for_user(target_user_id, tenant_id=tenant_id)
+        if not assignments:
+            raise NotFoundError("User not found")
         for a in assignments:
             if a.is_active:
                 role = await self.repo.get_role(a.role_id)
                 if role is not None:
                     self._assert_can_assign(actor_level=actor_level, target_level=role.level)
         user = await self.repo.get_user(target_user_id)
-        if user is None:
+        if user is None or user.home_tenant_id != tenant_id:
             raise NotFoundError("User not found")
         from app.core.time import utc_now
 
-        await self.repo.update_user(user, status="blocked", blocked_at=utc_now())
+        if not await self.repo.set_user_status(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+            status="blocked",
+            changed_at=utc_now(),
+        ):
+            raise NotFoundError("User not found")
         await self.invalidate_user_perms(target_user_id, tenant_id)
 
     async def soft_delete_user(
-        self, *, actor_level: int, tenant_id: UUID, target_user_id: UUID
+        self,
+        *,
+        actor_level: int,
+        actor_id: UUID,
+        tenant_id: UUID,
+        target_user_id: UUID,
     ) -> None:
+        if actor_id == target_user_id:
+            raise BusinessRuleError("You cannot archive your own account")
         assignments = await self.repo.list_assignments_for_user(target_user_id, tenant_id=tenant_id)
+        if not assignments:
+            raise NotFoundError("User not found")
         for a in assignments:
             if a.is_active:
                 role = await self.repo.get_role(a.role_id)
                 if role is not None:
                     self._assert_can_assign(actor_level=actor_level, target_level=role.level)
         user = await self.repo.get_user(target_user_id)
-        if user is None:
+        if user is None or user.home_tenant_id != tenant_id:
             raise NotFoundError("User not found")
         from app.core.time import utc_now
 
-        await self.repo.update_user(user, status="archived", archived_at=utc_now())
+        if not await self.repo.set_user_status(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+            status="archived",
+            changed_at=utc_now(),
+        ):
+            raise NotFoundError("User not found")
         await self.invalidate_user_perms(target_user_id, tenant_id)
 
     async def update_user_profile(
         self, *, tenant_id: UUID, target_user_id: UUID, fields: dict[str, object]
-    ) -> AppUser:
+    ) -> DirectoryUser:
         # Visibility: only users with at least one assignment in this tenant.
         assignments = await self.repo.list_assignments_for_user(target_user_id, tenant_id=tenant_id)
         if not assignments:
@@ -502,7 +534,17 @@ class RolesService:
         user = await self.repo.get_user(target_user_id)
         if user is None:
             raise NotFoundError("User not found")
-        return await self.repo.update_user(user, **fields)
+        full_name_value = fields.get("full_name", user.full_name)
+        phone_value = fields.get("phone", user.phone)
+        updated = await self.repo.update_user_profile(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+            full_name=str(full_name_value),
+            phone=None if phone_value is None else str(phone_value),
+        )
+        if updated is None:
+            raise NotFoundError("User not found")
+        return updated
 
     # -------------------------------------------------------------------------
     # Effective permissions (Redis cache)

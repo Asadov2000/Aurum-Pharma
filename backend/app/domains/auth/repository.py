@@ -2,15 +2,46 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, select, text, update
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
-from app.domains.auth.models import AppUser, EmailCode, LoginAttempt, Session
+from app.domains.auth.models import EmailCode, LoginAttempt, Session
+
+
+@dataclass(frozen=True)
+class AuthUserRecord:
+    id: UUID
+    email: str
+    full_name: str
+    password_hash: str | None
+    is_developer: bool
+    is_administrator: bool
+    home_tenant_id: UUID | None
+    status: str
+    last_login_at: datetime | None
+    password_required: bool
+
+
+def _auth_user_from_row(row: RowMapping) -> AuthUserRecord:
+    return AuthUserRecord(
+        id=cast(UUID, row["id"]),
+        email=cast(str, row["email"]),
+        full_name=cast(str, row["full_name"]),
+        password_hash=cast(str | None, row["password_hash"]),
+        is_developer=bool(row["is_developer"]),
+        is_administrator=bool(row["is_administrator"]),
+        home_tenant_id=cast(UUID | None, row["home_tenant_id"]),
+        status=cast(str, row["status"]),
+        last_login_at=cast(datetime | None, row["last_login_at"]),
+        password_required=bool(row["password_required"]),
+    )
 
 
 class AuthRepository:
@@ -21,19 +52,28 @@ class AuthRepository:
     # app_user
     # -------------------------------------------------------------------------
 
-    async def get_user_by_email(self, email: str) -> AppUser | None:
-        stmt = select(AppUser).where(AppUser.email_lower == email.lower())
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+    async def get_user_by_email(self, email: str) -> AuthUserRecord | None:
+        result = await self.session.execute(
+            text("SELECT * FROM public.lookup_auth_user_by_email(:email)"),
+            {"email": email},
+        )
+        row = result.mappings().one_or_none()
+        return _auth_user_from_row(row) if row is not None else None
 
-    async def get_user_by_id(self, user_id: UUID) -> AppUser | None:
-        stmt = select(AppUser).where(AppUser.id == user_id)
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+    async def get_user_by_id(
+        self, user_id: UUID, *, session_id: UUID | None = None
+    ) -> AuthUserRecord | None:
+        result = await self.session.execute(
+            text("SELECT * FROM public.lookup_auth_user_by_id(" ":user_id, :session_id)"),
+            {"user_id": user_id, "session_id": session_id},
+        )
+        row = result.mappings().one_or_none()
+        return _auth_user_from_row(row) if row is not None else None
 
     async def touch_last_login(self, user_id: UUID, when: datetime) -> None:
         await self.session.execute(
-            update(AppUser).where(AppUser.id == user_id).values(last_login_at=when)
+            text("SELECT public.touch_auth_user_last_login(:user_id, :when)"),
+            {"user_id": user_id, "when": when},
         )
 
     # -------------------------------------------------------------------------

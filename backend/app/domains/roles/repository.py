@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.models import AppUser
@@ -17,6 +20,43 @@ from app.domains.roles.models import (
     RoleTemplatePermission,
     UserAssignment,
 )
+
+
+@dataclass(frozen=True)
+class DirectoryUser:
+    id: UUID
+    email: str
+    email_lower: str
+    full_name: str
+    phone: str | None
+    home_tenant_id: UUID | None
+    status: str
+    last_login_at: datetime | None
+
+
+_DIRECTORY_COLUMNS = (
+    AppUser.id,
+    AppUser.email,
+    AppUser.email_lower,
+    AppUser.full_name,
+    AppUser.phone,
+    AppUser.home_tenant_id,
+    AppUser.status,
+    AppUser.last_login_at,
+)
+
+
+def _directory_user_from_row(row: RowMapping) -> DirectoryUser:
+    return DirectoryUser(
+        id=cast(UUID, row["id"]),
+        email=cast(str, row["email"]),
+        email_lower=cast(str, row["email_lower"]),
+        full_name=cast(str, row["full_name"]),
+        phone=cast(str | None, row["phone"]),
+        home_tenant_id=cast(UUID | None, row["home_tenant_id"]),
+        status=cast(str, row["status"]),
+        last_login_at=cast(datetime | None, row["last_login_at"]),
+    )
 
 
 class RolesRepository:
@@ -191,6 +231,7 @@ class RolesRepository:
         stmt = select(UserAssignment).where(UserAssignment.user_id == user_id)
         if tenant_id is not None:
             stmt = stmt.where(UserAssignment.tenant_id == tenant_id)
+        stmt = stmt.execution_options(populate_existing=True)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -200,9 +241,13 @@ class RolesRepository:
         """Assignments for many users in one query (kills the per-user N+1)."""
         if not user_ids:
             return []
-        stmt = select(UserAssignment).where(
-            UserAssignment.user_id.in_(user_ids),
-            UserAssignment.tenant_id == tenant_id,
+        stmt = (
+            select(UserAssignment)
+            .where(
+                UserAssignment.user_id.in_(user_ids),
+                UserAssignment.tenant_id == tenant_id,
+            )
+            .execution_options(populate_existing=True)
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -212,45 +257,80 @@ class RolesRepository:
             select(UserAssignment)
             .where(UserAssignment.tenant_id == tenant_id)
             .order_by(UserAssignment.created_at.asc())
+            .execution_options(populate_existing=True)
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_assignment(self, assignment_id: UUID) -> UserAssignment | None:
-        return await self.session.get(UserAssignment, assignment_id)
+        return await self.session.get(
+            UserAssignment,
+            assignment_id,
+            populate_existing=True,
+        )
 
-    async def insert_assignment(self, **fields: Any) -> UserAssignment:
-        a = UserAssignment(**fields)
-        self.session.add(a)
-        await self.session.flush()
-        await self.session.refresh(a)
-        return a
+    async def insert_assignment(
+        self,
+        *,
+        user_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID | None,
+        role_id: UUID,
+        password_required: bool,
+    ) -> UserAssignment:
+        stmt = select(UserAssignment).from_statement(
+            text(
+                "SELECT * FROM public.create_tenant_user_assignment("
+                ":tenant_id, :user_id, :branch_id, :role_id, :password_required)"
+            )
+        )
+        result = await self.session.execute(
+            stmt,
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "branch_id": branch_id,
+                "role_id": role_id,
+                "password_required": password_required,
+            },
+        )
+        return cast(UserAssignment, result.scalar_one())
 
     async def reactivate_assignment(
         self,
         assignment_id: UUID,
         *,
+        tenant_id: UUID,
         role_id: UUID,
         password_required: bool,
-        updated_by: UUID | None = None,
     ) -> UserAssignment | None:
-        await self.session.execute(
-            update(UserAssignment)
-            .where(UserAssignment.id == assignment_id)
-            .values(
-                is_active=True,
-                role_id=role_id,
-                password_required=password_required,
-                updated_by=updated_by,
+        stmt = (
+            select(UserAssignment)
+            .from_statement(
+                text(
+                    "SELECT * FROM public.reactivate_tenant_user_assignment("
+                    ":tenant_id, :assignment_id, :role_id, :password_required)"
+                )
             )
+            .execution_options(populate_existing=True)
         )
-        return await self.session.get(UserAssignment, assignment_id)
-
-    async def deactivate_assignment(self, assignment_id: UUID) -> int:
         result = await self.session.execute(
-            update(UserAssignment).where(UserAssignment.id == assignment_id).values(is_active=False)
+            stmt,
+            {
+                "tenant_id": tenant_id,
+                "assignment_id": assignment_id,
+                "role_id": role_id,
+                "password_required": password_required,
+            },
         )
-        return result.rowcount or 0  # type: ignore[attr-defined]
+        return result.scalar_one_or_none()
+
+    async def deactivate_assignment(self, assignment_id: UUID, *, tenant_id: UUID) -> int:
+        result = await self.session.execute(
+            text("SELECT public.deactivate_tenant_user_assignment(" ":tenant_id, :assignment_id)"),
+            {"tenant_id": tenant_id, "assignment_id": assignment_id},
+        )
+        return int(result.scalar_one())
 
     async def hard_delete_assignment(self, assignment_id: UUID) -> int:
         result = await self.session.execute(
@@ -264,27 +344,86 @@ class RolesRepository:
     # repository pile-up in auth)
     # -------------------------------------------------------------------------
 
-    async def get_user(self, user_id: UUID) -> AppUser | None:
-        return await self.session.get(AppUser, user_id)
+    async def get_user(self, user_id: UUID) -> DirectoryUser | None:
+        result = await self.session.execute(
+            select(*_DIRECTORY_COLUMNS).where(AppUser.id == user_id)
+        )
+        row = result.mappings().one_or_none()
+        return _directory_user_from_row(row) if row is not None else None
 
-    async def get_user_by_email(self, email: str) -> AppUser | None:
+    async def get_user_by_email_support(self, email: str) -> AppUser | None:
+        """Support-only global identity lookup used during tenant provisioning."""
         stmt = select(AppUser).where(AppUser.email_lower == email.lower())
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def find_invitable_user_id(self, *, tenant_id: UUID, email: str) -> UUID | None:
+        result = await self.session.execute(
+            text("SELECT public.find_invitable_user_id(:tenant_id, :email)"),
+            {"tenant_id": tenant_id, "email": email},
+        )
+        return cast(UUID | None, result.scalar_one())
+
     async def insert_user(self, **fields: Any) -> AppUser:
+        """Support-only identity creation used for the first tenant owner."""
         u = AppUser(**fields)
         self.session.add(u)
         await self.session.flush()
         await self.session.refresh(u)
         return u
 
-    async def update_user(self, user: AppUser, **fields: Any) -> AppUser:
-        for key, value in fields.items():
-            setattr(user, key, value)
-        await self.session.flush()
-        await self.session.refresh(user)
-        return user
+    async def insert_invited_user(self, *, tenant_id: UUID, email: str, full_name: str) -> UUID:
+        result = await self.session.execute(
+            text("SELECT public.create_invited_app_user(" ":tenant_id, :email, :full_name)"),
+            {"tenant_id": tenant_id, "email": email, "full_name": full_name},
+        )
+        return cast(UUID, result.scalar_one())
+
+    async def update_user_profile(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        full_name: str,
+        phone: str | None,
+    ) -> DirectoryUser | None:
+        result = await self.session.execute(
+            text(
+                "SELECT public.update_tenant_user_profile("
+                ":tenant_id, :user_id, :full_name, :phone)"
+            ),
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "full_name": full_name,
+                "phone": phone,
+            },
+        )
+        if not bool(result.scalar_one()):
+            return None
+        return await self.get_user(user_id)
+
+    async def set_user_status(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        status: str,
+        changed_at: datetime,
+    ) -> bool:
+        result = await self.session.execute(
+            text(
+                "SELECT public.set_tenant_user_status("
+                ":tenant_id, :user_id, :status, :changed_at)"
+            ),
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "status": status,
+                "changed_at": changed_at,
+            },
+        )
+        return bool(result.scalar_one())
 
     async def count_users_for_tenant(self, tenant_id: UUID) -> int:
         """Distinct users with at least one assignment in this tenant."""
@@ -298,11 +437,11 @@ class RolesRepository:
 
     async def list_users_for_tenant(
         self, tenant_id: UUID, *, limit: int, offset: int
-    ) -> list[AppUser]:
+    ) -> list[DirectoryUser]:
         """One page of distinct users with an assignment in this tenant, in a
         stable order (full_name, email) so pages don't shuffle."""
         stmt = (
-            select(AppUser)
+            select(*_DIRECTORY_COLUMNS)
             .join(UserAssignment, UserAssignment.user_id == AppUser.id)
             .where(UserAssignment.tenant_id == tenant_id)
             .order_by(AppUser.full_name.asc(), AppUser.email.asc())
@@ -311,7 +450,7 @@ class RolesRepository:
             .offset(offset)
         )
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        return [_directory_user_from_row(row) for row in result.mappings().all()]
 
     # -------------------------------------------------------------------------
     # effective permissions (loaded from DB; cached in Redis by the service)
