@@ -101,6 +101,25 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-delay 1
     restart: unless-stopped
 
+  db-owner-migrate:
+    profiles: ["maintenance"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      PYTHONPATH: /app
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      MIGRATION_DB_HOST: postgres
+      MIGRATION_DB_NAME: aurum
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: python -m app.db_owner_migrate
+
   celery-worker:
     build:
       context: ./backend

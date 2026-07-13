@@ -60,14 +60,12 @@ try {
 
     Invoke-AurumStep "Check Docker" "docker" @("version")
     Invoke-AurumStep "Start Docker Compose services" "docker" @("compose", "up", "-d")
-    Invoke-AurumStep "Apply database migrations" "docker" @(
-        "compose",
-        "exec",
-        "-T",
-        "backend",
-        "alembic",
-        "upgrade",
-        "head"
+    Invoke-AurumStep "Apply database migrations" "powershell.exe" @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        ".\scripts\migrate-local.ps1"
     )
     Invoke-AurumStep "Seed demo data" "docker" @(
         "compose",

@@ -164,15 +164,13 @@ Assert-HealthyContainer "aurum-postgres-test"
 Assert-HealthyContainer "aurum-redis"
 Assert-HealthyContainer "aurum-minio"
 
-Invoke-Checked "Applying Alembic migrations to head" @(
-    "docker",
-    "compose",
-    "exec",
-    "-T",
-    "backend",
-    "alembic",
-    "upgrade",
-    "head"
+Invoke-Checked "Applying Alembic migrations with database hardening" @(
+    "powershell.exe",
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    (Join-Path $RepoRoot "scripts\migrate-local.ps1")
 )
 
 Write-Step "Checking HTTP endpoints"
