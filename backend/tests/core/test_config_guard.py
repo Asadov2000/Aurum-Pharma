@@ -59,6 +59,19 @@ def test_production_accepts_strong_secrets() -> None:
     assert s.refresh_cookie_secure is True
 
 
+def test_production_rejects_development_edge_transport() -> None:
+    with pytest.raises(ValidationError, match="production requires mTLS"):
+        _build(ENVIRONMENT="production", EDGE_SYNC_ENABLED=True)
+
+
+def test_edge_credential_is_secret_in_settings_representation() -> None:
+    raw = "edge_v1.00000000-0000-4000-8000-000000000000." + "a" * 64
+    settings = _build(EDGE_SYNC_CREDENTIAL=raw)
+    assert raw not in repr(settings)
+    assert settings.EDGE_SYNC_CREDENTIAL is not None
+    assert settings.EDGE_SYNC_CREDENTIAL.get_secret_value() == raw
+
+
 def test_production_rejects_cross_site_refresh_cookie_without_secure_flag() -> None:
     with pytest.raises(ValidationError, match="REFRESH_COOKIE_SAMESITE"):
         _build(

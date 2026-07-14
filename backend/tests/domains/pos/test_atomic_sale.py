@@ -225,6 +225,7 @@ async def test_atomic_checkout_business_failure_rolls_back_every_row(
         )
         == 0
     )
+
     assert (
         await _count(
             db_session,
@@ -323,6 +324,9 @@ async def test_atomic_checkout_late_outbox_failure_rolls_back_savepoint(
     await _open_shift(service, scaffold)
     operation_id = uuid4()
     tenant_id = scaffold["tenant"].id
+    register_id = scaffold["register"].id
+    cashier_id = scaffold["cashier"].id
+    item_id = scaffold["item"].id
 
     async def _fail_enqueue(self: SyncOutboxRepository, **fields: object) -> SyncOutboxEvent:
         del self, fields
@@ -362,3 +366,20 @@ async def test_atomic_checkout_late_outbox_failure_rolls_back_savepoint(
         )
         == 0
     )
+
+    monkeypatch.undo()
+    recovered = await service.checkout(
+        tenant_id=tenant_id,
+        register_id=register_id,
+        cashier_user_id=cashier_id,
+        operation_id=operation_id,
+        items=[(item_id, Decimal("2"))],
+        payments=[("cash", Decimal("20"), None)],
+    )
+    event = await SyncOutboxRepository(db_session).get_by_operation_id(
+        tenant_id=tenant_id,
+        operation_id=operation_id,
+    )
+    assert event is not None
+    assert event.event_id == recovered.event_id
+    assert event.sequence == 1, "A rolled-back checkout must not consume a stream position"

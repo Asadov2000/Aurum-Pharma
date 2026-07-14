@@ -54,7 +54,12 @@ READ_ONLY_TABLES = {
     "role_template",
     "role_template_permission",
     "subscription_plan",
+    "sync_cursor",
+    "sync_inbox",
     "sync_outbox",
+    "sync_sale_projection",
+    "sync_shadow_report",
+    "sync_stream",
     "user_assignment",
 }
 
@@ -65,6 +70,7 @@ NO_ACCESS_TABLES = {
     "login_attempt",
     "notification_delivery",
     "session",
+    "sync_node",
 }
 
 APP_USER_SAFE_COLUMNS = {
@@ -89,6 +95,13 @@ SYNC_OUTBOX_INSERT_COLUMNS = {
     "schema_version",
     "payload",
     "payload_hash",
+    "origin_node_id",
+    "writer_epoch",
+    "sequence",
+    "occurred_at",
+    "stream_checksum",
+    "projection_hash",
+    "projection_checksum",
 }
 
 RUNTIME_VIEWS = {
@@ -98,6 +111,7 @@ RUNTIME_VIEWS = {
 
 CUSTOM_FUNCTIONS = {
     "append_audit_event",
+    "authenticate_edge_node",
     "auth_email_code_matches",
     "audit_redact_jsonb",
     "current_app_user_id",
@@ -120,21 +134,26 @@ CUSTOM_FUNCTIONS = {
     "mark_scoped_notification_read",
     "reactivate_tenant_user_assignment",
     "record_auth_login_attempt",
+    "reserve_sync_event_position",
     "resolve_notification_subscription",
     "revoke_auth_session_by_hash",
     "rotate_auth_session",
+    "finalize_sync_event_position",
     "set_tenant_user_status",
     "tenant_actor_has_permission",
     "touch_auth_user_last_login",
     "trg_audit_log",
+    "trg_guard_sync_stream_scope",
     "trg_set_created_meta",
     "trg_set_updated_meta",
     "trg_update_batch_qty",
+    "trg_validate_sync_stream_checkpoint",
     "update_tenant_user_profile",
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
     "append_audit_event",
+    "authenticate_edge_node",
     "auth_email_code_matches",
     "current_app_user_id",
     "current_tenant_id",
@@ -156,9 +175,11 @@ APP_EXECUTABLE_FUNCTIONS = {
     "mark_scoped_notification_read",
     "reactivate_tenant_user_assignment",
     "record_auth_login_attempt",
+    "reserve_sync_event_position",
     "resolve_notification_subscription",
     "revoke_auth_session_by_hash",
     "rotate_auth_session",
+    "finalize_sync_event_position",
     "set_tenant_user_status",
     "touch_auth_user_last_login",
     "update_tenant_user_profile",

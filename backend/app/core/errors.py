@@ -62,3 +62,9 @@ class RateLimitError(AurumError):
     code = "rate_limited"
     http_status = 429
     message = "Too many requests"
+
+
+class ServiceUnavailableError(AurumError):
+    code = "service_unavailable"
+    http_status = 503
+    message = "Service temporarily unavailable"

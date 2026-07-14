@@ -1,0 +1,72 @@
+services:
+  backend:
+    environment:
+      EDGE_SYNC_ENABLED: "true"
+
+  edge-postgres:
+    profiles: ["edge-shadow"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aurum_edge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:?Set AURUM_APP_PASSWORD}
+      AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:?Set AURUM_SUPPORT_PASSWORD}
+    volumes:
+      - edge-postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aurum_edge"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+  edge-migrate:
+    profiles: ["edge-shadow"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL_APP: ${EDGE_DATABASE_URL_APP:?Set EDGE_DATABASE_URL_APP}
+      DATABASE_URL_SUPPORT: ${EDGE_DATABASE_URL_SUPPORT:?Set EDGE_DATABASE_URL_SUPPORT}
+      # Settings requires this field, but the migration process never signs JWTs.
+      JWT_SECRET: edge-migrate-has-no-http-auth-surface
+      PYTHONPATH: /app
+    volumes:
+      - ./backend:/app
+    depends_on:
+      edge-postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+
+  edge-worker:
+    profiles: ["edge-shadow"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL_APP: ${EDGE_DATABASE_URL_APP:?Set EDGE_DATABASE_URL_APP}
+      # Runtime Edge code must never receive BYPASSRLS credentials. The shared
+      # Settings object still requires this key, so both runtime pools resolve
+      # to the least-privileged app role in this profile.
+      DATABASE_URL_SUPPORT: ${EDGE_DATABASE_URL_APP:?Set EDGE_DATABASE_URL_APP}
+      DEPLOYMENT_PROFILE: edge_shadow
+      EDGE_SYNC_CLOUD_URL: http://backend:8000
+      EDGE_SYNC_CREDENTIAL: ${EDGE_SYNC_CREDENTIAL:?Enroll an Edge node first}
+      # Settings requires this field, but the worker never signs or accepts JWTs.
+      JWT_SECRET: edge-worker-has-no-http-auth-surface
+      PYTHONPATH: /app
+    volumes:
+      - ./backend:/app
+    depends_on:
+      backend:
+        condition: service_started
+      edge-migrate:
+        condition: service_completed_successfully
+    command: python -m app.domains.sync.worker
+    restart: unless-stopped
+
+volumes:
+  edge-postgres-data:

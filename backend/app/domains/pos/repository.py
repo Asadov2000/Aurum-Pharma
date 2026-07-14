@@ -232,7 +232,11 @@ class POSRepository:
         return p
 
     async def list_payments(self, sale_id: UUID) -> list[SalePayment]:
-        stmt = select(SalePayment).where(SalePayment.sale_id == sale_id)
+        stmt = (
+            select(SalePayment)
+            .where(SalePayment.sale_id == sale_id)
+            .order_by(SalePayment.created_at, SalePayment.id)
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

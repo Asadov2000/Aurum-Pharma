@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
+from app.core.time import utc_now
 from app.domains.sync.repository import SyncOutboxRepository
 
 
@@ -127,16 +128,47 @@ async def test_sale_invisible_across_tenants(
             sale_ids = [str(r[0]) for r in sr.fetchall()]
             await conn.execute(
                 text(
+                    "INSERT INTO sync_node ("
+                    "tenant_id, branch_id, node_kind, mode, status, display_name"
+                    ") VALUES "
+                    "(:ta,:ba,'cloud','cloud_writer','active','Cloud writer'),"
+                    "(:tb,:bb,'cloud','cloud_writer','active','Cloud writer')"
+                ),
+                {
+                    "ta": tenant_ids[0],
+                    "tb": tenant_ids[1],
+                    "ba": branch_ids[0],
+                    "bb": branch_ids[1],
+                },
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO sync_stream ("
+                    "tenant_id, branch_id, writer_node_id, writer_epoch, last_sequence, "
+                    "current_checksum, current_projection_checksum"
+                    ") SELECT tenant_id, branch_id, id, 1, 1, repeat('a',64), repeat('b',64) "
+                    "FROM sync_node WHERE tenant_id = ANY(:ids) AND node_kind = 'cloud'"
+                ),
+                {"ids": tenant_ids},
+            )
+            await conn.execute(
+                text(
                     "INSERT INTO sync_outbox ("
-                    "tenant_id, branch_id, operation_id, aggregate_type, aggregate_id, "
-                    "event_type, payload, payload_hash"
-                    ") VALUES ("
-                    ":ta,:ba,gen_random_uuid(),'sale',:aa,'pos.sale.completed.v1',"
-                    "'{}'::jsonb,repeat('a',64)"
-                    "),("
-                    ":tb,:bb,gen_random_uuid(),'sale',:ab,'pos.sale.completed.v1',"
-                    "'{}'::jsonb,repeat('b',64)"
-                    ")"
+                    "tenant_id, branch_id, origin_node_id, writer_epoch, sequence, "
+                    "operation_id, aggregate_type, aggregate_id, event_type, occurred_at, "
+                    "payload, payload_hash, stream_checksum, projection_hash, "
+                    "projection_checksum"
+                    ") SELECT source_rows.tenant_id, source_rows.branch_id, sync_node.id, 1, 1, "
+                    "gen_random_uuid(), 'sale', source_rows.sale_id, "
+                    "'pos.sale.completed.v1', now(), "
+                    "'{}'::jsonb, repeat('a',64), repeat('a',64), repeat('b',64), "
+                    "repeat('b',64) FROM (VALUES "
+                    "(CAST(:ta AS uuid), CAST(:ba AS uuid), CAST(:aa AS uuid)),"
+                    "(CAST(:tb AS uuid), CAST(:bb AS uuid), CAST(:ab AS uuid))"
+                    ") AS source_rows(tenant_id, branch_id, sale_id) "
+                    "JOIN sync_node ON sync_node.tenant_id = source_rows.tenant_id "
+                    "AND sync_node.branch_id = source_rows.branch_id "
+                    "AND sync_node.node_kind = 'cloud'"
                 ),
                 {
                     "ta": tenant_ids[0],
@@ -155,17 +187,35 @@ async def test_sale_invisible_across_tenants(
                     text("SELECT set_config('app.tenant_id', :v, true)"),
                     {"v": tenant_ids[0]},
                 )
-                event = await SyncOutboxRepository(session).enqueue(
+                repo = SyncOutboxRepository(session)
+                position = await repo.reserve_position(
+                    tenant_id=UUID(tenant_ids[0]),
+                    branch_id=UUID(branch_ids[0]),
+                )
+                event = await repo.enqueue(
                     event_id=app_event_id,
                     tenant_id=UUID(tenant_ids[0]),
                     branch_id=UUID(branch_ids[0]),
+                    origin_node_id=position.origin_node_id,
+                    writer_epoch=position.writer_epoch,
+                    sequence=position.sequence,
                     operation_id=uuid4(),
                     aggregate_type="sale",
                     aggregate_id=UUID(sale_ids[0]),
                     event_type="pos.sale.completed.v1",
                     schema_version=1,
+                    occurred_at=utc_now(),
                     payload={"event_id": str(app_event_id)},
                     payload_hash="c" * 64,
+                    stream_checksum="d" * 64,
+                    projection_hash="e" * 64,
+                    projection_checksum="f" * 64,
+                )
+                await repo.finalize_position(
+                    stream_id=position.stream_id,
+                    sequence=position.sequence,
+                    stream_checksum="d" * 64,
+                    projection_checksum="f" * 64,
                 )
                 assert event.event_id == app_event_id
 
@@ -190,7 +240,13 @@ async def test_sale_invisible_across_tenants(
         if tenant_ids:
             async with support_engine_iso.begin() as conn:
                 for tbl in (
+                    "sync_shadow_report",
+                    "sync_sale_projection",
+                    "sync_cursor",
+                    "sync_inbox",
                     "sync_outbox",
+                    "sync_stream",
+                    "sync_node",
                     "sale",
                     "shift",
                     "register",

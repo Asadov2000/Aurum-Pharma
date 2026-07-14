@@ -1,0 +1,690 @@
+"""Business rules for enrollment, pull, apply, and shadow verification."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import Literal, cast
+from uuid import UUID
+
+import structlog
+from pydantic import ValidationError as PydanticValidationError
+
+from app.core.errors import AurumError, BusinessRuleError, ConflictError, NotFoundError
+from app.core.time import utc_now
+from app.domains.pos.schemas import SaleCheckoutResult
+from app.domains.sync.credentials import EdgeCredential, issue_edge_credential
+from app.domains.sync.integrity import (
+    canonical_json_hash,
+    projection_stream_checksum,
+    sale_projection_hash,
+    source_stream_checksum,
+)
+from app.domains.sync.integrity import (
+    canonical_json_hash as payload_hash,
+)
+from app.domains.sync.models import SyncCursor, SyncInboxEvent, SyncNode, SyncSaleProjection
+from app.domains.sync.repository import SyncCloudRepository, SyncEdgeRepository
+from app.domains.sync.schemas import (
+    EdgeApplyResult,
+    SyncEventEnvelope,
+    SyncNodeCreate,
+    SyncNodeCredentialRead,
+    SyncNodeRead,
+    SyncPullResponse,
+    SyncShadowReportRead,
+    SyncShadowReportRequest,
+)
+
+logger = structlog.get_logger("sync.service")
+CursorStatus = Literal["synced", "gap", "quarantined", "mismatch"]
+
+
+class _EnvelopeError(ValueError):
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(reason_code)
+
+
+def _node_with_credential(node: SyncNode, credential: EdgeCredential) -> SyncNodeCredentialRead:
+    node_data = SyncNodeRead.model_validate(node).model_dump()
+    return SyncNodeCredentialRead(**node_data, credential=credential.token)
+
+
+class SyncAdminService:
+    def __init__(self, repo: SyncCloudRepository) -> None:
+        self.repo = repo
+
+    async def create_node(self, payload: SyncNodeCreate) -> SyncNodeCredentialRead:
+        if not await self.repo.branch_exists(
+            tenant_id=payload.tenant_id, branch_id=payload.branch_id
+        ):
+            raise NotFoundError("Branch not found")
+        stream = await self.repo.ensure_stream(
+            tenant_id=payload.tenant_id, branch_id=payload.branch_id
+        )
+        credential = issue_edge_credential()
+        node = await self.repo.create_edge_node(
+            tenant_id=payload.tenant_id,
+            branch_id=payload.branch_id,
+            display_name=payload.display_name.strip(),
+            credential_kid=credential.kid,
+            credential_hash=credential.digest,
+            credential_expires_at=utc_now() + timedelta(days=payload.credential_valid_days),
+            shadow_start_sequence=stream.last_sequence,
+            shadow_start_checksum=stream.current_checksum,
+            shadow_start_projection_checksum=stream.current_projection_checksum,
+        )
+        return _node_with_credential(node, credential)
+
+    async def list_nodes(self, *, tenant_id: UUID | None) -> list[SyncNodeRead]:
+        nodes = await self.repo.list_edge_nodes(tenant_id=tenant_id)
+        return [SyncNodeRead.model_validate(node) for node in nodes]
+
+    async def rotate_credential(self, *, node_id: UUID, valid_days: int) -> SyncNodeCredentialRead:
+        existing = await self.repo.get_edge_node(node_id)
+        if existing is None:
+            raise NotFoundError("Edge node not found")
+        if existing.status != "active":
+            raise BusinessRuleError("Revoked Edge node cannot receive a new credential")
+        credential = issue_edge_credential()
+        node = await self.repo.rotate_edge_credential(
+            node_id=node_id,
+            credential_kid=credential.kid,
+            credential_hash=credential.digest,
+            credential_expires_at=utc_now() + timedelta(days=valid_days),
+        )
+        if node is None:
+            raise ConflictError("Edge node changed while rotating its credential")
+        return _node_with_credential(node, credential)
+
+    async def revoke_node(self, node_id: UUID) -> SyncNodeRead:
+        node = await self.repo.revoke_edge_node(node_id)
+        if node is None:
+            raise NotFoundError("Edge node not found")
+        return SyncNodeRead.model_validate(node)
+
+
+class SyncCloudService:
+    def __init__(self, repo: SyncCloudRepository) -> None:
+        self.repo = repo
+
+    async def pull(
+        self,
+        *,
+        edge_node_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        shadow_start_sequence: int,
+        shadow_start_checksum: str,
+        shadow_start_projection_checksum: str,
+        after_sequence: int,
+        limit: int,
+    ) -> SyncPullResponse:
+        stream = await self.repo.get_stream(tenant_id=tenant_id, branch_id=branch_id)
+        if stream is None:
+            raise AurumError("Sync stream is unavailable")
+        if after_sequence == 0:
+            effective_after = shadow_start_sequence
+        elif after_sequence < shadow_start_sequence:
+            raise ConflictError("Sync cursor predates this Edge enrollment")
+        else:
+            effective_after = after_sequence
+        if effective_after > stream.last_sequence:
+            raise ConflictError("Sync cursor is ahead of the Cloud stream")
+
+        if effective_after == shadow_start_sequence:
+            after_source_checksum = shadow_start_checksum
+            after_projection_checksum = shadow_start_projection_checksum
+        else:
+            checkpoint = await self.repo.get_event_at_sequence(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                origin_node_id=stream.writer_node_id,
+                writer_epoch=stream.writer_epoch,
+                sequence=effective_after,
+            )
+            if (
+                checkpoint is None
+                or checkpoint.stream_checksum is None
+                or checkpoint.projection_checksum is None
+            ):
+                raise AurumError("Cloud sync checkpoint is incomplete")
+            after_source_checksum = checkpoint.stream_checksum
+            after_projection_checksum = checkpoint.projection_checksum
+
+        rows = await self.repo.list_events(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            after_sequence=effective_after,
+            limit=limit + 1,
+        )
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        envelopes: list[SyncEventEnvelope] = []
+        expected_sequence = effective_after + 1
+        for row in rows:
+            if (
+                row.origin_node_id != stream.writer_node_id
+                or row.writer_epoch != stream.writer_epoch
+                or row.sequence != expected_sequence
+                or row.stream_checksum is None
+                or row.projection_hash is None
+                or row.projection_checksum is None
+            ):
+                raise AurumError("Cloud sync stream is not contiguous")
+            envelopes.append(SyncEventEnvelope.model_validate(row))
+            expected_sequence += 1
+
+        return SyncPullResponse(
+            edge_node_id=edge_node_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            origin_node_id=stream.writer_node_id,
+            writer_epoch=stream.writer_epoch,
+            effective_after_sequence=effective_after,
+            after_source_checksum=after_source_checksum,
+            after_projection_checksum=after_projection_checksum,
+            cloud_last_sequence=stream.last_sequence,
+            events=envelopes,
+            has_more=has_more,
+        )
+
+    async def report(
+        self,
+        *,
+        edge_node_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        shadow_start_sequence: int,
+        shadow_start_projection_checksum: str,
+        payload: SyncShadowReportRequest,
+    ) -> SyncShadowReportRead:
+        request_hash = canonical_json_hash(payload.model_dump(mode="json"))
+        existing = await self.repo.get_shadow_report(payload.report_id)
+        if existing is not None:
+            if existing.request_hash != request_hash or existing.edge_node_id != edge_node_id:
+                raise ConflictError("Report ID was already used for another checkpoint")
+            return SyncShadowReportRead.model_validate(existing, from_attributes=True)
+
+        stream = await self.repo.get_stream(tenant_id=tenant_id, branch_id=branch_id)
+        if stream is None:
+            raise AurumError("Sync stream is unavailable")
+        if (
+            payload.origin_node_id != stream.writer_node_id
+            or payload.writer_epoch != stream.writer_epoch
+        ):
+            raise ConflictError("Shadow report targets a stale writer epoch")
+        if not shadow_start_sequence <= payload.last_sequence <= stream.last_sequence:
+            raise ConflictError("Shadow report sequence is outside the enrolled stream")
+
+        if payload.last_sequence == shadow_start_sequence:
+            expected = shadow_start_projection_checksum
+        else:
+            checkpoint = await self.repo.get_event_at_sequence(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                origin_node_id=payload.origin_node_id,
+                writer_epoch=payload.writer_epoch,
+                sequence=payload.last_sequence,
+            )
+            if checkpoint is None or checkpoint.projection_checksum is None:
+                raise AurumError("Cloud projection checkpoint is incomplete")
+            expected = checkpoint.projection_checksum
+        report_status = "matched" if payload.projection_checksum == expected else "mismatch"
+        report = await self.repo.insert_shadow_report(
+            report_id=payload.report_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            origin_node_id=payload.origin_node_id,
+            writer_epoch=payload.writer_epoch,
+            last_sequence=payload.last_sequence,
+            projection_checksum=payload.projection_checksum,
+            expected_checksum=expected,
+            request_hash=request_hash,
+            status=report_status,
+        )
+        if report_status == "mismatch":
+            logger.error(
+                "edge_shadow_mismatch",
+                edge_node_id=str(edge_node_id),
+                branch_id=str(branch_id),
+                sequence=payload.last_sequence,
+            )
+        return SyncShadowReportRead.model_validate(report, from_attributes=True)
+
+
+class SyncEdgeApplyService:
+    def __init__(self, repo: SyncEdgeRepository) -> None:
+        self.repo = repo
+
+    @staticmethod
+    def _result(cursor: SyncCursor, *, applied: int = 0, duplicates: int = 0) -> EdgeApplyResult:
+        return EdgeApplyResult(
+            applied=applied,
+            duplicates=duplicates,
+            last_sequence=cursor.last_sequence,
+            source_checksum=cursor.source_checksum,
+            projection_checksum=cursor.projection_checksum,
+            status=cast(CursorStatus, cursor.status),
+        )
+
+    async def _stop(
+        self,
+        *,
+        cursor: SyncCursor,
+        envelope: SyncEventEnvelope | None,
+        cursor_status: str,
+        reason_code: str,
+        applied: int,
+        duplicates: int,
+    ) -> EdgeApplyResult:
+        if envelope is not None:
+            inbox = await self.repo.get_inbox_event(envelope.event_id)
+            if inbox is None:
+                await self.repo.insert_inbox(
+                    envelope,
+                    status="quarantined",
+                    reason_code=reason_code,
+                )
+            elif inbox.status != "quarantined":
+                await self.repo.mark_inbox(
+                    inbox,
+                    status="quarantined",
+                    reason_code=reason_code,
+                    applied_at=inbox.applied_at,
+                )
+        await self.repo.update_cursor(
+            cursor,
+            writer_epoch=cursor.writer_epoch,
+            last_sequence=cursor.last_sequence,
+            last_event_id=cursor.last_event_id,
+            source_checksum=cursor.source_checksum,
+            projection_checksum=cursor.projection_checksum,
+            status=cursor_status,
+        )
+        return self._result(cursor, applied=applied, duplicates=duplicates)
+
+    @staticmethod
+    def _same_inbox_event(existing: SyncInboxEvent, incoming: SyncEventEnvelope) -> bool:
+        return (
+            existing.event_id == incoming.event_id
+            and existing.tenant_id == incoming.tenant_id
+            and existing.branch_id == incoming.branch_id
+            and existing.origin_node_id == incoming.origin_node_id
+            and existing.writer_epoch == incoming.writer_epoch
+            and existing.sequence == incoming.sequence
+            and existing.payload_hash == incoming.payload_hash
+            and existing.stream_checksum == incoming.stream_checksum
+            and existing.projection_hash == incoming.projection_hash
+            and existing.projection_checksum == incoming.projection_checksum
+            and existing.status == "applied"
+        )
+
+    @staticmethod
+    def _validate_event(
+        envelope: SyncEventEnvelope,
+        *,
+        previous_source_checksum: str,
+        previous_projection_checksum: str,
+    ) -> SaleCheckoutResult:
+        if envelope.event_type != "pos.sale.completed.v1" or envelope.schema_version != 1:
+            raise _EnvelopeError("unsupported_event")
+        if envelope.aggregate_type != "sale":
+            raise _EnvelopeError("invalid_aggregate")
+        try:
+            calculated_payload_hash = payload_hash(envelope.payload)
+        except (TypeError, ValueError) as exc:
+            raise _EnvelopeError("invalid_payload_json") from exc
+        if calculated_payload_hash != envelope.payload_hash:
+            raise _EnvelopeError("payload_hash_mismatch")
+        try:
+            sale = SaleCheckoutResult.model_validate(envelope.payload)
+        except PydanticValidationError as exc:
+            raise _EnvelopeError("invalid_sale_projection") from exc
+        if (
+            sale.event_id != envelope.event_id
+            or sale.sale_id != envelope.aggregate_id
+            or sale.operation_id != envelope.operation_id
+            or sale.tenant_id != envelope.tenant_id
+            or sale.branch_id != envelope.branch_id
+            or sale.completed_at != envelope.occurred_at
+        ):
+            raise _EnvelopeError("payload_envelope_mismatch")
+
+        calculated_source = source_stream_checksum(
+            previous_checksum=previous_source_checksum,
+            event_id=envelope.event_id,
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+            operation_id=envelope.operation_id,
+            aggregate_type=envelope.aggregate_type,
+            aggregate_id=envelope.aggregate_id,
+            event_type=envelope.event_type,
+            schema_version=envelope.schema_version,
+            occurred_at=envelope.occurred_at,
+            payload_hash=envelope.payload_hash,
+        )
+        if calculated_source != envelope.stream_checksum:
+            raise _EnvelopeError("source_checksum_mismatch")
+
+        normalized_payload = sale.model_dump(mode="json")
+        calculated_projection_hash = sale_projection_hash(normalized_payload)
+        if calculated_projection_hash != envelope.projection_hash:
+            raise _EnvelopeError("projection_hash_mismatch")
+        calculated_projection = projection_stream_checksum(
+            previous_checksum=previous_projection_checksum,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+            sale_id=sale.sale_id,
+            projection_hash=calculated_projection_hash,
+        )
+        if calculated_projection != envelope.projection_checksum:
+            raise _EnvelopeError("projection_checksum_mismatch")
+        return sale
+
+    async def _prepare_cursor(
+        self, pull: SyncPullResponse
+    ) -> tuple[SyncCursor, EdgeApplyResult | None]:
+        cursor = await self.repo.get_cursor(
+            tenant_id=pull.tenant_id,
+            branch_id=pull.branch_id,
+            origin_node_id=pull.origin_node_id,
+            for_update=True,
+        )
+        if cursor is None:
+            cursor = await self.repo.insert_cursor(
+                tenant_id=pull.tenant_id,
+                branch_id=pull.branch_id,
+                origin_node_id=pull.origin_node_id,
+                writer_epoch=pull.writer_epoch,
+                start_sequence=pull.effective_after_sequence,
+                start_source_checksum=pull.after_source_checksum,
+                start_projection_checksum=pull.after_projection_checksum,
+            )
+        if cursor.status != "synced":
+            return cursor, self._result(cursor)
+        if cursor.writer_epoch != pull.writer_epoch:
+            halted = await self._stop(
+                cursor=cursor,
+                envelope=None,
+                cursor_status="quarantined",
+                reason_code="writer_epoch_mismatch",
+                applied=0,
+                duplicates=0,
+            )
+            return cursor, halted
+        if pull.effective_after_sequence > cursor.last_sequence:
+            halted = await self._stop(
+                cursor=cursor,
+                envelope=None,
+                cursor_status="gap",
+                reason_code="response_checkpoint_gap",
+                applied=0,
+                duplicates=0,
+            )
+            return cursor, halted
+        if pull.effective_after_sequence == cursor.last_sequence and (
+            pull.after_source_checksum != cursor.source_checksum
+            or pull.after_projection_checksum != cursor.projection_checksum
+        ):
+            halted = await self._stop(
+                cursor=cursor,
+                envelope=None,
+                cursor_status="mismatch",
+                reason_code="response_checkpoint_mismatch",
+                applied=0,
+                duplicates=0,
+            )
+            return cursor, halted
+        return cursor, None
+
+    async def _precheck_event(
+        self,
+        *,
+        pull: SyncPullResponse,
+        cursor: SyncCursor,
+        envelope: SyncEventEnvelope,
+        applied: int,
+        duplicates: int,
+    ) -> tuple[EdgeApplyResult | None, bool]:
+        if (
+            envelope.tenant_id != pull.tenant_id
+            or envelope.branch_id != pull.branch_id
+            or envelope.origin_node_id != pull.origin_node_id
+            or envelope.writer_epoch != pull.writer_epoch
+        ):
+            halted = await self._stop(
+                cursor=cursor,
+                envelope=None,
+                cursor_status="quarantined",
+                reason_code="event_scope_mismatch",
+                applied=applied,
+                duplicates=duplicates,
+            )
+            return halted, False
+
+        existing = await self.repo.get_inbox_event(envelope.event_id)
+        if envelope.sequence <= cursor.last_sequence:
+            if existing is not None and self._same_inbox_event(existing, envelope):
+                return None, True
+            halted = await self._stop(
+                cursor=cursor,
+                envelope=envelope if existing is None else None,
+                cursor_status="quarantined",
+                reason_code="event_identity_collision",
+                applied=applied,
+                duplicates=duplicates,
+            )
+            return halted, False
+        if envelope.sequence != cursor.last_sequence + 1:
+            halted = await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="gap",
+                reason_code="sequence_gap",
+                applied=applied,
+                duplicates=duplicates,
+            )
+            return halted, False
+        if existing is not None:
+            halted = await self._stop(
+                cursor=cursor,
+                envelope=None,
+                cursor_status="quarantined",
+                reason_code="event_identity_collision",
+                applied=applied,
+                duplicates=duplicates,
+            )
+            return halted, False
+        return None, False
+
+    async def _apply_new_event(
+        self,
+        *,
+        cursor: SyncCursor,
+        envelope: SyncEventEnvelope,
+        applied: int,
+        duplicates: int,
+    ) -> EdgeApplyResult | None:
+        try:
+            sale = self._validate_event(
+                envelope,
+                previous_source_checksum=cursor.source_checksum,
+                previous_projection_checksum=cursor.projection_checksum,
+            )
+        except _EnvelopeError as exc:
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code=exc.reason_code,
+                applied=applied,
+                duplicates=duplicates,
+            )
+        if await self.repo.get_sale_projection(sale.sale_id) is not None:
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code="sale_projection_collision",
+                applied=applied,
+                duplicates=duplicates,
+            )
+
+        inbox = await self.repo.insert_inbox(envelope, status="received")
+        await self.repo.insert_sale_projection(
+            sale_id=sale.sale_id,
+            tenant_id=sale.tenant_id,
+            branch_id=sale.branch_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+            source_event_id=envelope.event_id,
+            operation_id=sale.operation_id,
+            register_id=sale.register_id,
+            shift_id=sale.shift_id,
+            cashier_user_id=sale.cashier_user_id,
+            receipt_number=sale.receipt_number,
+            receipt_seq=sale.receipt_seq,
+            sale_created_at=sale.created_at,
+            completed_at=sale.completed_at,
+            total_amount=sale.total_amount,
+            currency=sale.currency,
+            is_test=sale.is_test,
+            items=[cast(dict[str, object], item.model_dump(mode="json")) for item in sale.items],
+            payments=[
+                cast(dict[str, object], payment.model_dump(mode="json"))
+                for payment in sale.payments
+            ],
+            source_payload_hash=envelope.payload_hash,
+            projection_hash=envelope.projection_hash,
+        )
+        await self.repo.mark_inbox(
+            inbox,
+            status="applied",
+            reason_code=None,
+            applied_at=utc_now(),
+        )
+        await self.repo.update_cursor(
+            cursor,
+            writer_epoch=envelope.writer_epoch,
+            last_sequence=envelope.sequence,
+            last_event_id=envelope.event_id,
+            source_checksum=envelope.stream_checksum,
+            projection_checksum=envelope.projection_checksum,
+            status="synced",
+        )
+        return None
+
+    async def apply(self, pull: SyncPullResponse) -> EdgeApplyResult:
+        cursor, halted = await self._prepare_cursor(pull)
+        if halted is not None:
+            return halted
+
+        applied = 0
+        duplicates = 0
+        for envelope in pull.events:
+            halted, duplicate = await self._precheck_event(
+                pull=pull,
+                cursor=cursor,
+                envelope=envelope,
+                applied=applied,
+                duplicates=duplicates,
+            )
+            if halted is not None:
+                return halted
+            if duplicate:
+                duplicates += 1
+                continue
+            halted = await self._apply_new_event(
+                cursor=cursor,
+                envelope=envelope,
+                applied=applied,
+                duplicates=duplicates,
+            )
+            if halted is not None:
+                return halted
+            applied += 1
+        return self._result(cursor, applied=applied, duplicates=duplicates)
+
+    @staticmethod
+    def _projection_payload(row: SyncSaleProjection) -> dict[str, object]:
+        sale = SaleCheckoutResult.model_validate(
+            {
+                "event_id": row.source_event_id,
+                "sale_id": row.sale_id,
+                "operation_id": row.operation_id,
+                "tenant_id": row.tenant_id,
+                "branch_id": row.branch_id,
+                "register_id": row.register_id,
+                "shift_id": row.shift_id,
+                "cashier_user_id": row.cashier_user_id,
+                "receipt_number": row.receipt_number,
+                "receipt_seq": row.receipt_seq,
+                "created_at": row.sale_created_at,
+                "completed_at": row.completed_at,
+                "total_amount": row.total_amount,
+                "currency": row.currency,
+                "is_test": row.is_test,
+                "items": row.items,
+                "payments": row.payments,
+            }
+        )
+        return cast(dict[str, object], sale.model_dump(mode="json"))
+
+    async def verify_projection(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        origin_node_id: UUID,
+    ) -> EdgeApplyResult:
+        cursor = await self.repo.get_cursor(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            origin_node_id=origin_node_id,
+            for_update=True,
+        )
+        if cursor is None:
+            raise NotFoundError("Edge sync cursor not found")
+        rows = await self.repo.list_sale_projections(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            origin_node_id=origin_node_id,
+            after_sequence=cursor.start_sequence,
+        )
+        expected_sequence = cursor.start_sequence + 1
+        checksum = cursor.start_projection_checksum
+        valid = True
+        for row in rows:
+            projection_hash = sale_projection_hash(self._projection_payload(row))
+            if row.sequence != expected_sequence or row.projection_hash != projection_hash:
+                valid = False
+                break
+            checksum = projection_stream_checksum(
+                previous_checksum=checksum,
+                origin_node_id=row.origin_node_id,
+                writer_epoch=row.writer_epoch,
+                sequence=row.sequence,
+                sale_id=row.sale_id,
+                projection_hash=projection_hash,
+            )
+            expected_sequence += 1
+        if expected_sequence - 1 != cursor.last_sequence or checksum != cursor.projection_checksum:
+            valid = False
+        if not valid:
+            await self.repo.update_cursor(
+                cursor,
+                writer_epoch=cursor.writer_epoch,
+                last_sequence=cursor.last_sequence,
+                last_event_id=cursor.last_event_id,
+                source_checksum=cursor.source_checksum,
+                projection_checksum=cursor.projection_checksum,
+                status="mismatch",
+            )
+        return self._result(cursor)

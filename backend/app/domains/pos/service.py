@@ -68,6 +68,12 @@ from app.domains.pos.schemas import (
 )
 from app.domains.pos.stock_on_date_xlsx import render_stock_on_date_xlsx
 from app.domains.pos.z_report_xlsx import get_or_render_z_report_xlsx
+from app.domains.sync.integrity import (
+    canonical_json_hash,
+    projection_stream_checksum,
+    sale_projection_hash,
+    source_stream_checksum,
+)
 from app.domains.sync.models import SyncOutboxEvent
 from app.domains.sync.repository import SyncOutboxRepository
 
@@ -303,16 +309,9 @@ class POSService:
     @staticmethod
     def _checkout_result_hash(payload: Mapping[str, object]) -> str:
         try:
-            canonical = json.dumps(
-                payload,
-                allow_nan=False,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
+            return canonical_json_hash(payload)
         except (TypeError, ValueError) as exc:
             raise AurumError("Checkout result is not serializable") from exc
-        return hashlib.sha256(canonical).hexdigest()
 
     async def _find_existing_checkout(
         self,
@@ -638,17 +637,61 @@ class POSService:
             ],
         )
         event_payload = result.model_dump(mode="json")
-        await SyncOutboxRepository(self.repo.session).enqueue(
+        outbox = SyncOutboxRepository(self.repo.session)
+        position = await outbox.reserve_position(
+            tenant_id=completed.tenant_id,
+            branch_id=completed.branch_id,
+        )
+        event_payload_hash = self._checkout_result_hash(event_payload)
+        event_projection_hash = sale_projection_hash(event_payload)
+        stream_checksum = source_stream_checksum(
+            previous_checksum=position.previous_checksum,
             event_id=event_id,
             tenant_id=completed.tenant_id,
             branch_id=completed.branch_id,
+            origin_node_id=position.origin_node_id,
+            writer_epoch=position.writer_epoch,
+            sequence=position.sequence,
             operation_id=operation_id,
             aggregate_type="sale",
             aggregate_id=completed.id,
             event_type="pos.sale.completed.v1",
             schema_version=1,
+            occurred_at=completed.completed_at,
+            payload_hash=event_payload_hash,
+        )
+        projection_checksum = projection_stream_checksum(
+            previous_checksum=position.previous_projection_checksum,
+            origin_node_id=position.origin_node_id,
+            writer_epoch=position.writer_epoch,
+            sequence=position.sequence,
+            sale_id=completed.id,
+            projection_hash=event_projection_hash,
+        )
+        await outbox.enqueue(
+            event_id=event_id,
+            tenant_id=completed.tenant_id,
+            branch_id=completed.branch_id,
+            origin_node_id=position.origin_node_id,
+            writer_epoch=position.writer_epoch,
+            sequence=position.sequence,
+            operation_id=operation_id,
+            aggregate_type="sale",
+            aggregate_id=completed.id,
+            event_type="pos.sale.completed.v1",
+            schema_version=1,
+            occurred_at=completed.completed_at,
             payload=event_payload,
-            payload_hash=self._checkout_result_hash(event_payload),
+            payload_hash=event_payload_hash,
+            stream_checksum=stream_checksum,
+            projection_hash=event_projection_hash,
+            projection_checksum=projection_checksum,
+        )
+        await outbox.finalize_position(
+            stream_id=position.stream_id,
+            sequence=position.sequence,
+            stream_checksum=stream_checksum,
+            projection_checksum=projection_checksum,
         )
         return result
 

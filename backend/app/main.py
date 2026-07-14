@@ -37,7 +37,10 @@ from app.domains.onboarding import router as onboarding_router
 from app.domains.pos import router as pos_router
 from app.domains.roles import router as roles_router
 from app.domains.suppliers import router as suppliers_router
+from app.domains.sync.router import admin_router as sync_admin_router
+from app.domains.sync.router import router as sync_router
 from app.middleware.auth_context import AuthContextMiddleware
+from app.middleware.edge_read_only import EdgeReadOnlyMiddleware
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
@@ -77,6 +80,10 @@ app.add_middleware(
 )
 
 app.add_middleware(AuthContextMiddleware)
+app.add_middleware(
+    EdgeReadOnlyMiddleware,
+    enabled=settings.DEPLOYMENT_PROFILE == "edge_shadow",
+)
 app.add_middleware(RequestIdMiddleware)
 # Outermost: stamps security headers on every response. Production-only so
 # dev/test/e2e are untouched; CSP ships Report-Only (see middleware docstring).
@@ -102,6 +109,8 @@ app.include_router(audit_router)
 app.include_router(onboarding_router)
 app.include_router(notifications_router)
 app.include_router(dashboard_router)
+app.include_router(sync_admin_router)
+app.include_router(sync_router)
 
 
 @app.get("/healthz", tags=["meta"])

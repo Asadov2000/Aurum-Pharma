@@ -1,7 +1,8 @@
-"""Fixtures for POS tests — full scaffold with batch ready for sale.
+"""Shared domain fixtures for POS and synchronization tests.
 
-`pos_scaffold` gives a tenant in `active` status (real sales, not is_test),
-a branch, a register, an item, and a single batch with qty_remaining=100.
+`pos_scaffold` creates an active tenant, branch, register, catalog item, batch,
+and cashier. Keeping it at the domain level lets sync tests reuse the real POS
+event source without loading the same pytest plugin twice.
 """
 
 from __future__ import annotations
@@ -43,7 +44,6 @@ async def pos_scaffold(db_session: AsyncSession):  # type: ignore[no-untyped-def
             }
         )
         if tenant_status != "setup":
-            # Service moves status; refresh to see the new value.
             await foundation.update_tenant(tenant.id, fields={"status": tenant_status})
             await db_session.refresh(tenant)
         branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
@@ -63,7 +63,7 @@ async def pos_scaffold(db_session: AsyncSession):  # type: ignore[no-untyped-def
             purchase_price=Decimal("3.00"),
             sale_price=Decimal(str(sale_price)),
             qty_initial=Decimal(str(batch_qty)),
-            qty_remaining=Decimal("0"),  # bumped by the incoming movement below
+            qty_remaining=Decimal("0"),
         )
         await inventory_repo.insert_movement(
             tenant_id=tenant.id,
@@ -74,7 +74,6 @@ async def pos_scaffold(db_session: AsyncSession):  # type: ignore[no-untyped-def
             source_id=None,
         )
         await db_session.refresh(batch)
-        # cashier user
         cashier = AppUser(
             email=f"cashier-{nick}@aurum.tj",
             full_name="Cashier",

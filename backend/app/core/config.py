@@ -6,7 +6,7 @@ import logging
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("aurum.config")
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     )
 
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    DEPLOYMENT_PROFILE: Literal["cloud", "edge_shadow"] = "cloud"
 
     DATABASE_URL_APP: str
     DATABASE_URL_SUPPORT: str
@@ -61,6 +62,18 @@ class Settings(BaseSettings):
     APP_NAME: str = "Aurum Pharma"
     LOG_LEVEL: str = "INFO"
 
+    # Development-only shadow transport. Production enrollment will use mTLS
+    # and hardware-backed device identities; the bearer credential is refused
+    # by the production configuration guard.
+    EDGE_SYNC_ENABLED: bool = False
+    EDGE_SYNC_MAX_CLOCK_SKEW_SECONDS: int = Field(default=300, ge=30, le=900)
+    EDGE_SYNC_NONCE_TTL_SECONDS: int = Field(default=600, ge=60, le=3600)
+    EDGE_SYNC_REQUESTS_PER_MINUTE: int = Field(default=120, ge=10, le=1000)
+    EDGE_SYNC_CLOUD_URL: AnyHttpUrl | None = None
+    EDGE_SYNC_CREDENTIAL: SecretStr | None = None
+    EDGE_SYNC_POLL_SECONDS: int = Field(default=5, ge=1, le=300)
+    EDGE_SYNC_BATCH_SIZE: int = Field(default=100, ge=1, le=100)
+
     @property
     def refresh_cookie_secure(self) -> bool:
         return (
@@ -92,6 +105,14 @@ class Settings(BaseSettings):
                 problems.append(f"{name} uses a default/example DB password")
         if self.REFRESH_COOKIE_SAMESITE == "none" and not self.refresh_cookie_secure:
             problems.append("REFRESH_COOKIE_SAMESITE=none requires REFRESH_COOKIE_SECURE=true")
+        if self.EDGE_SYNC_ENABLED:
+            problems.append(
+                "EDGE_SYNC_ENABLED uses development token auth; production requires mTLS"
+            )
+        if self.EDGE_SYNC_CREDENTIAL is not None:
+            problems.append(
+                "EDGE_SYNC_CREDENTIAL uses development token auth; production requires mTLS"
+            )
         if problems:
             raise ValueError(
                 "Refusing to start in production with insecure config:\n- " + "\n- ".join(problems)
