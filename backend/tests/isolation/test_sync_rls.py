@@ -112,6 +112,37 @@ async def _assert_unbacked_reservation_rejected(
                 await transaction.rollback()
 
 
+async def _assert_edge_receipt_allocation_denied(
+    engine: AsyncEngine,
+    *,
+    tenant_id: UUID,
+    branch_id: UUID,
+    register_id: UUID,
+    edge_node_id: UUID,
+) -> None:
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        try:
+            await _set_app_scope(
+                connection,
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                edge_node_id=edge_node_id,
+            )
+            with pytest.raises(DBAPIError) as error:
+                await connection.execute(
+                    text(
+                        "SELECT * FROM public.allocate_register_receipt("
+                        ":tenant_id, :register_id)"
+                    ),
+                    {"tenant_id": tenant_id, "register_id": register_id},
+                )
+            assert getattr(error.value.orig, "sqlstate", None) == "42501"
+        finally:
+            if transaction.is_active:
+                await transaction.rollback()
+
+
 async def test_edge_session_is_restricted_to_its_branch(
     support_engine_sync: AsyncEngine,
     app_engine_sync: AsyncEngine,
@@ -139,6 +170,15 @@ async def test_edge_session_is_restricted_to_its_branch(
                 {"tenant_id": tenant_id},
             )
             branch_ids = [row[0] for row in branch_rows]
+            register_rows = await connection.execute(
+                text(
+                    "INSERT INTO register (tenant_id, branch_id, name) VALUES "
+                    "(:tenant_id, :a, 'Register A'), "
+                    "(:tenant_id, :b, 'Register B') RETURNING id"
+                ),
+                {"tenant_id": tenant_id, "a": branch_ids[0], "b": branch_ids[1]},
+            )
+            register_ids = [row[0] for row in register_rows]
             cloud_rows = await connection.execute(
                 text(
                     "INSERT INTO sync_node ("
@@ -154,14 +194,20 @@ async def test_edge_session_is_restricted_to_its_branch(
                 text(
                     "INSERT INTO sync_node ("
                     "tenant_id, branch_id, node_kind, mode, status, display_name, "
-                    "credential_kid, credential_hash, credential_expires_at"
+                    "register_id, credential_kid, credential_hash, credential_expires_at"
                     ") VALUES "
                     "(:tenant_id,:a,'edge','shadow_readonly','active','Edge A',"
-                    "gen_random_uuid(),repeat('a',64),now()+interval '1 day'),"
+                    ":ra,gen_random_uuid(),repeat('a',64),now()+interval '1 day'),"
                     "(:tenant_id,:b,'edge','shadow_readonly','active','Edge B',"
-                    "gen_random_uuid(),repeat('b',64),now()+interval '1 day') RETURNING id"
+                    ":rb,gen_random_uuid(),repeat('b',64),now()+interval '1 day') RETURNING id"
                 ),
-                {"tenant_id": tenant_id, "a": branch_ids[0], "b": branch_ids[1]},
+                {
+                    "tenant_id": tenant_id,
+                    "a": branch_ids[0],
+                    "b": branch_ids[1],
+                    "ra": register_ids[0],
+                    "rb": register_ids[1],
+                },
             )
             edge_ids = [row[0] for row in edge_rows]
             await connection.execute(
@@ -181,6 +227,64 @@ async def test_edge_session_is_restricted_to_its_branch(
                     "cb": cloud_ids[1],
                 },
             )
+            for index in range(2):
+                activation_id = uuid4()
+                await connection.execute(
+                    text(
+                        "INSERT INTO sync_writer_epoch ("
+                        "tenant_id, branch_id, writer_epoch, activation_id, writer_node_id, "
+                        "allowed_register_id, capability, state, root_source_checksum, "
+                        "root_projection_checksum, current_source_checksum, "
+                        "current_projection_checksum, previous_writer_epoch, "
+                        "previous_terminal_source_checksum, "
+                        "previous_terminal_projection_checksum, bootstrap_snapshot_hash, "
+                        "activation_manifest_hash, receipt_baseline_seq, prepared_at"
+                        ") VALUES ("
+                        ":tenant_id,:branch_id,2,:activation_id,:edge_id,:register_id,"
+                        "'cash_sale_v1','prepared',repeat('e',64),repeat('f',64),"
+                        "repeat('e',64),repeat('f',64),1,repeat('b',64),repeat('d',64),"
+                        "repeat('1',64),repeat('2',64),0,now())"
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "branch_id": branch_ids[index],
+                        "activation_id": activation_id,
+                        "edge_id": edge_ids[index],
+                        "register_id": register_ids[index],
+                    },
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO sync_writer_readiness ("
+                        "activation_id, tenant_id, branch_id, edge_node_id, register_id, "
+                        "writer_epoch, previous_sequence, previous_source_checksum, "
+                        "previous_projection_checksum, bootstrap_snapshot_hash, "
+                        "activation_manifest_hash, receipt_baseline_seq, request_hash"
+                        ") VALUES ("
+                        ":activation_id,:tenant_id,:branch_id,:edge_id,:register_id,2,1,"
+                        "repeat('b',64),repeat('d',64),repeat('1',64),repeat('2',64),0,"
+                        "repeat('3',64))"
+                    ),
+                    {
+                        "activation_id": activation_id,
+                        "tenant_id": tenant_id,
+                        "branch_id": branch_ids[index],
+                        "edge_id": edge_ids[index],
+                        "register_id": register_ids[index],
+                    },
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO register_receipt_counter ("
+                        "tenant_id, branch_id, register_id, writer_epoch, last_receipt_seq"
+                        ") VALUES (:tenant_id,:branch_id,:register_id,1,0)"
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "branch_id": branch_ids[index],
+                        "register_id": register_ids[index],
+                    },
+                )
             event_ids = [uuid4(), uuid4()]
             sale_ids = [uuid4(), uuid4()]
             for index in range(2):
@@ -265,11 +369,13 @@ async def test_edge_session_is_restricted_to_its_branch(
                     text(
                         "INSERT INTO sync_shadow_report ("
                         "report_id, tenant_id, branch_id, edge_node_id, origin_node_id, "
-                        "writer_epoch, last_sequence, projection_checksum, expected_checksum, "
-                        "request_hash, status"
+                        "writer_epoch, last_sequence, source_checksum, "
+                        "expected_source_checksum, source_verified, projection_checksum, "
+                        "expected_checksum, request_hash, status"
                         ") VALUES ("
                         "gen_random_uuid(),:tenant_id,:branch_id,:edge_id,:cloud_id,1,1,"
-                        "repeat('d',64),repeat('d',64),repeat('e',64),'matched')"
+                        "repeat('b',64),repeat('b',64),true,repeat('d',64),repeat('d',64),"
+                        "repeat('e',64),'matched')"
                     ),
                     {
                         "tenant_id": tenant_id,
@@ -299,6 +405,9 @@ async def test_edge_session_is_restricted_to_its_branch(
                 "sync_cursor",
                 "sync_sale_projection",
                 "sync_shadow_report",
+                "sync_writer_epoch",
+                "sync_writer_readiness",
+                "register_receipt_counter",
             ):
                 rows = await connection.execute(
                     text(f"SELECT branch_id FROM {table} WHERE tenant_id = :tenant_id"),
@@ -327,6 +436,13 @@ async def test_edge_session_is_restricted_to_its_branch(
             tenant_id=tenant_id,
             branch_id=branch_ids[0],
         )
+        await _assert_edge_receipt_allocation_denied(
+            app_engine_sync,
+            tenant_id=tenant_id,
+            branch_id=branch_ids[0],
+            register_id=register_ids[0],
+            edge_node_id=edge_ids[0],
+        )
 
         async with support_engine_sync.connect() as connection:
             sequence = await connection.scalar(
@@ -342,12 +458,16 @@ async def test_edge_session_is_restricted_to_its_branch(
             async with support_engine_sync.begin() as connection:
                 for table in (
                     "sync_shadow_report",
+                    "sync_writer_readiness",
                     "sync_sale_projection",
                     "sync_cursor",
                     "sync_inbox",
                     "sync_outbox",
+                    "register_receipt_counter",
                     "sync_stream",
+                    "sync_writer_epoch",
                     "sync_node",
+                    "register",
                 ):
                     await connection.execute(
                         text(f"DELETE FROM {table} WHERE tenant_id = :tenant_id"),

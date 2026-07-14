@@ -323,10 +323,12 @@ async def test_machine_dependency_derives_rls_scope_from_committed_credential(
             async with db_engine.begin() as connection:
                 for table in (
                     "sync_shadow_report",
+                    "sync_writer_readiness",
                     "sync_sale_projection",
                     "sync_cursor",
                     "sync_inbox",
                     "sync_outbox",
+                    "register_receipt_counter",
                 ):
                     await connection.execute(
                         text(f"DELETE FROM {table} WHERE tenant_id = :tenant_id"),
@@ -334,6 +336,10 @@ async def test_machine_dependency_derives_rls_scope_from_committed_credential(
                     )
                 await connection.execute(
                     text("DELETE FROM sync_stream WHERE tenant_id = :tenant_id"),
+                    {"tenant_id": tenant_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM sync_writer_epoch WHERE tenant_id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
                 await connection.execute(

@@ -283,6 +283,8 @@ class SyncCloudRepository:
         *,
         tenant_id: UUID,
         branch_id: UUID,
+        origin_node_id: UUID,
+        writer_epoch: int,
         after_sequence: int,
         limit: int,
     ) -> list[SyncOutboxEvent]:
@@ -291,6 +293,8 @@ class SyncCloudRepository:
             .where(
                 SyncOutboxEvent.tenant_id == tenant_id,
                 SyncOutboxEvent.branch_id == branch_id,
+                SyncOutboxEvent.origin_node_id == origin_node_id,
+                SyncOutboxEvent.writer_epoch == writer_epoch,
                 SyncOutboxEvent.sequence > after_sequence,
                 SyncOutboxEvent.stream_checksum.is_not(None),
                 SyncOutboxEvent.projection_hash.is_not(None),
@@ -334,6 +338,9 @@ class SyncCloudRepository:
         origin_node_id: UUID,
         writer_epoch: int,
         last_sequence: int,
+        source_checksum: str,
+        expected_source_checksum: str,
+        source_verified: bool,
         projection_checksum: str,
         expected_checksum: str,
         request_hash: str,
@@ -349,6 +356,9 @@ class SyncCloudRepository:
                 origin_node_id=origin_node_id,
                 writer_epoch=writer_epoch,
                 last_sequence=last_sequence,
+                source_checksum=source_checksum,
+                expected_source_checksum=expected_source_checksum,
+                source_verified=source_verified,
                 projection_checksum=projection_checksum,
                 expected_checksum=expected_checksum,
                 request_hash=request_hash,
@@ -369,12 +379,14 @@ class SyncEdgeRepository:
         tenant_id: UUID,
         branch_id: UUID,
         origin_node_id: UUID,
+        writer_epoch: int,
         for_update: bool = False,
     ) -> SyncCursor | None:
         stmt = select(SyncCursor).where(
             SyncCursor.tenant_id == tenant_id,
             SyncCursor.branch_id == branch_id,
             SyncCursor.origin_node_id == origin_node_id,
+            SyncCursor.writer_epoch == writer_epoch,
         )
         if for_update:
             stmt = stmt.with_for_update()
@@ -415,14 +427,12 @@ class SyncEdgeRepository:
         self,
         cursor: SyncCursor,
         *,
-        writer_epoch: int,
         last_sequence: int,
         last_event_id: UUID | None,
         source_checksum: str,
         projection_checksum: str,
         status: str,
     ) -> SyncCursor:
-        cursor.writer_epoch = writer_epoch
         cursor.last_sequence = last_sequence
         cursor.last_event_id = last_event_id
         cursor.source_checksum = source_checksum
@@ -533,6 +543,7 @@ class SyncEdgeRepository:
         tenant_id: UUID,
         branch_id: UUID,
         origin_node_id: UUID,
+        writer_epoch: int,
         after_sequence: int,
     ) -> list[SyncSaleProjection]:
         result = await self.session.execute(
@@ -541,6 +552,7 @@ class SyncEdgeRepository:
                 SyncSaleProjection.tenant_id == tenant_id,
                 SyncSaleProjection.branch_id == branch_id,
                 SyncSaleProjection.origin_node_id == origin_node_id,
+                SyncSaleProjection.writer_epoch == writer_epoch,
                 SyncSaleProjection.sequence > after_sequence,
             )
             .order_by(SyncSaleProjection.sequence)

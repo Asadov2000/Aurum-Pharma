@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import BigInteger, and_, case, cast, distinct, func, literal, select, text
+from sqlalchemy import and_, case, distinct, func, literal, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import local_day_range
@@ -264,34 +264,32 @@ class POSRepository:
     # -------- receipt / aggregations --------
 
     async def allocate_receipt_number(self, register_id: UUID) -> tuple[int, str] | None:
-        """Allocate a register-wide number while holding the register row lock.
-
-        Historical demo data may have reset receipt_number on every shift. The
-        internal receipt_seq was backfilled uniquely, while numeric legacy
-        numbers are also considered so a newly displayed number never reuses
-        one of them.
-        """
-        register_stmt = select(Register.id).where(Register.id == register_id).with_for_update()
-        register_id_result = await self.session.execute(register_stmt)
-        if register_id_result.scalar_one_or_none() is None:
-            return None
-
-        numeric_receipt = case(
-            (
-                Sale.receipt_number.op("~")(r"^[0-9]{1,18}$"),
-                cast(Sale.receipt_number, BigInteger),
-            ),
-            else_=0,
-        )
-        stmt = select(
-            func.greatest(
-                func.coalesce(func.max(Sale.receipt_seq), 0),
-                func.coalesce(func.max(numeric_receipt), 0),
+        """Allocate the next register-wide number inside the sale transaction."""
+        scope = (
+            await self.session.execute(
+                select(Register.tenant_id, Register.branch_id).where(Register.id == register_id)
             )
-            + 1
-        ).where(Sale.register_id == register_id)
-        seq = int((await self.session.execute(stmt)).scalar_one())
-        return seq, f"{seq:06d}"
+        ).one_or_none()
+        if scope is None:
+            return None
+        await self.session.execute(
+            text("SELECT set_config('app.branch_id', :branch_id, true)"),
+            {"branch_id": str(scope.branch_id)},
+        )
+        result = await self.session.execute(
+            text(
+                "SELECT receipt_seq, receipt_number "
+                "FROM public.allocate_register_receipt(:tenant_id, :register_id)"
+            ),
+            {
+                "tenant_id": scope.tenant_id,
+                "register_id": register_id,
+            },
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        return int(row.receipt_seq), str(row.receipt_number)
 
     async def refunded_quantities(self, parent_sale_id: UUID) -> dict[UUID, Decimal]:
         stmt = (

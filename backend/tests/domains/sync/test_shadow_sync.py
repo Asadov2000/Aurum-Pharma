@@ -7,10 +7,15 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import utc_now
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 from app.domains.sync.models import SyncInboxEvent, SyncSaleProjection
-from app.domains.sync.repository import SyncCloudRepository, SyncEdgeRepository
+from app.domains.sync.repository import (
+    SyncCloudRepository,
+    SyncEdgeRepository,
+    SyncOutboxRepository,
+)
 from app.domains.sync.schemas import SyncNodeCreate, SyncShadowReportRequest
 from app.domains.sync.service import SyncAdminService, SyncCloudService, SyncEdgeApplyService
 
@@ -80,6 +85,7 @@ async def test_shadow_sale_matches_cloud_checkpoint(
         tenant_id=node.tenant_id,
         branch_id=node.branch_id,
         origin_node_id=pull.origin_node_id,
+        writer_epoch=pull.writer_epoch,
     )
     assert verified.status == "synced"
 
@@ -88,17 +94,56 @@ async def test_shadow_sale_matches_cloud_checkpoint(
         tenant_id=node.tenant_id,
         branch_id=node.branch_id,
         shadow_start_sequence=node.shadow_start_sequence,
+        shadow_start_checksum=node.shadow_start_checksum,
         shadow_start_projection_checksum=node.shadow_start_projection_checksum,
         payload=SyncShadowReportRequest(
             report_id=uuid4(),
             origin_node_id=pull.origin_node_id,
             writer_epoch=pull.writer_epoch,
             last_sequence=verified.last_sequence,
+            source_checksum=verified.source_checksum,
             projection_checksum=verified.projection_checksum,
         ),
     )
     assert report.status == "matched"
+    assert report.source_verified is True
+    assert report.expected_source_checksum == pull.events[0].stream_checksum
     assert report.expected_checksum == pull.events[0].projection_checksum
+
+
+async def test_shadow_report_rejects_source_chain_mismatch(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    pos = POSService(POSRepository(db_session))
+    await _open_shift(pos, scaffold)
+    node = await _enroll(db_session, scaffold)
+    await _checkout(pos, scaffold)
+    pull = await _pull(db_session, node)
+    edge = SyncEdgeApplyService(SyncEdgeRepository(db_session))
+    verified = await edge.apply(pull)
+
+    report = await SyncCloudService(SyncCloudRepository(db_session)).report(
+        edge_node_id=node.id,
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        shadow_start_sequence=node.shadow_start_sequence,
+        shadow_start_checksum=node.shadow_start_checksum,
+        shadow_start_projection_checksum=node.shadow_start_projection_checksum,
+        payload=SyncShadowReportRequest(
+            report_id=uuid4(),
+            origin_node_id=pull.origin_node_id,
+            writer_epoch=pull.writer_epoch,
+            last_sequence=verified.last_sequence,
+            source_checksum="f" * 64,
+            projection_checksum=verified.projection_checksum,
+        ),
+    )
+
+    assert report.status == "mismatch"
+    assert report.source_verified is False
+    assert report.expected_source_checksum == verified.source_checksum
 
 
 async def test_lost_ack_replay_is_a_verified_duplicate(
@@ -192,6 +237,7 @@ async def test_projection_is_rebuilt_from_local_rows_before_report(
         tenant_id=node.tenant_id,
         branch_id=node.branch_id,
         origin_node_id=pull.origin_node_id,
+        writer_epoch=pull.writer_epoch,
     )
 
     assert verified.status == "mismatch"
@@ -216,3 +262,93 @@ async def test_late_enrollment_starts_after_immutable_history(
     applied = await SyncEdgeApplyService(SyncEdgeRepository(db_session)).apply(pull)
     assert applied.status == "synced"
     assert applied.last_sequence == 2
+
+
+async def test_cloud_pull_does_not_mix_events_from_another_writer_epoch(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold(batch_qty=10)
+    pos = POSService(POSRepository(db_session))
+    await _open_shift(pos, scaffold)
+    node = await _enroll(db_session, scaffold)
+    sale = await _checkout(pos, scaffold)
+    stream = await SyncCloudRepository(db_session).get_stream(
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+    )
+    assert stream is not None
+
+    await SyncOutboxRepository(db_session).enqueue(
+        event_id=uuid4(),
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        origin_node_id=stream.writer_node_id,
+        writer_epoch=stream.writer_epoch + 1,
+        sequence=2,
+        operation_id=uuid4(),
+        aggregate_type="sale",
+        aggregate_id=uuid4(),
+        event_type="pos.sale.completed.v1",
+        schema_version=1,
+        occurred_at=utc_now(),
+        payload={},
+        payload_hash="a" * 64,
+        stream_checksum="b" * 64,
+        projection_hash="c" * 64,
+        projection_checksum="d" * 64,
+    )
+
+    pull = await _pull(db_session, node)
+
+    assert [event.event_id for event in pull.events] == [sale.event_id]
+
+
+async def test_edge_cursors_are_scoped_by_writer_epoch(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    node = await _enroll(db_session, scaffold)
+    stream = await SyncCloudRepository(db_session).get_stream(
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+    )
+    assert stream is not None
+    repo = SyncEdgeRepository(db_session)
+    first = await repo.insert_cursor(
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        origin_node_id=stream.writer_node_id,
+        writer_epoch=stream.writer_epoch,
+        start_sequence=0,
+        start_source_checksum="0" * 64,
+        start_projection_checksum="0" * 64,
+    )
+    second = await repo.insert_cursor(
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        origin_node_id=stream.writer_node_id,
+        writer_epoch=stream.writer_epoch + 1,
+        start_sequence=0,
+        start_source_checksum="1" * 64,
+        start_projection_checksum="2" * 64,
+    )
+
+    assert first.writer_epoch != second.writer_epoch
+    assert (
+        await repo.get_cursor(
+            tenant_id=node.tenant_id,
+            branch_id=node.branch_id,
+            origin_node_id=stream.writer_node_id,
+            writer_epoch=first.writer_epoch,
+        )
+    ) is first
+    assert (
+        await repo.get_cursor(
+            tenant_id=node.tenant_id,
+            branch_id=node.branch_id,
+            origin_node_id=stream.writer_node_id,
+            writer_epoch=second.writer_epoch,
+        )
+    ) is second

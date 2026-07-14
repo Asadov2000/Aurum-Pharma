@@ -122,6 +122,7 @@ async def report_shadow_checkpoint(
         tenant_id=principal.tenant_id,
         branch_id=principal.branch_id,
         shadow_start_sequence=principal.shadow_start_sequence,
+        shadow_start_checksum=principal.shadow_start_checksum,
         shadow_start_projection_checksum=principal.shadow_start_projection_checksum,
         payload=payload,
     )

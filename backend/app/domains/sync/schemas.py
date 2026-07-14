@@ -62,7 +62,8 @@ class SyncNodeRead(BaseModel):
     id: UUID
     tenant_id: UUID
     branch_id: UUID
-    mode: Literal["shadow_readonly"]
+    register_id: UUID | None
+    mode: Literal["shadow_readonly", "edge_writer"]
     status: Literal["active", "revoked"]
     display_name: str
     credential_kid: UUID
@@ -92,6 +93,7 @@ class SyncShadowReportRequest(BaseModel):
     origin_node_id: UUID
     writer_epoch: int = Field(gt=0)
     last_sequence: int = Field(ge=0)
+    source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
     projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -99,6 +101,9 @@ class SyncShadowReportRead(BaseModel):
     report_id: UUID
     status: Literal["matched", "mismatch"]
     last_sequence: int
+    source_checksum: Checksum
+    expected_source_checksum: Checksum
+    source_verified: bool
     projection_checksum: Checksum
     expected_checksum: Checksum
 

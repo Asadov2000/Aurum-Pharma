@@ -72,6 +72,7 @@ async def _apply_pull(pull: SyncPullResponse) -> EdgeApplyResult:
                     tenant_id=pull.tenant_id,
                     branch_id=pull.branch_id,
                     origin_node_id=pull.origin_node_id,
+                    writer_epoch=pull.writer_epoch,
                 )
             return result
 
@@ -104,6 +105,7 @@ async def _report(
         origin_node_id=pull.origin_node_id,
         writer_epoch=pull.writer_epoch,
         last_sequence=result.last_sequence,
+        source_checksum=result.source_checksum,
         projection_checksum=result.projection_checksum,
     )
     response = await client.post(

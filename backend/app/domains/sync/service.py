@@ -155,6 +155,8 @@ class SyncCloudService:
         rows = await self.repo.list_events(
             tenant_id=tenant_id,
             branch_id=branch_id,
+            origin_node_id=stream.writer_node_id,
+            writer_epoch=stream.writer_epoch,
             after_sequence=effective_after,
             limit=limit + 1,
         )
@@ -196,6 +198,7 @@ class SyncCloudService:
         tenant_id: UUID,
         branch_id: UUID,
         shadow_start_sequence: int,
+        shadow_start_checksum: str,
         shadow_start_projection_checksum: str,
         payload: SyncShadowReportRequest,
     ) -> SyncShadowReportRead:
@@ -218,7 +221,8 @@ class SyncCloudService:
             raise ConflictError("Shadow report sequence is outside the enrolled stream")
 
         if payload.last_sequence == shadow_start_sequence:
-            expected = shadow_start_projection_checksum
+            expected_source = shadow_start_checksum
+            expected_projection = shadow_start_projection_checksum
         else:
             checkpoint = await self.repo.get_event_at_sequence(
                 tenant_id=tenant_id,
@@ -227,10 +231,20 @@ class SyncCloudService:
                 writer_epoch=payload.writer_epoch,
                 sequence=payload.last_sequence,
             )
-            if checkpoint is None or checkpoint.projection_checksum is None:
-                raise AurumError("Cloud projection checkpoint is incomplete")
-            expected = checkpoint.projection_checksum
-        report_status = "matched" if payload.projection_checksum == expected else "mismatch"
+            if (
+                checkpoint is None
+                or checkpoint.stream_checksum is None
+                or checkpoint.projection_checksum is None
+            ):
+                raise AurumError("Cloud sync checkpoint is incomplete")
+            expected_source = checkpoint.stream_checksum
+            expected_projection = checkpoint.projection_checksum
+        source_verified = payload.source_checksum == expected_source
+        report_status = (
+            "matched"
+            if source_verified and payload.projection_checksum == expected_projection
+            else "mismatch"
+        )
         report = await self.repo.insert_shadow_report(
             report_id=payload.report_id,
             tenant_id=tenant_id,
@@ -239,8 +253,11 @@ class SyncCloudService:
             origin_node_id=payload.origin_node_id,
             writer_epoch=payload.writer_epoch,
             last_sequence=payload.last_sequence,
+            source_checksum=payload.source_checksum,
+            expected_source_checksum=expected_source,
+            source_verified=source_verified,
             projection_checksum=payload.projection_checksum,
-            expected_checksum=expected,
+            expected_checksum=expected_projection,
             request_hash=request_hash,
             status=report_status,
         )
@@ -296,7 +313,6 @@ class SyncEdgeApplyService:
                 )
         await self.repo.update_cursor(
             cursor,
-            writer_epoch=cursor.writer_epoch,
             last_sequence=cursor.last_sequence,
             last_event_id=cursor.last_event_id,
             source_checksum=cursor.source_checksum,
@@ -394,6 +410,7 @@ class SyncEdgeApplyService:
             tenant_id=pull.tenant_id,
             branch_id=pull.branch_id,
             origin_node_id=pull.origin_node_id,
+            writer_epoch=pull.writer_epoch,
             for_update=True,
         )
         if cursor is None:
@@ -572,7 +589,6 @@ class SyncEdgeApplyService:
         )
         await self.repo.update_cursor(
             cursor,
-            writer_epoch=envelope.writer_epoch,
             last_sequence=envelope.sequence,
             last_event_id=envelope.event_id,
             source_checksum=envelope.stream_checksum,
@@ -643,11 +659,13 @@ class SyncEdgeApplyService:
         tenant_id: UUID,
         branch_id: UUID,
         origin_node_id: UUID,
+        writer_epoch: int,
     ) -> EdgeApplyResult:
         cursor = await self.repo.get_cursor(
             tenant_id=tenant_id,
             branch_id=branch_id,
             origin_node_id=origin_node_id,
+            writer_epoch=writer_epoch,
             for_update=True,
         )
         if cursor is None:
@@ -656,6 +674,7 @@ class SyncEdgeApplyService:
             tenant_id=tenant_id,
             branch_id=branch_id,
             origin_node_id=origin_node_id,
+            writer_epoch=writer_epoch,
             after_sequence=cursor.start_sequence,
         )
         expected_sequence = cursor.start_sequence + 1
@@ -680,7 +699,6 @@ class SyncEdgeApplyService:
         if not valid:
             await self.repo.update_cursor(
                 cursor,
-                writer_epoch=cursor.writer_epoch,
                 last_sequence=cursor.last_sequence,
                 last_event_id=cursor.last_event_id,
                 source_checksum=cursor.source_checksum,

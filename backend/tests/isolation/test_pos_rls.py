@@ -241,11 +241,14 @@ async def test_sale_invisible_across_tenants(
             async with support_engine_iso.begin() as conn:
                 for tbl in (
                     "sync_shadow_report",
+                    "sync_writer_readiness",
                     "sync_sale_projection",
                     "sync_cursor",
                     "sync_inbox",
                     "sync_outbox",
+                    "register_receipt_counter",
                     "sync_stream",
+                    "sync_writer_epoch",
                     "sync_node",
                     "sale",
                     "shift",

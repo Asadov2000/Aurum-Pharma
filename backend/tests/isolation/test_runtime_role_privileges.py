@@ -51,6 +51,7 @@ READ_ONLY_TABLES = {
     "master_catalog",
     "notification",
     "permission",
+    "register_receipt_counter",
     "role_template",
     "role_template_permission",
     "subscription_plan",
@@ -60,6 +61,8 @@ READ_ONLY_TABLES = {
     "sync_sale_projection",
     "sync_shadow_report",
     "sync_stream",
+    "sync_writer_epoch",
+    "sync_writer_readiness",
     "user_assignment",
 }
 
@@ -110,6 +113,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "allocate_register_receipt",
     "append_audit_event",
     "authenticate_edge_node",
     "auth_email_code_matches",
@@ -144,6 +148,7 @@ CUSTOM_FUNCTIONS = {
     "touch_auth_user_last_login",
     "trg_audit_log",
     "trg_guard_sync_stream_scope",
+    "trg_sync_stream_epoch_ledger",
     "trg_set_created_meta",
     "trg_set_updated_meta",
     "trg_update_batch_qty",
@@ -152,6 +157,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "allocate_register_receipt",
     "append_audit_event",
     "authenticate_edge_node",
     "auth_email_code_matches",
