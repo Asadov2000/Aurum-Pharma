@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 
+import { Button } from "@/components/ui";
 import { findByBarcode } from "@/features/catalog/api";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
@@ -14,6 +15,11 @@ import { ReceiptPrintModal } from "./ReceiptPrintModal";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
 import { beep } from "./beep";
+import {
+  clearPendingCompletion,
+  hasPendingCompletion,
+  markPendingCompletion,
+} from "./completionOperation";
 import {
   type DraftInit,
   clearDraft as clearDraftStorage,
@@ -30,6 +36,12 @@ import {
   useSaleQuery,
   useUpdateSaleItem,
 } from "./queries";
+import {
+  clearPendingPaymentOperation,
+  createPendingPaymentOperation,
+  loadPendingPaymentOperation,
+  type PendingPaymentOperation,
+} from "./paymentOperation";
 import { type PaymentMethod, type SaleDetails } from "./types";
 import { type PosMode } from "./usePosMode";
 
@@ -41,6 +53,30 @@ type NumPadState =
   | { kind: "payment"; method: PaymentMethod; initial: string };
 
 type FlashTone = "success" | "danger";
+
+function isDefiniteRejection(error: unknown): boolean {
+  if (!isAxiosError(error) || error.response === undefined) return false;
+  const status = error.response.status;
+  return status >= 400 && status < 500 && status !== 408 && status !== 409;
+}
+
+type PaymentReconciliation = "pending" | "matched" | "conflict" | "settled-elsewhere";
+
+function reconcilePayment(
+  sale: SaleDetails,
+  operation: PendingPaymentOperation,
+): PaymentReconciliation {
+  const recorded = sale.payments.find((payment) => payment.operation_id === operation.operationId);
+  if (recorded) {
+    return recorded.payment_method === operation.paymentMethod &&
+      Number(recorded.amount).toFixed(2) === operation.amount
+      ? "matched"
+      : "conflict";
+  }
+
+  const paid = sale.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+  return paid + 0.001 >= Number(sale.total_amount) ? "settled-elsewhere" : "pending";
+}
 
 /**
  * The POS workspace. Owns the shift gate and the active sale, and lays the UI
@@ -108,6 +144,12 @@ function ActiveWorkspace({
   const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin));
   const [saleId, setSaleId] = useState<string | null>(init.saleId);
   const [nameById, setNameById] = useState<Record<string, string>>(init.nameById);
+  const [pendingPayment, setPendingPayment] = useState<PendingPaymentOperation | null>(() =>
+    init.saleId ? loadPendingPaymentOperation(init.saleId) : null,
+  );
+  const [completionUncertain, setCompletionUncertain] = useState(
+    () => init.saleId !== null && hasPendingCompletion(init.saleId),
+  );
   const [staleNotice, setStaleNotice] = useState<boolean>(init.expired);
   const [topError, setTopError] = useState<string | null>(null);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
@@ -136,20 +178,100 @@ function ActiveWorkspace({
   const totalDue = sale ? Number(sale.total_amount) : 0;
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = totalDue - totalPaid;
+  const saleEditingBlocked =
+    completeSale.isPending ||
+    completionUncertain ||
+    pendingPayment !== null ||
+    (saleId !== null && sale === null);
 
   const clearDraft = useCallback(() => clearDraftStorage(registerId), [registerId]);
+  const persistCompletedReceipt = useCallback(
+    (completedSaleId: string): boolean => {
+      const persisted = saveDraft(registerId, completedSaleId, nameById, "completed");
+      if (persisted) {
+        clearPendingCompletion(completedSaleId);
+        setCompletionUncertain(false);
+        setTopError(null);
+        return true;
+      }
+
+      setCompletionUncertain(true);
+      setTopError(
+        "Чек завершён, но не удалось сохранить ссылку для восстановления. Не закрывайте приложение и повторите сверку.",
+      );
+      return false;
+    },
+    [registerId, nameById],
+  );
 
   // Persist the live draft so a reload (or accidental close) restores the cart.
   // The savedAt stamp refreshes on every change → the TTL is an idle timeout.
   useEffect(() => {
-    if (saleId && isDraft) saveDraft(registerId, saleId, nameById);
-  }, [saleId, nameById, isDraft, registerId]);
+    if (sale?.status === "draft") saveDraft(registerId, sale.id, nameById, "draft");
+  }, [sale, nameById, registerId]);
 
-  // If a restored sale turns out already completed/voided, drop the stash so it
-  // doesn't keep resurrecting on reload.
+  // Keep the completed receipt addressable until the cashier explicitly starts
+  // another sale. This makes printer/browser recovery deterministic.
   useEffect(() => {
-    if (sale && sale.status !== "draft") clearDraft();
-  }, [sale, clearDraft]);
+    if (sale && sale.status !== "draft") {
+      persistCompletedReceipt(sale.id);
+    }
+  }, [sale, persistCompletedReceipt]);
+
+  useEffect(() => {
+    if (!pendingPayment || !sale) return;
+    const result = reconcilePayment(sale, pendingPayment);
+    if (result === "pending" && sale.status === "draft") return;
+
+    clearPendingPaymentOperation(pendingPayment.saleId, pendingPayment.operationId);
+    setPendingPayment(null);
+    if (result === "matched") {
+      setTopError(null);
+    } else if (result === "conflict") {
+      setTopError("Параметры сохранённой оплаты не совпали с сервером. Проверьте оплаты чека.");
+    } else if (result === "settled-elsewhere") {
+      setTopError("Чек уже оплачен другой операцией. Проверьте оплаты перед завершением.");
+    }
+  }, [pendingPayment, sale]);
+
+  useEffect(() => {
+    if (!saleId || (!pendingPayment && !completionUncertain)) return;
+    if (saleQuery.isError) {
+      setTopError(
+        (current) =>
+          current ??
+          "Не удалось загрузить чек для сверки денежной операции. Проверьте соединение и повторите сверку.",
+      );
+      return;
+    }
+    if (!sale) return;
+    if (
+      pendingPayment &&
+      !addPayment.isPending &&
+      sale.status === "draft" &&
+      reconcilePayment(sale, pendingPayment) === "pending"
+    ) {
+      setTopError((current) =>
+        current === null || current.startsWith("Не удалось загрузить чек для сверки")
+          ? "Результат предыдущей оплаты не подтверждён. Повторите оплату тем же способом или выполните сверку."
+          : current,
+      );
+    } else if (completionUncertain && !completeSale.isPending && sale.status === "draft") {
+      setTopError((current) =>
+        current === null || current.startsWith("Не удалось загрузить чек для сверки")
+          ? "Результат завершения продажи не подтверждён. Повторите завершение или выполните сверку с сервером."
+          : current,
+      );
+    }
+  }, [
+    saleId,
+    sale,
+    saleQuery.isError,
+    pendingPayment,
+    completionUncertain,
+    addPayment.isPending,
+    completeSale.isPending,
+  ]);
 
   useEffect(() => () => window.clearTimeout(flashTimer.current), []);
 
@@ -169,6 +291,7 @@ function ActiveWorkspace({
   }, [saleId, createSale, registerId]);
 
   const onAdd = async (catalogId: string, name: string, qty: number) => {
+    if (saleEditingBlocked) return;
     setTopError(null);
     try {
       const id = await ensureSaleId();
@@ -202,7 +325,7 @@ function ActiveWorkspace({
   };
 
   const onQtyChange = async (itemId: string, qty: number) => {
-    if (!saleId) return;
+    if (!saleId || saleEditingBlocked) return;
     setTopError(null);
     try {
       await updateItem.mutateAsync({ saleId, itemId, qty: String(qty) });
@@ -212,7 +335,7 @@ function ActiveWorkspace({
   };
 
   const onDelete = async (itemId: string) => {
-    if (!saleId) return;
+    if (!saleId || saleEditingBlocked) return;
     try {
       await deleteItem.mutateAsync({ saleId, itemId });
     } catch (err) {
@@ -224,15 +347,78 @@ function ActiveWorkspace({
     if (!saleId) return;
     const amt = Number(amount);
     if (!(amt > 0)) return;
+    const normalizedAmount = amt.toFixed(2);
+    const storedOperation =
+      pendingPayment?.saleId === saleId ? pendingPayment : loadPendingPaymentOperation(saleId);
+    if (!storedOperation && amt - remaining > 0.001) {
+      setTopError(`Сумма оплаты превышает остаток ${remaining.toFixed(2)} ${currency}.`);
+      return;
+    }
+    if (
+      storedOperation &&
+      (storedOperation.paymentMethod !== method || storedOperation.amount !== normalizedAmount)
+    ) {
+      setPendingPayment(storedOperation);
+      setTopError("Результат предыдущей оплаты ещё не подтверждён. Повторите её тем же способом.");
+      return;
+    }
+
+    if (!saveDraft(registerId, saleId, nameById, "draft")) {
+      setTopError(
+        "Локальное хранилище кассы недоступно. Оплата не отправлена; освободите место или перезапустите приложение.",
+      );
+      return;
+    }
+    const operation =
+      storedOperation ?? createPendingPaymentOperation(saleId, method, normalizedAmount);
+    if (!operation) {
+      setTopError(
+        "Не удалось сохранить ключ безопасного повтора. Оплата не отправлена; перезапустите приложение.",
+      );
+      return;
+    }
+    setPendingPayment(operation);
     setTopError(null);
     setPayingMethod(method);
     try {
       await addPayment.mutateAsync({
         saleId,
-        payload: { payment_method: method, amount: amt.toFixed(2) },
+        payload: {
+          operation_id: operation.operationId,
+          payment_method: method,
+          amount: normalizedAmount,
+        },
       });
+      clearPendingPaymentOperation(saleId, operation.operationId);
+      setPendingPayment(null);
     } catch (err) {
-      setTopError(describeApiError(err, "Не удалось добавить оплату"));
+      if (isDefiniteRejection(err)) {
+        clearPendingPaymentOperation(saleId, operation.operationId);
+        setPendingPayment(null);
+        setTopError(describeApiError(err, "Не удалось добавить оплату"));
+      } else {
+        const refreshed = await saleQuery.refetch();
+        const reconciliation = refreshed.data
+          ? reconcilePayment(refreshed.data, operation)
+          : "pending";
+        if (reconciliation !== "pending") {
+          clearPendingPaymentOperation(saleId, operation.operationId);
+          setPendingPayment(null);
+          if (reconciliation === "matched") {
+            setTopError(null);
+          } else if (reconciliation === "conflict") {
+            setTopError(
+              "Параметры сохранённой оплаты не совпали с сервером. Проверьте оплаты чека.",
+            );
+          } else {
+            setTopError("Чек уже оплачен другой операцией. Проверьте оплаты перед завершением.");
+          }
+        } else {
+          setTopError(
+            "Не удалось подтвердить результат оплаты. Проверьте соединение и повторите оплату тем же способом.",
+          );
+        }
+      }
     } finally {
       setPayingMethod(null);
     }
@@ -242,6 +428,17 @@ function ActiveWorkspace({
   // (so partial payments are easy). Keyboard/desktop: one tap pays the rest.
   const onPayTile = (method: PaymentMethod) => {
     if (!saleId || remaining <= 0.001) return;
+    if (completionUncertain || completeSale.isPending) return;
+    if (pendingPayment) {
+      if (pendingPayment.paymentMethod !== method) {
+        setTopError(
+          "Результат предыдущей оплаты ещё не подтверждён. Повторите её тем же способом.",
+        );
+        return;
+      }
+      void pay(method, pendingPayment.amount);
+      return;
+    }
     if (touch) {
       setNumpad({ kind: "payment", method, initial: remaining.toFixed(2) });
       return;
@@ -251,12 +448,28 @@ function ActiveWorkspace({
 
   const onComplete = async () => {
     if (!saleId || completingRef.current || completeSale.isPending) return;
+    if (pendingPayment || addPayment.isPending) {
+      setTopError("Сначала подтвердите результат оплаты.");
+      return;
+    }
     if (requiresRx) {
       setPrescriptionOpen(true);
       return;
     }
     if (remaining > 0.001) {
       setTopError(`Осталось оплатить ${remaining.toFixed(2)} ${currency}`);
+      return;
+    }
+    if (!saveDraft(registerId, saleId, nameById, "draft")) {
+      setTopError(
+        "Локальное хранилище кассы недоступно. Завершение не отправлено; освободите место или перезапустите приложение.",
+      );
+      return;
+    }
+    if (!markPendingCompletion(saleId)) {
+      setTopError(
+        "Не удалось сохранить маркер восстановления. Завершение не отправлено; перезапустите приложение.",
+      );
       return;
     }
     setTopError(null);
@@ -270,16 +483,58 @@ function ActiveWorkspace({
           saleId,
         });
       }
-      clearDraft();
-    } catch (err) {
+      persistCompletedReceipt(saleId);
       completingRef.current = false;
-      setTopError(describeApiError(err, "Не удалось завершить продажу"));
+    } catch (err) {
+      if (!isDefiniteRejection(err)) {
+        const refreshed = await saleQuery.refetch();
+        if (refreshed.data?.status === "completed") {
+          if (payments.some((payment) => payment.payment_method === "cash")) {
+            requestDesktopCashDrawerOpen({
+              reason: "sale-completed",
+              registerId,
+              saleId,
+            });
+          }
+          persistCompletedReceipt(saleId);
+          completingRef.current = false;
+          return;
+        }
+        setCompletionUncertain(true);
+        setTopError(
+          "Не удалось подтвердить завершение продажи. Проверьте соединение и повторите завершение.",
+        );
+      } else {
+        clearPendingCompletion(saleId);
+        setCompletionUncertain(false);
+        setTopError(describeApiError(err, "Не удалось завершить продажу"));
+      }
+      completingRef.current = false;
     }
   };
 
   const onNewSale = () => {
+    if (
+      completingRef.current ||
+      completeSale.isPending ||
+      addPayment.isPending ||
+      pendingPayment ||
+      completionUncertain
+    ) {
+      setTopError("Сначала подтвердите результат текущей денежной операции.");
+      return;
+    }
+    if (!clearDraft()) {
+      setTopError(
+        "Не удалось очистить локальное состояние кассы. Новая продажа не начата; перезапустите приложение.",
+      );
+      return;
+    }
     completingRef.current = false;
-    clearDraft();
+    if (saleId) {
+      clearPendingPaymentOperation(saleId);
+      clearPendingCompletion(saleId);
+    }
     setSaleId(null);
     setNameById({});
     setRequiresRx(false);
@@ -370,7 +625,10 @@ function ActiveWorkspace({
   return (
     <>
       {/* Global barcode capture — only while editing a draft. */}
-      <BarcodeListener enabled={isDraft} onScan={(code) => void onScan(code)} />
+      <BarcodeListener
+        enabled={isDraft && !saleEditingBlocked}
+        onScan={(code) => void onScan(code)}
+      />
 
       {/* Scan feedback: green/red edge flash (collapses to a static border under
           reduced-motion). */}
@@ -410,26 +668,27 @@ function ActiveWorkspace({
 
         {staleNotice && (
           <p className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
-            Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую
-            продажу.
+            Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую продажу.
           </p>
         )}
 
         {isDraft && (
-          <SearchBar
-            ref={searchRef}
-            onAdd={onAdd}
-            busy={addItem.isPending}
-            touch={touch}
-            branchId={branchId ?? undefined}
-          />
+          <fieldset disabled={saleEditingBlocked} className="min-w-0 border-0 p-0">
+            <SearchBar
+              ref={searchRef}
+              onAdd={onAdd}
+              busy={addItem.isPending}
+              touch={touch}
+              branchId={branchId ?? undefined}
+            />
+          </fieldset>
         )}
 
         <CartList
           items={items}
           nameById={nameById}
           currency={currency}
-          editable={isDraft}
+          editable={isDraft && !saleEditingBlocked}
           onQtyChange={(id, q) => void onQtyChange(id, q)}
           onDelete={(id) => void onDelete(id)}
           onQtyTap={touch ? onQtyTap : undefined}
@@ -437,7 +696,22 @@ function ActiveWorkspace({
           busy={updateItem.isPending || deleteItem.isPending}
         />
 
-        {topError && <p className="text-sm text-danger">{topError}</p>}
+        {topError && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-danger">
+            <p>{topError}</p>
+            {(pendingPayment || completionUncertain) && (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                isLoading={saleQuery.isFetching}
+                onClick={() => void saleQuery.refetch()}
+              >
+                Сверить с сервером
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* RIGHT — payment, sticky so it's always in view */}
@@ -451,7 +725,9 @@ function ActiveWorkspace({
             payments={payments}
             isDraft={isDraft}
             completing={completeSale.isPending}
+            completionUncertain={completionUncertain}
             payingMethod={payingMethod}
+            pendingPaymentMethod={pendingPayment?.paymentMethod ?? null}
             onPayTile={onPayTile}
             onComplete={() => void onComplete()}
             completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}

@@ -501,6 +501,7 @@ async def add_payment(
         sale_id=sale_id,
         payment_method=payload.payment_method,
         amount=payload.amount,
+        operation_id=payload.operation_id,
         actor_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
         allowed_branch_ids=user.branch_scope,

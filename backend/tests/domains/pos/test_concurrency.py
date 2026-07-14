@@ -22,7 +22,7 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.inventory.models import Batch, BatchMovement
 from app.domains.inventory.repository import InventoryRepository
-from app.domains.pos.models import Sale, Shift
+from app.domains.pos.models import Sale, SalePayment, Shift
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 
@@ -148,6 +148,24 @@ async def _complete(
         return sale.id, sale.receipt_number
 
 
+async def _add_payment(
+    factory: async_sessionmaker[AsyncSession],
+    *,
+    sale_id: UUID,
+    operation_id: UUID,
+    amount: Decimal = Decimal("10"),
+) -> UUID:
+    async with factory.begin() as session:
+        payment = await POSService(POSRepository(session)).add_payment(
+            sale_id=sale_id,
+            payment_method="cash",
+            amount=amount,
+            operation_id=operation_id,
+            metadata={"terminal_id": "T-1"},
+        )
+        return payment.id
+
+
 async def _refund(
     factory: async_sessionmaker[AsyncSession],
     context: CommittedPOS,
@@ -196,6 +214,80 @@ async def test_complete_is_idempotent_under_concurrent_requests(committed_pos) -
         batch = await session.get(Batch, context.batch_id)
         assert batch is not None
         assert batch.qty_remaining == context.initial_qty - Decimal("2")
+
+
+async def test_concurrent_payment_retry_inserts_one_row(committed_pos) -> None:
+    factory, context = committed_pos
+    async with factory.begin() as session:
+        service = POSService(POSRepository(session))
+        sale = await service.create_sale(
+            tenant_id=context.tenant_id,
+            register_id=context.register_id,
+            cashier_user_id=context.cashier_id,
+        )
+        await service.add_item(
+            sale_id=sale.id,
+            catalog_id=context.catalog_id,
+            qty=Decimal("1"),
+        )
+        sale_id = sale.id
+    operation_id = uuid4()
+
+    first, second = await asyncio.gather(
+        _add_payment(factory, sale_id=sale_id, operation_id=operation_id),
+        _add_payment(factory, sale_id=sale_id, operation_id=operation_id),
+    )
+
+    assert first == second
+    async with factory() as session:
+        count = await session.scalar(
+            select(func.count())
+            .select_from(SalePayment)
+            .where(
+                SalePayment.sale_id == sale_id,
+                SalePayment.operation_id == operation_id,
+            )
+        )
+        assert count == 1
+
+
+async def test_concurrent_distinct_payments_cannot_exceed_sale_total(committed_pos) -> None:
+    factory, context = committed_pos
+    async with factory.begin() as session:
+        service = POSService(POSRepository(session))
+        sale = await service.create_sale(
+            tenant_id=context.tenant_id,
+            register_id=context.register_id,
+            cashier_user_id=context.cashier_id,
+        )
+        await service.add_item(
+            sale_id=sale.id,
+            catalog_id=context.catalog_id,
+            qty=Decimal("1"),
+        )
+        sale_id = sale.id
+
+    results = await asyncio.gather(
+        _add_payment(
+            factory,
+            sale_id=sale_id,
+            operation_id=uuid4(),
+            amount=Decimal("7"),
+        ),
+        _add_payment(
+            factory,
+            sale_id=sale_id,
+            operation_id=uuid4(),
+            amount=Decimal("7"),
+        ),
+        return_exceptions=True,
+    )
+
+    assert sum(isinstance(result, UUID) for result in results) == 1
+    assert sum(isinstance(result, BusinessRuleError) for result in results) == 1
+    async with factory() as session:
+        repo = POSRepository(session)
+        assert await repo.payments_total(sale_id) == Decimal("7.00")
 
 
 async def test_concurrent_completes_allocate_unique_register_receipts(committed_pos) -> None:

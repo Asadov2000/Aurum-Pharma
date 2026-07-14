@@ -205,6 +205,19 @@ class POSRepository:
 
     # -------- payments --------
 
+    async def get_payment_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> SalePayment | None:
+        stmt = select(SalePayment).where(
+            SalePayment.tenant_id == tenant_id,
+            SalePayment.operation_id == operation_id,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def insert_payment(self, **fields: Any) -> SalePayment:
         p = SalePayment(**fields)
         self.session.add(p)

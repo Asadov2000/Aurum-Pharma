@@ -843,18 +843,78 @@ class POSService:
 
     # ---- payments ----
 
+    @staticmethod
+    def _payment_operation_hash(
+        *,
+        sale_id: UUID,
+        payment_method: str,
+        amount: Decimal,
+        metadata: dict[str, Any] | None,
+    ) -> str:
+        payload = {
+            "sale_id": str(sale_id),
+            "payment_method": payment_method,
+            "amount": format(amount.normalize(), "f"),
+            "metadata": metadata,
+        }
+        try:
+            canonical = json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise BusinessRuleError("Payment metadata must be valid JSON") from exc
+        return hashlib.sha256(canonical).hexdigest()
+
+    async def _find_existing_payment(
+        self,
+        *,
+        sale: Sale,
+        operation_id: UUID,
+        operation_hash: str,
+    ) -> SalePayment | None:
+        existing_sale = await self.repo.get_sale_by_operation_id(
+            tenant_id=sale.tenant_id,
+            operation_id=operation_id,
+        )
+        if existing_sale is not None:
+            raise ConflictError("Operation ID was already used for another POS operation")
+
+        existing = await self.repo.get_payment_by_operation_id(
+            tenant_id=sale.tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is None:
+            return None
+        if existing.sale_id != sale.id or existing.operation_hash != operation_hash:
+            raise ConflictError("Operation ID was already used for another payment")
+        return existing
+
     async def add_payment(
         self,
         *,
         sale_id: UUID,
         payment_method: str,
         amount: Decimal,
+        operation_id: UUID | None = None,
         actor_id: UUID | None = None,
         can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SalePayment:
+        effective_operation_id = operation_id or uuid4()
+        operation_hash = self._payment_operation_hash(
+            sale_id=sale_id,
+            payment_method=payment_method,
+            amount=amount,
+            metadata=metadata,
+        )
+        await self.repo.lock_operation_id(effective_operation_id)
+
         sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
@@ -863,12 +923,31 @@ class POSService:
             allowed_branch_ids=allowed_branch_ids,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
+        existing = await self._find_existing_payment(
+            sale=sale,
+            operation_id=effective_operation_id,
+            operation_hash=operation_hash,
+        )
+        if existing is not None:
+            return existing
         self._assert_draft(sale)
+        paid_total = await self.repo.payments_total(sale.id)
+        if paid_total + amount > sale.total_amount:
+            raise BusinessRuleError(
+                "Payment exceeds sale total",
+                details={
+                    "paid": str(paid_total),
+                    "attempted": str(amount),
+                    "total": str(sale.total_amount),
+                },
+            )
         return await self.repo.insert_payment(
             tenant_id=sale.tenant_id,
             sale_id=sale.id,
             payment_method=payment_method,
             amount=amount,
+            operation_id=effective_operation_id,
+            operation_hash=operation_hash,
             metadata_json=metadata,
         )
 
@@ -1072,6 +1151,13 @@ class POSService:
         operation_id: UUID,
         operation_hash: str,
     ) -> Sale | None:
+        existing_payment = await self.repo.get_payment_by_operation_id(
+            tenant_id=parent.tenant_id,
+            operation_id=operation_id,
+        )
+        if existing_payment is not None:
+            raise ConflictError("Operation ID was already used for another POS operation")
+
         existing = await self.repo.get_sale_by_operation_id(
             tenant_id=parent.tenant_id,
             operation_id=operation_id,

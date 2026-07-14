@@ -23,7 +23,9 @@ export function PaymentPanel({
   payments,
   isDraft,
   completing,
+  completionUncertain,
   payingMethod,
+  pendingPaymentMethod,
   onPayTile,
   onComplete,
   completedReceiptNumber,
@@ -40,7 +42,9 @@ export function PaymentPanel({
   payments: Payment[];
   isDraft: boolean;
   completing: boolean;
+  completionUncertain: boolean;
   payingMethod: PaymentMethod | null;
+  pendingPaymentMethod: PaymentMethod | null;
   onPayTile: (method: PaymentMethod) => void;
   onComplete: () => void;
   completedReceiptNumber: string | null;
@@ -65,9 +69,7 @@ export function PaymentPanel({
           <div className="mt-3 flex justify-center gap-6 text-sm">
             <span className="text-foreground-secondary">
               Оплачено{" "}
-              <span className="font-mono tabular-nums text-foreground">
-                {totalPaid.toFixed(2)}
-              </span>
+              <span className="font-mono tabular-nums text-foreground">{totalPaid.toFixed(2)}</span>
             </span>
             <span className={cn(settled ? "text-success-foreground" : "text-warning-foreground")}>
               Остаток{" "}
@@ -85,7 +87,14 @@ export function PaymentPanel({
               key={m}
               type="button"
               onClick={() => onPayTile(m)}
-              disabled={settled || payingMethod !== null || totalDue <= 0}
+              disabled={
+                settled ||
+                payingMethod !== null ||
+                totalDue <= 0 ||
+                completing ||
+                completionUncertain ||
+                (pendingPaymentMethod !== null && pendingPaymentMethod !== m)
+              }
               className={cn(
                 "pos-tile flex flex-col items-center justify-center gap-1 rounded-xl border border-border bg-surface p-2 text-center transition-colors",
                 touch ? "min-h-[96px]" : "min-h-[88px]",
@@ -96,12 +105,7 @@ export function PaymentPanel({
               <span className={cn(touch ? "text-3xl" : "text-2xl")} aria-hidden="true">
                 {tileIcon[m]}
               </span>
-              <span
-                className={cn(
-                  "font-medium text-foreground",
-                  touch ? "text-base" : "text-sm",
-                )}
-              >
+              <span className={cn("font-medium text-foreground", touch ? "text-base" : "text-sm")}>
                 {paymentMethodLabel[m]}
               </span>
             </button>
@@ -114,7 +118,9 @@ export function PaymentPanel({
         <ul className="divide-y divide-border rounded-xl border border-border bg-surface text-sm">
           {payments.map((p) => (
             <li key={p.id} className="flex items-center justify-between px-4 py-2">
-              <span className="text-foreground-secondary">{paymentMethodLabel[p.payment_method]}</span>
+              <span className="text-foreground-secondary">
+                {paymentMethodLabel[p.payment_method]}
+              </span>
               <span className="font-mono tabular-nums text-foreground">
                 {Number(p.amount).toFixed(2)} {p.currency}
               </span>
@@ -130,7 +136,7 @@ export function PaymentPanel({
           className="w-full"
           onClick={onComplete}
           isLoading={completing}
-          disabled={totalDue <= 0}
+          disabled={totalDue <= 0 || pendingPaymentMethod !== null}
           title={completeHint}
         >
           Завершить продажу

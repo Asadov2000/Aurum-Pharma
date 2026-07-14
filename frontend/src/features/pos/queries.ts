@@ -126,8 +126,11 @@ export function useAddPayment() {
   return useMutation({
     mutationFn: (args: { saleId: string; payload: PaymentAddPayload }) =>
       addPayment(args.saleId, args.payload),
-    onSuccess: (_data, vars) => {
-      void qc.invalidateQueries({ queryKey: posKeys.sale(vars.saleId) });
+    onSuccess: (payment, vars) => {
+      qc.setQueryData<SaleDetails>(posKeys.sale(vars.saleId), (sale) => {
+        if (!sale || sale.payments.some((item) => item.id === payment.id)) return sale;
+        return { ...sale, payments: [...sale.payments, payment] };
+      });
     },
   });
 }
@@ -137,7 +140,9 @@ export function useCompleteSale() {
   return useMutation({
     mutationFn: (saleId: string) => completeSale(saleId),
     onSuccess: (data) => {
-      void qc.invalidateQueries({ queryKey: posKeys.sale(data.id) });
+      qc.setQueryData<SaleDetails>(posKeys.sale(data.id), (sale) =>
+        sale ? { ...sale, ...data } : sale,
+      );
       // Completing affects inventory.
       void qc.invalidateQueries({ queryKey: ["inventory", "batches"] });
     },

@@ -4,6 +4,9 @@
  * a stale draft (idle past the TTL) is dropped rather than reopened silently.
  */
 
+import { hasPendingCompletion } from "./completionOperation";
+import { hasPendingPaymentOperation } from "./paymentOperation";
+
 export const draftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
 
 // Fallback idle-TTL (minutes) when tenant settings haven't loaded yet. The real
@@ -15,6 +18,7 @@ export interface SavedDraft {
   saleId: string;
   nameById: Record<string, string>;
   savedAt: number;
+  status?: "draft" | "completed";
 }
 
 export interface DraftInit {
@@ -31,7 +35,12 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
       if (parsed && typeof parsed.saleId === "string") {
         const savedAt = typeof parsed.savedAt === "number" ? parsed.savedAt : 0;
         const ageMin = (Date.now() - savedAt) / 60_000;
-        if (ageMin > ttlMin) {
+        if (
+          ageMin > ttlMin &&
+          parsed.status !== "completed" &&
+          !hasPendingPaymentOperation(parsed.saleId) &&
+          !hasPendingCompletion(parsed.saleId)
+        ) {
           // Stale: clear it and flag the cashier instead of reopening blind.
           window.localStorage.removeItem(draftKey(registerId));
           return { saleId: null, nameById: {}, expired: true };
@@ -49,21 +58,22 @@ export function saveDraft(
   registerId: string,
   saleId: string,
   nameById: Record<string, string>,
-): void {
+  status: "draft" | "completed" = "draft",
+): boolean {
+  const serialized = JSON.stringify({ saleId, nameById, savedAt: Date.now(), status });
   try {
-    window.localStorage.setItem(
-      draftKey(registerId),
-      JSON.stringify({ saleId, nameById, savedAt: Date.now() }),
-    );
+    window.localStorage.setItem(draftKey(registerId), serialized);
+    return window.localStorage.getItem(draftKey(registerId)) === serialized;
   } catch {
-    // ignore — just won't persist
+    return false;
   }
 }
 
-export function clearDraft(registerId: string): void {
+export function clearDraft(registerId: string): boolean {
   try {
     window.localStorage.removeItem(draftKey(registerId));
+    return window.localStorage.getItem(draftKey(registerId)) === null;
   } catch {
-    // ignore
+    return false;
   }
 }

@@ -69,6 +69,7 @@ export interface SaleItem {
 export interface Payment {
   id: string;
   sale_id: string;
+  operation_id: string | null;
   payment_method: PaymentMethod;
   amount: string;
   currency: string;
@@ -106,6 +107,7 @@ export interface SaleItemAddedResponse {
 }
 
 export interface PaymentAddPayload {
+  operation_id: string;
   payment_method: PaymentMethod;
   amount: string;
   metadata?: Record<string, unknown> | null;

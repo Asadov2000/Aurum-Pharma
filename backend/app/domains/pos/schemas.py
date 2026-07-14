@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator
 
 PAYMENT_METHODS = {"cash", "card", "bank_transfer"}
 
@@ -78,6 +78,7 @@ class SaleItemPatch(BaseModel):
 
 
 class PaymentAdd(BaseModel):
+    operation_id: UUID4
     payment_method: str
     amount: Decimal = Field(gt=0)
     metadata: dict[str, Any] | None = None
@@ -124,6 +125,7 @@ class PaymentRead(BaseModel):
 
     id: UUID
     sale_id: UUID
+    operation_id: UUID | None
     payment_method: str
     amount: Decimal
     currency: str

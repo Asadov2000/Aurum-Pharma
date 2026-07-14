@@ -13,6 +13,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     Text,
@@ -168,6 +169,8 @@ class SalePayment(Base):
     )
     payment_method: Mapped[str] = mapped_column(Text, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    operation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    operation_hash: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(
@@ -180,6 +183,21 @@ class SalePayment(Base):
             name="ck_sp_method",
         ),
         CheckConstraint("amount > 0", name="ck_sp_amount"),
+        CheckConstraint(
+            "(operation_id IS NULL) = (operation_hash IS NULL)",
+            name="ck_sp_operation_pair",
+        ),
+        CheckConstraint(
+            "operation_hash IS NULL OR operation_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_sp_operation_hash",
+        ),
+        Index(
+            "uq_sale_payment_tenant_operation",
+            "tenant_id",
+            "operation_id",
+            unique=True,
+            postgresql_where=text("operation_id IS NOT NULL"),
+        ),
     )
 
 

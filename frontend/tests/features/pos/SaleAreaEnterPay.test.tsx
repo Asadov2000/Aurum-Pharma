@@ -37,12 +37,13 @@ vi.mock("@/features/catalog/api", () => ({
 vi.mock("@/lib/desktopBridge", () => ({
   DESKTOP_BARCODE_SCANNED_EVENT: "aurum-desktop-barcode-scanned",
   normalizeDesktopBarcode: (rawCode: string) => rawCode.trim() || null,
-  requestDesktopCashDrawerOpen: (...a: unknown[]) =>
-    requestDesktopCashDrawerOpen(...a),
+  requestDesktopCashDrawerOpen: (...a: unknown[]) => requestDesktopCashDrawerOpen(...a),
 }));
 
 import { SaleArea } from "@/features/pos/SaleArea";
+import { markPendingCompletion } from "@/features/pos/completionOperation";
 import { draftKey } from "@/features/pos/draftStorage";
+import { createPendingPaymentOperation } from "@/features/pos/paymentOperation";
 
 const REG = "reg-1";
 
@@ -103,6 +104,7 @@ const SALE = {
 const CASH_PAYMENT = {
   id: "pay-cash-1",
   sale_id: SALE.id,
+  operation_id: null,
   payment_method: "cash" as const,
   amount: "50.00",
   currency: "TJS",
@@ -141,7 +143,7 @@ describe("SaleArea", () => {
     seedDraftSale(SALE.id);
     getCurrentShift.mockResolvedValue(SHIFT);
     getSale.mockResolvedValue(SALE);
-    addPayment.mockResolvedValue({ id: "pay-1" });
+    addPayment.mockResolvedValue({ ...CASH_PAYMENT, id: "pay-1" });
 
     renderArea();
 
@@ -151,7 +153,15 @@ describe("SaleArea", () => {
     fireEvent.keyDown(window, { key: "Enter" });
 
     await waitFor(() => expect(addPayment).toHaveBeenCalled());
-    expect(addPayment).toHaveBeenCalledWith("sale-1", {
+    const paymentPayload = addPayment.mock.calls[0]?.[1] as {
+      operation_id: string;
+      payment_method: string;
+      amount: string;
+    };
+    expect(paymentPayload).toEqual({
+      operation_id: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      ),
       payment_method: "cash",
       amount: "50.00",
     });
@@ -180,6 +190,48 @@ describe("SaleArea", () => {
       registerId: REG,
       saleId: SALE.id,
     });
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+      saleId: SALE.id,
+      status: "completed",
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Новая продажа/i }));
+    await waitFor(() => expect(screen.queryByText(/Чек № R-1 оформлен/i)).not.toBeInTheDocument());
+  });
+
+  it("keeps the completed receipt active when its local pointer cannot be cleared", async () => {
+    const sale = { ...SALE, payments: [CASH_PAYMENT] };
+    seedDraftSale(sale.id);
+    getCurrentShift.mockResolvedValue(SHIFT);
+    getSale.mockResolvedValue(sale);
+    completeSale.mockResolvedValue({
+      ...sale,
+      completed_at: "2026-05-23T08:10:00Z",
+      receipt_number: "R-locked",
+      status: "completed",
+    });
+
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    fireEvent.click(await screen.findByRole("button", { name: /Завершить продажу/i }));
+    expect(await screen.findByText(/Чек № R-locked оформлен/i)).toBeInTheDocument();
+
+    const removeItem = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("storage unavailable");
+    });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /Новая продажа/i }));
+
+      expect(
+        await screen.findByText(
+          /Не удалось очистить локальное состояние кассы.*Новая продажа не начата/i,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Чек № R-locked оформлен/i)).toBeInTheDocument();
+    } finally {
+      removeItem.mockRestore();
+    }
   });
 
   it("does not request the desktop cash drawer after a non-cash sale", async () => {
@@ -217,7 +269,7 @@ describe("SaleArea", () => {
 
     await waitFor(() => expect(completeSale).toHaveBeenCalledWith(SALE.id));
     await waitFor(() =>
-      expect(screen.getByText(/Не удалось завершить продажу/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Не удалось подтвердить завершение продажи/i)).toBeInTheDocument(),
     );
     expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
   });
@@ -240,9 +292,13 @@ describe("SaleArea", () => {
     await screen.findByText(/Остаток/);
     fireEvent.keyDown(window, { key: "F4" });
     fireEvent.keyDown(window, { key: "F4" });
+    fireEvent.keyDown(window, { key: "F2" });
 
     await waitFor(() => expect(completeSale).toHaveBeenCalledTimes(1));
     expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+      saleId: SALE.id,
+    });
 
     resolveComplete({
       ...sale,
@@ -252,6 +308,168 @@ describe("SaleArea", () => {
     });
 
     await waitFor(() => expect(requestDesktopCashDrawerOpen).toHaveBeenCalledTimes(1));
+  });
+
+  it("reuses one operation id after a payment response is lost", async () => {
+    seedDraftSale(SALE.id);
+    getCurrentShift.mockResolvedValue(SHIFT);
+    getSale.mockResolvedValue(SALE);
+    addPayment
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce({ ...CASH_PAYMENT, id: "pay-retry" });
+
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    fireEvent.keyDown(window, { key: "Enter" });
+    await screen.findByText(/Не удалось подтвердить результат оплаты/i);
+
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(addPayment).toHaveBeenCalledTimes(2));
+
+    const firstPayload = addPayment.mock.calls[0]?.[1] as { operation_id: string };
+    const secondPayload = addPayment.mock.calls[1]?.[1] as { operation_id: string };
+    expect(secondPayload.operation_id).toBe(firstPayload.operation_id);
+  });
+
+  it("accepts a payment found by reconciliation after its response is lost", async () => {
+    seedDraftSale(SALE.id);
+    getCurrentShift.mockResolvedValue(SHIFT);
+    getSale.mockImplementation(() => {
+      const payload = addPayment.mock.calls[0]?.[1] as { operation_id?: string } | undefined;
+      if (!payload?.operation_id) return Promise.resolve(SALE);
+      return Promise.resolve({
+        ...SALE,
+        payments: [{ ...CASH_PAYMENT, operation_id: payload.operation_id }],
+      });
+    });
+    addPayment.mockRejectedValue(new Error("response lost"));
+
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(getSale).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText(/Остаток/).textContent).toContain("0.00"));
+    expect(screen.queryByText(/Не удалось подтвердить результат оплаты/i)).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Enter" });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(addPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers a completed sale when the completion response is lost", async () => {
+    const sale = { ...SALE, payments: [CASH_PAYMENT] };
+    const completed = {
+      ...sale,
+      completed_at: "2026-05-23T08:10:00Z",
+      receipt_number: "R-4",
+      status: "completed" as const,
+    };
+    seedDraftSale(sale.id);
+    getCurrentShift.mockResolvedValue(SHIFT);
+    getSale.mockResolvedValueOnce(sale).mockResolvedValueOnce(completed);
+    completeSale.mockRejectedValue(new Error("response lost"));
+
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    fireEvent.click(await screen.findByRole("button", { name: /Завершить продажу/i }));
+
+    await waitFor(() => expect(requestDesktopCashDrawerOpen).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Чек № R-4 оформлен/i)).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+      saleId: SALE.id,
+      status: "completed",
+    });
+  });
+
+  it("does not abandon an unresolved completion after the page is restored", async () => {
+    const sale = { ...SALE, payments: [CASH_PAYMENT] };
+    const completed = {
+      ...sale,
+      completed_at: "2026-05-23T08:10:00Z",
+      receipt_number: "R-5",
+      status: "completed" as const,
+    };
+    seedDraftSale(sale.id);
+    markPendingCompletion(sale.id);
+    getCurrentShift.mockResolvedValue(SHIFT);
+    getSale.mockResolvedValue(sale);
+    completeSale.mockResolvedValue(completed);
+
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    fireEvent.keyDown(window, { key: "F2" });
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+      saleId: SALE.id,
+    });
+
+    fireEvent.keyDown(window, { key: "F4" });
+    expect(await screen.findByText(/Чек № R-5 оформлен/i)).toBeInTheDocument();
+  });
+
+  it("does not overwrite a completed receipt pointer while the sale is loading", async () => {
+    window.localStorage.setItem(
+      draftKey(REG),
+      JSON.stringify({
+        saleId: SALE.id,
+        nameById: {},
+        savedAt: Date.now(),
+        status: "completed",
+      }),
+    );
+    getCurrentShift.mockResolvedValue(SHIFT);
+    getSale.mockReturnValue(new Promise(() => undefined));
+
+    const view = renderArea();
+
+    await waitFor(() => expect(getSale).toHaveBeenCalledWith(SALE.id));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+      saleId: SALE.id,
+      status: "completed",
+    });
+    view.unmount();
+  });
+
+  it("does not send a payment when the recovery state cannot be persisted", async () => {
+    seedDraftSale(SALE.id);
+    getCurrentShift.mockResolvedValue(SHIFT);
+    getSale.mockResolvedValue(SALE);
+
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("storage unavailable");
+    });
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    expect(
+      await screen.findByText(/Локальное хранилище кассы недоступно.*Оплата не отправлена/i),
+    ).toBeInTheDocument();
+    expect(addPayment).not.toHaveBeenCalled();
+    setItem.mockRestore();
+  });
+
+  it("surfaces a stored payment payload conflict during reconciliation", async () => {
+    seedDraftSale(SALE.id);
+    const pending = createPendingPaymentOperation(SALE.id, "card", "20.00");
+    if (!pending) throw new Error("pending operation was not persisted");
+    getCurrentShift.mockResolvedValue(SHIFT);
+    getSale.mockResolvedValue({
+      ...SALE,
+      payments: [{ ...CASH_PAYMENT, operation_id: pending.operationId }],
+    });
+
+    renderArea();
+
+    expect(
+      await screen.findByText(/Параметры сохранённой оплаты не совпали с сервером/i),
+    ).toBeInTheDocument();
+    expect(addPayment).not.toHaveBeenCalled();
   });
 });
 

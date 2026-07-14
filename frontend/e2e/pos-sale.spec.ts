@@ -27,9 +27,7 @@ test.describe("POS sale (owner)", () => {
     clearLoginRateLimit(OWNER.email);
   });
 
-  test("adds an item to the cart from a desktop barcode scanner event", async ({
-    page,
-  }) => {
+  test("adds an item to the cart from a desktop barcode scanner event", async ({ page }) => {
     test.setTimeout(90_000);
 
     const apiAnon = await request.newContext();
@@ -72,8 +70,7 @@ test.describe("POS sale (owner)", () => {
 
     const barcodeLookup = page.waitForResponse(
       (response) =>
-        response.url().includes(`/api/v1/catalog/by-barcode/${barcode}`) &&
-        response.ok(),
+        response.url().includes(`/api/v1/catalog/by-barcode/${barcode}`) && response.ok(),
     );
     await page.evaluate((code) => {
       window.dispatchEvent(
@@ -89,9 +86,7 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByText("18.00", { exact: false }).first()).toBeVisible();
   });
 
-  test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({
-    page,
-  }) => {
+  test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({ page }) => {
     // Heaviest spec: seeds two accepted batches (~16 API calls) then drives
     // the whole sale UI. 60s is tight when the entire suite is hammering the
     // stack sequentially — give it headroom.
@@ -159,11 +154,35 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByText(/К оплате/)).toBeVisible();
     await expect(page.getByText("140.00", { exact: false }).first()).toBeVisible();
 
-    // One-tap cash tile pays the full remaining balance.
+    // Commit the payment on the server, then drop its HTTP response. The POS
+    // must reconcile the sale instead of creating a second payment.
+    let paymentRequests = 0;
+    let paymentOperationId: string | undefined;
+    await page.route("**/api/v1/sales/*/payments", async (route) => {
+      paymentRequests += 1;
+      const payload = route.request().postDataJSON() as { operation_id?: string };
+      paymentOperationId = payload.operation_id;
+      await route.fetch();
+      await route.abort("failed");
+    });
     await payPosSaleCash(page, "140.00");
+    await page.unroute("**/api/v1/sales/*/payments");
+    expect(paymentRequests).toBe(1);
+    expect(paymentOperationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
 
-    // Complete — the completion banner appears.
+    // Do the same for completion: sale_id is the idempotency key, and a GET
+    // confirms the committed receipt after the response is lost.
+    let completionRequests = 0;
+    await page.route("**/api/v1/sales/*/complete", async (route) => {
+      completionRequests += 1;
+      await route.fetch();
+      await route.abort("failed");
+    });
     await completePosSale(page);
+    await page.unroute("**/api/v1/sales/*/complete");
+    expect(completionRequests).toBe(1);
     await expectDesktopCashDrawerOpen(page, register.id);
 
     // ---- Print: open the receipt view and verify the totals match ----
@@ -248,10 +267,7 @@ async function installDesktopCashDrawerBridge(page: Page): Promise<void> {
   });
 }
 
-async function expectDesktopCashDrawerOpen(
-  page: Page,
-  registerId: string,
-): Promise<void> {
+async function expectDesktopCashDrawerOpen(page: Page, registerId: string): Promise<void> {
   await expect
     .poll(() =>
       page.evaluate(() => {

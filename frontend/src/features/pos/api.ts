@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 
 import {
   type PaymentAddPayload,
+  type Payment,
   type PrescriptionLog,
   type PrescriptionLogPayload,
   type ReceiptData,
@@ -14,6 +15,8 @@ import {
   type ShiftOpenPayload,
   type ZReport,
 } from "./types";
+
+const POS_MONEY_WRITE_TIMEOUT_MS = 15_000;
 
 // ---- Shifts ----
 
@@ -29,10 +32,7 @@ export async function getCurrentShift(registerId: string): Promise<Shift | null>
   return data;
 }
 
-export async function closeShift(
-  shiftId: string,
-  payload: ShiftClosePayload,
-): Promise<Shift> {
+export async function closeShift(shiftId: string, payload: ShiftClosePayload): Promise<Shift> {
   const { data } = await api.post<Shift>(`/shifts/${shiftId}/close`, payload);
   return data;
 }
@@ -67,10 +67,10 @@ export async function addSaleItem(
   catalogId: string,
   qty: string,
 ): Promise<SaleItemAddedResponse> {
-  const { data } = await api.post<SaleItemAddedResponse>(
-    `/sales/${saleId}/items`,
-    { catalog_id: catalogId, qty },
-  );
+  const { data } = await api.post<SaleItemAddedResponse>(`/sales/${saleId}/items`, {
+    catalog_id: catalogId,
+    qty,
+  });
   return data;
 }
 
@@ -87,16 +87,17 @@ export async function deleteSaleItem(saleId: string, itemId: string): Promise<vo
   await api.delete(`/sales/${saleId}/items/${itemId}`);
 }
 
-export async function addPayment(
-  saleId: string,
-  payload: PaymentAddPayload,
-): Promise<{ id: string }> {
-  const { data } = await api.post<{ id: string }>(`/sales/${saleId}/payments`, payload);
+export async function addPayment(saleId: string, payload: PaymentAddPayload): Promise<Payment> {
+  const { data } = await api.post<Payment>(`/sales/${saleId}/payments`, payload, {
+    timeout: POS_MONEY_WRITE_TIMEOUT_MS,
+  });
   return data;
 }
 
 export async function completeSale(saleId: string): Promise<Sale> {
-  const { data } = await api.post<Sale>(`/sales/${saleId}/complete`);
+  const { data } = await api.post<Sale>(`/sales/${saleId}/complete`, undefined, {
+    timeout: POS_MONEY_WRITE_TIMEOUT_MS,
+  });
   return data;
 }
 
@@ -104,10 +105,7 @@ export async function addPrescription(
   saleId: string,
   payload: PrescriptionLogPayload,
 ): Promise<PrescriptionLog> {
-  const { data } = await api.post<PrescriptionLog>(
-    `/sales/${saleId}/prescription`,
-    payload,
-  );
+  const { data } = await api.post<PrescriptionLog>(`/sales/${saleId}/prescription`, payload);
   return data;
 }
 

@@ -591,7 +591,11 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
         payment_resp = await client.post(
             f"/api/v1/sales/{sale.id}/payments",
             headers=peer_headers,
-            json={"payment_method": "cash", "amount": "10.00"},
+            json={
+                "operation_id": str(uuid4()),
+                "payment_method": "cash",
+                "amount": "10.00",
+            },
         )
         assert payment_resp.status_code == 403
 
