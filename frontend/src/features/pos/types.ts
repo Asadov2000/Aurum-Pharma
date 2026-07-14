@@ -128,6 +128,67 @@ export interface PrescriptionLog extends PrescriptionLogPayload {
   created_at: string;
 }
 
+export interface SaleCheckoutItemPayload {
+  catalog_id: string;
+  qty: string;
+}
+
+export interface SaleCheckoutPaymentPayload {
+  payment_method: PaymentMethod;
+  amount: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+export type SaleCheckoutPrescriptionPayload = Omit<PrescriptionLogPayload, "sale_item_id">;
+
+export interface SaleCheckoutPayload {
+  operation_id: string;
+  register_id: string;
+  draft_sale_id?: string | null;
+  items: SaleCheckoutItemPayload[];
+  payments: SaleCheckoutPaymentPayload[];
+  prescription?: SaleCheckoutPrescriptionPayload | null;
+}
+
+export interface SaleCheckoutItemResult {
+  id: string;
+  catalog_id: string;
+  batch_id: string;
+  qty: string;
+  unit_price: string;
+  total_price: string;
+  currency: string;
+  discount_amount: string;
+  position: number;
+}
+
+export interface SaleCheckoutPaymentResult {
+  id: string;
+  payment_method: PaymentMethod;
+  amount: string;
+  currency: string;
+}
+
+export interface SaleCheckoutResult {
+  event_id: string;
+  sale_id: string;
+  operation_id: string;
+  tenant_id: string;
+  branch_id: string;
+  register_id: string;
+  shift_id: string;
+  cashier_user_id: string;
+  receipt_number: string;
+  receipt_seq: number;
+  created_at: string;
+  completed_at: string;
+  total_amount: string;
+  currency: string;
+  is_test: boolean;
+  items: SaleCheckoutItemResult[];
+  payments: SaleCheckoutPaymentResult[];
+}
+
 // ---- receipt (print / PDF) ----
 
 export interface ReceiptLine {

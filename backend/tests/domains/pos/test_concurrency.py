@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -25,6 +26,8 @@ from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.models import Sale, SalePayment, Shift
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from app.domains.sync.models import SyncOutboxEvent
+from app.domains.sync.repository import SyncOutboxRepository
 
 
 @dataclass(frozen=True)
@@ -148,6 +151,25 @@ async def _complete(
         return sale.id, sale.receipt_number
 
 
+async def _atomic_checkout(
+    factory: async_sessionmaker[AsyncSession],
+    context: CommittedPOS,
+    *,
+    operation_id: UUID,
+    qty: Decimal,
+) -> tuple[UUID, UUID, str]:
+    async with factory.begin() as session:
+        result = await POSService(POSRepository(session)).checkout(
+            tenant_id=context.tenant_id,
+            register_id=context.register_id,
+            cashier_user_id=context.cashier_id,
+            operation_id=operation_id,
+            items=[(context.catalog_id, qty)],
+            payments=[("cash", qty * Decimal("10"), None)],
+        )
+        return result.sale_id, result.event_id, result.receipt_number
+
+
 async def _add_payment(
     factory: async_sessionmaker[AsyncSession],
     *,
@@ -214,6 +236,126 @@ async def test_complete_is_idempotent_under_concurrent_requests(committed_pos) -
         batch = await session.get(Batch, context.batch_id)
         assert batch is not None
         assert batch.qty_remaining == context.initial_qty - Decimal("2")
+
+
+async def test_concurrent_identical_atomic_sales_have_one_effect(committed_pos) -> None:
+    factory, context = committed_pos
+    operation_id = uuid4()
+
+    first, second = await asyncio.gather(
+        _atomic_checkout(
+            factory,
+            context,
+            operation_id=operation_id,
+            qty=Decimal("2"),
+        ),
+        _atomic_checkout(
+            factory,
+            context,
+            operation_id=operation_id,
+            qty=Decimal("2.000"),
+        ),
+    )
+
+    assert first == second
+    async with factory() as session:
+        sale_count = await session.scalar(
+            select(func.count()).select_from(Sale).where(Sale.operation_id == operation_id)
+        )
+        outbox_count = await session.scalar(
+            select(func.count())
+            .select_from(SyncOutboxEvent)
+            .where(SyncOutboxEvent.operation_id == operation_id)
+        )
+        batch = await session.get(Batch, context.batch_id)
+        assert sale_count == 1
+        assert outbox_count == 1
+        assert batch is not None
+        assert batch.qty_remaining == context.initial_qty - Decimal("2")
+        assert await _movement_count(session, first[0], "sale") == 1
+
+
+async def test_concurrent_distinct_atomic_sales_do_not_oversell(committed_pos) -> None:
+    factory, context = committed_pos
+    operation_ids = (uuid4(), uuid4())
+
+    results = await asyncio.gather(
+        _atomic_checkout(
+            factory,
+            context,
+            operation_id=operation_ids[0],
+            qty=Decimal("15"),
+        ),
+        _atomic_checkout(
+            factory,
+            context,
+            operation_id=operation_ids[1],
+            qty=Decimal("15"),
+        ),
+        return_exceptions=True,
+    )
+
+    assert sum(isinstance(result, tuple) for result in results) == 1
+    assert sum(isinstance(result, BusinessRuleError) for result in results) == 1
+    async with factory() as session:
+        batch = await session.get(Batch, context.batch_id)
+        sale_count = await session.scalar(
+            select(func.count()).select_from(Sale).where(Sale.operation_id.in_(operation_ids))
+        )
+        outbox_count = await session.scalar(
+            select(func.count())
+            .select_from(SyncOutboxEvent)
+            .where(SyncOutboxEvent.operation_id.in_(operation_ids))
+        )
+        assert batch is not None
+        assert batch.qty_remaining == Decimal("5")
+        assert sale_count == 1
+        assert outbox_count == 1
+
+
+async def test_atomic_checkout_late_failure_rolls_back_transaction(
+    committed_pos,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory, context = committed_pos
+    operation_id = uuid4()
+
+    async def _fail_enqueue(self: SyncOutboxRepository, **fields: object) -> SyncOutboxEvent:
+        del self, fields
+        raise RuntimeError("injected outbox failure")
+
+    monkeypatch.setattr(SyncOutboxRepository, "enqueue", _fail_enqueue)
+    with pytest.raises(RuntimeError, match="injected outbox failure"):
+        await _atomic_checkout(
+            factory,
+            context,
+            operation_id=operation_id,
+            qty=Decimal("2"),
+        )
+
+    async with factory() as session:
+        batch = await session.get(Batch, context.batch_id)
+        sale_count = await session.scalar(
+            select(func.count()).select_from(Sale).where(Sale.operation_id == operation_id)
+        )
+        outbox_count = await session.scalar(
+            select(func.count())
+            .select_from(SyncOutboxEvent)
+            .where(SyncOutboxEvent.operation_id == operation_id)
+        )
+        movement_count = await session.scalar(
+            select(func.count())
+            .select_from(BatchMovement)
+            .where(
+                BatchMovement.batch_id == context.batch_id,
+                BatchMovement.movement_type == "sale",
+            )
+        )
+        assert batch is not None
+        assert batch.qty_remaining == context.initial_qty
+        assert sale_count == 0
+        assert outbox_count == 0
+        assert movement_count == 0
 
 
 async def test_concurrent_payment_retry_inserts_one_row(committed_pos) -> None:

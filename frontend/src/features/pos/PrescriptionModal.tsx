@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { z } from "zod";
 
 import { Button, Input, Label, Modal, Textarea } from "@/components/ui";
-import { describeApiError } from "@/lib/errorMessages";
 
-import { useAddPrescription } from "./queries";
+import { type PrescriptionLogPayload } from "./types";
 
 interface FormValues {
   prescription_number: string;
@@ -14,18 +14,23 @@ interface FormValues {
   notes: string;
 }
 
+const prescriptionSchema = z.object({
+  prescription_number: z.string().max(500),
+  doctor_name: z.string().max(500),
+  doctor_license: z.string().max(500),
+  patient_name: z.string().max(500),
+  notes: z.string().max(2000),
+});
+
 export function PrescriptionModal({
-  saleId,
   open,
   onClose,
   onSaved,
 }: {
-  saleId: string;
   open: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (payload: PrescriptionLogPayload) => void;
 }): JSX.Element {
-  const add = useAddPrescription();
   const [topError, setTopError] = useState<string | null>(null);
   const form = useForm<FormValues>({
     defaultValues: {
@@ -37,25 +42,22 @@ export function PrescriptionModal({
     },
   });
 
-  const onSubmit = form.handleSubmit(async (values) => {
+  const onSubmit = form.handleSubmit((values) => {
     setTopError(null);
-    const trim = (v: string) => (v.trim() ? v.trim() : null);
-    try {
-      await add.mutateAsync({
-        saleId,
-        payload: {
-          prescription_number: trim(values.prescription_number),
-          doctor_name: trim(values.doctor_name),
-          doctor_license: trim(values.doctor_license),
-          patient_name: trim(values.patient_name),
-          notes: trim(values.notes),
-        },
-      });
-      form.reset();
-      onSaved();
-    } catch (err) {
-      setTopError(describeApiError(err, "Не удалось сохранить данные рецепта"));
+    const parsed = prescriptionSchema.safeParse(values);
+    if (!parsed.success) {
+      setTopError("Проверьте длину заполненных полей рецепта.");
+      return;
     }
+    const trim = (v: string) => (v.trim() ? v.trim() : null);
+    onSaved({
+      prescription_number: trim(parsed.data.prescription_number),
+      doctor_name: trim(parsed.data.doctor_name),
+      doctor_license: trim(parsed.data.doctor_license),
+      patient_name: trim(parsed.data.patient_name),
+      notes: trim(parsed.data.notes),
+    });
+    form.reset();
   });
 
   return (

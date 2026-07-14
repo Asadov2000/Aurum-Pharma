@@ -5,6 +5,7 @@
  */
 
 import { hasPendingCompletion } from "./completionOperation";
+import { hasPendingCheckoutOperation } from "./checkoutOperation";
 import { hasPendingPaymentOperation } from "./paymentOperation";
 
 export const draftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
@@ -19,12 +20,14 @@ export interface SavedDraft {
   nameById: Record<string, string>;
   savedAt: number;
   status?: "draft" | "completed";
+  requiresRx?: boolean;
 }
 
 export interface DraftInit {
   saleId: string | null;
   nameById: Record<string, string>;
   expired: boolean;
+  requiresRx: boolean;
 }
 
 export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): DraftInit {
@@ -39,19 +42,25 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
           ageMin > ttlMin &&
           parsed.status !== "completed" &&
           !hasPendingPaymentOperation(parsed.saleId) &&
-          !hasPendingCompletion(parsed.saleId)
+          !hasPendingCompletion(parsed.saleId) &&
+          !hasPendingCheckoutOperation(parsed.saleId)
         ) {
           // Stale: clear it and flag the cashier instead of reopening blind.
           window.localStorage.removeItem(draftKey(registerId));
-          return { saleId: null, nameById: {}, expired: true };
+          return { saleId: null, nameById: {}, expired: true, requiresRx: false };
         }
-        return { saleId: parsed.saleId, nameById: parsed.nameById ?? {}, expired: false };
+        return {
+          saleId: parsed.saleId,
+          nameById: parsed.nameById ?? {},
+          expired: false,
+          requiresRx: parsed.requiresRx === true,
+        };
       }
     }
   } catch {
     // ignore corrupt/blocked storage
   }
-  return { saleId: null, nameById: {}, expired: false };
+  return { saleId: null, nameById: {}, expired: false, requiresRx: false };
 }
 
 export function saveDraft(
@@ -59,8 +68,9 @@ export function saveDraft(
   saleId: string,
   nameById: Record<string, string>,
   status: "draft" | "completed" = "draft",
+  requiresRx: boolean = false,
 ): boolean {
-  const serialized = JSON.stringify({ saleId, nameById, savedAt: Date.now(), status });
+  const serialized = JSON.stringify({ saleId, nameById, savedAt: Date.now(), status, requiresRx });
   try {
     window.localStorage.setItem(draftKey(registerId), serialized);
     return window.localStorage.getItem(draftKey(registerId)) === serialized;

@@ -143,6 +143,53 @@ async def _create_stocked_item(db_session: AsyncSession, *, tenant_id: UUID, bra
     return item
 
 
+async def _assert_atomic_checkout_access(
+    client: AsyncClient,
+    *,
+    peer_headers: dict[str, str],
+    manager_headers: dict[str, str],
+    checkout_operation_id: UUID,
+    checkout_payload: dict[str, object],
+) -> None:
+    peer_checkout = await client.post(
+        "/api/v1/sales/checkout",
+        headers=peer_headers,
+        json=checkout_payload,
+    )
+    assert peer_checkout.status_code == 403
+
+    rx_checkout = await client.post(
+        "/api/v1/sales/checkout",
+        headers=manager_headers,
+        json={
+            **checkout_payload,
+            "operation_id": str(uuid4()),
+            "prescription": {"prescription_number": "RX-SEC"},
+        },
+    )
+    assert rx_checkout.status_code == 403
+
+    manager_checkout = await client.post(
+        "/api/v1/sales/checkout",
+        headers=manager_headers,
+        json=checkout_payload,
+    )
+    assert manager_checkout.status_code == 201
+
+    peer_recovery = await client.get(
+        f"/api/v1/sales/operations/{checkout_operation_id}",
+        headers=peer_headers,
+    )
+    assert peer_recovery.status_code == 403
+
+    manager_recovery = await client.get(
+        f"/api/v1/sales/operations/{checkout_operation_id}",
+        headers=manager_headers,
+    )
+    assert manager_recovery.status_code == 200
+    assert manager_recovery.json() == manager_checkout.json()
+
+
 @pytest.mark.parametrize("path", REPORT_READ_PATHS)
 async def test_sensitive_reads_require_reports_view(
     db_session: AsyncSession, client: AsyncClient, path: str
@@ -259,7 +306,7 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
         sale_a = await pos.create_sale(
             tenant_id=tenant.id,
             register_id=register_a.id,
-            cashier_user_id=peer.id,
+            cashier_user_id=branch_user.id,
         )
         sale_b = await pos.create_sale(
             tenant_id=tenant.id,
@@ -544,7 +591,6 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
             permission_codes={
                 "pos.sell",
                 "pos.shift_close",
-                "pos.handle_prescription",
                 "sales.view.tenant",
             },
         )
@@ -612,6 +658,23 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
         )
         assert complete_resp.status_code == 403
 
+        checkout_operation_id = uuid4()
+        checkout_payload: dict[str, object] = {
+            "operation_id": str(checkout_operation_id),
+            "register_id": str(register.id),
+            "draft_sale_id": str(sale.id),
+            "items": [{"catalog_id": str(item.id), "qty": "1"}],
+            "payments": [{"payment_method": "cash", "amount": "10.00"}],
+        }
+        manager_headers = {"Authorization": f"Bearer {_token(manager)}"}
+        await _assert_atomic_checkout_access(
+            client,
+            peer_headers=peer_headers,
+            manager_headers=manager_headers,
+            checkout_operation_id=checkout_operation_id,
+            checkout_payload=checkout_payload,
+        )
+
         close_resp = await client.post(
             f"/api/v1/shifts/{shift.id}/close",
             headers=peer_headers,
@@ -621,7 +684,7 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
 
         manager_resp = await client.post(
             f"/api/v1/shifts/{shift.id}/close",
-            headers={"Authorization": f"Bearer {_token(manager)}"},
+            headers=manager_headers,
             json={"closing_cash_actual": "0"},
         )
         assert manager_resp.status_code == 200
@@ -737,6 +800,17 @@ async def test_readonly_tenant_blocks_pos_mutations(
                 {"payment_method": "cash", "amount": "10.00"},
             ),
             ("POST", f"/api/v1/sales/{draft_sale.id}/complete", None),
+            (
+                "POST",
+                "/api/v1/sales/checkout",
+                {
+                    "operation_id": str(uuid4()),
+                    "register_id": str(register.id),
+                    "draft_sale_id": str(draft_sale.id),
+                    "items": [{"catalog_id": str(item.id), "qty": "1"}],
+                    "payments": [{"payment_method": "cash", "amount": "10.00"}],
+                },
+            ),
             (
                 "POST",
                 f"/api/v1/sales/{draft_sale.id}/prescription",

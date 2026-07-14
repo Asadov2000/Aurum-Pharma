@@ -48,9 +48,15 @@ describe("pending POS payment operation", () => {
       saleId: "sale-1",
       nameById: {},
       expired: false,
+      requiresRx: false,
     });
 
     clearPendingPaymentOperation("sale-1", operation.operationId);
-    expect(loadDraft("register-1", 1)).toEqual({ saleId: null, nameById: {}, expired: true });
+    expect(loadDraft("register-1", 1)).toEqual({
+      saleId: null,
+      nameById: {},
+      expired: true,
+      requiresRx: false,
+    });
   });
 });

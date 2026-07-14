@@ -54,6 +54,7 @@ READ_ONLY_TABLES = {
     "role_template",
     "role_template_permission",
     "subscription_plan",
+    "sync_outbox",
     "user_assignment",
 }
 
@@ -75,6 +76,19 @@ APP_USER_SAFE_COLUMNS = {
     "home_tenant_id",
     "status",
     "last_login_at",
+}
+
+SYNC_OUTBOX_INSERT_COLUMNS = {
+    "event_id",
+    "tenant_id",
+    "branch_id",
+    "operation_id",
+    "aggregate_type",
+    "aggregate_id",
+    "event_type",
+    "schema_version",
+    "payload",
+    "payload_hash",
 }
 
 RUNTIME_VIEWS = {
@@ -404,6 +418,22 @@ WHERE attributes.attrelid = 'public.app_user'::REGCLASS
 ORDER BY attributes.attname
 """
 
+SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL = """
+SELECT
+  attributes.attname,
+  pg_catalog.has_column_privilege(
+    'aurum_app', 'public.sync_outbox', attributes.attname, 'INSERT'
+  ) AS can_insert,
+  pg_catalog.has_column_privilege(
+    'aurum_app', 'public.sync_outbox', attributes.attname, 'UPDATE'
+  ) AS can_update
+FROM pg_catalog.pg_attribute AS attributes
+WHERE attributes.attrelid = 'public.sync_outbox'::REGCLASS
+  AND attributes.attnum > 0
+  AND NOT attributes.attisdropped
+ORDER BY attributes.attname
+"""
+
 
 @pytest_asyncio.fixture
 async def support_engine_privileges() -> AsyncIterator[AsyncEngine]:
@@ -445,6 +475,8 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         sequence_privileges = list(sequence_result.tuples())
         app_user_column_result = await conn.execute(text(APP_USER_COLUMN_PRIVILEGES_SQL))
         app_user_column_privileges = list(app_user_column_result.mappings())
+        sync_outbox_column_result = await conn.execute(text(SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL))
+        sync_outbox_column_privileges = list(sync_outbox_column_result.mappings())
 
     expected_relations = {
         **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
@@ -468,6 +500,10 @@ async def test_runtime_role_has_only_row_level_table_privileges(
     }
     assert {row["relname"] for row in view_security} == RUNTIME_VIEWS
     assert all(row["owner"] == "aurum_support" for row in view_security)
+    assert {
+        row["attname"] for row in sync_outbox_column_privileges if row["can_insert"]
+    } == SYNC_OUTBOX_INSERT_COLUMNS
+    assert not any(row["can_update"] for row in sync_outbox_column_privileges)
     assert all("security_invoker=true" in row["options"] for row in view_security)
     assert {row["proname"] for row in function_privileges} == CUSTOM_FUNCTIONS
     assert {

@@ -91,6 +91,96 @@ class PaymentAdd(BaseModel):
         return v
 
 
+class SaleCheckoutItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    catalog_id: UUID
+    qty: Decimal = Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False)
+
+
+class SaleCheckoutPayment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    payment_method: str
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2, allow_inf_nan=False)
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("payment_method")
+    @classmethod
+    def _check_method(cls, v: str) -> str:
+        if v not in PAYMENT_METHODS:
+            raise ValueError(f"payment_method must be one of {sorted(PAYMENT_METHODS)}")
+        return v
+
+
+class SaleCheckoutPrescription(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prescription_number: str | None = Field(default=None, max_length=500)
+    doctor_name: str | None = Field(default=None, max_length=500)
+    doctor_license: str | None = Field(default=None, max_length=500)
+    patient_name: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class SaleCheckoutRequest(BaseModel):
+    """One retry-safe command that creates every durable part of a sale."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: UUID4
+    register_id: UUID
+    draft_sale_id: UUID | None = None
+    items: list[SaleCheckoutItem] = Field(min_length=1, max_length=200)
+    payments: list[SaleCheckoutPayment] = Field(default_factory=list, max_length=10)
+    prescription: SaleCheckoutPrescription | None = None
+
+
+class SaleCheckoutItemResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    catalog_id: UUID
+    batch_id: UUID
+    qty: Decimal
+    unit_price: Decimal
+    total_price: Decimal
+    currency: str
+    discount_amount: Decimal
+    position: int
+
+
+class SaleCheckoutPaymentResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    payment_method: str
+    amount: Decimal
+    currency: str
+
+
+class SaleCheckoutResult(BaseModel):
+    """Immutable response snapshot also stored as the outbox event payload."""
+
+    event_id: UUID
+    sale_id: UUID
+    operation_id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    register_id: UUID
+    shift_id: UUID
+    cashier_user_id: UUID
+    receipt_number: str
+    receipt_seq: int
+    created_at: datetime
+    completed_at: datetime
+    total_amount: Decimal
+    currency: str
+    is_test: bool
+    items: list[SaleCheckoutItemResult]
+    payments: list[SaleCheckoutPaymentResult]
+
+
 class SaleItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

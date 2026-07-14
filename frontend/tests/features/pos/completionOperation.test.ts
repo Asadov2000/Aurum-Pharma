@@ -38,10 +38,16 @@ describe("pending POS completion", () => {
       saleId: "sale-1",
       nameById: {},
       expired: false,
+      requiresRx: false,
     });
 
     clearPendingCompletion("sale-1");
-    expect(loadDraft("register-1", 1)).toEqual({ saleId: null, nameById: {}, expired: true });
+    expect(loadDraft("register-1", 1)).toEqual({
+      saleId: null,
+      nameById: {},
+      expired: true,
+      requiresRx: false,
+    });
   });
 
   it("keeps a completed receipt pointer after the draft TTL", () => {
@@ -59,6 +65,7 @@ describe("pending POS completion", () => {
       saleId: "sale-1",
       nameById: {},
       expired: false,
+      requiresRx: false,
     });
   });
 });

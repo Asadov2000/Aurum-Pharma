@@ -9,7 +9,12 @@ describe("loadDraft (POS draft TTL)", () => {
   afterEach(() => window.localStorage.clear());
 
   it("returns an empty draft when nothing is stored", () => {
-    expect(loadDraft(REG)).toEqual({ saleId: null, nameById: {}, expired: false });
+    expect(loadDraft(REG)).toEqual({
+      saleId: null,
+      nameById: {},
+      expired: false,
+      requiresRx: false,
+    });
   });
 
   it("restores a fresh draft", () => {
@@ -21,6 +26,26 @@ describe("loadDraft (POS draft TTL)", () => {
       saleId: "s-1",
       nameById: { c1: "Аспирин" },
       expired: false,
+      requiresRx: false,
+    });
+  });
+
+  it("restores only the non-sensitive prescription requirement flag", () => {
+    window.localStorage.setItem(
+      draftKey(REG),
+      JSON.stringify({
+        saleId: "s-rx",
+        nameById: {},
+        savedAt: Date.now(),
+        requiresRx: true,
+      }),
+    );
+
+    expect(loadDraft(REG)).toEqual({
+      saleId: "s-rx",
+      nameById: {},
+      expired: false,
+      requiresRx: true,
     });
   });
 
@@ -73,6 +98,11 @@ describe("loadDraft (POS draft TTL)", () => {
 
   it("ignores corrupt JSON", () => {
     window.localStorage.setItem(draftKey(REG), "{not json");
-    expect(loadDraft(REG, 30)).toEqual({ saleId: null, nameById: {}, expired: false });
+    expect(loadDraft(REG, 30)).toEqual({
+      saleId: null,
+      nameById: {},
+      expired: false,
+      requiresRx: false,
+    });
   });
 });

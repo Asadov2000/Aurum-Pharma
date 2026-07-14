@@ -31,6 +31,8 @@ from app.domains.pos.schemas import (
     PrescriptionLogRead,
     ReceiptData,
     RefundCreate,
+    SaleCheckoutRequest,
+    SaleCheckoutResult,
     SaleCreate,
     SaleDetails,
     SaleItemAdd,
@@ -277,9 +279,68 @@ async def create_sale(
         tenant_id=_current_tenant_or_400(user),
         register_id=payload.register_id,
         cashier_user_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
         allowed_branch_ids=user.branch_scope,
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return SaleRead.model_validate(sale)
+
+
+@router.post(
+    "/sales/checkout",
+    response_model=SaleCheckoutResult,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def checkout_sale(
+    payload: SaleCheckoutRequest,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> SaleCheckoutResult:
+    if payload.prescription is not None and not (
+        user.is_developer or user.is_administrator or "pos.handle_prescription" in user.permissions
+    ):
+        raise PermissionDeniedError("Missing permission: pos.handle_prescription")
+
+    return await service.checkout(
+        tenant_id=_current_tenant_or_400(user),
+        register_id=payload.register_id,
+        cashier_user_id=user.user_id,
+        operation_id=payload.operation_id,
+        draft_sale_id=payload.draft_sale_id,
+        items=[(item.catalog_id, item.qty) for item in payload.items],
+        payments=[
+            (payment.payment_method, payment.amount, payment.metadata)
+            for payment in payload.payments
+        ],
+        prescription=(
+            payload.prescription.model_dump(exclude_none=True)
+            if payload.prescription is not None
+            else None
+        ),
+        can_manage_tenant=_can_view_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope,
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+
+
+@router.get(
+    "/sales/operations/{operation_id}",
+    response_model=SaleCheckoutResult,
+)
+async def get_checkout_result(
+    operation_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> SaleCheckoutResult:
+    return await service.get_checkout_result(
+        tenant_id=_current_tenant_or_400(user),
+        operation_id=operation_id,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope,
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
 
 
 @router.get("/sales", response_model=SaleList)

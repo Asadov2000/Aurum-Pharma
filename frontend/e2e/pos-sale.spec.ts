@@ -20,8 +20,8 @@ import {
 } from "./helpers";
 
 // Most important e2e flow: open shift → make a sale → FEFO splits across
-// two batches → add cash payment that covers the total → complete → check
-// that /batches reflects the consumed quantities.
+// two batches → stage cash payment → atomic checkout → check that /batches
+// reflects the consumed quantities.
 test.describe("POS sale (owner)", () => {
   test.beforeEach(() => {
     clearLoginRateLimit(OWNER.email);
@@ -154,35 +154,31 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByText(/К оплате/)).toBeVisible();
     await expect(page.getByText("140.00", { exact: false }).first()).toBeVisible();
 
-    // Commit the payment on the server, then drop its HTTP response. The POS
-    // must reconcile the sale instead of creating a second payment.
-    let paymentRequests = 0;
-    let paymentOperationId: string | undefined;
-    await page.route("**/api/v1/sales/*/payments", async (route) => {
-      paymentRequests += 1;
-      const payload = route.request().postDataJSON() as { operation_id?: string };
-      paymentOperationId = payload.operation_id;
-      await route.fetch();
-      await route.abort("failed");
-    });
+    // The tender is staged only in memory. Commit the complete sale command,
+    // then drop its HTTP response so the POS must recover by operation_id.
     await payPosSaleCash(page, "140.00");
-    await page.unroute("**/api/v1/sales/*/payments");
-    expect(paymentRequests).toBe(1);
-    expect(paymentOperationId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-
-    // Do the same for completion: sale_id is the idempotency key, and a GET
-    // confirms the committed receipt after the response is lost.
-    let completionRequests = 0;
-    await page.route("**/api/v1/sales/*/complete", async (route) => {
-      completionRequests += 1;
+    let checkoutRequests = 0;
+    let recoveryRequests = 0;
+    let checkoutOperationId: string | undefined;
+    await page.route("**/api/v1/sales/operations/**", async (route) => {
+      recoveryRequests += 1;
+      await route.continue();
+    });
+    await page.route("**/api/v1/sales/checkout", async (route) => {
+      checkoutRequests += 1;
+      const payload = route.request().postDataJSON() as { operation_id?: string };
+      checkoutOperationId = payload.operation_id;
       await route.fetch();
       await route.abort("failed");
     });
     await completePosSale(page);
-    await page.unroute("**/api/v1/sales/*/complete");
-    expect(completionRequests).toBe(1);
+    await page.unroute("**/api/v1/sales/checkout");
+    await page.unroute("**/api/v1/sales/operations/**");
+    expect(checkoutRequests).toBe(1);
+    expect(recoveryRequests).toBe(1);
+    expect(checkoutOperationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     await expectDesktopCashDrawerOpen(page, register.id);
 
     // ---- Print: open the receipt view and verify the totals match ----
@@ -202,11 +198,12 @@ test.describe("POS sale (owner)", () => {
     // ---- Check that batches are drained: total qty_remaining = 10 - 7 = 3 ----
     await page.goto("/batches");
     const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
+    await expect(batchCatalogPicker).toBeVisible({ timeout: 30_000 });
     await batchCatalogPicker.fill(searchKey);
     const batchCatalogOption = page.getByRole("button", {
       name: new RegExp(item.brand_name),
     });
-    await expect(batchCatalogOption).toBeVisible({ timeout: 15_000 });
+    await expect(batchCatalogOption).toBeVisible({ timeout: 30_000 });
     await batchCatalogOption.click();
     // FEFO drained FEFO-A entirely (qty → 0); the page hides empty batches
     // by default, so flip the toggle on first.

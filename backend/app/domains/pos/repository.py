@@ -196,6 +196,12 @@ class POSRepository:
         )
         return result.rowcount or 0  # type: ignore[attr-defined]
 
+    async def delete_items(self, sale_id: UUID) -> int:
+        from sqlalchemy import delete
+
+        result = await self.session.execute(delete(SaleItem).where(SaleItem.sale_id == sale_id))
+        return result.rowcount or 0  # type: ignore[attr-defined]
+
     async def next_item_position(self, sale_id: UUID) -> int:
         stmt = select(func.coalesce(func.max(SaleItem.position), 0)).where(
             SaleItem.sale_id == sale_id

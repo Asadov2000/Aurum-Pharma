@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -23,10 +24,12 @@ from uuid import UUID, uuid4
 
 import anyio
 import structlog
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InternalError
 
 from app.core.errors import (
+    AurumError,
     BusinessRuleError,
     ConflictError,
     NotFoundError,
@@ -49,9 +52,13 @@ from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.schemas import (
+    PAYMENT_METHODS,
     ReceiptData,
     ReceiptLine,
     ReceiptPayment,
+    SaleCheckoutItemResult,
+    SaleCheckoutPaymentResult,
+    SaleCheckoutResult,
     SalesSummaryData,
     SalesSummaryRow,
     StockOnDateData,
@@ -61,6 +68,8 @@ from app.domains.pos.schemas import (
 )
 from app.domains.pos.stock_on_date_xlsx import render_stock_on_date_xlsx
 from app.domains.pos.z_report_xlsx import get_or_render_z_report_xlsx
+from app.domains.sync.models import SyncOutboxEvent
+from app.domains.sync.repository import SyncOutboxRepository
 
 logger = structlog.get_logger("pos.service")
 
@@ -209,12 +218,22 @@ class POSService:
         tenant_id: UUID,
         register_id: UUID,
         cashier_user_id: UUID,
+        operation_id: UUID | None = None,
+        operation_hash: str | None = None,
+        can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> Sale:
         shift = await self.repo.lock_open_shift_for_register(register_id)
-        if shift is None:
+        if shift is None or shift.tenant_id != tenant_id:
             raise BusinessRuleError("No open shift for this register")
         self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
+        self._assert_shift_owned_or_managed(
+            shift,
+            actor_id=cashier_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
         # is_test if the tenant is still in 'setup'.
         tenant = await self.repo.session.get(Tenant, tenant_id)
         is_test = bool(tenant is not None and tenant.status == "setup")
@@ -225,7 +244,413 @@ class POSService:
             shift_id=shift.id,
             cashier_user_id=cashier_user_id,
             is_test=is_test,
+            operation_id=operation_id,
+            operation_hash=operation_hash,
         )
+
+    @staticmethod
+    def _aggregate_checkout_items(
+        items: list[tuple[UUID, Decimal]],
+    ) -> list[tuple[UUID, Decimal]]:
+        per_catalog: dict[UUID, Decimal] = {}
+        for catalog_id, qty in items:
+            if qty <= 0:
+                raise BusinessRuleError("Sale quantity must be positive")
+            per_catalog[catalog_id] = per_catalog.get(catalog_id, Decimal("0")) + qty
+        if not per_catalog:
+            raise BusinessRuleError("Sale must contain at least one item")
+        return list(per_catalog.items())
+
+    @staticmethod
+    def _checkout_operation_hash(
+        *,
+        register_id: UUID,
+        draft_sale_id: UUID | None,
+        items: list[tuple[UUID, Decimal]],
+        payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
+        prescription: Mapping[str, object] | None,
+    ) -> str:
+        payload = {
+            "kind": "sale_checkout_v1",
+            "register_id": str(register_id),
+            "draft_sale_id": str(draft_sale_id) if draft_sale_id is not None else None,
+            "items": [
+                [str(catalog_id), format(qty.normalize(), "f")]
+                for catalog_id, qty in sorted(items, key=lambda pair: str(pair[0]))
+            ],
+            "payments": [
+                {
+                    "payment_method": payment_method,
+                    "amount": format(amount.normalize(), "f"),
+                    "metadata": dict(metadata) if metadata is not None else None,
+                }
+                for payment_method, amount, metadata in payments
+            ],
+            "prescription": dict(prescription) if prescription is not None else None,
+        }
+        try:
+            canonical = json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise BusinessRuleError("Checkout payload must contain valid JSON") from exc
+        return hashlib.sha256(canonical).hexdigest()
+
+    @staticmethod
+    def _checkout_result_hash(payload: Mapping[str, object]) -> str:
+        try:
+            canonical = json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise AurumError("Checkout result is not serializable") from exc
+        return hashlib.sha256(canonical).hexdigest()
+
+    async def _find_existing_checkout(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+        operation_hash: str,
+        actor_id: UUID,
+        can_manage_tenant: bool,
+        allowed_branch_ids: set[UUID] | None,
+        allowed_manage_branch_ids: set[UUID] | None,
+    ) -> SaleCheckoutResult | None:
+        existing_payment = await self.repo.get_payment_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing_payment is not None:
+            raise ConflictError("Operation ID was already used for another POS operation")
+
+        existing = await self.repo.get_sale_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        outbox_event = await SyncOutboxRepository(self.repo.session).get_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is None:
+            if outbox_event is not None:
+                raise AurumError("Checkout outbox event has no sale aggregate")
+            return None
+        if existing.sale_type != "sale" or existing.operation_hash != operation_hash:
+            raise ConflictError("Operation ID was already used for another sale command")
+        return self._restore_checkout_result(
+            sale=existing,
+            outbox_event=outbox_event,
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+
+    def _restore_checkout_result(
+        self,
+        *,
+        sale: Sale,
+        outbox_event: SyncOutboxEvent | None,
+        tenant_id: UUID,
+        operation_id: UUID,
+        actor_id: UUID,
+        can_manage_tenant: bool,
+        allowed_branch_ids: set[UUID] | None,
+        allowed_manage_branch_ids: set[UUID] | None,
+    ) -> SaleCheckoutResult:
+        self._assert_sale_owned_or_managed(
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if (
+            sale.sale_type != "sale"
+            or sale.receipt_number is None
+            or sale.status not in {"completed", "voided"}
+        ):
+            raise AurumError("Checkout sale aggregate is incomplete")
+        if (
+            outbox_event is None
+            or outbox_event.aggregate_type != "sale"
+            or outbox_event.aggregate_id != sale.id
+            or outbox_event.event_type != "pos.sale.completed.v1"
+            or outbox_event.schema_version != 1
+        ):
+            raise AurumError("Checkout result snapshot is unavailable")
+        if outbox_event.payload_hash != self._checkout_result_hash(outbox_event.payload):
+            raise AurumError("Checkout result snapshot failed integrity validation")
+        try:
+            result = SaleCheckoutResult.model_validate(outbox_event.payload)
+        except PydanticValidationError as exc:
+            raise AurumError("Checkout result snapshot is invalid") from exc
+        if (
+            result.event_id != outbox_event.event_id
+            or result.sale_id != sale.id
+            or result.operation_id != operation_id
+            or result.tenant_id != tenant_id
+        ):
+            raise AurumError("Checkout result snapshot does not match the sale")
+        return result
+
+    async def get_checkout_result(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+        actor_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> SaleCheckoutResult:
+        await self.repo.lock_operation_id(operation_id)
+        if (
+            await self.repo.get_payment_by_operation_id(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+        ):
+            raise NotFoundError("Checkout operation not found")
+        sale = await self.repo.get_sale_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if sale is None or sale.sale_type != "sale":
+            raise NotFoundError("Checkout operation not found")
+        outbox_event = await SyncOutboxRepository(self.repo.session).get_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        return self._restore_checkout_result(
+            sale=sale,
+            outbox_event=outbox_event,
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+
+    @staticmethod
+    def _validate_checkout_payments(
+        payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
+    ) -> None:
+        for payment_method, amount, _metadata in payments:
+            if payment_method not in PAYMENT_METHODS:
+                raise BusinessRuleError("Unsupported payment method")
+            if amount <= 0:
+                raise BusinessRuleError("Payment amount must be positive")
+
+    async def _prepare_checkout_sale(
+        self,
+        *,
+        tenant_id: UUID,
+        register_id: UUID,
+        cashier_user_id: UUID,
+        operation_id: UUID,
+        operation_hash: str,
+        draft_sale_id: UUID | None,
+        can_manage_tenant: bool,
+        allowed_branch_ids: set[UUID] | None,
+        allowed_manage_branch_ids: set[UUID] | None,
+    ) -> Sale:
+        if draft_sale_id is None:
+            return await self.create_sale(
+                tenant_id=tenant_id,
+                register_id=register_id,
+                cashier_user_id=cashier_user_id,
+                operation_id=operation_id,
+                operation_hash=operation_hash,
+                can_manage_tenant=can_manage_tenant,
+                allowed_branch_ids=allowed_branch_ids,
+                allowed_manage_branch_ids=allowed_manage_branch_ids,
+            )
+
+        sale = await self._lock_sale(draft_sale_id)
+        self._assert_sale_owned_or_managed(
+            sale,
+            actor_id=cashier_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if (
+            sale.tenant_id != tenant_id
+            or sale.register_id != register_id
+            or sale.sale_type != "sale"
+        ):
+            raise NotFoundError("Checkout draft not found")
+        self._assert_draft(sale)
+        if sale.operation_id is not None or sale.operation_hash is not None:
+            raise ConflictError("Checkout draft already has an operation")
+        has_payments = bool(await self.repo.list_payments(sale.id))
+        has_prescriptions = bool(await self.repo.list_prescriptions(sale.id))
+        if has_payments or has_prescriptions:
+            raise BusinessRuleError("Checkout draft contains legacy financial data")
+        await self.repo.delete_items(sale.id)
+        return await self.repo.update_sale(
+            sale,
+            total_amount=Decimal("0"),
+            operation_id=operation_id,
+            operation_hash=operation_hash,
+        )
+
+    async def checkout(
+        self,
+        *,
+        tenant_id: UUID,
+        register_id: UUID,
+        cashier_user_id: UUID,
+        operation_id: UUID,
+        draft_sale_id: UUID | None = None,
+        items: list[tuple[UUID, Decimal]],
+        payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
+        prescription: Mapping[str, object] | None = None,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> SaleCheckoutResult:
+        """Create and complete a sale as one request transaction.
+
+        The FastAPI ``get_db`` dependency owns the transaction boundary. Any
+        exception from this method therefore removes the sale shell, lines,
+        payments, prescription, stock movements, and receipt allocation.
+        """
+        aggregated_items = self._aggregate_checkout_items(items)
+        self._validate_checkout_payments(payments)
+        operation_hash = self._checkout_operation_hash(
+            register_id=register_id,
+            draft_sale_id=draft_sale_id,
+            items=aggregated_items,
+            payments=payments,
+            prescription=prescription,
+        )
+
+        await self.repo.lock_operation_id(operation_id)
+        existing = await self._find_existing_checkout(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+            operation_hash=operation_hash,
+            actor_id=cashier_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if existing is not None:
+            return existing
+
+        sale = await self._prepare_checkout_sale(
+            tenant_id=tenant_id,
+            register_id=register_id,
+            cashier_user_id=cashier_user_id,
+            operation_id=operation_id,
+            operation_hash=operation_hash,
+            draft_sale_id=draft_sale_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        for catalog_id, qty in aggregated_items:
+            await self.add_item(
+                sale_id=sale.id,
+                catalog_id=catalog_id,
+                qty=qty,
+                actor_id=cashier_user_id,
+                can_manage_tenant=can_manage_tenant,
+                allowed_branch_ids=allowed_branch_ids,
+                allowed_manage_branch_ids=allowed_manage_branch_ids,
+            )
+
+        paid_total = sum((amount for _method, amount, _metadata in payments), Decimal("0"))
+        if paid_total != sale.total_amount:
+            raise BusinessRuleError(
+                "Payment total does not match sale total",
+                details={"paid": str(paid_total), "total": str(sale.total_amount)},
+            )
+        for payment_method, amount, metadata in payments:
+            await self.repo.insert_payment(
+                tenant_id=tenant_id,
+                sale_id=sale.id,
+                payment_method=payment_method,
+                amount=amount,
+                metadata_json=dict(metadata) if metadata is not None else None,
+            )
+
+        if prescription is not None:
+            await self.add_prescription(
+                sale_id=sale.id,
+                fields=dict(prescription),
+                actor_id=cashier_user_id,
+                can_manage_tenant=can_manage_tenant,
+                allowed_branch_ids=allowed_branch_ids,
+                allowed_manage_branch_ids=allowed_manage_branch_ids,
+            )
+        completed = await self.complete(
+            sale_id=sale.id,
+            actor_id=cashier_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if (
+            completed.receipt_number is None
+            or completed.receipt_seq is None
+            or completed.completed_at is None
+        ):
+            raise AurumError("Completed sale has no receipt snapshot")
+
+        sale_items = await self.repo.list_items(completed.id)
+        sale_payments = await self.repo.list_payments(completed.id)
+        event_id = uuid4()
+        result = SaleCheckoutResult(
+            event_id=event_id,
+            sale_id=completed.id,
+            operation_id=operation_id,
+            tenant_id=completed.tenant_id,
+            branch_id=completed.branch_id,
+            register_id=completed.register_id,
+            shift_id=completed.shift_id,
+            cashier_user_id=completed.cashier_user_id,
+            receipt_number=completed.receipt_number,
+            receipt_seq=completed.receipt_seq,
+            created_at=completed.created_at,
+            completed_at=completed.completed_at,
+            total_amount=completed.total_amount,
+            currency=completed.currency,
+            is_test=completed.is_test,
+            items=[SaleCheckoutItemResult.model_validate(item) for item in sale_items],
+            payments=[
+                SaleCheckoutPaymentResult.model_validate(payment) for payment in sale_payments
+            ],
+        )
+        event_payload = result.model_dump(mode="json")
+        await SyncOutboxRepository(self.repo.session).enqueue(
+            event_id=event_id,
+            tenant_id=completed.tenant_id,
+            branch_id=completed.branch_id,
+            operation_id=operation_id,
+            aggregate_type="sale",
+            aggregate_id=completed.id,
+            event_type="pos.sale.completed.v1",
+            schema_version=1,
+            payload=event_payload,
+            payload_hash=self._checkout_result_hash(event_payload),
+        )
+        return result
 
     async def get_sale(self, sale_id: UUID) -> Sale:
         sale = await self.repo.get_sale(sale_id)

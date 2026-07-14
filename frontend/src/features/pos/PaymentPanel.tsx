@@ -27,6 +27,7 @@ export function PaymentPanel({
   payingMethod,
   pendingPaymentMethod,
   onPayTile,
+  onClearPayments,
   onComplete,
   completedReceiptNumber,
   onPrint,
@@ -46,6 +47,7 @@ export function PaymentPanel({
   payingMethod: PaymentMethod | null;
   pendingPaymentMethod: PaymentMethod | null;
   onPayTile: (method: PaymentMethod) => void;
+  onClearPayments?: () => void;
   onComplete: () => void;
   completedReceiptNumber: string | null;
   onPrint?: () => void;
@@ -115,18 +117,25 @@ export function PaymentPanel({
 
       {/* Recorded payments */}
       {payments.length > 0 && (
-        <ul className="divide-y divide-border rounded-xl border border-border bg-surface text-sm">
-          {payments.map((p) => (
-            <li key={p.id} className="flex items-center justify-between px-4 py-2">
-              <span className="text-foreground-secondary">
-                {paymentMethodLabel[p.payment_method]}
-              </span>
-              <span className="font-mono tabular-nums text-foreground">
-                {Number(p.amount).toFixed(2)} {p.currency}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-2">
+          <ul className="divide-y divide-border rounded-xl border border-border bg-surface text-sm">
+            {payments.map((p) => (
+              <li key={p.id} className="flex items-center justify-between px-4 py-2">
+                <span className="text-foreground-secondary">
+                  {paymentMethodLabel[p.payment_method]}
+                </span>
+                <span className="font-mono tabular-nums text-foreground">
+                  {Number(p.amount).toFixed(2)} {p.currency}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {isDraft && onClearPayments && (
+            <Button type="button" size="sm" variant="ghost" onClick={onClearPayments}>
+              Очистить оплату
+            </Button>
+          )}
+        </div>
       )}
 
       {/* Complete */}

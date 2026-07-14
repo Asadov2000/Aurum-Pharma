@@ -7,6 +7,8 @@ import {
   type PrescriptionLogPayload,
   type ReceiptData,
   type Sale,
+  type SaleCheckoutPayload,
+  type SaleCheckoutResult,
   type SaleDetails,
   type SaleItem,
   type SaleItemAddedResponse,
@@ -98,6 +100,18 @@ export async function completeSale(saleId: string): Promise<Sale> {
   const { data } = await api.post<Sale>(`/sales/${saleId}/complete`, undefined, {
     timeout: POS_MONEY_WRITE_TIMEOUT_MS,
   });
+  return data;
+}
+
+export async function checkoutSale(payload: SaleCheckoutPayload): Promise<SaleCheckoutResult> {
+  const { data } = await api.post<SaleCheckoutResult>("/sales/checkout", payload, {
+    timeout: POS_MONEY_WRITE_TIMEOUT_MS,
+  });
+  return data;
+}
+
+export async function getCheckoutResult(operationId: string): Promise<SaleCheckoutResult> {
+  const { data } = await api.get<SaleCheckoutResult>(`/sales/operations/${operationId}`);
   return data;
 }
 

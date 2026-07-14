@@ -1,15 +1,22 @@
-"""RLS isolation across shift / sale / sale_item / sale_payment."""
+"""RLS isolation across the POS aggregate and its synchronization outbox."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from uuid import UUID, uuid4
 
 import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    create_async_engine,
+)
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
+from app.domains.sync.repository import SyncOutboxRepository
 
 
 @pytest_asyncio.fixture
@@ -97,12 +104,12 @@ async def test_sale_invisible_across_tenants(
                 },
             )
             shift_ids = [str(r[0]) for r in sh.fetchall()]
-            await conn.execute(
+            sr = await conn.execute(
                 text(
                     "INSERT INTO sale (tenant_id, branch_id, register_id, "
                     "shift_id, cashier_user_id, status) VALUES "
                     "(:ta,:ba,:ra,:sa,:ua,'completed'),"
-                    "(:tb,:bb,:rb,:sb,:ub,'completed')"
+                    "(:tb,:bb,:rb,:sb,:ub,'completed') RETURNING id"
                 ),
                 {
                     "ta": tenant_ids[0],
@@ -117,6 +124,50 @@ async def test_sale_invisible_across_tenants(
                     "ub": user_ids[1],
                 },
             )
+            sale_ids = [str(r[0]) for r in sr.fetchall()]
+            await conn.execute(
+                text(
+                    "INSERT INTO sync_outbox ("
+                    "tenant_id, branch_id, operation_id, aggregate_type, aggregate_id, "
+                    "event_type, payload, payload_hash"
+                    ") VALUES ("
+                    ":ta,:ba,gen_random_uuid(),'sale',:aa,'pos.sale.completed.v1',"
+                    "'{}'::jsonb,repeat('a',64)"
+                    "),("
+                    ":tb,:bb,gen_random_uuid(),'sale',:ab,'pos.sale.completed.v1',"
+                    "'{}'::jsonb,repeat('b',64)"
+                    ")"
+                ),
+                {
+                    "ta": tenant_ids[0],
+                    "tb": tenant_ids[1],
+                    "ba": branch_ids[0],
+                    "bb": branch_ids[1],
+                    "aa": sale_ids[0],
+                    "ab": sale_ids[1],
+                },
+            )
+
+        app_event_id = uuid4()
+        async with AsyncSession(app_engine_iso, expire_on_commit=False) as session:
+            async with session.begin():
+                await session.execute(
+                    text("SELECT set_config('app.tenant_id', :v, true)"),
+                    {"v": tenant_ids[0]},
+                )
+                event = await SyncOutboxRepository(session).enqueue(
+                    event_id=app_event_id,
+                    tenant_id=UUID(tenant_ids[0]),
+                    branch_id=UUID(branch_ids[0]),
+                    operation_id=uuid4(),
+                    aggregate_type="sale",
+                    aggregate_id=UUID(sale_ids[0]),
+                    event_type="pos.sale.completed.v1",
+                    schema_version=1,
+                    payload={"event_id": str(app_event_id)},
+                    payload_hash="c" * 64,
+                )
+                assert event.event_id == app_event_id
 
         async with app_engine_iso.connect() as app_conn:
             await _set_tenant(app_conn, tenant_ids[0])
@@ -127,10 +178,19 @@ async def test_sale_invisible_across_tenants(
                 )
             ).fetchall()
             assert len(rows) == 1, "Tenant A must see only its own sale"
+            outbox_rows = (
+                await app_conn.execute(
+                    text("SELECT event_id FROM sync_outbox WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+            ).fetchall()
+            assert {row[0] for row in outbox_rows} >= {app_event_id}
+            assert len(outbox_rows) == 2, "Tenant A must see only its own outbox events"
     finally:
         if tenant_ids:
             async with support_engine_iso.begin() as conn:
                 for tbl in (
+                    "sync_outbox",
                     "sale",
                     "shift",
                     "register",

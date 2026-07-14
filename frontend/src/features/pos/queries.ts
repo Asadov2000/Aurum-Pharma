@@ -4,6 +4,7 @@ import {
   addPayment,
   addPrescription,
   addSaleItem,
+  checkoutSale,
   closeShift,
   completeSale,
   createSale,
@@ -17,6 +18,8 @@ import {
 import {
   type PaymentAddPayload,
   type PrescriptionLogPayload,
+  type SaleCheckoutPayload,
+  type SaleCheckoutResult,
   type SaleDetails,
   type ShiftClosePayload,
   type ShiftOpenPayload,
@@ -27,6 +30,48 @@ export const posKeys = {
   sale: (saleId: string) => ["pos", "sale", saleId] as const,
   receipt: (saleId: string) => ["pos", "receipt", saleId] as const,
 };
+
+export function mergeCheckoutResult(
+  sale: SaleDetails | undefined,
+  result: SaleCheckoutResult,
+): SaleDetails {
+  const base: SaleDetails = sale ?? {
+    id: result.sale_id,
+    tenant_id: result.tenant_id,
+    branch_id: result.branch_id,
+    register_id: result.register_id,
+    shift_id: result.shift_id,
+    sale_type: "sale",
+    parent_sale_id: null,
+    status: "completed",
+    receipt_number: result.receipt_number,
+    operation_id: result.operation_id,
+    is_test: result.is_test,
+    total_amount: result.total_amount,
+    currency: result.currency,
+    voided_at: null,
+    voided_by_sale_id: null,
+    cashier_user_id: result.cashier_user_id,
+    created_at: result.created_at,
+    completed_at: result.completed_at,
+    items: [],
+    payments: [],
+  };
+  return {
+    ...base,
+    status: "completed",
+    operation_id: result.operation_id,
+    receipt_number: result.receipt_number,
+    completed_at: result.completed_at,
+    total_amount: result.total_amount,
+    items: result.items.map((item) => ({ ...item, sale_id: result.sale_id })),
+    payments: result.payments.map((payment) => ({
+      ...payment,
+      sale_id: result.sale_id,
+      operation_id: null,
+    })),
+  };
+}
 
 // ---- shift ----
 
@@ -144,6 +189,19 @@ export function useCompleteSale() {
         sale ? { ...sale, ...data } : sale,
       );
       // Completing affects inventory.
+      void qc.invalidateQueries({ queryKey: ["inventory", "batches"] });
+    },
+  });
+}
+
+export function useCheckoutSale() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: SaleCheckoutPayload) => checkoutSale(payload),
+    onSuccess: (result) => {
+      qc.setQueryData<SaleDetails>(posKeys.sale(result.sale_id), (sale) =>
+        mergeCheckoutResult(sale, result),
+      );
       void qc.invalidateQueries({ queryKey: ["inventory", "batches"] });
     },
   });
