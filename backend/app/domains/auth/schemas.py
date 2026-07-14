@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import UUID4, BaseModel, ConfigDict, EmailStr, Field
 
 
 class LoginCodeRequest(BaseModel):
@@ -42,10 +42,12 @@ class TokenResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str | None = None
+    operation_id: UUID4 | None = None
 
 
 class LogoutRequest(BaseModel):
     refresh_token: str | None = None
+    operation_id: UUID4 | None = None
 
 
 class LogoutResponse(BaseModel):

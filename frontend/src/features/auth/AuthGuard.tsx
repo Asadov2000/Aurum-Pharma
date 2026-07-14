@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { useMeQuery } from "./queries";
+import { isConfirmedAuthFailure } from "./failures";
 import { useAuthStore } from "@/stores/auth";
 
 export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | null {
@@ -26,7 +27,7 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
   }, [hydrated, accessToken, navigate, location.pathname]);
 
   useEffect(() => {
-    if (error) {
+    if (error && isConfirmedAuthFailure(error)) {
       clear();
       navigate({ to: "/login", search: { from: location.pathname } });
     }

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,7 +28,9 @@ async def test_refresh_happy_path(db_session: AsyncSession, make_user) -> None:
 
     service = AuthService(AuthRepository(db_session))
     new_access, new_refresh, expires_in = await service.refresh(
-        refresh_token=refresh, ip_address="127.0.0.1"
+        refresh_token=refresh,
+        operation_id=uuid4(),
+        ip_address="127.0.0.1",
     )
 
     assert new_access
@@ -39,17 +43,75 @@ async def test_refresh_rotation_invalidates_old_token(db_session: AsyncSession, 
     _, refresh = await _login(db_session, user.email)
 
     service = AuthService(AuthRepository(db_session))
-    await service.refresh(refresh_token=refresh, ip_address="127.0.0.1")
+    await service.refresh(
+        refresh_token=refresh,
+        operation_id=uuid4(),
+        ip_address="127.0.0.1",
+    )
 
     # The same token cannot be used a second time.
     with pytest.raises(AuthenticationError):
-        await service.refresh(refresh_token=refresh, ip_address="127.0.0.1")
+        await service.refresh(
+            refresh_token=refresh,
+            operation_id=uuid4(),
+            ip_address="127.0.0.1",
+        )
+
+
+async def test_refresh_repeats_same_rotation_after_lost_response(
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="ref-retry@aurum.tj")
+    _, refresh = await _login(db_session, user.email)
+    operation_id = uuid4()
+    service = AuthService(AuthRepository(db_session))
+
+    _, first_successor, _ = await service.refresh(
+        refresh_token=refresh,
+        operation_id=operation_id,
+        ip_address="127.0.0.1",
+    )
+    _, retried_successor, _ = await service.refresh(
+        refresh_token=refresh,
+        operation_id=operation_id,
+        ip_address="127.0.0.1",
+    )
+
+    assert retried_successor == first_successor
+
+
+async def test_refresh_reuses_cookie_already_set_by_same_operation(
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="ref-cookie-retry@aurum.tj")
+    _, refresh = await _login(db_session, user.email)
+    operation_id = uuid4()
+    service = AuthService(AuthRepository(db_session))
+
+    _, successor, _ = await service.refresh(
+        refresh_token=refresh,
+        operation_id=operation_id,
+        ip_address="127.0.0.1",
+    )
+    _, retried_successor, _ = await service.refresh(
+        refresh_token=successor,
+        operation_id=operation_id,
+        ip_address="127.0.0.1",
+    )
+
+    assert retried_successor == successor
 
 
 async def test_refresh_with_garbage_token(db_session: AsyncSession) -> None:
     service = AuthService(AuthRepository(db_session))
     with pytest.raises(AuthenticationError):
-        await service.refresh(refresh_token="not-a-real-token", ip_address="127.0.0.1")
+        await service.refresh(
+            refresh_token="not-a-real-token",
+            operation_id=uuid4(),
+            ip_address="127.0.0.1",
+        )
 
 
 async def test_logout_makes_refresh_unusable(db_session: AsyncSession, make_user) -> None:
@@ -60,7 +122,35 @@ async def test_logout_makes_refresh_unusable(db_session: AsyncSession, make_user
     await service.logout(refresh)
 
     with pytest.raises(AuthenticationError):
-        await service.refresh(refresh_token=refresh, ip_address="127.0.0.1")
+        await service.refresh(
+            refresh_token=refresh,
+            operation_id=uuid4(),
+            ip_address="127.0.0.1",
+        )
+
+
+async def test_logout_revokes_successor_after_lost_refresh_response(
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="lo-lost-refresh@aurum.tj")
+    _, refresh = await _login(db_session, user.email)
+    operation_id = uuid4()
+    service = AuthService(AuthRepository(db_session))
+    _, successor, _ = await service.refresh(
+        refresh_token=refresh,
+        operation_id=operation_id,
+        ip_address="127.0.0.1",
+    )
+
+    await service.logout(refresh, operation_id=operation_id)
+
+    with pytest.raises(AuthenticationError):
+        await service.refresh(
+            refresh_token=successor,
+            operation_id=uuid4(),
+            ip_address="127.0.0.1",
+        )
 
 
 async def test_logout_is_idempotent(db_session: AsyncSession, make_user) -> None:

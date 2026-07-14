@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -101,7 +101,6 @@ CUSTOM_FUNCTIONS = {
     "issue_auth_email_code",
     "is_support_session",
     "lookup_auth_user_by_id",
-    "lookup_auth_session_by_hash",
     "lookup_login_user_by_email",
     "mark_all_scoped_notifications_read",
     "mark_scoped_notification_read",
@@ -138,7 +137,6 @@ APP_EXECUTABLE_FUNCTIONS = {
     "issue_auth_email_code",
     "is_support_session",
     "lookup_auth_user_by_id",
-    "lookup_auth_session_by_hash",
     "lookup_login_user_by_email",
     "mark_all_scoped_notifications_read",
     "mark_scoped_notification_read",
@@ -555,6 +553,7 @@ async def test_auth_functions_hide_secrets_and_reject_replay(
     candidate_hash = hash_code(code, salt)
     first_refresh_hash = hash_token(f"first-{suffix}")
     second_refresh_hash = hash_token(f"second-{suffix}")
+    rotation_operation_id = uuid4()
     password_hash = hash_password(f"password-{suffix}")
 
     try:
@@ -665,12 +664,13 @@ async def test_auth_functions_hide_secrets_and_reject_replay(
                     await conn.execute(
                         text(
                             "SELECT * FROM public.rotate_auth_session("
-                            ":old_hash, :new_hash, NULL, '127.0.0.1', "
+                            ":old_hash, :new_hash, :operation_id, NULL, '127.0.0.1', "
                             "pg_catalog.now() + INTERVAL '7 days')"
                         ),
                         {
                             "old_hash": first_refresh_hash,
                             "new_hash": second_refresh_hash,
+                            "operation_id": rotation_operation_id,
                         },
                     )
                 )
@@ -682,12 +682,13 @@ async def test_auth_functions_hide_secrets_and_reject_replay(
                     await conn.execute(
                         text(
                             "SELECT * FROM public.rotate_auth_session("
-                            ":old_hash, :new_hash, NULL, '127.0.0.1', "
+                            ":old_hash, :new_hash, :operation_id, NULL, '127.0.0.1', "
                             "pg_catalog.now() + INTERVAL '7 days')"
                         ),
                         {
                             "old_hash": first_refresh_hash,
                             "new_hash": hash_token(f"third-{suffix}"),
+                            "operation_id": rotation_operation_id,
                         },
                     )
                 )
@@ -696,13 +697,17 @@ async def test_auth_functions_hide_secrets_and_reject_replay(
             )
             revoked_user_id = (
                 await conn.execute(
-                    text("SELECT public.revoke_auth_session_by_hash(" ":token_hash, 'logout')"),
+                    text(
+                        "SELECT public.revoke_auth_session_by_hash(" ":token_hash, 'logout', NULL)"
+                    ),
                     {"token_hash": second_refresh_hash},
                 )
             ).scalar_one()
             replayed_revoke = (
                 await conn.execute(
-                    text("SELECT public.revoke_auth_session_by_hash(" ":token_hash, 'logout')"),
+                    text(
+                        "SELECT public.revoke_auth_session_by_hash(" ":token_hash, 'logout', NULL)"
+                    ),
                     {"token_hash": second_refresh_hash},
                 )
             ).scalar_one()
@@ -750,16 +755,20 @@ async def test_auth_code_and_refresh_are_single_use_under_concurrency(
             ).scalar_one()
             return str(value) if value is not None else None
 
-    async def rotate_session(old_hash: str, new_hash: str) -> str | None:
+    async def rotate_session(old_hash: str, new_hash: str, operation_id: UUID) -> str | None:
         async with app_engine_privileges.begin() as conn:
             value = (
                 await conn.execute(
                     text(
                         "SELECT id FROM public.rotate_auth_session("
-                        ":old_hash, :new_hash, NULL, '127.0.0.1', "
+                        ":old_hash, :new_hash, :operation_id, NULL, '127.0.0.1', "
                         "pg_catalog.now() + INTERVAL '7 days')"
                     ),
-                    {"old_hash": old_hash, "new_hash": new_hash},
+                    {
+                        "old_hash": old_hash,
+                        "new_hash": new_hash,
+                        "operation_id": operation_id,
+                    },
                 )
             ).scalar_one_or_none()
             return str(value) if value is not None else None
@@ -799,10 +808,27 @@ async def test_auth_code_and_refresh_are_single_use_under_concurrency(
         winning_hash = refresh_hashes[winning_index]
 
         rotated_hashes = [hash_token(f"rotate-{suffix}-{index}") for index in range(2)]
+        rotation_ids = [uuid4(), uuid4()]
         rotated = await asyncio.gather(
-            *(rotate_session(winning_hash, value) for value in rotated_hashes)
+            *(
+                rotate_session(winning_hash, token_hash, operation_id)
+                for token_hash, operation_id in zip(rotated_hashes, rotation_ids, strict=True)
+            )
         )
         assert sum(value is not None for value in rotated) == 1
+        rotation_winner = next(index for index, value in enumerate(rotated) if value is not None)
+
+        retried = await asyncio.gather(
+            *(
+                rotate_session(
+                    winning_hash,
+                    rotated_hashes[rotation_winner],
+                    rotation_ids[rotation_winner],
+                )
+                for _ in range(2)
+            )
+        )
+        assert retried == [rotated[rotation_winner], rotated[rotation_winner]]
     finally:
         await _delete_auth_probe(support_engine_privileges, email=email)
 

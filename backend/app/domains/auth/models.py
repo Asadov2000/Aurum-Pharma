@@ -107,6 +107,11 @@ class Session(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_reason: Mapped[str | None] = mapped_column(Text)
+    rotation_operation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    rotated_from_session_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("session.id", ondelete="SET NULL"),
+    )
 
 
 class EmailCode(Base):

@@ -1,4 +1,5 @@
 import { type TokenPair } from "./types";
+import { clearRefreshOperationId } from "./refreshOperation";
 
 const LEGACY_ACCESS_KEY = "aurum.access_token";
 const LEGACY_REFRESH_KEY = "aurum.refresh_token";
@@ -25,8 +26,10 @@ export function loadTokens(): { access: string | null } {
 
 export function saveTokens(_tokens: TokenPair): void {
   clearLegacyTokens();
+  clearRefreshOperationId();
 }
 
 export function clearTokens(): void {
   clearLegacyTokens();
+  clearRefreshOperationId();
 }

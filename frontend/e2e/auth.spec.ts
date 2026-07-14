@@ -29,6 +29,34 @@ test.describe("Auth", () => {
     await expect(page.getByRole("link", { name: "Тенанты" })).toHaveCount(0);
   });
 
+  test("retries refresh with the same operation after a lost response", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+    const operationIds: string[] = [];
+    let loseFirstResponse = true;
+
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      const payload = route.request().postDataJSON() as { operation_id?: string };
+      if (payload.operation_id) operationIds.push(payload.operation_id);
+
+      if (loseFirstResponse) {
+        loseFirstResponse = false;
+        const committedResponse = await route.fetch();
+        expect(committedResponse.ok()).toBe(true);
+        await route.abort("failed");
+        return;
+      }
+
+      await route.continue();
+    });
+
+    await page.goto("/");
+
+    await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
+    expect(operationIds.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(operationIds).size).toBe(1);
+    await expect(page).not.toHaveURL(/\/login/);
+  });
+
   test("skip link moves keyboard users straight to main content", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.goto("/");

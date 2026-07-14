@@ -1,6 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveApiBaseUrl } from "@/lib/api";
+import {
+  configureAuthHooks,
+  refreshAccessToken,
+  resolveApiBaseUrl,
+} from "@/lib/api";
+
+afterEach(() => {
+  configureAuthHooks({
+    getAccessToken: () => null,
+    refreshTokens: async () => null,
+    onAuthFailure: () => {},
+  });
+});
 
 describe("resolveApiBaseUrl", () => {
   it("uses an explicit VITE_API_URL when configured", () => {
@@ -31,5 +43,48 @@ describe("resolveApiBaseUrl", () => {
     expect(resolveApiBaseUrl({ DEV: false, VITE_API_URL: undefined })).toBe(
       "/api/v1",
     );
+  });
+});
+
+describe("refreshAccessToken", () => {
+  it("shares one refresh between concurrent requests", async () => {
+    const refreshTokens = vi.fn(async () => "access");
+    configureAuthHooks({
+      getAccessToken: () => null,
+      refreshTokens,
+      onAuthFailure: () => {},
+    });
+
+    const results = await Promise.all([refreshAccessToken(), refreshAccessToken()]);
+
+    expect(results).toEqual(["access", "access"]);
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a confirmed auth rejection once", async () => {
+    const onAuthFailure = vi.fn();
+    configureAuthHooks({
+      getAccessToken: () => null,
+      refreshTokens: async () => null,
+      onAuthFailure,
+    });
+
+    await Promise.all([refreshAccessToken(), refreshAccessToken()]);
+
+    expect(onAuthFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a transient refresh error as logout", async () => {
+    const onAuthFailure = vi.fn();
+    configureAuthHooks({
+      getAccessToken: () => null,
+      refreshTokens: async () => {
+        throw new Error("offline");
+      },
+      onAuthFailure,
+    });
+
+    await expect(refreshAccessToken()).rejects.toThrow("offline");
+    expect(onAuthFailure).not.toHaveBeenCalled();
   });
 });

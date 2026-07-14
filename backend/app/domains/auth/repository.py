@@ -40,6 +40,7 @@ class AuthSessionRecord:
     id: UUID
     user_id: UUID
     expires_at: datetime
+    reuse_presented_token: bool
 
 
 class EmailCodeIssueStatus(StrEnum):
@@ -68,6 +69,7 @@ def _auth_session_from_row(row: RowMapping) -> AuthSessionRecord:
         id=cast(UUID, row["id"]),
         user_id=cast(UUID, row["user_id"]),
         expires_at=cast(datetime, row["expires_at"]),
+        reuse_presented_token=bool(row["reuse_presented_token"]),
     )
 
 
@@ -266,19 +268,12 @@ class AuthRepository:
         )
         return cast(UUID | None, result.scalar_one())
 
-    async def get_active_session_by_hash(self, token_hash: str) -> AuthSessionRecord | None:
-        result = await self.session.execute(
-            text("SELECT * FROM public.lookup_auth_session_by_hash(:token_hash)"),
-            {"token_hash": token_hash},
-        )
-        row = result.mappings().one_or_none()
-        return _auth_session_from_row(row) if row is not None else None
-
     async def rotate_session(
         self,
         *,
         old_token_hash: str,
         new_token_hash: str,
+        operation_id: UUID,
         user_agent: str | None,
         ip_address: str | None,
         expires_at: datetime,
@@ -286,11 +281,13 @@ class AuthRepository:
         result = await self.session.execute(
             text(
                 "SELECT * FROM public.rotate_auth_session("
-                ":old_token_hash, :new_token_hash, :user_agent, :ip_address, :expires_at)"
+                ":old_token_hash, :new_token_hash, :operation_id, "
+                ":user_agent, :ip_address, :expires_at)"
             ),
             {
                 "old_token_hash": old_token_hash,
                 "new_token_hash": new_token_hash,
+                "operation_id": operation_id,
                 "user_agent": user_agent,
                 "ip_address": ip_address,
                 "expires_at": expires_at,
@@ -299,10 +296,22 @@ class AuthRepository:
         row = result.mappings().one_or_none()
         return _auth_session_from_row(row) if row is not None else None
 
-    async def revoke_session_by_hash(self, token_hash: str, *, reason: str) -> UUID | None:
+    async def revoke_session_by_hash(
+        self,
+        token_hash: str,
+        *,
+        reason: str,
+        operation_id: UUID | None = None,
+    ) -> UUID | None:
         result = await self.session.execute(
-            text("SELECT public.revoke_auth_session_by_hash(:token_hash, :reason)"),
-            {"token_hash": token_hash, "reason": reason},
+            text(
+                "SELECT public.revoke_auth_session_by_hash(" ":token_hash, :reason, :operation_id)"
+            ),
+            {
+                "token_hash": token_hash,
+                "reason": reason,
+                "operation_id": operation_id,
+            },
         )
         return cast(UUID | None, result.scalar_one())
 

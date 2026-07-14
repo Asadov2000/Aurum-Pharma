@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, Request, Response, status
 from redis.asyncio import Redis
@@ -151,6 +152,7 @@ async def refresh_tokens(
     )
     access, refresh, expires = await service.refresh(
         refresh_token=refresh_token,
+        operation_id=payload.operation_id if payload and payload.operation_id else uuid4(),
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
@@ -176,7 +178,10 @@ async def logout(
         using_cookie = payload is None or not payload.refresh_token
         if using_cookie:
             _assert_cookie_refresh_origin(request)
-        await service.logout(refresh_token)
+        await service.logout(
+            refresh_token,
+            operation_id=payload.operation_id if payload is not None else None,
+        )
     _clear_refresh_cookie(response)
     return LogoutResponse()
 

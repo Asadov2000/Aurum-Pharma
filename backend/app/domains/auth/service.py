@@ -25,6 +25,7 @@ from app.core.errors import (
 )
 from app.core.security import (
     create_access_token,
+    derive_rotated_refresh_token,
     generate_code_salt,
     generate_email_code,
     generate_refresh_token,
@@ -215,28 +216,30 @@ class AuthService:
         self,
         *,
         refresh_token: str,
+        operation_id: UUID,
         ip_address: str,
         user_agent: str | None = None,
     ) -> tuple[str, str, int]:
         token_hash = hash_token(refresh_token)
-        s = await self.repo.get_active_session_by_hash(token_hash)
-        if s is None:
-            raise AuthenticationError("Invalid or expired refresh token")
-
-        user = await self.repo.get_user_by_id(s.user_id, session_id=s.id)
-        if user is None or user.status not in ("invited", "active"):
-            await self.repo.revoke_session_by_hash(token_hash, reason="user_inactive")
-            raise AuthenticationError("Invalid or expired refresh token")
-
-        new_refresh_token = generate_refresh_token()
+        new_refresh_token = derive_rotated_refresh_token(refresh_token, operation_id)
         rotated = await self.repo.rotate_session(
             old_token_hash=token_hash,
             new_token_hash=hash_token(new_refresh_token),
+            operation_id=operation_id,
             user_agent=user_agent,
             ip_address=ip_address,
             expires_at=utc_now() + timedelta(days=settings.REFRESH_TOKEN_DAYS),
         )
-        if rotated is None or rotated.user_id != user.id:
+        if rotated is None:
+            raise AuthenticationError("Invalid or expired refresh token")
+
+        user = await self.repo.get_user_by_id(rotated.user_id, session_id=rotated.id)
+        if user is None or user.status not in ("invited", "active"):
+            rotated_token = refresh_token if rotated.reuse_presented_token else new_refresh_token
+            await self.repo.revoke_session_by_hash(
+                hash_token(rotated_token),
+                reason="user_inactive",
+            )
             raise AuthenticationError("Invalid or expired refresh token")
 
         access_token = create_access_token(
@@ -245,16 +248,21 @@ class AuthService:
             is_developer=user.is_developer,
             is_administrator=user.is_administrator,
         )
-        logger.info("refresh_rotated", user_id=str(user.id), old_session_id=str(s.id))
-        return access_token, new_refresh_token, settings.ACCESS_TOKEN_MINUTES * 60
+        result_refresh_token = refresh_token if rotated.reuse_presented_token else new_refresh_token
+        logger.info("refresh_rotated", user_id=str(user.id), session_id=str(rotated.id))
+        return access_token, result_refresh_token, settings.ACCESS_TOKEN_MINUTES * 60
 
     # -------------------------------------------------------------------------
     # 4. Logout (idempotent)
     # -------------------------------------------------------------------------
 
-    async def logout(self, refresh_token: str) -> None:
+    async def logout(self, refresh_token: str, operation_id: UUID | None = None) -> None:
         token_hash = hash_token(refresh_token)
-        user_id = await self.repo.revoke_session_by_hash(token_hash, reason="logout")
+        user_id = await self.repo.revoke_session_by_hash(
+            token_hash,
+            reason="logout",
+            operation_id=operation_id,
+        )
         if user_id is not None and self.redis is not None:
             # Local import — RolesService pulls from roles domain, which
             # imports auth at module level. Lazy keeps the load DAG acyclic.

@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { useAuthStore } from "@/stores/auth";
 
 import { logoutRequest, verifyLoginCode } from "./api";
+import { getPendingRefreshOperationId } from "./refreshOperation";
 import { type LoginVerifyRequest } from "./types";
 
 export function useAuth() {
@@ -23,7 +24,7 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
-      await logoutRequest();
+      await logoutRequest(getPendingRefreshOperationId());
     } catch {
       // Whatever the server says, the client-side session is over.
     }

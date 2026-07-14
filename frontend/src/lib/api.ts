@@ -69,6 +69,18 @@ api.interceptors.request.use((config) => {
 // we don't burn the refresh token twice and trigger reuse-detection.
 let refreshing: Promise<string | null> | null = null;
 
+export function refreshAccessToken(): Promise<string | null> {
+  refreshing ??= refresh()
+    .then((token) => {
+      if (!token) onAuthFailure();
+      return token;
+    })
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -84,13 +96,8 @@ api.interceptors.response.use(
 
     original._retry = true;
 
-    refreshing ??= refresh().finally(() => {
-      refreshing = null;
-    });
-
-    const newAccess = await refreshing;
+    const newAccess = await refreshAccessToken();
     if (!newAccess) {
-      onAuthFailure();
       return Promise.reject(error);
     }
     original.headers.set("Authorization", `Bearer ${newAccess}`);

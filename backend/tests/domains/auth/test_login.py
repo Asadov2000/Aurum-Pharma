@@ -354,6 +354,7 @@ async def test_refresh_endpoint_rotates_cookie_session(
 
     response = await auth_client.post(
         "/api/v1/auth/refresh",
+        json={"operation_id": str(uuid4())},
         headers={"Origin": "http://localhost:5173"},
     )
 

@@ -73,6 +73,23 @@ def generate_refresh_token() -> str:
     return secrets.token_hex(32)
 
 
+def derive_rotated_refresh_token(refresh_token: str, operation_id: UUID) -> str:
+    """Derive the retry-stable successor for one refresh operation.
+
+    The database still stores only a SHA-256 verifier. Repeating the same
+    request can reproduce the plaintext successor after a lost response,
+    while a different operation id produces a different candidate.
+    """
+    root_key = settings.JWT_SECRET.encode()
+    rotation_key = hmac.new(
+        root_key,
+        b"aurum-refresh-rotation-key:v1",
+        hashlib.sha256,
+    ).digest()
+    message = refresh_token.encode() + b"\x00" + operation_id.bytes
+    return hmac.new(rotation_key, message, hashlib.sha256).hexdigest()
+
+
 def hash_token(token: str) -> str:
     """sha256 of the refresh token — no salt needed, token is already 256-bit."""
     return hashlib.sha256(token.encode()).hexdigest()
