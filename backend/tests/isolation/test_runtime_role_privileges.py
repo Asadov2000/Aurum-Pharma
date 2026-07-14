@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
+from app.core.security import hash_code, hash_password, hash_token
 
 CRUD_TABLES = {
     "barcode",
@@ -20,11 +22,9 @@ CRUD_TABLES = {
     "batch_movement",
     "branch",
     "catalog_import_job",
-    "email_code",
     "incoming_document",
     "incoming_item",
     "invoice",
-    "login_attempt",
     "notification_subscription",
     "onboarding_checklist",
     "payment",
@@ -35,7 +35,6 @@ CRUD_TABLES = {
     "sale",
     "sale_item",
     "sale_payment",
-    "session",
     "shift",
     "supplier",
     "supplier_return",
@@ -58,7 +57,14 @@ READ_ONLY_TABLES = {
     "user_assignment",
 }
 
-NO_ACCESS_TABLES = {"alembic_version", "app_user", "notification_delivery"}
+NO_ACCESS_TABLES = {
+    "alembic_version",
+    "app_user",
+    "email_code",
+    "login_attempt",
+    "notification_delivery",
+    "session",
+}
 
 APP_USER_SAFE_COLUMNS = {
     "id",
@@ -78,22 +84,32 @@ RUNTIME_VIEWS = {
 
 CUSTOM_FUNCTIONS = {
     "append_audit_event",
+    "auth_email_code_matches",
     "audit_redact_jsonb",
     "current_app_user_id",
     "current_tenant_id",
     "create_invited_app_user",
+    "create_auth_session_from_email_code",
     "create_scoped_notification",
     "create_tenant_user_assignment",
+    "consume_auth_email_code",
     "deactivate_tenant_user_assignment",
+    "enforce_auth_login_guard",
     "enqueue_notification_delivery",
     "find_invitable_user_id",
+    "find_auth_email_code_challenge",
+    "issue_auth_email_code",
     "is_support_session",
-    "lookup_auth_user_by_email",
     "lookup_auth_user_by_id",
+    "lookup_auth_session_by_hash",
+    "lookup_login_user_by_email",
     "mark_all_scoped_notifications_read",
     "mark_scoped_notification_read",
     "reactivate_tenant_user_assignment",
+    "record_auth_login_attempt",
     "resolve_notification_subscription",
+    "revoke_auth_session_by_hash",
+    "rotate_auth_session",
     "set_tenant_user_status",
     "tenant_actor_has_permission",
     "touch_auth_user_last_login",
@@ -106,21 +122,31 @@ CUSTOM_FUNCTIONS = {
 
 APP_EXECUTABLE_FUNCTIONS = {
     "append_audit_event",
+    "auth_email_code_matches",
     "current_app_user_id",
     "current_tenant_id",
     "create_invited_app_user",
+    "create_auth_session_from_email_code",
     "create_scoped_notification",
     "create_tenant_user_assignment",
+    "consume_auth_email_code",
     "deactivate_tenant_user_assignment",
+    "enforce_auth_login_guard",
     "enqueue_notification_delivery",
     "find_invitable_user_id",
+    "find_auth_email_code_challenge",
+    "issue_auth_email_code",
     "is_support_session",
-    "lookup_auth_user_by_email",
     "lookup_auth_user_by_id",
+    "lookup_auth_session_by_hash",
+    "lookup_login_user_by_email",
     "mark_all_scoped_notifications_read",
     "mark_scoped_notification_read",
     "reactivate_tenant_user_assignment",
+    "record_auth_login_attempt",
     "resolve_notification_subscription",
+    "revoke_auth_session_by_hash",
+    "rotate_auth_session",
     "set_tenant_user_status",
     "touch_auth_user_last_login",
     "update_tenant_user_profile",
@@ -491,6 +517,294 @@ async def test_runtime_role_cannot_escape_row_level_controls(
         app_engine_privileges,
         "SELECT public.digest('probe', 'sha256')",
     )
+    for table in ("email_code", "login_attempt", "session"):
+        await _assert_insufficient_privilege(
+            app_engine_privileges,
+            f"SELECT * FROM public.{table} LIMIT 1",
+        )
+
+
+async def _delete_auth_probe(
+    support_engine: AsyncEngine,
+    *,
+    email: str,
+) -> None:
+    async with support_engine.begin() as conn:
+        await conn.execute(
+            text("DELETE FROM public.login_attempt WHERE email_lower = :email"),
+            {"email": email},
+        )
+        await conn.execute(
+            text("DELETE FROM public.email_code WHERE email_lower = :email"),
+            {"email": email},
+        )
+        await conn.execute(
+            text("DELETE FROM public.app_user WHERE email_lower = :email"),
+            {"email": email},
+        )
+
+
+async def test_auth_functions_hide_secrets_and_reject_replay(
+    support_engine_privileges: AsyncEngine,
+    app_engine_privileges: AsyncEngine,
+) -> None:
+    suffix = uuid4().hex
+    email = f"auth-boundary-{suffix}@example.invalid"
+    code = "246810"
+    salt = uuid4().hex
+    candidate_hash = hash_code(code, salt)
+    first_refresh_hash = hash_token(f"first-{suffix}")
+    second_refresh_hash = hash_token(f"second-{suffix}")
+    password_hash = hash_password(f"password-{suffix}")
+
+    try:
+        async with support_engine_privileges.begin() as conn:
+            user_id = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO public.app_user "
+                        "(email, full_name, password_hash, status) "
+                        "VALUES (:email, 'Auth boundary', :password_hash, 'active') "
+                        "RETURNING id"
+                    ),
+                    {"email": email, "password_hash": password_hash},
+                )
+            ).scalar_one()
+
+        async with app_engine_privileges.begin() as conn:
+            issue_status = (
+                await conn.execute(
+                    text(
+                        "SELECT public.issue_auth_email_code("
+                        ":email, :candidate_hash, :salt, '127.0.0.1', NULL)"
+                    ),
+                    {
+                        "email": email,
+                        "candidate_hash": candidate_hash,
+                        "salt": salt,
+                    },
+                )
+            ).scalar_one()
+            challenge = (
+                (
+                    await conn.execute(
+                        text("SELECT * FROM public.find_auth_email_code_challenge(:email)"),
+                        {"email": email},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            await conn.execute(
+                text("SELECT set_config('app.user_id', :user_id, true)"),
+                {"user_id": str(user_id)},
+            )
+            current_identity = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT password_hash FROM public.lookup_auth_user_by_id("
+                            ":user_id, NULL)"
+                        ),
+                        {"user_id": user_id},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            login_identity = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT id, password_hash "
+                            "FROM public.lookup_login_user_by_email("
+                            ":email, :code_id, :candidate_hash)"
+                        ),
+                        {
+                            "email": email,
+                            "code_id": challenge["id"],
+                            "candidate_hash": candidate_hash,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            first_session_id = (
+                await conn.execute(
+                    text(
+                        "SELECT public.create_auth_session_from_email_code("
+                        ":code_id, :email, :candidate_hash, :refresh_hash, "
+                        "NULL, '127.0.0.1', pg_catalog.now() + INTERVAL '7 days')"
+                    ),
+                    {
+                        "code_id": challenge["id"],
+                        "email": email,
+                        "candidate_hash": candidate_hash,
+                        "refresh_hash": first_refresh_hash,
+                    },
+                )
+            ).scalar_one()
+            replayed_session_id = (
+                await conn.execute(
+                    text(
+                        "SELECT public.create_auth_session_from_email_code("
+                        ":code_id, :email, :candidate_hash, :refresh_hash, "
+                        "NULL, '127.0.0.1', pg_catalog.now() + INTERVAL '7 days')"
+                    ),
+                    {
+                        "code_id": challenge["id"],
+                        "email": email,
+                        "candidate_hash": candidate_hash,
+                        "refresh_hash": second_refresh_hash,
+                    },
+                )
+            ).scalar_one()
+            rotated = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT * FROM public.rotate_auth_session("
+                            ":old_hash, :new_hash, NULL, '127.0.0.1', "
+                            "pg_catalog.now() + INTERVAL '7 days')"
+                        ),
+                        {
+                            "old_hash": first_refresh_hash,
+                            "new_hash": second_refresh_hash,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            replayed_rotation = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT * FROM public.rotate_auth_session("
+                            ":old_hash, :new_hash, NULL, '127.0.0.1', "
+                            "pg_catalog.now() + INTERVAL '7 days')"
+                        ),
+                        {
+                            "old_hash": first_refresh_hash,
+                            "new_hash": hash_token(f"third-{suffix}"),
+                        },
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            revoked_user_id = (
+                await conn.execute(
+                    text("SELECT public.revoke_auth_session_by_hash(" ":token_hash, 'logout')"),
+                    {"token_hash": second_refresh_hash},
+                )
+            ).scalar_one()
+            replayed_revoke = (
+                await conn.execute(
+                    text("SELECT public.revoke_auth_session_by_hash(" ":token_hash, 'logout')"),
+                    {"token_hash": second_refresh_hash},
+                )
+            ).scalar_one()
+
+        assert issue_status == "created"
+        assert challenge["code_salt"] == salt
+        assert current_identity["password_hash"] is None
+        assert login_identity == {"id": user_id, "password_hash": password_hash}
+        assert first_session_id is not None
+        assert replayed_session_id is None
+        assert rotated["user_id"] == user_id
+        assert replayed_rotation is None
+        assert revoked_user_id == user_id
+        assert replayed_revoke is None
+    finally:
+        await _delete_auth_probe(support_engine_privileges, email=email)
+
+
+async def test_auth_code_and_refresh_are_single_use_under_concurrency(
+    support_engine_privileges: AsyncEngine,
+    app_engine_privileges: AsyncEngine,
+) -> None:
+    suffix = uuid4().hex
+    email = f"auth-race-{suffix}@example.invalid"
+    salt = uuid4().hex
+    candidate_hash = hash_code("135790", salt)
+    refresh_hashes = [hash_token(f"login-{suffix}-{index}") for index in range(2)]
+
+    async def create_session(refresh_hash: str) -> str | None:
+        async with app_engine_privileges.begin() as conn:
+            value = (
+                await conn.execute(
+                    text(
+                        "SELECT public.create_auth_session_from_email_code("
+                        ":code_id, :email, :candidate_hash, :refresh_hash, "
+                        "NULL, '127.0.0.1', pg_catalog.now() + INTERVAL '7 days')"
+                    ),
+                    {
+                        "code_id": code_id,
+                        "email": email,
+                        "candidate_hash": candidate_hash,
+                        "refresh_hash": refresh_hash,
+                    },
+                )
+            ).scalar_one()
+            return str(value) if value is not None else None
+
+    async def rotate_session(old_hash: str, new_hash: str) -> str | None:
+        async with app_engine_privileges.begin() as conn:
+            value = (
+                await conn.execute(
+                    text(
+                        "SELECT id FROM public.rotate_auth_session("
+                        ":old_hash, :new_hash, NULL, '127.0.0.1', "
+                        "pg_catalog.now() + INTERVAL '7 days')"
+                    ),
+                    {"old_hash": old_hash, "new_hash": new_hash},
+                )
+            ).scalar_one_or_none()
+            return str(value) if value is not None else None
+
+    try:
+        async with support_engine_privileges.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO public.app_user (email, full_name, status) "
+                    "VALUES (:email, 'Auth race', 'active')"
+                ),
+                {"email": email},
+            )
+
+        async with app_engine_privileges.begin() as conn:
+            await conn.execute(
+                text(
+                    "SELECT public.issue_auth_email_code("
+                    ":email, :candidate_hash, :salt, '127.0.0.1', NULL)"
+                ),
+                {
+                    "email": email,
+                    "candidate_hash": candidate_hash,
+                    "salt": salt,
+                },
+            )
+            code_id = (
+                await conn.execute(
+                    text("SELECT id FROM public.find_auth_email_code_challenge(:email)"),
+                    {"email": email},
+                )
+            ).scalar_one()
+
+        created = await asyncio.gather(*(create_session(value) for value in refresh_hashes))
+        assert sum(value is not None for value in created) == 1
+        winning_index = next(index for index, value in enumerate(created) if value is not None)
+        winning_hash = refresh_hashes[winning_index]
+
+        rotated_hashes = [hash_token(f"rotate-{suffix}-{index}") for index in range(2)]
+        rotated = await asyncio.gather(
+            *(rotate_session(winning_hash, value) for value in rotated_hashes)
+        )
+        assert sum(value is not None for value in rotated) == 1
+    finally:
+        await _delete_auth_probe(support_engine_privileges, email=email)
 
 
 async def test_runtime_role_can_use_required_extension_functions(

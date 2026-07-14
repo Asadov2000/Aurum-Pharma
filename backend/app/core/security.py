@@ -2,13 +2,14 @@
 
 bcrypt — for user passwords (slow on purpose, costs ~250ms — protects against
 brute force, but too slow for short-lived codes).
-sha256 — for email codes (with per-code salt) and refresh tokens (no salt;
-the token itself is already 256 bits of entropy).
+HMAC-SHA256 — for email codes (server secret + per-code salt). Plain sha256 —
+for refresh tokens (no salt; the token itself is already 256 bits of entropy).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 from datetime import timedelta
 from typing import Any
@@ -55,8 +56,16 @@ def generate_code_salt() -> str:
 
 
 def hash_code(code: str, salt: str) -> str:
-    """sha256(code + salt) — hex digest."""
-    return hashlib.sha256(f"{code}{salt}".encode()).hexdigest()
+    """Return a keyed verifier for a short-lived numeric code.
+
+    Six decimal digits can be brute-forced after a database leak even with a
+    per-row salt. The server secret keeps stored verifiers useless without the
+    application configuration.
+    """
+    root_key = settings.JWT_SECRET.encode()
+    code_key = hmac.new(root_key, b"aurum-email-code-key:v1", hashlib.sha256).digest()
+    message = f"{code}:{salt}".encode()
+    return hmac.new(code_key, message, hashlib.sha256).hexdigest()
 
 
 def generate_refresh_token() -> str:

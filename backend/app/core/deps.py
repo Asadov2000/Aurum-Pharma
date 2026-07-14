@@ -21,7 +21,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import AppSessionLocal, SupportSessionLocal
-from app.core.errors import AuthenticationError, PermissionDeniedError
+from app.core.errors import (
+    AuthenticationError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from app.core.redis import redis_client
 from app.core.security import decode_access_token
 
@@ -56,6 +61,52 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
                     text("SELECT set_config('app.support_session', 'true', true)"),
                 )
             yield session
+
+
+async def get_auth_db(request: Request) -> AsyncIterator[AsyncSession]:
+    """Commit intentional auth-state changes even when login is rejected.
+
+    Failed-code and lockout rows are part of the security ledger. The regular
+    request transaction correctly rolls back on domain errors, so auth routes
+    use this narrower dependency and commit only expected authentication
+    outcomes. Unexpected failures still roll back.
+    """
+    tenant_id = getattr(request.state, "tenant_id", None)
+    user_id = getattr(request.state, "user_id", None)
+    is_support = bool(getattr(request.state, "is_support_session", False))
+    use_support_pool = bool(getattr(request.state, "use_support_pool", False))
+
+    sessionmaker = SupportSessionLocal if use_support_pool else AppSessionLocal
+
+    async with sessionmaker() as session:
+        transaction = await session.begin()
+        try:
+            if tenant_id is not None:
+                await session.execute(
+                    text("SELECT set_config('app.tenant_id', :v, true)"),
+                    {"v": str(tenant_id)},
+                )
+            if user_id is not None:
+                await session.execute(
+                    text("SELECT set_config('app.user_id', :v, true)"),
+                    {"v": str(user_id)},
+                )
+            if is_support:
+                await session.execute(
+                    text("SELECT set_config('app.support_session', 'true', true)"),
+                )
+            yield session
+        except (AuthenticationError, RateLimitError, NotFoundError):
+            if transaction.is_active:
+                await transaction.commit()
+            raise
+        except BaseException:
+            if transaction.is_active:
+                await transaction.rollback()
+            raise
+        else:
+            if transaction.is_active:
+                await transaction.commit()
 
 
 async def get_redis() -> Redis:

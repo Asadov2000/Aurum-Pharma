@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.deps import CurrentUser, current_user, get_db, get_redis
+from app.core.deps import CurrentUser, current_user, get_auth_db, get_db, get_redis
 from app.core.errors import AuthenticationError
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
@@ -84,6 +84,13 @@ def _assert_cookie_refresh_origin(request: Request) -> None:
         raise AuthenticationError("Refresh session origin is not allowed")
 
 
+async def _auth_state_service(
+    db: Annotated[AsyncSession, Depends(get_auth_db, scope="function")],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> AuthService:
+    return AuthService(AuthRepository(db), redis=redis)
+
+
 async def _service(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
     redis: Annotated[Redis, Depends(get_redis)],
@@ -99,7 +106,7 @@ async def _service(
 async def request_login_code(
     payload: LoginCodeRequest,
     request: Request,
-    service: Annotated[AuthService, Depends(_service)],
+    service: Annotated[AuthService, Depends(_auth_state_service)],
 ) -> LoginCodeResponse:
     code = await service.request_login_code(
         email=str(payload.email),
@@ -115,7 +122,7 @@ async def verify_login_code(
     payload: LoginCodeVerify,
     request: Request,
     response: Response,
-    service: Annotated[AuthService, Depends(_service)],
+    service: Annotated[AuthService, Depends(_auth_state_service)],
 ) -> TokenResponse:
     access, refresh, expires = await service.verify_login_code(
         email=str(payload.email),
@@ -132,7 +139,7 @@ async def verify_login_code(
 async def refresh_tokens(
     request: Request,
     response: Response,
-    service: Annotated[AuthService, Depends(_service)],
+    service: Annotated[AuthService, Depends(_auth_state_service)],
     payload: Annotated[RefreshRequest | None, Body()] = None,
 ) -> TokenResponse:
     using_cookie = payload is None or not payload.refresh_token
@@ -155,7 +162,7 @@ async def refresh_tokens(
 async def logout(
     request: Request,
     response: Response,
-    service: Annotated[AuthService, Depends(_service)],
+    service: Annotated[AuthService, Depends(_auth_state_service)],
     payload: Annotated[LogoutRequest | None, Body()] = None,
 ) -> LogoutResponse:
     try:

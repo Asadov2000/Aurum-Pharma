@@ -33,7 +33,7 @@ from app.core.security import (
     verify_password,
 )
 from app.core.time import utc_now
-from app.domains.auth.repository import AuthRepository
+from app.domains.auth.repository import AuthRepository, EmailCodeIssueStatus
 
 if TYPE_CHECKING:
     from app.domains.auth.repository import AuthUserRecord
@@ -42,12 +42,6 @@ logger = structlog.get_logger("auth.service")
 settings = get_settings()
 
 
-# Rate-limit constants — pulled out so tests can monkeypatch if needed.
-CODE_TTL = timedelta(minutes=10)
-CODE_RATE_PER_MINUTE = 1
-CODE_RATE_PER_HOUR = 10
-LOGIN_FAIL_THRESHOLD = 5
-LOGIN_FAIL_WINDOW = timedelta(minutes=15)
 LOGIN_BLOCK_DURATION = timedelta(minutes=15)
 
 
@@ -69,54 +63,21 @@ class AuthService:
     ) -> str:
         """Returns the freshly minted plaintext code. The router decides
         whether to leak it back to the caller (dev only) or keep it secret."""
-        email_lower = email.lower()
-        now = utc_now()
+        email_lower = email.strip().lower()
 
-        # Rate-limit: 1 / minute and 10 / hour per email.
-        count_last_minute = await self.repo.count_codes_since(
-            email_lower, now - timedelta(minutes=1)
-        )
-        if count_last_minute >= CODE_RATE_PER_MINUTE:
-            await self.repo.insert_login_attempt(
-                email_lower=email_lower,
-                user_id=None,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                outcome="blocked",
-                metadata_json={"reason": "code_rate_limit_minute"},
-            )
-            raise RateLimitError("Too many code requests. Try again in a minute.")
-
-        count_last_hour = await self.repo.count_codes_since(email_lower, now - timedelta(hours=1))
-        if count_last_hour >= CODE_RATE_PER_HOUR:
-            await self.repo.insert_login_attempt(
-                email_lower=email_lower,
-                user_id=None,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                outcome="blocked",
-                metadata_json={"reason": "code_rate_limit_hour"},
-            )
-            raise RateLimitError("Too many code requests. Try again in an hour.")
-
-        # Generate + store hashed.
         code = generate_email_code()
         salt = generate_code_salt()
-        await self.repo.insert_email_code(
+        issue_status = await self.repo.issue_login_email_code(
             email_lower=email_lower,
             code_hash=hash_code(code, salt),
             code_salt=salt,
-            purpose="login",
-            ip_address=ip_address,
-            expires_at=now + CODE_TTL,
-        )
-        await self.repo.insert_login_attempt(
-            email_lower=email_lower,
-            user_id=None,
             ip_address=ip_address,
             user_agent=user_agent,
-            outcome="code_requested",
         )
+        if issue_status is EmailCodeIssueStatus.RATE_LIMIT_MINUTE:
+            raise RateLimitError("Too many code requests. Try again in a minute.")
+        if issue_status is EmailCodeIssueStatus.RATE_LIMIT_HOUR:
+            raise RateLimitError("Too many code requests. Try again in an hour.")
 
         # Anti-enumeration: dispatch the email even when the user does not
         # exist (the worker will silently drop it; clients see no difference).
@@ -143,43 +104,16 @@ class AuthService:
         user_agent: str | None = None,
     ) -> tuple[str, str, int]:
         """Returns (access_token, refresh_token, access_expires_in_seconds)."""
-        email_lower = email.lower()
+        email_lower = email.strip().lower()
         now = utc_now()
 
-        # Hard block: if a recent 'blocked' attempt is on file, refuse outright.
-        if await self.repo.is_currently_blocked(
-            email_lower=email_lower,
-            ip_address=ip_address,
-            block_window=LOGIN_BLOCK_DURATION,
-        ):
+        if await self.repo.enforce_login_guard(email_lower=email_lower, ip_address=ip_address):
             raise RateLimitError(
                 "Account temporarily locked. Try again later.",
                 details={"retry_after_minutes": int(LOGIN_BLOCK_DURATION.total_seconds() // 60)},
             )
 
-        # Soft threshold: 5 failures in 15 min → record a 'blocked' attempt
-        # (which sets up the hard block above for the next 15 min).
-        recent_failures = await self.repo.count_recent_failures(
-            email_lower=email_lower,
-            ip_address=ip_address,
-            within=LOGIN_FAIL_WINDOW,
-        )
-        if recent_failures >= LOGIN_FAIL_THRESHOLD:
-            await self.repo.insert_login_attempt(
-                email_lower=email_lower,
-                user_id=None,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                outcome="blocked",
-                metadata_json={"reason": "too_many_failures"},
-            )
-            raise RateLimitError(
-                "Too many failed attempts. Locked for 15 minutes.",
-                details={"retry_after_minutes": 15},
-            )
-
-        # Locate the code.
-        ec = await self.repo.find_active_email_code(email_lower, purpose="login")
+        ec = await self.repo.find_active_email_code(email_lower)
         if ec is None:
             await self.repo.insert_login_attempt(
                 email_lower=email_lower,
@@ -190,7 +124,12 @@ class AuthService:
             )
             raise AuthenticationError("Invalid or expired code")
 
-        if ec.code_hash != hash_code(code, ec.code_salt):
+        candidate_hash = hash_code(code, ec.code_salt)
+        if not await self.repo.email_code_matches(
+            code_id=ec.id,
+            email_lower=email_lower,
+            candidate_hash=candidate_hash,
+        ):
             await self.repo.insert_login_attempt(
                 email_lower=email_lower,
                 user_id=None,
@@ -200,20 +139,25 @@ class AuthService:
             )
             raise AuthenticationError("Invalid or expired code")
 
-        # Code is valid — does the user actually exist?
-        user = await self.repo.get_user_by_email(email_lower)
+        user = await self.repo.get_login_user_by_email(
+            email=email_lower,
+            code_id=ec.id,
+            candidate_hash=candidate_hash,
+        )
         if user is None or user.status not in ("invited", "active"):
-            # Burn the code so the same secret cannot be retried.
-            await self.repo.mark_email_code_used(ec.id, now)
+            await self.repo.consume_email_code(
+                code_id=ec.id,
+                email_lower=email_lower,
+                candidate_hash=candidate_hash,
+            )
             await self.repo.insert_login_attempt(
                 email_lower=email_lower,
                 user_id=None,
                 ip_address=ip_address,
                 user_agent=user_agent,
                 outcome="code_failed",
-                metadata_json={"reason": "user_missing_or_inactive"},
+                reason="user_missing_or_inactive",
             )
-            # The schema says only support creates users in phase 1.
             raise NotFoundError("User does not exist")
 
         # The database lookup resolves assignment.password_required without a
@@ -233,14 +177,26 @@ class AuthService:
                 )
                 raise AuthenticationError("Invalid credentials")
 
-        # All checks passed — burn the code, mint tokens, log success.
-        await self.repo.mark_email_code_used(ec.id, now)
-        access_token, refresh_token, expires_in = await self._issue_tokens(
-            user=user,
-            ip_address=ip_address,
+        refresh_token = generate_refresh_token()
+        session_id = await self.repo.create_session_from_email_code(
+            code_id=ec.id,
+            email_lower=email_lower,
+            candidate_hash=candidate_hash,
+            refresh_token_hash=hash_token(refresh_token),
             user_agent=user_agent,
+            ip_address=ip_address,
+            expires_at=now + timedelta(days=settings.REFRESH_TOKEN_DAYS),
         )
-        await self.repo.touch_last_login(user.id, now)
+        if session_id is None:
+            raise AuthenticationError("Invalid or expired code")
+
+        access_token = create_access_token(
+            user.id,
+            tenant_id=user.home_tenant_id,
+            is_developer=user.is_developer,
+            is_administrator=user.is_administrator,
+        )
+        await self.repo.touch_last_login(user.id, session_id)
         await self.repo.insert_login_attempt(
             email_lower=email_lower,
             user_id=user.id,
@@ -249,7 +205,7 @@ class AuthService:
             outcome="success",
         )
         logger.info("login_success", user_id=str(user.id))
-        return access_token, refresh_token, expires_in
+        return access_token, refresh_token, settings.ACCESS_TOKEN_MINUTES * 60
 
     # -------------------------------------------------------------------------
     # 3. Refresh
@@ -262,7 +218,6 @@ class AuthService:
         ip_address: str,
         user_agent: str | None = None,
     ) -> tuple[str, str, int]:
-        now = utc_now()
         token_hash = hash_token(refresh_token)
         s = await self.repo.get_active_session_by_hash(token_hash)
         if s is None:
@@ -270,40 +225,46 @@ class AuthService:
 
         user = await self.repo.get_user_by_id(s.user_id, session_id=s.id)
         if user is None or user.status not in ("invited", "active"):
-            await self.repo.revoke_session(s.id, reason="user_inactive", when=now)
+            await self.repo.revoke_session_by_hash(token_hash, reason="user_inactive")
             raise AuthenticationError("Invalid or expired refresh token")
 
-        # Rotation: revoke the presented session, issue a fresh one.
-        await self.repo.revoke_session(s.id, reason="rotated", when=now)
-        access_token, new_refresh_token, expires_in = await self._issue_tokens(
-            user=user,
-            ip_address=ip_address,
+        new_refresh_token = generate_refresh_token()
+        rotated = await self.repo.rotate_session(
+            old_token_hash=token_hash,
+            new_token_hash=hash_token(new_refresh_token),
             user_agent=user_agent,
+            ip_address=ip_address,
+            expires_at=utc_now() + timedelta(days=settings.REFRESH_TOKEN_DAYS),
+        )
+        if rotated is None or rotated.user_id != user.id:
+            raise AuthenticationError("Invalid or expired refresh token")
+
+        access_token = create_access_token(
+            user.id,
+            tenant_id=user.home_tenant_id,
+            is_developer=user.is_developer,
+            is_administrator=user.is_administrator,
         )
         logger.info("refresh_rotated", user_id=str(user.id), old_session_id=str(s.id))
-        return access_token, new_refresh_token, expires_in
+        return access_token, new_refresh_token, settings.ACCESS_TOKEN_MINUTES * 60
 
     # -------------------------------------------------------------------------
     # 4. Logout (idempotent)
     # -------------------------------------------------------------------------
 
     async def logout(self, refresh_token: str) -> None:
-        now = utc_now()
         token_hash = hash_token(refresh_token)
-        # Locate the session BEFORE revoking it so we know whose perms cache
-        # to drop.
-        s = await self.repo.get_active_session_by_hash(token_hash)
-        revoked = await self.repo.revoke_session_by_hash(token_hash, reason="logout", when=now)
-        if revoked and s is not None and self.redis is not None:
+        user_id = await self.repo.revoke_session_by_hash(token_hash, reason="logout")
+        if user_id is not None and self.redis is not None:
             # Local import — RolesService pulls from roles domain, which
             # imports auth at module level. Lazy keeps the load DAG acyclic.
             from app.domains.roles.repository import RolesRepository
             from app.domains.roles.service import RolesService
 
             roles_service = RolesService(RolesRepository(self.repo.session), redis=self.redis)
-            await roles_service.invalidate_user_perms_all_tenants(s.user_id)
-        if revoked:
-            logger.info("logout", token_hash_prefix=token_hash[:8])
+            await roles_service.invalidate_user_perms_all_tenants(user_id)
+        if user_id is not None:
+            logger.info("logout", user_id=str(user_id))
 
     # -------------------------------------------------------------------------
     # 5. /me
@@ -314,35 +275,3 @@ class AuthService:
         if user is None:
             raise NotFoundError("User not found")
         return user
-
-    # -------------------------------------------------------------------------
-    # internal
-    # -------------------------------------------------------------------------
-
-    async def _issue_tokens(
-        self,
-        *,
-        user: AuthUserRecord,
-        ip_address: str | None,
-        user_agent: str | None,
-    ) -> tuple[str, str, int]:
-        now = utc_now()
-        access_token = create_access_token(
-            user.id,
-            tenant_id=user.home_tenant_id,
-            is_developer=user.is_developer,
-            is_administrator=user.is_administrator,
-        )
-        refresh_token = generate_refresh_token()
-        await self.repo.insert_session(
-            user_id=user.id,
-            refresh_token_hash=hash_token(refresh_token),
-            user_agent=user_agent,
-            ip_address=ip_address,
-            expires_at=now + timedelta(days=settings.REFRESH_TOKEN_DAYS),
-        )
-        return (
-            access_token,
-            refresh_token,
-            settings.ACCESS_TOKEN_MINUTES * 60,
-        )

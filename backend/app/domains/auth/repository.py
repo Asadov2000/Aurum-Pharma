@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, cast
+from datetime import datetime
+from enum import StrEnum
+from typing import cast
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, text, update
+from sqlalchemy import delete, text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.time import utc_now
-from app.domains.auth.models import EmailCode, LoginAttempt, Session
+from app.domains.auth.models import EmailCode, Session
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,25 @@ class AuthUserRecord:
     status: str
     last_login_at: datetime | None
     password_required: bool
+
+
+@dataclass(frozen=True)
+class EmailCodeChallenge:
+    id: UUID
+    code_salt: str
+
+
+@dataclass(frozen=True)
+class AuthSessionRecord:
+    id: UUID
+    user_id: UUID
+    expires_at: datetime
+
+
+class EmailCodeIssueStatus(StrEnum):
+    CREATED = "created"
+    RATE_LIMIT_MINUTE = "rate_limit_minute"
+    RATE_LIMIT_HOUR = "rate_limit_hour"
 
 
 def _auth_user_from_row(row: RowMapping) -> AuthUserRecord:
@@ -44,6 +63,14 @@ def _auth_user_from_row(row: RowMapping) -> AuthUserRecord:
     )
 
 
+def _auth_session_from_row(row: RowMapping) -> AuthSessionRecord:
+    return AuthSessionRecord(
+        id=cast(UUID, row["id"]),
+        user_id=cast(UUID, row["user_id"]),
+        expires_at=cast(datetime, row["expires_at"]),
+    )
+
+
 class AuthRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -52,10 +79,23 @@ class AuthRepository:
     # app_user
     # -------------------------------------------------------------------------
 
-    async def get_user_by_email(self, email: str) -> AuthUserRecord | None:
+    async def get_login_user_by_email(
+        self,
+        *,
+        email: str,
+        code_id: UUID,
+        candidate_hash: str,
+    ) -> AuthUserRecord | None:
         result = await self.session.execute(
-            text("SELECT * FROM public.lookup_auth_user_by_email(:email)"),
-            {"email": email},
+            text(
+                "SELECT * FROM public.lookup_login_user_by_email("
+                ":email, :code_id, :candidate_hash)"
+            ),
+            {
+                "email": email,
+                "code_id": code_id,
+                "candidate_hash": candidate_hash,
+            },
         )
         row = result.mappings().one_or_none()
         return _auth_user_from_row(row) if row is not None else None
@@ -64,93 +104,98 @@ class AuthRepository:
         self, user_id: UUID, *, session_id: UUID | None = None
     ) -> AuthUserRecord | None:
         result = await self.session.execute(
-            text("SELECT * FROM public.lookup_auth_user_by_id(" ":user_id, :session_id)"),
+            text("SELECT * FROM public.lookup_auth_user_by_id(:user_id, :session_id)"),
             {"user_id": user_id, "session_id": session_id},
         )
         row = result.mappings().one_or_none()
         return _auth_user_from_row(row) if row is not None else None
 
-    async def touch_last_login(self, user_id: UUID, when: datetime) -> None:
+    async def touch_last_login(self, user_id: UUID, session_id: UUID) -> None:
         await self.session.execute(
-            text("SELECT public.touch_auth_user_last_login(:user_id, :when)"),
-            {"user_id": user_id, "when": when},
+            text("SELECT public.touch_auth_user_last_login(:user_id, :session_id)"),
+            {"user_id": user_id, "session_id": session_id},
         )
 
     # -------------------------------------------------------------------------
     # email_code
     # -------------------------------------------------------------------------
 
-    async def insert_email_code(
+    async def issue_login_email_code(
         self,
         *,
         email_lower: str,
         code_hash: str,
         code_salt: str,
-        purpose: str,
-        ip_address: str | None,
-        expires_at: datetime,
-    ) -> EmailCode:
-        ec = EmailCode(
-            email_lower=email_lower,
-            code_hash=code_hash,
-            code_salt=code_salt,
-            purpose=purpose,
-            ip_address=ip_address,
-            expires_at=expires_at,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> EmailCodeIssueStatus:
+        result = await self.session.execute(
+            text(
+                "SELECT public.issue_auth_email_code("
+                ":email, :code_hash, :code_salt, :ip_address, :user_agent)"
+            ),
+            {
+                "email": email_lower,
+                "code_hash": code_hash,
+                "code_salt": code_salt,
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+            },
         )
-        self.session.add(ec)
-        await self.session.flush()
-        return ec
+        return EmailCodeIssueStatus(result.scalar_one())
 
-    async def find_active_email_code(
-        self, email_lower: str, purpose: str = "login"
-    ) -> EmailCode | None:
-        """Most-recently issued unused, unexpired code for this email+purpose."""
-        now = utc_now()
-        stmt = (
-            select(EmailCode)
-            .where(
-                and_(
-                    EmailCode.email_lower == email_lower,
-                    EmailCode.purpose == purpose,
-                    EmailCode.used_at.is_(None),
-                    EmailCode.expires_at > now,
-                )
-            )
-            .order_by(EmailCode.created_at.desc())
-            .limit(1)
+    async def find_active_email_code(self, email_lower: str) -> EmailCodeChallenge | None:
+        result = await self.session.execute(
+            text("SELECT * FROM public.find_auth_email_code_challenge(:email)"),
+            {"email": email_lower},
         )
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return EmailCodeChallenge(
+            id=cast(UUID, row["id"]),
+            code_salt=cast(str, row["code_salt"]),
+        )
 
-    async def mark_email_code_used(self, code_id: UUID, when: datetime) -> None:
-        await self.session.execute(
-            update(EmailCode).where(EmailCode.id == code_id).values(used_at=when)
+    async def email_code_matches(
+        self,
+        *,
+        code_id: UUID,
+        email_lower: str,
+        candidate_hash: str,
+    ) -> bool:
+        result = await self.session.execute(
+            text("SELECT public.auth_email_code_matches(" ":code_id, :email, :candidate_hash)"),
+            {
+                "code_id": code_id,
+                "email": email_lower,
+                "candidate_hash": candidate_hash,
+            },
         )
+        return bool(result.scalar_one())
+
+    async def consume_email_code(
+        self,
+        *,
+        code_id: UUID,
+        email_lower: str,
+        candidate_hash: str,
+    ) -> bool:
+        result = await self.session.execute(
+            text("SELECT public.consume_auth_email_code(" ":code_id, :email, :candidate_hash)"),
+            {
+                "code_id": code_id,
+                "email": email_lower,
+                "candidate_hash": candidate_hash,
+            },
+        )
+        return bool(result.scalar_one())
 
     async def delete_expired_email_codes(self, older_than: datetime) -> int:
-        from sqlalchemy import delete
-
         result = await self.session.execute(
             delete(EmailCode).where(EmailCode.expires_at < older_than)
         )
-        # DELETE/UPDATE execute returns a CursorResult at runtime; mypy infers
-        # the parent Result type, hence the attr-defined ignore.
         return result.rowcount or 0  # type: ignore[attr-defined]
-
-    async def count_codes_since(self, email_lower: str, since: datetime) -> int:
-        stmt = (
-            select(func.count())
-            .select_from(EmailCode)
-            .where(
-                and_(
-                    EmailCode.email_lower == email_lower,
-                    EmailCode.created_at >= since,
-                )
-            )
-        )
-        result = await self.session.execute(stmt)
-        return int(result.scalar_one())
 
     # -------------------------------------------------------------------------
     # login_attempt
@@ -159,140 +204,108 @@ class AuthRepository:
     async def insert_login_attempt(
         self,
         *,
-        email_lower: str | None,
+        email_lower: str,
         user_id: UUID | None,
         ip_address: str,
         user_agent: str | None,
         outcome: str,
-        metadata_json: dict[str, Any] | None = None,
+        reason: str | None = None,
     ) -> None:
-        attempt = LoginAttempt(
-            email_lower=email_lower,
-            user_id=user_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            outcome=outcome,
-            metadata_json=metadata_json,
+        await self.session.execute(
+            text(
+                "SELECT public.record_auth_login_attempt("
+                ":email, :user_id, :ip_address, :user_agent, :outcome, :reason)"
+            ),
+            {
+                "email": email_lower,
+                "user_id": user_id,
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+                "outcome": outcome,
+                "reason": reason,
+            },
         )
-        self.session.add(attempt)
-        await self.session.flush()
 
-    async def count_recent_failures(
-        self,
-        *,
-        email_lower: str,
-        ip_address: str,
-        within: timedelta,
-        failure_outcomes: tuple[str, ...] = (
-            "code_failed",
-            "code_expired",
-            "password_failed",
-            "totp_failed",
-        ),
-    ) -> int:
-        since = utc_now() - within
-        stmt = (
-            select(func.count())
-            .select_from(LoginAttempt)
-            .where(
-                and_(
-                    LoginAttempt.email_lower == email_lower,
-                    LoginAttempt.ip_address == ip_address,
-                    LoginAttempt.outcome.in_(failure_outcomes),
-                    LoginAttempt.created_at >= since,
-                )
-            )
+    async def enforce_login_guard(self, *, email_lower: str, ip_address: str) -> bool:
+        result = await self.session.execute(
+            text("SELECT public.enforce_auth_login_guard(:email, :ip_address)"),
+            {"email": email_lower, "ip_address": ip_address},
         )
-        result = await self.session.execute(stmt)
-        return int(result.scalar_one())
-
-    async def is_currently_blocked(
-        self,
-        *,
-        email_lower: str,
-        ip_address: str,
-        block_window: timedelta,
-    ) -> bool:
-        """Returns True if a 'blocked' attempt was recorded within `block_window`."""
-        since = utc_now() - block_window
-        stmt = (
-            select(func.count())
-            .select_from(LoginAttempt)
-            .where(
-                and_(
-                    LoginAttempt.email_lower == email_lower,
-                    LoginAttempt.ip_address == ip_address,
-                    LoginAttempt.outcome == "blocked",
-                    LoginAttempt.created_at >= since,
-                )
-            )
-        )
-        result = await self.session.execute(stmt)
-        return int(result.scalar_one()) > 0
+        return bool(result.scalar_one())
 
     # -------------------------------------------------------------------------
     # session
     # -------------------------------------------------------------------------
 
-    async def insert_session(
+    async def create_session_from_email_code(
         self,
         *,
-        user_id: UUID,
+        code_id: UUID,
+        email_lower: str,
+        candidate_hash: str,
         refresh_token_hash: str,
         user_agent: str | None,
         ip_address: str | None,
         expires_at: datetime,
-    ) -> Session:
-        s = Session(
-            user_id=user_id,
-            refresh_token_hash=refresh_token_hash,
-            user_agent=user_agent,
-            ip_address=ip_address,
-            expires_at=expires_at,
-        )
-        self.session.add(s)
-        await self.session.flush()
-        return s
-
-    async def get_active_session_by_hash(self, token_hash: str) -> Session | None:
-        now = utc_now()
-        stmt = select(Session).where(
-            and_(
-                Session.refresh_token_hash == token_hash,
-                Session.revoked_at.is_(None),
-                Session.expires_at > now,
-            )
-        )
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def revoke_session(self, session_id: UUID, *, reason: str, when: datetime) -> None:
-        await self.session.execute(
-            update(Session)
-            .where(and_(Session.id == session_id, Session.revoked_at.is_(None)))
-            .values(revoked_at=when, revoked_reason=reason)
-        )
-
-    async def revoke_session_by_hash(self, token_hash: str, *, reason: str, when: datetime) -> int:
+    ) -> UUID | None:
         result = await self.session.execute(
-            update(Session)
-            .where(
-                and_(
-                    Session.refresh_token_hash == token_hash,
-                    Session.revoked_at.is_(None),
-                )
-            )
-            .values(revoked_at=when, revoked_reason=reason)
+            text(
+                "SELECT public.create_auth_session_from_email_code("
+                ":code_id, :email, :candidate_hash, :refresh_token_hash, "
+                ":user_agent, :ip_address, :expires_at)"
+            ),
+            {
+                "code_id": code_id,
+                "email": email_lower,
+                "candidate_hash": candidate_hash,
+                "refresh_token_hash": refresh_token_hash,
+                "user_agent": user_agent,
+                "ip_address": ip_address,
+                "expires_at": expires_at,
+            },
         )
-        return result.rowcount or 0  # type: ignore[attr-defined]
+        return cast(UUID | None, result.scalar_one())
 
-    async def touch_session_last_used(self, session_id: UUID, when: datetime) -> None:
-        await self.session.execute(
-            update(Session).where(Session.id == session_id).values(last_used_at=when)
+    async def get_active_session_by_hash(self, token_hash: str) -> AuthSessionRecord | None:
+        result = await self.session.execute(
+            text("SELECT * FROM public.lookup_auth_session_by_hash(:token_hash)"),
+            {"token_hash": token_hash},
         )
+        row = result.mappings().one_or_none()
+        return _auth_session_from_row(row) if row is not None else None
+
+    async def rotate_session(
+        self,
+        *,
+        old_token_hash: str,
+        new_token_hash: str,
+        user_agent: str | None,
+        ip_address: str | None,
+        expires_at: datetime,
+    ) -> AuthSessionRecord | None:
+        result = await self.session.execute(
+            text(
+                "SELECT * FROM public.rotate_auth_session("
+                ":old_token_hash, :new_token_hash, :user_agent, :ip_address, :expires_at)"
+            ),
+            {
+                "old_token_hash": old_token_hash,
+                "new_token_hash": new_token_hash,
+                "user_agent": user_agent,
+                "ip_address": ip_address,
+                "expires_at": expires_at,
+            },
+        )
+        row = result.mappings().one_or_none()
+        return _auth_session_from_row(row) if row is not None else None
+
+    async def revoke_session_by_hash(self, token_hash: str, *, reason: str) -> UUID | None:
+        result = await self.session.execute(
+            text("SELECT public.revoke_auth_session_by_hash(:token_hash, :reason)"),
+            {"token_hash": token_hash, "reason": reason},
+        )
+        return cast(UUID | None, result.scalar_one())
 
     async def delete_expired_sessions(self, older_than: datetime) -> int:
-        from sqlalchemy import delete
-
         result = await self.session.execute(delete(Session).where(Session.expires_at < older_than))
         return result.rowcount or 0  # type: ignore[attr-defined]

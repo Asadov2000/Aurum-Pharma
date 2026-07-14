@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.errors import (
     AuthenticationError,
@@ -47,9 +49,8 @@ async def _seed_code(
     from app.core.security import generate_code_salt, hash_code
     from app.core.time import utc_now
 
-    repo = AuthRepository(db_session)
     salt = generate_code_salt()
-    ec = await repo.insert_email_code(
+    ec = EmailCode(
         email_lower=email.lower(),
         code_hash=hash_code(code, salt),
         code_salt=salt,
@@ -57,6 +58,8 @@ async def _seed_code(
         ip_address="127.0.0.1",
         expires_at=utc_now() + timedelta(minutes=10),
     )
+    db_session.add(ec)
+    await db_session.flush()
     return ec
 
 
@@ -254,6 +257,62 @@ async def test_login_code_endpoint_hides_code_in_production(
         body = response.json()
         assert body["status"] == "ok"
         assert body["dev_code"] is None, f"dev_code leaked in {env}"
+
+
+async def test_failed_http_logins_persist_and_trigger_lockout(
+    client: AsyncClient,
+    db_engine: AsyncEngine,
+) -> None:
+    """Exercise the real auth DB dependency rather than the support override."""
+    from app.core.db import app_engine
+
+    email = f"http-lockout-{uuid4().hex}@aurum.tj"
+    await app_engine.dispose()
+    try:
+        issued = await client.post("/api/v1/auth/login/code", json={"email": email})
+        assert issued.status_code == 202
+        dev_code = issued.json()["dev_code"]
+        wrong_code = "000000" if dev_code != "000000" else "999999"
+
+        for _ in range(5):
+            rejected = await client.post(
+                "/api/v1/auth/login/verify",
+                json={"email": email, "code": wrong_code},
+            )
+            assert rejected.status_code == 401
+
+        blocked = await client.post(
+            "/api/v1/auth/login/verify",
+            json={"email": email, "code": dev_code},
+        )
+        assert blocked.status_code == 429
+
+        async with db_engine.connect() as conn:
+            rows = (
+                await conn.execute(
+                    text(
+                        "SELECT outcome, count(*) AS total "
+                        "FROM public.login_attempt "
+                        "WHERE email_lower = :email "
+                        "GROUP BY outcome"
+                    ),
+                    {"email": email},
+                )
+            ).mappings()
+            outcomes = {row["outcome"]: row["total"] for row in rows}
+
+        assert outcomes == {"blocked": 1, "code_failed": 5, "code_requested": 1}
+    finally:
+        async with db_engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM public.login_attempt WHERE email_lower = :email"),
+                {"email": email},
+            )
+            await conn.execute(
+                text("DELETE FROM public.email_code WHERE email_lower = :email"),
+                {"email": email},
+            )
+        await app_engine.dispose()
 
 
 async def test_login_verify_sets_httponly_refresh_cookie(

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
+from app.core.security import hash_code, hash_token
 from app.domains.notifications.repository import NotificationsRepository
 from app.domains.notifications.service import NotificationsService
 
@@ -650,26 +651,62 @@ async def test_runtime_cannot_write_identity_assignment_or_notification_tables(
 
 
 async def test_auth_lookup_resolves_password_requirement_without_tenant_context(
+    support_engine_iso: AsyncEngine,
     app_engine_iso: AsyncEngine,
     indirect_scope_rows: IndirectScopeRows,
 ) -> None:
     rows = indirect_scope_rows
     email = f"rls-user-a-{rows.token}@example.invalid"
+    salt = uuid4().hex
+    candidate_hash = hash_code("123456", salt)
 
-    async with app_engine_iso.begin() as conn:
-        login_record = (
-            (
+    try:
+        async with app_engine_iso.begin() as conn:
+            await conn.execute(
+                text(
+                    "SELECT public.issue_auth_email_code("
+                    ":email, :candidate_hash, :salt, '127.0.0.1', NULL)"
+                ),
+                {
+                    "email": email,
+                    "candidate_hash": candidate_hash,
+                    "salt": salt,
+                },
+            )
+            code_id = (
                 await conn.execute(
-                    text(
-                        "SELECT id, status, password_required "
-                        "FROM public.lookup_auth_user_by_email(:email)"
-                    ),
+                    text("SELECT id FROM public.find_auth_email_code_challenge(:email)"),
                     {"email": email},
                 )
+            ).scalar_one()
+            login_record = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT id, status, password_required "
+                            "FROM public.lookup_login_user_by_email("
+                            ":email, :code_id, :candidate_hash)"
+                        ),
+                        {
+                            "email": email,
+                            "code_id": code_id,
+                            "candidate_hash": candidate_hash,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
             )
-            .mappings()
-            .one()
-        )
+    finally:
+        async with support_engine_iso.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM login_attempt WHERE email_lower = :email"),
+                {"email": email},
+            )
+            await conn.execute(
+                text("DELETE FROM email_code WHERE email_lower = :email"),
+                {"email": email},
+            )
 
     assert str(login_record["id"]) == rows.user_ids[0]
     assert login_record["status"] == "invited"
@@ -780,7 +817,7 @@ async def test_blocking_user_revokes_sessions_immediately(
     indirect_scope_rows: IndirectScopeRows,
 ) -> None:
     rows = indirect_scope_rows
-    refresh_hash = f"security-block-{rows.token}"
+    refresh_hash = hash_token(f"security-block-{rows.token}")
     async with support_engine_iso.begin() as conn:
         session_id = str(
             (
