@@ -290,6 +290,7 @@ class SyncActivationBootstrap(Base):
     profile: Mapped[str] = mapped_column(Text, nullable=False)
     readiness_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
     foundation_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    component_manifest_hash: Mapped[str | None] = mapped_column(Text)
     snapshot_hash: Mapped[str] = mapped_column(Text, nullable=False)
     activation_manifest_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -312,6 +313,55 @@ class SyncActivationFoundation(Base):
     register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncActivationBootstrapComponent(Base):
+    __tablename__ = "sync_activation_bootstrap_component"
+
+    activation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    component: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    component_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncActivationBootstrapChunk(Base):
+    __tablename__ = "sync_activation_bootstrap_chunk"
+
+    activation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    component: Mapped[str] = mapped_column(Text, primary_key=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

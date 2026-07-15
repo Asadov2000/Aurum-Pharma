@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -21,7 +22,16 @@ from app.core.errors import BusinessRuleError, ConflictError
 from app.core.time import utc_now
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
-from app.domains.sync.activation_bootstrap import verify_activation_bootstrap
+from app.domains.sync.activation_bootstrap import (
+    ActivationSnapshotScope,
+    verify_activation_bootstrap,
+)
+from app.domains.sync.activation_components import (
+    REQUIRED_COMPONENTS,
+    build_component_descriptor,
+    component_manifest_hash,
+    full_snapshot_hash,
+)
 from app.domains.sync.credentials import parse_edge_credential
 from app.domains.sync.integrity import canonical_json_hash
 from app.domains.sync.models import (
@@ -32,6 +42,7 @@ from app.domains.sync.models import (
 )
 from app.domains.sync.repository import SyncCloudRepository
 from app.domains.sync.schemas import (
+    SyncActivationBootstrapChunkMetadata,
     SyncActivationBootstrapRead,
     SyncNodeCreate,
     SyncNodeCredentialRead,
@@ -123,6 +134,8 @@ async def committed_handover_scaffold(
                     await _set_support_session(session)
                     for table in (
                         "sync_writer_readiness",
+                        "sync_activation_bootstrap_chunk",
+                        "sync_activation_bootstrap_component",
                         "sync_activation_foundation",
                         "sync_activation_bootstrap",
                         "sync_writer_activation",
@@ -618,6 +631,325 @@ async def test_writer_handover_ledgers_reject_direct_mutation(
                 },
             )
     assert getattr(epoch_error.value.orig, "sqlstate", None) == "55000"
+
+
+async def test_full_component_ledger_is_exact_hash_bound_and_immutable(
+    db_engine: AsyncEngine,
+    committed_handover_scaffold: _CommittedHandoverScaffold,
+) -> None:
+    scaffold = committed_handover_scaffold
+    activation_id = uuid4()
+    foundation_digest = canonical_json_hash({})
+    component_chunks = {
+        component: SyncActivationBootstrapChunkMetadata(
+            component=component,
+            chunk_index=0,
+            item_count=0,
+            payload_hash=canonical_json_hash(
+                {"component": component, "schema_version": 1, "items": []}
+            ),
+        )
+        for component in REQUIRED_COMPONENTS
+    }
+    descriptors = [
+        build_component_descriptor(component=component, chunks=[component_chunks[component]])
+        for component in REQUIRED_COMPONENTS
+    ]
+    component_root = component_manifest_hash(descriptors)
+
+    async with AsyncSession(db_engine, expire_on_commit=False) as session:
+        async with session.begin():
+            await _set_support_session(session)
+            await session.execute(
+                text(
+                    "INSERT INTO public.register_receipt_counter ("
+                    "tenant_id, branch_id, register_id, writer_epoch, last_receipt_seq"
+                    ") VALUES (:tenant_id,:branch_id,:register_id,:writer_epoch,0) "
+                    "ON CONFLICT (tenant_id, register_id) DO NOTHING"
+                ),
+                {
+                    "tenant_id": scaffold.tenant_id,
+                    "branch_id": scaffold.branch_id,
+                    "register_id": scaffold.register_id,
+                    "writer_epoch": scaffold.stream.writer_epoch,
+                },
+            )
+            receipt_baseline = await session.scalar(
+                text(
+                    "SELECT last_receipt_seq FROM public.register_receipt_counter "
+                    "WHERE tenant_id = :tenant_id AND register_id = :register_id"
+                ),
+                {"tenant_id": scaffold.tenant_id, "register_id": scaffold.register_id},
+            )
+            assert receipt_baseline is not None
+            scope = ActivationSnapshotScope(
+                activation_id=activation_id,
+                tenant_id=scaffold.tenant_id,
+                branch_id=scaffold.branch_id,
+                edge_node_id=scaffold.node.id,
+                register_id=scaffold.register_id,
+                writer_epoch=scaffold.stream.writer_epoch + 1,
+                previous_writer_epoch=scaffold.stream.writer_epoch,
+                previous_terminal_sequence=scaffold.stream.last_sequence,
+                previous_terminal_source_checksum=scaffold.stream.current_checksum,
+                previous_terminal_projection_checksum=scaffold.stream.current_projection_checksum,
+                receipt_baseline_seq=receipt_baseline,
+            )
+            bootstrap_digest = full_snapshot_hash(
+                scope=scope,
+                foundation_digest=foundation_digest,
+                component_manifest_digest=component_root,
+            )
+            await session.execute(
+                text(
+                    "SELECT public.prepare_edge_writer_handover("
+                    ":activation_id,:tenant_id,:branch_id,:edge_node_id,:register_id,"
+                    ":expected_epoch,:expected_sequence,:source_checksum,"
+                    ":projection_checksum,:snapshot_hash,:request_hash)"
+                ),
+                {
+                    "activation_id": activation_id,
+                    "tenant_id": scaffold.tenant_id,
+                    "branch_id": scaffold.branch_id,
+                    "edge_node_id": scaffold.node.id,
+                    "register_id": scaffold.register_id,
+                    "expected_epoch": scaffold.stream.writer_epoch,
+                    "expected_sequence": scaffold.stream.last_sequence,
+                    "source_checksum": scaffold.stream.current_checksum,
+                    "projection_checksum": scaffold.stream.current_projection_checksum,
+                    "snapshot_hash": bootstrap_digest,
+                    "request_hash": canonical_json_hash({"activation_id": str(activation_id)}),
+                },
+            )
+            activation = await SyncCloudRepository(session).get_writer_activation(activation_id)
+            assert activation is not None
+            scope_params = {
+                "activation_id": activation_id,
+                "tenant_id": scaffold.tenant_id,
+                "branch_id": scaffold.branch_id,
+                "edge_node_id": scaffold.node.id,
+                "register_id": scaffold.register_id,
+                "writer_epoch": activation.writer_epoch,
+            }
+            await session.execute(
+                text(
+                    "INSERT INTO public.sync_activation_bootstrap ("
+                    "activation_id,tenant_id,branch_id,edge_node_id,register_id,writer_epoch,"
+                    "capability,profile,readiness_eligible,foundation_hash,"
+                    "component_manifest_hash,snapshot_hash,activation_manifest_hash"
+                    ") VALUES ("
+                    ":activation_id,:tenant_id,:branch_id,:edge_node_id,:register_id,"
+                    ":writer_epoch,'cash_sale_v1','cash_sale_v1_full_v1',true,"
+                    ":foundation_hash,:component_root,:snapshot_hash,:activation_manifest_hash)"
+                ),
+                {
+                    **scope_params,
+                    "foundation_hash": foundation_digest,
+                    "component_root": component_root,
+                    "snapshot_hash": bootstrap_digest,
+                    "activation_manifest_hash": activation.activation_manifest_hash,
+                },
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO public.sync_activation_foundation ("
+                    "activation_id,tenant_id,branch_id,edge_node_id,register_id,writer_epoch,"
+                    "schema_version,payload,payload_hash"
+                    ") VALUES ("
+                    ":activation_id,:tenant_id,:branch_id,:edge_node_id,:register_id,"
+                    ":writer_epoch,1,'{}'::jsonb,:foundation_hash)"
+                ),
+                {**scope_params, "foundation_hash": foundation_digest},
+            )
+
+            for index, descriptor in enumerate(descriptors):
+                chunk = component_chunks[descriptor.component]
+                await session.execute(
+                    text(
+                        "INSERT INTO public.sync_activation_bootstrap_component ("
+                        "activation_id,component,tenant_id,branch_id,edge_node_id,register_id,"
+                        "writer_epoch,schema_version,item_count,chunk_count,component_hash"
+                        ") VALUES ("
+                        ":activation_id,:component,:tenant_id,:branch_id,:edge_node_id,"
+                        ":register_id,:writer_epoch,1,:item_count,:chunk_count,:component_hash)"
+                    ),
+                    {
+                        **scope_params,
+                        "component": descriptor.component,
+                        "item_count": descriptor.item_count,
+                        "chunk_count": descriptor.chunk_count,
+                        "component_hash": descriptor.component_hash,
+                    },
+                )
+                payload = {"component": descriptor.component, "schema_version": 1, "items": []}
+                await session.execute(
+                    text(
+                        "INSERT INTO public.sync_activation_bootstrap_chunk ("
+                        "activation_id,component,chunk_index,tenant_id,branch_id,edge_node_id,"
+                        "register_id,writer_epoch,schema_version,item_count,payload,payload_hash"
+                        ") VALUES ("
+                        ":activation_id,:component,0,:tenant_id,:branch_id,:edge_node_id,"
+                        ":register_id,:writer_epoch,1,:item_count,CAST(:payload AS JSONB),"
+                        ":payload_hash)"
+                    ),
+                    {
+                        **scope_params,
+                        "component": descriptor.component,
+                        "item_count": chunk.item_count,
+                        "payload": json.dumps(payload, separators=(",", ":")),
+                        "payload_hash": chunk.payload_hash,
+                    },
+                )
+                complete = await session.scalar(
+                    text("SELECT public.is_cash_sale_v1_bootstrap_complete(:activation_id)"),
+                    {"activation_id": activation_id},
+                )
+                assert complete is (index == len(descriptors) - 1)
+
+            with pytest.raises(DBAPIError) as mutation_error:
+                async with session.begin_nested():
+                    await session.execute(
+                        text(
+                            "UPDATE public.sync_activation_bootstrap_chunk "
+                            "SET payload_hash = repeat('f',64) "
+                            "WHERE activation_id = :activation_id AND component = 'catalog'"
+                        ),
+                        {"activation_id": activation_id},
+                    )
+            assert getattr(mutation_error.value.orig, "sqlstate", None) == "55000"
+
+
+async def test_partial_full_component_ledger_rolls_back_at_commit(
+    db_engine: AsyncEngine,
+    committed_handover_scaffold: _CommittedHandoverScaffold,
+) -> None:
+    scaffold = committed_handover_scaffold
+    activation_id = uuid4()
+    foundation_digest = canonical_json_hash({})
+    descriptors = [
+        build_component_descriptor(
+            component=component,
+            chunks=[
+                SyncActivationBootstrapChunkMetadata(
+                    component=component,
+                    chunk_index=0,
+                    item_count=0,
+                    payload_hash=canonical_json_hash(
+                        {"component": component, "schema_version": 1, "items": []}
+                    ),
+                )
+            ],
+        )
+        for component in REQUIRED_COMPONENTS
+    ]
+    component_root = component_manifest_hash(descriptors)
+    scope = ActivationSnapshotScope(
+        activation_id=activation_id,
+        tenant_id=scaffold.tenant_id,
+        branch_id=scaffold.branch_id,
+        edge_node_id=scaffold.node.id,
+        register_id=scaffold.register_id,
+        writer_epoch=scaffold.stream.writer_epoch + 1,
+        previous_writer_epoch=scaffold.stream.writer_epoch,
+        previous_terminal_sequence=scaffold.stream.last_sequence,
+        previous_terminal_source_checksum=scaffold.stream.current_checksum,
+        previous_terminal_projection_checksum=scaffold.stream.current_projection_checksum,
+        receipt_baseline_seq=0,
+    )
+    bootstrap_digest = full_snapshot_hash(
+        scope=scope,
+        foundation_digest=foundation_digest,
+        component_manifest_digest=component_root,
+    )
+    params = {
+        "activation_id": activation_id,
+        "tenant_id": scaffold.tenant_id,
+        "branch_id": scaffold.branch_id,
+        "writer_epoch": scope.writer_epoch,
+        "edge_node_id": scaffold.node.id,
+        "register_id": scaffold.register_id,
+        "previous_epoch": scope.previous_writer_epoch,
+        "previous_sequence": scope.previous_terminal_sequence,
+        "source_checksum": scope.previous_terminal_source_checksum,
+        "projection_checksum": scope.previous_terminal_projection_checksum,
+        "snapshot_hash": bootstrap_digest,
+        "foundation_hash": foundation_digest,
+        "component_root": component_root,
+        "activation_manifest_hash": "e" * 64,
+    }
+
+    async with AsyncSession(db_engine, expire_on_commit=False) as session:
+        with pytest.raises(DBAPIError) as commit_error:
+            async with session.begin():
+                await _set_support_session(session)
+                await session.execute(
+                    text(
+                        "INSERT INTO public.sync_writer_activation ("
+                        "activation_id,tenant_id,branch_id,writer_epoch,writer_node_id,"
+                        "allowed_register_id,capability,state,root_source_checksum,"
+                        "root_projection_checksum,current_source_checksum,"
+                        "current_projection_checksum,previous_writer_epoch,"
+                        "previous_terminal_sequence,previous_terminal_source_checksum,"
+                        "previous_terminal_projection_checksum,bootstrap_snapshot_hash,"
+                        "activation_manifest_hash,receipt_baseline_seq,prepare_request_hash,"
+                        "prepared_at,aborted_at"
+                        ") VALUES ("
+                        ":activation_id,:tenant_id,:branch_id,:writer_epoch,:edge_node_id,"
+                        ":register_id,'cash_sale_v1','aborted',repeat('1',64),repeat('2',64),"
+                        "repeat('1',64),repeat('2',64),:previous_epoch,:previous_sequence,"
+                        ":source_checksum,:projection_checksum,:snapshot_hash,"
+                        ":activation_manifest_hash,0,repeat('3',64),now(),now())"
+                    ),
+                    params,
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO public.sync_activation_bootstrap ("
+                        "activation_id,tenant_id,branch_id,edge_node_id,register_id,writer_epoch,"
+                        "capability,profile,readiness_eligible,foundation_hash,"
+                        "component_manifest_hash,snapshot_hash,activation_manifest_hash"
+                        ") VALUES ("
+                        ":activation_id,:tenant_id,:branch_id,:edge_node_id,:register_id,"
+                        ":writer_epoch,'cash_sale_v1','cash_sale_v1_full_v1',true,"
+                        ":foundation_hash,:component_root,:snapshot_hash,"
+                        ":activation_manifest_hash)"
+                    ),
+                    params,
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO public.sync_activation_foundation ("
+                        "activation_id,tenant_id,branch_id,edge_node_id,register_id,writer_epoch,"
+                        "schema_version,payload,payload_hash"
+                        ") VALUES ("
+                        ":activation_id,:tenant_id,:branch_id,:edge_node_id,:register_id,"
+                        ":writer_epoch,1,'{}'::jsonb,:foundation_hash)"
+                    ),
+                    params,
+                )
+        assert getattr(commit_error.value.orig, "sqlstate", None) == "55000"
+
+    async with AsyncSession(db_engine) as session:
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM public.sync_writer_activation "
+                    "WHERE activation_id = :activation_id"
+                ),
+                {"activation_id": activation_id},
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM public.sync_activation_bootstrap "
+                    "WHERE activation_id = :activation_id"
+                ),
+                {"activation_id": activation_id},
+            )
+            == 0
+        )
 
 
 async def test_runtime_role_reads_signed_foundation_but_cannot_report_readiness(

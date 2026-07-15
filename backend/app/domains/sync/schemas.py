@@ -210,6 +210,40 @@ class SyncActivationBootstrapRead(BaseModel):
     signature: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+type SyncActivationComponent = Literal[
+    "authorization",
+    "catalog",
+    "inventory",
+    "offline_auth",
+    "pos_materialization",
+    "shift",
+]
+
+
+class SyncActivationBootstrapChunkMetadata(BaseModel):
+    """Hash-bound metadata for one future full-profile payload chunk."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    component: SyncActivationComponent
+    schema_version: Literal[1] = 1
+    chunk_index: int = Field(ge=0)
+    item_count: int = Field(ge=0)
+    payload_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SyncActivationBootstrapComponentMetadata(BaseModel):
+    """Immutable descriptor committed into the full-profile component root."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    component: SyncActivationComponent
+    schema_version: Literal[1] = 1
+    item_count: int = Field(ge=0)
+    chunk_count: int = Field(gt=0)
+    component_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class SyncNodeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

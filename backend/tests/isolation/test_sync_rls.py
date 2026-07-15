@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,6 +15,79 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
+from app.domains.sync.activation_bootstrap import ActivationSnapshotScope
+from app.domains.sync.activation_components import (
+    REQUIRED_COMPONENTS,
+    build_component_descriptor,
+    component_manifest_hash,
+    full_snapshot_hash,
+)
+from app.domains.sync.integrity import canonical_json_hash
+from app.domains.sync.schemas import (
+    SyncActivationBootstrapChunkMetadata,
+    SyncActivationBootstrapComponentMetadata,
+    SyncActivationComponent,
+)
+
+
+@dataclass(frozen=True)
+class _FullBootstrapFixture:
+    foundation_hash: str
+    component_manifest_hash: str
+    snapshot_hash: str
+    descriptors: tuple[SyncActivationBootstrapComponentMetadata, ...]
+    chunks: dict[SyncActivationComponent, SyncActivationBootstrapChunkMetadata]
+
+
+def _full_bootstrap_fixture(
+    *,
+    activation_id: UUID,
+    tenant_id: UUID,
+    branch_id: UUID,
+    edge_node_id: UUID,
+    register_id: UUID,
+) -> _FullBootstrapFixture:
+    chunks = {
+        component: SyncActivationBootstrapChunkMetadata(
+            component=component,
+            chunk_index=0,
+            item_count=0,
+            payload_hash=canonical_json_hash(
+                {"component": component, "schema_version": 1, "items": []}
+            ),
+        )
+        for component in REQUIRED_COMPONENTS
+    }
+    descriptors = tuple(
+        build_component_descriptor(component=component, chunks=[chunks[component]])
+        for component in REQUIRED_COMPONENTS
+    )
+    foundation_hash = canonical_json_hash({})
+    manifest_hash = component_manifest_hash(descriptors)
+    snapshot_hash = full_snapshot_hash(
+        scope=ActivationSnapshotScope(
+            activation_id=activation_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            register_id=register_id,
+            writer_epoch=2,
+            previous_writer_epoch=1,
+            previous_terminal_sequence=1,
+            previous_terminal_source_checksum="b" * 64,
+            previous_terminal_projection_checksum="d" * 64,
+            receipt_baseline_seq=0,
+        ),
+        foundation_digest=foundation_hash,
+        component_manifest_digest=manifest_hash,
+    )
+    return _FullBootstrapFixture(
+        foundation_hash=foundation_hash,
+        component_manifest_hash=manifest_hash,
+        snapshot_hash=snapshot_hash,
+        descriptors=descriptors,
+        chunks=chunks,
+    )
 
 
 @pytest_asyncio.fixture
@@ -151,6 +226,7 @@ async def _insert_activation_bootstrap(
     branch_id: UUID,
     edge_node_id: UUID,
     register_id: UUID,
+    bootstrap: _FullBootstrapFixture,
 ) -> None:
     params = {
         "activation_id": activation_id,
@@ -158,17 +234,21 @@ async def _insert_activation_bootstrap(
         "branch_id": branch_id,
         "edge_id": edge_node_id,
         "register_id": register_id,
+        "foundation_hash": bootstrap.foundation_hash,
+        "component_manifest_hash": bootstrap.component_manifest_hash,
+        "snapshot_hash": bootstrap.snapshot_hash,
     }
     await connection.execute(
         text(
             "INSERT INTO sync_activation_bootstrap ("
             "activation_id, tenant_id, branch_id, edge_node_id, register_id, "
             "writer_epoch, capability, profile, readiness_eligible, "
-            "foundation_hash, snapshot_hash, activation_manifest_hash"
+            "foundation_hash, component_manifest_hash, snapshot_hash, "
+            "activation_manifest_hash"
             ") VALUES ("
             ":activation_id,:tenant_id,:branch_id,:edge_id,:register_id,2,"
-            "'cash_sale_v1','foundation_shadow_v1',false,repeat('5',64),"
-            "repeat('1',64),repeat('2',64))"
+            "'cash_sale_v1','cash_sale_v1_full_v1',true,:foundation_hash,"
+            ":component_manifest_hash,:snapshot_hash,repeat('2',64))"
         ),
         params,
     )
@@ -179,13 +259,50 @@ async def _insert_activation_bootstrap(
             "writer_epoch, schema_version, payload, payload_hash"
             ") VALUES ("
             ":activation_id,:tenant_id,:branch_id,:edge_id,:register_id,2,1,"
-            "'{}'::jsonb,repeat('5',64))"
+            "'{}'::jsonb,:foundation_hash)"
         ),
         params,
     )
+    for descriptor in bootstrap.descriptors:
+        chunk = bootstrap.chunks[descriptor.component]
+        component_params = {
+            **params,
+            "component": descriptor.component,
+            "item_count": descriptor.item_count,
+            "chunk_count": descriptor.chunk_count,
+            "component_hash": descriptor.component_hash,
+            "payload_hash": chunk.payload_hash,
+            "payload": json.dumps(
+                {"component": descriptor.component, "schema_version": 1, "items": []},
+                separators=(",", ":"),
+            ),
+        }
+        await connection.execute(
+            text(
+                "INSERT INTO sync_activation_bootstrap_component ("
+                "activation_id, component, tenant_id, branch_id, edge_node_id, "
+                "register_id, writer_epoch, schema_version, item_count, chunk_count, "
+                "component_hash"
+                ") VALUES ("
+                ":activation_id,:component,:tenant_id,:branch_id,:edge_id,:register_id,"
+                "2,1,:item_count,:chunk_count,:component_hash)"
+            ),
+            component_params,
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO sync_activation_bootstrap_chunk ("
+                "activation_id, component, chunk_index, tenant_id, branch_id, edge_node_id, "
+                "register_id, writer_epoch, schema_version, item_count, payload, payload_hash"
+                ") VALUES ("
+                ":activation_id,:component,0,:tenant_id,:branch_id,:edge_id,:register_id,"
+                "2,1,:item_count,CAST(:payload AS JSONB),:payload_hash)"
+            ),
+            component_params,
+        )
 
 
-async def test_edge_session_is_restricted_to_its_branch(
+async def test_edge_session_is_restricted_to_its_branch(  # noqa: PLR0915 - cross-ledger fixture
     support_engine_sync: AsyncEngine,
     app_engine_sync: AsyncEngine,
 ) -> None:
@@ -266,6 +383,13 @@ async def test_edge_session_is_restricted_to_its_branch(
             )
             for index in range(2):
                 activation_id = uuid4()
+                bootstrap = _full_bootstrap_fixture(
+                    activation_id=activation_id,
+                    tenant_id=tenant_id,
+                    branch_id=branch_ids[index],
+                    edge_node_id=edge_ids[index],
+                    register_id=register_ids[index],
+                )
                 await connection.execute(
                     text(
                         "INSERT INTO sync_writer_activation ("
@@ -282,7 +406,7 @@ async def test_edge_session_is_restricted_to_its_branch(
                         ":activation_id,:tenant_id,:branch_id,2,:edge_id,:register_id,"
                         "'cash_sale_v1','aborted',repeat('e',64),repeat('f',64),"
                         "repeat('e',64),repeat('f',64),1,1,repeat('b',64),repeat('d',64),"
-                        "repeat('1',64),repeat('2',64),0,repeat('4',64),now(),now(),now())"
+                        ":snapshot_hash,repeat('2',64),0,repeat('4',64),now(),now(),now())"
                     ),
                     {
                         "tenant_id": tenant_id,
@@ -290,6 +414,7 @@ async def test_edge_session_is_restricted_to_its_branch(
                         "activation_id": activation_id,
                         "edge_id": edge_ids[index],
                         "register_id": register_ids[index],
+                        "snapshot_hash": bootstrap.snapshot_hash,
                     },
                 )
                 await connection.execute(
@@ -319,6 +444,7 @@ async def test_edge_session_is_restricted_to_its_branch(
                     branch_id=branch_ids[index],
                     edge_node_id=edge_ids[index],
                     register_id=register_ids[index],
+                    bootstrap=bootstrap,
                 )
                 await connection.execute(
                     text(
@@ -457,6 +583,8 @@ async def test_edge_session_is_restricted_to_its_branch(
                 "sync_writer_readiness",
                 "sync_activation_bootstrap",
                 "sync_activation_foundation",
+                "sync_activation_bootstrap_component",
+                "sync_activation_bootstrap_chunk",
                 "register_receipt_counter",
             ):
                 rows = await connection.execute(
@@ -509,6 +637,8 @@ async def test_edge_session_is_restricted_to_its_branch(
                 for table in (
                     "sync_shadow_report",
                     "sync_writer_readiness",
+                    "sync_activation_bootstrap_chunk",
+                    "sync_activation_bootstrap_component",
                     "sync_activation_foundation",
                     "sync_activation_bootstrap",
                     "sync_writer_activation",
