@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import Literal
+from datetime import date, datetime, timedelta
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import UUID4, BaseModel, ConfigDict, Field
+from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Checksum = str
 
@@ -242,6 +242,113 @@ class SyncActivationBootstrapComponentMetadata(BaseModel):
     item_count: int = Field(ge=0)
     chunk_count: int = Field(gt=0)
     component_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+type OfflinePosCommand = Literal[
+    "operation.result.read",
+    "receipt.print",
+    "receipt.reprint",
+    "sale.cash.complete",
+    "shift.close",
+    "shift.open",
+]
+
+
+class _StrictOfflineAuthModel(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        frozen=True,
+        validate_default=True,
+        revalidate_instances="always",
+    )
+
+
+class OfflineAuthScopeV0(_StrictOfflineAuthModel):
+    activation_id: UUID4
+    tenant_id: UUID4
+    branch_id: UUID4
+    edge_node_id: UUID4
+    register_id: UUID4
+    writer_epoch: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    user_id: UUID4
+    capability: Literal["cash_sale_v1"]
+
+
+class OfflineAuthDeviceBindingV0(_StrictOfflineAuthModel):
+    method: Literal["tpm2"]
+    key_id: UUID4
+    spki_sha256: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class OfflineAuthGrantClaimsV0(_StrictOfflineAuthModel):
+    schema_version: Literal[1]
+    grant_id: UUID4
+    issuer: Literal["aurum-cloud"]
+    audience: Literal["aurum-edge-offline-auth-v0"]
+    auth_context: Literal["fresh-online-interactive"]
+    scope: OfflineAuthScopeV0
+    allowed_commands: tuple[OfflinePosCommand, ...] = Field(min_length=1, max_length=6)
+    device_binding: OfflineAuthDeviceBindingV0
+    policy_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    subject_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    authenticated_at: datetime
+    issued_at: datetime
+    expires_at: datetime
+
+    @field_validator("allowed_commands")
+    @classmethod
+    def validate_allowed_commands(
+        cls, value: tuple[OfflinePosCommand, ...]
+    ) -> tuple[OfflinePosCommand, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("allowed_commands must not contain duplicates")
+        if value != tuple(sorted(value)):
+            raise ValueError("allowed_commands must use canonical sort order")
+        return value
+
+    @field_validator("authenticated_at", "issued_at", "expires_at")
+    @classmethod
+    def validate_utc_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() != timedelta(0):
+            raise ValueError("offline-auth timestamps must be UTC")
+        return value
+
+    @model_validator(mode="after")
+    def validate_grant_window(self) -> Self:
+        if not self.authenticated_at <= self.issued_at < self.expires_at:
+            raise ValueError("offline-auth grant timestamps are inconsistent")
+        if self.issued_at - self.authenticated_at > timedelta(minutes=5):
+            raise ValueError("online authentication is not fresh enough")
+        if self.expires_at - self.authenticated_at > timedelta(hours=72):
+            raise ValueError("offline-auth grant exceeds the 72 hour limit")
+        return self
+
+
+class SignedOfflineAuthGrantV0(_StrictOfflineAuthModel):
+    claims: OfflineAuthGrantClaimsV0
+    claims_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    signing_key_id: UUID4
+    signature_algorithm: Literal["ed25519-v1"]
+    signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+
+class OfflineAuthPayloadV0(_StrictOfflineAuthModel):
+    schema_version: Literal[1]
+    component: Literal["offline_auth"]
+    grants: tuple[SignedOfflineAuthGrantV0, ...] = Field(max_length=100)
+
+    @field_validator("grants")
+    @classmethod
+    def validate_grant_order(
+        cls, value: tuple[SignedOfflineAuthGrantV0, ...]
+    ) -> tuple[SignedOfflineAuthGrantV0, ...]:
+        grant_ids = tuple(str(grant.claims.grant_id) for grant in value)
+        if len(set(grant_ids)) != len(grant_ids):
+            raise ValueError("offline-auth payload contains duplicate grants")
+        if grant_ids != tuple(sorted(grant_ids)):
+            raise ValueError("offline-auth grants must use canonical sort order")
+        return value
 
 
 class SyncNodeCreate(BaseModel):
