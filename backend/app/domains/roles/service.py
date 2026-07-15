@@ -31,7 +31,7 @@ from app.core.errors import (
 )
 from app.domains.auth.models import AppUser
 from app.domains.roles.models import Permission, Role, RoleTemplate, UserAssignment
-from app.domains.roles.repository import DirectoryUser, RolesRepository
+from app.domains.roles.repository import AuthorizationSnapshot, DirectoryUser, RolesRepository
 
 logger = structlog.get_logger("roles.service")
 
@@ -550,6 +550,12 @@ class RolesService:
     async def get_effective_permissions(self, user_id: UUID, tenant_id: UUID) -> set[str]:
         """Load permissions from the transactionally current database state."""
         return await self.repo.effective_permissions(user_id, tenant_id)
+
+    async def get_authorization_snapshot(
+        self, user_id: UUID, tenant_id: UUID
+    ) -> AuthorizationSnapshot:
+        """Return rights and revision coordinates from one database snapshot."""
+        return await self.repo.authorization_snapshot(user_id, tenant_id)
 
     async def invalidate_user_perms(self, user_id: UUID, tenant_id: UUID) -> None:
         if self.redis is None:

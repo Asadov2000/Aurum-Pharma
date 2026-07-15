@@ -34,6 +34,15 @@ class DirectoryUser:
     last_login_at: datetime | None
 
 
+@dataclass(frozen=True)
+class AuthorizationSnapshot:
+    """One statement-level authorization view with its revision coordinates."""
+
+    policy_revision: int
+    subject_revision: int
+    permissions: frozenset[str]
+
+
 _DIRECTORY_COLUMNS = (
     AppUser.id,
     AppUser.email,
@@ -458,21 +467,55 @@ class RolesRepository:
 
     async def effective_permissions(self, user_id: UUID, tenant_id: UUID) -> set[str]:
         """Active permissions granted by active roles and assignments."""
-        stmt = (
-            select(RolePermission.permission_code)
-            .join(Role, Role.id == RolePermission.role_id)
-            .join(Permission, Permission.code == RolePermission.permission_code)
-            .join(UserAssignment, UserAssignment.role_id == RolePermission.role_id)
-            .where(
-                and_(
-                    UserAssignment.user_id == user_id,
-                    UserAssignment.tenant_id == tenant_id,
-                    UserAssignment.is_active.is_(True),
-                    Role.is_active.is_(True),
-                    Permission.is_active.is_(True),
-                )
-            )
-            .distinct()
+        snapshot = await self.authorization_snapshot(user_id, tenant_id)
+        return set(snapshot.permissions)
+
+    async def authorization_snapshot(self, user_id: UUID, tenant_id: UUID) -> AuthorizationSnapshot:
+        """Read revisions and active permissions from one PostgreSQL snapshot."""
+        result = await self.session.execute(
+            text("""
+                SELECT
+                  policy.revision AS policy_revision,
+                  COALESCE(subject.revision, 1::BIGINT) AS subject_revision,
+                  COALESCE(
+                    array_agg(
+                      DISTINCT granted_permission.code
+                      ORDER BY granted_permission.code
+                    ) FILTER (
+                      WHERE assignment.is_active
+                        AND assigned_role.is_active
+                        AND granted_permission.is_active
+                        AND (
+                          assigned_role.tenant_id IS NULL
+                          OR assigned_role.tenant_id = :tenant_id
+                        )
+                    ),
+                    ARRAY[]::TEXT[]
+                  ) AS permissions
+                FROM public.authorization_policy_revision AS policy
+                LEFT JOIN public.authorization_subject_revision AS subject
+                  ON subject.tenant_id = policy.tenant_id
+                 AND subject.user_id = :user_id
+                LEFT JOIN public.user_assignment AS assignment
+                  ON assignment.tenant_id = policy.tenant_id
+                 AND assignment.user_id = :user_id
+                LEFT JOIN public.role AS assigned_role
+                  ON assigned_role.id = assignment.role_id
+                LEFT JOIN public.role_permission AS role_permission
+                  ON role_permission.role_id = assigned_role.id
+                LEFT JOIN public.permission AS granted_permission
+                  ON granted_permission.code = role_permission.permission_code
+                WHERE policy.tenant_id = :tenant_id
+                GROUP BY policy.revision, subject.revision
+                """),
+            {"tenant_id": tenant_id, "user_id": user_id},
         )
-        result = await self.session.execute(stmt)
-        return set(result.scalars().all())
+        row = result.mappings().one_or_none()
+        if row is None:
+            raise RuntimeError("Authorization revision ledger is missing for tenant")
+        raw_permissions = row["permissions"] or []
+        return AuthorizationSnapshot(
+            policy_revision=int(row["policy_revision"]),
+            subject_revision=int(row["subject_revision"]),
+            permissions=frozenset(str(code) for code in raw_permissions),
+        )

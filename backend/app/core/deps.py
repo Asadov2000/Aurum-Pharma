@@ -121,6 +121,8 @@ class CurrentUser:
     permissions: set[str] = field(default_factory=set)
     branch_assignments: dict[str, str] = field(default_factory=dict)
     assignment_levels: dict[str, int] = field(default_factory=dict)
+    policy_revision: int | None = None
+    subject_revision: int | None = None
 
     @property
     def level(self) -> int:
@@ -210,6 +212,8 @@ async def current_user(
     permissions: set[str] = set()
     branch_assignments: dict[str, str] = {}
     assignment_levels: dict[str, int] = {}
+    policy_revision: int | None = None
+    subject_revision: int | None = None
 
     if tenant_id is not None:
         # Local import — roles depends on auth at module level, can't import
@@ -218,7 +222,10 @@ async def current_user(
         from app.domains.roles.service import RolesService
 
         service = RolesService(RolesRepository(db), redis=redis)
-        permissions = await service.get_effective_permissions(user_id, tenant_id)
+        authorization_snapshot = await service.get_authorization_snapshot(user_id, tenant_id)
+        permissions = set(authorization_snapshot.permissions)
+        policy_revision = authorization_snapshot.policy_revision
+        subject_revision = authorization_snapshot.subject_revision
 
         # branch_assignments: {branch_id_str | "tenant": role_id_str}
         assignments = await service.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
@@ -240,6 +247,8 @@ async def current_user(
         permissions=permissions,
         branch_assignments=branch_assignments,
         assignment_levels=assignment_levels,
+        policy_revision=policy_revision,
+        subject_revision=subject_revision,
     )
 
 
