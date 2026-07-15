@@ -9,9 +9,19 @@ import pytest
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.time import utc_now
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from app.domains.sync.bootstrap import (
+    BootstrapScope,
+    BootstrapValidationError,
+    chunk_as_pull,
+    verify_chunk,
+    verify_manifest,
+)
+from app.domains.sync.credentials import parse_edge_credential
+from app.domains.sync.integrity import ZERO_CHECKSUM
 from app.domains.sync.models import SyncInboxEvent, SyncSaleProjection
 from app.domains.sync.repository import (
     SyncCloudRepository,
@@ -60,6 +70,8 @@ async def _pull(session: AsyncSession, node, *, after: int = 0):  # type: ignore
         shadow_start_sequence=node.shadow_start_sequence,
         shadow_start_checksum=node.shadow_start_checksum,
         shadow_start_projection_checksum=node.shadow_start_projection_checksum,
+        shadow_start_origin_node_id=node.shadow_start_origin_node_id,
+        shadow_start_writer_epoch=node.shadow_start_writer_epoch,
         after_sequence=after,
         limit=100,
     )
@@ -253,17 +265,84 @@ async def test_late_enrollment_starts_after_immutable_history(
     pos = POSService(POSRepository(db_session))
     await _open_shift(pos, scaffold)
     first = await _checkout(pos, scaffold)
+    historical_second = await _checkout(pos, scaffold)
     node = await _enroll(db_session, scaffold)
-    second = await _checkout(pos, scaffold)
+    live = await _checkout(pos, scaffold)
 
     pull = await _pull(db_session, node)
 
-    assert node.shadow_start_sequence == 1
-    assert [event.event_id for event in pull.events] == [second.event_id]
+    assert node.shadow_start_sequence == 2
+    assert [event.event_id for event in pull.events] == [live.event_id]
     assert first.event_id not in {event.event_id for event in pull.events}
-    applied = await SyncEdgeApplyService(SyncEdgeRepository(db_session)).apply(pull)
+    assert historical_second.event_id not in {event.event_id for event in pull.events}
+    credential = parse_edge_credential(node.credential)
+    scope = BootstrapScope(
+        edge_node_id=node.id,
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        credential_kid=credential.kid,
+        credential_digest=credential.digest,
+        credential_issued_at=node.credential_issued_at,
+        credential_expires_at=node.credential_expires_at,
+        origin_node_id=node.shadow_start_origin_node_id,
+        writer_epoch=node.shadow_start_writer_epoch,
+        root_source_checksum=ZERO_CHECKSUM,
+        root_projection_checksum=ZERO_CHECKSUM,
+        checkpoint_sequence=node.shadow_start_sequence,
+        source_checksum=node.shadow_start_checksum,
+        projection_checksum=node.shadow_start_projection_checksum,
+    )
+    cloud = SyncCloudService(SyncCloudRepository(db_session))
+    settings = get_settings()
+    previous_chunk_size = settings.EDGE_BOOTSTRAP_CHUNK_SIZE
+    try:
+        settings.EDGE_BOOTSTRAP_CHUNK_SIZE = 1
+        signed = await cloud.bootstrap_manifest(scope=scope)
+        manifest = verify_manifest(signed, credential=node.credential, now=utc_now())
+        chunks = [
+            await cloud.bootstrap_chunk(
+                bootstrap_id=manifest.bootstrap_id,
+                chunk_index=index,
+                scope=scope,
+            )
+            for index in range(len(manifest.chunks))
+        ]
+    finally:
+        settings.EDGE_BOOTSTRAP_CHUNK_SIZE = previous_chunk_size
+
+    assert manifest.checkpoint_sequence == 2
+    assert len(chunks) == 2
+    for chunk in chunks:
+        verify_chunk(manifest, chunk)
+    tampered_event = chunks[0].events[0].model_copy(update={"payload_hash": "0" * 64})
+    tampered_chunk = chunks[0].model_copy(update={"events": [tampered_event]})
+    with pytest.raises(BootstrapValidationError, match="chunk hash"):
+        verify_chunk(manifest, tampered_chunk)
+
+    edge = SyncEdgeApplyService(SyncEdgeRepository(db_session))
+    first_chunk = await edge.apply(chunk_as_pull(manifest=manifest, chunk=chunks[0]))
+    assert first_chunk.status == "synced"
+    assert first_chunk.last_sequence == 1
+    assert await db_session.get(SyncSaleProjection, first.sale_id) is not None
+    replayed = await edge.apply(chunk_as_pull(manifest=manifest, chunk=chunks[0]))
+    assert replayed.status == "synced"
+    assert replayed.duplicates == 1
+    assert replayed.last_sequence == 1
+    resumed = await edge.apply(chunk_as_pull(manifest=manifest, chunk=chunks[1]))
+    assert resumed.status == "synced"
+    assert resumed.last_sequence == 2
+    assert await db_session.get(SyncSaleProjection, historical_second.sale_id) is not None
+
+    applied = await edge.apply(pull)
     assert applied.status == "synced"
-    assert applied.last_sequence == 2
+    assert applied.last_sequence == 3
+    verified = await edge.verify_projection(
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        origin_node_id=pull.origin_node_id,
+        writer_epoch=pull.writer_epoch,
+    )
+    assert verified.status == "synced"
 
 
 async def test_outbox_rejects_events_from_another_writer_epoch(

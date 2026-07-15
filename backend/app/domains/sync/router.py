@@ -5,14 +5,17 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.domains.foundation.router import require_support
 from app.domains.sync.auth import EdgeRequestContext, get_edge_context
+from app.domains.sync.bootstrap import BootstrapScope
 from app.domains.sync.repository import SyncCloudRepository
 from app.domains.sync.schemas import (
+    SyncBootstrapChunkRead,
+    SyncBootstrapManifestRead,
     SyncCredentialRotate,
     SyncNodeCreate,
     SyncNodeCredentialRead,
@@ -46,6 +49,26 @@ def _admin_service(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> SyncAdminService:
     return SyncAdminService(SyncCloudRepository(db))
+
+
+def _bootstrap_scope(context: EdgeRequestContext) -> BootstrapScope:
+    principal = context.principal
+    return BootstrapScope(
+        edge_node_id=principal.node_id,
+        tenant_id=principal.tenant_id,
+        branch_id=principal.branch_id,
+        credential_kid=principal.credential_kid,
+        credential_digest=principal.credential_digest,
+        credential_issued_at=principal.credential_issued_at,
+        credential_expires_at=principal.credential_expires_at,
+        origin_node_id=principal.shadow_start_origin_node_id,
+        writer_epoch=principal.shadow_start_writer_epoch,
+        root_source_checksum=principal.shadow_root_source_checksum,
+        root_projection_checksum=principal.shadow_root_projection_checksum,
+        checkpoint_sequence=principal.shadow_start_sequence,
+        source_checksum=principal.shadow_start_checksum,
+        projection_checksum=principal.shadow_start_projection_checksum,
+    )
 
 
 @admin_router.post(
@@ -145,8 +168,45 @@ async def pull_events(
         shadow_start_sequence=principal.shadow_start_sequence,
         shadow_start_checksum=principal.shadow_start_checksum,
         shadow_start_projection_checksum=principal.shadow_start_projection_checksum,
+        shadow_start_origin_node_id=principal.shadow_start_origin_node_id,
+        shadow_start_writer_epoch=principal.shadow_start_writer_epoch,
         after_sequence=after_sequence,
         limit=limit,
+    )
+
+
+@router.get("/bootstrap/manifest", response_model=SyncBootstrapManifestRead)
+async def get_bootstrap_manifest(
+    response: Response,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+) -> SyncBootstrapManifestRead:
+    _prevent_credential_caching(response)
+    return await SyncCloudService(SyncCloudRepository(context.session)).bootstrap_manifest(
+        scope=_bootstrap_scope(context)
+    )
+
+
+@router.get(
+    "/bootstrap/{bootstrap_id}/chunks/{chunk_index}",
+    response_model=SyncBootstrapChunkRead,
+)
+async def get_bootstrap_chunk(
+    bootstrap_id: UUID,
+    response: Response,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+    chunk_index: Annotated[int, Path(ge=0)],
+) -> SyncBootstrapChunkRead:
+    _prevent_credential_caching(response)
+    return await SyncCloudService(SyncCloudRepository(context.session)).bootstrap_chunk(
+        bootstrap_id=bootstrap_id,
+        chunk_index=chunk_index,
+        scope=_bootstrap_scope(context),
     )
 
 

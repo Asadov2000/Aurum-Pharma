@@ -129,6 +129,13 @@ async def committed_handover_scaffold(
                             {"tenant_id": tenant_id},
                         )
                     await session.execute(
+                        text(
+                            "DELETE FROM public.sync_node WHERE tenant_id = :tenant_id "
+                            "AND node_kind = 'edge'"
+                        ),
+                        {"tenant_id": tenant_id},
+                    )
+                    await session.execute(
                         text("DELETE FROM public.sync_stream WHERE tenant_id = :tenant_id"),
                         {"tenant_id": tenant_id},
                     )

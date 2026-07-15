@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Annotated, cast
 from uuid import UUID
 
@@ -32,6 +33,14 @@ class EdgePrincipal:
     node_id: UUID
     tenant_id: UUID
     branch_id: UUID
+    credential_kid: UUID
+    credential_digest: str = field(repr=False)
+    credential_issued_at: datetime
+    credential_expires_at: datetime
+    shadow_start_origin_node_id: UUID
+    shadow_start_writer_epoch: int
+    shadow_root_source_checksum: str
+    shadow_root_projection_checksum: str
     shadow_start_sequence: int
     shadow_start_checksum: str
     shadow_start_projection_checksum: str
@@ -127,6 +136,14 @@ async def get_edge_context(
                 node_id=row["node_id"],
                 tenant_id=row["tenant_id"],
                 branch_id=row["branch_id"],
+                credential_kid=kid,
+                credential_digest=credential_hash,
+                credential_issued_at=row["credential_issued_at"],
+                credential_expires_at=row["credential_expires_at"],
+                shadow_start_origin_node_id=row["shadow_start_origin_node_id"],
+                shadow_start_writer_epoch=int(row["shadow_start_writer_epoch"]),
+                shadow_root_source_checksum=str(row["shadow_root_source_checksum"]),
+                shadow_root_projection_checksum=str(row["shadow_root_projection_checksum"]),
                 shadow_start_sequence=int(row["shadow_start_sequence"]),
                 shadow_start_checksum=str(row["shadow_start_checksum"]),
                 shadow_start_projection_checksum=str(row["shadow_start_projection_checksum"]),

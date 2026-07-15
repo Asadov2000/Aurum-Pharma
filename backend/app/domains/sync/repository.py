@@ -210,7 +210,10 @@ class SyncCloudRepository:
         display_name: str,
         credential_kid: UUID,
         credential_hash: str,
+        credential_issued_at: datetime,
         credential_expires_at: datetime,
+        shadow_start_origin_node_id: UUID,
+        shadow_start_writer_epoch: int,
         shadow_start_sequence: int,
         shadow_start_checksum: str,
         shadow_start_projection_checksum: str,
@@ -226,7 +229,10 @@ class SyncCloudRepository:
                 display_name=display_name,
                 credential_kid=credential_kid,
                 credential_hash=credential_hash,
+                credential_issued_at=credential_issued_at,
                 credential_expires_at=credential_expires_at,
+                shadow_start_origin_node_id=shadow_start_origin_node_id,
+                shadow_start_writer_epoch=shadow_start_writer_epoch,
                 shadow_start_sequence=shadow_start_sequence,
                 shadow_start_checksum=shadow_start_checksum,
                 shadow_start_projection_checksum=shadow_start_projection_checksum,
@@ -254,6 +260,7 @@ class SyncCloudRepository:
         node_id: UUID,
         credential_kid: UUID,
         credential_hash: str,
+        credential_issued_at: datetime,
         credential_expires_at: datetime,
     ) -> SyncNode | None:
         result = await self.session.execute(
@@ -266,6 +273,7 @@ class SyncCloudRepository:
             .values(
                 credential_kid=credential_kid,
                 credential_hash=credential_hash,
+                credential_issued_at=credential_issued_at,
                 credential_expires_at=credential_expires_at,
             )
             .returning(SyncNode)
@@ -469,22 +477,21 @@ class SyncCloudRepository:
         writer_epoch: int,
         after_sequence: int,
         limit: int,
+        through_sequence: int | None = None,
     ) -> list[SyncOutboxEvent]:
-        result = await self.session.execute(
-            select(SyncOutboxEvent)
-            .where(
-                SyncOutboxEvent.tenant_id == tenant_id,
-                SyncOutboxEvent.branch_id == branch_id,
-                SyncOutboxEvent.origin_node_id == origin_node_id,
-                SyncOutboxEvent.writer_epoch == writer_epoch,
-                SyncOutboxEvent.sequence > after_sequence,
-                SyncOutboxEvent.stream_checksum.is_not(None),
-                SyncOutboxEvent.projection_hash.is_not(None),
-                SyncOutboxEvent.projection_checksum.is_not(None),
-            )
-            .order_by(SyncOutboxEvent.sequence)
-            .limit(limit)
+        stmt = select(SyncOutboxEvent).where(
+            SyncOutboxEvent.tenant_id == tenant_id,
+            SyncOutboxEvent.branch_id == branch_id,
+            SyncOutboxEvent.origin_node_id == origin_node_id,
+            SyncOutboxEvent.writer_epoch == writer_epoch,
+            SyncOutboxEvent.sequence > after_sequence,
+            SyncOutboxEvent.stream_checksum.is_not(None),
+            SyncOutboxEvent.projection_hash.is_not(None),
+            SyncOutboxEvent.projection_checksum.is_not(None),
         )
+        if through_sequence is not None:
+            stmt = stmt.where(SyncOutboxEvent.sequence <= through_sequence)
+        result = await self.session.execute(stmt.order_by(SyncOutboxEvent.sequence).limit(limit))
         return list(result.scalars().all())
 
     async def get_event_at_sequence(

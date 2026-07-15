@@ -291,6 +291,11 @@ async def test_machine_dependency_derives_rls_scope_from_committed_credential(
         context = await anext(dependency)
         assert context.principal.node_id == issued.id
         assert context.principal.tenant_id == issued.tenant_id
+        assert context.principal.credential_kid == parse_edge_credential(issued.credential).kid
+        assert context.principal.shadow_start_origin_node_id == stream.writer_node_id
+        assert context.principal.shadow_start_writer_epoch == stream.writer_epoch
+        assert context.principal.shadow_root_source_checksum == "0" * 64
+        assert context.principal.shadow_root_projection_checksum == "0" * 64
         db_scope = (
             await context.session.execute(
                 text(
@@ -334,6 +339,13 @@ async def test_machine_dependency_derives_rls_scope_from_committed_credential(
                         text(f"DELETE FROM {table} WHERE tenant_id = :tenant_id"),
                         {"tenant_id": tenant_id},
                     )
+                await connection.execute(
+                    text(
+                        "DELETE FROM sync_node WHERE tenant_id = :tenant_id "
+                        "AND node_kind = 'edge'"
+                    ),
+                    {"tenant_id": tenant_id},
+                )
                 await connection.execute(
                     text("DELETE FROM sync_stream WHERE tenant_id = :tenant_id"),
                     {"tenant_id": tenant_id},

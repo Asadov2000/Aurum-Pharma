@@ -192,12 +192,15 @@ async def test_edge_session_is_restricted_to_its_branch(
                 text(
                     "INSERT INTO sync_node ("
                     "tenant_id, branch_id, node_kind, mode, status, display_name, "
-                    "register_id, credential_kid, credential_hash, credential_expires_at"
+                    "register_id, credential_kid, credential_hash, credential_issued_at, "
+                    "credential_expires_at, shadow_start_origin_node_id, "
+                    "shadow_start_writer_epoch"
                     ") VALUES "
                     "(:tenant_id,:a,'edge','shadow_readonly','active','Edge A',"
-                    ":ra,gen_random_uuid(),repeat('a',64),now()+interval '1 day'),"
+                    ":ra,gen_random_uuid(),repeat('a',64),now(),now()+interval '1 day',:ca,1),"
                     "(:tenant_id,:b,'edge','shadow_readonly','active','Edge B',"
-                    ":rb,gen_random_uuid(),repeat('b',64),now()+interval '1 day') RETURNING id"
+                    ":rb,gen_random_uuid(),repeat('b',64),now(),now()+interval '1 day',:cb,1) "
+                    "RETURNING id"
                 ),
                 {
                     "tenant_id": tenant_id,
@@ -205,6 +208,8 @@ async def test_edge_session_is_restricted_to_its_branch(
                     "b": branch_ids[1],
                     "ra": register_ids[0],
                     "rb": register_ids[1],
+                    "ca": cloud_ids[0],
+                    "cb": cloud_ids[1],
                 },
             )
             edge_ids = [row[0] for row in edge_rows]
@@ -458,6 +463,19 @@ async def test_edge_session_is_restricted_to_its_branch(
                     "sync_inbox",
                     "sync_outbox",
                     "register_receipt_counter",
+                ):
+                    await connection.execute(
+                        text(f"DELETE FROM {table} WHERE tenant_id = :tenant_id"),
+                        {"tenant_id": tenant_id},
+                    )
+                await connection.execute(
+                    text(
+                        "DELETE FROM sync_node WHERE tenant_id = :tenant_id "
+                        "AND node_kind = 'edge'"
+                    ),
+                    {"tenant_id": tenant_id},
+                )
+                for table in (
                     "sync_stream",
                     "sync_writer_epoch",
                     "sync_node",

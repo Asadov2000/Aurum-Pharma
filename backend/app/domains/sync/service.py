@@ -20,6 +20,14 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.pos.schemas import SaleCheckoutResult
+from app.domains.sync.bootstrap import (
+    BootstrapScope,
+    BootstrapValidationError,
+    bootstrap_expires_at,
+    bootstrap_id_for,
+    build_manifest,
+    chunk_payload_hash,
+)
 from app.domains.sync.credentials import EdgeCredential, issue_edge_credential
 from app.domains.sync.integrity import (
     canonical_json_hash,
@@ -34,6 +42,8 @@ from app.domains.sync.models import SyncCursor, SyncInboxEvent, SyncNode, SyncSa
 from app.domains.sync.repository import SyncCloudRepository, SyncEdgeRepository
 from app.domains.sync.schemas import (
     EdgeApplyResult,
+    SyncBootstrapChunkRead,
+    SyncBootstrapManifestRead,
     SyncEventEnvelope,
     SyncNodeCreate,
     SyncNodeCredentialRead,
@@ -88,13 +98,18 @@ class SyncAdminService:
             tenant_id=payload.tenant_id, branch_id=payload.branch_id
         )
         credential = issue_edge_credential()
+        credential_issued_at = utc_now()
         node = await self.repo.create_edge_node(
             tenant_id=payload.tenant_id,
             branch_id=payload.branch_id,
             display_name=payload.display_name.strip(),
             credential_kid=credential.kid,
             credential_hash=credential.digest,
-            credential_expires_at=utc_now() + timedelta(days=payload.credential_valid_days),
+            credential_issued_at=credential_issued_at,
+            credential_expires_at=credential_issued_at
+            + timedelta(days=payload.credential_valid_days),
+            shadow_start_origin_node_id=stream.writer_node_id,
+            shadow_start_writer_epoch=stream.writer_epoch,
             shadow_start_sequence=stream.last_sequence,
             shadow_start_checksum=stream.current_checksum,
             shadow_start_projection_checksum=stream.current_projection_checksum,
@@ -112,11 +127,13 @@ class SyncAdminService:
         if existing.status != "active":
             raise BusinessRuleError("Revoked Edge node cannot receive a new credential")
         credential = issue_edge_credential()
+        credential_issued_at = utc_now()
         node = await self.repo.rotate_edge_credential(
             node_id=node_id,
             credential_kid=credential.kid,
             credential_hash=credential.digest,
-            credential_expires_at=utc_now() + timedelta(days=valid_days),
+            credential_issued_at=credential_issued_at,
+            credential_expires_at=credential_issued_at + timedelta(days=valid_days),
         )
         if node is None:
             raise ConflictError("Edge node changed while rotating its credential")
@@ -203,6 +220,8 @@ class SyncCloudService:
         shadow_start_sequence: int,
         shadow_start_checksum: str,
         shadow_start_projection_checksum: str,
+        shadow_start_origin_node_id: UUID | None = None,
+        shadow_start_writer_epoch: int | None = None,
         after_sequence: int,
         limit: int,
     ) -> SyncPullResponse:
@@ -217,6 +236,17 @@ class SyncCloudService:
             effective_after = after_sequence
         if effective_after > stream.last_sequence:
             raise ConflictError("Sync cursor is ahead of the Cloud stream")
+        if effective_after == shadow_start_sequence and (
+            (
+                shadow_start_origin_node_id is not None
+                and shadow_start_origin_node_id != stream.writer_node_id
+            )
+            or (
+                shadow_start_writer_epoch is not None
+                and shadow_start_writer_epoch != stream.writer_epoch
+            )
+        ):
+            raise ConflictError("Edge enrollment belongs to a different writer epoch")
 
         if effective_after == shadow_start_sequence:
             after_source_checksum = shadow_start_checksum
@@ -275,6 +305,164 @@ class SyncCloudService:
             cloud_last_sequence=stream.last_sequence,
             events=envelopes,
             has_more=has_more,
+        )
+
+    async def _bootstrap_bundle(
+        self,
+        *,
+        scope: BootstrapScope,
+    ) -> tuple[SyncBootstrapManifestRead, list[list[SyncEventEnvelope]]]:
+        settings = get_settings()
+        if scope.checkpoint_sequence > settings.EDGE_BOOTSTRAP_MAX_EVENTS:
+            raise BusinessRuleError("Bootstrap history requires a compact snapshot")
+        rows = await self.repo.list_events(
+            tenant_id=scope.tenant_id,
+            branch_id=scope.branch_id,
+            origin_node_id=scope.origin_node_id,
+            writer_epoch=scope.writer_epoch,
+            after_sequence=0,
+            limit=max(1, scope.checkpoint_sequence + 1),
+            through_sequence=scope.checkpoint_sequence,
+        )
+        if len(rows) != scope.checkpoint_sequence:
+            raise AurumError("Bootstrap history is incomplete")
+        events = [SyncEventEnvelope.model_validate(row) for row in rows]
+        previous_source = scope.root_source_checksum
+        previous_projection = scope.root_projection_checksum
+        try:
+            for event in events:
+                SyncEdgeApplyService._validate_event(
+                    event,
+                    previous_source_checksum=previous_source,
+                    previous_projection_checksum=previous_projection,
+                )
+                previous_source = event.stream_checksum
+                previous_projection = event.projection_checksum
+            signed, chunks = build_manifest(
+                edge_node_id=scope.edge_node_id,
+                tenant_id=scope.tenant_id,
+                branch_id=scope.branch_id,
+                credential_kid=scope.credential_kid,
+                credential_digest=scope.credential_digest,
+                credential_issued_at=scope.credential_issued_at,
+                credential_expires_at=scope.credential_expires_at,
+                origin_node_id=scope.origin_node_id,
+                writer_epoch=scope.writer_epoch,
+                root_source_checksum=scope.root_source_checksum,
+                root_projection_checksum=scope.root_projection_checksum,
+                checkpoint_sequence=scope.checkpoint_sequence,
+                source_checksum=scope.source_checksum,
+                projection_checksum=scope.projection_checksum,
+                events=events,
+                chunk_size=settings.EDGE_BOOTSTRAP_CHUNK_SIZE,
+                ttl_seconds=settings.EDGE_BOOTSTRAP_TTL_SECONDS,
+            )
+        except (_EnvelopeError, BootstrapValidationError) as exc:
+            raise AurumError("Bootstrap integrity validation failed") from exc
+        if utc_now() >= signed.manifest.expires_at:
+            raise BusinessRuleError(
+                "Bootstrap enrollment window expired; rotate the Edge credential"
+            )
+        return signed, chunks
+
+    async def bootstrap_manifest(self, *, scope: BootstrapScope) -> SyncBootstrapManifestRead:
+        signed, _ = await self._bootstrap_bundle(scope=scope)
+        return signed
+
+    async def bootstrap_chunk(
+        self,
+        *,
+        bootstrap_id: UUID,
+        chunk_index: int,
+        scope: BootstrapScope,
+    ) -> SyncBootstrapChunkRead:
+        settings = get_settings()
+        if scope.checkpoint_sequence > settings.EDGE_BOOTSTRAP_MAX_EVENTS:
+            raise BusinessRuleError("Bootstrap history requires a compact snapshot")
+        expected_bootstrap_id = bootstrap_id_for(
+            edge_node_id=scope.edge_node_id,
+            tenant_id=scope.tenant_id,
+            branch_id=scope.branch_id,
+            credential_kid=scope.credential_kid,
+            origin_node_id=scope.origin_node_id,
+            writer_epoch=scope.writer_epoch,
+            checkpoint_sequence=scope.checkpoint_sequence,
+            issued_at=scope.credential_issued_at,
+        )
+        if expected_bootstrap_id != bootstrap_id:
+            raise NotFoundError("Bootstrap not found")
+        chunk_count = (
+            scope.checkpoint_sequence + settings.EDGE_BOOTSTRAP_CHUNK_SIZE - 1
+        ) // settings.EDGE_BOOTSTRAP_CHUNK_SIZE
+        if chunk_index < 0 or chunk_index >= chunk_count:
+            raise NotFoundError("Bootstrap chunk not found")
+        try:
+            expires_at = bootstrap_expires_at(
+                credential_issued_at=scope.credential_issued_at,
+                credential_expires_at=scope.credential_expires_at,
+                ttl_seconds=settings.EDGE_BOOTSTRAP_TTL_SECONDS,
+            )
+        except BootstrapValidationError as exc:
+            raise AurumError("Bootstrap integrity validation failed") from exc
+        if utc_now() >= expires_at:
+            raise BusinessRuleError(
+                "Bootstrap enrollment window expired; rotate the Edge credential"
+            )
+
+        first_sequence = chunk_index * settings.EDGE_BOOTSTRAP_CHUNK_SIZE + 1
+        last_sequence = min(
+            scope.checkpoint_sequence,
+            first_sequence + settings.EDGE_BOOTSTRAP_CHUNK_SIZE - 1,
+        )
+        rows = await self.repo.list_events(
+            tenant_id=scope.tenant_id,
+            branch_id=scope.branch_id,
+            origin_node_id=scope.origin_node_id,
+            writer_epoch=scope.writer_epoch,
+            after_sequence=first_sequence - 1,
+            through_sequence=last_sequence,
+            limit=settings.EDGE_BOOTSTRAP_CHUNK_SIZE + 1,
+        )
+        if len(rows) != last_sequence - first_sequence + 1:
+            raise AurumError("Bootstrap chunk history is incomplete")
+        events = [SyncEventEnvelope.model_validate(row) for row in rows]
+        if first_sequence == 1:
+            previous_source = scope.root_source_checksum
+            previous_projection = scope.root_projection_checksum
+        else:
+            previous = await self.repo.get_event_at_sequence(
+                tenant_id=scope.tenant_id,
+                branch_id=scope.branch_id,
+                origin_node_id=scope.origin_node_id,
+                writer_epoch=scope.writer_epoch,
+                sequence=first_sequence - 1,
+            )
+            if (
+                previous is None
+                or previous.stream_checksum is None
+                or previous.projection_checksum is None
+            ):
+                raise AurumError("Bootstrap chunk checkpoint is incomplete")
+            previous_source = previous.stream_checksum
+            previous_projection = previous.projection_checksum
+        try:
+            for expected_sequence, event in enumerate(events, start=first_sequence):
+                if event.sequence != expected_sequence:
+                    raise BootstrapValidationError("Bootstrap chunk sequence is invalid")
+                SyncEdgeApplyService._validate_event(
+                    event,
+                    previous_source_checksum=previous_source,
+                    previous_projection_checksum=previous_projection,
+                )
+                previous_source = event.stream_checksum
+                previous_projection = event.projection_checksum
+        except (_EnvelopeError, BootstrapValidationError) as exc:
+            raise AurumError("Bootstrap chunk integrity validation failed") from exc
+        return SyncBootstrapChunkRead(
+            bootstrap_id=bootstrap_id,
+            chunk_index=chunk_index,
+            payload_hash=chunk_payload_hash(index=chunk_index, events=events),
+            events=events,
         )
 
     async def report(

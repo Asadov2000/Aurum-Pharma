@@ -31,7 +31,10 @@ class SyncNode(Base):
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     credential_kid: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     credential_hash: Mapped[str | None] = mapped_column(Text)
+    credential_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credential_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    shadow_start_origin_node_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    shadow_start_writer_epoch: Mapped[int | None] = mapped_column(BigInteger)
     shadow_start_sequence: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )

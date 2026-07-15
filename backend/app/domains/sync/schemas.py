@@ -47,6 +47,61 @@ class SyncPullResponse(BaseModel):
     has_more: bool
 
 
+class SyncBootstrapChunkDescriptor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=0)
+    first_sequence: int = Field(gt=0)
+    last_sequence: int = Field(gt=0)
+    event_count: int = Field(gt=0)
+    after_source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    after_projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SyncBootstrapManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    bootstrap_id: UUID
+    edge_node_id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    credential_kid: UUID
+    origin_node_id: UUID
+    writer_epoch: int = Field(gt=0)
+    root_source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    root_projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    checkpoint_sequence: int = Field(ge=0)
+    source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    snapshot_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_size: int = Field(gt=0, le=100)
+    chunks: list[SyncBootstrapChunkDescriptor]
+    issued_at: datetime
+    expires_at: datetime
+
+
+class SyncBootstrapManifestRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manifest: SyncBootstrapManifest
+    manifest_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    signature_algorithm: Literal["hmac-sha256-edge-v1"]
+    signature: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SyncBootstrapChunkRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bootstrap_id: UUID
+    chunk_index: int = Field(ge=0)
+    payload_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    events: list[SyncEventEnvelope]
+
+
 class SyncNodeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -67,7 +122,10 @@ class SyncNodeRead(BaseModel):
     status: Literal["active", "revoked"]
     display_name: str
     credential_kid: UUID
+    credential_issued_at: datetime
     credential_expires_at: datetime
+    shadow_start_origin_node_id: UUID
+    shadow_start_writer_epoch: int = Field(gt=0)
     shadow_start_sequence: int
     shadow_start_checksum: Checksum
     shadow_start_projection_checksum: Checksum
