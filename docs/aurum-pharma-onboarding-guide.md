@@ -24,16 +24,16 @@ Aurum Pharma — SaaS-система автоматизации аптек дл�
 
 | Область | Сейчас |
 |---|---:|
-| Backend-домены | 13 |
+| Backend-домены | 14 |
 | Frontend-фичи | 15 |
-| Alembic-миграции | 24 |
-| ORM-модели | 34 |
+| Alembic-миграции | 51 |
+| ORM-модели | 57 |
 | Frontend routes | 20 |
 | Docker-сервисы | 9 |
 | Playwright E2E specs | 11 |
-| Playwright E2E tests | 28 |
-| Frontend Vitest tests | 226 passed в последнем полном прогоне; статический grep сейчас находит 227 `it/test` |
-| Последний полный backend pytest-прогон в рабочей сессии | 249 passed |
+| Playwright E2E tests | 29 |
+| Frontend Vitest tests | 256 passed в последнем полном прогоне |
+| Последний полный backend pytest-прогон в рабочей сессии | 419 passed |
 
 Важно: документация полезна, но источник истины — реальный код. Если документ и код расходятся, сначала проверяй код через `rg`.
 
@@ -337,7 +337,8 @@ CI запускает backend quality gate, frontend test/build и полный 
 3. Подключить реальную SMTP-доставку login/invite кодов.
 4. Настроить production secrets: JWT, DB, MinIO, Redis, CORS, TLS.
 5. Настроить backup/restore PostgreSQL и MinIO.
-6. Провести security review RLS, JWT, CORS, storage tokens.
+6. Завершить release security review RLS, JWT, CORS, storage tokens и провести
+   отдельную проверку production-конфигурации.
 7. Проверить POS на параллельные продажи и конкуренцию за партии.
 8. Подготовить staging/prod deploy-артефакты.
 9. Проверить реальное оборудование: сканер, чековый принтер, денежный ящик.
@@ -345,13 +346,15 @@ CI запускает backend quality gate, frontend test/build и полный 
 
 Технический долг/риски:
 
-- refresh-токен пока хранится в `localStorage`; httpOnly cookie запланирован на Этап 2;
-- `notification_subscription` и `notification_delivery` стоит отдельно проверить на tenant-защиту;
+- access-токен хранится только в памяти frontend, refresh-токен передаётся в
+  `httpOnly` cookie; токены не сохраняются в `localStorage`;
+- `notification_subscription` и `notification_delivery` уже покрыты tenant/RLS
+  isolation-тестами; при изменении схемы эти тесты обязательны;
 - внешние notification/email каналы пока stub;
-- offline-касса не реализована;
+- offline-касса не включена: есть только fail-closed контракт и deny-only runtime;
 - production hosting ещё не выбран;
 - формальный SLA, WAF/IDS/pentest — позже.
-- есть drift документации: `docs/handoff.md` описывает план на первые 12 миграций, а в коде уже 24 миграции и дополнительные UI-разделы; `docs/spec-v3.md` местами отстаёт от факта, например по тёмной теме.
+- есть drift документации: `docs/handoff.md` описывает план на первые 12 миграций, а в коде уже 51 миграция и дополнительные UI-разделы; `docs/spec-v3.md` местами отстаёт от факта, например по тёмной теме.
 
 ---
 
@@ -359,8 +362,8 @@ CI запускает backend quality gate, frontend test/build и полный 
 
 После MVP и первых пилотов:
 
-- httpOnly cookie для refresh-токенов;
-- offline POS через очередь продаж;
+- production-адаптеры offline POS через очередь продаж только после аппаратной
+  проверки TPM, trusted time, локальной сессии и sealed anti-rollback state;
 - импорт из 1С:Аптека;
 - эквайринг карт;
 - PDF-экспорт всех отчётов;

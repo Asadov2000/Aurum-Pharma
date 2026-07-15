@@ -18,10 +18,18 @@ Offline-auth также нельзя строить только на систе
 
 ## Решение
 
-Версия v0 вводит только непубликуемый контракт и fail-closed интерфейсы. Runtime
-использует исключительно `DenyAllOfflineAuthVerifier`. Новых routes, таблиц,
-writer API и строк `offline_auth` в component ledger нет; профиль
-`cash_sale_v1_full_v1` остаётся недоступным.
+Версия v0 вводит строгий непубликуемый контракт, чистый fail-closed decision
+pipeline и интерфейсы для будущих адаптеров. Runtime использует исключительно
+`DenyAllOfflineAuthVerifier`. Новых routes, таблиц, writer API и строк
+`offline_auth` в component ledger нет; профиль `cash_sale_v1_full_v1` остаётся
+недоступным.
+
+`OfflineAuthDecisionPipeline` не является включённым runtime-механизмом. Он
+принимает только прямую композицию тестовых или будущих production-адаптеров.
+Изменяемые scope, активная device binding, локальная сессия, authorization
+snapshot, trusted time и anti-rollback читаются внутри одного `serialized()`
+state transaction. Такой адаптер обязан удерживать сериализацию до успешного
+commit; ошибка входа, проверки, `check_and_advance` или commit приводит к deny.
 
 Cloud grant содержит только:
 
@@ -53,12 +61,15 @@ b"aurum:offline-auth-grant:v0\0" + canonical_json_bytes(claims)
 Перед будущим `allow` обязательны все проверки:
 
 1. strict parse, canonical hash и Ed25519 подпись доверенным Cloud key id;
-2. полное равенство active writer scope и TPM device binding;
-3. существующая локальная сессия того же пользователя;
+2. полное равенство active writer scope и зарегистрированной TPM device
+   binding, затем доказательство владения этим ключом;
+3. существующая локальная сессия того же пользователя с точным
+   `authenticated_at` из grant;
 4. точное равенство policy/subject revisions с authorization snapshot;
 5. наличие команды одновременно в grant и authorization snapshot;
 6. защищённое монотонное время и непрерывность после перезапуска;
-7. атомарный anti-rollback `check_and_advance` перед возвратом `allow`.
+7. атомарный anti-rollback `check_and_advance` как последняя изменяемая
+   операция перед успешным commit и возвратом `allow`.
 
 Ошибка, отсутствие или повреждение любой зависимости означает общий
 `offline_auth_unavailable` без fallback. DPAPI используется только для защиты
@@ -72,8 +83,9 @@ sealed high-water state. Grant сам не создаёт и не восстан
 ## Последствия
 
 Плюсы: формат grant детерминирован и переносим между Cloud и Edge; опасные поля
-не могут незаметно попасть в payload; текущий runtime технически не способен
-включить offline-auth одним флагом или неполной настройкой.
+не могут незаметно попасть в payload; порядок проверок и единая транзакционная
+граница зафиксированы тестами; текущий runtime технически не способен включить
+offline-auth одним флагом или неполной настройкой.
 
 Цена: v0 ещё не даёт кассиру работать без online-сессии. Следующий положительный
 этап возможен только после реализации и аппаратной проверки всех адаптеров,
