@@ -140,9 +140,9 @@ def create_access_token(
 ) -> str:
     """Access token = short-lived JWT with identity claims only.
 
-    No permissions list inside — permissions live in Redis cache, keyed by user
-    and tenant. This keeps the header small and lets us invalidate immediately
-    when an assignment changes.
+    No permissions list inside: authorization is loaded from PostgreSQL for the
+    current user and tenant. This avoids stale JWT and cross-transaction cache
+    state when an assignment changes.
     """
     extra: dict[str, Any] = {
         "tenant_id": str(tenant_id) if tenant_id else None,

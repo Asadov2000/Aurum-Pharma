@@ -453,20 +453,23 @@ class RolesRepository:
         return [_directory_user_from_row(row) for row in result.mappings().all()]
 
     # -------------------------------------------------------------------------
-    # effective permissions (loaded from DB; cached in Redis by the service)
+    # effective permissions (authoritative database read)
     # -------------------------------------------------------------------------
 
     async def effective_permissions(self, user_id: UUID, tenant_id: UUID) -> set[str]:
-        """Union of permissions across all active assignments of this user in
-        this tenant."""
+        """Active permissions granted by active roles and assignments."""
         stmt = (
             select(RolePermission.permission_code)
+            .join(Role, Role.id == RolePermission.role_id)
+            .join(Permission, Permission.code == RolePermission.permission_code)
             .join(UserAssignment, UserAssignment.role_id == RolePermission.role_id)
             .where(
                 and_(
                     UserAssignment.user_id == user_id,
                     UserAssignment.tenant_id == tenant_id,
                     UserAssignment.is_active.is_(True),
+                    Role.is_active.is_(True),
+                    Permission.is_active.is_(True),
                 )
             )
             .distinct()

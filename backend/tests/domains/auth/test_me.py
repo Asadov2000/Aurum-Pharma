@@ -135,3 +135,49 @@ async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
     body = response.json()
     assert body["permissions"] == ["roles.assign"]
     assert body["level"] == 4
+
+
+async def test_me_ignores_assignments_to_inactive_roles(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    foundation = FoundationService(FoundationRepository(db_session))
+    tenant = await foundation.create_tenant(
+        payload={"name": "Inactive Role Tenant", "contact_email": "inactive-role@aurum.tj"}
+    )
+    user = await make_user(
+        email="inactive-role-user@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
+    role = Role(
+        tenant_id=tenant.id,
+        name="Inactive owner",
+        level=3,
+        is_system=False,
+        is_active=False,
+    )
+    db_session.add(role)
+    await db_session.flush()
+    await db_session.refresh(role)
+    db_session.add(RolePermission(role_id=role.id, permission_code="users.invite"))
+    db_session.add(UserAssignment(user_id=user.id, tenant_id=tenant.id, role_id=role.id))
+    await db_session.flush()
+
+    token = create_access_token(
+        user.id,
+        tenant_id=tenant.id,
+        is_developer=False,
+        is_administrator=False,
+    )
+
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["permissions"] == []
+    assert body["branch_assignments"] == {}
+    assert body["level"] == 4

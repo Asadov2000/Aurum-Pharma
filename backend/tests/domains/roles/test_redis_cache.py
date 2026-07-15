@@ -1,8 +1,6 @@
-"""Effective permissions go through a Redis cache; modifications invalidate."""
+"""Legacy permission-cache keys are ignored and cleaned by mutations."""
 
 from __future__ import annotations
-
-import json
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +10,7 @@ from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService, perms_cache_key
 
 
-async def test_cache_populated_on_first_read(
+async def test_stale_cache_is_never_used_for_authorization(
     db_session: AsyncSession,
     redis: Redis,
     make_tenant,
@@ -35,13 +33,13 @@ async def test_cache_populated_on_first_read(
         password_required=False,
     )
 
-    # First read populates the cache.
+    key = perms_cache_key(user.id, tenant.id)
+    await redis.set(key, '["users.delete"]')
+
     perms_first = await service.get_effective_permissions(user.id, tenant.id)
     assert "pos.sell" in perms_first
-
-    cached = await redis.get(perms_cache_key(user.id, tenant.id))
-    assert cached is not None
-    assert "pos.sell" in json.loads(cached)
+    assert "users.delete" not in perms_first
+    assert await redis.get(key) == '["users.delete"]'
 
 
 async def test_assignment_change_invalidates_cache(
@@ -69,7 +67,7 @@ async def test_assignment_change_invalidates_cache(
     )
     perms = await service.get_effective_permissions(target.id, tenant.id)
     assert "users.invite" not in perms
-    assert await redis.get(perms_cache_key(target.id, tenant.id)) is not None
+    await redis.set(perms_cache_key(target.id, tenant.id), '["users.invite"]')
 
     # Revoke the assignment — invalidation must run.
     await service.revoke_assignment(
@@ -81,7 +79,7 @@ async def test_assignment_change_invalidates_cache(
 
     assert await redis.get(perms_cache_key(target.id, tenant.id)) is None
 
-    # Re-assign as owner — new perms set, cached on next read.
+    # Re-assign as owner: reads still come from the database.
     await service.assign_role(
         actor_level=2,
         actor_id=actor.id,
@@ -123,7 +121,7 @@ async def test_role_permission_change_invalidates_assigned_users_cache(
     )
     perms = await service.get_effective_permissions(target.id, tenant.id)
     assert "pos.sell" in perms
-    assert await redis.get(perms_cache_key(target.id, tenant.id)) is not None
+    await redis.set(perms_cache_key(target.id, tenant.id), '["pos.sell"]')
 
     await service.update_role(
         actor_level=2,

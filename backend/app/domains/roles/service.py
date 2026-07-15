@@ -10,15 +10,13 @@ Effective level used for the check:
 - else: min level across the user's active assignments in the active tenant,
   or 4 ("seller") as a safe ceiling if they have no assignments.
 
-Permission cache lives in Redis: key `auth:perms:{user_id}:{tenant_id}`,
-TTL 5 minutes. Any change that affects a user's permissions
-(create/delete assignment, role swap) calls `invalidate_user_perms` so
-the next request recomputes from the DB.
+Effective permissions are recomputed from PostgreSQL on every request. Legacy
+Redis keys are still invalidated by mutations, but are never trusted: cache
+invalidation cannot be made atomic with the database transaction yet.
 """
 
 from __future__ import annotations
 
-import json
 from uuid import UUID
 
 import structlog
@@ -37,7 +35,6 @@ from app.domains.roles.repository import DirectoryUser, RolesRepository
 
 logger = structlog.get_logger("roles.service")
 
-PERMS_CACHE_TTL_SECONDS = 5 * 60
 PERMS_CACHE_PREFIX = "auth:perms"
 
 # Owner provisioning: a tenant's «Владелец» role is instantiated from the global
@@ -547,28 +544,12 @@ class RolesService:
         return updated
 
     # -------------------------------------------------------------------------
-    # Effective permissions (Redis cache)
+    # Effective permissions (authoritative DB read + legacy-key cleanup)
     # -------------------------------------------------------------------------
 
     async def get_effective_permissions(self, user_id: UUID, tenant_id: UUID) -> set[str]:
-        """Returns the cached perm set or recomputes + caches it."""
-        if self.redis is not None:
-            cached = await self.redis.get(perms_cache_key(user_id, tenant_id))
-            if cached:
-                try:
-                    return set(json.loads(cached))
-                except (ValueError, TypeError):
-                    pass  # fall through to recompute
-
-        perms = await self.repo.effective_permissions(user_id, tenant_id)
-
-        if self.redis is not None:
-            await self.redis.set(
-                perms_cache_key(user_id, tenant_id),
-                json.dumps(sorted(perms)),
-                ex=PERMS_CACHE_TTL_SECONDS,
-            )
-        return perms
+        """Load permissions from the transactionally current database state."""
+        return await self.repo.effective_permissions(user_id, tenant_id)
 
     async def invalidate_user_perms(self, user_id: UUID, tenant_id: UUID) -> None:
         if self.redis is None:

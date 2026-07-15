@@ -4,8 +4,7 @@
 `AuthContextMiddleware`, opens a transaction, and seeds the RLS GUCs.
 
 `current_user` decodes the access token and assembles a CurrentUser snapshot
-that includes the effective permission set (loaded from Redis cache, or
-recomputed from DB and re-cached).
+that includes the effective permission set recomputed from the database.
 """
 
 from __future__ import annotations
@@ -225,14 +224,13 @@ async def current_user(
         assignments = await service.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
         active_assignments = [a for a in assignments if a.is_active]
         roles_by_id = await service.repo.roles_by_ids([a.role_id for a in active_assignments])
-        for a in assignments:
-            if not a.is_active:
+        for a in active_assignments:
+            role = roles_by_id.get(a.role_id)
+            if role is None or not role.is_active:
                 continue
             key = str(a.branch_id) if a.branch_id is not None else "tenant"
             branch_assignments[key] = str(a.role_id)
-            role = roles_by_id.get(a.role_id)
-            if role is not None:
-                assignment_levels[key] = role.level
+            assignment_levels[key] = role.level
 
     return CurrentUser(
         user_id=user_id,

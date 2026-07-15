@@ -90,7 +90,7 @@ React UI
 | `frontend/` | React 18, TypeScript, Vite, TanStack Router/Query |
 | `backend/` | FastAPI, SQLAlchemy async, Alembic, Celery |
 | PostgreSQL 16 | Основная БД, RLS, audit triggers |
-| Redis | Кэш permissions, очереди Celery |
+| Redis | Rate limiting, временные ключи и очереди Celery; authorization из Redis не читается |
 | MinIO | Файлы: импорты, будущие документы/экспорты |
 | Celery worker/beat | Фоновые задачи и расписания |
 | Playwright | Сквозные браузерные проверки |

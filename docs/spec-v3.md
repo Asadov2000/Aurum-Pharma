@@ -79,9 +79,9 @@
 
 ### 2.2 Токены
 
-- **Access token (JWT)**: 15 минут TTL. Содержит `user_id`, `tenant_id`, флаги `is_developer/is_administrator`. **НЕ содержит список permissions** (они кешируются в Redis, ключ `auth:perms:{user_id}:{tenant_id}`, TTL 5 минут)
+- **Access token (JWT)**: 15 минут TTL. Содержит `user_id`, `tenant_id`, флаги `is_developer/is_administrator`. **НЕ содержит список permissions**; эффективные права читаются из PostgreSQL для каждого запроса. Межзапросный Redis-кэш запрещён до появления транзакционной authorization revision
 - **Refresh token**: 7 дней TTL. Хранится hash (sha256) в БД таблице `session`. Ротация при каждом использовании
-- **Refresh-токен в Этапе 1 хранится в localStorage** — известный риск XSS, перенос в httpOnly cookie запланирован на Этап 2
+- **Refresh token** передаётся только в `httpOnly` cookie, access token хранится только в памяти приложения. Sensitive-токены в web storage запрещены
 
 ### 2.3 Rate limiting
 
@@ -234,7 +234,7 @@ Middleware выбирает пул в зависимости от пользов
 
 ### 4.4 Расчёт эффективных прав
 
-В Этапе 1 без override — права = `role.permissions` напрямую. Расчёт делается один раз при логине, кешируется в Redis с TTL 5 минут, инвалидируется при изменении назначения роли.
+В Этапе 1 без override эффективные права — объединение активных permissions всех активных назначений и ролей пользователя в tenant. Они вычисляются из PostgreSQL на каждом запросе. Межзапросный кэш отключён, потому что его инвалидизация до commit допускает короткое повторное появление уже отозванного права.
 
 В Этапе 2 добавится `user_permission_override` (granted/revoked per-user per-branch), формула станет `role.permissions ∪ granted − revoked`.
 
