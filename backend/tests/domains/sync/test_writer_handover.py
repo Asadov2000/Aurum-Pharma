@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from httpx import AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -16,8 +18,11 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 from app.core.errors import BusinessRuleError, ConflictError
+from app.core.time import utc_now
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
+from app.domains.sync.activation_bootstrap import verify_activation_bootstrap
+from app.domains.sync.credentials import parse_edge_credential
 from app.domains.sync.integrity import canonical_json_hash
 from app.domains.sync.models import (
     SyncNode,
@@ -27,6 +32,7 @@ from app.domains.sync.models import (
 )
 from app.domains.sync.repository import SyncCloudRepository
 from app.domains.sync.schemas import (
+    SyncActivationBootstrapRead,
     SyncNodeCreate,
     SyncNodeCredentialRead,
     SyncShadowReportRequest,
@@ -117,6 +123,8 @@ async def committed_handover_scaffold(
                     await _set_support_session(session)
                     for table in (
                         "sync_writer_readiness",
+                        "sync_activation_foundation",
+                        "sync_activation_bootstrap",
                         "sync_writer_activation",
                         "sync_shadow_report",
                         "sync_cursor",
@@ -178,7 +186,6 @@ def _committed_prepare_request(
         expected_sequence=scaffold.stream.last_sequence,
         expected_source_checksum=scaffold.stream.current_checksum,
         expected_projection_checksum=scaffold.stream.current_projection_checksum,
-        bootstrap_snapshot_hash="a" * 64,
     )
 
 
@@ -235,7 +242,6 @@ async def _prepare_handover(
         expected_sequence=stream.last_sequence,
         expected_source_checksum=stream.current_checksum,
         expected_projection_checksum=stream.current_projection_checksum,
-        bootstrap_snapshot_hash="a" * 64,
     )
     epoch = await admin.prepare_writer(request)
     return admin, node, stream, epoch, request
@@ -310,7 +316,7 @@ async def test_prepare_and_cancel_are_idempotent_and_unfreeze_branch(
         is None
     )
 
-    conflicting = request.model_copy(update={"bootstrap_snapshot_hash": "b" * 64})
+    conflicting = request.model_copy(update={"expected_sequence": request.expected_sequence + 1})
     with pytest.raises(ConflictError):
         async with db_session.begin_nested():
             await admin.prepare_writer(conflicting)
@@ -557,6 +563,30 @@ async def test_writer_handover_ledgers_reject_direct_mutation(
             )
     assert getattr(activation_error.value.orig, "sqlstate", None) == "55000"
 
+    with pytest.raises(DBAPIError) as bootstrap_error:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE public.sync_activation_bootstrap "
+                    "SET foundation_hash = :hash "
+                    "WHERE activation_id = :activation_id"
+                ),
+                {"activation_id": prepared.activation_id, "hash": "b" * 64},
+            )
+    assert getattr(bootstrap_error.value.orig, "sqlstate", None) == "55000"
+
+    with pytest.raises(DBAPIError) as foundation_error:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE public.sync_activation_foundation "
+                    "SET payload_hash = :hash "
+                    "WHERE activation_id = :activation_id"
+                ),
+                {"activation_id": prepared.activation_id, "hash": "b" * 64},
+            )
+    assert getattr(foundation_error.value.orig, "sqlstate", None) == "55000"
+
     await _insert_readiness(db_session, node=node, epoch=prepared)
     with pytest.raises(DBAPIError) as readiness_error:
         async with db_session.begin_nested():
@@ -590,7 +620,7 @@ async def test_writer_handover_ledgers_reject_direct_mutation(
     assert getattr(epoch_error.value.orig, "sqlstate", None) == "55000"
 
 
-async def test_runtime_role_records_idempotent_readiness_with_edge_scoped_rls(
+async def test_runtime_role_reads_signed_foundation_but_cannot_report_readiness(
     db_engine: AsyncEngine,
     committed_handover_scaffold: _CommittedHandoverScaffold,
 ) -> None:
@@ -626,46 +656,111 @@ async def test_runtime_role_records_idempotent_readiness_with_edge_scoped_rls(
                 )
                 repo = SyncCloudRepository(app_session)
                 service = SyncCloudService(repo)
-                readiness = await service.record_writer_readiness(
+                credential = parse_edge_credential(scaffold.node.credential)
+                signed = await service.activation_foundation_bootstrap(
+                    activation_id=prepared.activation_id,
                     edge_node_id=scaffold.node.id,
                     tenant_id=scaffold.tenant_id,
                     branch_id=scaffold.branch_id,
-                    payload=payload,
+                    credential_kid=scaffold.node.credential_kid,
+                    credential_digest=credential.digest,
+                    credential_expires_at=scaffold.node.credential_expires_at,
                 )
-                replay = await service.record_writer_readiness(
-                    edge_node_id=scaffold.node.id,
-                    tenant_id=scaffold.tenant_id,
-                    branch_id=scaffold.branch_id,
-                    payload=payload,
+                manifest = verify_activation_bootstrap(
+                    signed,
+                    credential=scaffold.node.credential,
+                    now=utc_now(),
                 )
-                assert readiness.request_hash == canonical_json_hash(
-                    payload.model_dump(mode="json")
-                )
-                assert replay.reported_at == readiness.reported_at
+                assert manifest.activation_id == prepared.activation_id
+                assert manifest.snapshot_hash == prepared.bootstrap_snapshot_hash
+                assert manifest.profile == "foundation_shadow_v1"
+                assert manifest.readiness_eligible is False
+                foundation_payload = signed.foundation.model_dump(mode="json", by_alias=True)
+                assert "contact_email" not in foundation_payload["tenant"]
+                assert "contact_phone" not in foundation_payload["tenant"]
+                assert "printer_config" not in foundation_payload["register"]
 
-                activation = await repo.get_writer_activation(prepared.activation_id)
-                assert activation is not None
-                assert activation.state == "ready"
-                assert activation.ready_at is not None
+                with pytest.raises(BusinessRuleError, match="readiness is disabled"):
+                    await service.record_writer_readiness(
+                        edge_node_id=scaffold.node.id,
+                        tenant_id=scaffold.tenant_id,
+                        branch_id=scaffold.branch_id,
+                        payload=payload,
+                    )
 
-                with pytest.raises(ConflictError):
-                    async with app_session.begin_nested():
+                settings = get_settings()
+                previous_enabled = settings.EDGE_WRITER_READINESS_ENABLED
+                settings.EDGE_WRITER_READINESS_ENABLED = True
+                try:
+                    with pytest.raises(BusinessRuleError, match="Full Edge"):
                         await service.record_writer_readiness(
                             edge_node_id=scaffold.node.id,
                             tenant_id=scaffold.tenant_id,
                             branch_id=scaffold.branch_id,
-                            payload=payload.model_copy(
-                                update={"receipt_baseline_seq": payload.receipt_baseline_seq + 1}
-                            ),
+                            payload=payload,
                         )
+                finally:
+                    settings.EDGE_WRITER_READINESS_ENABLED = previous_enabled
+
+                activation = await repo.get_writer_activation(prepared.activation_id)
+                assert activation is not None
+                assert activation.state == "prepared"
+                assert await repo.get_writer_readiness(prepared.activation_id) is None
 
                 await app_session.execute(
                     text("SELECT set_config('app.edge_node_id', :edge_node_id, true)"),
                     {"edge_node_id": str(uuid4())},
                 )
                 assert await repo.get_writer_activation(prepared.activation_id) is None
+                assert await repo.get_activation_bootstrap(prepared.activation_id) is None
+                assert await repo.get_activation_foundation(prepared.activation_id) is None
     finally:
         await app_engine.dispose()
+
+
+async def test_authenticated_edge_downloads_activation_foundation_endpoint(
+    client: AsyncClient,
+    db_engine: AsyncEngine,
+    committed_handover_scaffold: _CommittedHandoverScaffold,
+) -> None:
+    from app.core.db import app_engine as request_app_engine
+
+    scaffold = committed_handover_scaffold
+    async with AsyncSession(db_engine, expire_on_commit=False) as support_session:
+        async with support_session.begin():
+            await _set_support_session(support_session)
+            prepared = await SyncAdminService(SyncCloudRepository(support_session)).prepare_writer(
+                _committed_prepare_request(scaffold, activation_id=uuid4())
+            )
+
+    settings = get_settings()
+    previous_enabled = settings.EDGE_SYNC_ENABLED
+    await request_app_engine.dispose()
+    settings.EDGE_SYNC_ENABLED = True
+    try:
+        response = await client.get(
+            f"/api/v1/sync/handover/{prepared.activation_id}/bootstrap/foundation",
+            headers={
+                "Authorization": f"AurumEdge {scaffold.node.credential}",
+                "X-Aurum-Timestamp": str(int(time.time())),
+                "X-Aurum-Nonce": str(uuid4()),
+            },
+        )
+    finally:
+        settings.EDGE_SYNC_ENABLED = previous_enabled
+        await request_app_engine.dispose()
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert "register" in response.json()["foundation"]
+    signed = SyncActivationBootstrapRead.model_validate(response.json())
+    manifest = verify_activation_bootstrap(
+        signed,
+        credential=scaffold.node.credential,
+        now=utc_now(),
+    )
+    assert manifest.activation_id == prepared.activation_id
+    assert manifest.edge_node_id == scaffold.node.id
 
 
 async def test_concurrent_preparations_allow_only_one_pending_activation(

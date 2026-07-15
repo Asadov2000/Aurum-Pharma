@@ -14,6 +14,7 @@ from app.domains.sync.auth import EdgeRequestContext, get_edge_context
 from app.domains.sync.bootstrap import BootstrapScope
 from app.domains.sync.repository import SyncCloudRepository
 from app.domains.sync.schemas import (
+    SyncActivationBootstrapRead,
     SyncBootstrapChunkRead,
     SyncBootstrapManifestRead,
     SyncCredentialRotate,
@@ -207,6 +208,33 @@ async def get_bootstrap_chunk(
         bootstrap_id=bootstrap_id,
         chunk_index=chunk_index,
         scope=_bootstrap_scope(context),
+    )
+
+
+@router.get(
+    "/handover/{activation_id}/bootstrap/foundation",
+    response_model=SyncActivationBootstrapRead,
+)
+async def get_activation_foundation_bootstrap(
+    activation_id: UUID,
+    response: Response,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+) -> SyncActivationBootstrapRead:
+    _prevent_credential_caching(response)
+    principal = context.principal
+    return await SyncCloudService(
+        SyncCloudRepository(context.session)
+    ).activation_foundation_bootstrap(
+        activation_id=activation_id,
+        edge_node_id=principal.node_id,
+        tenant_id=principal.tenant_id,
+        branch_id=principal.branch_id,
+        credential_kid=principal.credential_kid,
+        credential_digest=principal.credential_digest,
+        credential_expires_at=principal.credential_expires_at,
     )
 
 

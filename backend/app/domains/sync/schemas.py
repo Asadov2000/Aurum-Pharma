@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -102,6 +102,114 @@ class SyncBootstrapChunkRead(BaseModel):
     events: list[SyncEventEnvelope]
 
 
+class SyncActivationTenantSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    name: str
+    legal_name: str | None
+    inn_or_tin: str | None
+    registration_number: str | None
+    legal_address: str | None
+    logo_url: str | None
+    status: Literal["setup", "trial", "active", "grace_period", "readonly", "archived"]
+    drug_catalog_mode: Literal["connected", "autonomous"]
+    suspended_at: datetime | None
+    archived_at: datetime | None
+    updated_at: datetime
+
+
+class SyncActivationTenantSettingsSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: UUID
+    expiry_thresholds: dict[str, int]
+    expired_sale_mode: Literal["strict", "warning", "off"]
+    refund_reason_mode: Literal["required", "required_with_text", "optional", "off"]
+    session_admin_minutes: int = Field(ge=30, le=1440)
+    session_pos_minutes: int = Field(ge=30, le=1440)
+    pin_mode_enabled: bool
+    draft_sale_lifetime_min: int = Field(ge=5, le=240)
+    report_timezone: str = Field(min_length=1, max_length=100)
+    prescription_warning_text: str
+    updated_at: datetime
+
+
+class SyncActivationBranchSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    tenant_id: UUID
+    name: str
+    address: str | None
+    branch_type: Literal["pharmacy", "pharmacy_post", "kiosk"]
+    license_number: str | None
+    license_expires_at: date | None
+    working_hours: dict[str, object] | None
+    receipt_header: dict[str, object] | None
+    is_active: bool
+    updated_at: datetime
+
+
+class SyncActivationRegisterSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    name: str
+    printer_type: Literal["browser", "thermal_58", "thermal_80", "a4"] | None
+    is_active: bool
+    updated_at: datetime
+
+
+class SyncActivationFoundationSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    schema_version: Literal[1] = 1
+    currency: Literal["TJS"] = "TJS"
+    tenant: SyncActivationTenantSnapshot
+    settings: SyncActivationTenantSettingsSnapshot
+    branch: SyncActivationBranchSnapshot
+    register_snapshot: SyncActivationRegisterSnapshot = Field(alias="register")
+
+
+class SyncActivationBootstrapManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    profile: Literal["foundation_shadow_v1"] = "foundation_shadow_v1"
+    readiness_eligible: Literal[False] = False
+    activation_id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    edge_node_id: UUID
+    register_id: UUID
+    capability: Literal["cash_sale_v1"] = "cash_sale_v1"
+    writer_epoch: int = Field(gt=0)
+    previous_writer_epoch: int = Field(gt=0)
+    previous_terminal_sequence: int = Field(ge=0)
+    previous_terminal_source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    previous_terminal_projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    receipt_baseline_seq: int = Field(ge=0)
+    foundation_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    snapshot_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    activation_manifest_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    credential_kid: UUID
+    issued_at: datetime
+    expires_at: datetime
+
+
+class SyncActivationBootstrapRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manifest: SyncActivationBootstrapManifest
+    foundation: SyncActivationFoundationSnapshot
+    manifest_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    signature_algorithm: Literal["hmac-sha256-edge-activation-v1"]
+    signature: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class SyncNodeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -156,7 +264,6 @@ class SyncWriterPrepareRequest(BaseModel):
     expected_sequence: int = Field(ge=0)
     expected_source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
     expected_projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
-    bootstrap_snapshot_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class SyncWriterReadinessRequest(BaseModel):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Literal, cast
 from uuid import UUID
 
@@ -20,6 +20,13 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.pos.schemas import SaleCheckoutResult
+from app.domains.sync.activation_bootstrap import (
+    ActivationBootstrapValidationError,
+    ActivationSnapshotScope,
+    build_activation_bootstrap,
+    foundation_hash,
+    snapshot_hash,
+)
 from app.domains.sync.bootstrap import (
     BootstrapScope,
     BootstrapValidationError,
@@ -38,10 +45,22 @@ from app.domains.sync.integrity import (
 from app.domains.sync.integrity import (
     canonical_json_hash as payload_hash,
 )
-from app.domains.sync.models import SyncCursor, SyncInboxEvent, SyncNode, SyncSaleProjection
-from app.domains.sync.repository import SyncCloudRepository, SyncEdgeRepository
+from app.domains.sync.models import (
+    SyncCursor,
+    SyncInboxEvent,
+    SyncNode,
+    SyncSaleProjection,
+    SyncWriterActivation,
+)
+from app.domains.sync.repository import (
+    ActivationFoundationSource,
+    SyncCloudRepository,
+    SyncEdgeRepository,
+)
 from app.domains.sync.schemas import (
     EdgeApplyResult,
+    SyncActivationBootstrapRead,
+    SyncActivationFoundationSnapshot,
     SyncBootstrapChunkRead,
     SyncBootstrapManifestRead,
     SyncEventEnvelope,
@@ -75,7 +94,7 @@ def _handover_error(exc: DBAPIError) -> AurumError:
         return PermissionDeniedError("Writer handover operation is not allowed")
     if sqlstate in {"22023", "23502"}:
         return BusinessRuleError("Writer handover request is invalid")
-    if sqlstate in {"23503", "23505", "23514", "40001", "55000"}:
+    if sqlstate in {"23503", "23505", "23514", "40001", "40P01", "55000"}:
         return ConflictError("Writer handover state changed; refresh and retry")
     return AurumError("Writer handover database guard failed")
 
@@ -83,6 +102,86 @@ def _handover_error(exc: DBAPIError) -> AurumError:
 def _node_with_credential(node: SyncNode, credential: EdgeCredential) -> SyncNodeCredentialRead:
     node_data = SyncNodeRead.model_validate(node).model_dump()
     return SyncNodeCredentialRead(**node_data, credential=credential.token)
+
+
+def _foundation_snapshot(
+    source: ActivationFoundationSource,
+) -> SyncActivationFoundationSnapshot:
+    tenant = source.tenant
+    settings = source.settings
+    branch = source.branch
+    register = source.register
+    return SyncActivationFoundationSnapshot.model_validate(
+        {
+            "tenant": {
+                "id": tenant.id,
+                "name": tenant.name,
+                "legal_name": tenant.legal_name,
+                "inn_or_tin": tenant.inn_or_tin,
+                "registration_number": tenant.registration_number,
+                "legal_address": tenant.legal_address,
+                "logo_url": tenant.logo_url,
+                "status": tenant.status,
+                "drug_catalog_mode": tenant.drug_catalog_mode,
+                "suspended_at": tenant.suspended_at,
+                "archived_at": tenant.archived_at,
+                "updated_at": tenant.updated_at,
+            },
+            "settings": {
+                "tenant_id": settings.tenant_id,
+                "expiry_thresholds": settings.expiry_thresholds,
+                "expired_sale_mode": settings.expired_sale_mode,
+                "refund_reason_mode": settings.refund_reason_mode,
+                "session_admin_minutes": settings.session_admin_minutes,
+                "session_pos_minutes": settings.session_pos_minutes,
+                "pin_mode_enabled": settings.pin_mode_enabled,
+                "draft_sale_lifetime_min": settings.draft_sale_lifetime_min,
+                "report_timezone": settings.report_timezone,
+                "prescription_warning_text": settings.prescription_warning_text,
+                "updated_at": settings.updated_at,
+            },
+            "branch": {
+                "id": branch.id,
+                "tenant_id": branch.tenant_id,
+                "name": branch.name,
+                "address": branch.address,
+                "branch_type": branch.branch_type,
+                "license_number": branch.license_number,
+                "license_expires_at": branch.license_expires_at,
+                "working_hours": branch.working_hours,
+                "receipt_header": branch.receipt_header,
+                "is_active": branch.is_active,
+                "updated_at": branch.updated_at,
+            },
+            "register": {
+                "id": register.id,
+                "tenant_id": register.tenant_id,
+                "branch_id": register.branch_id,
+                "name": register.name,
+                "printer_type": register.printer_type,
+                "is_active": register.is_active,
+                "updated_at": register.updated_at,
+            },
+        }
+    )
+
+
+def _activation_snapshot_scope(
+    activation: SyncWriterActivation,
+) -> ActivationSnapshotScope:
+    return ActivationSnapshotScope(
+        activation_id=activation.activation_id,
+        tenant_id=activation.tenant_id,
+        branch_id=activation.branch_id,
+        edge_node_id=activation.writer_node_id,
+        register_id=activation.allowed_register_id,
+        writer_epoch=activation.writer_epoch,
+        previous_writer_epoch=activation.previous_writer_epoch,
+        previous_terminal_sequence=activation.previous_terminal_sequence,
+        previous_terminal_source_checksum=activation.previous_terminal_source_checksum,
+        previous_terminal_projection_checksum=(activation.previous_terminal_projection_checksum),
+        receipt_baseline_seq=activation.receipt_baseline_seq,
+    )
 
 
 class SyncAdminService:
@@ -152,6 +251,62 @@ class SyncAdminService:
 
     async def prepare_writer(self, payload: SyncWriterPrepareRequest) -> SyncWriterActivationRead:
         request_hash = canonical_json_hash(payload.model_dump(mode="json"))
+        existing = await self.repo.get_writer_activation(payload.activation_id)
+        if existing is not None:
+            bootstrap = await self.repo.get_activation_bootstrap(payload.activation_id)
+            existing_foundation = await self.repo.get_activation_foundation(payload.activation_id)
+            try:
+                existing_snapshot = SyncActivationFoundationSnapshot.model_validate(
+                    existing_foundation.payload if existing_foundation is not None else None
+                )
+            except PydanticValidationError as exc:
+                raise ConflictError("Activation ID was already used for another handover") from exc
+            existing_foundation_hash = foundation_hash(existing_snapshot)
+            if (
+                existing.prepare_request_hash != request_hash
+                or bootstrap is None
+                or existing_foundation is None
+                or bootstrap.tenant_id != existing.tenant_id
+                or bootstrap.branch_id != existing.branch_id
+                or bootstrap.edge_node_id != existing.writer_node_id
+                or bootstrap.register_id != existing.allowed_register_id
+                or bootstrap.writer_epoch != existing.writer_epoch
+                or bootstrap.capability != existing.capability
+                or bootstrap.profile != "foundation_shadow_v1"
+                or bootstrap.readiness_eligible
+                or bootstrap.foundation_hash != existing_foundation_hash
+                or bootstrap.snapshot_hash != existing.bootstrap_snapshot_hash
+                or bootstrap.activation_manifest_hash != existing.activation_manifest_hash
+                or bootstrap.foundation_hash != existing_foundation.payload_hash
+                or existing_foundation.tenant_id != existing.tenant_id
+                or existing_foundation.branch_id != existing.branch_id
+                or existing_foundation.edge_node_id != existing.writer_node_id
+                or existing_foundation.register_id != existing.allowed_register_id
+                or existing_foundation.writer_epoch != existing.writer_epoch
+                or existing_foundation.schema_version != 1
+                or snapshot_hash(
+                    scope=_activation_snapshot_scope(existing),
+                    foundation_digest=existing_foundation_hash,
+                )
+                != existing.bootstrap_snapshot_hash
+            ):
+                raise ConflictError("Activation ID was already used for another handover")
+            return SyncWriterActivationRead.model_validate(existing)
+
+        source = await self.repo.get_activation_foundation_source(
+            tenant_id=payload.tenant_id,
+            branch_id=payload.branch_id,
+            register_id=payload.register_id,
+        )
+        if source is None:
+            raise NotFoundError("Activation foundation scope not found")
+        if not source.branch.is_active or not source.register.is_active:
+            raise BusinessRuleError("Branch and register must be active for writer preparation")
+        try:
+            foundation_snapshot = _foundation_snapshot(source)
+        except PydanticValidationError as exc:
+            raise BusinessRuleError("Activation foundation configuration is invalid") from exc
+        foundation_digest = foundation_hash(foundation_snapshot)
         try:
             activation = await self.repo.prepare_writer_handover(
                 activation_id=payload.activation_id,
@@ -163,11 +318,23 @@ class SyncAdminService:
                 expected_sequence=payload.expected_sequence,
                 expected_source_checksum=payload.expected_source_checksum,
                 expected_projection_checksum=payload.expected_projection_checksum,
-                bootstrap_snapshot_hash=payload.bootstrap_snapshot_hash,
+                foundation_hash=foundation_digest,
                 request_hash=request_hash,
             )
         except DBAPIError as exc:
             raise _handover_error(exc) from exc
+        server_snapshot_hash = snapshot_hash(
+            scope=_activation_snapshot_scope(activation),
+            foundation_digest=foundation_digest,
+        )
+        if activation.bootstrap_snapshot_hash != server_snapshot_hash:
+            raise AurumError("Prepared writer bootstrap is inconsistent")
+        await self.repo.persist_activation_foundation(
+            activation=activation,
+            foundation_payload=foundation_snapshot.model_dump(mode="json", by_alias=True),
+            foundation_hash=foundation_digest,
+            snapshot_hash=server_snapshot_hash,
+        )
         return SyncWriterActivationRead.model_validate(activation)
 
     async def activate_writer(
@@ -210,6 +377,63 @@ class SyncAdminService:
 class SyncCloudService:
     def __init__(self, repo: SyncCloudRepository) -> None:
         self.repo = repo
+
+    async def activation_foundation_bootstrap(
+        self,
+        *,
+        activation_id: UUID,
+        edge_node_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        credential_kid: UUID,
+        credential_digest: str,
+        credential_expires_at: datetime,
+    ) -> SyncActivationBootstrapRead:
+        activation = await self.repo.get_writer_activation(activation_id)
+        bootstrap = await self.repo.get_activation_bootstrap(activation_id)
+        foundation_row = await self.repo.get_activation_foundation(activation_id)
+        if activation is None or bootstrap is None or foundation_row is None:
+            raise NotFoundError("Activation foundation bootstrap not found")
+        if (
+            activation.tenant_id != tenant_id
+            or activation.branch_id != branch_id
+            or activation.writer_node_id != edge_node_id
+            or activation.state not in {"prepared", "ready"}
+            or bootstrap.tenant_id != tenant_id
+            or bootstrap.branch_id != branch_id
+            or bootstrap.edge_node_id != edge_node_id
+            or bootstrap.register_id != activation.allowed_register_id
+            or bootstrap.writer_epoch != activation.writer_epoch
+            or bootstrap.capability != activation.capability
+            or bootstrap.profile != "foundation_shadow_v1"
+            or bootstrap.readiness_eligible
+            or bootstrap.snapshot_hash != activation.bootstrap_snapshot_hash
+            or bootstrap.activation_manifest_hash != activation.activation_manifest_hash
+            or foundation_row.tenant_id != tenant_id
+            or foundation_row.branch_id != branch_id
+            or foundation_row.edge_node_id != edge_node_id
+            or foundation_row.register_id != activation.allowed_register_id
+            or foundation_row.writer_epoch != activation.writer_epoch
+            or foundation_row.payload_hash != bootstrap.foundation_hash
+        ):
+            raise AurumError("Activation foundation bootstrap is inconsistent")
+        try:
+            foundation = SyncActivationFoundationSnapshot.model_validate(foundation_row.payload)
+            return build_activation_bootstrap(
+                scope=_activation_snapshot_scope(activation),
+                foundation=foundation,
+                stored_foundation_hash=bootstrap.foundation_hash,
+                stored_snapshot_hash=bootstrap.snapshot_hash,
+                activation_manifest_hash=bootstrap.activation_manifest_hash,
+                credential_kid=credential_kid,
+                credential_digest=credential_digest,
+                prepared_at=activation.prepared_at,
+                credential_expires_at=credential_expires_at,
+                ttl_seconds=get_settings().EDGE_BOOTSTRAP_TTL_SECONDS,
+                now=utc_now(),
+            )
+        except (ActivationBootstrapValidationError, PydanticValidationError) as exc:
+            raise AurumError("Activation foundation bootstrap is invalid") from exc
 
     async def pull(
         self,
@@ -552,6 +776,19 @@ class SyncCloudService:
         branch_id: UUID,
         payload: SyncWriterReadinessRequest,
     ) -> SyncWriterReadinessRead:
+        settings = get_settings()
+        if not settings.EDGE_WRITER_READINESS_ENABLED:
+            raise BusinessRuleError("Edge writer readiness is disabled")
+        bootstrap = await self.repo.get_activation_bootstrap(payload.activation_id)
+        if (
+            bootstrap is None
+            or bootstrap.edge_node_id != edge_node_id
+            or bootstrap.tenant_id != tenant_id
+            or bootstrap.branch_id != branch_id
+            or bootstrap.profile != "cash_sale_v1_full_v1"
+            or not bootstrap.readiness_eligible
+        ):
+            raise BusinessRuleError("Full Edge activation bootstrap is not available")
         request_hash = canonical_json_hash(payload.model_dump(mode="json"))
         try:
             readiness = await self.repo.record_writer_readiness(

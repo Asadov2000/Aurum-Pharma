@@ -8,9 +8,13 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import insert, select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
 from app.domains.sync.models import (
+    SyncActivationBootstrap,
+    SyncActivationFoundation,
     SyncCursor,
     SyncInboxEvent,
     SyncNode,
@@ -33,6 +37,14 @@ class ReservedStreamPosition:
     sequence: int
     previous_checksum: str
     previous_projection_checksum: str
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationFoundationSource:
+    tenant: Tenant
+    settings: TenantSettings
+    branch: Branch
+    register: Register
 
 
 class SyncOutboxRepository:
@@ -332,6 +344,135 @@ class SyncCloudRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_activation_bootstrap(
+        self,
+        activation_id: UUID,
+    ) -> SyncActivationBootstrap | None:
+        result = await self.session.execute(
+            select(SyncActivationBootstrap)
+            .where(SyncActivationBootstrap.activation_id == activation_id)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_activation_foundation(
+        self,
+        activation_id: UUID,
+    ) -> SyncActivationFoundation | None:
+        result = await self.session.execute(
+            select(SyncActivationFoundation)
+            .where(SyncActivationFoundation.activation_id == activation_id)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_activation_foundation_source(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        register_id: UUID,
+    ) -> ActivationFoundationSource | None:
+        tenant = await self.session.scalar(
+            select(Tenant).where(Tenant.id == tenant_id).with_for_update(read=True)
+        )
+        settings = await self.session.scalar(
+            select(TenantSettings)
+            .where(TenantSettings.tenant_id == tenant_id)
+            .with_for_update(read=True)
+        )
+        branch = await self.session.scalar(
+            select(Branch)
+            .where(Branch.id == branch_id, Branch.tenant_id == tenant_id)
+            .with_for_update(read=True)
+        )
+        register = await self.session.scalar(
+            select(Register)
+            .where(
+                Register.id == register_id,
+                Register.tenant_id == tenant_id,
+                Register.branch_id == branch_id,
+            )
+            .with_for_update(read=True)
+        )
+        if tenant is None or settings is None or branch is None or register is None:
+            return None
+        return ActivationFoundationSource(
+            tenant=tenant,
+            settings=settings,
+            branch=branch,
+            register=register,
+        )
+
+    async def persist_activation_foundation(
+        self,
+        *,
+        activation: SyncWriterActivation,
+        foundation_payload: dict[str, object],
+        foundation_hash: str,
+        snapshot_hash: str,
+    ) -> tuple[SyncActivationBootstrap, SyncActivationFoundation]:
+        await self.session.execute(
+            pg_insert(SyncActivationBootstrap)
+            .values(
+                activation_id=activation.activation_id,
+                tenant_id=activation.tenant_id,
+                branch_id=activation.branch_id,
+                edge_node_id=activation.writer_node_id,
+                register_id=activation.allowed_register_id,
+                writer_epoch=activation.writer_epoch,
+                capability=activation.capability,
+                profile="foundation_shadow_v1",
+                readiness_eligible=False,
+                foundation_hash=foundation_hash,
+                snapshot_hash=snapshot_hash,
+                activation_manifest_hash=activation.activation_manifest_hash,
+            )
+            .on_conflict_do_nothing(index_elements=[SyncActivationBootstrap.activation_id])
+        )
+        await self.session.execute(
+            pg_insert(SyncActivationFoundation)
+            .values(
+                activation_id=activation.activation_id,
+                tenant_id=activation.tenant_id,
+                branch_id=activation.branch_id,
+                edge_node_id=activation.writer_node_id,
+                register_id=activation.allowed_register_id,
+                writer_epoch=activation.writer_epoch,
+                schema_version=1,
+                payload=foundation_payload,
+                payload_hash=foundation_hash,
+            )
+            .on_conflict_do_nothing(index_elements=[SyncActivationFoundation.activation_id])
+        )
+        bootstrap = await self.get_activation_bootstrap(activation.activation_id)
+        foundation = await self.get_activation_foundation(activation.activation_id)
+        if bootstrap is None or foundation is None:
+            raise RuntimeError("Activation foundation bootstrap was not persisted")
+        if (
+            bootstrap.tenant_id != activation.tenant_id
+            or bootstrap.branch_id != activation.branch_id
+            or bootstrap.edge_node_id != activation.writer_node_id
+            or bootstrap.register_id != activation.allowed_register_id
+            or bootstrap.writer_epoch != activation.writer_epoch
+            or bootstrap.capability != activation.capability
+            or bootstrap.profile != "foundation_shadow_v1"
+            or bootstrap.readiness_eligible
+            or bootstrap.foundation_hash != foundation_hash
+            or bootstrap.snapshot_hash != snapshot_hash
+            or bootstrap.activation_manifest_hash != activation.activation_manifest_hash
+            or foundation.tenant_id != activation.tenant_id
+            or foundation.branch_id != activation.branch_id
+            or foundation.edge_node_id != activation.writer_node_id
+            or foundation.register_id != activation.allowed_register_id
+            or foundation.writer_epoch != activation.writer_epoch
+            or foundation.schema_version != 1
+            or foundation.payload_hash != foundation_hash
+            or foundation.payload != foundation_payload
+        ):
+            raise RuntimeError("Activation foundation bootstrap is inconsistent")
+        return bootstrap, foundation
+
     async def prepare_writer_handover(
         self,
         *,
@@ -344,15 +485,15 @@ class SyncCloudRepository:
         expected_sequence: int,
         expected_source_checksum: str,
         expected_projection_checksum: str,
-        bootstrap_snapshot_hash: str,
+        foundation_hash: str,
         request_hash: str,
     ) -> SyncWriterActivation:
         result = await self.session.execute(
             text(
-                "SELECT public.prepare_edge_writer_handover("
+                "SELECT public.prepare_edge_writer_foundation_handover("
                 ":activation_id, :tenant_id, :branch_id, :edge_node_id, :register_id, "
                 ":expected_writer_epoch, :expected_sequence, :expected_source_checksum, "
-                ":expected_projection_checksum, :bootstrap_snapshot_hash, :request_hash)"
+                ":expected_projection_checksum, :foundation_hash, :request_hash)"
             ),
             {
                 "activation_id": activation_id,
@@ -364,7 +505,7 @@ class SyncCloudRepository:
                 "expected_sequence": expected_sequence,
                 "expected_source_checksum": expected_source_checksum,
                 "expected_projection_checksum": expected_projection_checksum,
-                "bootstrap_snapshot_hash": bootstrap_snapshot_hash,
+                "foundation_hash": foundation_hash,
                 "request_hash": request_hash,
             },
         )

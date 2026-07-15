@@ -143,6 +143,48 @@ async def _assert_edge_receipt_allocation_denied(
                 await transaction.rollback()
 
 
+async def _insert_activation_bootstrap(
+    connection: AsyncConnection,
+    *,
+    activation_id: UUID,
+    tenant_id: UUID,
+    branch_id: UUID,
+    edge_node_id: UUID,
+    register_id: UUID,
+) -> None:
+    params = {
+        "activation_id": activation_id,
+        "tenant_id": tenant_id,
+        "branch_id": branch_id,
+        "edge_id": edge_node_id,
+        "register_id": register_id,
+    }
+    await connection.execute(
+        text(
+            "INSERT INTO sync_activation_bootstrap ("
+            "activation_id, tenant_id, branch_id, edge_node_id, register_id, "
+            "writer_epoch, capability, profile, readiness_eligible, "
+            "foundation_hash, snapshot_hash, activation_manifest_hash"
+            ") VALUES ("
+            ":activation_id,:tenant_id,:branch_id,:edge_id,:register_id,2,"
+            "'cash_sale_v1','foundation_shadow_v1',false,repeat('5',64),"
+            "repeat('1',64),repeat('2',64))"
+        ),
+        params,
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO sync_activation_foundation ("
+            "activation_id, tenant_id, branch_id, edge_node_id, register_id, "
+            "writer_epoch, schema_version, payload, payload_hash"
+            ") VALUES ("
+            ":activation_id,:tenant_id,:branch_id,:edge_id,:register_id,2,1,"
+            "'{}'::jsonb,repeat('5',64))"
+        ),
+        params,
+    )
+
+
 async def test_edge_session_is_restricted_to_its_branch(
     support_engine_sync: AsyncEngine,
     app_engine_sync: AsyncEngine,
@@ -269,6 +311,14 @@ async def test_edge_session_is_restricted_to_its_branch(
                         "edge_id": edge_ids[index],
                         "register_id": register_ids[index],
                     },
+                )
+                await _insert_activation_bootstrap(
+                    connection,
+                    activation_id=activation_id,
+                    tenant_id=tenant_id,
+                    branch_id=branch_ids[index],
+                    edge_node_id=edge_ids[index],
+                    register_id=register_ids[index],
                 )
                 await connection.execute(
                     text(
@@ -405,6 +455,8 @@ async def test_edge_session_is_restricted_to_its_branch(
                 "sync_writer_activation",
                 "sync_writer_epoch",
                 "sync_writer_readiness",
+                "sync_activation_bootstrap",
+                "sync_activation_foundation",
                 "register_receipt_counter",
             ):
                 rows = await connection.execute(
@@ -457,6 +509,8 @@ async def test_edge_session_is_restricted_to_its_branch(
                 for table in (
                     "sync_shadow_report",
                     "sync_writer_readiness",
+                    "sync_activation_foundation",
+                    "sync_activation_bootstrap",
                     "sync_writer_activation",
                     "sync_sale_projection",
                     "sync_cursor",

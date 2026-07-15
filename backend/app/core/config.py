@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     EDGE_BOOTSTRAP_MAX_EVENTS: int = Field(default=10000, ge=100, le=100000)
     # Fail-closed until mTLS, signed bootstrap, and the cash-only Edge runtime
     # are all available. The handover protocol can still be exercised in tests.
+    EDGE_WRITER_READINESS_ENABLED: bool = False
     EDGE_WRITER_ACTIVATION_ENABLED: bool = False
 
     @property
@@ -122,6 +123,10 @@ class Settings(BaseSettings):
         if self.EDGE_WRITER_ACTIVATION_ENABLED:
             problems.append(
                 "EDGE_WRITER_ACTIVATION_ENABLED requires the production Edge security stack"
+            )
+        if self.EDGE_WRITER_READINESS_ENABLED:
+            problems.append(
+                "EDGE_WRITER_READINESS_ENABLED requires a complete production Edge bootstrap"
             )
         if problems:
             raise ValueError(
