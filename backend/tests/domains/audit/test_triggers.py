@@ -94,6 +94,18 @@ async def test_delete_creates_record_with_old_values(db_session: AsyncSession) -
     from sqlalchemy import text
 
     await db_session.execute(
+        text("DELETE FROM sync_stream WHERE branch_id = :id"),
+        {"id": branch.id},
+    )
+    await db_session.execute(
+        text("DELETE FROM sync_writer_epoch WHERE branch_id = :id"),
+        {"id": branch.id},
+    )
+    await db_session.execute(
+        text("DELETE FROM sync_node WHERE branch_id = :id"),
+        {"id": branch.id},
+    )
+    await db_session.execute(
         text("DELETE FROM branch WHERE id = :id"),
         {"id": branch.id},
     )

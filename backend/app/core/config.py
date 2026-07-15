@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     EDGE_SYNC_CREDENTIAL: SecretStr | None = None
     EDGE_SYNC_POLL_SECONDS: int = Field(default=5, ge=1, le=300)
     EDGE_SYNC_BATCH_SIZE: int = Field(default=100, ge=1, le=100)
+    # Fail-closed until mTLS, signed bootstrap, and the cash-only Edge runtime
+    # are all available. The handover protocol can still be exercised in tests.
+    EDGE_WRITER_ACTIVATION_ENABLED: bool = False
 
     @property
     def refresh_cookie_secure(self) -> bool:
@@ -112,6 +115,10 @@ class Settings(BaseSettings):
         if self.EDGE_SYNC_CREDENTIAL is not None:
             problems.append(
                 "EDGE_SYNC_CREDENTIAL uses development token auth; production requires mTLS"
+            )
+        if self.EDGE_WRITER_ACTIVATION_ENABLED:
+            problems.append(
+                "EDGE_WRITER_ACTIVATION_ENABLED requires the production Edge security stack"
             )
         if problems:
             raise ValueError(

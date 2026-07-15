@@ -5,6 +5,8 @@ from __future__ import annotations
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
@@ -264,7 +266,7 @@ async def test_late_enrollment_starts_after_immutable_history(
     assert applied.last_sequence == 2
 
 
-async def test_cloud_pull_does_not_mix_events_from_another_writer_epoch(
+async def test_outbox_rejects_events_from_another_writer_epoch(
     db_session: AsyncSession,
     pos_scaffold,
 ) -> None:  # type: ignore[no-untyped-def]
@@ -279,25 +281,28 @@ async def test_cloud_pull_does_not_mix_events_from_another_writer_epoch(
     )
     assert stream is not None
 
-    await SyncOutboxRepository(db_session).enqueue(
-        event_id=uuid4(),
-        tenant_id=node.tenant_id,
-        branch_id=node.branch_id,
-        origin_node_id=stream.writer_node_id,
-        writer_epoch=stream.writer_epoch + 1,
-        sequence=2,
-        operation_id=uuid4(),
-        aggregate_type="sale",
-        aggregate_id=uuid4(),
-        event_type="pos.sale.completed.v1",
-        schema_version=1,
-        occurred_at=utc_now(),
-        payload={},
-        payload_hash="a" * 64,
-        stream_checksum="b" * 64,
-        projection_hash="c" * 64,
-        projection_checksum="d" * 64,
-    )
+    with pytest.raises(DBAPIError) as error:
+        async with db_session.begin_nested():
+            await SyncOutboxRepository(db_session).enqueue(
+                event_id=uuid4(),
+                tenant_id=node.tenant_id,
+                branch_id=node.branch_id,
+                origin_node_id=stream.writer_node_id,
+                writer_epoch=stream.writer_epoch + 1,
+                sequence=2,
+                operation_id=uuid4(),
+                aggregate_type="sale",
+                aggregate_id=uuid4(),
+                event_type="pos.sale.completed.v1",
+                schema_version=1,
+                occurred_at=utc_now(),
+                payload={},
+                payload_hash="a" * 64,
+                stream_checksum="b" * 64,
+                projection_hash="c" * 64,
+                projection_checksum="d" * 64,
+            )
+    assert getattr(error.value.orig, "sqlstate", None) == "42501"
 
     pull = await _pull(db_session, node)
 

@@ -20,6 +20,12 @@ from app.domains.sync.schemas import (
     SyncPullResponse,
     SyncShadowReportRead,
     SyncShadowReportRequest,
+    SyncWriterActivationRead,
+    SyncWriterEpochRead,
+    SyncWriterPrepareRequest,
+    SyncWriterReadinessRead,
+    SyncWriterReadinessRequest,
+    SyncWriterTransitionRequest,
 )
 from app.domains.sync.service import SyncAdminService, SyncCloudService
 
@@ -86,6 +92,42 @@ async def revoke_node(
     return await service.revoke_node(node_id)
 
 
+@admin_router.post(
+    "/handover/prepare",
+    response_model=SyncWriterActivationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def prepare_writer_handover(
+    payload: SyncWriterPrepareRequest,
+    service: Annotated[SyncAdminService, Depends(_admin_service)],
+) -> SyncWriterActivationRead:
+    return await service.prepare_writer(payload)
+
+
+@admin_router.post(
+    "/handover/{activation_id}/activate",
+    response_model=SyncWriterEpochRead,
+)
+async def activate_writer_handover(
+    activation_id: UUID,
+    payload: SyncWriterTransitionRequest,
+    service: Annotated[SyncAdminService, Depends(_admin_service)],
+) -> SyncWriterEpochRead:
+    return await service.activate_writer(activation_id=activation_id, payload=payload)
+
+
+@admin_router.post(
+    "/handover/{activation_id}/cancel",
+    response_model=SyncWriterActivationRead,
+)
+async def cancel_writer_handover(
+    activation_id: UUID,
+    payload: SyncWriterTransitionRequest,
+    service: Annotated[SyncAdminService, Depends(_admin_service)],
+) -> SyncWriterActivationRead:
+    return await service.cancel_writer(activation_id=activation_id, payload=payload)
+
+
 @router.get("/pull", response_model=SyncPullResponse)
 async def pull_events(
     context: Annotated[
@@ -124,5 +166,26 @@ async def report_shadow_checkpoint(
         shadow_start_sequence=principal.shadow_start_sequence,
         shadow_start_checksum=principal.shadow_start_checksum,
         shadow_start_projection_checksum=principal.shadow_start_projection_checksum,
+        payload=payload,
+    )
+
+
+@router.post(
+    "/handover/readiness",
+    response_model=SyncWriterReadinessRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_writer_readiness(
+    payload: SyncWriterReadinessRequest,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+) -> SyncWriterReadinessRead:
+    principal = context.principal
+    return await SyncCloudService(SyncCloudRepository(context.session)).record_writer_readiness(
+        edge_node_id=principal.node_id,
+        tenant_id=principal.tenant_id,
+        branch_id=principal.branch_id,
         payload=payload,
     )

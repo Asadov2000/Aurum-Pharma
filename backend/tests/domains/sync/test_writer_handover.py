@@ -1,0 +1,696 @@
+"""Writer handover lifecycle and fail-closed branch ownership rules."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from uuid import UUID, uuid4
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from app.core.config import get_settings
+from app.core.errors import BusinessRuleError, ConflictError
+from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.service import FoundationService
+from app.domains.sync.integrity import canonical_json_hash
+from app.domains.sync.models import (
+    SyncNode,
+    SyncStream,
+    SyncWriterEpoch,
+    SyncWriterReadiness,
+)
+from app.domains.sync.repository import SyncCloudRepository
+from app.domains.sync.schemas import (
+    SyncNodeCreate,
+    SyncNodeCredentialRead,
+    SyncShadowReportRequest,
+    SyncWriterActivationRead,
+    SyncWriterPrepareRequest,
+    SyncWriterReadinessRequest,
+    SyncWriterTransitionRequest,
+)
+from app.domains.sync.service import SyncAdminService, SyncCloudService
+
+
+@dataclass(frozen=True)
+class _CommittedHandoverScaffold:
+    tenant_id: UUID
+    branch_id: UUID
+    register_id: UUID
+    node: SyncNodeCredentialRead
+    stream: SyncStream
+
+
+async def _set_support_session(session: AsyncSession) -> None:
+    await session.execute(text("SELECT set_config('app.support_session', 'true', true)"))
+
+
+@pytest_asyncio.fixture
+async def committed_handover_scaffold(
+    db_engine: AsyncEngine,
+) -> AsyncIterator[_CommittedHandoverScaffold]:
+    tenant_id: UUID | None = None
+    async with AsyncSession(db_engine, expire_on_commit=False) as session:
+        async with session.begin():
+            foundation = FoundationService(FoundationRepository(session))
+            tenant = await foundation.create_tenant(
+                payload={
+                    "name": f"Writer handover {uuid4().hex[:8]}",
+                    "contact_email": f"handover-{uuid4().hex[:8]}@aurum.tj",
+                }
+            )
+            tenant_id = tenant.id
+            branch = await foundation.create_branch(
+                tenant_id=tenant.id,
+                fields={"name": "Committed handover branch"},
+            )
+            register = await foundation.create_register(
+                tenant_id=tenant.id,
+                fields={"branch_id": branch.id, "name": "Register 1"},
+            )
+            repo = SyncCloudRepository(session)
+            node = await SyncAdminService(repo).create_node(
+                SyncNodeCreate(
+                    tenant_id=tenant.id,
+                    branch_id=branch.id,
+                    display_name="Committed Edge writer",
+                )
+            )
+            stream = await repo.get_stream(tenant_id=tenant.id, branch_id=branch.id)
+            assert stream is not None
+            report = await SyncCloudService(repo).report(
+                edge_node_id=node.id,
+                tenant_id=node.tenant_id,
+                branch_id=node.branch_id,
+                shadow_start_sequence=node.shadow_start_sequence,
+                shadow_start_checksum=node.shadow_start_checksum,
+                shadow_start_projection_checksum=node.shadow_start_projection_checksum,
+                payload=SyncShadowReportRequest(
+                    report_id=uuid4(),
+                    origin_node_id=stream.writer_node_id,
+                    writer_epoch=stream.writer_epoch,
+                    last_sequence=stream.last_sequence,
+                    source_checksum=stream.current_checksum,
+                    projection_checksum=stream.current_projection_checksum,
+                ),
+            )
+            assert report.status == "matched"
+
+    try:
+        yield _CommittedHandoverScaffold(
+            tenant_id=tenant.id,
+            branch_id=branch.id,
+            register_id=register.id,
+            node=node,
+            stream=stream,
+        )
+    finally:
+        if tenant_id is not None:
+            async with AsyncSession(db_engine) as session:
+                async with session.begin():
+                    await _set_support_session(session)
+                    for table in (
+                        "sync_writer_readiness",
+                        "sync_writer_activation",
+                        "sync_shadow_report",
+                        "sync_cursor",
+                        "sync_inbox",
+                        "sync_outbox",
+                        "register_receipt_counter",
+                    ):
+                        await session.execute(
+                            text(f"DELETE FROM public.{table} WHERE tenant_id = :tenant_id"),
+                            {"tenant_id": tenant_id},
+                        )
+                    await session.execute(
+                        text("DELETE FROM public.sync_stream WHERE tenant_id = :tenant_id"),
+                        {"tenant_id": tenant_id},
+                    )
+                    await session.execute(
+                        text(
+                            "DELETE FROM public.sync_writer_epoch " "WHERE tenant_id = :tenant_id"
+                        ),
+                        {"tenant_id": tenant_id},
+                    )
+                    await session.execute(
+                        text("DELETE FROM public.sync_node WHERE tenant_id = :tenant_id"),
+                        {"tenant_id": tenant_id},
+                    )
+                    await session.execute(
+                        text("DELETE FROM public.register WHERE tenant_id = :tenant_id"),
+                        {"tenant_id": tenant_id},
+                    )
+                    await session.execute(
+                        text("DELETE FROM public.branch WHERE tenant_id = :tenant_id"),
+                        {"tenant_id": tenant_id},
+                    )
+                    await session.execute(
+                        text("DELETE FROM public.tenant WHERE id = :tenant_id"),
+                        {"tenant_id": tenant_id},
+                    )
+
+
+def _committed_prepare_request(
+    scaffold: _CommittedHandoverScaffold,
+    *,
+    activation_id: UUID,
+) -> SyncWriterPrepareRequest:
+    return SyncWriterPrepareRequest(
+        activation_id=activation_id,
+        tenant_id=scaffold.tenant_id,
+        branch_id=scaffold.branch_id,
+        edge_node_id=scaffold.node.id,
+        register_id=scaffold.register_id,
+        expected_writer_epoch=scaffold.stream.writer_epoch,
+        expected_sequence=scaffold.stream.last_sequence,
+        expected_source_checksum=scaffold.stream.current_checksum,
+        expected_projection_checksum=scaffold.stream.current_projection_checksum,
+        bootstrap_snapshot_hash="a" * 64,
+    )
+
+
+async def _prepare_handover(
+    session: AsyncSession,
+    scaffold,  # type: ignore[no-untyped-def]
+) -> tuple[
+    SyncAdminService,
+    SyncNodeCredentialRead,
+    SyncStream,
+    SyncWriterActivationRead,
+    SyncWriterPrepareRequest,
+]:
+    await _set_support_session(session)
+    repo = SyncCloudRepository(session)
+    admin = SyncAdminService(repo)
+    node = await admin.create_node(
+        SyncNodeCreate(
+            tenant_id=scaffold["tenant"].id,
+            branch_id=scaffold["branch"].id,
+            display_name="Edge handover test",
+        )
+    )
+    stream = await repo.get_stream(
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+    )
+    assert stream is not None
+    report = await SyncCloudService(repo).report(
+        edge_node_id=node.id,
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        shadow_start_sequence=node.shadow_start_sequence,
+        shadow_start_checksum=node.shadow_start_checksum,
+        shadow_start_projection_checksum=node.shadow_start_projection_checksum,
+        payload=SyncShadowReportRequest(
+            report_id=uuid4(),
+            origin_node_id=stream.writer_node_id,
+            writer_epoch=stream.writer_epoch,
+            last_sequence=stream.last_sequence,
+            source_checksum=stream.current_checksum,
+            projection_checksum=stream.current_projection_checksum,
+        ),
+    )
+    assert report.status == "matched"
+
+    request = SyncWriterPrepareRequest(
+        activation_id=uuid4(),
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        edge_node_id=node.id,
+        register_id=scaffold["register"].id,
+        expected_writer_epoch=stream.writer_epoch,
+        expected_sequence=stream.last_sequence,
+        expected_source_checksum=stream.current_checksum,
+        expected_projection_checksum=stream.current_projection_checksum,
+        bootstrap_snapshot_hash="a" * 64,
+    )
+    epoch = await admin.prepare_writer(request)
+    return admin, node, stream, epoch, request
+
+
+def _readiness_request(epoch: SyncWriterActivationRead) -> SyncWriterReadinessRequest:
+    return SyncWriterReadinessRequest(
+        activation_id=epoch.activation_id,
+        writer_epoch=epoch.writer_epoch,
+        previous_sequence=epoch.previous_terminal_sequence,
+        previous_source_checksum=epoch.previous_terminal_source_checksum,
+        previous_projection_checksum=epoch.previous_terminal_projection_checksum,
+        bootstrap_snapshot_hash=epoch.bootstrap_snapshot_hash,
+        activation_manifest_hash=epoch.activation_manifest_hash,
+        receipt_baseline_seq=epoch.receipt_baseline_seq,
+    )
+
+
+async def _insert_readiness(
+    session: AsyncSession,
+    *,
+    node: SyncNodeCredentialRead,
+    epoch: SyncWriterActivationRead,
+) -> None:
+    payload = _readiness_request(epoch)
+    assert epoch.allowed_register_id is not None
+    session.add(
+        SyncWriterReadiness(
+            activation_id=epoch.activation_id,
+            tenant_id=epoch.tenant_id,
+            branch_id=epoch.branch_id,
+            edge_node_id=node.id,
+            register_id=epoch.allowed_register_id,
+            writer_epoch=epoch.writer_epoch,
+            previous_sequence=payload.previous_sequence,
+            previous_source_checksum=payload.previous_source_checksum,
+            previous_projection_checksum=payload.previous_projection_checksum,
+            bootstrap_snapshot_hash=payload.bootstrap_snapshot_hash,
+            activation_manifest_hash=payload.activation_manifest_hash,
+            receipt_baseline_seq=payload.receipt_baseline_seq,
+            request_hash=canonical_json_hash(payload.model_dump(mode="json")),
+        )
+    )
+    await session.flush()
+    await session.execute(
+        text(
+            "UPDATE public.sync_writer_activation "
+            "SET state = 'ready', ready_at = now() "
+            "WHERE activation_id = :activation_id"
+        ),
+        {"activation_id": epoch.activation_id},
+    )
+
+
+async def test_prepare_and_cancel_are_idempotent_and_unfreeze_branch(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    admin, node, stream, prepared, request = await _prepare_handover(db_session, scaffold)
+
+    replay = await admin.prepare_writer(request)
+    assert replay.activation_id == prepared.activation_id
+    assert replay.state == "prepared"
+    assert prepared.writer_epoch == stream.writer_epoch + 1
+    assert prepared.previous_terminal_sequence == stream.last_sequence
+    assert prepared.allowed_register_id == scaffold["register"].id
+    assert (
+        await db_session.scalar(
+            select(SyncWriterEpoch).where(SyncWriterEpoch.activation_id == prepared.activation_id)
+        )
+        is None
+    )
+
+    conflicting = request.model_copy(update={"bootstrap_snapshot_hash": "b" * 64})
+    with pytest.raises(ConflictError):
+        async with db_session.begin_nested():
+            await admin.prepare_writer(conflicting)
+
+    with pytest.raises(DBAPIError) as frozen_error:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "SELECT public.assert_current_branch_writer("
+                    ":tenant_id, :branch_id, NULL, false)"
+                ),
+                {"tenant_id": prepared.tenant_id, "branch_id": prepared.branch_id},
+            )
+    assert getattr(frozen_error.value.orig, "sqlstate", None) == "55000"
+
+    transition = SyncWriterTransitionRequest(
+        tenant_id=prepared.tenant_id,
+        branch_id=prepared.branch_id,
+        activation_manifest_hash=prepared.activation_manifest_hash,
+    )
+    cancelled = await admin.cancel_writer(
+        activation_id=prepared.activation_id,
+        payload=transition,
+    )
+    replayed_cancel = await admin.cancel_writer(
+        activation_id=prepared.activation_id,
+        payload=transition,
+    )
+    assert cancelled.state == "aborted"
+    assert cancelled.activated_at is None
+    assert cancelled.aborted_at is not None
+    assert replayed_cancel.aborted_at == cancelled.aborted_at
+
+    edge_node = await db_session.scalar(
+        select(SyncNode).where(SyncNode.id == node.id).execution_options(populate_existing=True)
+    )
+    assert edge_node is not None
+    assert edge_node.mode == "shadow_readonly"
+    assert edge_node.register_id is None
+    await db_session.execute(
+        text("SELECT public.assert_current_branch_writer(" ":tenant_id, :branch_id, NULL, false)"),
+        {"tenant_id": prepared.tenant_id, "branch_id": prepared.branch_id},
+    )
+
+
+async def test_activation_is_atomic_idempotent_and_fences_cloud(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    admin, node, stream, prepared, _request = await _prepare_handover(db_session, scaffold)
+    transition = SyncWriterTransitionRequest(
+        tenant_id=prepared.tenant_id,
+        branch_id=prepared.branch_id,
+        activation_manifest_hash=prepared.activation_manifest_hash,
+    )
+
+    with pytest.raises(BusinessRuleError, match="activation is disabled"):
+        await admin.activate_writer(
+            activation_id=prepared.activation_id,
+            payload=transition,
+        )
+
+    settings = get_settings()
+    previous_enabled = settings.EDGE_WRITER_ACTIVATION_ENABLED
+    settings.EDGE_WRITER_ACTIVATION_ENABLED = True
+    try:
+        with pytest.raises(ConflictError):
+            async with db_session.begin_nested():
+                await admin.activate_writer(
+                    activation_id=prepared.activation_id,
+                    payload=transition,
+                )
+
+        await _insert_readiness(db_session, node=node, epoch=prepared)
+        activated = await admin.activate_writer(
+            activation_id=prepared.activation_id,
+            payload=transition,
+        )
+        replay = await admin.activate_writer(
+            activation_id=prepared.activation_id,
+            payload=transition,
+        )
+    finally:
+        settings.EDGE_WRITER_ACTIVATION_ENABLED = previous_enabled
+
+    assert activated.state == "active"
+    assert activated.activated_at is not None
+    assert replay.activation_id == activated.activation_id
+    assert replay.activated_at == activated.activated_at
+
+    current_stream = await db_session.scalar(
+        select(SyncStream)
+        .where(SyncStream.id == stream.id)
+        .execution_options(populate_existing=True)
+    )
+    assert current_stream is not None
+    assert current_stream.writer_node_id == node.id
+    assert current_stream.writer_epoch == prepared.writer_epoch
+    assert current_stream.last_sequence == 0
+    assert current_stream.current_checksum == prepared.root_source_checksum
+    assert current_stream.current_projection_checksum == prepared.root_projection_checksum
+
+    predecessor = await db_session.scalar(
+        select(SyncWriterEpoch)
+        .where(
+            SyncWriterEpoch.tenant_id == prepared.tenant_id,
+            SyncWriterEpoch.branch_id == prepared.branch_id,
+            SyncWriterEpoch.writer_epoch == prepared.previous_writer_epoch,
+        )
+        .execution_options(populate_existing=True)
+    )
+    assert predecessor is not None
+    assert predecessor.state == "fenced"
+    assert predecessor.fenced_at is not None
+
+    edge_node = await db_session.scalar(
+        select(SyncNode).where(SyncNode.id == node.id).execution_options(populate_existing=True)
+    )
+    assert edge_node is not None
+    assert edge_node.mode == "edge_writer"
+    assert edge_node.register_id == scaffold["register"].id
+
+    with pytest.raises(DBAPIError) as cloud_error:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "SELECT public.assert_current_branch_writer("
+                    ":tenant_id, :branch_id, :register_id, false)"
+                ),
+                {
+                    "tenant_id": prepared.tenant_id,
+                    "branch_id": prepared.branch_id,
+                    "register_id": scaffold["register"].id,
+                },
+            )
+    assert getattr(cloud_error.value.orig, "sqlstate", None) == "55000"
+
+    await db_session.execute(
+        text("SELECT set_config('app.edge_node_id', :edge_node_id, true)"),
+        {"edge_node_id": str(node.id)},
+    )
+    await db_session.execute(
+        text(
+            "SELECT public.assert_current_branch_writer("
+            ":tenant_id, :branch_id, :register_id, true)"
+        ),
+        {
+            "tenant_id": prepared.tenant_id,
+            "branch_id": prepared.branch_id,
+            "register_id": scaffold["register"].id,
+        },
+    )
+
+
+async def test_ready_handover_can_be_cancelled_and_retried_at_same_epoch(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    admin, node, _stream, prepared, request = await _prepare_handover(db_session, scaffold)
+    await _insert_readiness(db_session, node=node, epoch=prepared)
+    transition = SyncWriterTransitionRequest(
+        tenant_id=prepared.tenant_id,
+        branch_id=prepared.branch_id,
+        activation_manifest_hash=prepared.activation_manifest_hash,
+    )
+
+    cancelled = await admin.cancel_writer(
+        activation_id=prepared.activation_id,
+        payload=transition,
+    )
+    assert cancelled.state == "aborted"
+    assert cancelled.ready_at is not None
+
+    retry_request = request.model_copy(update={"activation_id": uuid4()})
+    retried = await admin.prepare_writer(retry_request)
+    assert retried.activation_id != prepared.activation_id
+    assert retried.writer_epoch == prepared.writer_epoch
+
+    await admin.cancel_writer(
+        activation_id=retried.activation_id,
+        payload=SyncWriterTransitionRequest(
+            tenant_id=retried.tenant_id,
+            branch_id=retried.branch_id,
+            activation_manifest_hash=retried.activation_manifest_hash,
+        ),
+    )
+
+
+async def test_pending_handover_rejects_stale_or_competing_preparation(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    admin, _node, _stream, prepared, request = await _prepare_handover(db_session, scaffold)
+
+    with pytest.raises(ConflictError):
+        async with db_session.begin_nested():
+            await admin.prepare_writer(request.model_copy(update={"activation_id": uuid4()}))
+
+    with pytest.raises(ConflictError):
+        async with db_session.begin_nested():
+            await admin.prepare_writer(
+                request.model_copy(
+                    update={
+                        "activation_id": uuid4(),
+                        "expected_sequence": request.expected_sequence + 1,
+                    }
+                )
+            )
+
+    with pytest.raises(BusinessRuleError, match="cannot be revoked"):
+        await admin.revoke_node(prepared.writer_node_id)
+
+    await admin.cancel_writer(
+        activation_id=prepared.activation_id,
+        payload=SyncWriterTransitionRequest(
+            tenant_id=prepared.tenant_id,
+            branch_id=prepared.branch_id,
+            activation_manifest_hash=prepared.activation_manifest_hash,
+        ),
+    )
+    revoked = await admin.revoke_node(prepared.writer_node_id)
+    assert revoked.status == "revoked"
+
+
+async def test_writer_handover_ledgers_reject_direct_mutation(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    _admin, node, stream, prepared, _request = await _prepare_handover(db_session, scaffold)
+
+    with pytest.raises(DBAPIError) as activation_error:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE public.sync_writer_activation "
+                    "SET bootstrap_snapshot_hash = :hash "
+                    "WHERE activation_id = :activation_id"
+                ),
+                {"activation_id": prepared.activation_id, "hash": "b" * 64},
+            )
+    assert getattr(activation_error.value.orig, "sqlstate", None) == "55000"
+
+    await _insert_readiness(db_session, node=node, epoch=prepared)
+    with pytest.raises(DBAPIError) as readiness_error:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE public.sync_writer_readiness "
+                    "SET request_hash = :hash "
+                    "WHERE activation_id = :activation_id"
+                ),
+                {"activation_id": prepared.activation_id, "hash": "c" * 64},
+            )
+    assert getattr(readiness_error.value.orig, "sqlstate", None) == "55000"
+
+    with pytest.raises(DBAPIError) as epoch_error:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE public.sync_writer_epoch "
+                    "SET activation_manifest_hash = :hash "
+                    "WHERE tenant_id = :tenant_id "
+                    "AND branch_id = :branch_id "
+                    "AND writer_epoch = :writer_epoch"
+                ),
+                {
+                    "tenant_id": prepared.tenant_id,
+                    "branch_id": prepared.branch_id,
+                    "writer_epoch": stream.writer_epoch,
+                    "hash": "d" * 64,
+                },
+            )
+    assert getattr(epoch_error.value.orig, "sqlstate", None) == "55000"
+
+
+async def test_runtime_role_records_idempotent_readiness_with_edge_scoped_rls(
+    db_engine: AsyncEngine,
+    committed_handover_scaffold: _CommittedHandoverScaffold,
+) -> None:
+    scaffold = committed_handover_scaffold
+    request = _committed_prepare_request(scaffold, activation_id=uuid4())
+    async with AsyncSession(db_engine, expire_on_commit=False) as support_session:
+        async with support_session.begin():
+            await _set_support_session(support_session)
+            prepared = await SyncAdminService(SyncCloudRepository(support_session)).prepare_writer(
+                request
+            )
+
+    payload = _readiness_request(prepared)
+    app_engine = create_async_engine(
+        str(get_settings().DATABASE_URL_APP),
+        poolclass=NullPool,
+    )
+    try:
+        async with AsyncSession(app_engine, expire_on_commit=False) as app_session:
+            async with app_session.begin():
+                await app_session.execute(
+                    text(
+                        "SELECT "
+                        "set_config('app.tenant_id', :tenant_id, true), "
+                        "set_config('app.branch_id', :branch_id, true), "
+                        "set_config('app.edge_node_id', :edge_node_id, true)"
+                    ),
+                    {
+                        "tenant_id": str(scaffold.tenant_id),
+                        "branch_id": str(scaffold.branch_id),
+                        "edge_node_id": str(scaffold.node.id),
+                    },
+                )
+                repo = SyncCloudRepository(app_session)
+                service = SyncCloudService(repo)
+                readiness = await service.record_writer_readiness(
+                    edge_node_id=scaffold.node.id,
+                    tenant_id=scaffold.tenant_id,
+                    branch_id=scaffold.branch_id,
+                    payload=payload,
+                )
+                replay = await service.record_writer_readiness(
+                    edge_node_id=scaffold.node.id,
+                    tenant_id=scaffold.tenant_id,
+                    branch_id=scaffold.branch_id,
+                    payload=payload,
+                )
+                assert readiness.request_hash == canonical_json_hash(
+                    payload.model_dump(mode="json")
+                )
+                assert replay.reported_at == readiness.reported_at
+
+                activation = await repo.get_writer_activation(prepared.activation_id)
+                assert activation is not None
+                assert activation.state == "ready"
+                assert activation.ready_at is not None
+
+                with pytest.raises(ConflictError):
+                    async with app_session.begin_nested():
+                        await service.record_writer_readiness(
+                            edge_node_id=scaffold.node.id,
+                            tenant_id=scaffold.tenant_id,
+                            branch_id=scaffold.branch_id,
+                            payload=payload.model_copy(
+                                update={"receipt_baseline_seq": payload.receipt_baseline_seq + 1}
+                            ),
+                        )
+
+                await app_session.execute(
+                    text("SELECT set_config('app.edge_node_id', :edge_node_id, true)"),
+                    {"edge_node_id": str(uuid4())},
+                )
+                assert await repo.get_writer_activation(prepared.activation_id) is None
+    finally:
+        await app_engine.dispose()
+
+
+async def test_concurrent_preparations_allow_only_one_pending_activation(
+    db_engine: AsyncEngine,
+    committed_handover_scaffold: _CommittedHandoverScaffold,
+) -> None:
+    scaffold = committed_handover_scaffold
+
+    async def prepare_once(activation_id: UUID) -> UUID | None:
+        request = _committed_prepare_request(scaffold, activation_id=activation_id)
+        try:
+            async with AsyncSession(db_engine, expire_on_commit=False) as session:
+                async with session.begin():
+                    await _set_support_session(session)
+                    prepared = await SyncAdminService(SyncCloudRepository(session)).prepare_writer(
+                        request
+                    )
+                    return prepared.activation_id
+        except ConflictError:
+            return None
+
+    first_id = uuid4()
+    second_id = uuid4()
+    results = await asyncio.gather(prepare_once(first_id), prepare_once(second_id))
+    assert sum(result is not None for result in results) == 1
+    assert {result for result in results if result is not None} <= {first_id, second_id}
+
+    async with AsyncSession(db_engine) as session:
+        pending_count = await session.scalar(
+            select(text("count(*)"))
+            .select_from(text("public.sync_writer_activation"))
+            .where(text("tenant_id = :tenant_id AND state IN ('prepared', 'ready')")),
+            {"tenant_id": scaffold.tenant_id},
+        )
+    assert pending_count == 1

@@ -18,6 +18,9 @@ from app.domains.sync.models import (
     SyncSaleProjection,
     SyncShadowReport,
     SyncStream,
+    SyncWriterActivation,
+    SyncWriterEpoch,
+    SyncWriterReadiness,
 )
 from app.domains.sync.schemas import SyncEventEnvelope
 
@@ -270,13 +273,192 @@ class SyncCloudRepository:
         return result.scalar_one_or_none()
 
     async def revoke_edge_node(self, node_id: UUID) -> SyncNode | None:
-        result = await self.session.execute(
-            update(SyncNode)
+        node = await self.session.scalar(
+            select(SyncNode)
             .where(SyncNode.id == node_id, SyncNode.node_kind == "edge")
-            .values(status="revoked")
-            .returning(SyncNode)
+            .with_for_update()
+        )
+        if node is None:
+            return None
+
+        active_epoch = await self.session.scalar(
+            select(SyncWriterEpoch.activation_id).where(
+                SyncWriterEpoch.writer_node_id == node_id,
+                SyncWriterEpoch.state == "active",
+            )
+        )
+        pending_activation = await self.session.scalar(
+            select(SyncWriterActivation.activation_id).where(
+                SyncWriterActivation.writer_node_id == node_id,
+                SyncWriterActivation.state.in_(("prepared", "ready")),
+            )
+        )
+        if active_epoch is not None or pending_activation is not None:
+            return None
+
+        node.status = "revoked"
+        await self.session.flush()
+        return node
+
+    async def get_writer_activation(self, activation_id: UUID) -> SyncWriterActivation | None:
+        result = await self.session.execute(
+            select(SyncWriterActivation)
+            .where(SyncWriterActivation.activation_id == activation_id)
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
+
+    async def get_writer_epoch(self, activation_id: UUID) -> SyncWriterEpoch | None:
+        result = await self.session.execute(
+            select(SyncWriterEpoch)
+            .where(SyncWriterEpoch.activation_id == activation_id)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_writer_readiness(self, activation_id: UUID) -> SyncWriterReadiness | None:
+        result = await self.session.execute(
+            select(SyncWriterReadiness)
+            .where(SyncWriterReadiness.activation_id == activation_id)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def prepare_writer_handover(
+        self,
+        *,
+        activation_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        register_id: UUID,
+        expected_writer_epoch: int,
+        expected_sequence: int,
+        expected_source_checksum: str,
+        expected_projection_checksum: str,
+        bootstrap_snapshot_hash: str,
+        request_hash: str,
+    ) -> SyncWriterActivation:
+        result = await self.session.execute(
+            text(
+                "SELECT public.prepare_edge_writer_handover("
+                ":activation_id, :tenant_id, :branch_id, :edge_node_id, :register_id, "
+                ":expected_writer_epoch, :expected_sequence, :expected_source_checksum, "
+                ":expected_projection_checksum, :bootstrap_snapshot_hash, :request_hash)"
+            ),
+            {
+                "activation_id": activation_id,
+                "tenant_id": tenant_id,
+                "branch_id": branch_id,
+                "edge_node_id": edge_node_id,
+                "register_id": register_id,
+                "expected_writer_epoch": expected_writer_epoch,
+                "expected_sequence": expected_sequence,
+                "expected_source_checksum": expected_source_checksum,
+                "expected_projection_checksum": expected_projection_checksum,
+                "bootstrap_snapshot_hash": bootstrap_snapshot_hash,
+                "request_hash": request_hash,
+            },
+        )
+        stored_activation_id = result.scalar_one()
+        activation = await self.get_writer_activation(stored_activation_id)
+        if activation is None:
+            raise RuntimeError("Prepared writer activation was not persisted")
+        return activation
+
+    async def record_writer_readiness(
+        self,
+        *,
+        activation_id: UUID,
+        writer_epoch: int,
+        previous_sequence: int,
+        previous_source_checksum: str,
+        previous_projection_checksum: str,
+        bootstrap_snapshot_hash: str,
+        activation_manifest_hash: str,
+        receipt_baseline_seq: int,
+        request_hash: str,
+    ) -> SyncWriterReadiness:
+        result = await self.session.execute(
+            text(
+                "SELECT public.record_edge_writer_readiness("
+                ":activation_id, :writer_epoch, :previous_sequence, "
+                ":previous_source_checksum, :previous_projection_checksum, "
+                ":bootstrap_snapshot_hash, :activation_manifest_hash, "
+                ":receipt_baseline_seq, :request_hash)"
+            ),
+            {
+                "activation_id": activation_id,
+                "writer_epoch": writer_epoch,
+                "previous_sequence": previous_sequence,
+                "previous_source_checksum": previous_source_checksum,
+                "previous_projection_checksum": previous_projection_checksum,
+                "bootstrap_snapshot_hash": bootstrap_snapshot_hash,
+                "activation_manifest_hash": activation_manifest_hash,
+                "receipt_baseline_seq": receipt_baseline_seq,
+                "request_hash": request_hash,
+            },
+        )
+        stored_activation_id = result.scalar_one()
+        readiness = await self.get_writer_readiness(stored_activation_id)
+        if readiness is None:
+            raise RuntimeError("Writer readiness was not persisted")
+        return readiness
+
+    async def activate_writer_handover(
+        self,
+        *,
+        activation_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        activation_manifest_hash: str,
+    ) -> SyncWriterEpoch:
+        await self.session.execute(
+            text("SELECT set_config('app.edge_writer_activation_enabled', 'true', true)")
+        )
+        result = await self.session.execute(
+            text(
+                "SELECT public.activate_edge_writer_handover("
+                ":activation_id, :tenant_id, :branch_id, :activation_manifest_hash)"
+            ),
+            {
+                "activation_id": activation_id,
+                "tenant_id": tenant_id,
+                "branch_id": branch_id,
+                "activation_manifest_hash": activation_manifest_hash,
+            },
+        )
+        stored_activation_id = result.scalar_one()
+        epoch = await self.get_writer_epoch(stored_activation_id)
+        if epoch is None:
+            raise RuntimeError("Activated writer epoch was not persisted")
+        return epoch
+
+    async def cancel_writer_handover(
+        self,
+        *,
+        activation_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        activation_manifest_hash: str,
+    ) -> SyncWriterActivation:
+        result = await self.session.execute(
+            text(
+                "SELECT public.cancel_edge_writer_handover("
+                ":activation_id, :tenant_id, :branch_id, :activation_manifest_hash)"
+            ),
+            {
+                "activation_id": activation_id,
+                "tenant_id": tenant_id,
+                "branch_id": branch_id,
+                "activation_manifest_hash": activation_manifest_hash,
+            },
+        )
+        stored_activation_id = result.scalar_one()
+        activation = await self.get_writer_activation(stored_activation_id)
+        if activation is None:
+            raise RuntimeError("Cancelled writer activation was not persisted")
+        return activation
 
     async def list_events(
         self,

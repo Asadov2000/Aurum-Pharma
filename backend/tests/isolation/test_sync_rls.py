@@ -179,17 +179,15 @@ async def test_edge_session_is_restricted_to_its_branch(
                 {"tenant_id": tenant_id, "a": branch_ids[0], "b": branch_ids[1]},
             )
             register_ids = [row[0] for row in register_rows]
-            cloud_rows = await connection.execute(
+            stream_rows = await connection.execute(
                 text(
-                    "INSERT INTO sync_node ("
-                    "tenant_id, branch_id, node_kind, mode, status, display_name"
-                    ") VALUES "
-                    "(:tenant_id,:a,'cloud','cloud_writer','active','Cloud A'),"
-                    "(:tenant_id,:b,'cloud','cloud_writer','active','Cloud B') RETURNING id"
+                    "SELECT branch_id, writer_node_id FROM sync_stream "
+                    "WHERE tenant_id = :tenant_id"
                 ),
-                {"tenant_id": tenant_id, "a": branch_ids[0], "b": branch_ids[1]},
+                {"tenant_id": tenant_id},
             )
-            cloud_ids = [row[0] for row in cloud_rows]
+            cloud_by_branch = {row[0]: row[1] for row in stream_rows}
+            cloud_ids = [cloud_by_branch[branch_id] for branch_id in branch_ids]
             edge_rows = await connection.execute(
                 text(
                     "INSERT INTO sync_node ("
@@ -212,38 +210,32 @@ async def test_edge_session_is_restricted_to_its_branch(
             edge_ids = [row[0] for row in edge_rows]
             await connection.execute(
                 text(
-                    "INSERT INTO sync_stream ("
-                    "tenant_id, branch_id, writer_node_id, writer_epoch, last_sequence, "
-                    "current_checksum, current_projection_checksum"
-                    ") VALUES "
-                    "(:tenant_id,:a,:ca,1,1,repeat('b',64),repeat('d',64)),"
-                    "(:tenant_id,:b,:cb,1,1,repeat('b',64),repeat('d',64))"
+                    "UPDATE sync_stream SET "
+                    "last_sequence = 1, current_checksum = repeat('b',64), "
+                    "current_projection_checksum = repeat('d',64) "
+                    "WHERE tenant_id = :tenant_id"
                 ),
-                {
-                    "tenant_id": tenant_id,
-                    "a": branch_ids[0],
-                    "b": branch_ids[1],
-                    "ca": cloud_ids[0],
-                    "cb": cloud_ids[1],
-                },
+                {"tenant_id": tenant_id},
             )
             for index in range(2):
                 activation_id = uuid4()
                 await connection.execute(
                     text(
-                        "INSERT INTO sync_writer_epoch ("
-                        "tenant_id, branch_id, writer_epoch, activation_id, writer_node_id, "
+                        "INSERT INTO sync_writer_activation ("
+                        "activation_id, tenant_id, branch_id, writer_epoch, writer_node_id, "
                         "allowed_register_id, capability, state, root_source_checksum, "
                         "root_projection_checksum, current_source_checksum, "
                         "current_projection_checksum, previous_writer_epoch, "
+                        "previous_terminal_sequence, "
                         "previous_terminal_source_checksum, "
                         "previous_terminal_projection_checksum, bootstrap_snapshot_hash, "
-                        "activation_manifest_hash, receipt_baseline_seq, prepared_at"
+                        "activation_manifest_hash, receipt_baseline_seq, "
+                        "prepare_request_hash, prepared_at, ready_at, aborted_at"
                         ") VALUES ("
-                        ":tenant_id,:branch_id,2,:activation_id,:edge_id,:register_id,"
-                        "'cash_sale_v1','prepared',repeat('e',64),repeat('f',64),"
-                        "repeat('e',64),repeat('f',64),1,repeat('b',64),repeat('d',64),"
-                        "repeat('1',64),repeat('2',64),0,now())"
+                        ":activation_id,:tenant_id,:branch_id,2,:edge_id,:register_id,"
+                        "'cash_sale_v1','aborted',repeat('e',64),repeat('f',64),"
+                        "repeat('e',64),repeat('f',64),1,1,repeat('b',64),repeat('d',64),"
+                        "repeat('1',64),repeat('2',64),0,repeat('4',64),now(),now(),now())"
                     ),
                     {
                         "tenant_id": tenant_id,
@@ -405,6 +397,7 @@ async def test_edge_session_is_restricted_to_its_branch(
                 "sync_cursor",
                 "sync_sale_projection",
                 "sync_shadow_report",
+                "sync_writer_activation",
                 "sync_writer_epoch",
                 "sync_writer_readiness",
                 "register_receipt_counter",
@@ -459,6 +452,7 @@ async def test_edge_session_is_restricted_to_its_branch(
                 for table in (
                     "sync_shadow_report",
                     "sync_writer_readiness",
+                    "sync_writer_activation",
                     "sync_sale_projection",
                     "sync_cursor",
                     "sync_inbox",

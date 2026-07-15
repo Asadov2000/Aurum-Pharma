@@ -64,6 +64,11 @@ def test_production_rejects_development_edge_transport() -> None:
         _build(ENVIRONMENT="production", EDGE_SYNC_ENABLED=True)
 
 
+def test_production_rejects_edge_writer_activation() -> None:
+    with pytest.raises(ValidationError, match="production Edge security stack"):
+        _build(ENVIRONMENT="production", EDGE_WRITER_ACTIVATION_ENABLED=True)
+
+
 def test_edge_credential_is_secret_in_settings_representation() -> None:
     raw = "edge_v1.00000000-0000-4000-8000-000000000000." + "a" * 64
     settings = _build(EDGE_SYNC_CREDENTIAL=raw)

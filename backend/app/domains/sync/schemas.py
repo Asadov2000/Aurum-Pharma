@@ -86,6 +86,119 @@ class SyncCredentialRotate(BaseModel):
     credential_valid_days: int = Field(default=90, ge=1, le=365)
 
 
+class SyncWriterPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activation_id: UUID4
+    tenant_id: UUID
+    branch_id: UUID
+    edge_node_id: UUID
+    register_id: UUID
+    expected_writer_epoch: int = Field(gt=0)
+    expected_sequence: int = Field(ge=0)
+    expected_source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    bootstrap_snapshot_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SyncWriterReadinessRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activation_id: UUID4
+    writer_epoch: int = Field(gt=0)
+    previous_sequence: int = Field(ge=0)
+    previous_source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    previous_projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    bootstrap_snapshot_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    activation_manifest_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    receipt_baseline_seq: int = Field(ge=0)
+
+
+class SyncWriterTransitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: UUID
+    branch_id: UUID
+    activation_manifest_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SyncWriterActivationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    activation_id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    writer_epoch: int
+    writer_node_id: UUID
+    allowed_register_id: UUID
+    capability: Literal["cash_sale_v1"]
+    state: Literal["prepared", "ready", "aborted", "activated"]
+    root_source_checksum: Checksum
+    root_projection_checksum: Checksum
+    last_sequence: int
+    current_source_checksum: Checksum
+    current_projection_checksum: Checksum
+    previous_writer_epoch: int
+    previous_terminal_sequence: int
+    previous_terminal_source_checksum: Checksum
+    previous_terminal_projection_checksum: Checksum
+    bootstrap_snapshot_hash: Checksum
+    activation_manifest_hash: Checksum
+    receipt_baseline_seq: int
+    prepare_request_hash: Checksum
+    prepared_at: datetime
+    ready_at: datetime | None
+    activated_at: datetime | None
+    aborted_at: datetime | None
+
+
+class SyncWriterEpochRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    activation_id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    writer_epoch: int
+    writer_node_id: UUID
+    allowed_register_id: UUID | None
+    capability: Literal["cloud_full", "cash_sale_v1"]
+    state: Literal["active", "fenced"]
+    root_source_checksum: Checksum
+    root_projection_checksum: Checksum
+    last_sequence: int
+    current_source_checksum: Checksum
+    current_projection_checksum: Checksum
+    previous_writer_epoch: int | None
+    previous_terminal_sequence: int | None
+    previous_terminal_source_checksum: Checksum | None
+    previous_terminal_projection_checksum: Checksum | None
+    bootstrap_snapshot_hash: Checksum
+    activation_manifest_hash: Checksum
+    receipt_baseline_seq: int
+    prepared_at: datetime
+    activated_at: datetime | None
+    fenced_at: datetime | None
+
+
+class SyncWriterReadinessRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    activation_id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    edge_node_id: UUID
+    register_id: UUID
+    writer_epoch: int
+    previous_sequence: int
+    previous_source_checksum: Checksum
+    previous_projection_checksum: Checksum
+    bootstrap_snapshot_hash: Checksum
+    activation_manifest_hash: Checksum
+    receipt_baseline_seq: int
+    request_hash: Checksum
+    reported_at: datetime
+
+
 class SyncShadowReportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

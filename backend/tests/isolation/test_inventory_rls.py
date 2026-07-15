@@ -111,6 +111,18 @@ async def test_batch_invisible_across_tenants(
                     {"ids": tenant_ids},
                 )
                 await conn.execute(
+                    text("DELETE FROM sync_stream WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM sync_writer_epoch WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM sync_node WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
                     text("DELETE FROM branch WHERE tenant_id = ANY(:ids)"),
                     {"ids": tenant_ids},
                 )

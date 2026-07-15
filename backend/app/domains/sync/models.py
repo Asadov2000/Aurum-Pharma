@@ -236,6 +236,44 @@ class SyncShadowReport(Base):
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
+class SyncWriterActivation(Base):
+    __tablename__ = "sync_writer_activation"
+
+    activation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    writer_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    allowed_register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    capability: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    root_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    root_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    last_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    current_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    current_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_terminal_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_terminal_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_terminal_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    bootstrap_snapshot_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    activation_manifest_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    receipt_baseline_seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    prepare_request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    prepared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    aborted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
 class SyncWriterEpoch(Base):
     __tablename__ = "sync_writer_epoch"
 
@@ -253,6 +291,7 @@ class SyncWriterEpoch(Base):
     current_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
     current_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
     previous_writer_epoch: Mapped[int | None] = mapped_column(BigInteger)
+    previous_terminal_sequence: Mapped[int | None] = mapped_column(BigInteger)
     previous_terminal_source_checksum: Mapped[str | None] = mapped_column(Text)
     previous_terminal_projection_checksum: Mapped[str | None] = mapped_column(Text)
     bootstrap_snapshot_hash: Mapped[str] = mapped_column(Text, nullable=False)

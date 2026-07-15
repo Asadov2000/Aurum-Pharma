@@ -128,26 +128,10 @@ async def test_sale_invisible_across_tenants(
             sale_ids = [str(r[0]) for r in sr.fetchall()]
             await conn.execute(
                 text(
-                    "INSERT INTO sync_node ("
-                    "tenant_id, branch_id, node_kind, mode, status, display_name"
-                    ") VALUES "
-                    "(:ta,:ba,'cloud','cloud_writer','active','Cloud writer'),"
-                    "(:tb,:bb,'cloud','cloud_writer','active','Cloud writer')"
-                ),
-                {
-                    "ta": tenant_ids[0],
-                    "tb": tenant_ids[1],
-                    "ba": branch_ids[0],
-                    "bb": branch_ids[1],
-                },
-            )
-            await conn.execute(
-                text(
-                    "INSERT INTO sync_stream ("
-                    "tenant_id, branch_id, writer_node_id, writer_epoch, last_sequence, "
-                    "current_checksum, current_projection_checksum"
-                    ") SELECT tenant_id, branch_id, id, 1, 1, repeat('a',64), repeat('b',64) "
-                    "FROM sync_node WHERE tenant_id = ANY(:ids) AND node_kind = 'cloud'"
+                    "UPDATE sync_stream SET last_sequence = 1, "
+                    "current_checksum = repeat('a',64), "
+                    "current_projection_checksum = repeat('b',64) "
+                    "WHERE tenant_id = ANY(:ids)"
                 ),
                 {"ids": tenant_ids},
             )

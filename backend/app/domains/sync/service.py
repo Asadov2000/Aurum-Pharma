@@ -8,8 +8,16 @@ from uuid import UUID
 
 import structlog
 from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy.exc import DBAPIError
 
-from app.core.errors import AurumError, BusinessRuleError, ConflictError, NotFoundError
+from app.core.config import get_settings
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.time import utc_now
 from app.domains.pos.schemas import SaleCheckoutResult
 from app.domains.sync.credentials import EdgeCredential, issue_edge_credential
@@ -33,6 +41,12 @@ from app.domains.sync.schemas import (
     SyncPullResponse,
     SyncShadowReportRead,
     SyncShadowReportRequest,
+    SyncWriterActivationRead,
+    SyncWriterEpochRead,
+    SyncWriterPrepareRequest,
+    SyncWriterReadinessRead,
+    SyncWriterReadinessRequest,
+    SyncWriterTransitionRequest,
 )
 
 logger = structlog.get_logger("sync.service")
@@ -43,6 +57,17 @@ class _EnvelopeError(ValueError):
     def __init__(self, reason_code: str) -> None:
         self.reason_code = reason_code
         super().__init__(reason_code)
+
+
+def _handover_error(exc: DBAPIError) -> AurumError:
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "42501":
+        return PermissionDeniedError("Writer handover operation is not allowed")
+    if sqlstate in {"22023", "23502"}:
+        return BusinessRuleError("Writer handover request is invalid")
+    if sqlstate in {"23503", "23505", "23514", "40001", "55000"}:
+        return ConflictError("Writer handover state changed; refresh and retry")
+    return AurumError("Writer handover database guard failed")
 
 
 def _node_with_credential(node: SyncNode, credential: EdgeCredential) -> SyncNodeCredentialRead:
@@ -98,10 +123,71 @@ class SyncAdminService:
         return _node_with_credential(node, credential)
 
     async def revoke_node(self, node_id: UUID) -> SyncNodeRead:
+        existing = await self.repo.get_edge_node(node_id)
+        if existing is None:
+            raise NotFoundError("Edge node not found")
         node = await self.repo.revoke_edge_node(node_id)
         if node is None:
-            raise NotFoundError("Edge node not found")
+            raise BusinessRuleError(
+                "Prepared or active writer node cannot be revoked; cancel handover first"
+            )
         return SyncNodeRead.model_validate(node)
+
+    async def prepare_writer(self, payload: SyncWriterPrepareRequest) -> SyncWriterActivationRead:
+        request_hash = canonical_json_hash(payload.model_dump(mode="json"))
+        try:
+            activation = await self.repo.prepare_writer_handover(
+                activation_id=payload.activation_id,
+                tenant_id=payload.tenant_id,
+                branch_id=payload.branch_id,
+                edge_node_id=payload.edge_node_id,
+                register_id=payload.register_id,
+                expected_writer_epoch=payload.expected_writer_epoch,
+                expected_sequence=payload.expected_sequence,
+                expected_source_checksum=payload.expected_source_checksum,
+                expected_projection_checksum=payload.expected_projection_checksum,
+                bootstrap_snapshot_hash=payload.bootstrap_snapshot_hash,
+                request_hash=request_hash,
+            )
+        except DBAPIError as exc:
+            raise _handover_error(exc) from exc
+        return SyncWriterActivationRead.model_validate(activation)
+
+    async def activate_writer(
+        self,
+        *,
+        activation_id: UUID,
+        payload: SyncWriterTransitionRequest,
+    ) -> SyncWriterEpochRead:
+        if not get_settings().EDGE_WRITER_ACTIVATION_ENABLED:
+            raise BusinessRuleError("Edge writer activation is disabled")
+        try:
+            epoch = await self.repo.activate_writer_handover(
+                activation_id=activation_id,
+                tenant_id=payload.tenant_id,
+                branch_id=payload.branch_id,
+                activation_manifest_hash=payload.activation_manifest_hash,
+            )
+        except DBAPIError as exc:
+            raise _handover_error(exc) from exc
+        return SyncWriterEpochRead.model_validate(epoch)
+
+    async def cancel_writer(
+        self,
+        *,
+        activation_id: UUID,
+        payload: SyncWriterTransitionRequest,
+    ) -> SyncWriterActivationRead:
+        try:
+            activation = await self.repo.cancel_writer_handover(
+                activation_id=activation_id,
+                tenant_id=payload.tenant_id,
+                branch_id=payload.branch_id,
+                activation_manifest_hash=payload.activation_manifest_hash,
+            )
+        except DBAPIError as exc:
+            raise _handover_error(exc) from exc
+        return SyncWriterActivationRead.model_validate(activation)
 
 
 class SyncCloudService:
@@ -269,6 +355,37 @@ class SyncCloudService:
                 sequence=payload.last_sequence,
             )
         return SyncShadowReportRead.model_validate(report, from_attributes=True)
+
+    async def record_writer_readiness(
+        self,
+        *,
+        edge_node_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        payload: SyncWriterReadinessRequest,
+    ) -> SyncWriterReadinessRead:
+        request_hash = canonical_json_hash(payload.model_dump(mode="json"))
+        try:
+            readiness = await self.repo.record_writer_readiness(
+                activation_id=payload.activation_id,
+                writer_epoch=payload.writer_epoch,
+                previous_sequence=payload.previous_sequence,
+                previous_source_checksum=payload.previous_source_checksum,
+                previous_projection_checksum=payload.previous_projection_checksum,
+                bootstrap_snapshot_hash=payload.bootstrap_snapshot_hash,
+                activation_manifest_hash=payload.activation_manifest_hash,
+                receipt_baseline_seq=payload.receipt_baseline_seq,
+                request_hash=request_hash,
+            )
+        except DBAPIError as exc:
+            raise _handover_error(exc) from exc
+        if (
+            readiness.edge_node_id != edge_node_id
+            or readiness.tenant_id != tenant_id
+            or readiness.branch_id != branch_id
+        ):
+            raise AurumError("Writer readiness scope is inconsistent")
+        return SyncWriterReadinessRead.model_validate(readiness)
 
 
 class SyncEdgeApplyService:
