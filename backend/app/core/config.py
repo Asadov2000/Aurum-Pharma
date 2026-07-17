@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     REFRESH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     # None means "secure in production, HTTP-friendly in local development".
     REFRESH_COOKIE_SECURE: bool | None = None
+    # Prometheus scrapes this endpoint from the private network. Staging and
+    # production still require a separate bearer secret if the route is exposed.
+    METRICS_TOKEN: SecretStr | None = None
 
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
@@ -90,10 +93,18 @@ class Settings(BaseSettings):
         )
 
     @model_validator(mode="after")
+    def _guard_non_development_metrics(self) -> Settings:
+        if self.ENVIRONMENT != "development" and (
+            self.METRICS_TOKEN is None or len(self.METRICS_TOKEN.get_secret_value()) < 32
+        ):
+            raise ValueError("METRICS_TOKEN must be set to a strong secret (>=32 chars)")
+        return self
+
+    @model_validator(mode="after")
     def _guard_production_secrets(self) -> Settings:
-        """Fail fast if production would start with default/placeholder secrets.
-        Development/staging are unaffected — they keep working with the defaults
-        used in docker-compose and tests."""
+        """Fail fast if a deployment would start with insecure configuration.
+        Development keeps working with the defaults used in docker-compose and
+        tests; staging uses the production-style operational gates."""
         if self.ENVIRONMENT != "production":
             return self
 

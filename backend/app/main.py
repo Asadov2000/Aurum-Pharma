@@ -10,10 +10,11 @@ So we add CORS first, then AuthContext, then RequestId last.
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
@@ -135,5 +136,19 @@ async def healthz() -> dict[str, object]:
 
 
 @app.get("/metrics", include_in_schema=False)
-async def metrics() -> Response:
+async def metrics(request: Request) -> Response:
+    if settings.ENVIRONMENT != "development":
+        authorization = request.headers.get("authorization", "")
+        scheme, separator, supplied = authorization.partition(" ")
+        expected = (
+            settings.METRICS_TOKEN.get_secret_value() if settings.METRICS_TOKEN is not None else ""
+        )
+        if (
+            not separator
+            or scheme.lower() != "bearer"
+            or not expected
+            or not secrets.compare_digest(supplied, expected)
+        ):
+            # Do not advertise an operational endpoint to unauthenticated callers.
+            raise HTTPException(status_code=404, detail="Not Found")
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

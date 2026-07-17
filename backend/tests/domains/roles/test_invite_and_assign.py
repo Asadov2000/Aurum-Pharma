@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, PermissionDeniedError
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 
@@ -170,6 +172,43 @@ async def test_duplicate_assignment_returns_conflict(
             branch_id=None,
             password_required=False,
         )
+
+
+async def test_assign_role_rejects_permission_from_another_branch(
+    db_session: AsyncSession,
+    make_tenant,
+    make_tenant_role,
+    make_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = await make_tenant()
+    actor = await make_user(email="branch-scope-actor@aurum.tj")
+    target = await make_user(email="branch-scope-target@aurum.tj")
+    seller_role = await make_tenant_role(
+        tenant_id=tenant.id,
+        template_name="Кассир",
+        level=4,
+    )
+    service = RolesService(RolesRepository(db_session))
+    scoped_gate = AsyncMock(return_value=False)
+    monkeypatch.setattr(service.repo, "actor_has_scoped_permission", scoped_gate)
+
+    with pytest.raises(PermissionDeniedError, match="branch scope"):
+        await service.assign_role(
+            actor_level=3,
+            actor_id=actor.id,
+            tenant_id=tenant.id,
+            target_user_id=target.id,
+            role_id=seller_role.id,
+            branch_id=None,
+            password_required=False,
+        )
+
+    scoped_gate.assert_awaited_once_with(
+        tenant_id=tenant.id,
+        permission_code="roles.assign",
+        branch_id=None,
+    )
 
 
 async def test_effective_permissions_match_role_set(

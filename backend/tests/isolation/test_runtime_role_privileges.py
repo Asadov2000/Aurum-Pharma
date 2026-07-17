@@ -163,6 +163,7 @@ CUSTOM_FUNCTIONS = {
     "finalize_sync_event_position",
     "set_tenant_user_status",
     "tenant_actor_has_permission",
+    "tenant_actor_has_scoped_permission",
     "touch_auth_user_last_login",
     "prepare_edge_writer_handover",
     "prepare_edge_writer_foundation_handover",
@@ -174,6 +175,7 @@ CUSTOM_FUNCTIONS = {
     "trg_authorization_tenant_created",
     "trg_authorization_user_status_mutation",
     "trg_guard_branch_writer",
+    "trg_guard_user_assignment_scope",
     "trg_guard_sync_activation_bootstrap",
     "trg_guard_sync_activation_bootstrap_chunk",
     "trg_guard_sync_activation_bootstrap_component",
@@ -227,6 +229,7 @@ APP_EXECUTABLE_FUNCTIONS = {
     "rotate_auth_session",
     "finalize_sync_event_position",
     "set_tenant_user_status",
+    "tenant_actor_has_scoped_permission",
     "touch_auth_user_last_login",
     "update_tenant_user_profile",
 }

@@ -49,7 +49,6 @@ export const OWNER: Creds = { email: "owner@aurum.tj", password: "Owner1234" };
 
 export interface TokenPair {
   access_token: string;
-  refresh_token?: string | null;
   refresh_cookie?: string;
   token_type: string;
   expires_in: number;

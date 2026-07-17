@@ -331,7 +331,7 @@ async def test_login_verify_sets_httponly_refresh_cookie(
     assert response.status_code == 200
     body = response.json()
     assert body["access_token"]
-    assert body["refresh_token"] is None
+    assert "refresh_token" not in body
     set_cookie = response.headers["set-cookie"]
     assert "aurum_refresh_token=" in set_cookie
     assert "HttpOnly" in set_cookie
@@ -361,8 +361,44 @@ async def test_refresh_endpoint_rotates_cookie_session(
     assert response.status_code == 200
     body = response.json()
     assert body["access_token"]
-    assert body["refresh_token"] is None
+    assert "refresh_token" not in body
     assert "aurum_refresh_token=" in response.headers["set-cookie"]
+
+
+async def test_refresh_endpoint_rejects_refresh_token_in_body(
+    auth_client: AsyncClient,
+) -> None:
+    response = await auth_client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": "must-stay-in-cookie"},
+    )
+
+    assert response.status_code == 422
+    assert any(error["type"] == "extra_forbidden" for error in response.json()["detail"])
+
+
+async def test_refresh_endpoint_requires_cookie(
+    auth_client: AsyncClient,
+) -> None:
+    response = await auth_client.post(
+        "/api/v1/auth/refresh",
+        json={"operation_id": str(uuid4())},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+async def test_logout_endpoint_rejects_refresh_token_in_body(
+    auth_client: AsyncClient,
+) -> None:
+    response = await auth_client.post(
+        "/api/v1/auth/logout",
+        json={"refresh_token": "must-stay-in-cookie"},
+    )
+
+    assert response.status_code == 422
+    assert any(error["type"] == "extra_forbidden" for error in response.json()["detail"])
 
 
 async def test_refresh_endpoint_blocks_untrusted_origin_for_cookie_session(

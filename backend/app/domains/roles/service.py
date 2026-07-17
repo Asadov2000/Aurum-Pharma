@@ -317,6 +317,20 @@ class RolesService:
     # Invite + assignments — anti-escalation enforced here
     # -------------------------------------------------------------------------
 
+    async def _assert_assignment_scope(
+        self,
+        *,
+        tenant_id: UUID,
+        permission_code: str,
+        branch_id: UUID | None,
+    ) -> None:
+        if not await self.repo.actor_has_scoped_permission(
+            tenant_id=tenant_id,
+            permission_code=permission_code,
+            branch_id=branch_id,
+        ):
+            raise PermissionDeniedError("Assignment is outside your authorized branch scope")
+
     async def invite_user(
         self,
         *,
@@ -334,6 +348,12 @@ class RolesService:
             raise NotFoundError("Role not found")
         self._assert_role_belongs_to_tenant(target_role, tenant_id)
         self._assert_can_assign(actor_level=actor_level, target_level=target_role.level)
+
+        await self._assert_assignment_scope(
+            tenant_id=tenant_id,
+            permission_code="users.invite",
+            branch_id=branch_id,
+        )
 
         user_id = await self.repo.find_invitable_user_id(tenant_id=tenant_id, email=email)
         if user_id is None:
@@ -403,6 +423,12 @@ class RolesService:
         self._assert_role_belongs_to_tenant(target_role, tenant_id)
         self._assert_can_assign(actor_level=actor_level, target_level=target_role.level)
 
+        await self._assert_assignment_scope(
+            tenant_id=tenant_id,
+            permission_code="roles.assign",
+            branch_id=branch_id,
+        )
+
         target_user = await self.repo.get_user(target_user_id)
         if target_user is None:
             raise NotFoundError("User not found")
@@ -445,6 +471,12 @@ class RolesService:
             raise NotFoundError("Assignment not found")
         if assignment.tenant_id != tenant_id:
             raise NotFoundError("Assignment not found")
+
+        await self._assert_assignment_scope(
+            tenant_id=tenant_id,
+            permission_code="roles.assign",
+            branch_id=assignment.branch_id,
+        )
 
         # Anti-escalation: a user can only revoke assignments whose role is
         # at-or-below their own level (otherwise an owner could fire admins).

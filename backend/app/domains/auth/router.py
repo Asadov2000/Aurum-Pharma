@@ -62,9 +62,7 @@ def _clear_refresh_cookie(response: Response) -> None:
     )
 
 
-def _refresh_token_from_request(request: Request, payload_token: str | None = None) -> str:
-    if payload_token:
-        return payload_token
+def _refresh_token_from_request(request: Request) -> str:
     token = request.cookies.get(get_settings().REFRESH_COOKIE_NAME)
     if not token:
         raise AuthenticationError("Refresh session is missing")
@@ -143,13 +141,8 @@ async def refresh_tokens(
     service: Annotated[AuthService, Depends(_auth_state_service)],
     payload: Annotated[RefreshRequest | None, Body()] = None,
 ) -> TokenResponse:
-    using_cookie = payload is None or not payload.refresh_token
-    if using_cookie:
-        _assert_cookie_refresh_origin(request)
-    refresh_token = _refresh_token_from_request(
-        request,
-        payload.refresh_token if payload is not None else None,
-    )
+    _assert_cookie_refresh_origin(request)
+    refresh_token = _refresh_token_from_request(request)
     access, refresh, expires = await service.refresh(
         refresh_token=refresh_token,
         operation_id=payload.operation_id if payload and payload.operation_id else uuid4(),
@@ -167,17 +160,12 @@ async def logout(
     service: Annotated[AuthService, Depends(_auth_state_service)],
     payload: Annotated[LogoutRequest | None, Body()] = None,
 ) -> LogoutResponse:
+    _assert_cookie_refresh_origin(request)
     try:
-        refresh_token = _refresh_token_from_request(
-            request,
-            payload.refresh_token if payload is not None else None,
-        )
+        refresh_token = _refresh_token_from_request(request)
     except AuthenticationError:
         refresh_token = None
     if refresh_token:
-        using_cookie = payload is None or not payload.refresh_token
-        if using_cookie:
-            _assert_cookie_refresh_origin(request)
         await service.logout(
             refresh_token,
             operation_id=payload.operation_id if payload is not None else None,

@@ -34,6 +34,14 @@ function psql(sql: string): string {
   ]).trim();
 }
 
+function supportPsql(sql: string): string {
+  return psql(`
+    SET SESSION AUTHORIZATION aurum_support;
+    ${sql};
+    RESET SESSION AUTHORIZATION;
+  `);
+}
+
 export default async function globalSetup(): Promise<void> {
   assertDockerAvailable();
 
@@ -41,7 +49,7 @@ export default async function globalSetup(): Promise<void> {
   //     owner/seller were demoted from system roles to per-tenant roles
   //     (migration 0020), so we match the tenant-scoped role by name, not the
   //     old system 'owner'. role_id is corrected on conflict for safety.
-  psql(`
+  supportPsql(`
     INSERT INTO user_assignment (user_id, tenant_id, role_id, is_active, password_required)
     SELECT u.id, u.home_tenant_id, r.id, true, false
     FROM app_user u, role r

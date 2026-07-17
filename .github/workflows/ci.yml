@@ -133,7 +133,8 @@ jobs:
             fi
           done
 
-          echo "::warning title=Python audit unavailable::No complete report after 3 attempts"
+          echo "::error title=Python audit unavailable::No complete report after 3 attempts"
+          exit 1
 
       - name: Start MinIO
         run: |
@@ -219,7 +220,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit JavaScript dependencies
-        run: pnpm audit --audit-level high --ignore-registry-errors
+        run: pnpm audit --audit-level high
 
       - name: Typecheck
         run: pnpm typecheck

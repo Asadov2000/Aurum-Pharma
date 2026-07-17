@@ -33,20 +33,19 @@ class LoginCodeVerify(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
-    # Phase 2 security hardening: refresh tokens are delivered in an httpOnly
-    # cookie, not in the JSON body. Kept optional for schema compatibility.
-    refresh_token: str | None = None
     token_type: str = "bearer"
     expires_in: int  # seconds
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
     operation_id: UUID4 | None = None
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
     operation_id: UUID4 | None = None
 
 

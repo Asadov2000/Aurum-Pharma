@@ -5,5 +5,7 @@ global:
 scrape_configs:
   - job_name: aurum-backend
     metrics_path: /metrics
+    # Development compose uses an open internal endpoint. In staging/production
+    # add an authorization.credentials_file that contains METRICS_TOKEN.
     static_configs:
       - targets: ["backend:8000"]

@@ -811,6 +811,149 @@ async def test_runtime_assignment_function_blocks_system_role_escalation(
     assert str(assignment["role_id"]) == rows.role_ids[0]
 
 
+async def test_runtime_assignment_functions_enforce_actor_branch_scope(
+    support_engine_iso: AsyncEngine,
+    app_engine_iso: AsyncEngine,
+    indirect_scope_rows: IndirectScopeRows,
+) -> None:
+    rows = indirect_scope_rows
+    async with support_engine_iso.begin() as conn:
+        branch_ids = [
+            str(row[0])
+            for row in (
+                await conn.execute(
+                    text(
+                        "INSERT INTO branch (tenant_id, name) VALUES "
+                        "(:tenant_id, :branch_a), (:tenant_id, :branch_b) RETURNING id"
+                    ),
+                    {
+                        "tenant_id": rows.tenant_ids[0],
+                        "branch_a": f"Scope A {rows.token}",
+                        "branch_b": f"Scope B {rows.token}",
+                    },
+                )
+            ).all()
+        ]
+        await conn.execute(
+            text(
+                "UPDATE user_assignment SET branch_id = :branch_id "
+                "WHERE tenant_id = :tenant_id AND user_id = :user_id"
+            ),
+            {
+                "branch_id": branch_ids[0],
+                "tenant_id": rows.tenant_ids[0],
+                "user_id": rows.user_ids[0],
+            },
+        )
+
+    for forbidden_branch_id in (None, branch_ids[1]):
+        await _assert_rls_denied(
+            app_engine_iso,
+            tenant_id=rows.tenant_ids[0],
+            user_id=rows.user_ids[0],
+            statement=(
+                "SELECT * FROM public.create_tenant_user_assignment("
+                ":tenant_id, :target_user_id, :branch_id, :role_id, false)"
+            ),
+            params={
+                "tenant_id": rows.tenant_ids[0],
+                "target_user_id": rows.user_ids[3],
+                "branch_id": forbidden_branch_id,
+                "role_id": rows.role_ids[0],
+            },
+        )
+
+    async with app_engine_iso.begin() as conn:
+        await _set_app_context(
+            conn,
+            tenant_id=rows.tenant_ids[0],
+            user_id=rows.user_ids[0],
+        )
+        own_branch_assignment_id = str(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT id FROM public.create_tenant_user_assignment("
+                        ":tenant_id, :target_user_id, :branch_id, :role_id, false)"
+                    ),
+                    {
+                        "tenant_id": rows.tenant_ids[0],
+                        "target_user_id": rows.user_ids[3],
+                        "branch_id": branch_ids[0],
+                        "role_id": rows.role_ids[0],
+                    },
+                )
+            ).scalar_one()
+        )
+
+    async with support_engine_iso.begin() as conn:
+        outside_assignment_id = str(
+            (
+                await conn.execute(
+                    text(
+                        "INSERT INTO user_assignment "
+                        "(user_id, tenant_id, branch_id, role_id, is_active) "
+                        "VALUES (:user_id, :tenant_id, :branch_id, :role_id, true) "
+                        "RETURNING id"
+                    ),
+                    {
+                        "user_id": rows.user_ids[2],
+                        "tenant_id": rows.tenant_ids[0],
+                        "branch_id": branch_ids[1],
+                        "role_id": rows.role_ids[0],
+                    },
+                )
+            ).scalar_one()
+        )
+        inactive_outside_assignment_id = str(
+            (
+                await conn.execute(
+                    text(
+                        "INSERT INTO user_assignment "
+                        "(user_id, tenant_id, branch_id, role_id, is_active) "
+                        "VALUES (:user_id, :tenant_id, :branch_id, :role_id, false) "
+                        "RETURNING id"
+                    ),
+                    {
+                        "user_id": rows.user_ids[3],
+                        "tenant_id": rows.tenant_ids[0],
+                        "branch_id": branch_ids[1],
+                        "role_id": rows.role_ids[0],
+                    },
+                )
+            ).scalar_one()
+        )
+
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[0],
+        statement=(
+            "SELECT public.deactivate_tenant_user_assignment(" ":tenant_id, :assignment_id)"
+        ),
+        params={
+            "tenant_id": rows.tenant_ids[0],
+            "assignment_id": outside_assignment_id,
+        },
+    )
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[0],
+        statement=(
+            "SELECT * FROM public.reactivate_tenant_user_assignment("
+            ":tenant_id, :assignment_id, :role_id, false)"
+        ),
+        params={
+            "tenant_id": rows.tenant_ids[0],
+            "assignment_id": inactive_outside_assignment_id,
+            "role_id": rows.role_ids[0],
+        },
+    )
+
+    assert own_branch_assignment_id
+
+
 async def test_blocking_user_revokes_sessions_immediately(
     support_engine_iso: AsyncEngine,
     app_engine_iso: AsyncEngine,

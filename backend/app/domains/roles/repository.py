@@ -81,6 +81,26 @@ class RolesRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def actor_has_scoped_permission(
+        self,
+        *,
+        tenant_id: UUID,
+        permission_code: str,
+        branch_id: UUID | None,
+    ) -> bool:
+        result = await self.session.execute(
+            text(
+                "SELECT public.tenant_actor_has_scoped_permission("
+                ":tenant_id, :permission_code, :branch_id)"
+            ),
+            {
+                "tenant_id": tenant_id,
+                "permission_code": permission_code,
+                "branch_id": branch_id,
+            },
+        )
+        return bool(result.scalar_one())
+
     # -------------------------------------------------------------------------
     # role
     # -------------------------------------------------------------------------

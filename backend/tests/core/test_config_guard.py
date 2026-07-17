@@ -12,6 +12,7 @@ _DEV_DB_APP = "postgresql+asyncpg://app:aurum_app_pw@postgres/aurum"
 _DEV_DB_SUPPORT = "postgresql+asyncpg://support:aurum_support_pw@postgres/aurum"
 _PROD_DB_APP = "postgresql+asyncpg://app:Str0ng-App-Pw@db/aurum"
 _PROD_DB_SUPPORT = "postgresql+asyncpg://support:Str0ng-Sup-Pw@db/aurum"
+_METRICS_TOKEN = "m" * 40
 
 
 def _build(**overrides: object) -> Settings:
@@ -21,6 +22,7 @@ def _build(**overrides: object) -> Settings:
         "JWT_SECRET": _STRONG_SECRET,
         "MINIO_ACCESS_KEY": "real-key",
         "MINIO_SECRET_KEY": "real-secret",
+        "METRICS_TOKEN": _METRICS_TOKEN,
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)  # type: ignore[arg-type]
@@ -89,6 +91,21 @@ def test_production_rejects_cross_site_refresh_cookie_without_secure_flag() -> N
             REFRESH_COOKIE_SAMESITE="none",
             REFRESH_COOKIE_SECURE=False,
         )
+
+
+def test_production_rejects_missing_metrics_token() -> None:
+    with pytest.raises(ValidationError, match="METRICS_TOKEN"):
+        _build(ENVIRONMENT="production", METRICS_TOKEN=None)
+
+
+def test_production_rejects_short_metrics_token() -> None:
+    with pytest.raises(ValidationError, match="METRICS_TOKEN"):
+        _build(ENVIRONMENT="production", METRICS_TOKEN="too-short")
+
+
+def test_staging_rejects_missing_metrics_token() -> None:
+    with pytest.raises(ValidationError, match="METRICS_TOKEN"):
+        _build(ENVIRONMENT="staging", METRICS_TOKEN=None)
 
 
 def test_development_allows_defaults() -> None:
