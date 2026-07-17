@@ -6,11 +6,8 @@ import { Badge, Button, ConfirmDialog, FormError, Label, Select, Switch } from "
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 
-import {
-  useCreateAssignment,
-  useRevokeAssignment,
-  useRolesQuery,
-} from "./queries";
+import { useCreateAssignment, useRevokeAssignment, useRolesQuery } from "./queries";
+import { isManageableRole } from "./roleAccess";
 import { type UserWithAssignments } from "./types";
 
 const schema = z.object({
@@ -23,13 +20,17 @@ type FormValues = z.infer<typeof schema>;
 
 export function AssignmentsPanel({
   user,
+  tenantId,
+  canManage,
   onClose,
 }: {
   user: UserWithAssignments;
+  tenantId: string | null;
+  canManage: boolean;
   onClose: () => void;
 }): JSX.Element {
-  const roles = useRolesQuery();
-  const branches = useBranchesQuery(true);
+  const roles = useRolesQuery(canManage);
+  const branches = useBranchesQuery(true, canManage);
   const createAssignment = useCreateAssignment();
   const revokeAssignment = useRevokeAssignment();
   const [topError, setTopError] = useState<string | null>(null);
@@ -55,6 +56,20 @@ export function AssignmentsPanel({
     }
     setTopError(null);
     const d = parsed.data;
+    const selectedRole = roles.data?.find((role) => role.id === d.role_id);
+    if (
+      !canManage ||
+      !selectedRole ||
+      !selectedRole.is_active ||
+      !isManageableRole(selectedRole, tenantId)
+    ) {
+      setTopError("Эта роль недоступна для назначения");
+      return;
+    }
+    if (d.branch_id && !branches.data?.some((branch) => branch.id === d.branch_id)) {
+      setTopError("Эта точка недоступна для назначения");
+      return;
+    }
     try {
       await createAssignment.mutateAsync({
         userId: user.id,
@@ -82,9 +97,19 @@ export function AssignmentsPanel({
     }
   };
 
-  const roleName = (roleId: string) => roles.data?.find((r) => r.id === roleId)?.name ?? roleId.slice(0, 8);
+  const manageableRoles = (roles.data ?? []).filter(
+    (role) => role.is_active && isManageableRole(role, tenantId),
+  );
+  const roleById = (roleId: string) => roles.data?.find((role) => role.id === roleId);
+  const roleName = (roleId: string) => roleById(roleId)?.name ?? roleId.slice(0, 8);
+  const canRevokeRole = (roleId: string): boolean => {
+    const role = roleById(roleId);
+    return Boolean(role && isManageableRole(role, tenantId));
+  };
   const branchName = (branchId: string | null) =>
-    branchId ? branches.data?.find((b) => b.id === branchId)?.name ?? branchId.slice(0, 8) : "все точки";
+    branchId
+      ? (branches.data?.find((branch) => branch.id === branchId)?.name ?? branchId.slice(0, 8))
+      : "все точки";
 
   return (
     <div className="space-y-4">
@@ -109,7 +134,7 @@ export function AssignmentsPanel({
                   </div>
                   <p className="text-xs text-foreground-muted">{branchName(a.branch_id)}</p>
                 </div>
-                {a.is_active && (
+                {a.is_active && canManage && canRevokeRole(a.role_id) && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -128,8 +153,26 @@ export function AssignmentsPanel({
         )}
       </div>
 
-      {addOpen ? (
-        <form onSubmit={onAdd} noValidate className="space-y-3 rounded-md border border-border bg-foreground/[0.03] p-3">
+      {roles.error && (
+        <p className="text-sm text-danger">
+          {describeApiError(roles.error, "Не удалось загрузить доступные роли")}
+        </p>
+      )}
+      {branches.error && (
+        <p className="text-sm text-danger">
+          {describeApiError(branches.error, "Не удалось загрузить точки")}
+        </p>
+      )}
+      {canManage && (roles.isLoading || branches.isLoading) && (
+        <p className="text-sm text-foreground-muted">Загрузка доступных ролей…</p>
+      )}
+
+      {canManage && addOpen ? (
+        <form
+          onSubmit={onAdd}
+          noValidate
+          className="space-y-3 rounded-md border border-border bg-foreground/[0.03] p-3"
+        >
           <div>
             <Label htmlFor="role_id">Роль</Label>
             <Select
@@ -138,13 +181,11 @@ export function AssignmentsPanel({
               {...form.register("role_id")}
             >
               <option value="">— выберите —</option>
-              {roles.data
-                ?.filter((r) => r.is_active)
-                .map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name} (уровень {r.level})
-                  </option>
-                ))}
+              {manageableRoles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.name}
+                </option>
+              ))}
             </Select>
             <FormError>{form.formState.errors.role_id?.message}</FormError>
           </div>
@@ -165,16 +206,32 @@ export function AssignmentsPanel({
             <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>
               Отмена
             </Button>
-            <Button type="submit" size="sm" isLoading={form.formState.isSubmitting}>
+            <Button
+              type="submit"
+              size="sm"
+              isLoading={form.formState.isSubmitting}
+              disabled={roles.isError || branches.isError}
+            >
               Добавить
             </Button>
           </div>
         </form>
-      ) : (
+      ) : canManage &&
+        !roles.isLoading &&
+        !branches.isLoading &&
+        !roles.error &&
+        !branches.error &&
+        manageableRoles.length > 0 ? (
         <Button variant="secondary" onClick={() => setAddOpen(true)}>
           + Назначить роль
         </Button>
-      )}
+      ) : canManage &&
+        !roles.isLoading &&
+        !branches.isLoading &&
+        !roles.error &&
+        !branches.error ? (
+        <p className="text-sm text-foreground-muted">Нет доступных для назначения ролей.</p>
+      ) : null}
 
       <div className="flex justify-end">
         <Button variant="ghost" onClick={onClose}>

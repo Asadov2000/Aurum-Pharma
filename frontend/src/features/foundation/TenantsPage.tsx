@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
   Badge,
   Button,
@@ -17,11 +18,13 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
 import { AdminBillingDrawer } from "@/features/billing/AdminBillingDrawer";
 
 import { describeApiError } from "./errors";
 import { useTenantsQuery } from "./queries";
 import { TenantForm } from "./TenantForm";
+import { TenantMemberForm } from "./TenantMemberForm";
 import { type Tenant, type TenantStatus } from "./types";
 
 const PAGE_SIZE = 20;
@@ -45,12 +48,15 @@ const statusLabel: Record<TenantStatus, string> = {
 };
 
 export function TenantsPage(): JSX.Element {
+  const { user } = useAuth();
+  const canManageTenants = Boolean(user?.is_developer || user?.is_administrator);
   const [editing, setEditing] = useState<Tenant | null>(null);
   const [creating, setCreating] = useState(false);
   const [billingTenant, setBillingTenant] = useState<Tenant | null>(null);
+  const [memberTenant, setMemberTenant] = useState<Tenant | null>(null);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
-  const { data, isLoading, error } = useTenantsQuery();
+  const { data, isLoading, error } = useTenantsQuery(canManageTenants);
 
   // Search + pagination are client-side: the API has no search param and the
   // tenant count is small (we already fetch up to 500).
@@ -60,12 +66,17 @@ export function TenantsPage(): JSX.Element {
     if (!needle) return all;
     return all.filter(
       (t) =>
-        t.name.toLowerCase().includes(needle) ||
-        t.contact_email.toLowerCase().includes(needle),
+        t.name.toLowerCase().includes(needle) || t.contact_email.toLowerCase().includes(needle),
     );
   }, [data, q]);
 
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  if (!canManageTenants) {
+    return (
+      <AccessDeniedCard title="Аптеки" message="У вас нет доступа к администрированию аптек." />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -91,13 +102,11 @@ export function TenantsPage(): JSX.Element {
         </FilterBar>
       )}
 
-      {error && (
+      {error ? (
         <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить список")}
         </p>
-      )}
-
-      {isLoading ? (
+      ) : isLoading ? (
         <SkeletonRows rows={6} />
       ) : !data || data.length === 0 ? (
         <TableEmpty>Пока нет ни одной аптеки</TableEmpty>
@@ -131,6 +140,19 @@ export function TenantsPage(): JSX.Element {
                     <Button variant="ghost" size="sm" onClick={() => setBillingTenant(t)}>
                       Биллинг
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={t.status === "archived"}
+                      title={
+                        t.status === "archived"
+                          ? "В архивную аптеку нельзя добавить сотрудника"
+                          : undefined
+                      }
+                      onClick={() => setMemberTenant(t)}
+                    >
+                      Добавить сотрудника
+                    </Button>
                   </TD>
                 </TR>
               ))}
@@ -163,6 +185,19 @@ export function TenantsPage(): JSX.Element {
           onClose={() => setBillingTenant(null)}
         />
       )}
+      <Modal
+        open={memberTenant !== null}
+        onClose={() => setMemberTenant(null)}
+        title="Новый сотрудник"
+      >
+        {memberTenant && (
+          <TenantMemberForm
+            tenantId={memberTenant.id}
+            tenantName={memberTenant.name}
+            onClose={() => setMemberTenant(null)}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

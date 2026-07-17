@@ -4,24 +4,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listUsers = vi.fn();
 const listRoles = vi.fn();
-const inviteUser = vi.fn();
+const updateUser = vi.fn();
+const suspendUser = vi.fn();
+const offboardUser = vi.fn();
+const createAssignment = vi.fn();
+const listBranches = vi.fn();
 
 vi.mock("@/features/roles/api", () => ({
-  listUsers: (...a: unknown[]) => listUsers(...a),
-  listRoles: (...a: unknown[]) => listRoles(...a),
+  listUsers: (...args: unknown[]) => listUsers(...args),
+  listRoles: (...args: unknown[]) => listRoles(...args),
   listPermissions: vi.fn().mockResolvedValue([]),
-  inviteUser: (...a: unknown[]) => inviteUser(...a),
-  updateUser: vi.fn(),
-  blockUser: vi.fn(),
-  archiveUser: vi.fn(),
-  createAssignment: vi.fn(),
+  listTemplates: vi.fn().mockResolvedValue([]),
+  createRole: vi.fn(),
+  updateRole: vi.fn(),
+  updateUser: (...args: unknown[]) => updateUser(...args),
+  suspendUser: (...args: unknown[]) => suspendUser(...args),
+  offboardUser: (...args: unknown[]) => offboardUser(...args),
+  createAssignment: (...args: unknown[]) => createAssignment(...args),
   revokeAssignment: vi.fn(),
 }));
 
 vi.mock("@/features/foundation/api", () => ({
-  listBranches: vi.fn().mockResolvedValue([]),
+  listBranches: (...args: unknown[]) => listBranches(...args),
   listTenants: vi.fn(),
   createTenant: vi.fn(),
+  createTenantOwner: vi.fn(),
+  createTenantMember: vi.fn(),
   updateTenant: vi.fn(),
   getTenantSettings: vi.fn(),
   updateTenantSettings: vi.fn(),
@@ -34,56 +42,76 @@ vi.mock("@/features/foundation/api", () => ({
   deleteRegister: vi.fn(),
 }));
 
-// The page now gates itself behind users.view; render as an owner who holds it
-// so the user/role queries stay enabled (the access gate is covered separately
-// in RouteAccess.test.tsx).
+let mockUser: Record<string, unknown> = {};
 vi.mock("@/features/auth/hooks", () => ({
-  useAuth: () => ({ user: { home_tenant_id: "t-1", permissions: ["users.view"] } }),
+  useAuth: () => ({ user: mockUser }),
 }));
 
 import { UsersPage } from "@/features/roles/UsersPage";
 
 function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
+    <QueryClientProvider client={queryClient}>
       <UsersPage />
     </QueryClientProvider>,
   );
 }
 
-const ROLE = {
-  id: "33333333-3333-3333-3333-333333333333",
-  tenant_id: null,
+const MANAGED_ROLE = {
+  id: "role-managed",
+  tenant_id: "tenant-1",
   name: "Кассир",
   description: null,
-  level: 4,
-  is_system: true,
+  is_system: false,
+  is_protected: false,
+  protected_kind: null,
   is_active: true,
+  version: 1,
   permissions: ["pos.sell"],
 };
 
+const SYSTEM_ROLE = {
+  ...MANAGED_ROLE,
+  id: "role-system",
+  tenant_id: null,
+  name: "Aurum Administrator",
+  is_system: true,
+  is_protected: true,
+  protected_kind: "administrator",
+};
+
+const OWNER_ROLE = {
+  ...MANAGED_ROLE,
+  id: "role-owner",
+  name: "Владелец",
+  is_protected: true,
+  protected_kind: "tenant_owner",
+};
+
 const USER_ACTIVE = {
-  id: "u-1",
-  email: "u1@aurum.tj",
-  full_name: "User One",
+  id: "member-1",
+  membership_id: "membership-1",
+  email: "user@aurum.tj",
+  full_name: "Иван Сотрудник",
   phone: null,
   status: "active" as const,
   last_login_at: null,
   assignments: [
     {
-      id: "a-1",
-      user_id: "u-1",
-      tenant_id: "t-1",
+      id: "assignment-1",
+      user_id: "member-1",
+      tenant_id: "tenant-1",
+      membership_id: "membership-1",
       branch_id: null,
-      role_id: ROLE.id,
+      role_id: MANAGED_ROLE.id,
       password_required: false,
       is_active: true,
     },
   ],
 };
 
-const usersResp = (items: unknown[]) => ({
+const usersResponse = (items: unknown[]) => ({
   items,
   total: items.length,
   page: 1,
@@ -92,84 +120,207 @@ const usersResp = (items: unknown[]) => ({
 
 describe("UsersPage", () => {
   beforeEach(() => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      permissions: ["users.view"],
+    };
     listUsers.mockReset();
     listRoles.mockReset();
-    inviteUser.mockReset();
-    listRoles.mockResolvedValue([ROLE]);
+    updateUser.mockReset();
+    suspendUser.mockReset();
+    offboardUser.mockReset();
+    createAssignment.mockReset();
+    listBranches.mockReset();
+    listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE, OWNER_ROLE]);
+    listBranches.mockResolvedValue([]);
+    updateUser.mockResolvedValue({});
+    suspendUser.mockResolvedValue(undefined);
+    offboardUser.mockResolvedValue(undefined);
+    createAssignment.mockResolvedValue({ id: "assignment-new" });
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
+  afterEach(() => vi.clearAllMocks());
 
-  it("renders an empty state when there are no users", async () => {
-    listUsers.mockResolvedValueOnce(usersResp([]));
+  it("renders attached-membership empty state without invite controls", async () => {
+    listUsers.mockResolvedValue(usersResponse([]));
     renderPage();
-    expect(await screen.findByText(/Пока нет пользователей/i)).toBeInTheDocument();
+
+    expect(await screen.findByText(/К аптеке пока не прикреплены сотрудники/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Пригласить/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Создать аккаунт/i)).not.toBeInTheDocument();
   });
 
-  it("renders the role name from the role registry, not the raw id", async () => {
-    listUsers.mockResolvedValueOnce(usersResp([USER_ACTIVE]));
+  it("renders assignment names from the role registry", async () => {
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
-    expect(await screen.findByText("User One")).toBeInTheDocument();
+
+    expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
     expect(await screen.findByText("Кассир")).toBeInTheDocument();
-    expect(screen.queryByText(ROLE.id)).not.toBeInTheDocument();
+    expect(screen.queryByText(MANAGED_ROLE.id)).not.toBeInTheDocument();
   });
 
-  it("rejects the invite form when required fields are empty", async () => {
-    listUsers.mockResolvedValueOnce(usersResp([]));
+  it("does not derive update, suspend, offboard or assignment actions from users.view", async () => {
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
-    await screen.findByText(/Пока нет пользователей/i);
-    fireEvent.click(screen.getByRole("button", { name: /\+ Пригласить/i }));
-    const submit = await screen.findByRole("button", { name: /^Пригласить$/i });
-    fireEvent.click(submit);
-    expect(await screen.findByText(/Некорректный email/i)).toBeInTheDocument();
-    expect(inviteUser).not.toHaveBeenCalled();
+
+    expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Профиль" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Роли" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Приостановить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Уволить" })).not.toBeInTheDocument();
   });
 
-  it("invites a user with the selected role", async () => {
-    listUsers.mockResolvedValue(usersResp([]));
-    listRoles.mockResolvedValue([ROLE]);
-    inviteUser.mockResolvedValueOnce({ id: "a-new" });
+  it("gates profile and assignment actions independently", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      permissions: ["users.view", "users.update", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
-    await screen.findByText(/Пока нет пользователей/i);
-    fireEvent.click(screen.getByRole("button", { name: /\+ Пригласить/i }));
-    fireEvent.change(await screen.findByLabelText("Email"), {
-      target: { value: "new@aurum.tj" },
+
+    expect(await screen.findByRole("button", { name: "Профиль" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Роли" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Приостановить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Уволить" })).not.toBeInTheDocument();
+  });
+
+  it("updates a profile only through users.update", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      permissions: ["users.view", "users.update"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Профиль" }));
+    fireEvent.change(await screen.findByLabelText("ФИО"), {
+      target: { value: "Иван Обновлённый" },
     });
-    fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "Новый" } });
-    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: ROLE.id } });
-    fireEvent.click(screen.getByRole("button", { name: /^Пригласить$/i }));
-    await waitFor(() => {
-      expect(inviteUser).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText("Телефон"), {
+      target: { value: "+992900001122" },
     });
-    expect(inviteUser).toHaveBeenCalledWith(
-      expect.objectContaining({
-        email: "new@aurum.tj",
-        full_name: "Новый",
-        role_id: ROLE.id,
-        branch_id: null,
-        password_required: false,
-      }),
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => expect(updateUser).toHaveBeenCalledTimes(1));
+    expect(updateUser).toHaveBeenCalledWith("member-1", {
+      full_name: "Иван Обновлённый",
+      phone: "+992900001122",
+    });
+  });
+
+  it("activates a pending membership through users.update", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      permissions: ["users.view", "users.update"],
+    };
+    listUsers.mockResolvedValue(
+      usersResponse([{ ...USER_ACTIVE, status: "pending", assignments: [] }]),
     );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Активировать" }));
+
+    await waitFor(() => expect(updateUser).toHaveBeenCalledTimes(1));
+    expect(updateUser).toHaveBeenCalledWith("member-1", { status: "active" });
   });
 
-  it("renders pagination and advances the page", async () => {
+  it("assigns only an active, manageable tenant role", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      permissions: ["users.view", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("button", { name: "+ Назначить роль" }));
+    expect(screen.queryByRole("option", { name: "Aurum Administrator" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
+
+    await waitFor(() => expect(createAssignment).toHaveBeenCalledTimes(1));
+    expect(createAssignment).toHaveBeenCalledWith("member-1", {
+      role_id: MANAGED_ROLE.id,
+      branch_id: null,
+      password_required: false,
+    });
+  });
+
+  it("protects owner membership from assignment and lifecycle actions", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      permissions: ["users.view", "users.update", "users.block", "users.delete", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(
+      usersResponse([
+        {
+          ...USER_ACTIVE,
+          assignments: [
+            {
+              ...USER_ACTIVE.assignments[0],
+              id: "assignment-owner",
+              role_id: OWNER_ROLE.id,
+            },
+          ],
+        },
+      ]),
+    );
+    renderPage();
+
+    expect(await screen.findByText("владелец")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Профиль" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Роли" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Приостановить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Уволить" })).not.toBeInTheDocument();
+  });
+
+  it("gates suspend and offboard with their own permissions", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      permissions: ["users.view", "users.block"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    const firstRender = renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Приостановить" }));
+    expect(screen.queryByRole("button", { name: "Уволить" })).not.toBeInTheDocument();
+    const suspendButtons = screen.getAllByRole("button", { name: "Приостановить" });
+    fireEvent.click(suspendButtons[suspendButtons.length - 1]!);
+    await waitFor(() => expect(suspendUser).toHaveBeenCalledWith("member-1"));
+
+    firstRender.unmount();
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      permissions: ["users.view", "users.delete"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Уволить" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Приостановить" })).not.toBeInTheDocument();
+  });
+
+  it("renders pagination and refetches the selected page", async () => {
     listUsers.mockResolvedValue({
       items: [USER_ACTIVE],
       total: 120,
       page: 1,
       page_size: 50,
     });
-    listRoles.mockResolvedValue([ROLE]);
     renderPage();
-    expect(await screen.findByText("User One")).toBeInTheDocument();
-    expect(screen.getByText("Всего:")).toBeInTheDocument();
-    expect(screen.getByText("120")).toBeInTheDocument();
-    const next = screen.getByRole("button", { name: /Вперёд/ });
-    expect(next).not.toBeDisabled();
-    fireEvent.click(next);
-    // Advancing the page refetches with page=2.
+
+    expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Вперёд/ }));
     await waitFor(() => expect(listUsers).toHaveBeenCalledWith(2, 50));
   });
 });

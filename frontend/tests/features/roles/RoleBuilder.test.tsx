@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listPermissions = vi.fn();
@@ -8,81 +9,89 @@ const createRole = vi.fn();
 const updateRole = vi.fn();
 
 vi.mock("@/features/roles/api", () => ({
-  listPermissions: (...a: unknown[]) => listPermissions(...a),
-  listTemplates: (...a: unknown[]) => listTemplates(...a),
-  createRole: (...a: unknown[]) => createRole(...a),
-  updateRole: (...a: unknown[]) => updateRole(...a),
-  // unused here but imported by queries.ts
+  listPermissions: (...args: unknown[]) => listPermissions(...args),
+  listTemplates: (...args: unknown[]) => listTemplates(...args),
+  createRole: (...args: unknown[]) => createRole(...args),
+  updateRole: (...args: unknown[]) => updateRole(...args),
   listRoles: vi.fn(),
   listUsers: vi.fn(),
-  inviteUser: vi.fn(),
   updateUser: vi.fn(),
-  blockUser: vi.fn(),
-  archiveUser: vi.fn(),
+  suspendUser: vi.fn(),
+  offboardUser: vi.fn(),
   createAssignment: vi.fn(),
   revokeAssignment: vi.fn(),
 }));
 
-let mockUser: Record<string, unknown> = {};
-vi.mock("@/features/auth/hooks", () => ({ useAuth: () => ({ user: mockUser }) }));
-
 import { RoleBuilderModal } from "@/features/roles/RoleBuilderModal";
 
-const PERMS = [
+const PERMISSIONS = [
   {
-    code: "users.invite",
+    code: "users.delete",
     group_code: "users",
-    name: "Приглашение сотрудника",
-    description: "Приглашение нового сотрудника по email.",
-    min_level_required: 3,
-    is_dangerous: false,
+    name: "Увольнение сотрудника",
+    description: "Необратимо завершает работу сотрудника в аптеке.",
+    is_dangerous: true,
     is_active: true,
+    scope_type: "TENANT_ALL",
+    target_role_type: "tenant",
+    risk_level: "critical",
+    requires_step_up: true,
+    requires_confirmation: true,
   },
   {
     code: "pos.sell",
     group_code: "pos",
     name: "Продажа",
     description: "Продажа товаров на кассе и оформление чеков.",
-    min_level_required: 4,
     is_dangerous: false,
     is_active: true,
+    scope_type: "BRANCH_SET",
+    target_role_type: "tenant",
+    risk_level: "normal",
+    requires_step_up: false,
+    requires_confirmation: false,
   },
 ];
 
-function renderModal() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderModal(
+  props: ComponentProps<typeof RoleBuilderModal> = {
+    mode: "create",
+    onClose: () => {},
+  },
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
-      <RoleBuilderModal mode="create" onClose={() => {}} />
+    <QueryClientProvider client={queryClient}>
+      <RoleBuilderModal {...props} />
     </QueryClientProvider>,
   );
 }
 
 describe("RoleBuilderModal", () => {
   beforeEach(() => {
-    listPermissions.mockResolvedValue(PERMS);
-    listTemplates.mockResolvedValue([]);
+    listPermissions.mockReset();
+    listTemplates.mockReset();
     createRole.mockReset();
     updateRole.mockReset();
-    mockUser = { is_developer: true };
+    listPermissions.mockResolvedValue(PERMISSIONS);
+    listTemplates.mockResolvedValue([]);
+    createRole.mockResolvedValue({});
   });
+
   afterEach(() => vi.clearAllMocks());
 
-  it("groups functions by section with a short description under each", async () => {
-    mockUser = { is_developer: true }; // support sees everything
+  it("renders exactly the server catalogue and marks dangerous permissions", async () => {
     renderModal();
-    // Russian section headings
+
     expect(await screen.findByText("Сотрудники")).toBeInTheDocument();
     expect(screen.getByText("Касса")).toBeInTheDocument();
-    // a function name + its tooltip/description text
-    expect(screen.getByText("Продажа")).toBeInTheDocument();
-    expect(
-      screen.getByText("Продажа товаров на кассе и оформление чеков."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Продажа товаров на кассе и оформление чеков.")).toBeInTheDocument();
+    expect(screen.getByText("опасное право")).toBeInTheDocument();
+    expect(screen.queryByText(/Уровень роли/i)).not.toBeInTheDocument();
   });
 
-  it("prefills the checkboxes from a chosen template", async () => {
-    mockUser = { is_developer: true };
+  it("copies only catalogue permissions from a template", async () => {
+    listPermissions.mockResolvedValue([PERMISSIONS[1]]);
     listTemplates.mockResolvedValue([
       {
         id: "tpl1",
@@ -91,37 +100,82 @@ describe("RoleBuilderModal", () => {
         description: null,
         is_system: true,
         is_active: true,
-        permissions: ["pos.sell"],
+        permissions: ["pos.sell", "users.delete"],
       },
     ]);
     renderModal();
-    const sell = await screen.findByRole("checkbox", { name: /Продажа/ });
-    expect(sell).not.toBeChecked();
 
+    const sell = await screen.findByRole("checkbox", { name: /Продажа/ });
     fireEvent.change(await screen.findByLabelText(/Начать из шаблона/), {
       target: { value: "tpl1" },
     });
 
-    expect(screen.getByRole("checkbox", { name: /Продажа/ })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /Приглашение сотрудника/ })).not.toBeChecked();
+    expect(sell).toBeChecked();
+    expect(screen.queryByText("Увольнение сотрудника")).not.toBeInTheDocument();
   });
 
-  it("shows only the functions the current user holds (anti-escalation)", async () => {
-    // A limited user holding only pos.sell must not even see users.invite.
-    mockUser = { home_tenant_id: "t-1", permissions: ["pos.sell"] };
+  it("does not infer extra permissions for a support account", async () => {
+    listPermissions.mockResolvedValue([PERMISSIONS[1]]);
     renderModal();
+
     expect(await screen.findByText("Продажа")).toBeInTheDocument();
-    expect(screen.queryByText("Приглашение сотрудника")).not.toBeInTheDocument();
+    expect(screen.queryByText("Увольнение сотрудника")).not.toBeInTheDocument();
   });
 
-  it("hides functions above the role level", async () => {
-    mockUser = {
-      home_tenant_id: "t-1",
-      level: 3,
-      permissions: ["pos.sell", "users.invite"],
-    };
+  it("submits a role without a numeric level", async () => {
     renderModal();
-    expect(await screen.findByText("Продажа")).toBeInTheDocument();
-    expect(screen.queryByText("Приглашение сотрудника")).not.toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText("Название"), {
+      target: { value: "  Старший кассир  " },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Продажа/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
+
+    await waitFor(() => expect(createRole).toHaveBeenCalledTimes(1));
+    expect(createRole).toHaveBeenCalledWith({
+      name: "Старший кассир",
+      description: null,
+      permissions: ["pos.sell"],
+    });
+    expect(createRole.mock.calls[0]?.[0]).not.toHaveProperty("level");
+  });
+
+  it("shows a catalogue error and disables submission", async () => {
+    listPermissions.mockRejectedValue(new Error("catalogue failed"));
+    renderModal();
+
+    expect(await screen.findByText(/Не удалось загрузить доступные функции/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Создать роль" })).toBeDisabled();
+  });
+
+  it("blocks edit when the role contains a permission outside the grantable catalogue", async () => {
+    listPermissions.mockResolvedValue([PERMISSIONS[1]]);
+    renderModal({
+      mode: "edit",
+      role: {
+        id: "role-1",
+        tenant_id: "tenant-1",
+        name: "Особая роль",
+        description: null,
+        is_system: false,
+        is_protected: false,
+        protected_kind: null,
+        is_active: true,
+        version: 1,
+        permissions: ["pos.sell", "audit.view.global"],
+      },
+      onClose: () => {},
+    });
+
+    expect(
+      await screen.findByText(
+        "Роль содержит функции, недоступные для изменения. Редактирование заблокировано.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("audit.view.global")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Название")).toBeDisabled();
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(updateRole).not.toHaveBeenCalled();
   });
 });

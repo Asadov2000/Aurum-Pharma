@@ -1,13 +1,7 @@
 // Mirrors backend Pydantic schemas in app/domains/foundation/schemas.py.
 // Codegen lands in Phase 2 — until then we keep these by hand.
 
-export type TenantStatus =
-  | "setup"
-  | "trial"
-  | "active"
-  | "grace_period"
-  | "readonly"
-  | "archived";
+export type TenantStatus = "setup" | "trial" | "active" | "grace_period" | "readonly" | "archived";
 
 export interface Tenant {
   id: string;
@@ -45,9 +39,27 @@ export interface OwnerCreatePayload {
 
 export interface OwnerProvision {
   user_id: string;
+  membership_id: string;
+  ownership_id: string;
   email: string;
   home_tenant_id: string;
   role_id: string;
+}
+
+export interface TenantMemberCreatePayload {
+  email: string;
+  full_name: string;
+  phone?: string | null;
+}
+
+export interface TenantMembership {
+  membership_id: string;
+  user_id: string;
+  tenant_id: string;
+  email: string;
+  full_name: string;
+  phone: string | null;
+  status: "pending" | "active" | "suspended" | "offboarded";
 }
 
 export interface TenantUpdatePayload {

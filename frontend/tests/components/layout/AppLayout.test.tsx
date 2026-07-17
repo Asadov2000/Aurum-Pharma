@@ -15,6 +15,7 @@ const OWNER_PERMS = [
   ...SELLER_PERMS,
   "reports.view",
   "users.view",
+  "roles.create",
   "suppliers.view",
   "incoming.view",
   "settings.update",
@@ -51,12 +52,22 @@ describe("buildNav — team management visibility", () => {
     expect(items.some((i) => i.to === "/pos")).toBe(true);
   });
 
-  it("shows «Пользователи»/«Роли» to a tenant user with users.view (owner)", () => {
+  it("shows team pages to an owner with their exact permissions", () => {
     const items = buildNav(false, true, OWNER_PERMS);
     expect(labels(items)).toContain("Пользователи");
     expect(labels(items)).toContain("Роли");
     expect(items.some((i) => i.to === "/users")).toBe(true);
     expect(items.some((i) => i.to === "/roles")).toBe(true);
+  });
+
+  it("does not use users.view as permission to open role management", () => {
+    const userViewer = buildNav(false, true, ["users.view"]);
+    expect(labels(userViewer)).toContain("Пользователи");
+    expect(labels(userViewer)).not.toContain("Роли");
+
+    const roleManager = buildNav(false, true, ["roles.update"]);
+    expect(labels(roleManager)).not.toContain("Пользователи");
+    expect(labels(roleManager)).toContain("Роли");
   });
 });
 

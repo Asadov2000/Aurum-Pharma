@@ -5,11 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const listTenants = vi.fn();
 const createTenant = vi.fn();
 const createTenantOwner = vi.fn();
+const createTenantMember = vi.fn();
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
+    <a href={to}>{children}</a>
+  ),
+}));
 
 vi.mock("@/features/foundation/api", () => ({
   listTenants: (...a: unknown[]) => listTenants(...a),
   createTenant: (...a: unknown[]) => createTenant(...a),
   createTenantOwner: (...a: unknown[]) => createTenantOwner(...a),
+  createTenantMember: (...a: unknown[]) => createTenantMember(...a),
   updateTenant: vi.fn(),
   getTenantSettings: vi.fn(),
   updateTenantSettings: vi.fn(),
@@ -21,6 +29,11 @@ vi.mock("@/features/foundation/api", () => ({
   createRegister: vi.fn(),
   updateRegister: vi.fn(),
   deleteRegister: vi.fn(),
+}));
+
+let mockUser: Record<string, unknown> = {};
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => ({ user: mockUser }),
 }));
 
 import { TenantsPage } from "@/features/foundation/TenantsPage";
@@ -55,9 +68,11 @@ const SAMPLE = {
 
 describe("TenantsPage", () => {
   beforeEach(() => {
+    mockUser = { is_administrator: true };
     listTenants.mockReset();
     createTenant.mockReset();
     createTenantOwner.mockReset();
+    createTenantMember.mockReset();
   });
 
   afterEach(() => {
@@ -76,6 +91,18 @@ describe("TenantsPage", () => {
     expect(await screen.findByText("Demo Pharmacy")).toBeInTheDocument();
     expect(screen.getByText("owner@aurum.tj")).toBeInTheDocument();
     expect(screen.getByText(/Активен/)).toBeInTheDocument();
+  });
+
+  it("blocks direct access for a non-support account", () => {
+    mockUser = {
+      is_administrator: false,
+      is_developer: false,
+      home_tenant_id: SAMPLE.id,
+    };
+    renderPage();
+
+    expect(screen.getByText(/нет доступа к администрированию аптек/i)).toBeInTheDocument();
+    expect(listTenants).not.toHaveBeenCalled();
   });
 
   it("validates required fields when submitting an empty create form", async () => {
@@ -138,5 +165,33 @@ describe("TenantsPage", () => {
     expect(await screen.findByText(/Аптека и владелец созданы/i)).toBeInTheDocument();
     expect(screen.getByText("vladelec@shifo.tj")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Получить код входа/i })).toBeInTheDocument();
+  });
+
+  it("creates a member for the selected tenant and refreshes data", async () => {
+    listTenants.mockResolvedValue([SAMPLE]);
+    createTenantMember.mockResolvedValue(undefined);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить сотрудника" }));
+    fireEvent.change(await screen.findByLabelText("ФИО"), {
+      target: { value: "Новый Сотрудник" },
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "member@aurum.tj" },
+    });
+    fireEvent.change(screen.getByLabelText(/Телефон/), {
+      target: { value: "+992900001100" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Создать аккаунт" }));
+
+    await waitFor(() => expect(createTenantMember).toHaveBeenCalledTimes(1));
+    expect(createTenantMember).toHaveBeenCalledWith(SAMPLE.id, {
+      email: "member@aurum.tj",
+      full_name: "Новый Сотрудник",
+      phone: "+992900001100",
+    });
+    expect(await screen.findByText(/Аккаунт сотрудника создан/i)).toBeInTheDocument();
+    await waitFor(() => expect(listTenants.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByLabelText(/tenant.*id|uuid/i)).not.toBeInTheDocument();
   });
 });

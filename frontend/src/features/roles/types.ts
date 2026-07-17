@@ -5,9 +5,13 @@ export interface Permission {
   group_code: string;
   name: string;
   description: string | null;
-  min_level_required: number;
   is_dangerous: boolean;
   is_active: boolean;
+  scope_type: "PLATFORM" | "TENANT_ALL" | "BRANCH_SET" | "OWN";
+  target_role_type: "platform" | "tenant";
+  risk_level: "normal" | "sensitive" | "critical";
+  requires_step_up: boolean;
+  requires_confirmation: boolean;
 }
 
 export interface Role {
@@ -15,9 +19,11 @@ export interface Role {
   tenant_id: string | null;
   name: string;
   description: string | null;
-  level: number;
   is_system: boolean;
+  is_protected: boolean;
+  protected_kind: "developer" | "administrator" | "tenant_owner" | null;
   is_active: boolean;
+  version: number;
   permissions: string[];
 }
 
@@ -34,14 +40,12 @@ export interface RoleTemplate {
 export interface RoleCreatePayload {
   name: string;
   description?: string | null;
-  level: number;
   permissions: string[];
 }
 
 export interface RoleUpdatePayload {
   name?: string;
   description?: string | null;
-  level?: number;
   permissions?: string[];
 }
 
@@ -49,16 +53,18 @@ export interface Assignment {
   id: string;
   user_id: string;
   tenant_id: string;
+  membership_id: string;
   branch_id: string | null;
   role_id: string;
   password_required: boolean;
   is_active: boolean;
 }
 
-export type UserStatus = "invited" | "active" | "blocked" | "archived";
+export type UserStatus = "pending" | "active" | "suspended" | "offboarded";
 
 export interface UserWithAssignments {
   id: string;
+  membership_id: string;
   email: string;
   full_name: string;
   phone: string | null;
@@ -74,14 +80,6 @@ export interface UserListResponse {
   page_size: number;
 }
 
-export interface InviteUserPayload {
-  email: string;
-  full_name: string;
-  role_id: string;
-  branch_id?: string | null;
-  password_required?: boolean;
-}
-
 export interface AssignmentCreatePayload {
   role_id: string;
   branch_id?: string | null;
@@ -91,4 +89,5 @@ export interface AssignmentCreatePayload {
 export interface UserUpdatePayload {
   full_name?: string;
   phone?: string | null;
+  status?: "active";
 }

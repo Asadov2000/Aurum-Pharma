@@ -4,6 +4,7 @@ import {
   createBranch,
   createRegister,
   createTenant,
+  createTenantMember,
   createTenantOwner,
   deleteBranch,
   deleteRegister,
@@ -23,15 +24,16 @@ import {
   type RegisterCreatePayload,
   type RegisterUpdatePayload,
   type TenantCreatePayload,
+  type TenantMemberCreatePayload,
   type TenantSettingsUpdatePayload,
   type TenantUpdatePayload,
 } from "./types";
 
 export const foundationKeys = {
   tenants: ["foundation", "tenants"] as const,
+  tenantMembers: (tenantId: string) => ["foundation", "tenant-members", tenantId] as const,
   settings: ["foundation", "settings"] as const,
-  branches: (includeInactive: boolean) =>
-    ["foundation", "branches", { includeInactive }] as const,
+  branches: (includeInactive: boolean) => ["foundation", "branches", { includeInactive }] as const,
   registers: (branchId: string | null, includeInactive: boolean) =>
     ["foundation", "registers", { branchId, includeInactive }] as const,
 };
@@ -74,6 +76,21 @@ export function useCreateTenantOwner() {
       createTenantOwner(args.tenantId, args.payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: foundationKeys.tenants });
+    },
+  });
+}
+
+export function useCreateTenantMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { tenantId: string; payload: TenantMemberCreatePayload }) =>
+      createTenantMember(args.tenantId, args.payload),
+    onSuccess: async (_data, variables) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: foundationKeys.tenants }),
+        qc.invalidateQueries({ queryKey: foundationKeys.tenantMembers(variables.tenantId) }),
+        qc.invalidateQueries({ queryKey: ["roles", "users"] }),
+      ]);
     },
   });
 }

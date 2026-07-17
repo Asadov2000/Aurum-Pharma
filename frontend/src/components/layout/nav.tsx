@@ -9,6 +9,9 @@ export function buildNav(
 ): NavItem[] {
   const can = (code: string): boolean => isSupport || permissions.includes(code);
   const canAny = (codes: readonly string[]): boolean => codes.some((code) => can(code));
+  const hasPermission = (code: string): boolean => permissions.includes(code);
+  const hasAnyPermission = (codes: readonly string[]): boolean =>
+    codes.some((code) => hasPermission(code));
 
   // «Главная» is the owner dashboard (gated by reports.view on the backend).
   // Hide it from users who'd only get a 403 — e.g. sellers.
@@ -22,11 +25,10 @@ export function buildNav(
     items.push({ to: "/onboarding", label: "Старт" });
     items.push({ to: "/branches", label: "Точки" });
     items.push({ to: "/registers", label: "Кассы" });
-    // «Пользователи» / «Роли» — team management, gated by users.view on the
-    // backend. Hide them from users who lack it (e.g. sellers) so they don't
-    // see a menu item that would only 403.
-    if (can("users.view")) {
+    if (hasPermission("users.view")) {
       items.push({ to: "/users", label: "Пользователи" });
+    }
+    if (hasAnyPermission(["roles.create", "roles.update", "roles.assign"])) {
       items.push({ to: "/roles", label: "Роли" });
     }
     if (can("catalog.view")) items.push({ to: "/catalog", label: "Каталог" });

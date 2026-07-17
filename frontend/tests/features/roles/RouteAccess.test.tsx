@@ -2,8 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Render-time Links (in the access-denied card) need a router context; stub
-// them to plain anchors.
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
     <a href={to}>{children}</a>
@@ -15,7 +13,6 @@ vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => ({ user: mockUser }),
 }));
 
-// Keep the network out of the unit test — every roles API call resolves empty.
 vi.mock("@/features/roles/api", () => ({
   listUsers: vi.fn(async () => ({ items: [], total: 0, page: 1, page_size: 50 })),
   listRoles: vi.fn(async () => []),
@@ -23,10 +20,9 @@ vi.mock("@/features/roles/api", () => ({
   listTemplates: vi.fn(async () => []),
   createRole: vi.fn(),
   updateRole: vi.fn(),
-  inviteUser: vi.fn(),
   updateUser: vi.fn(),
-  blockUser: vi.fn(),
-  archiveUser: vi.fn(),
+  suspendUser: vi.fn(),
+  offboardUser: vi.fn(),
   createAssignment: vi.fn(),
   revokeAssignment: vi.fn(),
 }));
@@ -35,69 +31,76 @@ import { RolesPage } from "@/features/roles/RolesPage";
 import { UsersPage } from "@/features/roles/UsersPage";
 
 function renderPage(node: React.ReactNode) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>);
 }
 
-const SELLER = { home_tenant_id: "t-1", full_name: "Seller", permissions: ["pos.sell"] };
-const OWNER = {
-  home_tenant_id: "t-1",
-  full_name: "Owner",
-  permissions: ["users.view", "roles.assign"],
-};
-// An owner who can also build roles (holds roles.create).
-const OWNER_BUILDER = {
-  home_tenant_id: "t-1",
-  full_name: "Owner",
-  permissions: ["users.view", "roles.assign", "roles.create"],
-};
+const SELLER = { home_tenant_id: "tenant-1", permissions: ["pos.sell"] };
+const USER_VIEWER = { home_tenant_id: "tenant-1", permissions: ["users.view"] };
+const ROLE_ASSIGNER = { home_tenant_id: "tenant-1", permissions: ["roles.assign"] };
+const ROLE_BUILDER = { home_tenant_id: "tenant-1", permissions: ["roles.create"] };
 
-describe("UsersPage — route access by users.view", () => {
+describe("UsersPage direct access", () => {
   beforeEach(() => {
     mockUser = {};
   });
+
   afterEach(() => vi.clearAllMocks());
 
-  it("blocks a seller reaching /users directly (friendly stub, no table)", () => {
+  it("blocks a tenant user without users.view", () => {
     mockUser = SELLER;
     renderPage(<UsersPage />);
-    expect(screen.getByText(/Управление сотрудниками доступно/)).toBeInTheDocument();
-    expect(screen.queryByText("+ Пригласить")).not.toBeInTheDocument();
+
+    expect(screen.getByText(/нет доступа к сотрудникам/i)).toBeInTheDocument();
   });
 
-  it("lets an owner (users.view) onto /users", async () => {
-    mockUser = OWNER;
+  it("allows users.view but never exposes an account creation action", async () => {
+    mockUser = USER_VIEWER;
     renderPage(<UsersPage />);
-    expect(await screen.findByText("+ Пригласить")).toBeInTheDocument();
-    expect(screen.queryByText(/Управление сотрудниками доступно/)).not.toBeInTheDocument();
+
+    expect(await screen.findByText("Сотрудники")).toBeInTheDocument();
+    expect(screen.queryByText(/Пригласить/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Создать аккаунт/i)).not.toBeInTheDocument();
+  });
+
+  it("blocks a support account without tenant context", () => {
+    mockUser = {
+      is_administrator: true,
+      home_tenant_id: null,
+      permissions: ["users.view"],
+    };
+    renderPage(<UsersPage />);
+
+    expect(screen.getByText(/нет доступа к сотрудникам/i)).toBeInTheDocument();
   });
 });
 
-describe("RolesPage — route access by users.view", () => {
+describe("RolesPage direct access", () => {
   beforeEach(() => {
     mockUser = {};
   });
+
   afterEach(() => vi.clearAllMocks());
 
-  it("blocks a seller reaching /roles directly (friendly stub)", () => {
-    mockUser = SELLER;
+  it("does not use users.view as a role-management permission", () => {
+    mockUser = USER_VIEWER;
     renderPage(<RolesPage />);
-    expect(screen.getByText(/Управление ролями доступно/)).toBeInTheDocument();
-    expect(screen.queryByText("Роли аптеки")).not.toBeInTheDocument();
+
+    expect(screen.getByText(/нет доступа к управлению ролями/i)).toBeInTheDocument();
   });
 
-  it("lets an owner (users.view) onto /roles but hides the builder without roles.create", async () => {
-    mockUser = OWNER;
+  it("allows roles.assign to inspect manageable roles without showing the builder", async () => {
+    mockUser = ROLE_ASSIGNER;
     renderPage(<RolesPage />);
+
     expect(await screen.findByText("Роли аптеки")).toBeInTheDocument();
-    expect(screen.queryByText(/Управление ролями доступно/)).not.toBeInTheDocument();
-    // No roles.create → no builder entry point.
     expect(screen.queryByText("+ Создать роль")).not.toBeInTheDocument();
   });
 
-  it("shows the builder («Создать роль») to a user with roles.create", async () => {
-    mockUser = OWNER_BUILDER;
+  it("shows the builder only with roles.create", async () => {
+    mockUser = ROLE_BUILDER;
     renderPage(<RolesPage />);
+
     expect(await screen.findByText("+ Создать роль")).toBeInTheDocument();
   });
 });

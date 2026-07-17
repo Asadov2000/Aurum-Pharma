@@ -11,6 +11,8 @@ import {
   type RegisterUpdatePayload,
   type Tenant,
   type TenantCreatePayload,
+  type TenantMemberCreatePayload,
+  type TenantMembership,
   type TenantSettings,
   type TenantSettingsUpdatePayload,
   type TenantUpdatePayload,
@@ -43,6 +45,14 @@ export async function createTenantOwner(
   payload: OwnerCreatePayload,
 ): Promise<OwnerProvision> {
   const { data } = await api.post<OwnerProvision>(`/admin/tenants/${tenantId}/owner`, payload);
+  return data;
+}
+
+export async function createTenantMember(
+  tenantId: string,
+  payload: TenantMemberCreatePayload,
+): Promise<TenantMembership> {
+  const { data } = await api.post<TenantMembership>(`/admin/tenants/${tenantId}/members`, payload);
   return data;
 }
 

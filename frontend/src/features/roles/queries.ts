@@ -1,22 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  archiveUser,
-  blockUser,
   createAssignment,
   createRole,
-  inviteUser,
   listPermissions,
   listRoles,
   listTemplates,
   listUsers,
+  offboardUser,
   revokeAssignment,
+  suspendUser,
   updateRole,
   updateUser,
 } from "./api";
 import {
   type AssignmentCreatePayload,
-  type InviteUserPayload,
   type RoleCreatePayload,
   type RoleUpdatePayload,
   type UserUpdatePayload,
@@ -82,16 +80,6 @@ export function useUpdateRole() {
   });
 }
 
-export function useInviteUser() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: InviteUserPayload) => inviteUser(payload),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: rolesKeys.users });
-    },
-  });
-}
-
 export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
@@ -103,20 +91,20 @@ export function useUpdateUser() {
   });
 }
 
-export function useBlockUser() {
+export function useSuspendUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => blockUser(id),
+    mutationFn: (id: string) => suspendUser(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rolesKeys.users });
     },
   });
 }
 
-export function useArchiveUser() {
+export function useOffboardUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => archiveUser(id),
+    mutationFn: (id: string) => offboardUser(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rolesKeys.users });
     },

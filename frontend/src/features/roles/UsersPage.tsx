@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
   Badge,
   Button,
@@ -15,169 +16,269 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import { useAuth } from "@/features/auth/hooks";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { AssignmentsPanel } from "./AssignmentsPanel";
-import { InviteUserModal } from "./InviteUserModal";
 import {
-  useArchiveUser,
-  useBlockUser,
+  useOffboardUser,
   useRolesQuery,
+  useSuspendUser,
+  useUpdateUser,
   useUsersQuery,
 } from "./queries";
 import { type UserStatus, type UserWithAssignments } from "./types";
+import { UserProfileForm } from "./UserProfileForm";
 
-// UserWithAssignments is used implicitly via the query data + onBlock/onArchive args.
 type Row = UserWithAssignments;
+type PendingAction = { type: "suspend" | "offboard"; user: Row };
 
 const PAGE_SIZE = 50;
 
 const statusTone: Record<UserStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
-  invited: "info",
+  pending: "info",
   active: "success",
-  blocked: "warning",
-  archived: "danger",
+  suspended: "warning",
+  offboarded: "danger",
 };
 
 const statusLabel: Record<UserStatus, string> = {
-  invited: "Приглашён",
+  pending: "Ожидает активации",
   active: "Активен",
-  blocked: "Заблокирован",
-  archived: "Архив",
+  suspended: "Приостановлен",
+  offboarded: "Уволен",
 };
+
+const isSuspended = (status: UserStatus): boolean => status === "suspended";
+const isOffboarded = (status: UserStatus): boolean => status === "offboarded";
 
 export function UsersPage(): JSX.Element {
   const { user } = useAuth();
   const hasTenant = Boolean(user?.home_tenant_id);
-  // Team management is gated by users.view on the backend (owner/admin/dev).
-  const canManage =
-    Boolean(user?.is_developer || user?.is_administrator) ||
-    (user?.permissions ?? []).includes("users.view");
+  const permissions = user?.permissions ?? [];
+  const canView = permissions.includes("users.view");
+  const canUpdate = permissions.includes("users.update");
+  const canSuspend = permissions.includes("users.block");
+  const canOffboard = permissions.includes("users.delete");
+  const canAssign = permissions.includes("roles.assign");
+  const showActions = canUpdate || canSuspend || canOffboard || canAssign;
 
-  const [inviting, setInviting] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [pending, setPending] = useState<{ type: "block" | "archive"; user: Row } | null>(null);
+  const [assignmentUserId, setAssignmentUserId] = useState<string | null>(null);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [activatingUserId, setActivatingUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const users = useUsersQuery(hasTenant && canManage, page, PAGE_SIZE);
-  const roles = useRolesQuery(hasTenant && canManage);
-  const blockMutation = useBlockUser();
-  const archiveMutation = useArchiveUser();
+  const users = useUsersQuery(hasTenant && canView, page, PAGE_SIZE);
+  const roles = useRolesQuery(hasTenant && canView);
+  const suspendMutation = useSuspendUser();
+  const offboardMutation = useOffboardUser();
+  const activateMutation = useUpdateUser();
 
   const rows = users.data?.items ?? [];
+  const assignmentUser = assignmentUserId
+    ? (rows.find((candidate) => candidate.id === assignmentUserId) ?? null)
+    : null;
+  const profileUser = profileUserId
+    ? (rows.find((candidate) => candidate.id === profileUserId) ?? null)
+    : null;
 
-  // Always derive the editing target from the latest query data so the
-  // AssignmentsPanel re-renders with fresh assignments after mutations.
-  const editing = editingId ? rows.find((u) => u.id === editingId) ?? null : null;
+  const roleName = (id: string) =>
+    roles.data?.find((role) => role.id === id)?.name ?? id.slice(0, 8);
 
-  const roleName = (id: string) => roles.data?.find((r) => r.id === id)?.name ?? id.slice(0, 8);
-
-  const ask = (type: "block" | "archive", u: Row) => {
+  const ask = (type: PendingAction["type"], target: Row) => {
     setActionError(null);
-    setPending({ type, user: u });
+    setPending({ type, user: target });
   };
 
   const runPending = async () => {
     if (!pending) return;
     setActionError(null);
-    const mutation = pending.type === "block" ? blockMutation : archiveMutation;
-    const fail = pending.type === "block" ? "Не удалось заблокировать" : "Не удалось архивировать";
+    const mutation = pending.type === "suspend" ? suspendMutation : offboardMutation;
+    const fallback =
+      pending.type === "suspend"
+        ? "Не удалось приостановить сотрудника"
+        : "Не удалось уволить сотрудника";
     try {
       await mutation.mutateAsync(pending.user.id);
       setPending(null);
-    } catch (err) {
-      setActionError(describeApiError(err, fail));
+    } catch (error) {
+      setActionError(describeApiError(error, fallback));
     }
   };
 
-  // A tenant user without users.view (e.g. a seller) gets a friendly note
-  // instead of a screen that only 403s. Support users (no tenant) fall through.
-  if (hasTenant && !canManage) {
+  const activateMembership = async (member: Row) => {
+    setActionError(null);
+    setActivatingUserId(member.id);
+    try {
+      await activateMutation.mutateAsync({
+        id: member.id,
+        payload: { status: "active" },
+      });
+    } catch (error) {
+      setActionError(describeApiError(error, "Не удалось активировать сотрудника"));
+    } finally {
+      setActivatingUserId(null);
+    }
+  };
+
+  if (!hasTenant || !canView) {
     return (
-      <AccessDeniedCard
-        title="Пользователи"
-        message="Управление сотрудниками доступно владельцу и администратору."
-      />
+      <AccessDeniedCard title="Сотрудники" message="У вас нет доступа к сотрудникам этой аптеки." />
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Пользователи</h1>
-        <Button onClick={() => setInviting(true)}>+ Пригласить</Button>
-      </div>
-      {users.error && (
+      <h1 className="text-2xl font-semibold text-foreground">Сотрудники</h1>
+
+      {roles.error && !users.error && (
         <p className="text-sm text-danger">
-          {describeApiError(users.error, "Не удалось загрузить пользователей")}
+          {describeApiError(roles.error, "Не удалось загрузить названия ролей")}
         </p>
       )}
-      {users.isLoading ? (
+      {actionError && pending === null && <p className="text-sm text-danger">{actionError}</p>}
+
+      {users.error ? (
+        <p className="text-sm text-danger">
+          {describeApiError(users.error, "Не удалось загрузить сотрудников")}
+        </p>
+      ) : users.isLoading ? (
         <SkeletonRows rows={6} />
       ) : rows.length === 0 ? (
-        <TableEmpty>Пока нет пользователей</TableEmpty>
+        <TableEmpty>К аптеке пока не прикреплены сотрудники</TableEmpty>
       ) : (
         <>
           <Table>
-          <THead>
-            <TR>
-              <TH>Имя</TH>
-              <TH>Email</TH>
-              <TH>Статус</TH>
-              <TH>Роли</TH>
-              <TH>Последний вход</TH>
-              <TH className="text-right">Действия</TH>
-            </TR>
-          </THead>
-          <TBody>
-            {rows.map((u) => {
-              const activeAssignments = u.assignments.filter((a) => a.is_active);
-              return (
-                <TR key={u.id}>
-                  <TD className="font-medium">{u.full_name}</TD>
-                  <TD>{u.email}</TD>
-                  <TD>
-                    <Badge tone={statusTone[u.status]}>{statusLabel[u.status]}</Badge>
-                  </TD>
-                  <TD>
-                    {activeAssignments.length === 0 ? (
-                      <span className="text-foreground-muted">—</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {activeAssignments.map((a) => (
-                          <Badge key={a.id} tone="neutral">
-                            {roleName(a.role_id)}
-                          </Badge>
-                        ))}
-                      </div>
+            <THead>
+              <TR>
+                <TH>Имя</TH>
+                <TH>Email</TH>
+                <TH>Статус</TH>
+                <TH>Роли</TH>
+                <TH>Последний вход</TH>
+                {showActions && <TH className="text-right">Действия</TH>}
+              </TR>
+            </THead>
+            <TBody>
+              {rows.map((member) => {
+                const activeAssignments = member.assignments.filter(
+                  (assignment) => assignment.is_active,
+                );
+                const isOwnerMembership = activeAssignments.some(
+                  (assignment) =>
+                    roles.data?.find((role) => role.id === assignment.role_id)?.protected_kind ===
+                    "tenant_owner",
+                );
+                const roleCatalogueReady = roles.isSuccess;
+                const protectsLifecycle = isOwnerMembership || member.id === user?.id;
+                const canEditMember = canUpdate && !isOffboarded(member.status);
+                const canActivateMember =
+                  canUpdate &&
+                  roleCatalogueReady &&
+                  (member.status === "pending" || member.status === "suspended") &&
+                  !protectsLifecycle;
+                const canAssignMember =
+                  canAssign &&
+                  roleCatalogueReady &&
+                  member.status === "active" &&
+                  !protectsLifecycle;
+                const canSuspendMember =
+                  canSuspend &&
+                  roleCatalogueReady &&
+                  !protectsLifecycle &&
+                  !isSuspended(member.status) &&
+                  member.status !== "pending" &&
+                  !isOffboarded(member.status);
+                const canOffboardMember =
+                  canOffboard &&
+                  roleCatalogueReady &&
+                  !protectsLifecycle &&
+                  !isOffboarded(member.status);
+                const hasActions =
+                  canEditMember ||
+                  canActivateMember ||
+                  canAssignMember ||
+                  canSuspendMember ||
+                  canOffboardMember;
+
+                return (
+                  <TR key={member.id}>
+                    <TD className="font-medium">
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        {member.full_name}
+                        {isOwnerMembership && <Badge tone="info">владелец</Badge>}
+                      </span>
+                    </TD>
+                    <TD>{member.email}</TD>
+                    <TD>
+                      <Badge tone={statusTone[member.status]}>{statusLabel[member.status]}</Badge>
+                    </TD>
+                    <TD>
+                      {activeAssignments.length === 0 ? (
+                        <span className="text-foreground-muted">—</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {activeAssignments.map((assignment) => (
+                            <Badge key={assignment.id} tone="neutral">
+                              {roleName(assignment.role_id)}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </TD>
+                    <TD>
+                      {member.last_login_at
+                        ? new Date(member.last_login_at).toLocaleString("ru-RU")
+                        : "—"}
+                    </TD>
+                    {showActions && (
+                      <TD className="text-right whitespace-nowrap">
+                        {canEditMember && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setProfileUserId(member.id)}
+                          >
+                            Профиль
+                          </Button>
+                        )}
+                        {canActivateMember && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            isLoading={activateMutation.isPending && activatingUserId === member.id}
+                            onClick={() => void activateMembership(member)}
+                          >
+                            {member.status === "pending" ? "Активировать" : "Возобновить"}
+                          </Button>
+                        )}
+                        {canAssignMember && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setAssignmentUserId(member.id)}
+                          >
+                            Роли
+                          </Button>
+                        )}
+                        {canSuspendMember && (
+                          <Button variant="ghost" size="sm" onClick={() => ask("suspend", member)}>
+                            Приостановить
+                          </Button>
+                        )}
+                        {canOffboardMember && (
+                          <Button variant="ghost" size="sm" onClick={() => ask("offboard", member)}>
+                            Уволить
+                          </Button>
+                        )}
+                        {!hasActions && <span className="text-foreground-muted">—</span>}
+                      </TD>
                     )}
-                  </TD>
-                  <TD>
-                    {u.last_login_at
-                      ? new Date(u.last_login_at).toLocaleString("ru-RU")
-                      : "—"}
-                  </TD>
-                  <TD className="text-right whitespace-nowrap">
-                    <Button variant="ghost" size="sm" onClick={() => setEditingId(u.id)}>
-                      Роли
-                    </Button>
-                    {u.status !== "blocked" && u.status !== "archived" && (
-                      <Button variant="ghost" size="sm" onClick={() => ask("block", u)}>
-                        Блок
-                      </Button>
-                    )}
-                    {u.status !== "archived" && (
-                      <Button variant="ghost" size="sm" onClick={() => ask("archive", u)}>
-                        Архив
-                      </Button>
-                    )}
-                  </TD>
-                </TR>
-              );
-            })}
-          </TBody>
+                  </TR>
+                );
+              })}
+            </TBody>
           </Table>
           <Pagination
             page={page}
@@ -188,39 +289,47 @@ export function UsersPage(): JSX.Element {
         </>
       )}
 
-      <Modal open={inviting} onClose={() => setInviting(false)} title="Пригласить пользователя">
-        <InviteUserModal onClose={() => setInviting(false)} />
+      <Modal
+        open={profileUser !== null}
+        onClose={() => setProfileUserId(null)}
+        title={profileUser ? `Профиль: ${profileUser.full_name}` : ""}
+      >
+        {profileUser && (
+          <UserProfileForm user={profileUser} onClose={() => setProfileUserId(null)} />
+        )}
       </Modal>
 
       <Modal
-        open={editing !== null}
-        onClose={() => setEditingId(null)}
-        title={editing ? `Роли: ${editing.full_name}` : ""}
+        open={assignmentUser !== null}
+        onClose={() => setAssignmentUserId(null)}
+        title={assignmentUser ? `Роли: ${assignmentUser.full_name}` : ""}
       >
-        {editing && (
-          <AssignmentsPanel user={editing} onClose={() => setEditingId(null)} />
+        {assignmentUser && (
+          <AssignmentsPanel
+            user={assignmentUser}
+            tenantId={user?.home_tenant_id ?? null}
+            canManage={canAssign}
+            onClose={() => setAssignmentUserId(null)}
+          />
         )}
       </Modal>
 
       <ConfirmDialog
         open={pending !== null}
-        title={pending?.type === "block" ? "Заблокировать сотрудника" : "Архивировать сотрудника"}
+        title={pending?.type === "suspend" ? "Приостановить доступ" : "Уволить сотрудника"}
         message={
           <>
-            {pending?.type === "block" ? (
-              <>
-                Заблокировать «{pending?.user.full_name}»? Он не сможет войти, пока вы не снимете
-                блокировку.
-              </>
+            {pending?.type === "suspend" ? (
+              <>Приостановить доступ для «{pending?.user.full_name}»? Сотрудник не сможет войти.</>
             ) : (
-              <>Архивировать «{pending?.user.full_name}»? Действие необратимо.</>
+              <>Уволить «{pending?.user.full_name}»? Действие необратимо.</>
             )}
             {actionError && <span className="mt-2 block text-danger">{actionError}</span>}
           </>
         }
-        confirmLabel={pending?.type === "block" ? "Заблокировать" : "Архивировать"}
+        confirmLabel={pending?.type === "suspend" ? "Приостановить" : "Уволить"}
         variant="danger"
-        isLoading={blockMutation.isPending || archiveMutation.isPending}
+        isLoading={suspendMutation.isPending || offboardMutation.isPending}
         onConfirm={() => void runPending()}
         onCancel={() => {
           setPending(null);

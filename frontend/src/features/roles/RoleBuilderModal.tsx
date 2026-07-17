@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 
-import { Button, Input, Label, Select, Textarea } from "@/components/ui";
-import { useAuth } from "@/features/auth/hooks";
+import { Badge, Button, Input, Label, Select, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 
-import { allowedRoleLevels, currentUserLevel, groupLabel, levelLabel } from "./labels";
+import { groupLabel } from "./labels";
 import { useCreateRole, usePermissionsQuery, useTemplatesQuery, useUpdateRole } from "./queries";
+import { hasUnavailableRolePermissions, ROLE_EDIT_BLOCKED_MESSAGE } from "./roleAccess";
 import { type Permission, type Role } from "./types";
 
 interface Props {
@@ -30,45 +30,28 @@ function groupBy(perms: Permission[]): { code: string; items: Permission[] }[] {
 }
 
 export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
-  const { user } = useAuth();
   const permsQuery = usePermissionsQuery();
   const templatesQuery = useTemplatesQuery(mode === "create");
   const createRole = useCreateRole();
   const updateRole = useUpdateRole();
 
-  const isSupport = Boolean(user?.is_developer || user?.is_administrator);
-  const userPerms = useMemo(() => new Set(user?.permissions ?? []), [user?.permissions]);
-
-  // Allowed levels: strictly weaker than the actor's own. On edit the level is
-  // fixed to the role's current tier.
-  const allowedLevels = useMemo(
-    () => allowedRoleLevels(currentUserLevel(user)),
-    [user],
-  );
-
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
-  const [level, setLevel] = useState<number>(
-    mode === "edit" && role ? role.level : (allowedLevels[0] ?? 4),
-  );
   const [templateId, setTemplateId] = useState("");
   const [checked, setChecked] = useState<Set<string>>(() => new Set(role?.permissions ?? []));
   const [nameError, setNameError] = useState<string | null>(null);
   const [topError, setTopError] = useState<string | null>(null);
 
-  // Anti-escalation: only show functions the current user actually holds (a
-  // dev/admin holds everything) and functions that fit the selected role level.
-  const visible = useMemo(() => {
-    const all = permsQuery.data ?? [];
-    return all.filter(
-      (p) =>
-        p.is_active &&
-        p.min_level_required >= level &&
-        (isSupport || userPerms.has(p.code)),
-    );
-  }, [permsQuery.data, isSupport, level, userPerms]);
+  // The server returns the grantable catalogue for this actor. The client must
+  // neither expand it for support accounts nor infer delegation from JWT data.
+  const visible = useMemo(() => permsQuery.data ?? [], [permsQuery.data]);
   const visibleCodes = useMemo(() => new Set(visible.map((p) => p.code)), [visible]);
   const groups = useMemo(() => groupBy(visible), [visible]);
+  const editBlocked =
+    mode === "edit" &&
+    role !== undefined &&
+    permsQuery.isSuccess &&
+    hasUnavailableRolePermissions(role, visibleCodes);
 
   const toggle = (code: string) =>
     setChecked((prev) => {
@@ -85,12 +68,16 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
       setChecked(new Set());
       return;
     }
-    // Intersect with visible so a preset never ticks a function the actor lacks.
+    // Templates are hints only and may tick exclusively grantable catalogue items.
     setChecked(new Set(tpl.permissions.filter((c) => visibleCodes.has(c))));
   };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (editBlocked) {
+      setTopError(ROLE_EDIT_BLOCKED_MESSAGE);
+      return;
+    }
     const trimmed = name.trim();
     if (!trimmed) {
       setNameError("Введите название роли");
@@ -98,10 +85,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
     }
     setNameError(null);
     setTopError(null);
-    // Only ever submit functions the actor can grant (defence in depth).
-    const codes = [...checked].filter(
-      (c) => visibleCodes.has(c) && (isSupport || userPerms.has(c)),
-    );
+    const codes = [...checked].filter((code) => visibleCodes.has(code));
     try {
       if (mode === "edit" && role) {
         await updateRole.mutateAsync({
@@ -112,7 +96,6 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
         await createRole.mutateAsync({
           name: trimmed,
           description: description.trim() || null,
-          level,
           permissions: codes,
         });
       }
@@ -131,6 +114,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
         <Input
           id="role-name"
           value={name}
+          disabled={editBlocked}
           invalid={Boolean(nameError)}
           onChange={(e) => setName(e.target.value)}
           placeholder="Например: Старший кассир"
@@ -143,6 +127,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
         <Textarea
           id="role-desc"
           value={description}
+          disabled={editBlocked}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Коротко, для чего эта роль"
         />
@@ -154,6 +139,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
           <Select
             id="role-template"
             value={templateId}
+            disabled={templatesQuery.isLoading || templatesQuery.isError}
             onChange={(e) => onTemplateChange(e.target.value)}
           >
             <option value="">— с нуля —</option>
@@ -166,33 +152,30 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
           <p className="mt-1 text-xs text-foreground-muted">
             Шаблон только расставит галочки — дальше их можно править.
           </p>
+          {templatesQuery.isLoading && (
+            <p className="mt-1 text-xs text-foreground-muted">Загрузка шаблонов…</p>
+          )}
+          {templatesQuery.error && (
+            <p className="mt-1 text-xs text-danger">
+              {describeApiError(templatesQuery.error, "Не удалось загрузить шаблоны")}
+            </p>
+          )}
         </div>
       )}
 
       <div>
-        <Label>Уровень роли</Label>
-        {mode === "edit" ? (
-          <p className="text-sm text-foreground-secondary">{levelLabel(level)}</p>
-        ) : allowedLevels.length <= 1 ? (
-          <p className="text-sm text-foreground-secondary">
-            {levelLabel(level)}{" "}
-            <span className="text-foreground-muted">— слабее вашего уровня (иначе нельзя)</span>
-          </p>
-        ) : (
-          <Select value={level} onChange={(e) => setLevel(Number(e.target.value))}>
-            {allowedLevels.map((l) => (
-              <option key={l} value={l}>
-                {levelLabel(l)}
-              </option>
-            ))}
-          </Select>
-        )}
-      </div>
-
-      <div>
         <Label>Функции роли</Label>
+        {editBlocked && (
+          <p className="mb-2 text-sm text-danger" role="alert">
+            {ROLE_EDIT_BLOCKED_MESSAGE}
+          </p>
+        )}
         {permsQuery.isLoading ? (
           <p className="text-sm text-foreground-muted">Загрузка…</p>
+        ) : permsQuery.error ? (
+          <p className="text-sm text-danger">
+            {describeApiError(permsQuery.error, "Не удалось загрузить доступные функции")}
+          </p>
         ) : groups.length === 0 ? (
           <p className="text-sm text-foreground-muted">Нет доступных функций.</p>
         ) : (
@@ -213,10 +196,14 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
                         type="checkbox"
                         className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
                         checked={checked.has(p.code)}
+                        disabled={editBlocked}
                         onChange={() => toggle(p.code)}
                       />
                       <span className="leading-tight">
-                        <span className="text-sm text-foreground">{p.name}</span>
+                        <span className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+                          {p.name}
+                          {p.is_dangerous && <Badge tone="danger">опасное право</Badge>}
+                        </span>
                         {p.description && (
                           <span className="block text-xs text-foreground-muted">
                             {p.description}
@@ -238,7 +225,11 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
         <Button type="button" variant="secondary" onClick={onClose}>
           Отмена
         </Button>
-        <Button type="submit" isLoading={submitting}>
+        <Button
+          type="submit"
+          isLoading={submitting}
+          disabled={permsQuery.isLoading || permsQuery.isError || editBlocked}
+        >
           {mode === "edit" ? "Сохранить" : "Создать роль"}
         </Button>
       </div>

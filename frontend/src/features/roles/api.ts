@@ -3,7 +3,6 @@ import { api } from "@/lib/api";
 import {
   type Assignment,
   type AssignmentCreatePayload,
-  type InviteUserPayload,
   type Permission,
   type Role,
   type RoleCreatePayload,
@@ -45,11 +44,6 @@ export async function listUsers(page = 1, pageSize = 50): Promise<UserListRespon
   return data;
 }
 
-export async function inviteUser(payload: InviteUserPayload): Promise<Assignment> {
-  const { data } = await api.post<Assignment>("/users/invite", payload);
-  return data;
-}
-
 export async function updateUser(
   userId: string,
   payload: UserUpdatePayload,
@@ -61,11 +55,11 @@ export async function updateUser(
   return data;
 }
 
-export async function blockUser(userId: string): Promise<void> {
+export async function suspendUser(userId: string): Promise<void> {
   await api.post(`/users/${userId}/block`);
 }
 
-export async function archiveUser(userId: string): Promise<void> {
+export async function offboardUser(userId: string): Promise<void> {
   await api.delete(`/users/${userId}`);
 }
 
