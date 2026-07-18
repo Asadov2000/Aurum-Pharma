@@ -15,6 +15,23 @@ export default defineConfig({
     port: 5173,
     watch: {
       usePolling: true,
+      interval: 1_000,
+      ignored: [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/coverage/**",
+        "**/e2e/**",
+        "**/playwright-report/**",
+        "**/test-results/**",
+        "**/tests/**",
+      ],
+    },
+    warmup: {
+      clientFiles: [
+        "./src/main.tsx",
+        "./src/router.tsx",
+        "./src/features/auth/LoginPage.tsx",
+      ],
     },
   },
   test: {

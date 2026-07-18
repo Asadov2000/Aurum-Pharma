@@ -1,3 +1,10 @@
+x-backend-dev-volumes: &backend-dev-volumes
+  - ./backend/app:/app/app
+  - ./backend/alembic:/app/alembic
+  - ./backend/tests:/app/tests
+  - ./backend/alembic.ini:/app/alembic.ini:ro
+  - ./backend/pyproject.toml:/app/pyproject.toml:ro
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -88,9 +95,9 @@ services:
     env_file: .env
     environment:
       WATCHFILES_FORCE_POLLING: "true"
+      WATCHFILES_POLL_DELAY_MS: "1000"
       PYTHONPATH: /app
-    volumes:
-      - ./backend:/app
+    volumes: *backend-dev-volumes
     ports:
       - "8000:8000"
     depends_on:
@@ -98,7 +105,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-delay 1
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app --reload-delay 1
     restart: unless-stopped
 
   db-owner-migrate:
@@ -113,8 +120,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       MIGRATION_DB_HOST: postgres
       MIGRATION_DB_NAME: aurum
-    volumes:
-      - ./backend:/app
+    volumes: *backend-dev-volumes
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,8 +134,7 @@ services:
     env_file: .env
     environment:
       PYTHONPATH: /app
-    volumes:
-      - ./backend:/app
+    volumes: *backend-dev-volumes
     depends_on:
       redis:
         condition: service_healthy
@@ -146,8 +151,7 @@ services:
     env_file: .env
     environment:
       PYTHONPATH: /app
-    volumes:
-      - ./backend:/app
+    volumes: *backend-dev-volumes
     depends_on:
       redis:
         condition: service_healthy
@@ -160,11 +164,16 @@ services:
       dockerfile: Dockerfile
     container_name: aurum-frontend
     environment:
-      CHOKIDAR_USEPOLLING: "true"
       VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
     volumes:
-      - ./frontend:/app
-      - frontend-node-modules:/app/node_modules
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html:ro
+      - ./frontend/postcss.config.js:/app/postcss.config.js:ro
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./frontend/vite.config.ts:/app/vite.config.ts:ro
+      - frontend-vite-cache:/app/node_modules/.vite
     ports:
       - "5173:5173"
     command: pnpm dev --host 0.0.0.0
@@ -186,4 +195,4 @@ volumes:
   redis-data:
   minio-data:
   prometheus-data:
-  frontend-node-modules:
+  frontend-vite-cache:
