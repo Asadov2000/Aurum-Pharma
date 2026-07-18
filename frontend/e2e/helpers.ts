@@ -1,9 +1,5 @@
-import {
-  expect,
-  type APIRequestContext,
-  type Page,
-  request,
-} from "@playwright/test";
+import { expect, type APIRequestContext, type Page, request } from "@playwright/test";
+import { createHmac } from "node:crypto";
 
 import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
 
@@ -17,7 +13,9 @@ function sqlLiteral(value: string): string {
  * Wipe per-minute rate-limit records for a given login email. The backend
  * caps email-code requests at 1/min; tests that hit /auth/login/code in
  * quick succession otherwise stall on 429 retries that overshoot the
- * per-test timeout. Safe to use freely in tests — only affects test users.
+ * per-test timeout. It also clears the seeded support user's replay counter
+ * because isolated E2E specs intentionally log in several times per 30-second
+ * TOTP window. Production replay behavior is covered by backend tests.
  */
 export function clearLoginRateLimit(email: string): void {
   // Drop both buckets the backend checks (1/min AND 10/hr). Tests run dozens
@@ -26,7 +24,19 @@ export function clearLoginRateLimit(email: string): void {
   const emailLiteral = sqlLiteral(email);
   const sql =
     `DELETE FROM email_code WHERE email_lower=${emailLiteral}; ` +
-    `DELETE FROM login_attempt WHERE email_lower=${emailLiteral} AND outcome IN ('blocked','code_requested');`;
+    `DELETE FROM login_attempt WHERE email_lower=${emailLiteral} AND outcome IN ('blocked','code_requested'); ` +
+    "UPDATE support_mfa SET last_used_counter=NULL " +
+    `WHERE user_id=(SELECT id FROM app_user WHERE lower(email)=${emailLiteral});`;
+  dockerExec(E2E_POSTGRES_CONTAINER, ["psql", "-U", "postgres", "-d", E2E_POSTGRES_DB, "-c", sql]);
+}
+
+export function makeSupportSessionRequireStepUp(email: string): void {
+  const emailLiteral = sqlLiteral(email);
+  const userIdQuery = `(SELECT id FROM app_user WHERE lower(email)=${emailLiteral})`;
+  const sql =
+    "UPDATE session SET mfa_verified_at=now()-INTERVAL '11 minutes' " +
+    `WHERE user_id=${userIdQuery} AND revoked_at IS NULL; ` +
+    `UPDATE support_mfa SET last_used_counter=NULL WHERE user_id=${userIdQuery};`;
   dockerExec(E2E_POSTGRES_CONTAINER, [
     "psql",
     "-U",
@@ -42,9 +52,14 @@ export const TENANT_ID = process.env.E2E_TENANT_ID ?? "";
 export interface Creds {
   email: string;
   password: string;
+  totpSecret?: string;
 }
 
-export const DEV: Creds = { email: "dev@aurum.tj", password: "Devdev1234" };
+export const DEV: Creds = {
+  email: "dev@aurum.tj",
+  password: "Devdev1234",
+  totpSecret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+};
 export const OWNER: Creds = { email: "owner@aurum.tj", password: "Owner1234" };
 
 export interface TokenPair {
@@ -57,14 +72,36 @@ export interface TokenPair {
 const REFRESH_COOKIE_NAME = "aurum_refresh_token";
 const REFRESH_COOKIE_PATH = "/api/v1/auth";
 
+function decodeBase32(value: string): Buffer {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const character of value.replaceAll("=", "").toUpperCase()) {
+    const index = alphabet.indexOf(character);
+    if (index < 0) throw new Error("Invalid E2E TOTP secret");
+    bits += index.toString(2).padStart(5, "0");
+  }
+  const bytes: number[] = [];
+  for (let offset = 0; offset + 8 <= bits.length; offset += 8) {
+    bytes.push(Number.parseInt(bits.slice(offset, offset + 8), 2));
+  }
+  return Buffer.from(bytes);
+}
+
+export function currentTotp(secret: string): string {
+  const counter = BigInt(Math.floor(Date.now() / 1000 / 30));
+  const message = Buffer.alloc(8);
+  message.writeBigUInt64BE(counter);
+  const digest = createHmac("sha1", decodeBase32(secret)).update(message).digest();
+  const offset = digest[digest.length - 1]! & 0x0f;
+  const binary = digest.readUInt32BE(offset) & 0x7fffffff;
+  return (binary % 1_000_000).toString().padStart(6, "0");
+}
+
 /**
  * Backend rate-limit on the email-code endpoint is 1/min, 10/hr per email.
  * In CI we hit that limit immediately — caller usually wants to retry.
  */
-export async function apiLogin(
-  api: APIRequestContext,
-  creds: Creds,
-): Promise<TokenPair> {
+export async function apiLogin(api: APIRequestContext, creds: Creds): Promise<TokenPair> {
   // Pre-flight: clear BOTH rate-limit buckets (1/min and 10/hr) before EACH
   // attempt so a fresh code request always succeeds. With the bucket wiped
   // a 429 should be impossible; the short bounded retry only covers a rare
@@ -98,8 +135,30 @@ export async function apiLogin(
     if (!verifyRes.ok()) {
       throw new Error(`/auth/login/verify → ${verifyRes.status()} ${await verifyRes.text()}`);
     }
-    const body = (await verifyRes.json()) as TokenPair;
-    return { ...body, refresh_cookie: verifyRes.headers()["set-cookie"] };
+    const body = (await verifyRes.json()) as
+      | TokenPair
+      | {
+          status: "mfa_required";
+          challenge_token: string;
+        };
+    if ("access_token" in body) {
+      return { ...body, refresh_cookie: verifyRes.headers()["set-cookie"] };
+    }
+    if (!creds.totpSecret || body.status !== "mfa_required") {
+      throw new Error(`Unexpected support MFA response: ${body.status}`);
+    }
+    const mfaRes = await api.post(`${API}/auth/mfa/verify`, {
+      data: {
+        challenge_token: body.challenge_token,
+        code: currentTotp(creds.totpSecret),
+      },
+      timeout: 30_000,
+    });
+    if (!mfaRes.ok()) {
+      throw new Error(`/auth/mfa/verify -> ${mfaRes.status()} ${await mfaRes.text()}`);
+    }
+    const tokens = (await mfaRes.json()) as TokenPair;
+    return { ...tokens, refresh_cookie: mfaRes.headers()["set-cookie"] };
   }
   throw new Error(`apiLogin failed: ${lastErr}`);
 }
@@ -108,10 +167,7 @@ export async function apiLogin(
  * Drop straight into the app as the given user by installing the httpOnly
  * refresh cookie and keeping the access token in browser memory.
  */
-export async function loginInBrowser(
-  page: Page,
-  creds: Creds,
-): Promise<TokenPair> {
+export async function loginInBrowser(page: Page, creds: Creds): Promise<TokenPair> {
   const api = await request.newContext();
   try {
     const tokens = await apiLogin(api, creds);
@@ -269,10 +325,7 @@ export interface SeededSupplier {
   name: string;
 }
 
-export async function seedSupplier(
-  api: APIRequestContext,
-  name: string,
-): Promise<SeededSupplier> {
+export async function seedSupplier(api: APIRequestContext, name: string): Promise<SeededSupplier> {
   const res = await api.post("suppliers", {
     data: { name },
   });
@@ -359,7 +412,10 @@ export async function seedAcceptedBatch(
   return (await batchRes.json()) as SeededBatch;
 }
 
-function expectOk(res: { status(): number; ok(): boolean; text(): Promise<string> }, label: string): void {
+function expectOk(
+  res: { status(): number; ok(): boolean; text(): Promise<string> },
+  label: string,
+): void {
   if (!res.ok()) {
     throw new Error(`${label} → ${res.status()}`);
   }

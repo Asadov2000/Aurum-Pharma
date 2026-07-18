@@ -1,14 +1,17 @@
 import { expect, test } from "@playwright/test";
 
-import { clearLoginRateLimit, DEV, loginInBrowser, OWNER } from "./helpers";
+import {
+  clearLoginRateLimit,
+  currentTotp,
+  DEV,
+  loginInBrowser,
+  makeSupportSessionRequireStepUp,
+  OWNER,
+} from "./helpers";
 
 test.describe("Auth", () => {
-  test.beforeEach(() => {
-    clearLoginRateLimit(DEV.email);
-    clearLoginRateLimit(OWNER.email);
-  });
-
   test("dev logs in via the UI and lands on a support page", async ({ page }) => {
+    clearLoginRateLimit(DEV.email);
     await page.goto("/login", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Email").fill(DEV.email);
     await page.getByRole("button", { name: /Получить код/ }).click();
@@ -16,8 +19,36 @@ test.describe("Auth", () => {
     await expect(page.getByText(/Dev-режим/)).toBeVisible();
     await page.getByLabel(/Пароль/).fill(DEV.password);
     await page.getByRole("button", { name: /^Войти$/ }).click();
+    await page.getByLabel("Код подтверждения").fill(currentTotp(DEV.totpSecret!));
+    await page.getByRole("button", { name: "Подтвердить" }).click();
 
     await expect(page.getByRole("link", { name: "Тенанты" })).toBeVisible();
+  });
+
+  test("retries a protected request after global MFA step-up", async ({ page }) => {
+    await loginInBrowser(page, DEV);
+    makeSupportSessionRequireStepUp(DEV.email);
+    await page.goto("/audit");
+    await expect(page.getByRole("link", { name: "Тенанты" })).toBeVisible();
+
+    const deniedRequest = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/admin/audit/global") && response.status() === 403,
+    );
+    await page.locator("#scope").selectOption("global");
+    await deniedRequest;
+
+    const dialog = page.getByRole("dialog", { name: "Подтверждение действия" });
+    await expect(dialog).toBeVisible();
+
+    const retriedRequest = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/admin/audit/global") && response.status() === 200,
+    );
+    await dialog.getByLabel("Код подтверждения").fill(currentTotp(DEV.totpSecret!));
+    await dialog.getByRole("button", { name: "Подтвердить" }).click();
+    await retriedRequest;
+    await expect(dialog).toBeHidden();
   });
 
   test("owner logs in via refresh cookie and sees tenant sidebar items", async ({ page }) => {
@@ -75,9 +106,7 @@ test.describe("Auth", () => {
     await expect(page.locator("main#main-content")).toBeFocused();
   });
 
-  test("mobile drawer keeps keyboard focus inside and restores it on Escape", async ({
-    page,
-  }) => {
+  test("mobile drawer keeps keyboard focus inside and restores it on Escape", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");

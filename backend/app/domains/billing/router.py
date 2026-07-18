@@ -17,9 +17,10 @@ from app.core.deps import (
     CurrentUser,
     current_user,
     get_db,
+    require_recent_support_mfa,
     require_tenant_permission,
 )
-from app.core.errors import BusinessRuleError, PermissionDeniedError
+from app.core.errors import BusinessRuleError
 from app.domains.billing.repository import BillingRepository
 from app.domains.billing.schemas import (
     InvoiceCreate,
@@ -39,14 +40,6 @@ async def _service(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> BillingService:
     return BillingService(BillingRepository(db))
-
-
-async def require_support(
-    user: Annotated[CurrentUser, Depends(current_user)],
-) -> CurrentUser:
-    if not (user.is_developer or user.is_administrator):
-        raise PermissionDeniedError("Support privileges required")
-    return user
 
 
 def _current_tenant_or_400(user: CurrentUser) -> UUID:
@@ -125,7 +118,7 @@ admin_router = APIRouter(prefix="/api/v1/admin/tenants", tags=["admin"])
     "/{tenant_id}/subscription",
     response_model=SubscriptionRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_support)],
+    dependencies=[Depends(require_recent_support_mfa)],
 )
 async def create_subscription(
     tenant_id: UUID,
@@ -146,7 +139,7 @@ async def create_subscription(
     "/{tenant_id}/invoices",
     response_model=InvoiceRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_support)],
+    dependencies=[Depends(require_recent_support_mfa)],
 )
 async def create_invoice(
     tenant_id: UUID,
@@ -174,7 +167,7 @@ async def record_payment(
     tenant_id: UUID,
     invoice_id: UUID,
     payload: PaymentCreate,
-    user: Annotated[CurrentUser, Depends(require_support)],
+    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
     service: Annotated[BillingService, Depends(_service)],
 ) -> PaymentRead:
     payment = await service.record_payment(

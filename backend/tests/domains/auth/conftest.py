@@ -18,7 +18,7 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_auth_db, get_db
+from app.core.deps import get_auth_db, get_db, get_support_auth_db
 from app.core.security import hash_password
 from app.domains.auth.models import AppUser
 from app.main import app
@@ -46,11 +46,13 @@ async def auth_client(
 
     app.dependency_overrides[get_auth_db] = _override
     app.dependency_overrides[get_db] = _override
+    app.dependency_overrides[get_support_auth_db] = _override
     try:
         yield client
     finally:
         app.dependency_overrides.pop(get_auth_db, None)
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_support_auth_db, None)
 
 
 @pytest_asyncio.fixture

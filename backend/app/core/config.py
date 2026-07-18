@@ -33,8 +33,12 @@ class Settings(BaseSettings):
 
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
+    MFA_ENCRYPTION_KEY: SecretStr | None = None
+    MFA_ENCRYPTION_KEY_VERSION: int = Field(default=1, ge=1, le=32767)
+    MFA_ENCRYPTION_PREVIOUS_KEYS: dict[int, SecretStr] = Field(default_factory=dict)
     ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 7
+    MFA_STEP_UP_MINUTES: int = Field(default=10, ge=1, le=15)
     REFRESH_COOKIE_NAME: str = "aurum_refresh_token"
     REFRESH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     # None means "secure in production, HTTP-friendly in local development".
@@ -98,6 +102,30 @@ class Settings(BaseSettings):
             self.METRICS_TOKEN is None or len(self.METRICS_TOKEN.get_secret_value()) < 32
         ):
             raise ValueError("METRICS_TOKEN must be set to a strong secret (>=32 chars)")
+        return self
+
+    @model_validator(mode="after")
+    def _guard_non_development_mfa_key(self) -> Settings:
+        if self.ENVIRONMENT != "development" and self.MFA_ENCRYPTION_KEY is None:
+            raise ValueError("MFA_ENCRYPTION_KEY must be set outside development")
+
+        roots: dict[int, str] = {
+            version: secret.get_secret_value()
+            for version, secret in self.MFA_ENCRYPTION_PREVIOUS_KEYS.items()
+        }
+        if self.MFA_ENCRYPTION_KEY is not None:
+            roots[self.MFA_ENCRYPTION_KEY_VERSION] = self.MFA_ENCRYPTION_KEY.get_secret_value()
+        if self.MFA_ENCRYPTION_KEY_VERSION in self.MFA_ENCRYPTION_PREVIOUS_KEYS:
+            raise ValueError("MFA_ENCRYPTION_PREVIOUS_KEYS must not contain the current version")
+        for version, root in roots.items():
+            if version < 1 or version > 32767:
+                raise ValueError("MFA encryption key versions must be between 1 and 32767")
+            if len(root) < 32:
+                raise ValueError("MFA encryption keys must contain at least 32 characters")
+            if root == self.JWT_SECRET:
+                raise ValueError("MFA encryption keys must differ from JWT_SECRET")
+        if len(set(roots.values())) != len(roots):
+            raise ValueError("MFA encryption key versions must use distinct secrets")
         return self
 
     @model_validator(mode="after")

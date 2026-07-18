@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, EmailStr, Field
@@ -32,9 +33,48 @@ class LoginCodeVerify(BaseModel):
 
 
 class TokenResponse(BaseModel):
+    status: Literal["authenticated"] = "authenticated"
     access_token: str
     token_type: str = "bearer"
     expires_in: int  # seconds
+
+
+class MfaChallengeResponse(BaseModel):
+    status: Literal[
+        "mfa_required",
+        "mfa_enrollment_required",
+        "mfa_recovery_required",
+    ]
+    challenge_token: str
+    expires_in: int
+
+
+class MfaChallengeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    challenge_token: str = Field(min_length=64, max_length=128)
+
+
+class MfaCodeRequest(MfaChallengeRequest):
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class MfaEnrollmentStartResponse(BaseModel):
+    status: Literal["mfa_enrollment_ready"] = "mfa_enrollment_ready"
+    secret: str
+    provisioning_uri: str
+    recovery_codes: list[str]
+    expires_in: int
+
+
+class MfaRecoveryRequest(MfaChallengeRequest):
+    recovery_code: str = Field(min_length=20, max_length=32)
+
+
+class MfaStepUpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class RefreshRequest(BaseModel):

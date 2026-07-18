@@ -13,6 +13,8 @@ _DEV_DB_SUPPORT = "postgresql+asyncpg://support:aurum_support_pw@postgres/aurum"
 _PROD_DB_APP = "postgresql+asyncpg://app:Str0ng-App-Pw@db/aurum"
 _PROD_DB_SUPPORT = "postgresql+asyncpg://support:Str0ng-Sup-Pw@db/aurum"
 _METRICS_TOKEN = "m" * 40
+_MFA_ENCRYPTION_KEY = "k" * 40
+_PREVIOUS_MFA_ENCRYPTION_KEY = "p" * 40
 
 
 def _build(**overrides: object) -> Settings:
@@ -23,6 +25,7 @@ def _build(**overrides: object) -> Settings:
         "MINIO_ACCESS_KEY": "real-key",
         "MINIO_SECRET_KEY": "real-secret",
         "METRICS_TOKEN": _METRICS_TOKEN,
+        "MFA_ENCRYPTION_KEY": _MFA_ENCRYPTION_KEY,
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)  # type: ignore[arg-type]
@@ -106,6 +109,43 @@ def test_production_rejects_short_metrics_token() -> None:
 def test_staging_rejects_missing_metrics_token() -> None:
     with pytest.raises(ValidationError, match="METRICS_TOKEN"):
         _build(ENVIRONMENT="staging", METRICS_TOKEN=None)
+
+
+def test_non_development_requires_independent_mfa_encryption_key() -> None:
+    with pytest.raises(ValidationError, match="MFA_ENCRYPTION_KEY"):
+        _build(ENVIRONMENT="staging", MFA_ENCRYPTION_KEY=None)
+
+    with pytest.raises(ValidationError, match="differ from JWT_SECRET"):
+        _build(
+            ENVIRONMENT="production",
+            MFA_ENCRYPTION_KEY=_STRONG_SECRET,
+        )
+
+
+def test_mfa_encryption_key_is_secret_in_settings_representation() -> None:
+    settings = _build(
+        MFA_ENCRYPTION_KEY=_MFA_ENCRYPTION_KEY,
+        MFA_ENCRYPTION_KEY_VERSION=2,
+        MFA_ENCRYPTION_PREVIOUS_KEYS={1: _PREVIOUS_MFA_ENCRYPTION_KEY},
+    )
+    assert _MFA_ENCRYPTION_KEY not in repr(settings)
+    assert _PREVIOUS_MFA_ENCRYPTION_KEY not in repr(settings)
+    assert settings.MFA_ENCRYPTION_KEY is not None
+    assert settings.MFA_ENCRYPTION_KEY.get_secret_value() == _MFA_ENCRYPTION_KEY
+
+
+def test_mfa_keyring_rejects_ambiguous_or_reused_roots() -> None:
+    with pytest.raises(ValidationError, match="must not contain the current version"):
+        _build(
+            MFA_ENCRYPTION_KEY_VERSION=2,
+            MFA_ENCRYPTION_PREVIOUS_KEYS={2: _PREVIOUS_MFA_ENCRYPTION_KEY},
+        )
+
+    with pytest.raises(ValidationError, match="distinct secrets"):
+        _build(
+            MFA_ENCRYPTION_KEY_VERSION=2,
+            MFA_ENCRYPTION_PREVIOUS_KEYS={1: _MFA_ENCRYPTION_KEY},
+        )
 
 
 def test_development_allows_defaults() -> None:

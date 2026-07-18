@@ -125,10 +125,11 @@ async def redis() -> AsyncIterator[Redis]:
 
     app.dependency_overrides[get_redis] = _override
     try:
-        # Clean leftover perm-cache keys so cache tests start from a known state.
+        # Clean test-owned auth keys so cache and MFA guards start deterministically.
         try:
-            async for key in client.scan_iter(match="auth:perms:*"):
-                await client.delete(key)
+            for pattern in ("auth:perms:*", "auth:mfa-attempts:*"):
+                async for key in client.scan_iter(match=pattern):
+                    await client.delete(key)
         except Exception:
             pass
         yield client

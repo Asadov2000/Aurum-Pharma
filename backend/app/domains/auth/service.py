@@ -1,8 +1,9 @@
 """Business logic for the auth domain.
 
-Rate-limit + lockout state lives in the `login_attempt` table (DB, not Redis)
-so a Redis restart cannot silently lift a block. Codes and refresh tokens
-are stored only as hashes; plaintext is returned to the client exactly once.
+Login lockout state lives in the `login_attempt` table. MFA additionally uses
+an account-wide Redis attempt budget so changing IP addresses cannot bypass
+the five-attempt limit. Codes and refresh tokens are stored only as hashes;
+plaintext is returned to the client exactly once.
 
 Future hook-points marked `TODO(roles)` will pull permission-related signals
 once the roles domain (migration 0004) is on disk.
@@ -10,46 +11,137 @@ once the roles domain (migration 0004) is on disk.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 from uuid import UUID
 
 import structlog
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.core.config import get_settings
 from app.core.errors import (
     AuthenticationError,
     NotFoundError,
     RateLimitError,
+    ServiceUnavailableError,
 )
 from app.core.security import (
+    build_totp_uri,
     create_access_token,
+    derive_mfa_encryption_key,
     derive_rotated_refresh_token,
     generate_code_salt,
     generate_email_code,
+    generate_recovery_codes,
     generate_refresh_token,
+    generate_totp_secret,
     hash_code,
+    hash_recovery_code,
     hash_token,
+    match_totp_counter,
+    mfa_encryption_keyring_json,
     verify_password,
 )
 from app.core.time import utc_now
 from app.domains.auth.repository import AuthRepository, EmailCodeIssueStatus
 
 if TYPE_CHECKING:
-    from app.domains.auth.repository import AuthUserRecord
+    from app.domains.auth.repository import (
+        AuthUserRecord,
+        MfaChallengeRecord,
+        MfaSessionRecord,
+    )
 
 logger = structlog.get_logger("auth.service")
 settings = get_settings()
 
 
 LOGIN_BLOCK_DURATION = timedelta(minutes=15)
+MFA_CHALLENGE_DURATION = timedelta(minutes=5)
+MFA_ATTEMPT_LIMIT = 5
+MFA_ATTEMPT_WINDOW_SECONDS = 15 * 60
+
+
+class AuthTokens(NamedTuple):
+    access_token: str
+    refresh_token: str
+    expires_in: int
+
+
+@dataclass(frozen=True)
+class MfaLoginChallenge:
+    status: Literal[
+        "mfa_required",
+        "mfa_enrollment_required",
+        "mfa_recovery_required",
+    ]
+    challenge_token: str
+    expires_in: int
+
+
+@dataclass(frozen=True)
+class MfaEnrollmentSetup:
+    secret: str
+    provisioning_uri: str
+    recovery_codes: list[str]
+    expires_in: int
+
+
+def _mfa_challenge_status(
+    purpose: str,
+) -> Literal[
+    "mfa_required",
+    "mfa_enrollment_required",
+    "mfa_recovery_required",
+]:
+    if purpose == "verify":
+        return "mfa_required"
+    if purpose == "enroll":
+        return "mfa_enrollment_required"
+    if purpose == "recover":
+        return "mfa_recovery_required"
+    raise AuthenticationError("Invalid MFA challenge")
 
 
 class AuthService:
     def __init__(self, repo: AuthRepository, redis: Redis | None = None) -> None:
         self.repo = repo
         self.redis = redis
+
+    def _mfa_attempt_key(self, user_id: UUID) -> str:
+        return f"auth:mfa-attempts:{user_id}"
+
+    async def _claim_mfa_attempt(self, user_id: UUID) -> None:
+        if self.redis is None:
+            return
+        try:
+            pipeline = self.redis.pipeline(transaction=True)
+            pipeline.incr(self._mfa_attempt_key(user_id))
+            pipeline.expire(
+                self._mfa_attempt_key(user_id),
+                MFA_ATTEMPT_WINDOW_SECONDS,
+            )
+            results = cast(list[object], await pipeline.execute())
+            attempts = int(cast(int, results[0]))
+        except RedisError as exc:
+            raise ServiceUnavailableError("MFA attempt guard is unavailable") from exc
+        if attempts > MFA_ATTEMPT_LIMIT:
+            raise RateLimitError(
+                "Too many MFA attempts. Try again later.",
+                details={
+                    "retry_after_minutes": MFA_ATTEMPT_WINDOW_SECONDS // 60,
+                },
+            )
+
+    async def _clear_mfa_attempts(self, user_id: UUID) -> None:
+        if self.redis is None:
+            return
+        try:
+            await self.redis.delete(self._mfa_attempt_key(user_id))
+        except RedisError as exc:
+            raise ServiceUnavailableError("MFA attempt guard is unavailable") from exc
 
     # -------------------------------------------------------------------------
     # 1. Request an email code
@@ -103,8 +195,7 @@ class AuthService:
         password: str | None,
         ip_address: str,
         user_agent: str | None = None,
-    ) -> tuple[str, str, int]:
-        """Returns (access_token, refresh_token, access_expires_in_seconds)."""
+    ) -> AuthTokens | MfaLoginChallenge:
         email_lower = email.strip().lower()
         now = utc_now()
 
@@ -166,7 +257,8 @@ class AuthService:
 
         # The database lookup resolves assignment.password_required without a
         # tenant GUC because login happens before an authenticated context exists.
-        needs_password = bool(user.password_hash) or user.password_required
+        is_support = user.is_developer or user.is_administrator
+        needs_password = is_support or bool(user.password_hash) or user.password_required
         if needs_password:
             password_ok = bool(
                 password and user.password_hash and verify_password(password, user.password_hash)
@@ -180,6 +272,25 @@ class AuthService:
                     outcome="password_failed",
                 )
                 raise AuthenticationError("Invalid credentials")
+
+        if is_support:
+            challenge_token = generate_refresh_token()
+            challenge = await self.repo.create_mfa_challenge_from_email_code(
+                email_lower=email_lower,
+                code_id=ec.id,
+                candidate_hash=candidate_hash,
+                token_hash=hash_token(challenge_token),
+                ip_address=ip_address,
+                user_agent=user_agent,
+                expires_at=now + MFA_CHALLENGE_DURATION,
+            )
+            if challenge is None:
+                raise AuthenticationError("Invalid or expired code")
+            return MfaLoginChallenge(
+                status=_mfa_challenge_status(challenge.purpose),
+                challenge_token=challenge_token,
+                expires_in=int(MFA_CHALLENGE_DURATION.total_seconds()),
+            )
 
         refresh_token = generate_refresh_token()
         session_id = await self.repo.create_session_from_email_code(
@@ -204,6 +315,7 @@ class AuthService:
             tenant_id=user.home_tenant_id,
             is_developer=user.is_developer,
             is_administrator=user.is_administrator,
+            session_id=session_id,
         )
         await self.repo.touch_last_login(user.id, session_id)
         await self.repo.insert_login_attempt(
@@ -214,10 +326,315 @@ class AuthService:
             outcome="success",
         )
         logger.info("login_success", user_id=str(user.id))
-        return access_token, refresh_token, settings.ACCESS_TOKEN_MINUTES * 60
+        return AuthTokens(
+            access_token,
+            refresh_token,
+            settings.ACCESS_TOKEN_MINUTES * 60,
+        )
 
     # -------------------------------------------------------------------------
-    # 3. Refresh
+    # 3. Support MFA
+    # -------------------------------------------------------------------------
+
+    async def _get_mfa_challenge(
+        self,
+        *,
+        challenge_token: str,
+        ip_address: str,
+        include_secret: bool = True,
+    ) -> MfaChallengeRecord:
+        challenge = await self.repo.get_mfa_challenge(
+            token_hash=hash_token(challenge_token),
+            encryption_keyring=mfa_encryption_keyring_json(),
+            include_secret=include_secret,
+        )
+        if challenge is None:
+            raise AuthenticationError("Invalid or expired MFA challenge")
+        if await self.repo.enforce_login_guard(
+            email_lower=challenge.email.lower(),
+            ip_address=ip_address,
+        ):
+            raise RateLimitError(
+                "Account temporarily locked. Try again later.",
+                details={"retry_after_minutes": int(LOGIN_BLOCK_DURATION.total_seconds() // 60)},
+            )
+        return challenge
+
+    async def start_mfa_enrollment(
+        self,
+        *,
+        challenge_token: str,
+        ip_address: str,
+    ) -> MfaEnrollmentSetup:
+        challenge = await self._get_mfa_challenge(
+            challenge_token=challenge_token,
+            ip_address=ip_address,
+            include_secret=False,
+        )
+        if challenge.purpose not in ("enroll", "recovery_enroll"):
+            raise AuthenticationError("MFA enrollment is not available")
+
+        secret = generate_totp_secret()
+        recovery_codes = generate_recovery_codes()
+        staged = await self.repo.stage_mfa_enrollment(
+            token_hash=hash_token(challenge_token),
+            secret=secret,
+            key_version=settings.MFA_ENCRYPTION_KEY_VERSION,
+            encryption_key=derive_mfa_encryption_key(),
+            recovery_code_hashes=[hash_recovery_code(code) for code in recovery_codes],
+        )
+        if not staged:
+            raise AuthenticationError("Invalid or expired MFA challenge")
+        return MfaEnrollmentSetup(
+            secret=secret,
+            provisioning_uri=build_totp_uri(
+                account_name=challenge.email,
+                secret=secret,
+                issuer=settings.APP_NAME,
+            ),
+            recovery_codes=recovery_codes,
+            expires_in=max(0, int((challenge.expires_at - utc_now()).total_seconds())),
+        )
+
+    async def _finalize_mfa_login(
+        self,
+        *,
+        challenge_email: str,
+        session_record: MfaSessionRecord,
+        refresh_token: str,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> AuthTokens:
+        access_token = create_access_token(
+            session_record.user_id,
+            tenant_id=None,
+            is_developer=session_record.is_developer,
+            is_administrator=session_record.is_administrator,
+            session_id=session_record.session_id,
+            mfa_verified_at=session_record.mfa_verified_at,
+        )
+        await self.repo.touch_last_login(
+            session_record.user_id,
+            session_record.session_id,
+        )
+        await self.repo.insert_login_attempt(
+            email_lower=challenge_email.lower(),
+            user_id=session_record.user_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            outcome="success",
+        )
+        logger.info(
+            "support_login_success",
+            user_id=str(session_record.user_id),
+            session_id=str(session_record.session_id),
+        )
+        return AuthTokens(
+            access_token,
+            refresh_token,
+            settings.ACCESS_TOKEN_MINUTES * 60,
+        )
+
+    async def complete_mfa_enrollment(
+        self,
+        *,
+        challenge_token: str,
+        code: str,
+        ip_address: str,
+        user_agent: str | None = None,
+    ) -> AuthTokens:
+        challenge = await self._get_mfa_challenge(
+            challenge_token=challenge_token,
+            ip_address=ip_address,
+        )
+        if challenge.purpose not in ("enroll", "recovery_enroll") or not challenge.secret:
+            raise AuthenticationError("MFA enrollment is not ready")
+
+        await self._claim_mfa_attempt(challenge.user_id)
+        counter = match_totp_counter(challenge.secret, code)
+        if counter is None:
+            await self.repo.record_mfa_failure(
+                token_hash=hash_token(challenge_token),
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            raise AuthenticationError("Invalid authentication code")
+
+        refresh_token = generate_refresh_token()
+        session_record = await self.repo.complete_mfa_enrollment(
+            token_hash=hash_token(challenge_token),
+            counter=counter,
+            verified_secret=challenge.secret,
+            encryption_keyring=mfa_encryption_keyring_json(),
+            refresh_token_hash=hash_token(refresh_token),
+            user_agent=user_agent,
+            ip_address=ip_address,
+            expires_at=utc_now() + timedelta(days=settings.REFRESH_TOKEN_DAYS),
+        )
+        if session_record is None:
+            raise AuthenticationError("Invalid or expired MFA challenge")
+        await self._clear_mfa_attempts(challenge.user_id)
+        return await self._finalize_mfa_login(
+            challenge_email=challenge.email,
+            session_record=session_record,
+            refresh_token=refresh_token,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
+    async def verify_mfa(
+        self,
+        *,
+        challenge_token: str,
+        code: str,
+        ip_address: str,
+        user_agent: str | None = None,
+    ) -> AuthTokens:
+        challenge = await self._get_mfa_challenge(
+            challenge_token=challenge_token,
+            ip_address=ip_address,
+        )
+        if challenge.purpose != "verify" or not challenge.secret:
+            raise AuthenticationError("MFA verification is not available")
+
+        await self._claim_mfa_attempt(challenge.user_id)
+        counter = match_totp_counter(
+            challenge.secret,
+            code,
+            last_used_counter=challenge.last_used_counter,
+        )
+        if counter is None:
+            await self.repo.record_mfa_failure(
+                token_hash=hash_token(challenge_token),
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            raise AuthenticationError("Invalid authentication code")
+
+        refresh_token = generate_refresh_token()
+        session_record = await self.repo.complete_mfa_verification(
+            token_hash=hash_token(challenge_token),
+            counter=counter,
+            verified_secret=challenge.secret,
+            encryption_keyring=mfa_encryption_keyring_json(),
+            refresh_token_hash=hash_token(refresh_token),
+            user_agent=user_agent,
+            ip_address=ip_address,
+            expires_at=utc_now() + timedelta(days=settings.REFRESH_TOKEN_DAYS),
+        )
+        if session_record is None:
+            raise AuthenticationError("Invalid or replayed authentication code")
+        await self._clear_mfa_attempts(challenge.user_id)
+        return await self._finalize_mfa_login(
+            challenge_email=challenge.email,
+            session_record=session_record,
+            refresh_token=refresh_token,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
+    async def recover_mfa(
+        self,
+        *,
+        challenge_token: str,
+        recovery_code: str,
+        ip_address: str,
+        user_agent: str | None = None,
+    ) -> MfaLoginChallenge:
+        challenge = await self._get_mfa_challenge(
+            challenge_token=challenge_token,
+            ip_address=ip_address,
+            include_secret=False,
+        )
+        if challenge.purpose not in ("verify", "recover"):
+            raise AuthenticationError("MFA recovery is not available")
+        await self._claim_mfa_attempt(challenge.user_id)
+        try:
+            recovery_code_hash = hash_recovery_code(recovery_code)
+        except ValueError:
+            recovery_code_hash = hash_token(f"invalid-recovery:{recovery_code}")
+
+        recovered = await self.repo.recover_mfa_challenge(
+            token_hash=hash_token(challenge_token),
+            recovery_code_hash=recovery_code_hash,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        if not recovered:
+            raise AuthenticationError("Invalid recovery code")
+        await self._clear_mfa_attempts(challenge.user_id)
+        return MfaLoginChallenge(
+            status="mfa_enrollment_required",
+            challenge_token=challenge_token,
+            expires_in=10 * 60,
+        )
+
+    async def step_up_mfa(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        is_developer: bool,
+        is_administrator: bool,
+        code: str,
+        ip_address: str,
+        user_agent: str | None = None,
+    ) -> tuple[str, int]:
+        if not (is_developer or is_administrator):
+            raise AuthenticationError("Support MFA is required")
+        record = await self.repo.get_step_up_mfa(
+            user_id=user_id,
+            session_id=session_id,
+            encryption_keyring=mfa_encryption_keyring_json(),
+        )
+        if record is None:
+            raise AuthenticationError("Support MFA is unavailable")
+        if await self.repo.enforce_login_guard(
+            email_lower=record.email.lower(),
+            ip_address=ip_address,
+        ):
+            raise RateLimitError(
+                "Account temporarily locked. Try again later.",
+                details={"retry_after_minutes": int(LOGIN_BLOCK_DURATION.total_seconds() // 60)},
+            )
+        await self._claim_mfa_attempt(user_id)
+        counter = match_totp_counter(
+            record.secret,
+            code,
+            last_used_counter=record.last_used_counter,
+        )
+        if counter is None:
+            await self.repo.insert_login_attempt(
+                email_lower=record.email.lower(),
+                user_id=user_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                outcome="totp_failed",
+            )
+            raise AuthenticationError("Invalid authentication code")
+
+        verified_at = await self.repo.complete_step_up_mfa(
+            user_id=user_id,
+            session_id=session_id,
+            counter=counter,
+            verified_secret=record.secret,
+            encryption_keyring=mfa_encryption_keyring_json(),
+        )
+        if verified_at is None:
+            raise AuthenticationError("Invalid or replayed authentication code")
+        await self._clear_mfa_attempts(user_id)
+        access_token = create_access_token(
+            user_id,
+            tenant_id=None,
+            is_developer=is_developer,
+            is_administrator=is_administrator,
+            session_id=session_id,
+            mfa_verified_at=verified_at,
+        )
+        return access_token, settings.ACCESS_TOKEN_MINUTES * 60
+
+    # -------------------------------------------------------------------------
+    # 4. Refresh
     # -------------------------------------------------------------------------
 
     async def refresh(
@@ -227,7 +644,7 @@ class AuthService:
         operation_id: UUID,
         ip_address: str,
         user_agent: str | None = None,
-    ) -> tuple[str, str, int]:
+    ) -> AuthTokens:
         token_hash = hash_token(refresh_token)
         new_refresh_token = derive_rotated_refresh_token(refresh_token, operation_id)
         rotated = await self.repo.rotate_session(
@@ -253,18 +670,33 @@ class AuthService:
             )
             raise AuthenticationError("Invalid or expired refresh token")
 
+        mfa_verified_at = await self.repo.get_session_mfa_verified_at(
+            session_id=rotated.id,
+            user_id=user.id,
+        )
+        if (user.is_developer or user.is_administrator) and (
+            user.mfa_status != "active" or mfa_verified_at is None
+        ):
+            raise AuthenticationError("Support MFA is required")
+
         access_token = create_access_token(
             user.id,
             tenant_id=user.home_tenant_id,
             is_developer=user.is_developer,
             is_administrator=user.is_administrator,
+            session_id=rotated.id,
+            mfa_verified_at=mfa_verified_at,
         )
         result_refresh_token = refresh_token if rotated.reuse_presented_token else new_refresh_token
         logger.info("refresh_rotated", user_id=str(user.id), session_id=str(rotated.id))
-        return access_token, result_refresh_token, settings.ACCESS_TOKEN_MINUTES * 60
+        return AuthTokens(
+            access_token,
+            result_refresh_token,
+            settings.ACCESS_TOKEN_MINUTES * 60,
+        )
 
     # -------------------------------------------------------------------------
-    # 4. Logout (idempotent)
+    # 5. Logout (idempotent)
     # -------------------------------------------------------------------------
 
     async def logout(self, refresh_token: str, operation_id: UUID | None = None) -> None:
@@ -286,7 +718,7 @@ class AuthService:
             logger.info("logout", user_id=str(user_id))
 
     # -------------------------------------------------------------------------
-    # 5. /me
+    # 6. /me
     # -------------------------------------------------------------------------
 
     async def get_user_info(self, user_id: UUID) -> AuthUserRecord:

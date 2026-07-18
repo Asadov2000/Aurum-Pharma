@@ -1,6 +1,28 @@
 export interface TokenPair {
+  status?: "authenticated";
   access_token: string;
   token_type: "bearer";
+  expires_in: number;
+}
+
+export type MfaChallengeStatus =
+  | "mfa_required"
+  | "mfa_enrollment_required"
+  | "mfa_recovery_required";
+
+export interface MfaChallengeResponse {
+  status: MfaChallengeStatus;
+  challenge_token: string;
+  expires_in: number;
+}
+
+export type LoginVerifyResponse = TokenPair | MfaChallengeResponse;
+
+export interface MfaEnrollmentSetup {
+  status: "mfa_enrollment_ready";
+  secret: string;
+  provisioning_uri: string;
+  recovery_codes: string[];
   expires_in: number;
 }
 
@@ -34,4 +56,16 @@ export interface LoginVerifyRequest {
   email: string;
   code: string;
   password?: string;
+}
+
+export interface MfaChallengeRequest {
+  challenge_token: string;
+}
+
+export interface MfaCodeRequest extends MfaChallengeRequest {
+  code: string;
+}
+
+export interface MfaRecoveryRequest extends MfaChallengeRequest {
+  recovery_code: string;
 }

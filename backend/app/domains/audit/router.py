@@ -10,7 +10,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, current_user, get_db, require_permission
+from app.core.deps import (
+    CurrentUser,
+    get_db,
+    require_permission,
+    require_recent_support_mfa,
+)
 from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.audit.models import AuditLog
 from app.domains.audit.repository import AuditRepository
@@ -34,7 +39,7 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
 
 
 async def require_developer(
-    user: Annotated[CurrentUser, Depends(current_user)],
+    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
 ) -> CurrentUser:
     if not user.is_developer:
         raise PermissionDeniedError("Developer privileges required")

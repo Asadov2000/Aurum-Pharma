@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
-from typing import Annotated
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import Depends, Header, Request
@@ -19,6 +20,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import AppSessionLocal, SupportSessionLocal
 from app.core.errors import (
     AuthenticationError,
@@ -28,6 +30,9 @@ from app.core.errors import (
 )
 from app.core.redis import redis_client
 from app.core.security import decode_access_token
+
+if TYPE_CHECKING:
+    from app.domains.auth.repository import AuthRepository, AuthUserRecord
 
 
 async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
@@ -108,6 +113,49 @@ async def get_auth_db(request: Request) -> AsyncIterator[AsyncSession]:
                 await transaction.commit()
 
 
+async def get_support_auth_db(request: Request) -> AsyncIterator[AsyncSession]:
+    """Run support MFA state transitions through the privileged auth boundary.
+
+    Unauthenticated MFA challenge tokens cannot select the support pool via a
+    JWT yet. These routes use this dependency explicitly; their repository is
+    limited to SECURITY DEFINER auth functions and never receives raw SQL from
+    the request.
+    """
+    tenant_id = getattr(request.state, "tenant_id", None)
+    user_id = getattr(request.state, "user_id", None)
+    is_support = bool(getattr(request.state, "is_support_session", False))
+
+    async with SupportSessionLocal() as session:
+        transaction = await session.begin()
+        try:
+            if tenant_id is not None:
+                await session.execute(
+                    text("SELECT set_config('app.tenant_id', :v, true)"),
+                    {"v": str(tenant_id)},
+                )
+            if user_id is not None:
+                await session.execute(
+                    text("SELECT set_config('app.user_id', :v, true)"),
+                    {"v": str(user_id)},
+                )
+            if is_support:
+                await session.execute(
+                    text("SELECT set_config('app.support_session', 'true', true)"),
+                )
+            yield session
+        except (AuthenticationError, RateLimitError, NotFoundError):
+            if transaction.is_active:
+                await transaction.commit()
+            raise
+        except BaseException:
+            if transaction.is_active:
+                await transaction.rollback()
+            raise
+        else:
+            if transaction.is_active:
+                await transaction.commit()
+
+
 async def get_redis() -> Redis:
     return redis_client
 
@@ -134,12 +182,29 @@ def _optional_uuid_claim(claims: Mapping[str, object], key: str) -> UUID | None:
         raise AuthenticationError(f"Token {key} is not a valid UUID") from exc
 
 
+def _optional_timestamp_claim(
+    claims: Mapping[str, object],
+    key: str,
+) -> datetime | None:
+    raw = claims.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        raise AuthenticationError(f"Token {key} is not a valid timestamp")
+    try:
+        return datetime.fromtimestamp(raw, tz=UTC)
+    except (OverflowError, OSError, ValueError) as exc:
+        raise AuthenticationError(f"Token {key} is not a valid timestamp") from exc
+
+
 @dataclass
 class CurrentUser:
     user_id: UUID
     tenant_id: UUID | None
     is_developer: bool
     is_administrator: bool
+    session_id: UUID | None = None
+    mfa_verified_at: datetime | None = None
     permissions: set[str] = field(default_factory=set)
     permission_scopes: dict[str, frozenset[UUID] | None] = field(default_factory=dict)
     branch_assignments: dict[str, str] = field(default_factory=dict)
@@ -229,6 +294,29 @@ class CurrentUser:
         return branch_scope is None or branch_id in branch_scope
 
 
+async def _validate_support_session(
+    *,
+    repository: AuthRepository,
+    identity: AuthUserRecord,
+    user_id: UUID,
+    session_id: UUID | None,
+    mfa_verified_at: datetime | None,
+) -> None:
+    if session_id is None or mfa_verified_at is None or identity.mfa_status != "active":
+        raise AuthenticationError("Support MFA is required")
+    session_mfa_verified_at = await repository.get_session_mfa_verified_at(
+        session_id=session_id,
+        user_id=user_id,
+    )
+    # A step-up timestamp is intentionally access-token-only. Persisting it on
+    # the refresh session would let a refresh token stolen before step-up inherit
+    # the elevated assurance. The claim may therefore be newer than the baseline.
+    if session_mfa_verified_at is None or mfa_verified_at > datetime.now(UTC) + timedelta(
+        minutes=1
+    ):
+        raise AuthenticationError("Support session is inactive")
+
+
 async def current_user(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
     redis: Annotated[Redis, Depends(get_redis)],
@@ -242,6 +330,8 @@ async def current_user(
 
     user_id = _required_uuid_claim(claims, "sub")
     tenant_id = _optional_uuid_claim(claims, "tenant_id")
+    session_id = _optional_uuid_claim(claims, "sid")
+    mfa_verified_at = _optional_timestamp_claim(claims, "mfa_at")
 
     is_dev = bool(claims.get("is_developer", False))
     is_admin = bool(claims.get("is_administrator", False))
@@ -251,11 +341,23 @@ async def current_user(
     # permission or tenant data is loaded.
     from app.domains.auth.repository import AuthRepository
 
-    identity = await AuthRepository(db).get_user_by_id(user_id)
+    auth_repo = AuthRepository(db)
+    identity = await auth_repo.get_user_by_id(
+        user_id,
+        session_id=session_id,
+    )
     if identity is None or identity.status not in ("invited", "active"):
         raise AuthenticationError("User is inactive")
     if identity.is_developer is not is_dev or identity.is_administrator is not is_admin:
         raise AuthenticationError("Session claims are outdated")
+    if is_dev or is_admin:
+        await _validate_support_session(
+            repository=auth_repo,
+            identity=identity,
+            user_id=user_id,
+            session_id=session_id,
+            mfa_verified_at=mfa_verified_at,
+        )
     if tenant_id is not None and (
         identity.home_tenant_id != tenant_id or identity.membership_status != "active"
     ):
@@ -311,6 +413,8 @@ async def current_user(
         tenant_id=tenant_id,
         is_developer=is_dev,
         is_administrator=is_admin,
+        session_id=session_id,
+        mfa_verified_at=mfa_verified_at,
         permissions=permissions,
         permission_scopes=permission_scopes,
         branch_assignments=branch_assignments,
@@ -320,6 +424,35 @@ async def current_user(
         membership_status=membership_status,
         is_tenant_owner=is_tenant_owner,
     )
+
+
+async def require_recent_support_mfa(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    if not (user.is_developer or user.is_administrator):
+        raise PermissionDeniedError("Support privileges required")
+    verified_at = user.mfa_verified_at
+    if verified_at is None:
+        raise PermissionDeniedError(
+            "Recent MFA verification required",
+            details={"reason": "mfa_step_up_required"},
+        )
+    now = datetime.now(UTC)
+    max_age = timedelta(minutes=get_settings().MFA_STEP_UP_MINUTES)
+    if verified_at > now + timedelta(minutes=1) or now - verified_at > max_age:
+        raise PermissionDeniedError(
+            "Recent MFA verification required",
+            details={"reason": "mfa_step_up_required"},
+        )
+    return user
+
+
+async def require_recent_mfa_if_support(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    if user.is_developer or user.is_administrator:
+        return await require_recent_support_mfa(user)
+    return user
 
 
 def require_permission(code: str):  # type: ignore[no-untyped-def]

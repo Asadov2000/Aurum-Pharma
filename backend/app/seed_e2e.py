@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import SupportSessionLocal
-from app.core.security import hash_password
+from app.core.security import derive_mfa_encryption_key, hash_password
 from app.core.time import utc_now
 from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Tenant
@@ -30,6 +30,8 @@ from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 
 CONFIRMATION_ENV = "AURUM_E2E_SEED"
+DEV_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+ADMIN_TOTP_SECRET = "KRUGS4ZANFZSAYJAMNXW2L3ON5XCA5DF"
 
 
 def require_e2e_seed_confirmation(*, environment: str, confirmation: str | None) -> None:
@@ -67,7 +69,7 @@ async def main() -> None:
 
             now = utc_now()
             roles_repo = RolesRepository(session)
-            await roles_repo.insert_user(
+            developer = await roles_repo.insert_user(
                 email="dev@aurum.tj",
                 full_name="Aurum Developer",
                 password_hash=hash_password("Devdev1234"),
@@ -76,7 +78,7 @@ async def main() -> None:
                 status="active",
                 activated_at=now,
             )
-            await roles_repo.insert_user(
+            administrator = await roles_repo.insert_user(
                 email="admin@aurum.tj",
                 full_name="Aurum Administrator",
                 password_hash=hash_password("Admin1234"),
@@ -84,6 +86,45 @@ async def main() -> None:
                 is_administrator=True,
                 status="active",
                 activated_at=now,
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO public.support_mfa (
+                      user_id,
+                      active_secret_ciphertext,
+                      active_key_version,
+                      status,
+                      active_generation,
+                      confirmed_at
+                    ) VALUES (
+                      :user_id,
+                      public.pgp_sym_encrypt(
+                        :secret,
+                        :encryption_key,
+                        'cipher-algo=aes256, compress-algo=0'
+                      ),
+                      :key_version,
+                      'active',
+                      1,
+                      :confirmed_at
+                    )
+                    """),
+                [
+                    {
+                        "user_id": developer.id,
+                        "secret": DEV_TOTP_SECRET,
+                        "encryption_key": derive_mfa_encryption_key(),
+                        "key_version": settings.MFA_ENCRYPTION_KEY_VERSION,
+                        "confirmed_at": now,
+                    },
+                    {
+                        "user_id": administrator.id,
+                        "secret": ADMIN_TOTP_SECRET,
+                        "encryption_key": derive_mfa_encryption_key(),
+                        "key_version": settings.MFA_ENCRYPTION_KEY_VERSION,
+                        "confirmed_at": now,
+                    },
+                ],
             )
 
             owner, _membership, _ownership, _role = await RolesService(roles_repo).provision_owner(

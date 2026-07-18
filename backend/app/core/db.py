@@ -24,6 +24,7 @@ settings = get_settings()
 app_engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL_APP,
     echo=False,
+    hide_parameters=True,
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
@@ -32,6 +33,7 @@ app_engine: AsyncEngine = create_async_engine(
 support_engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL_SUPPORT,
     echo=False,
+    hide_parameters=True,
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,
@@ -58,6 +60,7 @@ SupportSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
 worker_engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL_SUPPORT,
     echo=False,
+    hide_parameters=True,
     poolclass=NullPool,
 )
 

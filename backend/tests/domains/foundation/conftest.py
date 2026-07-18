@@ -22,6 +22,7 @@ from app.domains.roles.models import (
     UserAssignment,
 )
 from app.main import app
+from tests.auth_helpers import create_support_access_token
 
 
 @pytest_asyncio.fixture
@@ -94,15 +95,13 @@ async def make_user(db_session: AsyncSession):  # type: ignore[no-untyped-def]
 
 
 @pytest_asyncio.fixture
-async def support_token(make_user) -> str:  # type: ignore[no-untyped-def]
+async def support_token(
+    db_session: AsyncSession,
+    make_user,
+) -> str:  # type: ignore[no-untyped-def]
     """An access token for a freshly-minted administrator."""
     admin = await make_user(is_administrator=True)
-    return create_access_token(
-        admin.id,
-        tenant_id=None,
-        is_developer=False,
-        is_administrator=True,
-    )
+    return await create_support_access_token(db_session, admin)
 
 
 @pytest_asyncio.fixture
@@ -115,7 +114,7 @@ async def tenant_admin_token(
 
     async def _factory(tenant: Tenant | None = None) -> tuple[str, Tenant, AppUser]:
         t = tenant if tenant is not None else await make_tenant()
-        user = await make_user(home_tenant_id=t.id, is_administrator=True)
+        user = await make_user(home_tenant_id=t.id)
         membership = TenantMembership(
             tenant_id=t.id,
             user_id=user.id,
@@ -146,7 +145,7 @@ async def tenant_admin_token(
             user.id,
             tenant_id=t.id,
             is_developer=False,
-            is_administrator=True,
+            is_administrator=False,
         )
         return token, t, user
 

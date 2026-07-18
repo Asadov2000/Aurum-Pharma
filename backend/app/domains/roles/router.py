@@ -15,6 +15,7 @@ from app.core.deps import (
     get_db,
     get_redis,
     require_permission,
+    require_recent_mfa_if_support,
 )
 from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.roles.models import Role
@@ -134,6 +135,7 @@ async def list_roles(
 async def create_role(
     payload: RoleCreate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.create"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleWithPermissions:
     role, codes = await service.create_role(
@@ -154,6 +156,7 @@ async def update_role(
     role_id: UUID,
     payload: RoleUpdate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.update"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleWithPermissions:
     role, codes = await service.update_role(
@@ -253,6 +256,7 @@ async def list_users(
 async def invite_user(
     payload: InviteUserRequest,
     user: Annotated[CurrentUser, Depends(require_permission("users.invite"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> AssignmentRead:
     _, assignment, _ = await service.invite_user(
@@ -276,6 +280,7 @@ async def update_user(
     user_id: UUID,
     payload: UserUpdate,
     user: Annotated[CurrentUser, Depends(require_permission("users.update"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, object]:
     fields = payload.model_dump(exclude_none=True, exclude={"status"})
@@ -298,6 +303,7 @@ async def update_user(
 async def block_user(
     user_id: UUID,
     user: Annotated[CurrentUser, Depends(require_permission("users.block"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, str]:
     await service.block_user(
@@ -313,6 +319,7 @@ async def block_user(
 async def soft_delete_user(
     user_id: UUID,
     user: Annotated[CurrentUser, Depends(require_permission("users.delete"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, str]:
     await service.soft_delete_user(
@@ -338,6 +345,7 @@ async def create_assignment(
     user_id: UUID,
     payload: AssignmentCreate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> AssignmentRead:
     assignment = await service.assign_role(
@@ -360,6 +368,7 @@ async def revoke_assignment(
     user_id: UUID,
     assignment_id: UUID,
     user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, str]:
     await service.revoke_assignment(

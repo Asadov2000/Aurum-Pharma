@@ -1,6 +1,6 @@
 # Aurum Pharma — onboarding guide для нового программиста
 
-Дата обзора: 8 июля 2026  
+Дата обзора: 18 июля 2026
 Репозиторий: `Aurum-Pharma`  
 Цель документа: быстро ввести нового разработчика в продукт, архитектуру, уже реализованные части и ближайшие задачи до релиза.
 
@@ -26,7 +26,7 @@ Aurum Pharma — SaaS-система автоматизации аптек дл�
 |---|---:|
 | Backend-домены | 14 |
 | Frontend-фичи | 15 |
-| Alembic-миграции | 51 |
+| Alembic-миграции | 60 (`head` = `0060`) |
 | ORM-модели | 57 |
 | Frontend routes | 20 |
 | Docker-сервисы | 9 |
@@ -138,6 +138,13 @@ Backend entrypoint: `backend/app/main.py`.
 - `aurum_app` — обычная роль БД, RLS включён.
 - `aurum_support` — роль для developer/administrator, имеет BYPASSRLS.
 - Middleware читает JWT и выставляет контекст запроса.
+- Support-MFA хранит TOTP-секрет отдельно от `app_user`, в зашифрованном виде с
+  отдельными active/pending версиями ключа. Чувствительные SECURITY DEFINER
+  функции доступны только через `aurum_support`; у `aurum_app` нет прямых прав
+  на MFA-таблицы.
+- Recovery-коды имеют 96 случайных бит и хранятся как SHA-256 digest, который не
+  зависит от JWT или ключа шифрования TOTP. Step-up живёт только в новом
+  короткоживущем access-токене и не записывается в refresh-сессию.
 
 Важно для нового разработчика:
 
@@ -295,7 +302,10 @@ pnpm e2e:isolated
 - report exports;
 - PWA/runtime/desktop bridge.
 
-CI запускает backend quality gate, frontend test/build и полный Playwright E2E. Локальный E2E использует отдельный одноразовый стек и не загрязняет dev-БД.
+CI запускает backend quality gate, frontend test/build и полный Playwright E2E.
+Backend-job проверяет миграции на одноразовой CI БД по цепочке
+`upgrade head -> downgrade 0055 -> upgrade head`. Локальный E2E использует
+отдельный одноразовый стек и не загрязняет dev-БД.
 
 Ещё один фронтенд-риск: отчёт по списаниям в `ReportsPage` ожидает отдельный backend endpoint. Это не блокирует текущие продажи, но важно для полного отчётного контура.
 
@@ -348,13 +358,19 @@ CI запускает backend quality gate, frontend test/build и полный 
 
 - access-токен хранится только в памяти frontend, refresh-токен передаётся в
   `httpOnly` cookie; токены не сохраняются в `localStorage`;
+- support-аккаунты разработчика и администратора защищены TOTP, одноразовыми
+  recovery-кодами, серверной проверкой активной сессии и access-token-only
+  step-up MFA для опасных операций; production-ключ и его ротацию ещё необходимо
+  настроить и проверить на staging;
 - `notification_subscription` и `notification_delivery` уже покрыты tenant/RLS
   isolation-тестами; при изменении схемы эти тесты обязательны;
 - внешние notification/email каналы пока stub;
 - offline-касса не включена: есть только fail-closed контракт и deny-only runtime;
 - production hosting ещё не выбран;
 - формальный SLA, WAF/IDS/pentest — позже.
-- есть drift документации: `docs/handoff.md` описывает план на первые 12 миграций, а в коде уже 51 миграция и дополнительные UI-разделы; `docs/spec-v3.md` местами отстаёт от факта, например по тёмной теме.
+- есть drift документации: `docs/handoff.md` описывает план на первые 12 миграций,
+  а в коде уже 60 миграций и дополнительные UI-разделы; `docs/spec-v3.md`
+  местами отстаёт от факта, например по тёмной теме.
 
 ---
 

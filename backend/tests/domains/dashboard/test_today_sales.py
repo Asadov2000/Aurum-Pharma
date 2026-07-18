@@ -194,7 +194,6 @@ async def test_dashboard_summary_requires_reports_view(
         email=f"admin-{uuid4().hex[:8]}@aurum.tj",
         full_name="Admin",
         home_tenant_id=tenant.id,
-        is_administrator=True,
         status="active",
     )
     db_session.add_all([seller, admin])
@@ -239,7 +238,7 @@ async def test_dashboard_summary_requires_reports_view(
         seller.id, tenant_id=tenant.id, is_developer=False, is_administrator=False
     )
     admin_token = create_access_token(
-        admin.id, tenant_id=tenant.id, is_developer=False, is_administrator=True
+        admin.id, tenant_id=tenant.id, is_developer=False, is_administrator=False
     )
     url = "/api/v1/dashboard/summary"
 

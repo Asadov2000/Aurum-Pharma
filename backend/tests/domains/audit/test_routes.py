@@ -9,9 +9,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
-from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.main import app
+from tests.auth_helpers import create_support_access_token
 
 
 async def test_global_audit_is_only_available_in_admin_namespace(
@@ -30,11 +30,9 @@ async def test_global_audit_is_only_available_in_admin_namespace(
     )
     db_session.add(developer)
     await db_session.flush()
-    token = create_access_token(
-        developer.id,
-        tenant_id=None,
-        is_developer=True,
-        is_administrator=False,
+    token = await create_support_access_token(
+        db_session,
+        developer,
     )
 
     app.dependency_overrides[get_db] = _override
@@ -71,11 +69,9 @@ async def test_global_audit_rejects_aurum_administrator(
     )
     db_session.add(administrator)
     await db_session.flush()
-    token = create_access_token(
-        administrator.id,
-        tenant_id=None,
-        is_developer=False,
-        is_administrator=True,
+    token = await create_support_access_token(
+        db_session,
+        administrator,
     )
 
     app.dependency_overrides[get_db] = _override

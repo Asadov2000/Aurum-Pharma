@@ -173,6 +173,9 @@ services:
       - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
       - ./frontend/tsconfig.json:/app/tsconfig.json:ro
       - ./frontend/vite.config.ts:/app/vite.config.ts:ro
+      - ./frontend/playwright.config.ts:/app/playwright.config.ts:ro
+      - ./frontend/tests:/app/tests:ro
+      - ./frontend/e2e:/app/e2e:ro
       - frontend-vite-cache:/app/node_modules/.vite
     ports:
       - "5173:5173"

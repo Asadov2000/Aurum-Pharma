@@ -8,8 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db
-from app.domains.foundation.router import require_support
+from app.core.deps import get_db, require_recent_support_mfa
 from app.domains.sync.auth import EdgeRequestContext, get_edge_context
 from app.domains.sync.bootstrap import BootstrapScope
 from app.domains.sync.repository import SyncCloudRepository
@@ -36,7 +35,7 @@ from app.domains.sync.service import SyncAdminService, SyncCloudService
 admin_router = APIRouter(
     prefix="/api/v1/admin/sync",
     tags=["admin-sync"],
-    dependencies=[Depends(require_support)],
+    dependencies=[Depends(require_recent_support_mfa)],
 )
 router = APIRouter(prefix="/api/v1/sync", tags=["edge-sync"])
 

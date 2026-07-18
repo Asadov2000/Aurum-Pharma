@@ -8,6 +8,7 @@ import { useAuthStore } from "@/stores/auth";
 import { refreshTokensRequest } from "./api";
 import { isConfirmedAuthFailure, isTransientRefreshFailure } from "./failures";
 import { getOrCreateRefreshOperationId } from "./refreshOperation";
+import { requestMfaStepUp } from "./stepUpCoordinator";
 
 const DEFAULT_RETRY_DELAYS_MS = [0, 300, 900] as const;
 const BOOTSTRAP_RETRY_MAX_MS = 30_000;
@@ -67,6 +68,7 @@ export function bootstrapAuth(): void {
   configureAuthHooks({
     getAccessToken: () => useAuthStore.getState().accessToken,
     refreshTokens: refreshSessionFromCookie,
+    requestMfaStepUp,
     onAuthFailure: () => {
       useAuthStore.getState().clear();
     },

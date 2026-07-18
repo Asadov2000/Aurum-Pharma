@@ -23,6 +23,7 @@ from app.core.deps import (
     get_db,
     require_any_permission,
     require_permission,
+    require_recent_support_mfa,
 )
 from app.core.errors import AuthenticationError, BusinessRuleError, PermissionDeniedError
 from app.domains.foundation.repository import FoundationRepository
@@ -98,7 +99,7 @@ admin_router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
     "/tenants",
     response_model=TenantRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_support)],
+    dependencies=[Depends(require_recent_support_mfa)],
 )
 async def create_tenant(
     payload: TenantCreate,
@@ -138,7 +139,7 @@ async def get_tenant(
 @admin_router.patch(
     "/tenants/{tenant_id}",
     response_model=TenantRead,
-    dependencies=[Depends(require_support)],
+    dependencies=[Depends(require_recent_support_mfa)],
 )
 async def update_tenant(
     tenant_id: UUID,
@@ -157,7 +158,7 @@ async def update_tenant(
 async def create_tenant_membership(
     tenant_id: UUID,
     payload: TenantAccountCreate,
-    user: Annotated[CurrentUser, Depends(require_support)],
+    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
     service: Annotated[FoundationService, Depends(_service)],
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> TenantMembershipRead:
@@ -195,7 +196,7 @@ async def create_tenant_membership(
 async def create_tenant_owner(
     tenant_id: UUID,
     payload: OwnerCreate,
-    user: Annotated[CurrentUser, Depends(require_support)],
+    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
     service: Annotated[FoundationService, Depends(_service)],
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> OwnerProvisionRead:

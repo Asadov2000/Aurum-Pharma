@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/features/auth/hooks";
+import { MfaStepUpDialog } from "@/features/auth/MfaStepUpDialog";
 
 import { OfflineStatusBanner } from "./OfflineStatusBanner";
 import { PwaInstallButton } from "./PwaInstallButton";
@@ -154,57 +155,52 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       <div className="flex min-w-0 flex-col">
         <div className="sticky top-0 z-sticky">
           <header className="flex items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-surface/85 sm:px-6">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Button
-              ref={mobileMenuButtonRef}
-              variant="secondary"
-              size="sm"
-              className="h-9 w-9 shrink-0 px-0 lg:hidden"
-              aria-label="Открыть меню"
-              onClick={() => setMobileNavOpen(true)}
-            >
-              <MenuIcon />
-            </Button>
-            <span
-              aria-hidden="true"
-              className="hidden h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-sm font-semibold text-primary sm:grid"
-            >
-              {initial}
-            </span>
-            <div className="hidden min-w-0 leading-tight sm:block">
-              <div className="truncate text-sm font-semibold text-foreground">{name}</div>
-              {caption && (
-                <div className="truncate text-xs text-foreground-muted">{caption}</div>
-              )}
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <Button
+                ref={mobileMenuButtonRef}
+                variant="secondary"
+                size="sm"
+                className="h-9 w-9 shrink-0 px-0 lg:hidden"
+                aria-label="Открыть меню"
+                onClick={() => setMobileNavOpen(true)}
+              >
+                <MenuIcon />
+              </Button>
+              <span
+                aria-hidden="true"
+                className="hidden h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-sm font-semibold text-primary sm:grid"
+              >
+                {initial}
+              </span>
+              <div className="hidden min-w-0 leading-tight sm:block">
+                <div className="truncate text-sm font-semibold text-foreground">{name}</div>
+                {caption && <div className="truncate text-xs text-foreground-muted">{caption}</div>}
+              </div>
             </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <PwaInstallButton />
-            <RuntimeSurfaceBadge />
-            <ThemeToggle />
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-8 w-8 px-0 sm:w-auto sm:px-3"
-              onClick={() => void logout()}
-            >
-              <LogoutIcon />
-              <span className="sr-only sm:not-sr-only">Выйти</span>
-            </Button>
-          </div>
+            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+              <PwaInstallButton />
+              <RuntimeSurfaceBadge />
+              <ThemeToggle />
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-8 w-8 px-0 sm:w-auto sm:px-3"
+                onClick={() => void logout()}
+              >
+                <LogoutIcon />
+                <span className="sr-only sm:not-sr-only">Выйти</span>
+              </Button>
+            </div>
           </header>
           <OfflineStatusBanner />
           <ServerStatusBanner />
           <PwaUpdateBanner />
         </div>
-        <main
-          id="main-content"
-          tabIndex={-1}
-          className="min-w-0 flex-1 px-4 py-4 sm:px-6 sm:py-6"
-        >
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 px-4 py-4 sm:px-6 sm:py-6">
           {children}
         </main>
       </div>
+      <MfaStepUpDialog />
     </div>
   );
 }

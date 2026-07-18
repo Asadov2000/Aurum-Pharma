@@ -1,6 +1,6 @@
 # Security Release Plan
 
-Дата ревизии: 2026-07-17.
+Дата ревизии: 2026-07-18.
 
 Абсолютно неуязвимого приложения не бывает. Цель Aurum Pharma — уменьшить
 вероятность инцидента, ограничить его последствия и иметь проверенное
@@ -19,10 +19,29 @@
 - `/metrics` закрыт bearer-секретом вне development; секрет обязателен для
   staging/production и не попадает в представление настроек.
 - CI фиксирует lock-файлы, запускает Python/JS dependency audit и теперь падает,
-  если advisory-сервис недоступен.
+  если advisory-сервис недоступен. Alembic-цепочка проверяется на одноразовой CI
+  БД как `upgrade head -> downgrade 0055 -> upgrade head`.
 - Offline-auth работает только в fail-closed deny-only режиме. Полный offline POS
   не считается включённым до появления аппаратной идентификации и доверенного
   времени.
+- Support-аккаунты уровней 1–2 требуют TOTP после email-кода и пароля. Секрет
+  хранится отдельно от `app_user` только в зашифрованном виде; повторное
+  использование одного временного кода отклоняется.
+- Для активного и ожидающего TOTP-секрета хранятся отдельные версии ключа.
+  Версионированный keyring читает переходный набор ключей, а support-only
+  операция ротации перешифровывает обе фазы фактора.
+- Recovery-коды одноразовые, содержат 96 случайных бит и хранятся только как
+  доменно-разделённый SHA-256 digest без зависимости от JWT или ключа шифрования
+  TOTP. Восстановление отзывает активные сессии, требует зарегистрировать новый
+  TOTP-фактор и фиксируется в неизменяемом аудите без секретов и кодов.
+- JWT support-аккаунта привязан к серверной сессии. Её отзыв действует сразу, а
+  опасные support-операции требуют недавний step-up MFA. Результат step-up
+  записывается только в новый короткоживущий access-токен и не повышает уровень
+  refresh-сессии; исходный запрос повторяется только после подтверждения.
+- MFA-таблицы закрыты FORCE RLS и недоступны напрямую роли `aurum_app`.
+  SECURITY DEFINER-функции с доступом к секрету или изменением MFA-состояния
+  принадлежат `aurum_support`, имеют фиксированный `search_path`; EXECUTE для
+  `PUBLIC` и `aurum_app` отозван.
 
 ## Блокеры релиза пилота
 
@@ -33,6 +52,11 @@
       на host-интерфейс.
 - [ ] Секреты выдаются через secret manager/Docker secrets, а не через fallback в
       compose или committed `.env`.
+- [x] Реализованы отдельные active/pending key versions, переходный keyring,
+      идемпотентная support-only операция перешифрования и operator runbook.
+- [ ] Независимый `MFA_ENCRYPTION_KEY` выдан в secret manager каждой
+      staging/production-среды до первого support-enrollment; ротация отрепетирована
+      на staging с проверенным backup и rollback.
 - [ ] Production/staging fail-closed: HTTPS для CORS origins, secure cookies,
       encrypted Redis/MinIO/DB transport и отсутствие default credentials.
 - [ ] PostgreSQL backup с WAL/PITR, версионирование MinIO, шифрование,
@@ -50,7 +74,7 @@
       пользователя и scope; шаблон и прямой API-запрос не обходят этот каталог.
 - [ ] Запретить self-assignment, изменение собственной границы полномочий,
       назначение protected-ролей и удаление последнего владельца.
-- [ ] TOTP для support-уровней 1–2, защищённое восстановление и аудит recovery.
+- [x] TOTP для support-уровней 1–2, защищённое восстановление и аудит recovery.
 - [ ] Session inventory, принудительный logout, rotation/revocation и уведомление
       о подозрительном входе.
 - [ ] Проверить branch-scoped permissions во всех доменах, не только в roles;
@@ -90,7 +114,7 @@
 
 1. Scoped authorization, account/membership/ownership и безопасный конструктор
    из ADR-0007.
-2. TOTP, support sessions и защищённый поток восстановления support-аккаунта.
+2. Session inventory, принудительный logout и уведомления о подозрительных входах.
 3. Отдельный production compose/reverse-proxy профиль и секреты.
 4. Backup/restore job с одноразовой проверкой восстановления.
 5. DB-инварианты POS и полный refund/void sync-контур.

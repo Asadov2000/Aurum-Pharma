@@ -28,6 +28,7 @@ class AuthUserRecord:
     membership_status: str | None
     last_login_at: datetime | None
     password_required: bool
+    mfa_status: str | None
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,42 @@ class AuthSessionRecord:
     user_id: UUID
     expires_at: datetime
     reuse_presented_token: bool
+
+
+@dataclass(frozen=True)
+class MfaChallengeCreated:
+    id: UUID
+    purpose: str
+
+
+@dataclass(frozen=True)
+class MfaChallengeRecord:
+    user_id: UUID
+    email: str
+    is_developer: bool
+    is_administrator: bool
+    purpose: str
+    mfa_status: str | None
+    secret: str | None
+    last_used_counter: int | None
+    failed_attempts: int
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class MfaSessionRecord:
+    session_id: UUID
+    user_id: UUID
+    mfa_verified_at: datetime
+    is_developer: bool
+    is_administrator: bool
+
+
+@dataclass(frozen=True)
+class StepUpMfaRecord:
+    email: str
+    secret: str
+    last_used_counter: int | None
 
 
 class EmailCodeIssueStatus(StrEnum):
@@ -63,6 +100,7 @@ def _auth_user_from_row(row: RowMapping) -> AuthUserRecord:
         membership_status=cast(str | None, row["membership_status"]),
         last_login_at=cast(datetime | None, row["last_login_at"]),
         password_required=bool(row["password_required"]),
+        mfa_status=cast(str | None, row["mfa_status"]),
     )
 
 
@@ -72,6 +110,31 @@ def _auth_session_from_row(row: RowMapping) -> AuthSessionRecord:
         user_id=cast(UUID, row["user_id"]),
         expires_at=cast(datetime, row["expires_at"]),
         reuse_presented_token=bool(row["reuse_presented_token"]),
+    )
+
+
+def _mfa_challenge_from_row(row: RowMapping) -> MfaChallengeRecord:
+    return MfaChallengeRecord(
+        user_id=cast(UUID, row["user_id"]),
+        email=cast(str, row["email"]),
+        is_developer=bool(row["is_developer"]),
+        is_administrator=bool(row["is_administrator"]),
+        purpose=cast(str, row["purpose"]),
+        mfa_status=cast(str | None, row["mfa_status"]),
+        secret=cast(str | None, row["secret"]),
+        last_used_counter=cast(int | None, row["last_used_counter"]),
+        failed_attempts=int(row["failed_attempts"]),
+        expires_at=cast(datetime, row["expires_at"]),
+    )
+
+
+def _mfa_session_from_row(row: RowMapping) -> MfaSessionRecord:
+    return MfaSessionRecord(
+        session_id=cast(UUID, row["session_id"]),
+        user_id=cast(UUID, row["user_id"]),
+        mfa_verified_at=cast(datetime, row["mfa_verified_at"]),
+        is_developer=bool(row["is_developer"]),
+        is_administrator=bool(row["is_administrator"]),
     )
 
 
@@ -238,6 +301,247 @@ class AuthRepository:
         return bool(result.scalar_one())
 
     # -------------------------------------------------------------------------
+    # support MFA
+    # -------------------------------------------------------------------------
+
+    async def create_mfa_challenge_from_email_code(
+        self,
+        *,
+        email_lower: str,
+        code_id: UUID,
+        candidate_hash: str,
+        token_hash: str,
+        ip_address: str,
+        user_agent: str | None,
+        expires_at: datetime,
+    ) -> MfaChallengeCreated | None:
+        result = await self.session.execute(
+            text(
+                "SELECT * FROM public.create_auth_mfa_challenge_from_email_code("
+                ":email, :code_id, :candidate_hash, :token_hash, :ip_address, "
+                ":user_agent, :expires_at)"
+            ),
+            {
+                "email": email_lower,
+                "code_id": code_id,
+                "candidate_hash": candidate_hash,
+                "token_hash": token_hash,
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+                "expires_at": expires_at,
+            },
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return MfaChallengeCreated(
+            id=cast(UUID, row["challenge_id"]),
+            purpose=cast(str, row["purpose"]),
+        )
+
+    async def get_mfa_challenge(
+        self,
+        *,
+        token_hash: str,
+        encryption_keyring: str,
+        include_secret: bool,
+    ) -> MfaChallengeRecord | None:
+        result = await self.session.execute(
+            text(
+                "SELECT * FROM public.lookup_auth_mfa_challenge("
+                ":token_hash, CAST(:encryption_keyring AS JSONB), :include_secret)"
+            ),
+            {
+                "token_hash": token_hash,
+                "encryption_keyring": encryption_keyring,
+                "include_secret": include_secret,
+            },
+        )
+        row = result.mappings().one_or_none()
+        return _mfa_challenge_from_row(row) if row is not None else None
+
+    async def stage_mfa_enrollment(
+        self,
+        *,
+        token_hash: str,
+        secret: str,
+        key_version: int,
+        encryption_key: str,
+        recovery_code_hashes: list[str],
+    ) -> bool:
+        result = await self.session.execute(
+            text(
+                "SELECT public.stage_auth_mfa_enrollment("
+                ":token_hash, :secret, :key_version, :encryption_key, :code_hashes)"
+            ),
+            {
+                "token_hash": token_hash,
+                "secret": secret,
+                "key_version": key_version,
+                "encryption_key": encryption_key,
+                "code_hashes": recovery_code_hashes,
+            },
+        )
+        return bool(result.scalar_one())
+
+    async def complete_mfa_enrollment(
+        self,
+        *,
+        token_hash: str,
+        counter: int,
+        verified_secret: str,
+        encryption_keyring: str,
+        refresh_token_hash: str,
+        user_agent: str | None,
+        ip_address: str,
+        expires_at: datetime,
+    ) -> MfaSessionRecord | None:
+        result = await self.session.execute(
+            text(
+                "SELECT * FROM public.complete_auth_mfa_enrollment("
+                ":token_hash, :counter, :verified_secret, "
+                "CAST(:encryption_keyring AS JSONB), "
+                ":refresh_token_hash, :user_agent, :ip_address, :expires_at)"
+            ),
+            {
+                "token_hash": token_hash,
+                "counter": counter,
+                "verified_secret": verified_secret,
+                "encryption_keyring": encryption_keyring,
+                "refresh_token_hash": refresh_token_hash,
+                "user_agent": user_agent,
+                "ip_address": ip_address,
+                "expires_at": expires_at,
+            },
+        )
+        row = result.mappings().one_or_none()
+        return _mfa_session_from_row(row) if row is not None else None
+
+    async def complete_mfa_verification(
+        self,
+        *,
+        token_hash: str,
+        counter: int,
+        verified_secret: str,
+        encryption_keyring: str,
+        refresh_token_hash: str,
+        user_agent: str | None,
+        ip_address: str,
+        expires_at: datetime,
+    ) -> MfaSessionRecord | None:
+        result = await self.session.execute(
+            text(
+                "SELECT * FROM public.complete_auth_mfa_verification("
+                ":token_hash, :counter, :verified_secret, "
+                "CAST(:encryption_keyring AS JSONB), "
+                ":refresh_token_hash, :user_agent, :ip_address, :expires_at)"
+            ),
+            {
+                "token_hash": token_hash,
+                "counter": counter,
+                "verified_secret": verified_secret,
+                "encryption_keyring": encryption_keyring,
+                "refresh_token_hash": refresh_token_hash,
+                "user_agent": user_agent,
+                "ip_address": ip_address,
+                "expires_at": expires_at,
+            },
+        )
+        row = result.mappings().one_or_none()
+        return _mfa_session_from_row(row) if row is not None else None
+
+    async def record_mfa_failure(
+        self,
+        *,
+        token_hash: str,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> bool:
+        result = await self.session.execute(
+            text("SELECT public.record_auth_mfa_failure(" ":token_hash, :ip_address, :user_agent)"),
+            {
+                "token_hash": token_hash,
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+            },
+        )
+        return bool(result.scalar_one())
+
+    async def recover_mfa_challenge(
+        self,
+        *,
+        token_hash: str,
+        recovery_code_hash: str,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> bool:
+        result = await self.session.execute(
+            text(
+                "SELECT public.recover_auth_mfa_challenge("
+                ":token_hash, :code_hash, :ip_address, :user_agent)"
+            ),
+            {
+                "token_hash": token_hash,
+                "code_hash": recovery_code_hash,
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+            },
+        )
+        return bool(result.scalar_one())
+
+    async def get_step_up_mfa(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        encryption_keyring: str,
+    ) -> StepUpMfaRecord | None:
+        result = await self.session.execute(
+            text(
+                "SELECT * FROM public.lookup_support_mfa_for_step_up("
+                ":user_id, :session_id, CAST(:encryption_keyring AS JSONB))"
+            ),
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "encryption_keyring": encryption_keyring,
+            },
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return StepUpMfaRecord(
+            email=cast(str, row["email"]),
+            secret=cast(str, row["secret"]),
+            last_used_counter=cast(int | None, row["last_used_counter"]),
+        )
+
+    async def complete_step_up_mfa(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        counter: int,
+        verified_secret: str,
+        encryption_keyring: str,
+    ) -> datetime | None:
+        result = await self.session.execute(
+            text(
+                "SELECT public.complete_support_mfa_step_up("
+                ":user_id, :session_id, :counter, :verified_secret, "
+                "CAST(:encryption_keyring AS JSONB))"
+            ),
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "counter": counter,
+                "verified_secret": verified_secret,
+                "encryption_keyring": encryption_keyring,
+            },
+        )
+        return cast(datetime | None, result.scalar_one())
+
+    # -------------------------------------------------------------------------
     # session
     # -------------------------------------------------------------------------
 
@@ -316,6 +620,21 @@ class AuthRepository:
         )
         row = result.mappings().one_or_none()
         return _auth_session_from_row(row) if row is not None else None
+
+    async def get_session_mfa_verified_at(
+        self,
+        *,
+        session_id: UUID,
+        user_id: UUID,
+    ) -> datetime | None:
+        result = await self.session.execute(
+            text("SELECT public.lookup_auth_session_mfa(" ":session_id, :user_id)"),
+            {
+                "session_id": session_id,
+                "user_id": user_id,
+            },
+        )
+        return cast(datetime | None, result.scalar_one())
 
     async def revoke_session_by_hash(
         self,

@@ -35,23 +35,29 @@ export const api: AxiosInstance = axios.create({
 interface RetryConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
   _skipAuth?: boolean;
+  _skipRefresh?: boolean;
+  _stepUpRetry?: boolean;
 }
 
 type TokenGetter = () => string | null;
 type Refresher = () => Promise<string | null>;
+type StepUpRequester = () => Promise<string | null>;
 type OnAuthFailure = () => void;
 
 let getAccess: TokenGetter = () => null;
 let refresh: Refresher = async () => null;
+let requestStepUp: StepUpRequester = async () => null;
 let onAuthFailure: OnAuthFailure = () => {};
 
 export function configureAuthHooks(opts: {
   getAccessToken: TokenGetter;
   refreshTokens: Refresher;
+  requestMfaStepUp: StepUpRequester;
   onAuthFailure: OnAuthFailure;
 }): void {
   getAccess = opts.getAccessToken;
   refresh = opts.refreshTokens;
+  requestStepUp = opts.requestMfaStepUp;
   onAuthFailure = opts.onAuthFailure;
 }
 
@@ -81,13 +87,39 @@ export function refreshAccessToken(): Promise<string | null> {
   return refreshing;
 }
 
+let steppingUp: Promise<string | null> | null = null;
+
+export function requestStepUpAccessToken(): Promise<string | null> {
+  steppingUp ??= requestStepUp().finally(() => {
+    steppingUp = null;
+  });
+  return steppingUp;
+}
+
+export function isMfaStepUpRequired(error: AxiosError): boolean {
+  if (error.response?.status !== 403) return false;
+  const data = error.response.data as { error?: { details?: { reason?: unknown } } } | undefined;
+  return data?.error?.details?.reason === "mfa_step_up_required";
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const original = error.config as RetryConfig | undefined;
+    if (original && !original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
+      original._stepUpRetry = true;
+      const newAccess = await requestStepUpAccessToken();
+      if (!newAccess) {
+        return Promise.reject(error);
+      }
+      original.headers.set("Authorization", `Bearer ${newAccess}`);
+      return api.request(original);
+    }
+
     if (
       !original ||
       original._skipAuth ||
+      original._skipRefresh ||
       original._retry ||
       error.response?.status !== 401
     ) {
@@ -107,4 +139,8 @@ api.interceptors.response.use(
 
 export function withoutAuth(config?: AxiosRequestConfig): AxiosRequestConfig {
   return { ...(config ?? {}), _skipAuth: true } as AxiosRequestConfig;
+}
+
+export function withoutRefresh(config?: AxiosRequestConfig): AxiosRequestConfig {
+  return { ...(config ?? {}), _skipRefresh: true } as AxiosRequestConfig;
 }

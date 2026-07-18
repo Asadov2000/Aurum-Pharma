@@ -15,9 +15,11 @@ export function useAuth() {
 
   const login = useCallback(
     async (payload: LoginVerifyRequest) => {
-      const tokens = await verifyLoginCode(payload);
-      setTokens(tokens);
-      return tokens;
+      const result = await verifyLoginCode(payload);
+      if ("access_token" in result) {
+        setTokens(result);
+      }
+      return result;
     },
     [setTokens],
   );

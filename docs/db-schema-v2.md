@@ -1,7 +1,8 @@
 # Aurum Pharma — Схема БД v2
 
-> **Версия:** 2.0
-> **Дата:** май 2026
+> **Версия:** 2.1
+> **Дата:** июль 2026
+> **Текущий Alembic head:** `0060`
 > **Статус:** актуальная, для Этапа 1
 > **СУБД:** PostgreSQL 16
 > **Заменяет:** v1 схему (~80 таблиц)
@@ -235,7 +236,6 @@ CREATE TABLE app_user (
   full_name           TEXT NOT NULL,
   phone               TEXT,
   password_hash       TEXT,                   -- опциональный (для cash mode)
-  totp_secret         TEXT,                   -- TOTP-секрет (Этап 2 для уровней 3-4)
   is_developer        BOOLEAN NOT NULL DEFAULT false,
   is_administrator    BOOLEAN NOT NULL DEFAULT false,
   -- Привязка к "домашнему" тенанту (NULL для developer/administrator)
@@ -259,7 +259,9 @@ CREATE TRIGGER trg_app_user_updated BEFORE UPDATE ON app_user
   FOR EACH ROW EXECUTE FUNCTION trg_set_updated_meta();
 
 -- app_user НЕ имеет tenant_id (это таблица идентификаторов).
--- RLS не применяется; видимость определяется на уровне роутера/сервиса.
+-- TOTP-секреты здесь запрещены: support-MFA хранится отдельно и зашифрованно.
+-- Прямой доступ runtime-ролей закрыт; auth использует ограниченные
+-- SECURITY DEFINER-функции.
 
 -- =============================================================================
 -- SESSION (refresh-токены)
@@ -274,11 +276,137 @@ CREATE TABLE session (
   last_used_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at          TIMESTAMPTZ NOT NULL,
   revoked_at          TIMESTAMPTZ,
-  revoked_reason      TEXT
+  revoked_reason      TEXT,
+  rotation_operation_id UUID,
+  rotated_from_session_id UUID REFERENCES session(id) ON DELETE SET NULL,
+  mfa_verified_at     TIMESTAMPTZ
 );
 CREATE INDEX ix_session_user ON session (user_id) WHERE revoked_at IS NULL;
 CREATE UNIQUE INDEX ux_session_refresh_hash ON session (refresh_token_hash);
 CREATE INDEX ix_session_expires ON session (expires_at) WHERE revoked_at IS NULL;
+
+-- session.mfa_verified_at хранит базовую MFA-проверку входа support-аккаунта.
+-- Step-up не записывается в refresh-сессию: его время существует только в
+-- короткоживущем access-токене, чтобы ранее украденный refresh-токен не мог
+-- унаследовать повышенный уровень доверия.
+
+-- =============================================================================
+-- SUPPORT_MFA (только уровни 1–2)
+-- =============================================================================
+CREATE TABLE support_mfa (
+  user_id                    UUID PRIMARY KEY
+                              REFERENCES app_user(id) ON DELETE CASCADE,
+  active_secret_ciphertext   BYTEA,
+  pending_secret_ciphertext  BYTEA,
+  active_key_version         SMALLINT
+                              CHECK (active_key_version > 0),
+  pending_key_version        SMALLINT
+                              CHECK (pending_key_version > 0),
+  status                     TEXT NOT NULL
+                              CHECK (status IN (
+                                'pending','active','recovery_pending'
+                              )),
+  active_generation          SMALLINT,
+  pending_generation         SMALLINT,
+  last_used_counter          BIGINT,
+  confirmed_at               TIMESTAMPTZ,
+  created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ck_support_mfa_state_consistency CHECK (
+    (
+      status = 'active'
+      AND active_secret_ciphertext IS NOT NULL
+      AND active_key_version IS NOT NULL
+      AND active_generation IS NOT NULL
+      AND pending_secret_ciphertext IS NULL
+      AND pending_key_version IS NULL
+      AND pending_generation IS NULL
+    )
+    OR (
+      status = 'pending'
+      AND active_secret_ciphertext IS NULL
+      AND active_key_version IS NULL
+      AND active_generation IS NULL
+      AND pending_secret_ciphertext IS NOT NULL
+      AND pending_key_version IS NOT NULL
+      AND pending_generation IS NOT NULL
+    )
+    OR (
+      status = 'recovery_pending'
+      AND active_secret_ciphertext IS NOT NULL
+      AND active_key_version IS NOT NULL
+      AND active_generation IS NOT NULL
+      AND (
+        (
+          pending_secret_ciphertext IS NULL
+          AND pending_key_version IS NULL
+          AND pending_generation IS NULL
+        )
+        OR (
+          pending_secret_ciphertext IS NOT NULL
+          AND pending_key_version IS NOT NULL
+          AND pending_generation IS NOT NULL
+        )
+      )
+    )
+  )
+);
+
+CREATE TABLE support_mfa_recovery_code (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             UUID NOT NULL
+                        REFERENCES support_mfa(user_id) ON DELETE CASCADE,
+  generation          SMALLINT NOT NULL,
+  code_hash           TEXT NOT NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  activated_at        TIMESTAMPTZ,
+  used_at              TIMESTAMPTZ,
+  UNIQUE (user_id, generation, code_hash)
+);
+
+CREATE TABLE auth_mfa_challenge (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  token_hash          TEXT NOT NULL UNIQUE,
+  user_id             UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  purpose             TEXT NOT NULL
+                        CHECK (purpose IN (
+                          'verify','enroll','recover','recovery_enroll'
+                        )),
+  failed_attempts     SMALLINT NOT NULL DEFAULT 0
+                        CHECK (failed_attempts BETWEEN 0 AND 5),
+  ip_address          INET NOT NULL,
+  user_agent          TEXT,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at          TIMESTAMPTZ NOT NULL,
+  consumed_at         TIMESTAMPTZ,
+  recovery_code_id    UUID
+                        REFERENCES support_mfa_recovery_code(id)
+                        ON DELETE SET NULL
+);
+
+CREATE INDEX ix_auth_mfa_challenge_user_active
+  ON auth_mfa_challenge (user_id, expires_at DESC)
+  WHERE consumed_at IS NULL;
+CREATE INDEX ix_support_mfa_recovery_active
+  ON support_mfa_recovery_code (user_id, generation)
+  WHERE activated_at IS NOT NULL AND used_at IS NULL;
+
+-- Все три MFA-таблицы принадлежат aurum_support, имеют FORCE RLS, а aurum_app
+-- не получает прямых прав на таблицы. TOTP-секрет шифруется pgcrypto; отдельные
+-- active/pending key versions позволяют читать и перешифровывать обе фазы
+-- фактора через версионированный keyring.
+--
+-- Recovery-код содержит 96 случайных бит и хранится как доменно-разделённый
+-- SHA-256 digest. Он не зависит от JWT_SECRET и ключей шифрования TOTP, поэтому
+-- их ротация не инвалидирует сохранённые recovery-коды. Challenge-токены также
+-- хранятся только как digest.
+--
+-- Чувствительные и изменяющие состояние MFA-функции, включая расшифровку,
+-- enrollment/verification/recovery/step-up и ротацию ключа, являются
+-- SECURITY DEFINER с фиксированным search_path. EXECUTE выдан только
+-- aurum_support; права PUBLIC и aurum_app отозваны. aurum_app может вызывать
+-- только ограниченные функции создания MFA challenge и проверки базового MFA
+-- состояния сессии, которые не возвращают TOTP-секрет.
 
 -- =============================================================================
 -- EMAIL_CODE (6-значные коды для логина)

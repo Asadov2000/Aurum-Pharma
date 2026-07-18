@@ -22,15 +22,11 @@ from app.domains.roles.models import (
 )
 from app.domains.roles.repository import RolesRepository
 from app.main import app
+from tests.auth_helpers import create_support_access_token
 
 
-def _support_token(user: AppUser, *, developer: bool = True) -> str:
-    return create_access_token(
-        user.id,
-        tenant_id=None,
-        is_developer=developer,
-        is_administrator=not developer,
-    )
+async def _support_token(db: AsyncSession, user: AppUser) -> str:
+    return await create_support_access_token(db, user)
 
 
 async def _make_tenant(db: AsyncSession):  # type: ignore[no-untyped-def]
@@ -58,7 +54,7 @@ async def test_developer_provisions_owner(db_session: AsyncSession, client: Asyn
     try:
         tenant = await _make_tenant(db_session)
         dev = await _make_user(db_session, is_developer=True)
-        token = _support_token(dev, developer=True)
+        token = await _support_token(db_session, dev)
 
         resp = await client.post(
             f"/api/v1/admin/tenants/{tenant.id}/owner",
@@ -115,7 +111,7 @@ async def test_support_creates_pending_member_at_frontend_contract_path(
     try:
         tenant = await _make_tenant(db_session)
         administrator = await _make_user(db_session, is_administrator=True)
-        token = _support_token(administrator, developer=False)
+        token = await _support_token(db_session, administrator)
         headers = {"Authorization": f"Bearer {token}"}
         payload = {
             "email": "pending-member@shifo.tj",
@@ -170,7 +166,7 @@ async def test_owner_role_matches_template_permissions(
     try:
         tenant = await _make_tenant(db_session)
         dev = await _make_user(db_session, is_developer=True)
-        token = _support_token(dev)
+        token = await _support_token(db_session, dev)
 
         resp = await client.post(
             f"/api/v1/admin/tenants/{tenant.id}/owner",
@@ -231,7 +227,7 @@ async def test_duplicate_email_conflict(db_session: AsyncSession, client: AsyncC
     try:
         tenant = await _make_tenant(db_session)
         dev = await _make_user(db_session, is_developer=True)
-        token = _support_token(dev)
+        token = await _support_token(db_session, dev)
         payload = {"email": "dup-owner@shifo.tj", "full_name": "Дубль"}
 
         first = await client.post(
@@ -261,7 +257,7 @@ async def test_bootstrap_endpoint_rejects_second_active_owner(
     try:
         tenant = await _make_tenant(db_session)
         dev = await _make_user(db_session, is_developer=True)
-        token = _support_token(dev)
+        token = await _support_token(db_session, dev)
 
         r1 = await client.post(
             f"/api/v1/admin/tenants/{tenant.id}/owner",

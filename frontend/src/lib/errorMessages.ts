@@ -75,6 +75,12 @@ const MESSAGE_MAP: Record<string, string> = {
   "User already has an active assignment for this branch":
     "У пользователя уже есть роль на этой точке.",
   "Support privileges required": "Требуются права поддержки.",
+  "Invalid authentication code": "Неверный или устаревший код подтверждения.",
+  "Invalid or replayed authentication code":
+    "Этот код уже использован или устарел. Введите новый код.",
+  "Invalid recovery code": "Неверный или уже использованный резервный код.",
+  "Invalid or expired MFA challenge": "Время подтверждения истекло. Начните вход заново.",
+  "Support MFA is unavailable": "Двухфакторная защита недоступна. Войдите в систему заново.",
   "Request is not scoped to a tenant":
     "Действие требует выбранной аптеки. Войдите под учётной записью аптеки.",
 

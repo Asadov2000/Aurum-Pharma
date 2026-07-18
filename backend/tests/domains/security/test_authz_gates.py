@@ -30,6 +30,7 @@ from app.domains.roles.models import (
     Role,
     RolePermission,
     TenantMembership,
+    TenantOwnership,
     UserAssignment,
 )
 from app.domains.suppliers.repository import SuppliersRepository
@@ -75,34 +76,42 @@ async def _seed_tenant_subjects(db_session: AsyncSession) -> tuple[Tenant, AppUs
         email=f"admin-{nick}@aurum.tj",
         full_name="Admin",
         home_tenant_id=tenant.id,
-        is_administrator=True,
         status="active",
     )
     db_session.add_all([regular, admin])
     await db_session.flush()
     await db_session.refresh(regular)
     await db_session.refresh(admin)
-    db_session.add_all(
-        [
-            TenantMembership(
-                tenant_id=tenant.id,
-                user_id=user.id,
-                full_name=user.full_name,
-                status="active",
-            )
-            for user in (regular, admin)
-        ]
+    regular_membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=regular.id,
+        full_name=regular.full_name,
+        status="active",
+    )
+    admin_membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=admin.id,
+        full_name=admin.full_name,
+        status="active",
+    )
+    db_session.add_all([regular_membership, admin_membership])
+    await db_session.flush()
+    db_session.add(
+        TenantOwnership(
+            tenant_id=tenant.id,
+            membership_id=admin_membership.id,
+        )
     )
     await db_session.flush()
     return tenant, regular, admin
 
 
-def _token(user: AppUser, *, is_administrator: bool = False) -> str:
+def _token(user: AppUser) -> str:
     return create_access_token(
         user.id,
         tenant_id=user.home_tenant_id,
         is_developer=False,
-        is_administrator=is_administrator,
+        is_administrator=False,
     )
 
 
@@ -243,7 +252,7 @@ async def test_sensitive_reads_require_reports_view(
             permission_codes={"reports.view"},
         )
         regular_token = _token(regular)
-        admin_token = _token(admin, is_administrator=True)
+        admin_token = _token(admin)
 
         regular_resp = await client.get(path, headers={"Authorization": f"Bearer {regular_token}"})
         assert regular_resp.status_code == 403, path
@@ -488,10 +497,11 @@ async def test_tenant_reads_require_domain_permission(
                 "pos.shift_open",
                 "registers.view",
                 "settings.update",
+                "users.view",
             },
         )
         regular_token = _token(regular)
-        admin_token = _token(admin, is_administrator=True)
+        admin_token = _token(admin)
 
         regular_resp = await client.get(path, headers={"Authorization": f"Bearer {regular_token}"})
         assert regular_resp.status_code == 403, path

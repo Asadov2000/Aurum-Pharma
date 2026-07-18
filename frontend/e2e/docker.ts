@@ -16,6 +16,22 @@ function isErrno(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+function errorDetails(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const stderr = "stderr" in error ? String(error.stderr) : "";
+  return `${error.message}\n${stderr}`;
+}
+
+function isTransientDockerError(error: unknown): boolean {
+  return /500 Internal Server Error|dockerDesktopLinuxEngine|context deadline exceeded|ETIMEDOUT|timed out/i.test(
+    errorDetails(error),
+  );
+}
+
+function sleepSync(milliseconds: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
 export function assertDockerAvailable(): void {
   const probe = spawnSync("docker", ["version"], { stdio: "ignore" });
   if (probe.error || probe.status !== 0) {
@@ -24,14 +40,22 @@ export function assertDockerAvailable(): void {
 }
 
 export function dockerExec(container: string, args: string[]): string {
-  try {
-    return execFileSync("docker", ["exec", container, ...args], {
-      encoding: "utf8",
-    });
-  } catch (error) {
-    if (isErrno(error) && error.code === "ENOENT") {
-      throw new Error(hostOnlyMessage);
+  const attempts = 2;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return execFileSync("docker", ["exec", container, ...args], {
+        encoding: "utf8",
+        timeout: 45_000,
+      });
+    } catch (error) {
+      if (isErrno(error) && error.code === "ENOENT") {
+        throw new Error(hostOnlyMessage);
+      }
+      if (!isTransientDockerError(error) || attempt === attempts) {
+        throw error;
+      }
+      sleepSync(500 * attempt);
     }
-    throw error;
   }
+  throw new Error("Docker command failed without an error");
 }

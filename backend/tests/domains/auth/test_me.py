@@ -43,6 +43,7 @@ async def test_me_with_valid_token_returns_user(
         "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
     body = response.json()
     assert body["email"] == "me@aurum.tj"
     assert body["full_name"] == "Me User"

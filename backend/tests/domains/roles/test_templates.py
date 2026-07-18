@@ -13,6 +13,7 @@ from app.domains.roles.models import Permission, RolePermission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 from app.main import app
+from tests.auth_helpers import create_support_access_token
 
 PROTECTED_GOVERNANCE_CODES = {
     "roles.assign",
@@ -138,11 +139,10 @@ async def test_administrator_has_explicit_catalog_access_but_no_role_write_bypas
         )
         administrator.is_administrator = True
         await db_session.flush()
-        token = create_access_token(
-            administrator.id,
+        token = await create_support_access_token(
+            db_session,
+            administrator,
             tenant_id=tenant.id,
-            is_developer=False,
-            is_administrator=True,
         )
         headers = {"Authorization": f"Bearer {token}"}
 
