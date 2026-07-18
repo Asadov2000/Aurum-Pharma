@@ -22,7 +22,6 @@ import { describeApiError } from "@/features/foundation/errors";
 import { AssignmentsPanel } from "./AssignmentsPanel";
 import {
   useOffboardUser,
-  useRolesQuery,
   useSuspendUser,
   useUpdateUser,
   useUsersQuery,
@@ -55,12 +54,13 @@ const isOffboarded = (status: UserStatus): boolean => status === "offboarded";
 export function UsersPage(): JSX.Element {
   const { user } = useAuth();
   const hasTenant = Boolean(user?.home_tenant_id);
+  const isTenantOwner = user?.is_tenant_owner === true;
   const permissions = user?.permissions ?? [];
   const canView = permissions.includes("users.view");
-  const canUpdate = permissions.includes("users.update");
-  const canSuspend = permissions.includes("users.block");
-  const canOffboard = permissions.includes("users.delete");
-  const canAssign = permissions.includes("roles.assign");
+  const canUpdate = isTenantOwner && permissions.includes("users.update");
+  const canSuspend = isTenantOwner && permissions.includes("users.block");
+  const canOffboard = isTenantOwner && permissions.includes("users.delete");
+  const canAssign = isTenantOwner && permissions.includes("roles.assign");
   const showActions = canUpdate || canSuspend || canOffboard || canAssign;
 
   const [assignmentUserId, setAssignmentUserId] = useState<string | null>(null);
@@ -70,7 +70,6 @@ export function UsersPage(): JSX.Element {
   const [actionError, setActionError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const users = useUsersQuery(hasTenant && canView, page, PAGE_SIZE);
-  const roles = useRolesQuery(hasTenant && canView);
   const suspendMutation = useSuspendUser();
   const offboardMutation = useOffboardUser();
   const activateMutation = useUpdateUser();
@@ -83,8 +82,8 @@ export function UsersPage(): JSX.Element {
     ? (rows.find((candidate) => candidate.id === profileUserId) ?? null)
     : null;
 
-  const roleName = (id: string) =>
-    roles.data?.find((role) => role.id === id)?.name ?? id.slice(0, 8);
+  const roleName = (assignment: Row["assignments"][number]) =>
+    assignment.role_name ?? assignment.role_id.slice(0, 8);
 
   const ask = (type: PendingAction["type"], target: Row) => {
     setActionError(null);
@@ -132,11 +131,6 @@ export function UsersPage(): JSX.Element {
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold text-foreground">Сотрудники</h1>
 
-      {roles.error && !users.error && (
-        <p className="text-sm text-danger">
-          {describeApiError(roles.error, "Не удалось загрузить названия ролей")}
-        </p>
-      )}
       {actionError && pending === null && <p className="text-sm text-danger">{actionError}</p>}
 
       {users.error ? (
@@ -165,34 +159,25 @@ export function UsersPage(): JSX.Element {
                 const activeAssignments = member.assignments.filter(
                   (assignment) => assignment.is_active,
                 );
-                const isOwnerMembership = activeAssignments.some(
-                  (assignment) =>
-                    roles.data?.find((role) => role.id === assignment.role_id)?.protected_kind ===
-                    "tenant_owner",
-                );
-                const roleCatalogueReady = roles.isSuccess;
+                const isOwnerMembership = member.is_tenant_owner;
                 const protectsLifecycle = isOwnerMembership || member.id === user?.id;
                 const canEditMember = canUpdate && !isOffboarded(member.status);
                 const canActivateMember =
                   canUpdate &&
-                  roleCatalogueReady &&
                   (member.status === "pending" || member.status === "suspended") &&
                   !protectsLifecycle;
                 const canAssignMember =
                   canAssign &&
-                  roleCatalogueReady &&
                   member.status === "active" &&
                   !protectsLifecycle;
                 const canSuspendMember =
                   canSuspend &&
-                  roleCatalogueReady &&
                   !protectsLifecycle &&
                   !isSuspended(member.status) &&
                   member.status !== "pending" &&
                   !isOffboarded(member.status);
                 const canOffboardMember =
                   canOffboard &&
-                  roleCatalogueReady &&
                   !protectsLifecycle &&
                   !isOffboarded(member.status);
                 const hasActions =
@@ -221,7 +206,7 @@ export function UsersPage(): JSX.Element {
                         <div className="flex flex-wrap gap-1">
                           {activeAssignments.map((assignment) => (
                             <Badge key={assignment.id} tone="neutral">
-                              {roleName(assignment.role_id)}
+                              {roleName(assignment)}
                             </Badge>
                           ))}
                         </div>

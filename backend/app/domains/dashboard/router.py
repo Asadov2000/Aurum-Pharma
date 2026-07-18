@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, get_redis, require_permission
+from app.core.deps import CurrentUser, get_db, get_redis, require_tenant_permission
 from app.core.errors import BusinessRuleError
 from app.domains.dashboard.repository import DashboardRepository
 from app.domains.dashboard.schemas import DashboardSummary
@@ -36,7 +36,10 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
 
 @router.get("/summary", response_model=DashboardSummary)
 async def get_summary(
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_tenant_permission("reports.view")),
+    ],
     service: Annotated[DashboardService, Depends(_service)],
 ) -> DashboardSummary:
     # reports.view (owner/admin/dev) — keeps owner-level financials off the

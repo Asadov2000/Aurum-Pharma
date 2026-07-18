@@ -743,6 +743,10 @@ class POSService:
         branch_ids: set[UUID] | None = None,
         page: int,
         page_size: int,
+        viewer_id: UUID | None = None,
+        own_branch_ids: set[UUID] | None = None,
+        tenant_view_branch_ids: set[UUID] | None = None,
+        can_view_tenant: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         return await self.repo.list_sales(
             tenant_id=tenant_id,
@@ -759,6 +763,10 @@ class POSService:
             page=page,
             page_size=page_size,
             tz=await self._report_tz(tenant_id),
+            viewer_id=viewer_id,
+            own_branch_ids=own_branch_ids,
+            tenant_view_branch_ids=tenant_view_branch_ids,
+            can_view_tenant=can_view_tenant,
         )
 
     async def get_sale_details(
@@ -1150,9 +1158,12 @@ class POSService:
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> None:
+        POSService._assert_branch_allowed(
+            sale.branch_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
         if can_manage_tenant:
             return
-        POSService._assert_branch_allowed(sale.branch_id, allowed_branch_ids=allowed_branch_ids)
         if actor_id is None:
             return
         if allowed_manage_branch_ids is not None and sale.branch_id in allowed_manage_branch_ids:

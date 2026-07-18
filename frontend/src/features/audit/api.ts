@@ -3,7 +3,8 @@ import { api } from "@/lib/api";
 import { type AuditPage, type AuditSearchParams } from "./types";
 
 export async function searchAudit(params: AuditSearchParams): Promise<AuditPage> {
-  const base = `/audit/${params.scope}`;
+  const base =
+    params.scope === "global" ? "/admin/audit/global" : `/audit/${params.scope}`;
   const { data } = await api.get<AuditPage>(base, {
     params: {
       action: params.action || undefined,

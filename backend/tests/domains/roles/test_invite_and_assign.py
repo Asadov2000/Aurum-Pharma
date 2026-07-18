@@ -1,236 +1,507 @@
-"""invite_user, assign_role, anti-escalation."""
+"""Pending membership, preassignment, and assignment isolation tests."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from datetime import timedelta
+from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, PermissionDeniedError
+from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.core.security import generate_code_salt, hash_code
+from app.core.time import utc_now
+from app.domains.auth.models import AppUser, EmailCode
+from app.domains.auth.repository import AuthRepository
+from app.domains.auth.service import AuthService
+from app.domains.foundation.models import Branch
+from app.domains.roles.models import (
+    Role,
+    RolePermission,
+    TenantMembership,
+    UserAssignment,
+)
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 
 
-async def test_invite_creates_user_and_assignment(
-    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
+def _tenantwide_scopes(
+    permissions: set[str],
+) -> dict[str, frozenset[UUID] | None]:
+    return {permission: None for permission in permissions}
+
+
+async def _owner_context(
+    db_session: AsyncSession,
+    *,
+    tenant_id,
+    make_owner,
+):  # type: ignore[no-untyped-def]
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant_id)
+    repo = RolesRepository(db_session)
+    permissions = set(await repo.get_role_permissions(owner_role.id))
+    return owner, owner_role, permissions, RolesService(repo)
+
+
+async def _custom_cashier_role(
+    service: RolesService,
+    *,
+    owner,
+    tenant_id,
+    owner_permissions: set[str],
+):  # type: ignore[no-untyped-def]
+    role, _codes = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant_id,
+        name=f"Кассир {str(owner.id)[:8]}",
+        description=None,
+        permission_codes=["catalog.view", "pos.sell"],
+    )
+    return role
+
+
+async def _seed_code(
+    db_session: AsyncSession,
+    *,
+    email: str,
+    code: str = "123456",
+) -> None:
+    salt = generate_code_salt()
+    db_session.add(
+        EmailCode(
+            email_lower=email.lower(),
+            code_hash=hash_code(code, salt),
+            code_salt=salt,
+            purpose="login",
+            ip_address="127.0.0.1",
+            expires_at=utc_now() + timedelta(minutes=10),
+        )
+    )
+    await db_session.flush()
+
+
+async def test_pending_membership_can_be_preassigned_but_has_no_permissions_until_acceptance(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="actor1@aurum.tj")
-    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
-    service = RolesService(RolesRepository(db_session))
-
-    user, assignment, first_invite = await service.invite_user(
-        actor_level=2,  # administrator
-        actor_id=actor.id,
+    other_tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
         tenant_id=tenant.id,
-        email="newhire@aurum.tj",
-        full_name="New Hire",
-        role_id=seller_role.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    account, membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="pending-assignee@aurum.tj",
+        full_name="Pending Assignee",
+        actor_id=owner.id,
+    )
+    other_membership = TenantMembership(
+        tenant_id=other_tenant.id,
+        user_id=account.id,
+        full_name="Other pending membership",
+        status="pending",
+    )
+    db_session.add(other_membership)
+    await db_session.flush()
+    assignment = await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=role.id,
         branch_id=None,
         password_required=False,
     )
-    assert first_invite is True
-    assert user.email_lower == "newhire@aurum.tj"
-    assert user.status == "invited"
-    assert assignment.user_id == user.id
-    assert assignment.tenant_id == tenant.id
-    assert assignment.role_id == seller_role.id
+
+    assert membership.status == "pending"
+    assert assignment.membership_id == membership.id
+    assert await service.get_effective_permissions(account.id, tenant.id) == set()
+
+    await _seed_code(db_session, email=account.email)
+    await AuthService(AuthRepository(db_session)).verify_login_code(
+        email=account.email,
+        code="123456",
+        password=None,
+        ip_address="127.0.0.1",
+    )
+    await db_session.refresh(account)
+    await db_session.refresh(membership)
+    await db_session.refresh(other_membership)
+
+    assert account.status == "active"
+    assert membership.status == "active"
+    assert other_membership.status == "pending"
+    assert await service.get_effective_permissions(account.id, tenant.id) == {
+        "catalog.view",
+        "pos.sell",
+    }
+    assert await service.get_effective_permissions(account.id, other_tenant.id) == set()
 
 
-async def test_invite_existing_user_creates_assignment_only(
-    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
+async def test_failed_login_does_not_activate_pending_membership(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    existing = await make_user(email="existing@aurum.tj")
-    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
-    service = RolesService(RolesRepository(db_session))
-
-    user, assignment, first_invite = await service.invite_user(
-        actor_level=2,
-        actor_id=existing.id,
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
         tenant_id=tenant.id,
-        email="existing@aurum.tj",
-        full_name="Existing User",
-        role_id=seller_role.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    account, membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="pending-failed-login@aurum.tj",
+        full_name="Pending",
+    )
+    await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=role.id,
         branch_id=None,
         password_required=False,
     )
-    assert first_invite is False
-    assert user.id == existing.id
-    assert assignment.user_id == existing.id
+    await _seed_code(db_session, email=account.email)
+
+    from app.core.errors import AuthenticationError
+
+    with pytest.raises(AuthenticationError):
+        await AuthService(AuthRepository(db_session)).verify_login_code(
+            email=account.email,
+            code="000000",
+            password=None,
+            ip_address="127.0.0.1",
+        )
+
+    await db_session.refresh(membership)
+    assert membership.status == "pending"
+    assert await service.get_effective_permissions(account.id, tenant.id) == set()
 
 
-async def test_anti_escalation_owner_cannot_grant_administrator(
-    db_session: AsyncSession, make_tenant, system_roles, make_user
+async def test_owner_invite_route_cannot_create_global_account(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="owner-actor@aurum.tj")
-    service = RolesService(RolesRepository(db_session))
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
 
-    with pytest.raises(BusinessRuleError):
+    with pytest.raises(PermissionDeniedError, match="cannot create accounts"):
         await service.invite_user(
-            actor_level=3,  # owner
-            actor_id=actor.id,
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
             tenant_id=tenant.id,
-            email="evilboss@aurum.tj",
-            full_name="Evil Boss",
-            role_id=system_roles["administrator"].id,  # level 2 — higher
+            email="not-created@aurum.tj",
+            full_name="Not Created",
+            role_id=role.id,
             branch_id=None,
             password_required=False,
         )
 
-
-async def test_anti_escalation_administrator_cannot_grant_developer(
-    db_session: AsyncSession, make_tenant, system_roles, make_user
-) -> None:
-    tenant = await make_tenant()
-    actor = await make_user(email="admin-actor@aurum.tj")
-    service = RolesService(RolesRepository(db_session))
-
-    with pytest.raises(BusinessRuleError):
-        await service.invite_user(
-            actor_level=2,
-            actor_id=actor.id,
-            tenant_id=tenant.id,
-            email="evildev@aurum.tj",
-            full_name="Evil Dev",
-            role_id=system_roles["developer"].id,
-            branch_id=None,
-            password_required=False,
+    assert (
+        await db_session.execute(
+            select(AppUser).where(AppUser.email_lower == "not-created@aurum.tj")
         )
+    ).scalar_one_or_none() is None
 
 
-async def test_developer_can_grant_anything(
-    db_session: AsyncSession, make_tenant, system_roles, make_user
-) -> None:
-    tenant = await make_tenant()
-    actor = await make_user(email="dev-actor@aurum.tj")
-    service = RolesService(RolesRepository(db_session))
-
-    _, assignment, _ = await service.invite_user(
-        actor_level=1,
-        actor_id=actor.id,
-        tenant_id=tenant.id,
-        email="seconddev@aurum.tj",
-        full_name="Second Dev",
-        role_id=system_roles["developer"].id,
-        branch_id=None,
-        password_required=False,
-    )
-    assert assignment.role_id == system_roles["developer"].id
-
-
-async def test_cannot_assign_role_from_another_tenant(
-    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
+async def test_assignment_rejects_foreign_membership(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant_a = await make_tenant()
     tenant_b = await make_tenant()
-    actor = await make_user(email="cross-tenant-role@aurum.tj")
-    other_role = await make_tenant_role(tenant_id=tenant_b.id, template_name="Кассир", level=4)
-    service = RolesService(RolesRepository(db_session))
-
-    with pytest.raises(NotFoundError):
-        await service.invite_user(
-            actor_level=1,
-            actor_id=actor.id,
-            tenant_id=tenant_a.id,
-            email="wrong-role@aurum.tj",
-            full_name="Wrong Role",
-            role_id=other_role.id,
-            branch_id=None,
-            password_required=False,
-        )
-
-
-async def test_duplicate_assignment_returns_conflict(
-    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
-) -> None:
-    tenant = await make_tenant()
-    actor = await make_user(email="dup-actor@aurum.tj")
-    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
-    service = RolesService(RolesRepository(db_session))
-
-    await service.invite_user(
-        actor_level=2,
-        actor_id=actor.id,
-        tenant_id=tenant.id,
-        email="dup@aurum.tj",
-        full_name="Dup",
-        role_id=seller_role.id,
-        branch_id=None,
-        password_required=False,
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant_a.id,
+        make_owner=make_owner,
     )
-    with pytest.raises(ConflictError):
-        await service.invite_user(
-            actor_level=2,
-            actor_id=actor.id,
-            tenant_id=tenant.id,
-            email="dup@aurum.tj",
-            full_name="Dup",
-            role_id=seller_role.id,
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant_a.id,
+        owner_permissions=owner_permissions,
+    )
+    foreign_account, _membership = await service.create_tenant_account(
+        tenant_id=tenant_b.id,
+        email="foreign-member@aurum.tj",
+        full_name="Foreign",
+    )
+
+    with pytest.raises(NotFoundError, match="membership"):
+        await service.assign_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant_a.id,
+            target_user_id=foreign_account.id,
+            role_id=role.id,
             branch_id=None,
             password_required=False,
         )
 
 
-async def test_assign_role_rejects_permission_from_another_branch(
+@pytest.mark.parametrize("status", ["suspended", "offboarded"])
+async def test_assignment_rejects_inactive_membership(
+    status: str,
     db_session: AsyncSession,
     make_tenant,
-    make_tenant_role,
-    make_user,
-    monkeypatch: pytest.MonkeyPatch,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="branch-scope-actor@aurum.tj")
-    target = await make_user(email="branch-scope-target@aurum.tj")
-    seller_role = await make_tenant_role(
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
         tenant_id=tenant.id,
-        template_name="Кассир",
-        level=4,
+        make_owner=make_owner,
     )
-    service = RolesService(RolesRepository(db_session))
-    scoped_gate = AsyncMock(return_value=False)
-    monkeypatch.setattr(service.repo, "actor_has_scoped_permission", scoped_gate)
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    account, membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email=f"{status}@aurum.tj",
+        full_name=status,
+    )
+    membership.status = status
+    await db_session.flush()
 
-    with pytest.raises(PermissionDeniedError, match="branch scope"):
+    with pytest.raises(BusinessRuleError, match="pending or active"):
         await service.assign_role(
-            actor_level=3,
-            actor_id=actor.id,
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
             tenant_id=tenant.id,
-            target_user_id=target.id,
-            role_id=seller_role.id,
+            target_user_id=account.id,
+            role_id=role.id,
             branch_id=None,
             password_required=False,
         )
 
-    scoped_gate.assert_awaited_once_with(
-        tenant_id=tenant.id,
-        permission_code="roles.assign",
-        branch_id=None,
-    )
 
-
-async def test_effective_permissions_match_role_set(
-    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
+async def test_protected_owner_role_cannot_be_assigned_through_role_api(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="eff-actor@aurum.tj")
-    seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
-    service = RolesService(RolesRepository(db_session))
-
-    user, _, _ = await service.invite_user(
-        actor_level=2,
-        actor_id=actor.id,
+    owner, owner_role, owner_permissions, service = await _owner_context(
+        db_session,
         tenant_id=tenant.id,
-        email="effective@aurum.tj",
-        full_name="E",
-        role_id=seller_role.id,
-        branch_id=None,
-        password_required=False,
+        make_owner=make_owner,
+    )
+    account, _membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="owner-role-target@aurum.tj",
+        full_name="Target",
     )
 
-    perms = await service.repo.effective_permissions(user.id, tenant.id)
-    assert "pos.sell" in perms
-    assert "catalog.view" in perms
-    assert "users.invite" not in perms  # seller cannot invite
+    with pytest.raises(PermissionDeniedError, match="Protected"):
+        await service.assign_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=account.id,
+            role_id=owner_role.id,
+            branch_id=None,
+            password_required=False,
+        )
+
+
+async def test_owner_cannot_assign_role_to_self(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+
+    with pytest.raises(PermissionDeniedError, match="yourself"):
+        await service.assign_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=owner.id,
+            role_id=role.id,
+            branch_id=None,
+            password_required=False,
+        )
+
+
+async def test_membership_lookup_never_links_same_email_from_another_tenant(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant_a = await make_tenant()
+    tenant_b = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant_a.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant_a.id,
+        owner_permissions=owner_permissions,
+    )
+    await service.create_tenant_account(
+        tenant_id=tenant_b.id,
+        email="same-email-foreign@aurum.tj",
+        full_name="Foreign",
+    )
+
+    with pytest.raises(PermissionDeniedError, match="cannot create accounts"):
+        await service.invite_user(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant_a.id,
+            email="same-email-foreign@aurum.tj",
+            full_name="Foreign",
+            role_id=role.id,
+            branch_id=None,
+            password_required=False,
+        )
+
+    memberships = list(
+        (
+            await db_session.execute(
+                select(TenantMembership).where(
+                    TenantMembership.user_id.in_(
+                        select(AppUser.id).where(
+                            AppUser.email_lower == "same-email-foreign@aurum.tj"
+                        )
+                    )
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [membership.tenant_id for membership in memberships] == [tenant_b.id]
+
+
+async def test_role_capability_cannot_be_delegated_outside_its_branch_scope(
+    db_session: AsyncSession,
+    make_tenant,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    actor = await make_user(
+        email="scoped-owner@aurum.tj",
+        home_tenant_id=tenant.id,
+        is_owner=True,
+    )
+    target = await make_user(
+        email="scoped-target@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
+    branch_a = Branch(tenant_id=tenant.id, name="Scope A")
+    branch_b = Branch(tenant_id=tenant.id, name="Scope B")
+    delegated_role = Role(
+        tenant_id=tenant.id,
+        name="Scoped cashier",
+        level=4,
+        is_system=False,
+    )
+    db_session.add_all([branch_a, branch_b, delegated_role])
+    await db_session.flush()
+    await db_session.refresh(branch_a)
+    await db_session.refresh(branch_b)
+    await db_session.refresh(delegated_role)
+    db_session.add(RolePermission(role_id=delegated_role.id, permission_code="pos.sell"))
+    await db_session.flush()
+
+    with pytest.raises(PermissionDeniedError, match="target assignment scope"):
+        await RolesService(RolesRepository(db_session)).assign_role(
+            actor_id=actor.id,
+            actor_permissions={"roles.assign", "pos.sell"},
+            actor_permission_scopes={
+                "roles.assign": frozenset({branch_b.id}),
+                "pos.sell": frozenset({branch_a.id}),
+            },
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=target.id,
+            role_id=delegated_role.id,
+            branch_id=branch_b.id,
+            password_required=False,
+        )
+
+    assignment = (
+        await db_session.execute(
+            select(UserAssignment).where(
+                UserAssignment.tenant_id == tenant.id,
+                UserAssignment.user_id == target.id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert assignment is None

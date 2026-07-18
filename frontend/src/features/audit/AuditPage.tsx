@@ -27,12 +27,12 @@ const PAGE_SIZE = 50;
 const scopeLabel: Record<AuditScope, string> = {
   my: "Мои действия",
   tenant: "Все по тенанту",
-  global: "Глобально (support)",
+  global: "Глобально",
 };
 
 export function AuditPage(): JSX.Element {
   const { user } = useAuth();
-  const isSupport = Boolean(user?.is_developer || user?.is_administrator);
+  const canViewGlobalAudit = Boolean(user?.is_developer);
 
   const [scope, setScope] = useState<AuditScope>("my");
   const [action, setAction] = useState("");
@@ -79,7 +79,7 @@ export function AuditPage(): JSX.Element {
           >
             <option value="my">{scopeLabel.my}</option>
             <option value="tenant">{scopeLabel.tenant}</option>
-            {isSupport && <option value="global">{scopeLabel.global}</option>}
+            {canViewGlobalAudit && <option value="global">{scopeLabel.global}</option>}
           </Select>
         </div>
         <div>

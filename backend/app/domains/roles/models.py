@@ -38,6 +38,37 @@ class Permission(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    scope_type: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'TENANT_ALL'")
+    )
+    target_role_type: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'tenant'")
+    )
+    risk_level: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'normal'"))
+    developer_grantable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    administrator_grantable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    owner_grantable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    developer_delegable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    administrator_delegable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    owner_delegable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    requires_step_up: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    requires_confirmation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -46,6 +77,18 @@ class Permission(Base):
         CheckConstraint(
             "min_level_required BETWEEN 1 AND 4",
             name="ck_permission_min_level",
+        ),
+        CheckConstraint(
+            "scope_type IN ('PLATFORM','TENANT_ALL','BRANCH_SET','OWN')",
+            name="ck_permission_scope_type",
+        ),
+        CheckConstraint(
+            "target_role_type IN ('platform','tenant')",
+            name="ck_permission_target_role_type",
+        ),
+        CheckConstraint(
+            "risk_level IN ('normal','sensitive','critical')",
+            name="ck_permission_risk_level",
         ),
     )
 
@@ -99,6 +142,11 @@ class Role(Base):
     level: Mapped[int] = mapped_column(Integer, nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_protected: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    protected_kind: Mapped[str | None] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -110,7 +158,88 @@ class Role(Base):
 
     __table_args__ = (
         CheckConstraint("level BETWEEN 1 AND 4", name="ck_role_level"),
+        CheckConstraint("version >= 1", name="ck_role_version"),
+        CheckConstraint(
+            "(is_protected AND protected_kind IN "
+            "('developer','administrator','tenant_owner')) "
+            "OR (NOT is_protected AND protected_kind IS NULL)",
+            name="ck_role_protected_kind",
+        ),
         UniqueConstraint("tenant_id", "name", name="uq_role_tenant_name"),
+    )
+
+
+class TenantMembership(Base):
+    __tablename__ = "tenant_membership"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    full_name: Mapped[str] = mapped_column(Text, nullable=False)
+    phone: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    invited_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    offboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','active','suspended','offboarded')",
+            name="ck_tenant_membership_status",
+        ),
+        UniqueConstraint("tenant_id", "user_id", name="uq_tenant_membership_tenant_user"),
+    )
+
+
+class TenantOwnership(Base):
+    __tablename__ = "tenant_ownership"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    membership_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenant_membership.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "membership_id",
+            name="uq_tenant_ownership_tenant_membership",
+        ),
     )
 
 
@@ -187,6 +316,11 @@ class UserAssignment(Base):
     )
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    membership_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenant_membership.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     branch_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     role_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("role.id"), nullable=False

@@ -20,8 +20,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const mobileCloseButtonRef = useRef<HTMLButtonElement>(null);
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
   const hasTenant = Boolean(user?.home_tenant_id);
+  const isTenantOwner = Boolean(user?.is_tenant_owner);
   const perms = user?.permissions ?? [];
-  const items = buildNav(isSupport, hasTenant, perms);
+  const items = buildNav(isSupport, hasTenant, isTenantOwner, perms);
 
   // Clean identity: a recognizable name + a quiet caption. We have no role name
   // in the payload, so the caption is the support role (dev/admin) when set, or

@@ -1,139 +1,267 @@
-"""Role templates: the global recommendation library.
-
-Covers: the two seeded presets carry the expected owner/seller-shaped sets,
-GET /templates is gated by roles.create (seller refused, owner allowed), and a
-template cannot be used to dodge the create_role anti-escalation subset rule.
-"""
+"""Permission and template catalogues are filtered by delegation metadata."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from uuid import uuid4
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
-from app.core.errors import PermissionDeniedError
 from app.core.security import create_access_token
-from app.domains.auth.models import AppUser
-from app.domains.foundation.repository import FoundationRepository
-from app.domains.foundation.service import FoundationService
-from app.domains.roles.models import UserAssignment
+from app.domains.roles.models import Permission, RolePermission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 from app.main import app
 
+PROTECTED_GOVERNANCE_CODES = {
+    "roles.assign",
+    "roles.create",
+    "roles.update",
+    "users.block",
+    "users.delete",
+    "users.invite",
+    "users.update",
+}
 
-async def test_templates_carry_expected_sets(db_session: AsyncSession) -> None:
+
+async def test_permission_scope_metadata_uses_explicit_capability_mapping(
+    db_session: AsyncSession,
+) -> None:
+    expected = {
+        "audit.view.global": "PLATFORM",
+        "audit.view.own": "OWN",
+        "sales.view.own": "OWN",
+        "pos.sell": "BRANCH_SET",
+        "roles.assign": "TENANT_ALL",
+        "incoming.create": "BRANCH_SET",
+        "reports.view": "BRANCH_SET",
+        "catalog.view": "TENANT_ALL",
+        "suppliers.view": "TENANT_ALL",
+        "settings.update": "TENANT_ALL",
+    }
+
+    for code, scope_type in expected.items():
+        permission = await db_session.get(Permission, code)
+        assert permission is not None
+        assert permission.scope_type == scope_type
+
+
+async def test_owner_templates_are_intersected_with_owner_catalog(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    repo = RolesRepository(db_session)
+    service = RolesService(repo)
+    owner_permissions = set(await repo.get_role_permissions(owner_role.id))
+    catalog = await service.list_permissions(
+        actor_id=owner.id,
+        tenant_id=tenant.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+    )
+    allowed = {permission.code for permission in catalog}
+    templates = await service.list_templates_with_permissions(
+        actor_id=owner.id,
+        tenant_id=tenant.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+    )
+
+    assert templates
+    for _template, codes in templates:
+        assert set(codes) <= allowed
+    assert "audit.view.global" not in allowed
+    assert "tenant.export.full" not in allowed
+    assert allowed.isdisjoint(PROTECTED_GOVERNANCE_CODES)
+
+
+async def test_support_catalogues_exclude_platform_and_protected_grants(
+    db_session: AsyncSession,
+    make_tenant,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    developer = await make_user(home_tenant_id=tenant.id)
+    administrator = await make_user(home_tenant_id=tenant.id)
     service = RolesService(RolesRepository(db_session))
-    by_name = {t.name: set(codes) for t, codes in await service.list_templates_with_permissions()}
 
-    assert "Владелец" in by_name
-    assert "Кассир" in by_name
+    developer_codes = {
+        permission.code
+        for permission in await service.list_permissions(
+            actor_id=developer.id,
+            tenant_id=tenant.id,
+            actor_permissions=set(),
+            actor_is_developer=True,
+            actor_is_administrator=False,
+        )
+    }
+    administrator_codes = {
+        permission.code
+        for permission in await service.list_permissions(
+            actor_id=administrator.id,
+            tenant_id=tenant.id,
+            actor_permissions=set(),
+            actor_is_developer=False,
+            actor_is_administrator=True,
+        )
+    }
 
-    vladelec = by_name["Владелец"]
-    kassir = by_name["Кассир"]
-
-    # Owner-shaped preset: management reach, but never the cross-tenant audit.
-    assert "users.invite" in vladelec
-    assert "pos.sell" in vladelec
-    assert "audit.view.global" not in vladelec
-    # Cashier-shaped preset: sells, but cannot manage staff.
-    assert "pos.sell" in kassir
-    assert "users.invite" not in kassir
-    # The owner preset is a strict superset of the cashier one.
-    assert kassir < vladelec
+    assert "tenant.export.full" in developer_codes
+    assert "tenant.export.full" not in administrator_codes
+    assert "audit.view.global" not in developer_codes
+    assert "audit.view.global" not in administrator_codes
+    assert developer_codes.isdisjoint(PROTECTED_GOVERNANCE_CODES)
+    assert administrator_codes.isdisjoint(PROTECTED_GOVERNANCE_CODES)
 
 
-async def test_templates_endpoint_gated_by_roles_create(
-    db_session: AsyncSession, client: AsyncClient, make_tenant_role
+async def test_administrator_has_explicit_catalog_access_but_no_role_write_bypass(
+    db_session: AsyncSession,
+    client: AsyncClient,
+    make_tenant,
+    make_user,
 ) -> None:
     async def _override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_db] = _override
     try:
-        foundation = FoundationService(FoundationRepository(db_session))
-        nick = uuid4().hex[:8]
-        tenant = await foundation.create_tenant(
-            payload={"name": f"Tmpl {nick}", "contact_email": f"t-{nick}@aurum.tj"}
-        )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
-
-        seller = AppUser(
-            email=f"seller-{nick}@aurum.tj",
-            full_name="Seller",
+        tenant = await make_tenant()
+        administrator = await make_user(
+            email="catalog-admin@aurum.tj",
             home_tenant_id=tenant.id,
-            status="active",
         )
-        owner = AppUser(
-            email=f"owner-{nick}@aurum.tj",
-            full_name="Owner",
-            home_tenant_id=tenant.id,
-            status="active",
-        )
-        db_session.add_all([seller, owner])
+        administrator.is_administrator = True
         await db_session.flush()
-        await db_session.refresh(seller)
-        await db_session.refresh(owner)
+        token = create_access_token(
+            administrator.id,
+            tenant_id=tenant.id,
+            is_developer=False,
+            is_administrator=True,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
 
-        # A tenant «Владелец» role (from the template) carries roles.create.
-        owner_role = await make_tenant_role(tenant_id=tenant.id, template_name="Владелец", level=3)
-        db_session.add(
-            UserAssignment(
-                user_id=owner.id,
-                tenant_id=tenant.id,
-                role_id=owner_role.id,
-                is_active=True,
-            )
-        )
-        await db_session.flush()
+        catalog_response = await client.get("/api/v1/permissions", headers=headers)
+        assert catalog_response.status_code == 200
+        assert "audit.view.global" not in {item["code"] for item in catalog_response.json()}
 
-        seller_token = create_access_token(
-            seller.id, tenant_id=tenant.id, is_developer=False, is_administrator=False
+        create_response = await client.post(
+            "/api/v1/roles",
+            headers=headers,
+            json={"name": "Admin bypass", "permissions": ["pos.sell"]},
         )
-        owner_token = create_access_token(
-            owner.id, tenant_id=tenant.id, is_developer=False, is_administrator=False
-        )
-
-        seller_resp = await client.get(
-            "/api/v1/templates", headers={"Authorization": f"Bearer {seller_token}"}
-        )
-        assert seller_resp.status_code == 403
-
-        owner_resp = await client.get(
-            "/api/v1/templates", headers={"Authorization": f"Bearer {owner_token}"}
-        )
-        assert owner_resp.status_code == 200
-        names = {t["name"] for t in owner_resp.json()}
-        assert {"Владелец", "Кассир"} <= names
+        assert create_response.status_code == 403
     finally:
         app.dependency_overrides.pop(get_db, None)
 
 
-async def test_template_cannot_bypass_anti_escalation(
-    db_session: AsyncSession, make_tenant, make_user
+async def test_non_owner_with_roles_create_cannot_read_delegation_catalog(
+    db_session: AsyncSession,
+    client: AsyncClient,
+    make_tenant,
+    make_tenant_role,
+    make_user,
 ) -> None:
-    """A preset is only a hint: building a role from the rich «Владелец» set as
-    an actor who lacks those permissions still hits the 403 subset guard."""
-    service = RolesService(RolesRepository(db_session))
-    templates = {t.name: codes for t, codes in await service.list_templates_with_permissions()}
-    owner_template = templates["Владелец"]
+    async def _override() -> AsyncIterator[AsyncSession]:
+        yield db_session
 
-    tenant = await make_tenant()
-    actor = await make_user(email="weak-tmpl@aurum.tj", home_tenant_id=tenant.id)
-
-    with pytest.raises(PermissionDeniedError):
-        await service.create_role(
-            actor_level=3,
-            actor_id=actor.id,
-            actor_permissions={"pos.sell"},  # holds almost nothing
-            actor_is_support=False,
+    app.dependency_overrides[get_db] = _override
+    try:
+        tenant = await make_tenant()
+        user = await make_user(home_tenant_id=tenant.id)
+        role = await make_tenant_role(
             tenant_id=tenant.id,
-            name="Из шаблона",
-            description=None,
+            template_name="Кассир",
             level=4,
-            permission_codes=owner_template,
         )
+        # The HTTP gate will pass only if roles.create is present, but the
+        # service still requires the protected ownership root.
+        from app.domains.roles.models import RolePermission, UserAssignment
+
+        db_session.add(RolePermission(role_id=role.id, permission_code="roles.create"))
+        await db_session.flush()
+        membership = await RolesRepository(db_session).get_membership_for_user(
+            tenant_id=tenant.id,
+            user_id=user.id,
+        )
+        assert membership is not None
+        db_session.add(
+            UserAssignment(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                membership_id=membership.id,
+                role_id=role.id,
+            )
+        )
+        await db_session.flush()
+        token = create_access_token(
+            user.id,
+            tenant_id=tenant.id,
+            is_developer=False,
+            is_administrator=False,
+        )
+
+        response = await client.get(
+            "/api/v1/permissions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_role_catalog_does_not_disclose_protected_owner_role(
+    db_session: AsyncSession,
+    client: AsyncClient,
+    make_tenant,
+    make_owner,
+    make_tenant_role,
+) -> None:
+    async def _override() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override
+    try:
+        tenant = await make_tenant()
+        owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+        staff_role = await make_tenant_role(
+            tenant_id=tenant.id,
+            template_name="Кассир",
+            level=4,
+            name="Visible cashier",
+        )
+        db_session.add(
+            RolePermission(
+                role_id=staff_role.id,
+                permission_code="audit.view.global",
+            )
+        )
+        await db_session.flush()
+        token = create_access_token(
+            owner.id,
+            tenant_id=tenant.id,
+            is_developer=False,
+            is_administrator=False,
+        )
+
+        response = await client.get(
+            "/api/v1/roles",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert {item["id"] for item in body} == {str(staff_role.id)}
+        assert body[0]["has_hidden_permissions"] is True
+        assert "audit.view.global" not in body[0]["permissions"]
+        serialized = str(body)
+        assert str(owner_role.id) not in serialized
+        assert "tenant_owner" not in serialized
+        assert "audit.view.global" not in serialized
+    finally:
+        app.dependency_overrides.pop(get_db, None)

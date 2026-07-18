@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,8 @@ from app.domains.roles.models import (
     RolePermission,
     RoleTemplate,
     RoleTemplatePermission,
+    TenantMembership,
+    TenantOwnership,
     UserAssignment,
 )
 
@@ -25,6 +27,8 @@ from app.domains.roles.models import (
 @dataclass(frozen=True)
 class DirectoryUser:
     id: UUID
+    membership_id: UUID
+    is_tenant_owner: bool
     email: str
     email_lower: str
     full_name: str
@@ -41,16 +45,26 @@ class AuthorizationSnapshot:
     policy_revision: int
     subject_revision: int
     permissions: frozenset[str]
+    permission_scopes: dict[str, frozenset[UUID] | None]
 
 
 _DIRECTORY_COLUMNS = (
     AppUser.id,
+    TenantMembership.id.label("membership_id"),
+    select(TenantOwnership.id)
+    .where(
+        TenantOwnership.tenant_id == TenantMembership.tenant_id,
+        TenantOwnership.membership_id == TenantMembership.id,
+        TenantOwnership.is_active.is_(True),
+    )
+    .exists()
+    .label("is_tenant_owner"),
     AppUser.email,
     AppUser.email_lower,
-    AppUser.full_name,
-    AppUser.phone,
+    TenantMembership.full_name,
+    TenantMembership.phone,
     AppUser.home_tenant_id,
-    AppUser.status,
+    TenantMembership.status,
     AppUser.last_login_at,
 )
 
@@ -58,6 +72,8 @@ _DIRECTORY_COLUMNS = (
 def _directory_user_from_row(row: RowMapping) -> DirectoryUser:
     return DirectoryUser(
         id=cast(UUID, row["id"]),
+        membership_id=cast(UUID, row["membership_id"]),
+        is_tenant_owner=bool(row["is_tenant_owner"]),
         email=cast(str, row["email"]),
         email_lower=cast(str, row["email_lower"]),
         full_name=cast(str, row["full_name"]),
@@ -117,6 +133,15 @@ class RolesRepository:
     async def get_role(self, role_id: UUID) -> Role | None:
         return await self.session.get(Role, role_id)
 
+    async def get_role_for_update(self, role_id: UUID) -> Role | None:
+        stmt = (
+            select(Role)
+            .where(Role.id == role_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def roles_by_ids(self, role_ids: list[UUID]) -> dict[UUID, Role]:
         if not role_ids:
             return {}
@@ -172,11 +197,22 @@ class RolesRepository:
         return role
 
     async def set_role_permissions(self, role_id: UUID, codes: list[str]) -> None:
-        """Replace the role's permission set wholesale."""
+        """Replace one tenant role's permissions and audit the exact set diff."""
+        before = await self.get_role_permissions(role_id)
+        after = sorted(set(codes))
+        if before == after:
+            return
         await self.session.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
-        for code in codes:
+        for code in after:
             self.session.add(RolePermission(role_id=role_id, permission_code=code))
         await self.session.flush()
+        await self.session.execute(
+            text(
+                "SELECT public.record_role_permission_change("
+                ":role_id, CAST(:before AS TEXT[]), CAST(:after AS TEXT[]))"
+            ),
+            {"role_id": role_id, "before": before, "after": after},
+        )
 
     async def active_user_ids_for_role(self, role_id: UUID, *, tenant_id: UUID) -> list[UUID]:
         stmt = (
@@ -190,6 +226,25 @@ class RolesRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def user_has_active_role(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        role_id: UUID,
+    ) -> bool:
+        stmt = select(
+            select(UserAssignment.id)
+            .where(
+                UserAssignment.tenant_id == tenant_id,
+                UserAssignment.user_id == user_id,
+                UserAssignment.role_id == role_id,
+                UserAssignment.is_active.is_(True),
+            )
+            .exists()
+        )
+        return bool((await self.session.execute(stmt)).scalar_one())
 
     async def existing_active_permission_codes(self, codes: list[str]) -> set[str]:
         if not codes:
@@ -249,6 +304,190 @@ class RolesRepository:
         for template_id, code in (await self.session.execute(stmt)).all():
             out.setdefault(template_id, []).append(code)
         return out
+
+    # -------------------------------------------------------------------------
+    # tenant membership / ownership
+    # -------------------------------------------------------------------------
+
+    async def lock_tenant_for_owner_provisioning(self, tenant_id: UUID) -> bool:
+        result = await self.session.execute(
+            text("SELECT id FROM public.tenant " "WHERE id = :tenant_id FOR UPDATE"),
+            {"tenant_id": tenant_id},
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def insert_membership(self, **fields: Any) -> TenantMembership:
+        membership = TenantMembership(**fields)
+        self.session.add(membership)
+        await self.session.flush()
+        await self.session.refresh(membership)
+        return membership
+
+    async def get_membership(self, membership_id: UUID) -> TenantMembership | None:
+        return await self.session.get(
+            TenantMembership,
+            membership_id,
+            populate_existing=True,
+        )
+
+    async def get_membership_for_user(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> TenantMembership | None:
+        stmt = (
+            select(TenantMembership)
+            .where(
+                TenantMembership.tenant_id == tenant_id,
+                TenantMembership.user_id == user_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def find_membership_by_email(
+        self,
+        *,
+        tenant_id: UUID,
+        email: str,
+    ) -> TenantMembership | None:
+        """Resolve an email only inside the caller's tenant membership set."""
+        stmt = (
+            select(TenantMembership)
+            .join(AppUser, AppUser.id == TenantMembership.user_id)
+            .where(
+                TenantMembership.tenant_id == tenant_id,
+                AppUser.email_lower == email.lower().strip(),
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def insert_ownership(self, **fields: Any) -> TenantOwnership:
+        ownership = TenantOwnership(**fields)
+        self.session.add(ownership)
+        await self.session.flush()
+        await self.session.refresh(ownership)
+        return ownership
+
+    async def get_active_ownership(
+        self,
+        *,
+        tenant_id: UUID,
+        membership_id: UUID,
+    ) -> TenantOwnership | None:
+        stmt = (
+            select(TenantOwnership)
+            .where(
+                TenantOwnership.tenant_id == tenant_id,
+                TenantOwnership.membership_id == membership_id,
+                TenantOwnership.is_active.is_(True),
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def has_active_ownership(self, *, tenant_id: UUID, user_id: UUID) -> bool:
+        stmt = select(
+            select(TenantOwnership.id)
+            .join(
+                TenantMembership,
+                TenantMembership.id == TenantOwnership.membership_id,
+            )
+            .where(
+                TenantOwnership.tenant_id == tenant_id,
+                TenantOwnership.is_active.is_(True),
+                TenantMembership.tenant_id == tenant_id,
+                TenantMembership.user_id == user_id,
+                TenantMembership.status == "active",
+            )
+            .exists()
+        )
+        return bool((await self.session.execute(stmt)).scalar_one())
+
+    async def count_active_owners(self, tenant_id: UUID) -> int:
+        stmt = (
+            select(func.count(TenantOwnership.id))
+            .join(
+                TenantMembership,
+                TenantMembership.id == TenantOwnership.membership_id,
+            )
+            .where(
+                TenantOwnership.tenant_id == tenant_id,
+                TenantOwnership.is_active.is_(True),
+                TenantMembership.tenant_id == tenant_id,
+                TenantMembership.status == "active",
+            )
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def deactivate_ownership(
+        self,
+        *,
+        tenant_id: UUID,
+        membership_id: UUID,
+        actor_id: UUID,
+        revoked_at: datetime,
+    ) -> bool:
+        result = await self.session.execute(
+            update(TenantOwnership)
+            .where(
+                TenantOwnership.tenant_id == tenant_id,
+                TenantOwnership.membership_id == membership_id,
+                TenantOwnership.is_active.is_(True),
+            )
+            .values(
+                is_active=False,
+                revoked_at=revoked_at,
+                updated_by=actor_id,
+            )
+        )
+        return bool(result.rowcount)  # type: ignore[attr-defined]
+
+    async def update_membership_profile(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        full_name: str,
+        phone: str | None,
+    ) -> bool:
+        result = await self.session.execute(
+            text(
+                "SELECT public.update_tenant_membership_profile("
+                ":tenant_id, :user_id, :full_name, :phone)"
+            ),
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "full_name": full_name,
+                "phone": phone,
+            },
+        )
+        return bool(result.scalar_one())
+
+    async def set_membership_status(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        status: str,
+        changed_at: datetime,
+    ) -> bool:
+        result = await self.session.execute(
+            text(
+                "SELECT public.set_tenant_membership_status("
+                ":tenant_id, :user_id, :status, :changed_at)"
+            ),
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "status": status,
+                "changed_at": changed_at,
+            },
+        )
+        return bool(result.scalar_one())
 
     # -------------------------------------------------------------------------
     # user_assignment
@@ -373,9 +612,17 @@ class RolesRepository:
     # repository pile-up in auth)
     # -------------------------------------------------------------------------
 
-    async def get_user(self, user_id: UUID) -> DirectoryUser | None:
+    async def get_user(self, user_id: UUID, *, tenant_id: UUID) -> DirectoryUser | None:
         result = await self.session.execute(
-            select(*_DIRECTORY_COLUMNS).where(AppUser.id == user_id)
+            select(*_DIRECTORY_COLUMNS)
+            .join(
+                TenantMembership,
+                and_(
+                    TenantMembership.user_id == AppUser.id,
+                    TenantMembership.tenant_id == tenant_id,
+                ),
+            )
+            .where(AppUser.id == user_id)
         )
         row = result.mappings().one_or_none()
         return _directory_user_from_row(row) if row is not None else None
@@ -386,95 +633,38 @@ class RolesRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def find_invitable_user_id(self, *, tenant_id: UUID, email: str) -> UUID | None:
-        result = await self.session.execute(
-            text("SELECT public.find_invitable_user_id(:tenant_id, :email)"),
-            {"tenant_id": tenant_id, "email": email},
-        )
-        return cast(UUID | None, result.scalar_one())
-
     async def insert_user(self, **fields: Any) -> AppUser:
-        """Support-only identity creation used for the first tenant owner."""
+        """Support-only global identity creation."""
         u = AppUser(**fields)
         self.session.add(u)
         await self.session.flush()
         await self.session.refresh(u)
         return u
 
-    async def insert_invited_user(self, *, tenant_id: UUID, email: str, full_name: str) -> UUID:
-        result = await self.session.execute(
-            text("SELECT public.create_invited_app_user(" ":tenant_id, :email, :full_name)"),
-            {"tenant_id": tenant_id, "email": email, "full_name": full_name},
-        )
-        return cast(UUID, result.scalar_one())
-
-    async def update_user_profile(
-        self,
-        *,
-        tenant_id: UUID,
-        user_id: UUID,
-        full_name: str,
-        phone: str | None,
-    ) -> DirectoryUser | None:
-        result = await self.session.execute(
-            text(
-                "SELECT public.update_tenant_user_profile("
-                ":tenant_id, :user_id, :full_name, :phone)"
-            ),
-            {
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "full_name": full_name,
-                "phone": phone,
-            },
-        )
-        if not bool(result.scalar_one()):
-            return None
-        return await self.get_user(user_id)
-
-    async def set_user_status(
-        self,
-        *,
-        tenant_id: UUID,
-        user_id: UUID,
-        status: str,
-        changed_at: datetime,
-    ) -> bool:
-        result = await self.session.execute(
-            text(
-                "SELECT public.set_tenant_user_status("
-                ":tenant_id, :user_id, :status, :changed_at)"
-            ),
-            {
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "status": status,
-                "changed_at": changed_at,
-            },
-        )
-        return bool(result.scalar_one())
-
     async def count_users_for_tenant(self, tenant_id: UUID) -> int:
-        """Distinct users with at least one assignment in this tenant."""
+        """All tenant memberships, including pending users without a role."""
         stmt = (
-            select(func.count(func.distinct(AppUser.id)))
-            .select_from(AppUser)
-            .join(UserAssignment, UserAssignment.user_id == AppUser.id)
-            .where(UserAssignment.tenant_id == tenant_id)
+            select(func.count(TenantMembership.id))
+            .select_from(TenantMembership)
+            .where(TenantMembership.tenant_id == tenant_id)
         )
         return int((await self.session.execute(stmt)).scalar_one())
 
     async def list_users_for_tenant(
         self, tenant_id: UUID, *, limit: int, offset: int
     ) -> list[DirectoryUser]:
-        """One page of distinct users with an assignment in this tenant, in a
+        """One page of memberships in this tenant, in a
         stable order (full_name, email) so pages don't shuffle."""
         stmt = (
             select(*_DIRECTORY_COLUMNS)
-            .join(UserAssignment, UserAssignment.user_id == AppUser.id)
-            .where(UserAssignment.tenant_id == tenant_id)
-            .order_by(AppUser.full_name.asc(), AppUser.email.asc())
-            .distinct()
+            .join(
+                TenantMembership,
+                and_(
+                    TenantMembership.user_id == AppUser.id,
+                    TenantMembership.tenant_id == tenant_id,
+                ),
+            )
+            .order_by(TenantMembership.full_name.asc(), AppUser.email.asc())
             .limit(limit)
             .offset(offset)
         )
@@ -491,51 +681,81 @@ class RolesRepository:
         return set(snapshot.permissions)
 
     async def authorization_snapshot(self, user_id: UUID, tenant_id: UUID) -> AuthorizationSnapshot:
-        """Read revisions and active permissions from one PostgreSQL snapshot."""
+        """Read revisions and capability/scope pairs from one PostgreSQL snapshot."""
         result = await self.session.execute(
             text("""
                 SELECT
                   policy.revision AS policy_revision,
                   COALESCE(subject.revision, 1::BIGINT) AS subject_revision,
-                  COALESCE(
-                    array_agg(
-                      DISTINCT granted_permission.code
-                      ORDER BY granted_permission.code
-                    ) FILTER (
-                      WHERE assignment.is_active
-                        AND assigned_role.is_active
-                        AND granted_permission.is_active
-                        AND (
-                          assigned_role.tenant_id IS NULL
-                          OR assigned_role.tenant_id = :tenant_id
-                        )
-                    ),
-                    ARRAY[]::TEXT[]
-                  ) AS permissions
+                  granted_permission.code AS permission_code,
+                  granted_permission.scope_type,
+                  assignment.branch_id
                 FROM public.authorization_policy_revision AS policy
                 LEFT JOIN public.authorization_subject_revision AS subject
                   ON subject.tenant_id = policy.tenant_id
                  AND subject.user_id = :user_id
+                LEFT JOIN public.tenant_membership AS membership
+                  ON membership.tenant_id = policy.tenant_id
+                 AND membership.user_id = :user_id
+                 AND membership.status = 'active'
                 LEFT JOIN public.user_assignment AS assignment
                   ON assignment.tenant_id = policy.tenant_id
                  AND assignment.user_id = :user_id
+                 AND assignment.membership_id = membership.id
+                 AND assignment.is_active
                 LEFT JOIN public.role AS assigned_role
                   ON assigned_role.id = assignment.role_id
+                 AND assigned_role.is_active
+                 AND (
+                   assigned_role.tenant_id IS NULL
+                   OR assigned_role.tenant_id = :tenant_id
+                 )
                 LEFT JOIN public.role_permission AS role_permission
                   ON role_permission.role_id = assigned_role.id
                 LEFT JOIN public.permission AS granted_permission
                   ON granted_permission.code = role_permission.permission_code
+                 AND granted_permission.is_active
                 WHERE policy.tenant_id = :tenant_id
-                GROUP BY policy.revision, subject.revision
+                ORDER BY granted_permission.code, assignment.branch_id
                 """),
             {"tenant_id": tenant_id, "user_id": user_id},
         )
-        row = result.mappings().one_or_none()
-        if row is None:
+        rows = result.mappings().all()
+        if not rows:
             raise RuntimeError("Authorization revision ledger is missing for tenant")
-        raw_permissions = row["permissions"] or []
+
+        mutable_scopes: dict[str, set[UUID] | None] = {}
+        for row in rows:
+            raw_code = row["permission_code"]
+            if raw_code is None:
+                continue
+            code = str(raw_code)
+            branch_id = cast(UUID | None, row["branch_id"])
+            scope_type = str(row["scope_type"])
+
+            # Tenant/platform capabilities are ineffective when they only come
+            # from a branch assignment. Branch-aware capabilities retain the
+            # assignment that granted them.
+            if branch_id is not None and scope_type in {"PLATFORM", "TENANT_ALL"}:
+                continue
+            if code in mutable_scopes and mutable_scopes[code] is None:
+                continue
+            if branch_id is None:
+                mutable_scopes[code] = None
+                continue
+            mutable_scopes.setdefault(code, set())
+            scoped_branches = mutable_scopes[code]
+            if scoped_branches is not None:
+                scoped_branches.add(branch_id)
+
+        permission_scopes = {
+            code: None if branches is None else frozenset(branches)
+            for code, branches in mutable_scopes.items()
+        }
+        first = rows[0]
         return AuthorizationSnapshot(
-            policy_revision=int(row["policy_revision"]),
-            subject_revision=int(row["subject_revision"]),
-            permissions=frozenset(str(code) for code in raw_permissions),
+            policy_revision=int(first["policy_revision"]),
+            subject_revision=int(first["subject_revision"]),
+            permissions=frozenset(permission_scopes),
+            permission_scopes=permission_scopes,
         )

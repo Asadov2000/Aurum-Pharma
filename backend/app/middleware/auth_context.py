@@ -36,10 +36,15 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
             if claims is not None:
                 request.state.user_id = claims.get("sub")
                 request.state.tenant_id = claims.get("tenant_id")
-                request.state.is_support_session = bool(claims.get("support", False))
-                # Developers and administrators bypass RLS via the support pool.
-                request.state.use_support_pool = bool(
-                    claims.get("is_developer", False) or claims.get("is_administrator", False)
+                is_developer = bool(claims.get("is_developer", False))
+                is_administrator = bool(claims.get("is_administrator", False))
+                is_admin_route = request.url.path == "/api/v1/admin" or request.url.path.startswith(
+                    "/api/v1/admin/"
                 )
+                # The BYPASSRLS connection is available only to routes that
+                # also enforce require_support at the FastAPI boundary.
+                use_support_pool = is_admin_route and (is_developer or is_administrator)
+                request.state.use_support_pool = use_support_pool
+                request.state.is_support_session = use_support_pool
 
         return await call_next(request)

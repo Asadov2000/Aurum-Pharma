@@ -51,7 +51,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
     mode === "edit" &&
     role !== undefined &&
     permsQuery.isSuccess &&
-    hasUnavailableRolePermissions(role, visibleCodes);
+    hasUnavailableRolePermissions(role);
 
   const toggle = (code: string) =>
     setChecked((prev) => {
@@ -90,7 +90,12 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
       if (mode === "edit" && role) {
         await updateRole.mutateAsync({
           id: role.id,
-          payload: { name: trimmed, description: description.trim() || null, permissions: codes },
+          payload: {
+            expected_version: role.version,
+            name: trimmed,
+            description: description.trim() || null,
+            permissions: codes,
+          },
         });
       } else {
         await createRole.mutateAsync({

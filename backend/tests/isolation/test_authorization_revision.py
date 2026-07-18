@@ -18,7 +18,11 @@ from app.core.config import get_settings
 
 @pytest_asyncio.fixture
 async def support_engine_revision() -> AsyncIterator[AsyncEngine]:
-    engine = create_async_engine(get_settings().DATABASE_URL_SUPPORT, poolclass=NullPool)
+    engine = create_async_engine(
+        get_settings().DATABASE_URL_SUPPORT,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"app.support_session": "true"}},
+    )
     try:
         yield engine
     finally:

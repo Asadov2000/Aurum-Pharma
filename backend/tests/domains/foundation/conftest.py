@@ -15,6 +15,12 @@ from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Tenant
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
+from app.domains.roles.models import (
+    Role,
+    RolePermission,
+    TenantMembership,
+    UserAssignment,
+)
 from app.main import app
 
 
@@ -100,13 +106,42 @@ async def support_token(make_user) -> str:  # type: ignore[no-untyped-def]
 
 
 @pytest_asyncio.fixture
-async def tenant_admin_token(make_tenant, make_user):  # type: ignore[no-untyped-def]
-    """A token for a tenant-scoped administrator (so RLS does see a tenant_id
-    in the JWT, and permission checks pass because of is_administrator)."""
+async def tenant_admin_token(
+    db_session: AsyncSession,
+    make_tenant,
+    make_user,
+):  # type: ignore[no-untyped-def]
+    """Create a tenant-scoped administrator with explicit settings access."""
 
     async def _factory(tenant: Tenant | None = None) -> tuple[str, Tenant, AppUser]:
         t = tenant if tenant is not None else await make_tenant()
         user = await make_user(home_tenant_id=t.id, is_administrator=True)
+        membership = TenantMembership(
+            tenant_id=t.id,
+            user_id=user.id,
+            full_name=user.full_name,
+            status="active",
+        )
+        role = Role(
+            tenant_id=t.id,
+            name=f"Settings administrator {uuid4().hex[:8]}",
+            level=2,
+            is_system=False,
+        )
+        db_session.add_all([membership, role])
+        await db_session.flush()
+        await db_session.refresh(membership)
+        await db_session.refresh(role)
+        db_session.add(RolePermission(role_id=role.id, permission_code="settings.update"))
+        db_session.add(
+            UserAssignment(
+                user_id=user.id,
+                tenant_id=t.id,
+                membership_id=membership.id,
+                role_id=role.id,
+            )
+        )
+        await db_session.flush()
         token = create_access_token(
             user.id,
             tenant_id=t.id,

@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -70,6 +71,8 @@ READ_ONLY_TABLES = {
     "sync_writer_activation",
     "sync_writer_epoch",
     "sync_writer_readiness",
+    "tenant_membership",
+    "tenant_ownership",
     "user_assignment",
 }
 
@@ -120,6 +123,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "accept_tenant_invitation",
     "activate_edge_writer_handover",
     "allocate_register_receipt",
     "append_audit_event",
@@ -156,25 +160,34 @@ CUSTOM_FUNCTIONS = {
     "reactivate_tenant_user_assignment",
     "record_edge_writer_readiness",
     "record_auth_login_attempt",
+    "record_role_permission_change",
     "reserve_sync_event_position",
     "resolve_notification_subscription",
     "revoke_auth_session_by_hash",
     "rotate_auth_session",
     "finalize_sync_event_position",
     "set_tenant_user_status",
+    "set_tenant_membership_status",
+    "tenant_actor_can_delegate_role",
     "tenant_actor_has_permission",
     "tenant_actor_has_scoped_permission",
+    "tenant_actor_is_owner",
     "touch_auth_user_last_login",
     "prepare_edge_writer_handover",
     "prepare_edge_writer_foundation_handover",
     "trg_audit_log",
+    "trg_audit_tenant_membership_event",
+    "trg_audit_tenant_ownership_event",
     "trg_authorization_assignment_mutation",
+    "trg_authorization_membership_mutation",
+    "trg_authorization_ownership_mutation",
     "trg_authorization_permission_mutation",
     "trg_authorization_policy_mutation",
     "trg_authorization_role_permission_mutation",
     "trg_authorization_tenant_created",
     "trg_authorization_user_status_mutation",
     "trg_guard_branch_writer",
+    "trg_guard_role_permission_mutation",
     "trg_guard_user_assignment_scope",
     "trg_guard_sync_activation_bootstrap",
     "trg_guard_sync_activation_bootstrap_chunk",
@@ -185,6 +198,9 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_sync_writer_activation",
     "trg_guard_sync_writer_epoch",
     "trg_guard_sync_writer_readiness",
+    "trg_guard_tenant_membership",
+    "trg_guard_tenant_ownership",
+    "trg_guard_tenant_role_mutation",
     "trg_initialize_branch_sync_writer",
     "trg_require_full_activation_bootstrap",
     "trg_require_full_bootstrap_transition",
@@ -194,17 +210,18 @@ CUSTOM_FUNCTIONS = {
     "trg_set_updated_meta",
     "trg_update_batch_qty",
     "trg_validate_sync_stream_checkpoint",
+    "update_tenant_membership_profile",
     "update_tenant_user_profile",
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "accept_tenant_invitation",
     "allocate_register_receipt",
     "append_audit_event",
     "authenticate_edge_node",
     "auth_email_code_matches",
     "current_app_user_id",
     "current_tenant_id",
-    "create_invited_app_user",
     "create_auth_session_from_email_code",
     "create_scoped_notification",
     "create_tenant_user_assignment",
@@ -212,7 +229,6 @@ APP_EXECUTABLE_FUNCTIONS = {
     "deactivate_tenant_user_assignment",
     "enforce_auth_login_guard",
     "enqueue_notification_delivery",
-    "find_invitable_user_id",
     "find_auth_email_code_challenge",
     "issue_auth_email_code",
     "is_support_session",
@@ -223,15 +239,17 @@ APP_EXECUTABLE_FUNCTIONS = {
     "reactivate_tenant_user_assignment",
     "record_edge_writer_readiness",
     "record_auth_login_attempt",
+    "record_role_permission_change",
     "reserve_sync_event_position",
     "resolve_notification_subscription",
     "revoke_auth_session_by_hash",
     "rotate_auth_session",
     "finalize_sync_event_position",
-    "set_tenant_user_status",
+    "set_tenant_membership_status",
     "tenant_actor_has_scoped_permission",
+    "tenant_actor_is_owner",
     "touch_auth_user_last_login",
-    "update_tenant_user_profile",
+    "update_tenant_membership_profile",
 }
 
 APP_EXECUTABLE_SECURITY_DEFINERS = sorted(
@@ -411,7 +429,7 @@ ORDER BY routines.proname
 """
 
 APP_EXECUTABLE_SECURITY_DEFINERS_SQL = """
-SELECT routines.proname
+SELECT DISTINCT routines.proname
 FROM pg_catalog.pg_proc AS routines
 JOIN pg_catalog.pg_namespace AS schemas
   ON schemas.oid = routines.pronamespace
@@ -419,6 +437,28 @@ WHERE schemas.nspname = 'public'
   AND routines.prosecdef
   AND pg_catalog.has_function_privilege('aurum_app', routines.oid, 'EXECUTE')
 ORDER BY routines.proname
+"""
+
+TENANT_ACCOUNT_TABLE_PRIVILEGES_SQL = """
+SELECT
+  relations.relname,
+  checks.privilege,
+  pg_catalog.has_table_privilege(
+    'aurum_support', relations.oid, checks.privilege
+  ) AS support_has_privilege
+FROM pg_catalog.pg_class AS relations
+JOIN pg_catalog.pg_namespace AS schemas
+  ON schemas.oid = relations.relnamespace
+CROSS JOIN (
+  VALUES
+    ('SELECT'),
+    ('INSERT'),
+    ('UPDATE'),
+    ('DELETE')
+) AS checks(privilege)
+WHERE schemas.nspname = 'public'
+  AND relations.relname IN ('tenant_membership', 'tenant_ownership')
+ORDER BY relations.relname, checks.privilege
 """
 
 EXTENSION_FUNCTION_PRIVILEGES_SQL = """
@@ -505,6 +545,22 @@ ORDER BY attributes.attname
 """
 
 
+def _assert_tenant_account_support_privileges(
+    rows: list[RowMapping],
+) -> None:
+    actual = {
+        "tenant_membership": set(),
+        "tenant_ownership": set(),
+    }
+    for row in rows:
+        if row["support_has_privilege"]:
+            actual[str(row["relname"])].add(str(row["privilege"]))
+    assert actual == {
+        "tenant_membership": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+        "tenant_ownership": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    }
+
+
 @pytest_asyncio.fixture
 async def support_engine_privileges() -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(get_settings().DATABASE_URL_SUPPORT, poolclass=NullPool)
@@ -547,6 +603,8 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         app_user_column_privileges = list(app_user_column_result.mappings())
         sync_outbox_column_result = await conn.execute(text(SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL))
         sync_outbox_column_privileges = list(sync_outbox_column_result.mappings())
+        tenant_account_result = await conn.execute(text(TENANT_ACCOUNT_TABLE_PRIVILEGES_SQL))
+        tenant_account_privileges = list(tenant_account_result.mappings())
 
     expected_relations = {
         **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
@@ -591,6 +649,75 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         row["attname"] for row in app_user_column_privileges if row["can_select"]
     } == APP_USER_SAFE_COLUMNS
     assert all(row["can_update"] is False for row in app_user_column_privileges)
+    _assert_tenant_account_support_privileges(tenant_account_privileges)
+
+
+async def test_support_cannot_delete_ownership_history_directly(
+    support_engine_privileges: AsyncEngine,
+) -> None:
+    suffix = uuid4().hex
+    async with support_engine_privileges.begin() as conn:
+        tenant_id = (
+            await conn.execute(
+                text(
+                    "INSERT INTO public.tenant (name, contact_email) "
+                    "VALUES (:name, :email) RETURNING id"
+                ),
+                {
+                    "name": f"Ownership guard {suffix}",
+                    "email": f"ownership-guard-{suffix}@example.invalid",
+                },
+            )
+        ).scalar_one()
+        user_id = (
+            await conn.execute(
+                text(
+                    "INSERT INTO public.app_user (email, full_name, status) "
+                    "VALUES (:email, 'Ownership guard', 'active') RETURNING id"
+                ),
+                {"email": f"ownership-guard-user-{suffix}@example.invalid"},
+            )
+        ).scalar_one()
+        membership_id = (
+            await conn.execute(
+                text(
+                    "INSERT INTO public.tenant_membership "
+                    "(tenant_id, user_id, full_name, status) "
+                    "VALUES (:tenant_id, :user_id, 'Ownership guard', 'active') "
+                    "RETURNING id"
+                ),
+                {"tenant_id": tenant_id, "user_id": user_id},
+            )
+        ).scalar_one()
+        ownership_id = (
+            await conn.execute(
+                text(
+                    "INSERT INTO public.tenant_ownership "
+                    "(tenant_id, membership_id) "
+                    "VALUES (:tenant_id, :membership_id) RETURNING id"
+                ),
+                {"tenant_id": tenant_id, "membership_id": membership_id},
+            )
+        ).scalar_one()
+
+    try:
+        async with support_engine_privileges.begin() as conn:
+            with pytest.raises(DBAPIError) as error:
+                await conn.execute(
+                    text("DELETE FROM public.tenant_ownership " "WHERE id = :ownership_id"),
+                    {"ownership_id": ownership_id},
+                )
+            assert getattr(error.value.orig, "sqlstate", None) == "42501"
+    finally:
+        async with support_engine_privileges.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM public.tenant WHERE id = :tenant_id"),
+                {"tenant_id": tenant_id},
+            )
+            await conn.execute(
+                text("DELETE FROM public.app_user WHERE id = :user_id"),
+                {"user_id": user_id},
+            )
 
 
 async def _assert_insufficient_privilege(engine: AsyncEngine, statement: str) -> None:

@@ -5,6 +5,7 @@ import { HomeIcon, type NavItem } from "./Sidebar";
 export function buildNav(
   isSupport: boolean,
   hasTenant: boolean,
+  isTenantOwner: boolean,
   permissions: readonly string[],
 ): NavItem[] {
   const can = (code: string): boolean => isSupport || permissions.includes(code);
@@ -28,7 +29,10 @@ export function buildNav(
     if (hasPermission("users.view")) {
       items.push({ to: "/users", label: "Пользователи" });
     }
-    if (hasAnyPermission(["roles.create", "roles.update", "roles.assign"])) {
+    if (
+      isTenantOwner &&
+      hasAnyPermission(["roles.create", "roles.update", "roles.assign"])
+    ) {
       items.push({ to: "/roles", label: "Роли" });
     }
     if (can("catalog.view")) items.push({ to: "/catalog", label: "Каталог" });

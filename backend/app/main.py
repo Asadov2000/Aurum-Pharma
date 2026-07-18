@@ -23,6 +23,7 @@ from app.core.config import get_settings
 from app.core.db import app_engine, support_engine
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import redis_client
+from app.domains.audit import admin_router as audit_admin_router
 from app.domains.audit import router as audit_router
 from app.domains.auth import router as auth_router
 from app.domains.billing import admin_router as billing_admin_router
@@ -106,6 +107,7 @@ app.include_router(incoming_router)
 app.include_router(pos_router)
 app.include_router(billing_tenant_router)
 app.include_router(billing_admin_router)
+app.include_router(audit_admin_router)
 app.include_router(audit_router)
 app.include_router(onboarding_router)
 app.include_router(notifications_router)

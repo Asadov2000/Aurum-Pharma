@@ -11,9 +11,6 @@ export function isManageableRole(role: Role, tenantId: string | null | undefined
   return Boolean(tenantId) && role.tenant_id === tenantId && !isProtectedRole(role);
 }
 
-export function hasUnavailableRolePermissions(
-  role: Role,
-  grantableCodes: ReadonlySet<string>,
-): boolean {
-  return role.permissions.some((code) => !grantableCodes.has(code));
+export function hasUnavailableRolePermissions(role: Role): boolean {
+  return role.has_hidden_permissions;
 }

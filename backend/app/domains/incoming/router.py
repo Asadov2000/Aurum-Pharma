@@ -51,7 +51,7 @@ async def list_incoming(
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
 ) -> list[IncomingDocumentRead]:
-    branch_scope = user.branch_scope
+    branch_scope = user.branch_scope_for("incoming.view")
     if branch_scope is not None and branch_id is not None and branch_id not in branch_scope:
         return []
     effective_branch_id = branch_id
@@ -83,7 +83,7 @@ async def create_incoming(
         tenant_id=_current_tenant_or_400(user),
         fields=payload.model_dump(),
         created_by=user.user_id,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
     return IncomingDocumentRead.model_validate(doc)
 
@@ -94,8 +94,9 @@ async def get_incoming(
     user: Annotated[CurrentUser, Depends(require_permission("incoming.view"))],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentWithItems:
-    doc = await service.get_document(document_id, allowed_branch_ids=user.branch_scope)
-    items = await service.list_items(document_id, allowed_branch_ids=user.branch_scope)
+    branch_scope = user.branch_scope_for("incoming.view")
+    doc = await service.get_document(document_id, allowed_branch_ids=branch_scope)
+    items = await service.list_items(document_id, allowed_branch_ids=branch_scope)
     return IncomingDocumentWithItems(
         **IncomingDocumentRead.model_validate(doc).model_dump(),
         items=[IncomingItemRead.model_validate(i) for i in items],
@@ -113,7 +114,7 @@ async def update_incoming(
         document_id,
         fields=payload.model_dump(exclude_none=True),
         updated_by=user.user_id,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
     return IncomingDocumentRead.model_validate(doc)
 
@@ -135,7 +136,7 @@ async def add_item(
     item = await service.add_item(
         document_id,
         fields=payload.model_dump(),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
     return IncomingItemRead.model_validate(item)
 
@@ -155,7 +156,7 @@ async def update_item(
         document_id,
         item_id,
         fields=payload.model_dump(exclude_none=True),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
     return IncomingItemRead.model_validate(item)
 
@@ -167,7 +168,11 @@ async def delete_item(
     user: Annotated[CurrentUser, Depends(require_permission("incoming.create"))],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> dict[str, str]:
-    await service.delete_item(document_id, item_id, allowed_branch_ids=user.branch_scope)
+    await service.delete_item(
+        document_id,
+        item_id,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
+    )
     return {"status": "deleted"}
 
 
@@ -183,7 +188,7 @@ async def accept_incoming(
     doc = await service.accept(
         document_id,
         actor_id=user.user_id,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
     return IncomingDocumentRead.model_validate(doc)
 
@@ -197,6 +202,6 @@ async def reject_incoming(
     doc = await service.reject(
         document_id,
         actor_id=user.user_id,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
     return IncomingDocumentRead.model_validate(doc)

@@ -24,6 +24,10 @@ vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => ({ user: mockUser }),
 }));
 
+vi.mock("@/components/AccessDeniedCard", () => ({
+  AccessDeniedCard: ({ message }: { message: string }) => <div>{message}</div>,
+}));
+
 import { RolesPage } from "@/features/roles/RolesPage";
 
 const MANAGED_ROLE = {
@@ -37,6 +41,7 @@ const MANAGED_ROLE = {
   is_active: true,
   version: 1,
   permissions: ["pos.sell"],
+  has_hidden_permissions: false,
 };
 
 const SYSTEM_ROLE = {
@@ -76,6 +81,7 @@ describe("RolesPage", () => {
   beforeEach(() => {
     mockUser = {
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["roles.update"],
     };
     listRoles.mockReset();
@@ -113,6 +119,7 @@ describe("RolesPage", () => {
   it("gates create and update independently", async () => {
     mockUser = {
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["roles.create"],
     };
     renderPage();
@@ -120,6 +127,21 @@ describe("RolesPage", () => {
     expect(await screen.findByText("Старший кассир")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "+ Создать роль" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Изменить" })).not.toBeInTheDocument();
+  });
+
+  it("does not expose the constructor to a non-owner with a copied permission", () => {
+    mockUser = {
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: false,
+      permissions: ["roles.update"],
+    };
+    renderPage();
+
+    expect(
+      screen.getByText("У вас нет доступа к управлению ролями этой аптеки."),
+    ).toBeInTheDocument();
+    expect(listRoles).not.toHaveBeenCalled();
+    expect(listPermissions).not.toHaveBeenCalled();
   });
 
   it("renders a request error without an empty-state fallback", async () => {

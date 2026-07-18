@@ -9,7 +9,7 @@ that includes the effective permission set recomputed from the database.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Annotated
 from uuid import UUID
@@ -112,6 +112,28 @@ async def get_redis() -> Redis:
     return redis_client
 
 
+def _required_uuid_claim(claims: Mapping[str, object], key: str) -> UUID:
+    raw = claims.get(key)
+    if not isinstance(raw, str) or not raw:
+        raise AuthenticationError(f"Token missing {key}")
+    try:
+        return UUID(raw)
+    except ValueError as exc:
+        raise AuthenticationError(f"Token {key} is not a valid UUID") from exc
+
+
+def _optional_uuid_claim(claims: Mapping[str, object], key: str) -> UUID | None:
+    raw = claims.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise AuthenticationError(f"Token {key} is not a valid UUID")
+    try:
+        return UUID(raw)
+    except ValueError as exc:
+        raise AuthenticationError(f"Token {key} is not a valid UUID") from exc
+
+
 @dataclass
 class CurrentUser:
     user_id: UUID
@@ -119,10 +141,13 @@ class CurrentUser:
     is_developer: bool
     is_administrator: bool
     permissions: set[str] = field(default_factory=set)
+    permission_scopes: dict[str, frozenset[UUID] | None] = field(default_factory=dict)
     branch_assignments: dict[str, str] = field(default_factory=dict)
     assignment_levels: dict[str, int] = field(default_factory=dict)
     policy_revision: int | None = None
     subject_revision: int | None = None
+    membership_status: str | None = None
+    is_tenant_owner: bool = False
 
     @property
     def level(self) -> int:
@@ -140,10 +165,6 @@ class CurrentUser:
         return 4
 
     @property
-    def has_tenant_branch_access(self) -> bool:
-        return self.is_developer or self.is_administrator or "tenant" in self.branch_assignments
-
-    @property
     def assigned_branch_ids(self) -> set[UUID]:
         branch_ids: set[UUID] = set()
         for key in self.branch_assignments:
@@ -155,14 +176,56 @@ class CurrentUser:
                 continue
         return branch_ids
 
-    @property
-    def branch_scope(self) -> set[UUID] | None:
-        if self.has_tenant_branch_access:
-            return None
-        return self.assigned_branch_ids
+    def branch_scope_for(self, permission_code: str) -> set[UUID] | None:
+        """Return only the branches paired with this capability.
 
-    def can_access_branch(self, branch_id: UUID) -> bool:
-        branch_scope = self.branch_scope
+        ``None`` means the capability was granted by a tenant-wide assignment;
+        an empty set means it is absent or has no usable branch scope.
+        """
+        if self.is_developer:
+            return None
+        if permission_code not in self.permissions:
+            return set()
+        scope = self.permission_scopes.get(permission_code, frozenset())
+        return None if scope is None else set(scope)
+
+    def branch_scope_for_any(self, *permission_codes: str) -> set[UUID] | None:
+        if self.is_developer:
+            return None
+        combined: set[UUID] = set()
+        for code in permission_codes:
+            if code not in self.permissions:
+                continue
+            scope = self.permission_scopes.get(code, frozenset())
+            if scope is None:
+                return None
+            combined.update(scope)
+        return combined
+
+    def branch_scope_for_all(self, *permission_codes: str) -> set[UUID] | None:
+        """Intersect scopes when an operation requires multiple capabilities."""
+        if self.is_developer:
+            return None
+        combined: set[UUID] | None = None
+        for code in permission_codes:
+            scope = self.branch_scope_for(code)
+            if scope is None:
+                continue
+            combined = set(scope) if combined is None else combined.intersection(scope)
+        return combined
+
+    def has_tenant_scope(self, permission_code: str) -> bool:
+        return self.is_developer or (
+            permission_code in self.permissions
+            and self.permission_scopes.get(permission_code, frozenset()) is None
+        )
+
+    def can_access_branch(self, permission_code: str, branch_id: UUID) -> bool:
+        branch_scope = self.branch_scope_for(permission_code)
+        return branch_scope is None or branch_id in branch_scope
+
+    def can_access_branch_for_any(self, branch_id: UUID, *permission_codes: str) -> bool:
+        branch_scope = self.branch_scope_for_any(*permission_codes)
         return branch_scope is None or branch_id in branch_scope
 
 
@@ -177,23 +240,8 @@ async def current_user(
     token = authorization.split(" ", 1)[1].strip()
     claims = decode_access_token(token)
 
-    sub = claims.get("sub")
-    if not sub:
-        raise AuthenticationError("Token missing subject")
-    try:
-        user_id = UUID(sub)
-    except (TypeError, ValueError) as exc:
-        raise AuthenticationError("Token subject is not a valid UUID") from exc
-
-    tenant_raw = claims.get("tenant_id")
-    tenant_id: UUID | None
-    if tenant_raw:
-        try:
-            tenant_id = UUID(tenant_raw)
-        except (TypeError, ValueError) as exc:
-            raise AuthenticationError("Token tenant_id is not a valid UUID") from exc
-    else:
-        tenant_id = None
+    user_id = _required_uuid_claim(claims, "sub")
+    tenant_id = _optional_uuid_claim(claims, "tenant_id")
 
     is_dev = bool(claims.get("is_developer", False))
     is_admin = bool(claims.get("is_administrator", False))
@@ -208,12 +256,19 @@ async def current_user(
         raise AuthenticationError("User is inactive")
     if identity.is_developer is not is_dev or identity.is_administrator is not is_admin:
         raise AuthenticationError("Session claims are outdated")
+    if tenant_id is not None and (
+        identity.home_tenant_id != tenant_id or identity.membership_status != "active"
+    ):
+        raise AuthenticationError("Tenant membership is inactive")
 
     permissions: set[str] = set()
+    permission_scopes: dict[str, frozenset[UUID] | None] = {}
     branch_assignments: dict[str, str] = {}
     assignment_levels: dict[str, int] = {}
     policy_revision: int | None = None
     subject_revision: int | None = None
+    membership_status: str | None = None
+    is_tenant_owner = False
 
     if tenant_id is not None:
         # Local import — roles depends on auth at module level, can't import
@@ -222,14 +277,26 @@ async def current_user(
         from app.domains.roles.service import RolesService
 
         service = RolesService(RolesRepository(db), redis=redis)
+        membership = await service.repo.get_membership_for_user(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        membership_status = membership.status if membership is not None else None
+        is_tenant_owner = await service.repo.has_active_ownership(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
         authorization_snapshot = await service.get_authorization_snapshot(user_id, tenant_id)
         permissions = set(authorization_snapshot.permissions)
+        permission_scopes = dict(authorization_snapshot.permission_scopes)
         policy_revision = authorization_snapshot.policy_revision
         subject_revision = authorization_snapshot.subject_revision
 
         # branch_assignments: {branch_id_str | "tenant": role_id_str}
         assignments = await service.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
-        active_assignments = [a for a in assignments if a.is_active]
+        active_assignments = [
+            a for a in assignments if a.is_active and membership_status == "active"
+        ]
         roles_by_id = await service.repo.roles_by_ids([a.role_id for a in active_assignments])
         for a in active_assignments:
             role = roles_by_id.get(a.role_id)
@@ -245,25 +312,27 @@ async def current_user(
         is_developer=is_dev,
         is_administrator=is_admin,
         permissions=permissions,
+        permission_scopes=permission_scopes,
         branch_assignments=branch_assignments,
         assignment_levels=assignment_levels,
         policy_revision=policy_revision,
         subject_revision=subject_revision,
+        membership_status=membership_status,
+        is_tenant_owner=is_tenant_owner,
     )
 
 
 def require_permission(code: str):  # type: ignore[no-untyped-def]
     """Dependency factory — declares that a route needs `code`.
 
-    Developers and administrators bypass per-permission checks per the spec
-    (levels 1-2 see everything). Regular users must have `code` in their
-    effective permission set.
+    Developer retains the temporary phase-one bypass. Administrator access is
+    granted only by explicit support dependencies on admin routes.
     """
 
     async def _checker(
         user: Annotated[CurrentUser, Depends(current_user)],
     ) -> CurrentUser:
-        if user.is_developer or user.is_administrator:
+        if user.is_developer:
             return user
         if code in user.permissions:
             return user
@@ -278,11 +347,26 @@ def require_any_permission(*codes: str):  # type: ignore[no-untyped-def]
     async def _checker(
         user: Annotated[CurrentUser, Depends(current_user)],
     ) -> CurrentUser:
-        if user.is_developer or user.is_administrator:
+        if user.is_developer:
             return user
         if any(code in user.permissions for code in codes):
             return user
         raise PermissionDeniedError(f"Missing one of permissions: {', '.join(codes)}")
+
+    return _checker
+
+
+def require_tenant_permission(code: str):  # type: ignore[no-untyped-def]
+    """Require a capability granted by a tenant-wide assignment."""
+
+    async def _checker(
+        user: Annotated[CurrentUser, Depends(current_user)],
+    ) -> CurrentUser:
+        if not user.is_developer and code not in user.permissions:
+            raise PermissionDeniedError(f"Missing permission: {code}")
+        if user.has_tenant_scope(code):
+            return user
+        raise PermissionDeniedError(f"Tenant-wide permission required: {code}")
 
     return _checker
 

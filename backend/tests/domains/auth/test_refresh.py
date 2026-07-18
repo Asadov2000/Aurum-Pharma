@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AuthenticationError
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.service import AuthService
+from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.service import FoundationService
+from app.domains.roles.models import TenantMembership
 from tests.domains.auth.test_login import _seed_code
 
 
@@ -36,6 +39,42 @@ async def test_refresh_happy_path(db_session: AsyncSession, make_user) -> None:
     assert new_access
     assert new_refresh != refresh  # rotated
     assert expires_in == 15 * 60
+
+
+@pytest.mark.parametrize("membership_status", ["suspended", "offboarded"])
+async def test_refresh_rejects_inactive_tenant_membership(
+    db_session: AsyncSession,
+    make_user,
+    membership_status: str,
+) -> None:
+    tenant = await FoundationService(FoundationRepository(db_session)).create_tenant(
+        payload={
+            "name": f"Inactive refresh {membership_status}",
+            "contact_email": f"inactive-refresh-{membership_status}@aurum.tj",
+        }
+    )
+    user = await make_user(
+        email=f"refresh-{membership_status}@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
+    membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        full_name=user.full_name,
+        status="active",
+    )
+    db_session.add(membership)
+    await db_session.flush()
+    _, refresh = await _login(db_session, user.email)
+    membership.status = membership_status
+    await db_session.flush()
+
+    with pytest.raises(AuthenticationError):
+        await AuthService(AuthRepository(db_session)).refresh(
+            refresh_token=refresh,
+            operation_id=uuid4(),
+            ip_address="127.0.0.1",
+        )
 
 
 async def test_refresh_rotation_invalidates_old_token(db_session: AsyncSession, make_user) -> None:

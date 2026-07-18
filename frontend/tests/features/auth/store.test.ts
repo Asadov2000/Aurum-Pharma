@@ -51,6 +51,7 @@ describe("useAuthStore", () => {
       status: "active",
       last_login_at: null,
       level: 4,
+      is_tenant_owner: false,
       branch_assignments: {},
       permissions: [],
     });

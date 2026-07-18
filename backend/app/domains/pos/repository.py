@@ -466,15 +466,69 @@ class POSRepository:
     ) -> None:
         if branch_ids is None:
             return
+        clauses.append(
+            POSRepository._branch_scope_predicate(
+                params,
+                branch_ids,
+                prefix="allowed_branch",
+            )
+        )
+
+    @staticmethod
+    def _branch_scope_predicate(
+        params: dict[str, Any],
+        branch_ids: set[UUID],
+        *,
+        prefix: str,
+    ) -> str:
         if not branch_ids:
-            clauses.append("1 = 0")
-            return
+            return "1 = 0"
         branch_keys: list[str] = []
         for idx, allowed_branch_id in enumerate(sorted(branch_ids, key=str)):
-            key = f"allowed_branch_{idx}"
+            key = f"{prefix}_{idx}"
             branch_keys.append(f":{key}")
             params[key] = str(allowed_branch_id)
-        clauses.append(f"s.branch_id IN ({', '.join(branch_keys)})")
+        return f"s.branch_id IN ({', '.join(branch_keys)})"
+
+    @staticmethod
+    def _append_sales_visibility_clause(
+        clauses: list[str],
+        params: dict[str, Any],
+        *,
+        viewer_id: UUID | None,
+        own_branch_ids: set[UUID] | None,
+        tenant_view_branch_ids: set[UUID] | None,
+        can_view_tenant: bool,
+    ) -> None:
+        if viewer_id is None or can_view_tenant:
+            return
+
+        params["viewer"] = str(viewer_id)
+        authorization_clauses: list[str] = []
+        if own_branch_ids is None:
+            authorization_clauses.append("s.cashier_user_id = :viewer")
+        elif own_branch_ids:
+            own_scope = POSRepository._branch_scope_predicate(
+                params,
+                own_branch_ids,
+                prefix="own_branch",
+            )
+            authorization_clauses.append(f"(s.cashier_user_id = :viewer AND {own_scope})")
+
+        if tenant_view_branch_ids is None:
+            authorization_clauses.append("1 = 1")
+        elif tenant_view_branch_ids:
+            authorization_clauses.append(
+                POSRepository._branch_scope_predicate(
+                    params,
+                    tenant_view_branch_ids,
+                    prefix="tenant_view_branch",
+                )
+            )
+
+        clauses.append(
+            f"({' OR '.join(authorization_clauses)})" if authorization_clauses else "1 = 0"
+        )
 
     # -------- sales listing (receipt search) --------
 
@@ -495,6 +549,10 @@ class POSRepository:
         page: int,
         page_size: int,
         tz: str = "Asia/Dushanbe",
+        viewer_id: UUID | None = None,
+        own_branch_ids: set[UUID] | None = None,
+        tenant_view_branch_ids: set[UUID] | None = None,
+        can_view_tenant: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         """One query joins sale → branch/register/cashier for resolved names,
         aggregates payment methods, builds a short item preview, and derives
@@ -517,6 +575,14 @@ class POSRepository:
             clauses.append("s.branch_id = :branch")
             params["branch"] = str(branch_id)
         self._append_branch_scope_clause(clauses, params, branch_ids)
+        self._append_sales_visibility_clause(
+            clauses,
+            params,
+            viewer_id=viewer_id,
+            own_branch_ids=own_branch_ids,
+            tenant_view_branch_ids=tenant_view_branch_ids,
+            can_view_tenant=can_view_tenant,
+        )
         if register_id is not None:
             clauses.append("s.register_id = :register")
             params["register"] = str(register_id)

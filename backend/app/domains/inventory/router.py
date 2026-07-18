@@ -44,7 +44,7 @@ async def list_batches(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> BatchList:
-    branch_scope = user.branch_scope
+    branch_scope = user.branch_scope_for("reports.view")
     if branch_scope is not None and branch_id is not None and branch_id not in branch_scope:
         return BatchList(items=[], total=0, page=page, page_size=page_size)
     rows, total = await service.list_batches(
@@ -70,11 +70,12 @@ async def get_batch(
     user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> BatchDetails:
-    batch = await service.get_batch(batch_id, allowed_branch_ids=user.branch_scope)
+    branch_scope = user.branch_scope_for("reports.view")
+    batch = await service.get_batch(batch_id, allowed_branch_ids=branch_scope)
     recent = await service.list_movements(
         batch_id,
         limit=20,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=branch_scope,
     )
     return BatchDetails(
         **BatchRead.model_validate(batch).model_dump(),
@@ -88,7 +89,10 @@ async def list_movements(
     user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> list[MovementRead]:
-    movements = await service.list_movements(batch_id, allowed_branch_ids=user.branch_scope)
+    movements = await service.list_movements(
+        batch_id,
+        allowed_branch_ids=user.branch_scope_for("reports.view"),
+    )
     return [MovementRead.model_validate(m) for m in movements]
 
 
@@ -109,6 +113,6 @@ async def create_write_off(
         reason=payload.reason,
         comment=payload.comment,
         actor_id=user.user_id,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("batches.write_off"),
     )
     return WriteOffRead.model_validate(wo)

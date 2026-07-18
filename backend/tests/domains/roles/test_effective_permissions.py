@@ -6,7 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.roles.models import Permission, UserAssignment
+from app.domains.roles.models import Permission, TenantMembership, UserAssignment
 from app.domains.roles.repository import RolesRepository
 
 
@@ -120,6 +120,15 @@ async def test_effective_permissions_are_isolated_by_tenant(
         level=3,
         name="Tenant B role",
     )
+    db_session.add(
+        TenantMembership(
+            tenant_id=tenant_b.id,
+            user_id=user.id,
+            full_name=user.full_name,
+            status="active",
+        )
+    )
+    await db_session.flush()
     await _assign(
         db_session,
         user_id=user.id,

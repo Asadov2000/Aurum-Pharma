@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -53,6 +53,7 @@ async def main() -> None:
 
     async with SupportSessionLocal() as session:
         async with session.begin():
+            await session.execute(text("SELECT set_config('app.support_session', 'true', true)"))
             await require_empty_database(session)
 
             foundation = FoundationService(FoundationRepository(session))
@@ -85,7 +86,7 @@ async def main() -> None:
                 activated_at=now,
             )
 
-            owner, _role = await RolesService(roles_repo).provision_owner(
+            owner, _membership, _ownership, _role = await RolesService(roles_repo).provision_owner(
                 tenant_id=tenant.id,
                 email="owner@aurum.tj",
                 full_name="Demo Owner",

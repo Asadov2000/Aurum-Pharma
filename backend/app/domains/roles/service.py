@@ -1,22 +1,8 @@
-"""Business logic for the roles domain.
-
-Anti-escalation rule (one of the few hard invariants in the product):
-A user can never grant a role of *higher* privilege than their own.
-"Higher privilege" means lower numeric level (1 = developer, 4 = seller).
-
-Effective level used for the check:
-- is_developer  → 1
-- is_administrator → 2
-- else: min level across the user's active assignments in the active tenant,
-  or 4 ("seller") as a safe ceiling if they have no assignments.
-
-Effective permissions are recomputed from PostgreSQL on every request. Legacy
-Redis keys are still invalidated by mutations, but are never trusted: cache
-invalidation cannot be made atomic with the database transaction yet.
-"""
+"""Business rules for scoped tenant membership and delegated authorization."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import UUID
 
 import structlog
@@ -29,21 +15,33 @@ from app.core.errors import (
     PermissionDeniedError,
     ValidationError,
 )
+from app.core.time import utc_now
 from app.domains.auth.models import AppUser
-from app.domains.roles.models import Permission, Role, RoleTemplate, UserAssignment
+from app.domains.roles.models import (
+    Permission,
+    Role,
+    RoleTemplate,
+    TenantMembership,
+    TenantOwnership,
+    UserAssignment,
+)
 from app.domains.roles.repository import AuthorizationSnapshot, DirectoryUser, RolesRepository
 
 logger = structlog.get_logger("roles.service")
 
 PERMS_CACHE_PREFIX = "auth:perms"
-
-# Owner provisioning: a tenant's «Владелец» role is instantiated from the global
-# owner template (seeded in 0019, slug added in 0023). Looked up by the stable
-# slug, not the display name. Level 3 = owner tier (1=dev … 4=seller).
 OWNER_TEMPLATE_SLUG = "owner"
-CASHIER_TEMPLATE_SLUG = "cashier"
 OWNER_ROLE_NAME = "Владелец"
 OWNER_ROLE_LEVEL = 3
+CUSTOM_ROLE_LEGACY_LEVEL = 4
+RESERVED_ROLE_NAMES = {
+    "administrator",
+    "developer",
+    "owner",
+    "администратор",
+    "владелец",
+    "разработчик",
+}
 
 
 def perms_cache_key(user_id: UUID, tenant_id: UUID) -> str:
@@ -56,27 +54,193 @@ class RolesService:
         self.redis = redis
 
     # -------------------------------------------------------------------------
-    # Catalogue reads
+    # Delegable catalogue
     # -------------------------------------------------------------------------
 
-    async def list_permissions(self) -> list[Permission]:
-        return await self.repo.list_permissions()
+    async def list_permissions(
+        self,
+        *,
+        actor_id: UUID,
+        tenant_id: UUID,
+        actor_permissions: set[str],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+    ) -> list[Permission]:
+        return await self._delegation_catalog(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+        )
 
     async def list_roles_with_permissions(
-        self, tenant_id: UUID | None = None
-    ) -> list[tuple[Role, list[str]]]:
-        roles = await self.repo.list_roles(tenant_id=tenant_id)
-        perms = await self.repo.permissions_for_roles([r.id for r in roles])
-        return [(role, perms.get(role.id, [])) for role in roles]
+        self,
+        *,
+        actor_id: UUID,
+        tenant_id: UUID,
+        actor_permissions: set[str],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+    ) -> list[tuple[Role, list[str], bool]]:
+        roles = [
+            role
+            for role in await self.repo.list_roles(tenant_id=tenant_id)
+            if role.tenant_id == tenant_id and not role.is_system and not role.is_protected
+        ]
+        permissions = await self.repo.permissions_for_roles([role.id for role in roles])
+        catalog = await self._delegation_catalog(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+        )
+        allowed = {permission.code for permission in catalog}
+        result: list[tuple[Role, list[str], bool]] = []
+        for role in roles:
+            role_codes = set(permissions.get(role.id, []))
+            visible_codes = sorted(role_codes & allowed)
+            result.append((role, visible_codes, bool(role_codes - allowed)))
+        return result
 
-    async def list_templates_with_permissions(self) -> list[tuple[RoleTemplate, list[str]]]:
+    async def list_templates_with_permissions(
+        self,
+        *,
+        actor_id: UUID,
+        tenant_id: UUID,
+        actor_permissions: set[str],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+    ) -> list[tuple[RoleTemplate, list[str]]]:
+        catalog = await self._delegation_catalog(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+        )
+        allowed = {permission.code for permission in catalog}
         templates = await self.repo.list_templates()
-        perms = await self.repo.permissions_for_templates([t.id for t in templates])
-        return [(template, perms.get(template.id, [])) for template in templates]
+        permissions = await self.repo.permissions_for_templates(
+            [template.id for template in templates]
+        )
+        return [
+            (
+                template,
+                sorted(set(permissions.get(template.id, [])) & allowed),
+            )
+            for template in templates
+        ]
+
+    async def _delegation_catalog(
+        self,
+        *,
+        actor_id: UUID,
+        tenant_id: UUID,
+        actor_permissions: set[str],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+    ) -> list[Permission]:
+        permissions = [
+            permission
+            for permission in await self.repo.list_permissions()
+            if permission.is_active and permission.target_role_type == "tenant"
+        ]
+        if actor_is_developer:
+            return [permission for permission in permissions if permission.developer_delegable]
+        if actor_is_administrator:
+            return [permission for permission in permissions if permission.administrator_delegable]
+        if not await self.repo.has_active_ownership(
+            tenant_id=tenant_id,
+            user_id=actor_id,
+        ):
+            raise PermissionDeniedError("Active tenant ownership is required")
+        return [
+            permission
+            for permission in permissions
+            if permission.owner_delegable and permission.code in actor_permissions
+        ]
+
+    async def _validated_role_permissions(
+        self,
+        *,
+        actor_id: UUID,
+        tenant_id: UUID,
+        actor_permissions: set[str],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+        requested: list[str],
+    ) -> list[str]:
+        codes = list(dict.fromkeys(requested))
+        all_permissions = await self.repo.list_permissions()
+        known = {permission.code for permission in all_permissions}
+        unknown = sorted(set(codes) - known)
+        if unknown:
+            raise ValidationError(
+                "Unknown permission codes",
+                details={"permissions": unknown},
+            )
+
+        catalog = await self._delegation_catalog(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+        )
+        allowed = {permission.code for permission in catalog}
+        unavailable = sorted(set(codes) - allowed)
+        if unavailable:
+            raise PermissionDeniedError(
+                "Permissions are outside the delegation envelope",
+                details={"permissions": unavailable},
+            )
+
+        return sorted(codes)
 
     # -------------------------------------------------------------------------
-    # Owner provisioning (support-level: dev/admin onboards a new pharmacy)
+    # Support account and owner provisioning
     # -------------------------------------------------------------------------
+
+    async def create_tenant_account(
+        self,
+        *,
+        tenant_id: UUID,
+        email: str,
+        full_name: str,
+        phone: str | None = None,
+        actor_id: UUID | None = None,
+    ) -> tuple[AppUser, TenantMembership]:
+        """Support-only account creation. No role is assigned."""
+        if await self.repo.get_user_by_email_support(email) is not None:
+            raise ConflictError("Пользователь с таким email уже существует")
+
+        user = await self.repo.insert_user(
+            email=email.strip(),
+            full_name=full_name.strip(),
+            phone=phone,
+            home_tenant_id=tenant_id,
+            is_developer=False,
+            is_administrator=False,
+            status="invited",
+        )
+        membership = await self.repo.insert_membership(
+            tenant_id=tenant_id,
+            user_id=user.id,
+            full_name=full_name.strip(),
+            phone=phone,
+            status="pending",
+            created_by=actor_id,
+            updated_by=actor_id,
+        )
+        logger.info(
+            "tenant_membership_created",
+            tenant_id=str(tenant_id),
+            membership_id=str(membership.id),
+            user_id=str(user.id),
+        )
+        return user, membership
 
     async def provision_owner(
         self,
@@ -85,22 +249,46 @@ class RolesService:
         email: str,
         full_name: str,
         actor_id: UUID | None = None,
-    ) -> tuple[AppUser, Role]:
-        """Create the first owner of a tenant and give them a tenant «Владелец»
-        role instantiated from the global template. Support-level operation —
-        the anti-escalation subset check is intentionally bypassed (the source is
-        the trusted system template), so this goes straight through the repo, not
-        create_role. Caller runs it inside one transaction (all-or-nothing)."""
+    ) -> tuple[AppUser, TenantMembership, TenantOwnership, Role]:
+        """Atomically create the account, active membership, ownership and
+        protected owner assignment. The request transaction is the atomic
+        boundary."""
+        if not await self.repo.lock_tenant_for_owner_provisioning(tenant_id):
+            raise NotFoundError("Tenant not found")
+        if await self.repo.count_active_owners(tenant_id) > 0:
+            raise ConflictError(
+                "Tenant already has an active owner",
+                details={"workflow": "Use the protected ownership-transfer workflow"},
+            )
         if await self.repo.get_user_by_email_support(email) is not None:
             raise ConflictError("Пользователь с таким email уже существует")
 
+        now = utc_now()
         user = await self.repo.insert_user(
-            email=email,
-            full_name=full_name,
+            email=email.strip(),
+            full_name=full_name.strip(),
             home_tenant_id=tenant_id,
             is_developer=False,
             is_administrator=False,
             status="active",
+            activated_at=now,
+        )
+        membership = await self.repo.insert_membership(
+            tenant_id=tenant_id,
+            user_id=user.id,
+            full_name=full_name.strip(),
+            status="active",
+            activated_at=now,
+            created_by=actor_id,
+            updated_by=actor_id,
+        )
+        ownership = await self.repo.insert_ownership(
+            tenant_id=tenant_id,
+            membership_id=membership.id,
+            is_active=True,
+            granted_at=now,
+            created_by=actor_id,
+            updated_by=actor_id,
         )
         role = await self._ensure_tenant_owner_role(tenant_id, actor_id)
         await self.repo.insert_assignment(
@@ -110,53 +298,69 @@ class RolesService:
             role_id=role.id,
             password_required=False,
         )
-        logger.info("owner_provisioned", tenant_id=str(tenant_id), user_id=str(user.id))
-        return user, role
+        logger.info(
+            "owner_provisioned",
+            tenant_id=str(tenant_id),
+            membership_id=str(membership.id),
+            user_id=str(user.id),
+        )
+        return user, membership, ownership, role
 
-    async def _ensure_tenant_owner_role(self, tenant_id: UUID, actor_id: UUID | None) -> Role:
-        """Reuse the tenant's «Владелец» role if present, else instantiate it from
-        the global template (full permission set copied verbatim)."""
-        existing = await self.repo.get_role_by_name(OWNER_ROLE_NAME, tenant_id=tenant_id)
-        if existing is not None:
-            return existing
+    async def _ensure_tenant_owner_role(
+        self,
+        tenant_id: UUID,
+        actor_id: UUID | None,
+    ) -> Role:
         template = await self.repo.get_template_by_slug(OWNER_TEMPLATE_SLUG)
         if template is None:
             raise NotFoundError("Шаблон роли «Владелец» не найден")
         codes = await self.repo.get_template_permissions(template.id)
-        role = await self.repo.insert_role(
-            tenant_id=tenant_id,
-            name=OWNER_ROLE_NAME,
-            description=template.description,
-            level=OWNER_ROLE_LEVEL,
-            is_system=False,
-            created_by=actor_id,
-            updated_by=actor_id,
-        )
+
+        role = await self.repo.get_role_by_name(OWNER_ROLE_NAME, tenant_id=tenant_id)
+        if role is None:
+            role = await self.repo.insert_role(
+                tenant_id=tenant_id,
+                name=OWNER_ROLE_NAME,
+                description=template.description,
+                level=OWNER_ROLE_LEVEL,
+                is_system=False,
+                is_protected=True,
+                protected_kind="tenant_owner",
+                version=1,
+                created_by=actor_id,
+                updated_by=actor_id,
+            )
+        elif not role.is_protected or role.protected_kind != "tenant_owner":
+            raise ConflictError(
+                "Reserved owner role name is already in use",
+                details={"role_id": str(role.id)},
+            )
         await self.repo.set_role_permissions(role.id, codes)
         return role
 
     # -------------------------------------------------------------------------
-    # Role builder — create / edit custom (tenant) roles
+    # Tenant role builder
     # -------------------------------------------------------------------------
 
     async def create_role(
         self,
         *,
-        actor_level: int,
         actor_id: UUID,
         actor_permissions: set[str],
-        actor_is_support: bool,
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
         tenant_id: UUID,
         name: str,
         description: str | None,
-        level: int,
         permission_codes: list[str],
     ) -> tuple[Role, list[str]]:
-        self._assert_can_define_role(actor_level=actor_level, target_level=level)
+        self._assert_role_name_available(name)
         codes = await self._validated_role_permissions(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
             actor_permissions=actor_permissions,
-            actor_is_support=actor_is_support,
-            target_level=level,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
             requested=permission_codes,
         )
         if await self.repo.get_role_by_name(name, tenant_id=tenant_id) is not None:
@@ -164,178 +368,326 @@ class RolesService:
 
         role = await self.repo.insert_role(
             tenant_id=tenant_id,
-            name=name,
+            name=name.strip(),
             description=description,
-            level=level,
+            level=CUSTOM_ROLE_LEGACY_LEVEL,
             is_system=False,
+            is_protected=False,
+            protected_kind=None,
+            version=1,
             created_by=actor_id,
             updated_by=actor_id,
         )
         await self.repo.set_role_permissions(role.id, codes)
-        return role, sorted(codes)
+        return role, codes
 
     async def update_role(
         self,
         *,
-        actor_level: int,
         actor_id: UUID,
         actor_permissions: set[str],
-        actor_is_support: bool,
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
         tenant_id: UUID,
         role_id: UUID,
+        expected_version: int,
         name: str | None,
         description: str | None,
-        level: int | None,
         permission_codes: list[str] | None,
     ) -> tuple[Role, list[str]]:
-        role = await self.repo.get_role(role_id)
-        if role is None:
+        role = await self.repo.get_role_for_update(role_id)
+        if role is None or role.tenant_id != tenant_id:
             raise NotFoundError("Role not found")
-        if role.is_system:
-            # Explicit 403 first — system roles are visible to every tenant
-            # (tenant_id NULL), so this guard must precede the ownership check.
-            raise PermissionDeniedError("System roles cannot be modified")
-        if role.tenant_id != tenant_id:
-            raise NotFoundError("Role not found")  # another tenant's role — hide it
+        if role.version != expected_version:
+            raise ConflictError(
+                "Role version is stale",
+                details={
+                    "expected_version": expected_version,
+                    "current_version": role.version,
+                },
+            )
+        if role.is_system or role.is_protected:
+            raise PermissionDeniedError("Protected roles cannot be modified")
+        if await self.repo.user_has_active_role(
+            tenant_id=tenant_id,
+            user_id=actor_id,
+            role_id=role.id,
+        ):
+            raise PermissionDeniedError("You cannot change your own active role")
 
-        # The actor must outrank the role as it currently stands, and — if the
-        # level is being changed — the new level too.
-        should_invalidate = level is not None or permission_codes is not None
-        affected_user_ids = (
-            await self.repo.active_user_ids_for_role(role.id, tenant_id=tenant_id)
-            if should_invalidate
-            else []
+        current_codes = await self.repo.get_role_permissions(role.id)
+        catalog = await self._delegation_catalog(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+        )
+        allowed = {permission.code for permission in catalog}
+        if set(current_codes) - allowed:
+            raise PermissionDeniedError(
+                "Role contains capabilities outside the delegation envelope"
+            )
+        requested_codes = current_codes if permission_codes is None else permission_codes
+        codes = await self._validated_role_permissions(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+            requested=requested_codes,
         )
 
-        self._assert_can_define_role(actor_level=actor_level, target_level=role.level)
-        if level is not None:
-            self._assert_can_define_role(actor_level=actor_level, target_level=level)
-
+        fields: dict[str, object] = {}
         if name is not None and name != role.name:
+            self._assert_role_name_available(name)
             clash = await self.repo.get_role_by_name(name, tenant_id=tenant_id)
             if clash is not None and clash.id != role.id:
                 raise ConflictError("A role with this name already exists")
-
-        fields: dict[str, object] = {"updated_by": actor_id}
-        if name is not None:
-            fields["name"] = name
-        if description is not None:
+            fields["name"] = name.strip()
+        if description is not None and description != role.description:
             fields["description"] = description
-        if level is not None:
-            fields["level"] = level
-        role = await self.repo.update_role(role, **fields)
 
-        target_level = level if level is not None else role.level
-        if level is not None and permission_codes is None:
-            await self._assert_permissions_fit_role_level(
-                await self.repo.get_role_permissions(role.id),
-                target_level=target_level,
-            )
+        permissions_changed = codes != current_codes
+        if fields or permissions_changed:
+            fields["version"] = role.version + 1
+            fields["updated_by"] = actor_id
+            role = await self.repo.update_role(role, **fields)
 
-        if permission_codes is not None:
-            codes = await self._validated_role_permissions(
-                actor_permissions=actor_permissions,
-                actor_is_support=actor_is_support,
-                target_level=target_level,
-                requested=permission_codes,
-            )
+        affected_user_ids = (
+            await self.repo.active_user_ids_for_role(role.id, tenant_id=tenant_id)
+            if permissions_changed
+            else []
+        )
+        if permissions_changed:
             await self.repo.set_role_permissions(role.id, codes)
-
         if affected_user_ids:
             await self.invalidate_users_perms(affected_user_ids, tenant_id)
+        return role, codes
 
-        return role, await self.repo.get_role_permissions(role.id)
-
-    async def _validated_role_permissions(
-        self,
-        *,
-        actor_permissions: set[str],
-        actor_is_support: bool,
-        target_level: int,
-        requested: list[str],
-    ) -> list[str]:
-        """Dedupe + validate the codes a role is being given: every code must
-        exist and be active, must fit the target role's level, and (unless the
-        actor is dev/admin) must be one the actor already holds — you cannot
-        grant reach you don't have yourself."""
-        codes = list(dict.fromkeys(requested))  # de-dupe, keep order
-        if codes:
-            levels = await self.repo.active_permission_levels(codes)
-            unknown = [c for c in codes if c not in levels]
-            if unknown:
-                raise ValidationError(
-                    "Unknown or inactive permission codes",
-                    details={"permissions": unknown},
-                )
-            too_strong = sorted(
-                code for code, min_level in levels.items() if min_level < target_level
-            )
-            if too_strong:
-                raise PermissionDeniedError(
-                    "Cannot grant permissions above the role level",
-                    details={"permissions": too_strong, "role_level": target_level},
-                )
-        if not actor_is_support:
-            extra = sorted(set(codes) - actor_permissions)
-            if extra:
-                raise PermissionDeniedError(
-                    "Cannot grant permissions you do not hold yourself",
-                    details={"permissions": extra},
-                )
-        return codes
-
-    async def _assert_permissions_fit_role_level(
-        self, codes: list[str], *, target_level: int
-    ) -> None:
-        if not codes:
-            return
-        levels = await self.repo.active_permission_levels(codes)
-        too_strong = sorted(code for code, min_level in levels.items() if min_level < target_level)
-        if too_strong:
-            raise PermissionDeniedError(
-                "Cannot keep permissions above the role level",
-                details={"permissions": too_strong, "role_level": target_level},
-            )
+    @staticmethod
+    def _assert_role_name_available(name: str) -> None:
+        if name.strip().casefold() in RESERVED_ROLE_NAMES:
+            raise PermissionDeniedError("Protected role names are reserved")
 
     # -------------------------------------------------------------------------
-    # Users in tenant
+    # Tenant directory and account lifecycle
     # -------------------------------------------------------------------------
 
     async def list_users(
-        self, tenant_id: UUID, *, page: int = 1, page_size: int = 50
+        self,
+        tenant_id: UUID,
+        *,
+        page: int = 1,
+        page_size: int = 50,
     ) -> tuple[list[tuple[DirectoryUser, list[UserAssignment]]], int]:
         total = await self.repo.count_users_for_tenant(tenant_id)
         users = await self.repo.list_users_for_tenant(
-            tenant_id, limit=page_size, offset=(page - 1) * page_size
+            tenant_id,
+            limit=page_size,
+            offset=(page - 1) * page_size,
         )
         by_user: dict[UUID, list[UserAssignment]] = {}
-        for a in await self.repo.assignments_for_users([u.id for u in users], tenant_id=tenant_id):
-            by_user.setdefault(a.user_id, []).append(a)
-        return [(u, by_user.get(u.id, [])) for u in users], total
+        assignments = await self.repo.assignments_for_users(
+            [user.id for user in users],
+            tenant_id=tenant_id,
+        )
+        for assignment in assignments:
+            by_user.setdefault(assignment.user_id, []).append(assignment)
+        return [(user, by_user.get(user.id, [])) for user in users], total
 
-    # -------------------------------------------------------------------------
-    # Invite + assignments — anti-escalation enforced here
-    # -------------------------------------------------------------------------
-
-    async def _assert_assignment_scope(
+    async def update_user_profile(
         self,
         *,
         tenant_id: UUID,
+        target_user_id: UUID,
+        fields: dict[str, object],
+    ) -> DirectoryUser:
+        user = await self.repo.get_user(target_user_id, tenant_id=tenant_id)
+        if user is None:
+            raise NotFoundError("User not found in this tenant")
+        full_name = str(fields.get("full_name", user.full_name))
+        phone_value = fields.get("phone", user.phone)
+        if not await self.repo.update_membership_profile(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+            full_name=full_name,
+            phone=None if phone_value is None else str(phone_value),
+        ):
+            raise NotFoundError("User not found in this tenant")
+        updated = await self.repo.get_user(target_user_id, tenant_id=tenant_id)
+        if updated is None:
+            raise NotFoundError("User not found in this tenant")
+        return updated
+
+    async def activate_membership(
+        self,
+        *,
+        actor_id: UUID,
+        tenant_id: UUID,
+        target_user_id: UUID,
+    ) -> None:
+        if actor_id == target_user_id:
+            raise BusinessRuleError("You cannot activate your own membership")
+        if not await self.repo.set_membership_status(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+            status="active",
+            changed_at=utc_now(),
+        ):
+            raise NotFoundError("Membership not found")
+        await self.invalidate_user_perms(target_user_id, tenant_id)
+
+    async def block_user(
+        self,
+        *,
+        actor_id: UUID,
+        actor_is_developer: bool,
+        tenant_id: UUID,
+        target_user_id: UUID,
+    ) -> None:
+        await self._change_membership_status(
+            actor_id=actor_id,
+            actor_is_developer=actor_is_developer,
+            tenant_id=tenant_id,
+            target_user_id=target_user_id,
+            target_status="suspended",
+        )
+
+    async def soft_delete_user(
+        self,
+        *,
+        actor_id: UUID,
+        actor_is_developer: bool,
+        tenant_id: UUID,
+        target_user_id: UUID,
+    ) -> None:
+        await self._change_membership_status(
+            actor_id=actor_id,
+            actor_is_developer=actor_is_developer,
+            tenant_id=tenant_id,
+            target_user_id=target_user_id,
+            target_status="offboarded",
+        )
+
+    async def _change_membership_status(
+        self,
+        *,
+        actor_id: UUID,
+        actor_is_developer: bool,
+        tenant_id: UUID,
+        target_user_id: UUID,
+        target_status: str,
+    ) -> None:
+        if actor_id == target_user_id:
+            raise BusinessRuleError("You cannot change your own membership status")
+        membership = await self.repo.get_membership_for_user(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+        )
+        if membership is None:
+            raise NotFoundError("Membership not found")
+
+        ownership = await self.repo.get_active_ownership(
+            tenant_id=tenant_id,
+            membership_id=membership.id,
+        )
+        if ownership is not None:
+            if await self.repo.count_active_owners(tenant_id) <= 1:
+                raise BusinessRuleError("The last active owner cannot be changed")
+            if not actor_is_developer:
+                raise PermissionDeniedError("Owner lifecycle requires a protected support workflow")
+
+        now = utc_now()
+        if not await self.repo.set_membership_status(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+            status=target_status,
+            changed_at=now,
+        ):
+            raise NotFoundError("Membership not found")
+        if ownership is not None:
+            await self.repo.deactivate_ownership(
+                tenant_id=tenant_id,
+                membership_id=membership.id,
+                actor_id=actor_id,
+                revoked_at=now,
+            )
+        await self.invalidate_user_perms(target_user_id, tenant_id)
+
+    # -------------------------------------------------------------------------
+    # Existing membership assignment
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _capability_allows_target_scope(
+        *,
         permission_code: str,
         branch_id: UUID | None,
+        actor_permissions: set[str],
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
+    ) -> bool:
+        if actor_is_developer:
+            return True
+        if permission_code not in actor_permissions:
+            return False
+        scope = actor_permission_scopes.get(permission_code, frozenset())
+        if branch_id is None:
+            return scope is None
+        return scope is None or branch_id in scope
+
+    def _assert_assignment_scope(
+        self,
+        *,
+        branch_id: UUID | None,
+        actor_permissions: set[str],
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
     ) -> None:
-        if not await self.repo.actor_has_scoped_permission(
-            tenant_id=tenant_id,
-            permission_code=permission_code,
+        if not self._capability_allows_target_scope(
+            permission_code="roles.assign",
             branch_id=branch_id,
+            actor_permissions=actor_permissions,
+            actor_permission_scopes=actor_permission_scopes,
+            actor_is_developer=actor_is_developer,
         ):
             raise PermissionDeniedError("Assignment is outside your authorized branch scope")
+
+    def _assert_role_delegation_at_scope(
+        self,
+        *,
+        role_codes: list[str],
+        branch_id: UUID | None,
+        actor_permissions: set[str],
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
+    ) -> None:
+        unavailable = sorted(
+            code
+            for code in role_codes
+            if not self._capability_allows_target_scope(
+                permission_code=code,
+                branch_id=branch_id,
+                actor_permissions=actor_permissions,
+                actor_permission_scopes=actor_permission_scopes,
+                actor_is_developer=actor_is_developer,
+            )
+        )
+        if unavailable:
+            raise PermissionDeniedError(
+                "Role capabilities are outside your target assignment scope",
+                details={"permissions": unavailable},
+            )
 
     async def invite_user(
         self,
         *,
-        actor_level: int,
         actor_id: UUID,
+        actor_permissions: set[str],
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
         tenant_id: UUID,
         email: str,
         full_name: str,
@@ -343,259 +695,203 @@ class RolesService:
         branch_id: UUID | None,
         password_required: bool,
     ) -> tuple[DirectoryUser, UserAssignment, bool]:
-        target_role = await self.repo.get_role(role_id)
-        if target_role is None or not target_role.is_active:
-            raise NotFoundError("Role not found")
-        self._assert_role_belongs_to_tenant(target_role, tenant_id)
-        self._assert_can_assign(actor_level=actor_level, target_level=target_role.level)
+        """Compatibility route: resolve only an existing tenant membership.
 
-        await self._assert_assignment_scope(
+        The full name is intentionally not used. A tenant actor cannot create a
+        global account or discover an account outside this tenant.
+        """
+        del full_name
+        membership = await self.repo.find_membership_by_email(
             tenant_id=tenant_id,
-            permission_code="users.invite",
-            branch_id=branch_id,
+            email=email,
         )
-
-        user_id = await self.repo.find_invitable_user_id(tenant_id=tenant_id, email=email)
-        if user_id is None:
-            user_id = await self.repo.insert_invited_user(
-                tenant_id=tenant_id,
-                email=email,
-                full_name=full_name,
+        if membership is None:
+            raise PermissionDeniedError(
+                "Tenant owners cannot create accounts; support must create the membership"
             )
-            first_invite = True
-        else:
-            first_invite = False
-
-        # One assignment per (user, tenant, branch). If an *active* one is
-        # already there → conflict. If an *inactive* one exists (e.g. user
-        # was previously offboarded) → reactivate it with the new role.
-        existing = await self.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
-        assignment = None
-        for a in existing:
-            if a.branch_id == branch_id:
-                if a.is_active:
-                    raise ConflictError("User already has an active assignment for this branch")
-                assignment = await self.repo.reactivate_assignment(
-                    a.id,
-                    tenant_id=tenant_id,
-                    role_id=role_id,
-                    password_required=password_required,
-                )
-                break
-
-        if assignment is None:
-            assignment = await self.repo.insert_assignment(
-                user_id=user_id,
-                tenant_id=tenant_id,
-                branch_id=branch_id,
-                role_id=role_id,
-                password_required=password_required,
-            )
-        await self.invalidate_user_perms(user_id, tenant_id)
-
-        user = await self.repo.get_user(user_id)
+        assignment = await self.assign_role(
+            actor_id=actor_id,
+            actor_permissions=actor_permissions,
+            actor_permission_scopes=actor_permission_scopes,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+            tenant_id=tenant_id,
+            target_user_id=membership.user_id,
+            role_id=role_id,
+            branch_id=branch_id,
+            password_required=password_required,
+        )
+        user = await self.repo.get_user(membership.user_id, tenant_id=tenant_id)
         if user is None:
-            raise NotFoundError("User not found")
-
-        if first_invite:
-            # Lazy import — Celery task module pulls celery_app which imports
-            # config at module load; keep this off the cold-start path.
-            from app.tasks.roles import send_invite_email
-
-            send_invite_email.delay(email, str(tenant_id))
-
-        return user, assignment, first_invite
+            raise NotFoundError("Membership not found")
+        return user, assignment, False
 
     async def assign_role(
         self,
         *,
-        actor_level: int,
         actor_id: UUID,
+        actor_permissions: set[str],
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
         tenant_id: UUID,
         target_user_id: UUID,
         role_id: UUID,
         branch_id: UUID | None,
         password_required: bool,
     ) -> UserAssignment:
-        target_role = await self.repo.get_role(role_id)
-        if target_role is None or not target_role.is_active:
+        if actor_id == target_user_id:
+            raise PermissionDeniedError("You cannot assign privileges to yourself")
+
+        role = await self.repo.get_role(role_id)
+        if role is None or not role.is_active or role.tenant_id != tenant_id or role.is_system:
             raise NotFoundError("Role not found")
-        self._assert_role_belongs_to_tenant(target_role, tenant_id)
-        self._assert_can_assign(actor_level=actor_level, target_level=target_role.level)
+        if role.is_protected:
+            raise PermissionDeniedError("Protected roles cannot be assigned")
 
-        await self._assert_assignment_scope(
+        role_codes = await self.repo.get_role_permissions(role.id)
+        await self._validated_role_permissions(
+            actor_id=actor_id,
             tenant_id=tenant_id,
-            permission_code="roles.assign",
-            branch_id=branch_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+            requested=role_codes,
         )
+        membership = await self.repo.get_membership_for_user(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+        )
+        if membership is None:
+            raise NotFoundError("Tenant membership not found")
+        if membership.status not in {"pending", "active"}:
+            raise BusinessRuleError(
+                "Roles can only be prepared for pending or active memberships",
+                details={"membership_status": membership.status},
+            )
 
-        target_user = await self.repo.get_user(target_user_id)
-        if target_user is None:
-            raise NotFoundError("User not found")
-
-        existing = await self.repo.list_assignments_for_user(target_user_id, tenant_id=tenant_id)
-        assignment = None
-        for a in existing:
-            if a.branch_id == branch_id:
-                if a.is_active:
-                    raise ConflictError("User already has an active assignment for this branch")
-                assignment = await self.repo.reactivate_assignment(
-                    a.id,
-                    tenant_id=tenant_id,
-                    role_id=role_id,
-                    password_required=password_required,
-                )
-                break
-
-        if assignment is None:
-            assignment = await self.repo.insert_assignment(
-                user_id=target_user_id,
+        self._assert_assignment_scope(
+            branch_id=branch_id,
+            actor_permissions=actor_permissions,
+            actor_permission_scopes=actor_permission_scopes,
+            actor_is_developer=actor_is_developer,
+        )
+        self._assert_role_delegation_at_scope(
+            role_codes=role_codes,
+            branch_id=branch_id,
+            actor_permissions=actor_permissions,
+            actor_permission_scopes=actor_permission_scopes,
+            actor_is_developer=actor_is_developer,
+        )
+        existing = await self.repo.list_assignments_for_user(
+            target_user_id,
+            tenant_id=tenant_id,
+        )
+        for assignment in existing:
+            if assignment.branch_id != branch_id:
+                continue
+            if assignment.is_active:
+                raise ConflictError("User already has an active assignment for this branch")
+            reactivated = await self.repo.reactivate_assignment(
+                assignment.id,
                 tenant_id=tenant_id,
-                branch_id=branch_id,
                 role_id=role_id,
                 password_required=password_required,
             )
+            if reactivated is None:
+                raise NotFoundError("Assignment not found")
+            await self.invalidate_user_perms(target_user_id, tenant_id)
+            return reactivated
+
+        assignment = await self.repo.insert_assignment(
+            user_id=target_user_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            role_id=role_id,
+            password_required=password_required,
+        )
         await self.invalidate_user_perms(target_user_id, tenant_id)
         return assignment
 
     async def revoke_assignment(
         self,
         *,
-        actor_level: int,
+        actor_id: UUID,
+        actor_permissions: set[str],
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
         tenant_id: UUID,
         target_user_id: UUID,
         assignment_id: UUID,
     ) -> None:
+        if actor_id == target_user_id:
+            raise PermissionDeniedError("You cannot revoke your own privileges")
         assignment = await self.repo.get_assignment(assignment_id)
-        if assignment is None or assignment.user_id != target_user_id:
+        if (
+            assignment is None
+            or assignment.user_id != target_user_id
+            or assignment.tenant_id != tenant_id
+        ):
             raise NotFoundError("Assignment not found")
-        if assignment.tenant_id != tenant_id:
-            raise NotFoundError("Assignment not found")
-
-        await self._assert_assignment_scope(
-            tenant_id=tenant_id,
-            permission_code="roles.assign",
-            branch_id=assignment.branch_id,
-        )
-
-        # Anti-escalation: a user can only revoke assignments whose role is
-        # at-or-below their own level (otherwise an owner could fire admins).
         role = await self.repo.get_role(assignment.role_id)
-        if role is not None:
-            self._assert_can_assign(actor_level=actor_level, target_level=role.level)
-
+        if role is None:
+            raise NotFoundError("Role not found")
+        if role.is_protected:
+            raise PermissionDeniedError("Protected role assignments cannot be revoked")
+        await self._validated_role_permissions(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+            requested=await self.repo.get_role_permissions(role.id),
+        )
+        self._assert_assignment_scope(
+            branch_id=assignment.branch_id,
+            actor_permissions=actor_permissions,
+            actor_permission_scopes=actor_permission_scopes,
+            actor_is_developer=actor_is_developer,
+        )
+        self._assert_role_delegation_at_scope(
+            role_codes=await self.repo.get_role_permissions(role.id),
+            branch_id=assignment.branch_id,
+            actor_permissions=actor_permissions,
+            actor_permission_scopes=actor_permission_scopes,
+            actor_is_developer=actor_is_developer,
+        )
         await self.repo.deactivate_assignment(assignment_id, tenant_id=tenant_id)
         await self.invalidate_user_perms(target_user_id, tenant_id)
 
-    async def block_user(
-        self,
-        *,
-        actor_level: int,
-        actor_id: UUID,
-        tenant_id: UUID,
-        target_user_id: UUID,
-    ) -> None:
-        if actor_id == target_user_id:
-            raise BusinessRuleError("You cannot block your own account")
-        # Anti-escalation: block requires the actor's level <= every
-        # assignment's role level in this tenant.
-        assignments = await self.repo.list_assignments_for_user(target_user_id, tenant_id=tenant_id)
-        if not assignments:
-            raise NotFoundError("User not found")
-        for a in assignments:
-            if a.is_active:
-                role = await self.repo.get_role(a.role_id)
-                if role is not None:
-                    self._assert_can_assign(actor_level=actor_level, target_level=role.level)
-        user = await self.repo.get_user(target_user_id)
-        if user is None or user.home_tenant_id != tenant_id:
-            raise NotFoundError("User not found")
-        from app.core.time import utc_now
-
-        if not await self.repo.set_user_status(
-            tenant_id=tenant_id,
-            user_id=target_user_id,
-            status="blocked",
-            changed_at=utc_now(),
-        ):
-            raise NotFoundError("User not found")
-        await self.invalidate_user_perms(target_user_id, tenant_id)
-
-    async def soft_delete_user(
-        self,
-        *,
-        actor_level: int,
-        actor_id: UUID,
-        tenant_id: UUID,
-        target_user_id: UUID,
-    ) -> None:
-        if actor_id == target_user_id:
-            raise BusinessRuleError("You cannot archive your own account")
-        assignments = await self.repo.list_assignments_for_user(target_user_id, tenant_id=tenant_id)
-        if not assignments:
-            raise NotFoundError("User not found")
-        for a in assignments:
-            if a.is_active:
-                role = await self.repo.get_role(a.role_id)
-                if role is not None:
-                    self._assert_can_assign(actor_level=actor_level, target_level=role.level)
-        user = await self.repo.get_user(target_user_id)
-        if user is None or user.home_tenant_id != tenant_id:
-            raise NotFoundError("User not found")
-        from app.core.time import utc_now
-
-        if not await self.repo.set_user_status(
-            tenant_id=tenant_id,
-            user_id=target_user_id,
-            status="archived",
-            changed_at=utc_now(),
-        ):
-            raise NotFoundError("User not found")
-        await self.invalidate_user_perms(target_user_id, tenant_id)
-
-    async def update_user_profile(
-        self, *, tenant_id: UUID, target_user_id: UUID, fields: dict[str, object]
-    ) -> DirectoryUser:
-        # Visibility: only users with at least one assignment in this tenant.
-        assignments = await self.repo.list_assignments_for_user(target_user_id, tenant_id=tenant_id)
-        if not assignments:
-            raise NotFoundError("User not found in this tenant")
-        user = await self.repo.get_user(target_user_id)
-        if user is None:
-            raise NotFoundError("User not found")
-        full_name_value = fields.get("full_name", user.full_name)
-        phone_value = fields.get("phone", user.phone)
-        updated = await self.repo.update_user_profile(
-            tenant_id=tenant_id,
-            user_id=target_user_id,
-            full_name=str(full_name_value),
-            phone=None if phone_value is None else str(phone_value),
-        )
-        if updated is None:
-            raise NotFoundError("User not found")
-        return updated
-
     # -------------------------------------------------------------------------
-    # Effective permissions (authoritative DB read + legacy-key cleanup)
+    # Effective permissions
     # -------------------------------------------------------------------------
 
     async def get_effective_permissions(self, user_id: UUID, tenant_id: UUID) -> set[str]:
-        """Load permissions from the transactionally current database state."""
         return await self.repo.effective_permissions(user_id, tenant_id)
 
     async def get_authorization_snapshot(
-        self, user_id: UUID, tenant_id: UUID
+        self,
+        user_id: UUID,
+        tenant_id: UUID,
     ) -> AuthorizationSnapshot:
-        """Return rights and revision coordinates from one database snapshot."""
         return await self.repo.authorization_snapshot(user_id, tenant_id)
 
     async def invalidate_user_perms(self, user_id: UUID, tenant_id: UUID) -> None:
         if self.redis is None:
             return
         await self.redis.delete(perms_cache_key(user_id, tenant_id))
-        logger.info("perms_cache_invalidated", user_id=str(user_id), tenant_id=str(tenant_id))
+        logger.info(
+            "perms_cache_invalidated",
+            user_id=str(user_id),
+            tenant_id=str(tenant_id),
+        )
 
-    async def invalidate_users_perms(self, user_ids: list[UUID], tenant_id: UUID) -> None:
+    async def invalidate_users_perms(
+        self,
+        user_ids: list[UUID],
+        tenant_id: UUID,
+    ) -> None:
         if self.redis is None or not user_ids:
             return
         keys = [perms_cache_key(user_id, tenant_id) for user_id in set(user_ids)]
@@ -607,41 +903,9 @@ class RolesService:
         )
 
     async def invalidate_user_perms_all_tenants(self, user_id: UUID) -> None:
-        """Drop every cached entry for this user across all tenants (used at
-        logout)."""
         if self.redis is None:
             return
         pattern = f"{PERMS_CACHE_PREFIX}:{user_id}:*"
         async for key in self.redis.scan_iter(match=pattern):
             await self.redis.delete(key)
         logger.info("perms_cache_purged_for_user", user_id=str(user_id))
-
-    # -------------------------------------------------------------------------
-    # Anti-escalation helper
-    # -------------------------------------------------------------------------
-
-    @staticmethod
-    def _assert_can_assign(*, actor_level: int, target_level: int) -> None:
-        if target_level < actor_level:
-            raise BusinessRuleError(
-                "Cannot assign role of higher privilege than your own",
-                details={"actor_level": actor_level, "target_level": target_level},
-            )
-
-    @staticmethod
-    def _assert_role_belongs_to_tenant(role: Role, tenant_id: UUID) -> None:
-        if role.tenant_id is not None and role.tenant_id != tenant_id:
-            raise NotFoundError("Role not found")
-
-    @staticmethod
-    def _assert_can_define_role(*, actor_level: int, target_level: int) -> None:
-        """Defining (creating / editing) a custom role is stricter than
-        assigning one: the role must be *strictly* weaker than the actor (a
-        higher numeric level; 1 = developer … 4 = seller). Equal-or-stronger
-        would let an actor mint a role with their own — or greater — reach, so
-        it is refused with a 403."""
-        if target_level <= actor_level:
-            raise PermissionDeniedError(
-                "Cannot create or edit a role at or above your own level",
-                details={"actor_level": actor_level, "target_level": target_level},
-            )

@@ -14,7 +14,12 @@ from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
-from app.domains.roles.models import Role, UserAssignment
+from app.domains.roles.models import (
+    Role,
+    TenantMembership,
+    TenantOwnership,
+    UserAssignment,
+)
 from app.domains.roles.repository import RolesRepository
 from app.main import app
 
@@ -99,6 +104,62 @@ async def test_developer_provisions_owner(db_session: AsyncSession, client: Asyn
         app.dependency_overrides.pop(get_db, None)
 
 
+async def test_support_creates_pending_member_at_frontend_contract_path(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    async def _override() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override
+    try:
+        tenant = await _make_tenant(db_session)
+        administrator = await _make_user(db_session, is_administrator=True)
+        token = _support_token(administrator, developer=False)
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "email": "pending-member@shifo.tj",
+            "full_name": "Pending Member",
+        }
+
+        response = await client.post(
+            f"/api/v1/admin/tenants/{tenant.id}/members",
+            json=payload,
+            headers=headers,
+        )
+        legacy_path = await client.post(
+            f"/api/v1/admin/tenants/{tenant.id}/memberships",
+            json={
+                "email": "must-not-be-created@shifo.tj",
+                "full_name": "Legacy",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 201, response.text
+        assert legacy_path.status_code == 404
+        body = response.json()
+        account = await db_session.get(AppUser, body["user_id"])
+        membership = await db_session.get(
+            TenantMembership,
+            body["membership_id"],
+        )
+        assert account is not None
+        assert account.status == "invited"
+        assert account.home_tenant_id == tenant.id
+        assert membership is not None
+        assert membership.status == "pending"
+        assert membership.tenant_id == tenant.id
+        assignment_count = await db_session.scalar(
+            select(func.count())
+            .select_from(UserAssignment)
+            .where(UserAssignment.membership_id == membership.id)
+        )
+        assert assignment_count == 0
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
 async def test_owner_role_matches_template_permissions(
     db_session: AsyncSession, client: AsyncClient
 ) -> None:
@@ -138,6 +199,16 @@ async def test_non_support_actor_forbidden(db_session: AsyncSession, client: Asy
     try:
         tenant = await _make_tenant(db_session)
         seller = await _make_user(db_session)  # no flags
+        seller.home_tenant_id = tenant.id
+        db_session.add(
+            TenantMembership(
+                tenant_id=tenant.id,
+                user_id=seller.id,
+                full_name=seller.full_name,
+                status="active",
+            )
+        )
+        await db_session.flush()
         token = create_access_token(
             seller.id, tenant_id=tenant.id, is_developer=False, is_administrator=False
         )
@@ -180,7 +251,7 @@ async def test_duplicate_email_conflict(db_session: AsyncSession, client: AsyncC
         app.dependency_overrides.pop(get_db, None)
 
 
-async def test_owner_role_reused_on_second_owner(
+async def test_bootstrap_endpoint_rejects_second_active_owner(
     db_session: AsyncSession, client: AsyncClient
 ) -> None:
     async def _override() -> AsyncIterator[AsyncSession]:
@@ -202,16 +273,18 @@ async def test_owner_role_reused_on_second_owner(
             json={"email": "owner-b@shifo.tj", "full_name": "B"},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert r1.status_code == 201 and r2.status_code == 201
-        # Same role reused — no duplicate «Владелец» role row in the tenant.
-        assert r1.json()["role_id"] == r2.json()["role_id"]
-        count = (
+        assert r1.status_code == 201
+        assert r2.status_code == 409
+        ownership_count = (
             await db_session.execute(
                 select(func.count())
-                .select_from(Role)
-                .where(Role.tenant_id == tenant.id, Role.name == "Владелец")
+                .select_from(TenantOwnership)
+                .where(
+                    TenantOwnership.tenant_id == tenant.id,
+                    TenantOwnership.is_active.is_(True),
+                )
             )
         ).scalar_one()
-        assert count == 1
+        assert ownership_count == 1
     finally:
         app.dependency_overrides.pop(get_db, None)

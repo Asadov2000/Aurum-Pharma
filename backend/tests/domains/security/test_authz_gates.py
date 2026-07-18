@@ -9,10 +9,12 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.core.security import create_access_token
+from app.core.time import utc_now
 from app.domains.auth.models import AppUser
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
@@ -24,7 +26,12 @@ from app.domains.incoming.service import IncomingService
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
-from app.domains.roles.models import Role, RolePermission, UserAssignment
+from app.domains.roles.models import (
+    Role,
+    RolePermission,
+    TenantMembership,
+    UserAssignment,
+)
 from app.domains.suppliers.repository import SuppliersRepository
 from app.domains.suppliers.service import SuppliersService
 from app.main import app
@@ -75,6 +82,18 @@ async def _seed_tenant_subjects(db_session: AsyncSession) -> tuple[Tenant, AppUs
     await db_session.flush()
     await db_session.refresh(regular)
     await db_session.refresh(admin)
+    db_session.add_all(
+        [
+            TenantMembership(
+                tenant_id=tenant.id,
+                user_id=user.id,
+                full_name=user.full_name,
+                status="active",
+            )
+            for user in (regular, admin)
+        ]
+    )
+    await db_session.flush()
     return tenant, regular, admin
 
 
@@ -95,6 +114,25 @@ async def _assign_permissions(
     permission_codes: set[str],
     branch_id: UUID | None = None,
 ) -> None:
+    membership = await db_session.scalar(
+        select(TenantMembership).where(
+            TenantMembership.tenant_id == tenant_id,
+            TenantMembership.user_id == user_id,
+        )
+    )
+    if membership is None:
+        user = await db_session.get(AppUser, user_id)
+        assert user is not None
+        membership = TenantMembership(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            full_name=user.full_name,
+            status="active",
+        )
+        db_session.add(membership)
+        await db_session.flush()
+        await db_session.refresh(membership)
+
     role = Role(
         tenant_id=tenant_id,
         name=f"sec-role-{uuid4().hex[:8]}",
@@ -110,6 +148,7 @@ async def _assign_permissions(
         UserAssignment(
             user_id=user_id,
             tenant_id=tenant_id,
+            membership_id=membership.id,
             branch_id=branch_id,
             role_id=role.id,
         )
@@ -196,7 +235,13 @@ async def test_sensitive_reads_require_reports_view(
 ) -> None:
     await _override_db(db_session)
     try:
-        _tenant, regular, admin = await _seed_tenant_subjects(db_session)
+        tenant, regular, admin = await _seed_tenant_subjects(db_session)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=admin.id,
+            permission_codes={"reports.view"},
+        )
         regular_token = _token(regular)
         admin_token = _token(admin, is_administrator=True)
 
@@ -259,6 +304,7 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
                 "registers.view",
                 "pos.shift_open",
                 "pos.sell",
+                "reports.view",
                 "sales.view.tenant",
             },
         )
@@ -282,6 +328,12 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
         )
         assert other_registers_resp.status_code == 200
         assert other_registers_resp.json() == []
+
+        dashboard_resp = await client.get("/api/v1/dashboard/summary", headers=headers)
+        assert dashboard_resp.status_code == 403
+
+        billing_resp = await client.get("/api/v1/billing/invoices", headers=headers)
+        assert billing_resp.status_code == 403
 
         own_shift_resp = await client.post(
             "/api/v1/shifts/open",
@@ -424,7 +476,20 @@ async def test_tenant_reads_require_domain_permission(
 ) -> None:
     await _override_db(db_session)
     try:
-        _tenant, regular, admin = await _seed_tenant_subjects(db_session)
+        tenant, regular, admin = await _seed_tenant_subjects(db_session)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=admin.id,
+            permission_codes={
+                "branches.view",
+                "catalog.create",
+                "catalog.view",
+                "pos.shift_open",
+                "registers.view",
+                "settings.update",
+            },
+        )
         regular_token = _token(regular)
         admin_token = _token(admin, is_administrator=True)
 
@@ -508,6 +573,11 @@ async def test_cashier_cannot_view_another_cashiers_sale(
             register_id=register.id,
             cashier_user_id=cashier.id,
         )
+        sale.status = "completed"
+        sale.completed_at = utc_now()
+        sale.receipt_seq = 1
+        sale.receipt_number = f"SEC-{nick}"
+        await db_session.flush()
 
         cashier_resp = await client.get(
             f"/api/v1/sales/{sale.id}",
@@ -520,12 +590,234 @@ async def test_cashier_cannot_view_another_cashiers_sale(
             headers={"Authorization": f"Bearer {_token(peer)}"},
         )
         assert peer_resp.status_code == 403
+        peer_list = await client.get(
+            f"/api/v1/sales?cashier_id={cashier.id}",
+            headers={"Authorization": f"Bearer {_token(peer)}"},
+        )
+        assert peer_list.status_code == 200
+        assert peer_list.json()["total"] == 0
 
         manager_resp = await client.get(
             f"/api/v1/sales/{sale.id}",
             headers={"Authorization": f"Bearer {_token(manager)}"},
         )
         assert manager_resp.status_code == 200
+        manager_list = await client.get(
+            f"/api/v1/sales?cashier_id={cashier.id}",
+            headers={"Authorization": f"Bearer {_token(manager)}"},
+        )
+        assert manager_list.status_code == 200
+        assert manager_list.json()["total"] == 1
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_sales_list_keeps_each_capability_paired_with_its_branch_scope(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    await _override_db(db_session)
+    try:
+        foundation = FoundationService(FoundationRepository(db_session))
+        pos = POSService(POSRepository(db_session))
+        nick = uuid4().hex[:8]
+        tenant = await foundation.create_tenant(
+            payload={
+                "name": f"Mixed Sales Scope {nick}",
+                "contact_email": f"mixed-sales-{nick}@aurum.tj",
+            }
+        )
+        await foundation.update_tenant(tenant.id, fields={"status": "active"})
+        own_branch = await foundation.create_branch(
+            tenant_id=tenant.id,
+            fields={"name": "Own branch"},
+        )
+        team_branch = await foundation.create_branch(
+            tenant_id=tenant.id,
+            fields={"name": "Team branch"},
+        )
+        own_register = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": own_branch.id, "name": "Own register"},
+        )
+        hidden_register = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": own_branch.id, "name": "Hidden peer register"},
+        )
+        team_register = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": team_branch.id, "name": "Team register"},
+        )
+
+        viewer = AppUser(
+            email=f"mixed-viewer-{nick}@aurum.tj",
+            full_name="Mixed Viewer",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        hidden_peer = AppUser(
+            email=f"mixed-hidden-{nick}@aurum.tj",
+            full_name="Hidden Peer",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        visible_peer = AppUser(
+            email=f"mixed-visible-{nick}@aurum.tj",
+            full_name="Visible Peer",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        db_session.add_all([viewer, hidden_peer, visible_peer])
+        await db_session.flush()
+        await db_session.refresh(viewer)
+        await db_session.refresh(hidden_peer)
+        await db_session.refresh(visible_peer)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=viewer.id,
+            permission_codes={"sales.view.own"},
+            branch_id=own_branch.id,
+        )
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=viewer.id,
+            permission_codes={"sales.view.tenant"},
+            branch_id=team_branch.id,
+        )
+
+        sales = []
+        for register, cashier in (
+            (own_register, viewer),
+            (hidden_register, hidden_peer),
+            (team_register, visible_peer),
+        ):
+            await pos.open_shift(
+                tenant_id=tenant.id,
+                register_id=register.id,
+                opened_by_user_id=cashier.id,
+                opening_cash=Decimal("0"),
+            )
+            sale = await pos.create_sale(
+                tenant_id=tenant.id,
+                register_id=register.id,
+                cashier_user_id=cashier.id,
+            )
+            sale.status = "completed"
+            sale.completed_at = utc_now()
+            sale.receipt_seq = len(sales) + 1
+            sale.receipt_number = f"MIX-{nick}-{len(sales) + 1}"
+            sales.append(sale)
+        await db_session.flush()
+
+        headers = {"Authorization": f"Bearer {_token(viewer)}"}
+        combined = await client.get("/api/v1/sales", headers=headers)
+        assert combined.status_code == 200
+        assert {item["id"] for item in combined.json()["items"]} == {
+            str(sales[0].id),
+            str(sales[2].id),
+        }
+
+        hidden_filter = await client.get(
+            f"/api/v1/sales?cashier_id={hidden_peer.id}",
+            headers=headers,
+        )
+        assert hidden_filter.status_code == 200
+        assert hidden_filter.json()["total"] == 0
+
+        visible_filter = await client.get(
+            f"/api/v1/sales?cashier_id={visible_peer.id}",
+            headers=headers,
+        )
+        assert visible_filter.status_code == 200
+        assert {item["id"] for item in visible_filter.json()["items"]} == {str(sales[2].id)}
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_tenant_sales_view_does_not_expand_pos_sell_branch_scope(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    await _override_db(db_session)
+    try:
+        foundation = FoundationService(FoundationRepository(db_session))
+        pos = POSService(POSRepository(db_session))
+        nick = uuid4().hex[:8]
+        tenant = await foundation.create_tenant(
+            payload={
+                "name": f"POS Capability Scope {nick}",
+                "contact_email": f"pos-capability-{nick}@aurum.tj",
+            }
+        )
+        await foundation.update_tenant(tenant.id, fields={"status": "active"})
+        allowed_branch = await foundation.create_branch(
+            tenant_id=tenant.id,
+            fields={"name": "Allowed POS branch"},
+        )
+        denied_branch = await foundation.create_branch(
+            tenant_id=tenant.id,
+            fields={"name": "Denied POS branch"},
+        )
+        denied_register = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": denied_branch.id, "name": "Denied register"},
+        )
+        item = await _create_stocked_item(
+            db_session,
+            tenant_id=tenant.id,
+            branch_id=denied_branch.id,
+        )
+
+        cashier = AppUser(
+            email=f"scoped-cashier-{nick}@aurum.tj",
+            full_name="Scoped Cashier",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        manager = AppUser(
+            email=f"scoped-manager-{nick}@aurum.tj",
+            full_name="Scoped Manager",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        db_session.add_all([cashier, manager])
+        await db_session.flush()
+        await db_session.refresh(cashier)
+        await db_session.refresh(manager)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=manager.id,
+            permission_codes={"pos.sell"},
+            branch_id=allowed_branch.id,
+        )
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=manager.id,
+            permission_codes={"sales.view.tenant"},
+        )
+
+        await pos.open_shift(
+            tenant_id=tenant.id,
+            register_id=denied_register.id,
+            opened_by_user_id=cashier.id,
+            opening_cash=Decimal("0"),
+        )
+        draft = await pos.create_sale(
+            tenant_id=tenant.id,
+            register_id=denied_register.id,
+            cashier_user_id=cashier.id,
+        )
+
+        response = await client.post(
+            f"/api/v1/sales/{draft.id}/items",
+            headers={"Authorization": f"Bearer {_token(manager)}"},
+            json={"catalog_id": str(item.id), "qty": "1"},
+        )
+        assert response.status_code == 403
     finally:
         app.dependency_overrides.pop(get_db, None)
 

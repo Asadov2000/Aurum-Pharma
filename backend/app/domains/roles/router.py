@@ -9,8 +9,14 @@ from fastapi import APIRouter, Depends, Query, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, get_redis, require_any_permission, require_permission
-from app.core.errors import BusinessRuleError
+from app.core.deps import (
+    CurrentUser,
+    current_user,
+    get_db,
+    get_redis,
+    require_permission,
+)
+from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.roles.models import Role
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.schemas import (
@@ -47,17 +53,37 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     return user.tenant_id
 
 
-def _role_with_permissions(role: Role, codes: list[str]) -> RoleWithPermissions:
+def _role_with_permissions(
+    role: Role,
+    codes: list[str],
+    *,
+    has_hidden_permissions: bool = False,
+) -> RoleWithPermissions:
     return RoleWithPermissions(
         id=role.id,
         tenant_id=role.tenant_id,
         name=role.name,
         description=role.description,
-        level=role.level,
         is_system=role.is_system,
         is_active=role.is_active,
+        is_protected=role.is_protected,
+        protected_kind=role.protected_kind,
+        version=role.version,
         permissions=codes,
+        has_hidden_permissions=has_hidden_permissions,
     )
+
+
+async def require_role_catalog_access(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    if user.is_developer or user.is_administrator:
+        return user
+    if user.is_tenant_owner and user.permissions.intersection(
+        {"users.view", "roles.assign", "roles.create", "roles.update"}
+    ):
+        return user
+    raise PermissionDeniedError("Role catalogue access required")
 
 
 # -----------------------------------------------------------------------------
@@ -67,32 +93,40 @@ def _role_with_permissions(role: Role, codes: list[str]) -> RoleWithPermissions:
 
 @router.get("/permissions", response_model=list[PermissionRead])
 async def list_permissions(
-    _user: Annotated[
-        CurrentUser,
-        Depends(
-            require_any_permission("users.view", "roles.assign", "roles.create", "roles.update")
-        ),
-    ],
+    user: Annotated[CurrentUser, Depends(require_role_catalog_access)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> list[PermissionRead]:
-    perms = await service.list_permissions()
+    perms = await service.list_permissions(
+        actor_id=user.user_id,
+        tenant_id=_current_tenant_or_400(user),
+        actor_permissions=user.permissions,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
+    )
     return [PermissionRead.model_validate(p) for p in perms]
 
 
 @router.get("/roles", response_model=list[RoleWithPermissions])
 async def list_roles(
-    _user: Annotated[
-        CurrentUser,
-        Depends(
-            require_any_permission("users.view", "roles.assign", "roles.create", "roles.update")
-        ),
-    ],
+    user: Annotated[CurrentUser, Depends(require_role_catalog_access)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> list[RoleWithPermissions]:
-    pairs = await service.list_roles_with_permissions(tenant_id=_user.tenant_id)
+    pairs = await service.list_roles_with_permissions(
+        actor_id=user.user_id,
+        tenant_id=_current_tenant_or_400(user),
+        actor_permissions=user.permissions,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
+    )
     out: list[RoleWithPermissions] = []
-    for role, codes in pairs:
-        out.append(_role_with_permissions(role, codes))
+    for role, codes, has_hidden_permissions in pairs:
+        out.append(
+            _role_with_permissions(
+                role,
+                codes,
+                has_hidden_permissions=has_hidden_permissions,
+            )
+        )
     return out
 
 
@@ -103,14 +137,13 @@ async def create_role(
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleWithPermissions:
     role, codes = await service.create_role(
-        actor_level=user.level,
         actor_id=user.user_id,
         actor_permissions=user.permissions,
-        actor_is_support=user.is_developer or user.is_administrator,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
         tenant_id=_current_tenant_or_400(user),
         name=payload.name,
         description=payload.description,
-        level=payload.level,
         permission_codes=payload.permissions,
     )
     return _role_with_permissions(role, codes)
@@ -124,15 +157,15 @@ async def update_role(
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleWithPermissions:
     role, codes = await service.update_role(
-        actor_level=user.level,
         actor_id=user.user_id,
         actor_permissions=user.permissions,
-        actor_is_support=user.is_developer or user.is_administrator,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
         tenant_id=_current_tenant_or_400(user),
         role_id=role_id,
+        expected_version=payload.expected_version,
         name=payload.name,
         description=payload.description,
-        level=payload.level,
         permission_codes=payload.permissions,
     )
     return _role_with_permissions(role, codes)
@@ -140,13 +173,19 @@ async def update_role(
 
 @router.get("/templates", response_model=list[TemplateWithPermissions])
 async def list_templates(
-    _user: Annotated[CurrentUser, Depends(require_permission("roles.create"))],
+    user: Annotated[CurrentUser, Depends(require_role_catalog_access)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> list[TemplateWithPermissions]:
     """Global role presets for the builder — same gate as creating a role.
     A template only pre-fills the form; anti-escalation still applies on
     POST /roles, so a preset can never grant reach the actor lacks."""
-    pairs = await service.list_templates_with_permissions()
+    pairs = await service.list_templates_with_permissions(
+        actor_id=user.user_id,
+        tenant_id=_current_tenant_or_400(user),
+        actor_permissions=user.permissions,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
+    )
     return [
         TemplateWithPermissions(
             id=template.id,
@@ -175,15 +214,31 @@ async def list_users(
 ) -> UserListResponse:
     tenant_id = _current_tenant_or_400(user)
     pairs, total = await service.list_users(tenant_id, page=page, page_size=page_size)
+    roles_by_id = await service.repo.roles_by_ids(
+        [assignment.role_id for _member, assignments in pairs for assignment in assignments]
+    )
     items = [
         UserWithAssignments(
             id=u.id,
+            membership_id=u.membership_id,
+            is_tenant_owner=u.is_tenant_owner,
             email=u.email,
             full_name=u.full_name,
             phone=u.phone,
             status=u.status,
             last_login_at=u.last_login_at,
-            assignments=[AssignmentRead.model_validate(a) for a in assignments],
+            assignments=[
+                AssignmentRead.model_validate(assignment).model_copy(
+                    update={
+                        "role_name": (
+                            roles_by_id[assignment.role_id].name
+                            if assignment.role_id in roles_by_id
+                            else None
+                        )
+                    }
+                )
+                for assignment in assignments
+            ],
         )
         for u, assignments in pairs
     ]
@@ -201,8 +256,11 @@ async def invite_user(
     service: Annotated[RolesService, Depends(_service)],
 ) -> AssignmentRead:
     _, assignment, _ = await service.invite_user(
-        actor_level=user.level,
         actor_id=user.user_id,
+        actor_permissions=user.permissions,
+        actor_permission_scopes=user.permission_scopes,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
         tenant_id=_current_tenant_or_400(user),
         email=str(payload.email),
         full_name=payload.full_name,
@@ -220,9 +278,16 @@ async def update_user(
     user: Annotated[CurrentUser, Depends(require_permission("users.update"))],
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, object]:
-    fields = payload.model_dump(exclude_none=True)
+    fields = payload.model_dump(exclude_none=True, exclude={"status"})
+    tenant_id = _current_tenant_or_400(user)
+    if payload.status == "active":
+        await service.activate_membership(
+            actor_id=user.user_id,
+            tenant_id=tenant_id,
+            target_user_id=user_id,
+        )
     updated = await service.update_user_profile(
-        tenant_id=_current_tenant_or_400(user),
+        tenant_id=tenant_id,
         target_user_id=user_id,
         fields=fields,
     )
@@ -236,12 +301,12 @@ async def block_user(
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, str]:
     await service.block_user(
-        actor_level=user.level,
         actor_id=user.user_id,
+        actor_is_developer=user.is_developer,
         tenant_id=_current_tenant_or_400(user),
         target_user_id=user_id,
     )
-    return {"status": "blocked"}
+    return {"status": "suspended"}
 
 
 @router.delete("/users/{user_id}")
@@ -251,12 +316,12 @@ async def soft_delete_user(
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, str]:
     await service.soft_delete_user(
-        actor_level=user.level,
         actor_id=user.user_id,
+        actor_is_developer=user.is_developer,
         tenant_id=_current_tenant_or_400(user),
         target_user_id=user_id,
     )
-    return {"status": "archived"}
+    return {"status": "offboarded"}
 
 
 # -----------------------------------------------------------------------------
@@ -276,8 +341,11 @@ async def create_assignment(
     service: Annotated[RolesService, Depends(_service)],
 ) -> AssignmentRead:
     assignment = await service.assign_role(
-        actor_level=user.level,
         actor_id=user.user_id,
+        actor_permissions=user.permissions,
+        actor_permission_scopes=user.permission_scopes,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
         tenant_id=_current_tenant_or_400(user),
         target_user_id=user_id,
         role_id=payload.role_id,
@@ -295,7 +363,11 @@ async def revoke_assignment(
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, str]:
     await service.revoke_assignment(
-        actor_level=user.level,
+        actor_id=user.user_id,
+        actor_permissions=user.permissions,
+        actor_permission_scopes=user.permission_scopes,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
         tenant_id=_current_tenant_or_400(user),
         target_user_id=user_id,
         assignment_id=assignment_id,

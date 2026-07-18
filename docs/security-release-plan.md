@@ -40,11 +40,25 @@
 
 ### P0: identity и authorization
 
+- [ ] Реализовать ADR-0007: отделить глобальный account от tenant membership,
+      защищённого ownership и обычных рабочих ролей.
+- [ ] Убрать общий bypass permissions для Aurum Administrator; Developer-only,
+      platform, tenant и branch capabilities проверяются раздельно.
+- [ ] Запретить tenant-пользователю создавать или прикреплять глобальный account;
+      владелец назначает роли только заранее созданным membership своего tenant.
+- [ ] Конструктор получает с сервера только delegable capabilities текущего
+      пользователя и scope; шаблон и прямой API-запрос не обходят этот каталог.
+- [ ] Запретить self-assignment, изменение собственной границы полномочий,
+      назначение protected-ролей и удаление последнего владельца.
 - [ ] TOTP для support-уровней 1–2, защищённое восстановление и аудит recovery.
 - [ ] Session inventory, принудительный logout, rotation/revocation и уведомление
       о подозрительном входе.
 - [ ] Проверить branch-scoped permissions во всех доменах, не только в roles;
       permission должен действовать только в филиале, где выдана роль.
+- [ ] Изменения membership, ownership, role capabilities, assignments и support
+      sessions записываются в неизменяемый аудит с точным before/after diff.
+- [ ] Доступ support к tenant выполняется только через короткую support session
+      с причиной, явным scope и step-up MFA.
 - [ ] Trusted-proxy allowlist для client IP; не принимать произвольный
       `X-Forwarded-For`.
 
@@ -74,12 +88,14 @@
 
 ## Порядок следующей разработки
 
-1. TOTP и защищённый поток восстановления support-аккаунта.
-2. Отдельный production compose/reverse-proxy профиль и секреты.
-3. Backup/restore job с одноразовой проверкой восстановления.
-4. DB-инварианты POS и полный refund/void sync-контур.
-5. mTLS/device identity, зашифрованная локальная БД и trusted time для Edge.
-6. Подписанный Windows-дистрибутив и безопасное обновление.
+1. Scoped authorization, account/membership/ownership и безопасный конструктор
+   из ADR-0007.
+2. TOTP, support sessions и защищённый поток восстановления support-аккаунта.
+3. Отдельный production compose/reverse-proxy профиль и секреты.
+4. Backup/restore job с одноразовой проверкой восстановления.
+5. DB-инварианты POS и полный refund/void sync-контур.
+6. mTLS/device identity, зашифрованная локальная БД и trusted time для Edge.
+7. Подписанный Windows-дистрибутив и безопасное обновление.
 
 До завершения этих пунктов локальный `docker-compose.yml` является только demo
 окружением. Его опубликованные порты, dev-серверы и тестовые секреты нельзя

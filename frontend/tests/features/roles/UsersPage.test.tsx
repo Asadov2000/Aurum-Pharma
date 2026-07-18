@@ -69,6 +69,7 @@ const MANAGED_ROLE = {
   is_active: true,
   version: 1,
   permissions: ["pos.sell"],
+  has_hidden_permissions: false,
 };
 
 const SYSTEM_ROLE = {
@@ -81,17 +82,10 @@ const SYSTEM_ROLE = {
   protected_kind: "administrator",
 };
 
-const OWNER_ROLE = {
-  ...MANAGED_ROLE,
-  id: "role-owner",
-  name: "Владелец",
-  is_protected: true,
-  protected_kind: "tenant_owner",
-};
-
 const USER_ACTIVE = {
   id: "member-1",
   membership_id: "membership-1",
+  is_tenant_owner: false,
   email: "user@aurum.tj",
   full_name: "Иван Сотрудник",
   phone: null,
@@ -105,6 +99,7 @@ const USER_ACTIVE = {
       membership_id: "membership-1",
       branch_id: null,
       role_id: MANAGED_ROLE.id,
+      role_name: MANAGED_ROLE.name,
       password_required: false,
       is_active: true,
     },
@@ -123,6 +118,7 @@ describe("UsersPage", () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["users.view"],
     };
     listUsers.mockReset();
@@ -132,7 +128,7 @@ describe("UsersPage", () => {
     offboardUser.mockReset();
     createAssignment.mockReset();
     listBranches.mockReset();
-    listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE, OWNER_ROLE]);
+    listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE]);
     listBranches.mockResolvedValue([]);
     updateUser.mockResolvedValue({});
     suspendUser.mockResolvedValue(undefined);
@@ -151,13 +147,14 @@ describe("UsersPage", () => {
     expect(screen.queryByText(/Создать аккаунт/i)).not.toBeInTheDocument();
   });
 
-  it("renders assignment names from the role registry", async () => {
+  it("renders server-provided assignment names without opening the role builder", async () => {
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
 
     expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
     expect(await screen.findByText("Кассир")).toBeInTheDocument();
     expect(screen.queryByText(MANAGED_ROLE.id)).not.toBeInTheDocument();
+    expect(listRoles).not.toHaveBeenCalled();
   });
 
   it("does not derive update, suspend, offboard or assignment actions from users.view", async () => {
@@ -175,6 +172,7 @@ describe("UsersPage", () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["users.view", "users.update", "roles.assign"],
     };
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
@@ -190,6 +188,7 @@ describe("UsersPage", () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["users.view", "users.update"],
     };
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
@@ -215,6 +214,7 @@ describe("UsersPage", () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["users.view", "users.update"],
     };
     listUsers.mockResolvedValue(
@@ -232,6 +232,7 @@ describe("UsersPage", () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["users.view", "roles.assign"],
     };
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
@@ -257,22 +258,18 @@ describe("UsersPage", () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["users.view", "users.update", "users.block", "users.delete", "roles.assign"],
     };
     listUsers.mockResolvedValue(
       usersResponse([
         {
           ...USER_ACTIVE,
-          assignments: [
-            {
-              ...USER_ACTIVE.assignments[0],
-              id: "assignment-owner",
-              role_id: OWNER_ROLE.id,
-            },
-          ],
+          is_tenant_owner: true,
         },
       ]),
     );
+    listRoles.mockResolvedValue([MANAGED_ROLE]);
     renderPage();
 
     expect(await screen.findByText("владелец")).toBeInTheDocument();
@@ -286,6 +283,7 @@ describe("UsersPage", () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["users.view", "users.block"],
     };
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
@@ -301,6 +299,7 @@ describe("UsersPage", () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
       permissions: ["users.view", "users.delete"],
     };
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));

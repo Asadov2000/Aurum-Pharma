@@ -73,6 +73,8 @@ class OwnerCreate(BaseModel):
 
 class OwnerProvisionRead(BaseModel):
     user_id: UUID
+    membership_id: UUID
+    ownership_id: UUID
     email: str
     home_tenant_id: UUID
     role_id: UUID

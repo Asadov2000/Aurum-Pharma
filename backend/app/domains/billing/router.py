@@ -13,7 +13,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, current_user, get_db, require_permission
+from app.core.deps import (
+    CurrentUser,
+    current_user,
+    get_db,
+    require_tenant_permission,
+)
 from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.billing.repository import BillingRepository
 from app.domains.billing.schemas import (
@@ -69,7 +74,10 @@ async def list_plans(
 @tenant_router.get("/subscription", response_model=SubscriptionWithPlan | None)
 async def current_subscription(
     # reports.view (owner/admin/dev): billing/financial data, off the seller's screen.
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_tenant_permission("reports.view")),
+    ],
     service: Annotated[BillingService, Depends(_service)],
 ) -> SubscriptionWithPlan | None:
     row = await service.get_active_subscription(_current_tenant_or_400(user))
@@ -80,7 +88,10 @@ async def current_subscription(
 
 @tenant_router.get("/invoices", response_model=list[InvoiceRead])
 async def list_invoices(
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_tenant_permission("reports.view")),
+    ],
     service: Annotated[BillingService, Depends(_service)],
 ) -> list[InvoiceRead]:
     invoices = await service.list_invoices(_current_tenant_or_400(user))
@@ -90,7 +101,10 @@ async def list_invoices(
 @tenant_router.get("/invoices/{invoice_id}", response_model=InvoiceWithPayments)
 async def get_invoice(
     invoice_id: UUID,
-    _user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    _user: Annotated[
+        CurrentUser,
+        Depends(require_tenant_permission("reports.view")),
+    ],
     service: Annotated[BillingService, Depends(_service)],
 ) -> InvoiceWithPayments:
     inv, payments = await service.get_invoice_with_payments(invoice_id)

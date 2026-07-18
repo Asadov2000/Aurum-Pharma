@@ -1,5 +1,4 @@
-"""Custom-role builder: create_role / update_role with anti-escalation,
-permission-subset and system-role protections."""
+"""Delegation-envelope and protected-role tests for the tenant role builder."""
 
 from __future__ import annotations
 
@@ -7,314 +6,339 @@ from collections.abc import AsyncIterator
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
-from app.core.errors import ConflictError, PermissionDeniedError, ValidationError
+from app.core.errors import PermissionDeniedError, ValidationError
 from app.core.security import create_access_token
-from app.domains.roles.models import UserAssignment
+from app.domains.audit.models import AuditLog
+from app.domains.roles.models import Role, RolePermission
 from app.domains.roles.repository import RolesRepository
-from app.domains.roles.service import RolesService
+from app.domains.roles.service import CUSTOM_ROLE_LEGACY_LEVEL, RolesService
 from app.main import app
 
+PROTECTED_GOVERNANCE_CODES = {
+    "roles.assign",
+    "roles.create",
+    "roles.update",
+    "users.block",
+    "users.delete",
+    "users.invite",
+    "users.update",
+}
 
-async def test_owner_creates_tenant_role_from_subset(
-    db_session: AsyncSession, make_tenant, make_user
+
+async def _owner_permissions(repo: RolesRepository, owner_role: Role) -> set[str]:
+    return set(await repo.get_role_permissions(owner_role.id))
+
+
+async def test_owner_creates_role_from_strict_delegable_subset_and_audits_diff(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="owner-rb@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    repo = RolesRepository(db_session)
+    service = RolesService(repo)
 
     role, codes = await service.create_role(
-        actor_level=3,  # owner
-        actor_id=actor.id,
-        actor_permissions={"pos.sell", "catalog.view"},
-        actor_is_support=False,
+        actor_id=owner.id,
+        actor_permissions=await _owner_permissions(repo, owner_role),
+        actor_is_developer=False,
+        actor_is_administrator=False,
         tenant_id=tenant.id,
         name="Стажёр",
         description="Помощник кассира",
-        level=4,  # strictly weaker than owner (3)
-        permission_codes=["pos.sell"],
+        permission_codes=["pos.sell", "catalog.view"],
     )
 
-    assert role.tenant_id == tenant.id
-    assert role.is_system is False
-    assert role.level == 4
-    assert role.name == "Стажёр"
-    assert codes == ["pos.sell"]
-    assert await service.repo.get_role_permissions(role.id) == ["pos.sell"]
+    assert role.level == CUSTOM_ROLE_LEGACY_LEVEL
+    assert role.version == 1
+    assert role.is_protected is False
+    assert codes == ["catalog.view", "pos.sell"]
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "ROLE_PERMISSIONS_CHANGED",
+                AuditLog.record_id == role.id,
+            )
+        )
+    ).scalar_one()
+    assert audit.metadata_json is not None
+    assert audit.metadata_json["before_permissions"] == []
+    assert audit.metadata_json["after_permissions"] == codes
+    assert "email" not in audit.metadata_json
 
 
-async def test_create_role_at_or_above_own_level_denied(
-    db_session: AsyncSession, make_tenant, make_user
+async def test_owner_can_use_full_visible_catalog_without_protected_governance(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="owner-esc@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
-
-    # Equal level (owner -> owner) is refused — not strictly weaker.
-    with pytest.raises(PermissionDeniedError):
-        await service.create_role(
-            actor_level=3,
-            actor_id=actor.id,
-            actor_permissions={"pos.sell"},
-            actor_is_support=False,
-            tenant_id=tenant.id,
-            name="Равный",
-            description=None,
-            level=3,
-            permission_codes=[],
-        )
-
-    # Stronger level (owner -> administrator) is refused too.
-    with pytest.raises(PermissionDeniedError):
-        await service.create_role(
-            actor_level=3,
-            actor_id=actor.id,
-            actor_permissions={"pos.sell"},
-            actor_is_support=False,
-            tenant_id=tenant.id,
-            name="Сильнее",
-            description=None,
-            level=2,
-            permission_codes=[],
-        )
-
-
-async def test_create_role_with_foreign_permission_denied(
-    db_session: AsyncSession, make_tenant, make_user
-) -> None:
-    tenant = await make_tenant()
-    actor = await make_user(email="owner-foreign@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
-
-    # Actor holds only pos.sell but tries to mint a role with catalog.delete.
-    with pytest.raises(PermissionDeniedError):
-        await service.create_role(
-            actor_level=3,
-            actor_id=actor.id,
-            actor_permissions={"pos.sell"},
-            actor_is_support=False,
-            tenant_id=tenant.id,
-            name="Слишком много",
-            description=None,
-            level=4,
-            permission_codes=["catalog.delete"],
-        )
-
-
-async def test_create_role_permission_must_fit_target_level(
-    db_session: AsyncSession, make_tenant, make_user
-) -> None:
-    tenant = await make_tenant()
-    actor = await make_user(email="owner-level-perm@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
-
-    with pytest.raises(PermissionDeniedError):
-        await service.create_role(
-            actor_level=3,
-            actor_id=actor.id,
-            actor_permissions={"pos.sell", "users.invite"},
-            actor_is_support=False,
-            tenant_id=tenant.id,
-            name="Кассир с правами владельца",
-            description=None,
-            level=4,
-            permission_codes=["pos.sell", "users.invite"],
-        )
-
-
-async def test_create_role_unknown_permission_rejected(
-    db_session: AsyncSession, make_tenant, make_user
-) -> None:
-    tenant = await make_tenant()
-    actor = await make_user(email="owner-unknown@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
-
-    with pytest.raises(ValidationError):
-        await service.create_role(
-            actor_level=3,
-            actor_id=actor.id,
-            actor_permissions={"pos.sell"},
-            actor_is_support=False,
-            tenant_id=tenant.id,
-            name="Битый код",
-            description=None,
-            level=4,
-            permission_codes=["totally.bogus"],
-        )
-
-
-async def test_duplicate_role_name_conflicts(
-    db_session: AsyncSession, make_tenant, make_user
-) -> None:
-    tenant = await make_tenant()
-    actor = await make_user(email="owner-dup@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
-
-    await service.create_role(
-        actor_level=3,
-        actor_id=actor.id,
-        actor_permissions={"pos.sell"},
-        actor_is_support=False,
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    repo = RolesRepository(db_session)
+    service = RolesService(repo)
+    owner_permissions = await _owner_permissions(repo, owner_role)
+    catalog = await service.list_permissions(
+        actor_id=owner.id,
         tenant_id=tenant.id,
-        name="Кассир-стажёр",
-        description=None,
-        level=4,
-        permission_codes=["pos.sell"],
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
     )
-    with pytest.raises(ConflictError):
-        await service.create_role(
-            actor_level=3,
-            actor_id=actor.id,
-            actor_permissions={"pos.sell"},
-            actor_is_support=False,
-            tenant_id=tenant.id,
-            name="Кассир-стажёр",  # same name in the same tenant
-            description=None,
-            level=4,
-            permission_codes=["pos.sell"],
-        )
+
+    visible_codes = {permission.code for permission in catalog}
+    role, codes = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        name="Полный бизнес-доступ",
+        description=None,
+        permission_codes=sorted(visible_codes),
+    )
+
+    assert role.is_protected is False
+    assert set(codes) == visible_codes
+    assert visible_codes.isdisjoint(PROTECTED_GOVERNANCE_CODES)
 
 
-async def test_update_system_role_forbidden(
-    db_session: AsyncSession, make_tenant, system_roles, make_user
+async def test_owner_cannot_grant_global_protected_or_unknown_permission(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="dev-sys@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    repo = RolesRepository(db_session)
+    service = RolesService(repo)
+    owner_permissions = await _owner_permissions(repo, owner_role)
 
-    # Even a developer (level 1, support) cannot edit a seeded system role here
-    # (administrator remains a system role after the owner/seller demotion).
-    with pytest.raises(PermissionDeniedError):
-        await service.update_role(
-            actor_level=1,
-            actor_id=actor.id,
-            actor_permissions=set(),
-            actor_is_support=True,
+    with pytest.raises(PermissionDeniedError) as global_error:
+        await service.create_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_is_developer=False,
+            actor_is_administrator=False,
             tenant_id=tenant.id,
-            role_id=system_roles["administrator"].id,
-            name="Взлом",
+            name="Глобальный аудит",
             description=None,
-            level=None,
+            permission_codes=["audit.view.global"],
+        )
+    assert global_error.value.details == {"permissions": ["audit.view.global"]}
+
+    with pytest.raises(PermissionDeniedError) as governance_error:
+        await service.create_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            name="Управление ролями",
+            description=None,
+            permission_codes=["roles.assign"],
+        )
+    assert governance_error.value.details == {"permissions": ["roles.assign"]}
+
+    with pytest.raises(ValidationError) as unknown_error:
+        await service.create_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            name="Неизвестное право",
+            description=None,
+            permission_codes=["missing.permission"],
+        )
+    assert unknown_error.value.details == {"permissions": ["missing.permission"]}
+
+
+async def test_protected_owner_role_cannot_be_edited(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    repo = RolesRepository(db_session)
+
+    with pytest.raises(PermissionDeniedError, match="Protected"):
+        await RolesService(repo).update_role(
+            actor_id=owner.id,
+            actor_permissions=await _owner_permissions(repo, owner_role),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            role_id=owner_role.id,
+            expected_version=owner_role.version,
+            name="Новый владелец",
+            description=None,
             permission_codes=None,
         )
 
 
-async def test_update_tenant_role_changes_name_and_permissions(
-    db_session: AsyncSession, make_tenant, make_user
+async def test_actor_cannot_edit_role_assigned_to_self(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="owner-upd@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
-    perms = {"pos.sell", "catalog.view", "catalog.update"}
-
-    role, _ = await service.create_role(
-        actor_level=3,
-        actor_id=actor.id,
-        actor_permissions=perms,
-        actor_is_support=False,
+    owner, membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    custom_role = Role(
         tenant_id=tenant.id,
-        name="Стажёр",
+        name="Дополнительная роль владельца",
+        level=CUSTOM_ROLE_LEGACY_LEVEL,
+    )
+    db_session.add(custom_role)
+    await db_session.flush()
+    await db_session.refresh(custom_role)
+    owner_assignment = (
+        await RolesRepository(db_session).list_assignments_for_user(
+            owner.id,
+            tenant_id=tenant.id,
+        )
+    )[0]
+    owner_assignment.role_id = custom_role.id
+    await db_session.flush()
+    repo = RolesRepository(db_session)
+
+    with pytest.raises(PermissionDeniedError, match="own active role"):
+        await RolesService(repo).update_role(
+            actor_id=owner.id,
+            actor_permissions=await _owner_permissions(repo, owner_role),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            role_id=custom_role.id,
+            expected_version=custom_role.version,
+            name=None,
+            description="Changed",
+            permission_codes=[],
+        )
+
+
+async def test_role_update_increments_version_and_records_before_after(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    repo = RolesRepository(db_session)
+    service = RolesService(repo)
+    owner_permissions = await _owner_permissions(repo, owner_role)
+    role, _ = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        name="Кассир-стажёр",
         description=None,
-        level=4,
         permission_codes=["pos.sell"],
     )
 
     updated, codes = await service.update_role(
-        actor_level=3,
-        actor_id=actor.id,
-        actor_permissions=perms,
-        actor_is_support=False,
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
         tenant_id=tenant.id,
         role_id=role.id,
-        name="Старший кассир",
-        description="Обновлено",
-        level=None,
-        permission_codes=["pos.sell", "catalog.view"],
+        expected_version=role.version,
+        name=None,
+        description=None,
+        permission_codes=["catalog.view"],
     )
 
-    assert updated.id == role.id
-    assert updated.name == "Старший кассир"
-    assert updated.description == "Обновлено"
-    assert sorted(codes) == ["catalog.view", "pos.sell"]
+    assert updated.version == 2
+    assert codes == ["catalog.view"]
+    events = list(
+        (
+            await db_session.execute(
+                select(AuditLog)
+                .where(
+                    AuditLog.action == "ROLE_PERMISSIONS_CHANGED",
+                    AuditLog.record_id == role.id,
+                )
+                .order_by(AuditLog.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    update_event = next(
+        event
+        for event in events
+        if event.metadata_json is not None and event.metadata_json.get("role_version") == 2
+    )
+    assert update_event.metadata_json == {
+        "role_id": str(role.id),
+        "role_version": 2,
+        "before_permissions": ["pos.sell"],
+        "after_permissions": ["catalog.view"],
+    }
 
 
-async def test_update_role_permission_must_fit_target_level(
-    db_session: AsyncSession, make_tenant, make_user
+async def test_role_with_hidden_capability_cannot_be_modified_by_forged_request(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="owner-upd-level@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
-    perms = {"pos.sell", "users.invite"}
-
-    role, _ = await service.create_role(
-        actor_level=3,
-        actor_id=actor.id,
-        actor_permissions=perms,
-        actor_is_support=False,
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    repo = RolesRepository(db_session)
+    service = RolesService(repo)
+    owner_permissions = await _owner_permissions(repo, owner_role)
+    role, _codes = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
         tenant_id=tenant.id,
-        name="Кассир",
+        name="Legacy protected mix",
         description=None,
-        level=4,
         permission_codes=["pos.sell"],
     )
-
-    with pytest.raises(PermissionDeniedError):
-        await service.update_role(
-            actor_level=3,
-            actor_id=actor.id,
-            actor_permissions=perms,
-            actor_is_support=False,
-            tenant_id=tenant.id,
+    db_session.add(
+        RolePermission(
             role_id=role.id,
-            name=None,
-            description=None,
-            level=None,
-            permission_codes=["pos.sell", "users.invite"],
+            permission_code="audit.view.global",
         )
-
-
-async def test_update_role_level_requires_existing_permissions_to_fit(
-    db_session: AsyncSession, make_tenant, make_user
-) -> None:
-    tenant = await make_tenant()
-    actor = await make_user(email="dev-lower-level@aurum.tj", home_tenant_id=tenant.id)
-    service = RolesService(RolesRepository(db_session))
-
-    role, _ = await service.create_role(
-        actor_level=1,
-        actor_id=actor.id,
-        actor_permissions=set(),
-        actor_is_support=True,
-        tenant_id=tenant.id,
-        name="Менеджер",
-        description=None,
-        level=3,
-        permission_codes=["users.invite"],
     )
+    await db_session.flush()
 
-    with pytest.raises(PermissionDeniedError):
+    with pytest.raises(
+        PermissionDeniedError,
+        match="outside the delegation envelope",
+    ):
         await service.update_role(
-            actor_level=1,
-            actor_id=actor.id,
-            actor_permissions=set(),
-            actor_is_support=True,
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_is_developer=False,
+            actor_is_administrator=False,
             tenant_id=tenant.id,
             role_id=role.id,
+            expected_version=role.version,
             name=None,
-            description=None,
-            level=4,
-            permission_codes=None,
+            description="Forged update",
+            permission_codes=["pos.sell"],
         )
 
+    assert role.description is None
 
-async def test_role_create_endpoint_enforces_permission_level(
+
+async def test_public_role_contract_rejects_numeric_level(
     db_session: AsyncSession,
     client: AsyncClient,
     make_tenant,
-    make_tenant_role,
-    make_user,
+    make_owner,
 ) -> None:
     async def _override() -> AsyncIterator[AsyncSession]:
         yield db_session
@@ -322,59 +346,121 @@ async def test_role_create_endpoint_enforces_permission_level(
     app.dependency_overrides[get_db] = _override
     try:
         tenant = await make_tenant()
-        owner = await make_user(email="owner-http-rb@aurum.tj", home_tenant_id=tenant.id)
-        owner_role = await make_tenant_role(tenant_id=tenant.id, template_name="Владелец", level=3)
-        db_session.add(
-            UserAssignment(
-                user_id=owner.id,
-                tenant_id=tenant.id,
-                role_id=owner_role.id,
-                is_active=True,
-            )
-        )
-        await db_session.flush()
-
+        owner, _membership, _ownership, _owner_role = await make_owner(tenant_id=tenant.id)
         token = create_access_token(
             owner.id,
             tenant_id=tenant.id,
             is_developer=False,
             is_administrator=False,
         )
-        resp = await client.post(
+
+        response = await client.post(
             "/api/v1/roles",
             headers={"Authorization": f"Bearer {token}"},
             json={
-                "name": "Кассир с invite",
+                "name": "Legacy level",
                 "level": 4,
-                "permissions": ["pos.sell", "users.invite"],
+                "permissions": ["pos.sell"],
             },
         )
-        assert resp.status_code == 403
-        assert resp.json()["error"]["details"]["permissions"] == ["users.invite"]
+
+        assert response.status_code == 422
     finally:
         app.dependency_overrides.pop(get_db, None)
 
 
-async def test_support_bypasses_subset_and_creates_below_self(
-    db_session: AsyncSession, make_tenant, make_user
+async def test_role_update_rejects_stale_expected_version_with_409(
+    db_session: AsyncSession,
+    client: AsyncClient,
+    make_tenant,
+    make_owner,
+) -> None:
+    async def _override() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override
+    try:
+        tenant = await make_tenant()
+        owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+        repo = RolesRepository(db_session)
+        role, _codes = await RolesService(repo).create_role(
+            actor_id=owner.id,
+            actor_permissions=await _owner_permissions(repo, owner_role),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            name="Optimistic role",
+            description=None,
+            permission_codes=["pos.sell"],
+        )
+        token = create_access_token(
+            owner.id,
+            tenant_id=tenant.id,
+            is_developer=False,
+            is_administrator=False,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        initial_version = role.version
+
+        first = await client.patch(
+            f"/api/v1/roles/{role.id}",
+            headers=headers,
+            json={"expected_version": initial_version, "description": "first"},
+        )
+        stale = await client.patch(
+            f"/api/v1/roles/{role.id}",
+            headers=headers,
+            json={"expected_version": initial_version, "description": "stale"},
+        )
+
+        assert first.status_code == 200
+        assert first.json()["version"] == 2
+        assert stale.status_code == 409
+        assert stale.json()["error"] == {
+            "code": "conflict",
+            "message": "Role version is stale",
+            "details": {
+                "expected_version": 1,
+                "current_version": 2,
+            },
+        }
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_developer_can_create_tenant_role_but_not_platform_grant(
+    db_session: AsyncSession,
+    make_tenant,
+    make_user,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="dev-build@aurum.tj", home_tenant_id=tenant.id)
+    developer = await make_user(
+        email="developer-builder@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
     service = RolesService(RolesRepository(db_session))
 
-    # Developer (level 1, support) holds no resolved permissions but may still
-    # grant any existing code, and may create a level-2 role (weaker than 1).
     role, codes = await service.create_role(
-        actor_level=1,
-        actor_id=actor.id,
+        actor_id=developer.id,
         actor_permissions=set(),
-        actor_is_support=True,
+        actor_is_developer=True,
+        actor_is_administrator=False,
         tenant_id=tenant.id,
-        name="Менеджер сети",
+        name="Менеджер",
         description=None,
-        level=2,
-        permission_codes=["catalog.delete"],
+        permission_codes=["tenant.export.full"],
     )
+    assert role.tenant_id == tenant.id
+    assert codes == ["tenant.export.full"]
 
-    assert role.level == 2
-    assert codes == ["catalog.delete"]
+    with pytest.raises(PermissionDeniedError):
+        await service.create_role(
+            actor_id=developer.id,
+            actor_permissions=set(),
+            actor_is_developer=True,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            name="Platform role",
+            description=None,
+            permission_codes=["audit.view.global"],
+        )

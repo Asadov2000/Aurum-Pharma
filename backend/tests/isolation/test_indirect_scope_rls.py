@@ -28,7 +28,11 @@ from app.domains.notifications.service import NotificationsService
 @pytest_asyncio.fixture
 async def support_engine_iso() -> AsyncIterator[AsyncEngine]:
     settings = get_settings()
-    engine = create_async_engine(settings.DATABASE_URL_SUPPORT, poolclass=NullPool)
+    engine = create_async_engine(
+        settings.DATABASE_URL_SUPPORT,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"app.support_session": "true"}},
+    )
     try:
         yield engine
     finally:
@@ -241,6 +245,21 @@ async def indirect_scope_rows(
                 ).scalar_one()
                 notification_ids.append(str(notification_id))
 
+            writable_role_id = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO role "
+                        "(tenant_id, name, level, is_system) "
+                        "VALUES (:tenant_id, :name, 4, false) RETURNING id"
+                    ),
+                    {
+                        "tenant_id": tenant_ids[0],
+                        "name": f"RLS writable role-{token}",
+                    },
+                )
+            ).scalar_one()
+            role_ids.append(str(writable_role_id))
+
             recipient_user_id = (
                 await conn.execute(
                     text(
@@ -256,7 +275,7 @@ async def indirect_scope_rows(
                 )
             ).scalar_one()
             user_ids.append(str(recipient_user_id))
-            unassigned_user_id = (
+            membership_only_user_id = (
                 await conn.execute(
                     text(
                         "INSERT INTO app_user "
@@ -264,13 +283,13 @@ async def indirect_scope_rows(
                         "VALUES (:email, :full_name, :tenant_id) RETURNING id"
                     ),
                     {
-                        "email": f"rls-unassigned-{token}@example.invalid",
-                        "full_name": "RLS unassigned",
+                        "email": f"rls-member-{token}@example.invalid",
+                        "full_name": "RLS membership only",
                         "tenant_id": tenant_ids[0],
                     },
                 )
             ).scalar_one()
-            user_ids.append(str(unassigned_user_id))
+            user_ids.append(str(membership_only_user_id))
             recipient_notification_id = (
                 await conn.execute(
                     text(
@@ -302,8 +321,36 @@ async def indirect_scope_rows(
             ]
             assert len(permission_codes) == 2
 
-            assignment_scopes = ((0, 0), (1, 1), (2, 0))
-            for user_index, tenant_index in assignment_scopes:
+            membership_scopes = ((0, 0), (1, 1), (2, 0), (3, 0))
+            for user_index, tenant_index in membership_scopes:
+                await conn.execute(
+                    text(
+                        "INSERT INTO tenant_membership "
+                        "(tenant_id, user_id, full_name, status) "
+                        "SELECT :tenant_id, id, full_name, 'active' "
+                        "FROM app_user WHERE id = :user_id"
+                    ),
+                    {
+                        "tenant_id": tenant_ids[tenant_index],
+                        "user_id": user_ids[user_index],
+                    },
+                )
+
+            for owner_index, tenant_index in ((0, 0), (1, 1)):
+                await conn.execute(
+                    text(
+                        "INSERT INTO tenant_ownership (tenant_id, membership_id) "
+                        "SELECT :tenant_id, id FROM tenant_membership "
+                        "WHERE tenant_id = :tenant_id AND user_id = :user_id"
+                    ),
+                    {
+                        "tenant_id": tenant_ids[tenant_index],
+                        "user_id": user_ids[owner_index],
+                    },
+                )
+
+            for user_index, tenant_index in ((0, 0), (1, 1), (2, 0)):
+                role_index = 2 if user_index == 2 else tenant_index
                 await conn.execute(
                     text(
                         "INSERT INTO user_assignment "
@@ -313,7 +360,7 @@ async def indirect_scope_rows(
                     {
                         "user_id": user_ids[user_index],
                         "tenant_id": tenant_ids[tenant_index],
-                        "role_id": role_ids[tenant_index],
+                        "role_id": role_ids[role_index],
                         "password_required": user_index == 0,
                     },
                 )
@@ -365,7 +412,13 @@ async def indirect_scope_rows(
                 ),
                 {
                     "role_id": role_ids[0],
-                    "codes": ["users.invite", "users.block", "roles.assign"],
+                    "codes": [
+                        permission_codes[1],
+                        "users.invite",
+                        "users.block",
+                        "roles.assign",
+                        "roles.update",
+                    ],
                 },
             )
 
@@ -458,7 +511,8 @@ async def test_indirect_scope_reads_are_isolated(
                 )
             ).scalar_one()
 
-        assert visible_roles == {rows.role_ids[index]}
+        expected_roles = {rows.role_ids[index]}
+        assert visible_roles == expected_roles
         assert visible_subscriptions == {rows.user_ids[index]}
         assert system_permission_count > 0
 
@@ -515,7 +569,7 @@ async def test_indirect_scope_reads_are_isolated(
                 )
             ).scalar_one(),
         )
-    assert support_counts == (5, 3, 2)
+    assert support_counts == (7, 3, 2)
 
 
 async def test_identity_directory_and_notifications_are_recipient_scoped(
@@ -560,7 +614,11 @@ async def test_identity_directory_and_notifications_are_recipient_scoped(
             )
         ).scalar_one()
 
-    assert directory_user_ids == {rows.user_ids[0], rows.user_ids[2]}
+    assert directory_user_ids == {
+        rows.user_ids[0],
+        rows.user_ids[2],
+        rows.user_ids[3],
+    }
     assert visible_notification_ids == {rows.notification_ids[0]}
     assert marked == 1
 
@@ -770,6 +828,16 @@ async def test_runtime_assignment_function_blocks_system_role_escalation(
             "role_id": system_role_id,
         },
     )
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[0],
+        statement="SELECT public.find_invitable_user_id(:tenant_id, :email)",
+        params={
+            "tenant_id": rows.tenant_ids[0],
+            "email": f"rls-member-{rows.token}@example.invalid",
+        },
+    )
 
     async with app_engine_iso.begin() as conn:
         await _set_app_context(
@@ -777,15 +845,6 @@ async def test_runtime_assignment_function_blocks_system_role_escalation(
             tenant_id=rows.tenant_ids[0],
             user_id=rows.user_ids[0],
         )
-        found_user_id = (
-            await conn.execute(
-                text("SELECT public.find_invitable_user_id(:tenant_id, :email)"),
-                {
-                    "tenant_id": rows.tenant_ids[0],
-                    "email": f"rls-unassigned-{rows.token}@example.invalid",
-                },
-            )
-        ).scalar_one()
         assignment = (
             (
                 await conn.execute(
@@ -797,7 +856,7 @@ async def test_runtime_assignment_function_blocks_system_role_escalation(
                     {
                         "tenant_id": rows.tenant_ids[0],
                         "target_user_id": rows.user_ids[3],
-                        "role_id": rows.role_ids[0],
+                        "role_id": rows.role_ids[2],
                     },
                 )
             )
@@ -805,13 +864,12 @@ async def test_runtime_assignment_function_blocks_system_role_escalation(
             .one()
         )
 
-    assert str(found_user_id) == rows.user_ids[3]
     assert str(assignment["user_id"]) == rows.user_ids[3]
     assert str(assignment["tenant_id"]) == rows.tenant_ids[0]
-    assert str(assignment["role_id"]) == rows.role_ids[0]
+    assert str(assignment["role_id"]) == rows.role_ids[2]
 
 
-async def test_runtime_assignment_functions_enforce_actor_branch_scope(
+async def test_runtime_assignment_requires_tenant_wide_actor_scope(
     support_engine_iso: AsyncEngine,
     app_engine_iso: AsyncEngine,
     indirect_scope_rows: IndirectScopeRows,
@@ -846,7 +904,7 @@ async def test_runtime_assignment_functions_enforce_actor_branch_scope(
             },
         )
 
-    for forbidden_branch_id in (None, branch_ids[1]):
+    for forbidden_branch_id in (None, branch_ids[0], branch_ids[1]):
         await _assert_rls_denied(
             app_engine_iso,
             tenant_id=rows.tenant_ids[0],
@@ -859,99 +917,9 @@ async def test_runtime_assignment_functions_enforce_actor_branch_scope(
                 "tenant_id": rows.tenant_ids[0],
                 "target_user_id": rows.user_ids[3],
                 "branch_id": forbidden_branch_id,
-                "role_id": rows.role_ids[0],
+                "role_id": rows.role_ids[2],
             },
         )
-
-    async with app_engine_iso.begin() as conn:
-        await _set_app_context(
-            conn,
-            tenant_id=rows.tenant_ids[0],
-            user_id=rows.user_ids[0],
-        )
-        own_branch_assignment_id = str(
-            (
-                await conn.execute(
-                    text(
-                        "SELECT id FROM public.create_tenant_user_assignment("
-                        ":tenant_id, :target_user_id, :branch_id, :role_id, false)"
-                    ),
-                    {
-                        "tenant_id": rows.tenant_ids[0],
-                        "target_user_id": rows.user_ids[3],
-                        "branch_id": branch_ids[0],
-                        "role_id": rows.role_ids[0],
-                    },
-                )
-            ).scalar_one()
-        )
-
-    async with support_engine_iso.begin() as conn:
-        outside_assignment_id = str(
-            (
-                await conn.execute(
-                    text(
-                        "INSERT INTO user_assignment "
-                        "(user_id, tenant_id, branch_id, role_id, is_active) "
-                        "VALUES (:user_id, :tenant_id, :branch_id, :role_id, true) "
-                        "RETURNING id"
-                    ),
-                    {
-                        "user_id": rows.user_ids[2],
-                        "tenant_id": rows.tenant_ids[0],
-                        "branch_id": branch_ids[1],
-                        "role_id": rows.role_ids[0],
-                    },
-                )
-            ).scalar_one()
-        )
-        inactive_outside_assignment_id = str(
-            (
-                await conn.execute(
-                    text(
-                        "INSERT INTO user_assignment "
-                        "(user_id, tenant_id, branch_id, role_id, is_active) "
-                        "VALUES (:user_id, :tenant_id, :branch_id, :role_id, false) "
-                        "RETURNING id"
-                    ),
-                    {
-                        "user_id": rows.user_ids[3],
-                        "tenant_id": rows.tenant_ids[0],
-                        "branch_id": branch_ids[1],
-                        "role_id": rows.role_ids[0],
-                    },
-                )
-            ).scalar_one()
-        )
-
-    await _assert_rls_denied(
-        app_engine_iso,
-        tenant_id=rows.tenant_ids[0],
-        user_id=rows.user_ids[0],
-        statement=(
-            "SELECT public.deactivate_tenant_user_assignment(" ":tenant_id, :assignment_id)"
-        ),
-        params={
-            "tenant_id": rows.tenant_ids[0],
-            "assignment_id": outside_assignment_id,
-        },
-    )
-    await _assert_rls_denied(
-        app_engine_iso,
-        tenant_id=rows.tenant_ids[0],
-        user_id=rows.user_ids[0],
-        statement=(
-            "SELECT * FROM public.reactivate_tenant_user_assignment("
-            ":tenant_id, :assignment_id, :role_id, false)"
-        ),
-        params={
-            "tenant_id": rows.tenant_ids[0],
-            "assignment_id": inactive_outside_assignment_id,
-            "role_id": rows.role_ids[0],
-        },
-    )
-
-    assert own_branch_assignment_id
 
 
 async def test_blocking_user_revokes_sessions_immediately(
@@ -988,8 +956,8 @@ async def test_blocking_user_revokes_sessions_immediately(
         changed = (
             await conn.execute(
                 text(
-                    "SELECT public.set_tenant_user_status("
-                    ":tenant_id, :target_user_id, 'blocked', pg_catalog.now())"
+                    "SELECT public.set_tenant_membership_status("
+                    ":tenant_id, :target_user_id, 'suspended', pg_catalog.now())"
                 ),
                 {
                     "tenant_id": rows.tenant_ids[0],
@@ -1003,14 +971,17 @@ async def test_blocking_user_revokes_sessions_immediately(
             (
                 await conn.execute(
                     text(
-                        "SELECT app_user.status, auth_session.revoked_at, "
+                        "SELECT membership.status, auth_session.revoked_at, "
                         "auth_session.revoked_reason "
-                        "FROM app_user "
+                        "FROM tenant_membership AS membership "
                         "JOIN session AS auth_session "
-                        "ON auth_session.user_id = app_user.id "
-                        "WHERE app_user.id = :user_id AND auth_session.id = :session_id"
+                        "ON auth_session.user_id = membership.user_id "
+                        "WHERE membership.tenant_id = :tenant_id "
+                        "AND membership.user_id = :user_id "
+                        "AND auth_session.id = :session_id"
                     ),
                     {
+                        "tenant_id": rows.tenant_ids[0],
                         "user_id": rows.user_ids[2],
                         "session_id": session_id,
                     },
@@ -1021,9 +992,9 @@ async def test_blocking_user_revokes_sessions_immediately(
         )
 
     assert changed is True
-    assert state["status"] == "blocked"
+    assert state["status"] == "suspended"
     assert state["revoked_at"] is not None
-    assert state["revoked_reason"] == "user_blocked"
+    assert state["revoked_reason"] == "membership_suspended"
 
 
 async def test_role_and_subscription_writes_are_isolated(
@@ -1042,7 +1013,7 @@ async def test_role_and_subscription_writes_are_isolated(
                 "INSERT INTO role_permission (role_id, permission_code) "
                 "VALUES (:role_id, :permission_code)"
             ),
-            {"role_id": rows.role_ids[0], "permission_code": rows.permission_codes[1]},
+            {"role_id": rows.role_ids[2], "permission_code": rows.permission_codes[1]},
         )
         await conn.execute(
             text(
@@ -1126,6 +1097,54 @@ async def test_role_and_subscription_writes_are_isolated(
         assert system_delete.rowcount == 0
         assert cross_role_permission_delete.rowcount == 0
         assert cross_subscription_delete.rowcount == 0
+
+
+async def test_role_mutations_recheck_live_owner_scope(
+    support_engine_iso: AsyncEngine,
+    app_engine_iso: AsyncEngine,
+    indirect_scope_rows: IndirectScopeRows,
+) -> None:
+    rows = indirect_scope_rows
+
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[0],
+        statement=(
+            "UPDATE role SET description = :description, version = version + 1 "
+            "WHERE id = :role_id"
+        ),
+        params={
+            "description": "self-role mutation",
+            "role_id": rows.role_ids[0],
+        },
+    )
+
+    async with support_engine_iso.begin() as conn:
+        await conn.execute(
+            text(
+                "DELETE FROM role_permission "
+                "WHERE role_id = :role_id AND permission_code = :permission_code"
+            ),
+            {
+                "role_id": rows.role_ids[0],
+                "permission_code": rows.permission_codes[1],
+            },
+        )
+
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[0],
+        statement=(
+            "INSERT INTO role_permission (role_id, permission_code) "
+            "VALUES (:role_id, :permission_code)"
+        ),
+        params={
+            "role_id": rows.role_ids[2],
+            "permission_code": rows.permission_codes[1],
+        },
+    )
 
 
 async def test_notification_functions_support_same_tenant_recipient(

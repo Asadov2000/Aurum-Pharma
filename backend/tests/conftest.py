@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis, from_url
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -89,6 +90,7 @@ async def db_connection(
 @pytest_asyncio.fixture
 async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSession]:
     nested = await db_connection.begin_nested()
+    await db_connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
     session_factory = async_sessionmaker(
         bind=db_connection,
         expire_on_commit=False,

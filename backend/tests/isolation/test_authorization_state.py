@@ -17,7 +17,11 @@ from app.core.config import get_settings
 
 @pytest_asyncio.fixture
 async def support_engine_authorization() -> AsyncIterator[AsyncEngine]:
-    engine = create_async_engine(get_settings().DATABASE_URL_SUPPORT, poolclass=NullPool)
+    engine = create_async_engine(
+        get_settings().DATABASE_URL_SUPPORT,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"app.support_session": "true"}},
+    )
     try:
         yield engine
     finally:
@@ -113,6 +117,30 @@ async def test_assignment_gate_rejects_inactive_permission(
             )
             user_ids = [str(row[0]) for row in rows.fetchall()]
             actor_id = user_ids[0]
+            await connection.execute(
+                text(
+                    "INSERT INTO public.tenant_membership "
+                    "(tenant_id, user_id, full_name, status) "
+                    "SELECT :tenant_id, id, full_name, 'active' "
+                    "FROM public.app_user "
+                    "WHERE id = ANY(CAST(:user_ids AS UUID[]))"
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "user_ids": user_ids,
+                },
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO public.tenant_ownership (tenant_id, membership_id) "
+                    "SELECT :tenant_id, id FROM public.tenant_membership "
+                    "WHERE tenant_id = :tenant_id AND user_id = :actor_id"
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "actor_id": actor_id,
+                },
+            )
             roles = await connection.execute(
                 text(
                     "INSERT INTO public.role "
@@ -197,14 +225,105 @@ async def test_assignment_gate_rejects_inactive_permission(
                     {"tenant_id": tenant_id},
                 )
                 await connection.execute(
-                    text("DELETE FROM public.app_user WHERE home_tenant_id = :tenant_id"),
+                    text("DELETE FROM public.tenant WHERE id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
+            if user_ids:
                 await connection.execute(
-                    text("DELETE FROM public.tenant_settings WHERE tenant_id = :tenant_id"),
+                    text(
+                        "DELETE FROM public.app_user " "WHERE id = ANY(CAST(:user_ids AS UUID[]))"
+                    ),
+                    {"user_ids": user_ids},
+                )
+
+
+async def test_membership_history_rejects_direct_delete_but_allows_tenant_cascade(
+    support_engine_authorization: AsyncEngine,
+) -> None:
+    suffix = uuid4().hex
+    tenant_id = ""
+    user_id = ""
+
+    try:
+        async with support_engine_authorization.begin() as connection:
+            tenant_id = str(
+                (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO public.tenant (name, contact_email) "
+                            "VALUES (:name, :email) RETURNING id"
+                        ),
+                        {
+                            "name": f"Membership history {suffix}",
+                            "email": f"membership-history-{suffix}@example.invalid",
+                        },
+                    )
+                ).scalar_one()
+            )
+            user_id = str(
+                (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO public.app_user "
+                            "(email, full_name, home_tenant_id, status) "
+                            "VALUES (:email, 'History user', :tenant_id, 'active') "
+                            "RETURNING id"
+                        ),
+                        {
+                            "email": f"membership-user-{suffix}@example.invalid",
+                            "tenant_id": tenant_id,
+                        },
+                    )
+                ).scalar_one()
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO public.tenant_membership "
+                    "(tenant_id, user_id, full_name, status) "
+                    "VALUES (:tenant_id, :user_id, 'History user', 'active')"
+                ),
+                {"tenant_id": tenant_id, "user_id": user_id},
+            )
+
+        with pytest.raises(DBAPIError) as error:
+            async with support_engine_authorization.begin() as connection:
+                await connection.execute(
+                    text(
+                        "DELETE FROM public.tenant_membership "
+                        "WHERE tenant_id = :tenant_id AND user_id = :user_id"
+                    ),
+                    {"tenant_id": tenant_id, "user_id": user_id},
+                )
+        assert getattr(error.value.orig, "sqlstate", None) == "42501"
+
+        async with support_engine_authorization.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM public.tenant WHERE id = :tenant_id"),
+                {"tenant_id": tenant_id},
+            )
+            remaining = (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM public.tenant_membership "
+                        "WHERE tenant_id = :tenant_id"
+                    ),
+                    {"tenant_id": tenant_id},
+                )
+            ).scalar_one()
+            assert remaining == 0
+    finally:
+        async with support_engine_authorization.begin() as connection:
+            if tenant_id:
+                await connection.execute(
+                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
                 await connection.execute(
                     text("DELETE FROM public.tenant WHERE id = :tenant_id"),
                     {"tenant_id": tenant_id},
+                )
+            if user_id:
+                await connection.execute(
+                    text("DELETE FROM public.app_user WHERE id = :user_id"),
+                    {"user_id": user_id},
                 )

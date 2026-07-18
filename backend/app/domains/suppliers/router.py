@@ -60,7 +60,7 @@ async def create_supplier_return(
         comment=payload.comment,
         source_document_id=payload.source_document_id,
         actor_id=user.user_id,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("incoming.return"),
     )
     return SupplierReturnCreated(
         **SupplierReturnRead.model_validate(sr).model_dump(),
@@ -80,7 +80,7 @@ async def list_supplier_returns(
         supplier_id=supplier_id,
         date_from=date_from,
         date_to=date_to,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("suppliers.view"),
     )
     return [SupplierReturnRead.model_validate(i) for i in items]
 

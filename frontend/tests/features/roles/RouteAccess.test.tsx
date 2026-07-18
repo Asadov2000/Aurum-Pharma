@@ -36,9 +36,21 @@ function renderPage(node: React.ReactNode) {
 }
 
 const SELLER = { home_tenant_id: "tenant-1", permissions: ["pos.sell"] };
-const USER_VIEWER = { home_tenant_id: "tenant-1", permissions: ["users.view"] };
-const ROLE_ASSIGNER = { home_tenant_id: "tenant-1", permissions: ["roles.assign"] };
-const ROLE_BUILDER = { home_tenant_id: "tenant-1", permissions: ["roles.create"] };
+const USER_VIEWER = {
+  home_tenant_id: "tenant-1",
+  is_tenant_owner: true,
+  permissions: ["users.view"],
+};
+const ROLE_ASSIGNER = {
+  home_tenant_id: "tenant-1",
+  is_tenant_owner: true,
+  permissions: ["roles.assign"],
+};
+const ROLE_BUILDER = {
+  home_tenant_id: "tenant-1",
+  is_tenant_owner: true,
+  permissions: ["roles.create"],
+};
 
 describe("UsersPage direct access", () => {
   beforeEach(() => {

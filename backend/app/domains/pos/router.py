@@ -65,27 +65,19 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
 
 
 def _can_view_tenant_sales(user: CurrentUser) -> bool:
-    return (
-        user.is_developer
-        or user.is_administrator
-        or (user.has_tenant_branch_access and "sales.view.tenant" in user.permissions)
-    )
+    return user.has_tenant_scope("sales.view.tenant")
 
 
 def _sale_view_branch_scope(user: CurrentUser) -> set[UUID] | None:
-    if user.branch_scope is None or "sales.view.tenant" not in user.permissions:
-        return None
-    return user.branch_scope
+    return user.branch_scope_for("sales.view.tenant")
 
 
 def _sale_manage_branch_scope(user: CurrentUser) -> set[UUID] | None:
-    if user.branch_scope is None or "sales.view.tenant" not in user.permissions:
-        return None
-    return user.branch_scope
+    return user.branch_scope_for("sales.view.tenant")
 
 
 def _effective_report_branch_id(user: CurrentUser, branch_id: UUID | None) -> UUID | None:
-    branch_scope = user.branch_scope
+    branch_scope = user.branch_scope_for("reports.view")
     if branch_scope is None:
         return branch_id
     if branch_id is not None:
@@ -118,7 +110,7 @@ async def open_shift(
         register_id=payload.register_id,
         opened_by_user_id=user.user_id,
         opening_cash=payload.opening_cash,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.shift_open"),
     )
     return ShiftRead.model_validate(shift)
 
@@ -135,7 +127,11 @@ async def get_current_shift(
     shift = await service.get_current_shift(
         user_id=user.user_id,
         register_id=register_id,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for_any(
+            "pos.shift_open",
+            "pos.shift_close",
+            "pos.sell",
+        ),
     )
     return ShiftRead.model_validate(shift) if shift is not None else None
 
@@ -156,7 +152,7 @@ async def close_shift(
         closing_cash_actual=payload.closing_cash_actual,
         closed_by_user_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.shift_close"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
         notes=payload.notes,
     )
@@ -169,7 +165,10 @@ async def z_report(
     user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> ZReport:
-    report = await service.z_report(shift_id, allowed_branch_ids=user.branch_scope)
+    report = await service.z_report(
+        shift_id,
+        allowed_branch_ids=user.branch_scope_for("reports.view"),
+    )
     return ZReport.model_validate(report)
 
 
@@ -187,7 +186,10 @@ async def z_report_xlsx(
 ) -> Response:
     """Z-report as an Excel workbook (closed shifts only), lazily generated and
     cached in MinIO."""
-    xlsx = await service.get_z_report_xlsx(shift_id, allowed_branch_ids=user.branch_scope)
+    xlsx = await service.get_z_report_xlsx(
+        shift_id,
+        allowed_branch_ids=user.branch_scope_for("reports.view"),
+    )
     return Response(
         content=xlsx,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -280,7 +282,7 @@ async def create_sale(
         register_id=payload.register_id,
         cashier_user_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return SaleRead.model_validate(sale)
@@ -298,9 +300,16 @@ async def checkout_sale(
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleCheckoutResult:
     if payload.prescription is not None and not (
-        user.is_developer or user.is_administrator or "pos.handle_prescription" in user.permissions
+        user.is_developer or "pos.handle_prescription" in user.permissions
     ):
         raise PermissionDeniedError("Missing permission: pos.handle_prescription")
+
+    allowed_branch_ids = user.branch_scope_for("pos.sell")
+    if payload.prescription is not None:
+        allowed_branch_ids = user.branch_scope_for_all(
+            "pos.sell",
+            "pos.handle_prescription",
+        )
 
     return await service.checkout(
         tenant_id=_current_tenant_or_400(user),
@@ -319,7 +328,7 @@ async def checkout_sale(
             else None
         ),
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=allowed_branch_ids,
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
 
@@ -338,14 +347,17 @@ async def get_checkout_result(
         operation_id=operation_id,
         actor_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
 
 
 @router.get("/sales", response_model=SaleList)
 async def list_sales(
-    user: Annotated[CurrentUser, Depends(require_permission("sales.view.own"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission("sales.view.own", "sales.view.tenant")),
+    ],
     service: Annotated[POSService, Depends(_service)],
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
@@ -360,20 +372,18 @@ async def list_sales(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> SaleList:
     tenant_id = _current_tenant_or_400(user)
-    # Scope: anyone with sales.view.tenant (owner/admin/dev) sees every
-    # receipt and may filter by cashier; a seller (own-only) is pinned to
-    # their own receipts regardless of the cashier_id query param.
-    branch_ids = user.branch_scope
+    # Keep each capability paired with the branches where it was granted.
+    # The repository applies the row-level OR: own receipts in own_scope,
+    # plus every receipt in tenant_view_scope.
+    own_branch_ids = user.branch_scope_for("sales.view.own")
+    tenant_view_branch_ids = user.branch_scope_for("sales.view.tenant")
+    branch_ids = user.branch_scope_for_any("sales.view.own", "sales.view.tenant")
     if branch_ids is not None and branch_id is not None and branch_id not in branch_ids:
         return SaleList(items=[], total=0, page=page, page_size=page_size)
 
-    if _can_view_tenant_sales(user) or _sale_view_branch_scope(user) is not None:
-        effective_cashier = cashier_id
-    else:
-        effective_cashier = user.user_id
     rows, total = await service.list_sales(
         tenant_id=tenant_id,
-        cashier_id=effective_cashier,
+        cashier_id=cashier_id,
         branch_id=branch_id,
         register_id=register_id,
         receipt_number=receipt_number,
@@ -385,6 +395,10 @@ async def list_sales(
         branch_ids=branch_ids,
         page=page,
         page_size=page_size,
+        viewer_id=user.user_id,
+        own_branch_ids=own_branch_ids,
+        tenant_view_branch_ids=tenant_view_branch_ids,
+        can_view_tenant=_can_view_tenant_sales(user),
     )
     return SaleList(
         items=[SaleListItem(**row) for row in rows],
@@ -407,7 +421,10 @@ async def get_sale(
         sale_id,
         viewer_id=user.user_id,
         can_view_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for_any(
+            "sales.view.own",
+            "sales.view.tenant",
+        ),
         allowed_view_branch_ids=_sale_view_branch_scope(user),
     )
     return SaleDetails(
@@ -441,7 +458,10 @@ async def get_receipt(
         sale_id,
         viewer_id=user.user_id,
         can_view_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for_any(
+            "sales.view.own",
+            "sales.view.tenant",
+        ),
         allowed_view_branch_ids=_sale_view_branch_scope(user),
     )
 
@@ -464,7 +484,10 @@ async def get_receipt_pdf(
         sale_id,
         viewer_id=user.user_id,
         can_view_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for_any(
+            "sales.view.own",
+            "sales.view.tenant",
+        ),
         allowed_view_branch_ids=_sale_view_branch_scope(user),
     )
     return Response(
@@ -492,7 +515,7 @@ async def add_sale_item(
         qty=payload.qty,
         actor_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return SaleItemAdded(
@@ -519,7 +542,7 @@ async def update_sale_item(
         qty=payload.qty,
         actor_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return SaleItemRead.model_validate(item)
@@ -540,7 +563,7 @@ async def delete_sale_item(
         item_id=item_id,
         actor_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return {"status": "deleted"}
@@ -565,7 +588,7 @@ async def add_payment(
         operation_id=payload.operation_id,
         actor_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
         metadata=payload.metadata,
     )
@@ -586,7 +609,7 @@ async def complete_sale(
         sale_id=sale_id,
         actor_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return SaleRead.model_validate(sale)
@@ -609,7 +632,7 @@ async def add_prescription(
         fields=payload.model_dump(exclude_none=True),
         actor_id=user.user_id,
         can_manage_tenant=_can_view_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.handle_prescription"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return PrescriptionLogRead.model_validate(pl)
@@ -634,7 +657,7 @@ async def refund_sale(
         comment=payload.comment,
         cashier_user_id=user.user_id,
         operation_id=payload.operation_id,
-        allowed_branch_ids=user.branch_scope,
+        allowed_branch_ids=user.branch_scope_for("pos.refund"),
     )
     return SaleRead.model_validate(return_sale)
 

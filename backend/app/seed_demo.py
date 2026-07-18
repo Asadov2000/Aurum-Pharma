@@ -424,6 +424,7 @@ async def main() -> None:
     force = os.getenv("SEED_DEMO_FORCE") == "1"
     async with SupportSessionLocal() as session:
         async with session.begin():
+            await session.execute(text("SELECT set_config('app.support_session', 'true', true)"))
             tenant = await _get_demo(session)
             tenant.name = DEMO_NAME
             tenant.status = "active"

@@ -145,7 +145,10 @@ class AuthService:
             code_id=ec.id,
             candidate_hash=candidate_hash,
         )
-        if user is None or user.status not in ("invited", "active"):
+        membership_can_login = user is not None and (
+            user.home_tenant_id is None or user.membership_status in ("pending", "active")
+        )
+        if user is None or user.status not in ("invited", "active") or not membership_can_login:
             await self.repo.consume_email_code(
                 code_id=ec.id,
                 email_lower=email_lower,
@@ -191,6 +194,11 @@ class AuthService:
         if session_id is None:
             raise AuthenticationError("Invalid or expired code")
 
+        await self.repo.accept_tenant_invitation(
+            session_id=session_id,
+            tenant_id=user.home_tenant_id,
+            accepted_at=now,
+        )
         access_token = create_access_token(
             user.id,
             tenant_id=user.home_tenant_id,
@@ -234,7 +242,10 @@ class AuthService:
             raise AuthenticationError("Invalid or expired refresh token")
 
         user = await self.repo.get_user_by_id(rotated.user_id, session_id=rotated.id)
-        if user is None or user.status not in ("invited", "active"):
+        membership_is_active = user is not None and (
+            user.home_tenant_id is None or user.membership_status == "active"
+        )
+        if user is None or user.status not in ("invited", "active") or not membership_is_active:
             rotated_token = refresh_token if rotated.reuse_presented_token else new_refresh_token
             await self.repo.revoke_session_by_hash(
                 hash_token(rotated_token),

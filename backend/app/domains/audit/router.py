@@ -10,14 +10,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, require_permission
-from app.core.errors import BusinessRuleError
+from app.core.deps import CurrentUser, current_user, get_db, require_permission
+from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.audit.models import AuditLog
 from app.domains.audit.repository import AuditRepository
 from app.domains.audit.schemas import AuditEntry, AuditPage
 from app.domains.audit.service import AuditService
 
 router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
+admin_router = APIRouter(prefix="/api/v1/admin/audit", tags=["admin", "audit"])
 
 
 async def _service(
@@ -30,6 +31,14 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     if user.tenant_id is None:
         raise BusinessRuleError("Request is not scoped to a tenant")
     return user.tenant_id
+
+
+async def require_developer(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    if not user.is_developer:
+        raise PermissionDeniedError("Developer privileges required")
+    return user
 
 
 def _to_page(
@@ -96,9 +105,9 @@ async def tenant_audit(
     return _to_page(items, total, page, page_size, service)
 
 
-@router.get("/global", response_model=AuditPage)
+@admin_router.get("/global", response_model=AuditPage)
 async def global_audit(
-    _user: Annotated[CurrentUser, Depends(require_permission("audit.view.global"))],
+    _user: Annotated[CurrentUser, Depends(require_developer)],
     service: Annotated[AuditService, Depends(_service)],
     tenant_id: Annotated[UUID | None, Query()] = None,
     user_id: Annotated[UUID | None, Query()] = None,

@@ -3,15 +3,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const searchAudit = vi.fn();
+const authState = vi.hoisted(() => ({
+  user: { is_developer: false, is_administrator: false },
+}));
 
 vi.mock("@/features/audit/api", () => ({
   searchAudit: (...a: unknown[]) => searchAudit(...a),
 }));
 
 vi.mock("@/features/auth/hooks", () => ({
-  useAuth: () => ({
-    user: { is_developer: false, is_administrator: false },
-  }),
+  useAuth: () => authState,
 }));
 
 import { AuditPage } from "@/features/audit/AuditPage";
@@ -44,6 +45,7 @@ const ENTRY = {
 describe("AuditPage", () => {
   beforeEach(() => {
     searchAudit.mockReset();
+    authState.user = { is_developer: false, is_administrator: false };
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -103,5 +105,25 @@ describe("AuditPage", () => {
         expect.objectContaining({ action: "delete" }),
       );
     });
+  });
+
+  it("does not expose global audit to an Aurum administrator", async () => {
+    authState.user = { is_developer: false, is_administrator: true };
+    searchAudit.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 50 });
+
+    renderPage();
+
+    await screen.findByText(/События пока не записаны/i);
+    expect(screen.queryByRole("option", { name: "Глобально" })).not.toBeInTheDocument();
+  });
+
+  it("exposes global audit only to a developer", async () => {
+    authState.user = { is_developer: true, is_administrator: false };
+    searchAudit.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 50 });
+
+    renderPage();
+
+    await screen.findByText(/События пока не записаны/i);
+    expect(screen.getByRole("option", { name: "Глобально" })).toBeInTheDocument();
   });
 });

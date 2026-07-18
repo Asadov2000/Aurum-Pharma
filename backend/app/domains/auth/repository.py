@@ -25,6 +25,7 @@ class AuthUserRecord:
     is_administrator: bool
     home_tenant_id: UUID | None
     status: str
+    membership_status: str | None
     last_login_at: datetime | None
     password_required: bool
 
@@ -59,6 +60,7 @@ def _auth_user_from_row(row: RowMapping) -> AuthUserRecord:
         is_administrator=bool(row["is_administrator"]),
         home_tenant_id=cast(UUID | None, row["home_tenant_id"]),
         status=cast(str, row["status"]),
+        membership_status=cast(str | None, row["membership_status"]),
         last_login_at=cast(datetime | None, row["last_login_at"]),
         password_required=bool(row["password_required"]),
     )
@@ -267,6 +269,25 @@ class AuthRepository:
             },
         )
         return cast(UUID | None, result.scalar_one())
+
+    async def accept_tenant_invitation(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID | None,
+        accepted_at: datetime,
+    ) -> int:
+        result = await self.session.execute(
+            text(
+                "SELECT public.accept_tenant_invitation(" ":session_id, :tenant_id, :accepted_at)"
+            ),
+            {
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "accepted_at": accepted_at,
+            },
+        )
+        return int(result.scalar_one())
 
     async def rotate_session(
         self,

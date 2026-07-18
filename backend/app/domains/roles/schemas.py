@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -15,9 +16,13 @@ class PermissionRead(BaseModel):
     group_code: str
     name: str
     description: str | None
-    min_level_required: int
     is_dangerous: bool
     is_active: bool
+    scope_type: Literal["PLATFORM", "TENANT_ALL", "BRANCH_SET", "OWN"]
+    target_role_type: Literal["platform", "tenant"]
+    risk_level: Literal["normal", "sensitive", "critical"]
+    requires_step_up: bool
+    requires_confirmation: bool
 
 
 class RoleRead(BaseModel):
@@ -27,35 +32,36 @@ class RoleRead(BaseModel):
     tenant_id: UUID | None
     name: str
     description: str | None
-    level: int
     is_system: bool
     is_active: bool
+    is_protected: bool
+    protected_kind: str | None
+    version: int
 
 
 class RoleWithPermissions(RoleRead):
     permissions: list[str]
+    has_hidden_permissions: bool = False
 
 
 class RoleCreate(BaseModel):
-    """Create a custom (tenant) role. `level` must be strictly weaker than the
-    actor's own (higher number = weaker; 4 = seller), and every code in
-    `permissions` must be one the actor already holds — both enforced in the
-    service."""
+    """Create a custom tenant role from the server-provided catalogue."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
-    level: int = Field(ge=1, le=4)
     permissions: list[str] = Field(default_factory=list)
 
 
 class RoleUpdate(BaseModel):
-    """Patch a custom (tenant) role. All fields optional; `permissions=None`
-    leaves the set untouched, `permissions=[]` clears it. System roles are
-    rejected in the service."""
+    """Patch a custom tenant role; protected roles are never editable."""
 
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
-    level: int | None = Field(default=None, ge=1, le=4)
     permissions: list[str] | None = None
 
 
@@ -83,8 +89,10 @@ class AssignmentRead(BaseModel):
     id: UUID
     user_id: UUID
     tenant_id: UUID
+    membership_id: UUID
     branch_id: UUID | None
     role_id: UUID
+    role_name: str | None = None
     password_required: bool
     is_active: bool
 
@@ -93,6 +101,8 @@ class UserInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    membership_id: UUID
+    is_tenant_owner: bool
     email: str
     full_name: str
     phone: str | None
@@ -112,6 +122,8 @@ class UserListResponse(BaseModel):
 
 
 class InviteUserRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=200)
     role_id: UUID
@@ -126,5 +138,26 @@ class AssignmentCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     full_name: str | None = Field(default=None, min_length=1, max_length=200)
     phone: str | None = None
+    status: Literal["active"] | None = None
+
+
+class TenantAccountCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=200)
+    phone: str | None = None
+
+
+class TenantMembershipRead(BaseModel):
+    membership_id: UUID
+    user_id: UUID
+    tenant_id: UUID
+    email: str
+    full_name: str
+    phone: str | None
+    status: Literal["pending", "active", "suspended", "offboarded"]

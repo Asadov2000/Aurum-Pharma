@@ -37,7 +37,9 @@ function psql(sql: string): string {
 function supportPsql(sql: string): string {
   return psql(`
     SET SESSION AUTHORIZATION aurum_support;
+    SET app.support_session = 'true';
     ${sql};
+    RESET app.support_session;
     RESET SESSION AUTHORIZATION;
   `);
 }

@@ -23,20 +23,20 @@ const OWNER_PERMS = [
 
 describe("buildNav — dashboard visibility", () => {
   it("hides «Главная» (dashboard) from a tenant user without reports.view (seller)", () => {
-    const items = buildNav(false, true, SELLER_PERMS);
+    const items = buildNav(false, true, false, SELLER_PERMS);
     expect(labels(items)).not.toContain("Главная");
     // …but the seller still gets the tenant workspace items.
     expect(items.some((i) => i.to === "/pos")).toBe(true);
   });
 
   it("shows «Главная» to a tenant user with reports.view (owner)", () => {
-    const items = buildNav(false, true, OWNER_PERMS);
+    const items = buildNav(false, true, true, OWNER_PERMS);
     expect(labels(items)).toContain("Главная");
     expect(items[0]?.to).toBe("/");
   });
 
   it("shows «Главная» to a support user (admin/dev)", () => {
-    const items = buildNav(true, false, []);
+    const items = buildNav(true, false, false, []);
     expect(items[0]?.to).toBe("/");
     expect(items.some((i) => i.to === "/admin/tenants")).toBe(true);
   });
@@ -44,7 +44,7 @@ describe("buildNav — dashboard visibility", () => {
 
 describe("buildNav — team management visibility", () => {
   it("hides «Пользователи»/«Роли» from a tenant user without users.view (seller)", () => {
-    const items = buildNav(false, true, SELLER_PERMS);
+    const items = buildNav(false, true, false, SELLER_PERMS);
     expect(labels(items)).not.toContain("Пользователи");
     expect(labels(items)).not.toContain("Роли");
     // The rest of the seller's workspace is untouched.
@@ -53,7 +53,7 @@ describe("buildNav — team management visibility", () => {
   });
 
   it("shows team pages to an owner with their exact permissions", () => {
-    const items = buildNav(false, true, OWNER_PERMS);
+    const items = buildNav(false, true, true, OWNER_PERMS);
     expect(labels(items)).toContain("Пользователи");
     expect(labels(items)).toContain("Роли");
     expect(items.some((i) => i.to === "/users")).toBe(true);
@@ -61,19 +61,22 @@ describe("buildNav — team management visibility", () => {
   });
 
   it("does not use users.view as permission to open role management", () => {
-    const userViewer = buildNav(false, true, ["users.view"]);
+    const userViewer = buildNav(false, true, false, ["users.view"]);
     expect(labels(userViewer)).toContain("Пользователи");
     expect(labels(userViewer)).not.toContain("Роли");
 
-    const roleManager = buildNav(false, true, ["roles.update"]);
+    const roleManager = buildNav(false, true, false, ["roles.update"]);
     expect(labels(roleManager)).not.toContain("Пользователи");
-    expect(labels(roleManager)).toContain("Роли");
+    expect(labels(roleManager)).not.toContain("Роли");
+
+    const ownerRoleManager = buildNav(false, true, true, ["roles.update"]);
+    expect(labels(ownerRoleManager)).toContain("Роли");
   });
 });
 
 describe("buildNav — owner-only pages", () => {
   it("hides financial/reporting pages from a seller", () => {
-    const items = buildNav(false, true, SELLER_PERMS);
+    const items = buildNav(false, true, false, SELLER_PERMS);
     expect(labels(items)).not.toContain("Партии");
     expect(labels(items)).not.toContain("Биллинг");
     expect(labels(items)).not.toContain("Отчёты");
@@ -81,7 +84,7 @@ describe("buildNav — owner-only pages", () => {
   });
 
   it("shows financial/reporting pages to an owner", () => {
-    const items = buildNav(false, true, OWNER_PERMS);
+    const items = buildNav(false, true, true, OWNER_PERMS);
     expect(labels(items)).toContain("Партии");
     expect(labels(items)).toContain("Биллинг");
     expect(labels(items)).toContain("Отчёты");

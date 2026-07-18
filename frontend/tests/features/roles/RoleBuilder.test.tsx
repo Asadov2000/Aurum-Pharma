@@ -161,7 +161,8 @@ describe("RoleBuilderModal", () => {
         protected_kind: null,
         is_active: true,
         version: 1,
-        permissions: ["pos.sell", "audit.view.global"],
+        permissions: ["pos.sell"],
+        has_hidden_permissions: true,
       },
       onClose: () => {},
     });
@@ -177,5 +178,37 @@ describe("RoleBuilderModal", () => {
     expect(save).toBeDisabled();
     fireEvent.click(save);
     expect(updateRole).not.toHaveBeenCalled();
+  });
+
+  it("submits the expected role version so stale editors cannot overwrite changes", async () => {
+    updateRole.mockResolvedValue({});
+    renderModal({
+      mode: "edit",
+      role: {
+        id: "role-1",
+        tenant_id: "tenant-1",
+        name: "Кассир",
+        description: null,
+        is_system: false,
+        is_protected: false,
+        protected_kind: null,
+        is_active: true,
+        version: 7,
+        permissions: ["pos.sell"],
+        has_hidden_permissions: false,
+      },
+      onClose: () => {},
+    });
+
+    await screen.findByText("Продажа");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => expect(updateRole).toHaveBeenCalledTimes(1));
+    expect(updateRole).toHaveBeenCalledWith("role-1", {
+      expected_version: 7,
+      name: "Кассир",
+      description: null,
+      permissions: ["pos.sell"],
+    });
   });
 });

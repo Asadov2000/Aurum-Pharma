@@ -22,7 +22,11 @@ from app.core.config import get_settings
 @pytest_asyncio.fixture
 async def support_engine_iso() -> AsyncIterator[AsyncEngine]:
     settings = get_settings()
-    engine = create_async_engine(settings.DATABASE_URL_SUPPORT, poolclass=NullPool)
+    engine = create_async_engine(
+        settings.DATABASE_URL_SUPPORT,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"app.support_session": "true"}},
+    )
     try:
         yield engine
     finally:
@@ -75,6 +79,21 @@ async def test_user_assignment_isolated_between_tenants(
                 {"a": tenant_ids[0], "b": tenant_ids[1]},
             )
             user_ids = [str(row[0]) for row in u_rows.fetchall()]
+
+            await conn.execute(
+                text(
+                    "INSERT INTO tenant_membership "
+                    "(tenant_id, user_id, full_name, status) VALUES "
+                    "(:ta, :ua, 'A worker', 'active'), "
+                    "(:tb, :ub, 'B worker', 'active')"
+                ),
+                {
+                    "ua": user_ids[0],
+                    "ub": user_ids[1],
+                    "ta": tenant_ids[0],
+                    "tb": tenant_ids[1],
+                },
+            )
 
             role_id = (
                 await conn.execute(

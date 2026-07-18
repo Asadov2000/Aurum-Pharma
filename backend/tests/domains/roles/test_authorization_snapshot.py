@@ -5,7 +5,9 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.roles.models import Permission, RolePermission, UserAssignment
+from app.core.deps import CurrentUser
+from app.domains.foundation.models import Branch
+from app.domains.roles.models import Permission, Role, RolePermission, UserAssignment
 from app.domains.roles.repository import RolesRepository
 
 
@@ -15,11 +17,13 @@ async def _assign(
     user_id,
     tenant_id,
     role_id,
+    branch_id=None,
 ) -> UserAssignment:
     assignment = UserAssignment(
         user_id=user_id,
         tenant_id=tenant_id,
         role_id=role_id,
+        branch_id=branch_id,
     )
     db_session.add(assignment)
     await db_session.flush()
@@ -51,6 +55,96 @@ async def test_snapshot_contains_active_permissions_and_revisions(
     assert snapshot.policy_revision >= 1
     assert snapshot.subject_revision >= 1
     assert "pos.sell" in snapshot.permissions
+
+
+async def test_capability_scope_stays_bound_to_the_assignment_that_granted_it(
+    db_session: AsyncSession,
+    make_tenant,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    branch_a = Branch(tenant_id=tenant.id, name="Scope A")
+    branch_b = Branch(tenant_id=tenant.id, name="Scope B")
+    sell_role = Role(tenant_id=tenant.id, name="Sell only A", level=4)
+    unrelated_branch_role = Role(
+        tenant_id=tenant.id,
+        name="Unrelated only B",
+        level=4,
+    )
+    unrelated_tenant_role = Role(
+        tenant_id=tenant.id,
+        name="Unrelated tenant-wide",
+        level=4,
+    )
+    db_session.add_all(
+        [
+            branch_a,
+            branch_b,
+            sell_role,
+            unrelated_branch_role,
+            unrelated_tenant_role,
+        ]
+    )
+    await db_session.flush()
+    db_session.add_all(
+        [
+            RolePermission(role_id=sell_role.id, permission_code="pos.sell"),
+            RolePermission(
+                role_id=unrelated_branch_role.id,
+                permission_code="branches.view",
+            ),
+            RolePermission(
+                role_id=unrelated_branch_role.id,
+                permission_code="settings.update",
+            ),
+            RolePermission(
+                role_id=unrelated_tenant_role.id,
+                permission_code="catalog.view",
+            ),
+        ]
+    )
+    await db_session.flush()
+    await _assign(
+        db_session,
+        user_id=user.id,
+        tenant_id=tenant.id,
+        role_id=sell_role.id,
+        branch_id=branch_a.id,
+    )
+    await _assign(
+        db_session,
+        user_id=user.id,
+        tenant_id=tenant.id,
+        role_id=unrelated_branch_role.id,
+        branch_id=branch_b.id,
+    )
+    await _assign(
+        db_session,
+        user_id=user.id,
+        tenant_id=tenant.id,
+        role_id=unrelated_tenant_role.id,
+    )
+
+    snapshot = await RolesRepository(db_session).authorization_snapshot(
+        user.id,
+        tenant.id,
+    )
+    current = CurrentUser(
+        user_id=user.id,
+        tenant_id=tenant.id,
+        is_developer=False,
+        is_administrator=False,
+        permissions=set(snapshot.permissions),
+        permission_scopes=dict(snapshot.permission_scopes),
+    )
+
+    assert snapshot.permission_scopes["pos.sell"] == frozenset({branch_a.id})
+    assert snapshot.permission_scopes["branches.view"] == frozenset({branch_b.id})
+    assert snapshot.permission_scopes["catalog.view"] is None
+    assert "settings.update" not in snapshot.permissions
+    assert current.can_access_branch("pos.sell", branch_a.id)
+    assert not current.can_access_branch("pos.sell", branch_b.id)
 
 
 async def test_assignment_mutation_advances_only_subject_revision(

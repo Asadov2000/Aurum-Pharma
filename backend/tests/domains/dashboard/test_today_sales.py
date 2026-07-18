@@ -23,6 +23,12 @@ from app.domains.foundation.service import FoundationService
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from app.domains.roles.models import (
+    Role,
+    RolePermission,
+    TenantMembership,
+    UserAssignment,
+)
 
 
 async def _seed(db: AsyncSession):  # type: ignore[no-untyped-def]
@@ -170,7 +176,7 @@ async def test_today_sales_gross_keeps_same_day_full_refund_and_matches_summary(
 async def test_dashboard_summary_requires_reports_view(
     db_session: AsyncSession, auth_client: AsyncClient
 ) -> None:
-    """Seller (no reports.view) → 403; administrator → 200."""
+    """Seller without reports.view is denied; explicitly authorized admin succeeds."""
     foundation = FoundationService(FoundationRepository(db_session))
     nick = uuid4().hex[:8]
     tenant = await foundation.create_tenant(
@@ -195,6 +201,39 @@ async def test_dashboard_summary_requires_reports_view(
     await db_session.flush()
     await db_session.refresh(seller)
     await db_session.refresh(admin)
+
+    seller_membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=seller.id,
+        full_name=seller.full_name,
+        status="active",
+    )
+    admin_membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=admin.id,
+        full_name=admin.full_name,
+        status="active",
+    )
+    role = Role(
+        tenant_id=tenant.id,
+        name=f"dashboard-reporter-{uuid4().hex[:8]}",
+        level=2,
+        is_system=False,
+    )
+    db_session.add_all([seller_membership, admin_membership, role])
+    await db_session.flush()
+    await db_session.refresh(admin_membership)
+    await db_session.refresh(role)
+    db_session.add(RolePermission(role_id=role.id, permission_code="reports.view"))
+    db_session.add(
+        UserAssignment(
+            user_id=admin.id,
+            tenant_id=tenant.id,
+            membership_id=admin_membership.id,
+            role_id=role.id,
+        )
+    )
+    await db_session.flush()
 
     seller_token = create_access_token(
         seller.id, tenant_id=tenant.id, is_developer=False, is_administrator=False

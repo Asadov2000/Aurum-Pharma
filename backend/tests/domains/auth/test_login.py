@@ -17,6 +17,9 @@ from app.core.errors import (
 from app.domains.auth.models import EmailCode, LoginAttempt
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.service import AuthService
+from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.service import FoundationService
+from app.domains.roles.models import TenantMembership
 
 
 async def _latest_code_for(db_session: AsyncSession, email: str) -> EmailCode:
@@ -120,6 +123,42 @@ async def test_verify_login_code_happy_path(db_session: AsyncSession, make_user)
     assert access  # non-empty JWT
     assert len(refresh) == 64  # 32 bytes hex
     assert expires_in == 15 * 60
+
+
+@pytest.mark.parametrize("membership_status", ["suspended", "offboarded"])
+async def test_verify_rejects_inactive_tenant_membership(
+    db_session: AsyncSession,
+    make_user,
+    membership_status: str,
+) -> None:
+    tenant = await FoundationService(FoundationRepository(db_session)).create_tenant(
+        payload={
+            "name": f"Inactive login {membership_status}",
+            "contact_email": f"inactive-login-{membership_status}@aurum.tj",
+        }
+    )
+    user = await make_user(
+        email=f"inactive-{membership_status}@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
+    db_session.add(
+        TenantMembership(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            full_name=user.full_name,
+            status=membership_status,
+        )
+    )
+    await db_session.flush()
+    await _seed_code(db_session, user.email, code="123456")
+
+    with pytest.raises(NotFoundError):
+        await AuthService(AuthRepository(db_session)).verify_login_code(
+            email=user.email,
+            code="123456",
+            password=None,
+            ip_address="127.0.0.1",
+        )
 
 
 async def test_verify_invalid_code(db_session: AsyncSession, make_user) -> None:

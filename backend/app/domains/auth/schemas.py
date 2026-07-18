@@ -65,6 +65,7 @@ class MeResponse(BaseModel):
     status: str
     last_login_at: datetime | None
     level: int = 4
+    is_tenant_owner: bool = False
     # role_id keyed by branch_id (or the literal "tenant" for tenant-wide
     # assignments). Empty when the request has no tenant_id in the token.
     branch_assignments: dict[str, str] = {}

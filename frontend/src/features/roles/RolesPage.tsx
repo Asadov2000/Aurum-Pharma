@@ -23,7 +23,8 @@ export function RolesPage(): JSX.Element {
   const canCreate = userPermissions.includes("roles.create");
   const canUpdate = userPermissions.includes("roles.update");
   const canAssign = userPermissions.includes("roles.assign");
-  const canView = hasTenant && (canCreate || canUpdate || canAssign);
+  const canView =
+    hasTenant && user?.is_tenant_owner === true && (canCreate || canUpdate || canAssign);
 
   const roles = useRolesQuery(canView);
   const perms = usePermissionsQuery(canView);
@@ -60,7 +61,7 @@ export function RolesPage(): JSX.Element {
 
   const card = (r: Role) => {
     const visiblePermissions = r.permissions.filter((code) => grantableCodes.has(code));
-    const editBlocked = perms.isSuccess && hasUnavailableRolePermissions(r, grantableCodes);
+    const editBlocked = perms.isSuccess && hasUnavailableRolePermissions(r);
 
     return (
       <Card key={r.id}>

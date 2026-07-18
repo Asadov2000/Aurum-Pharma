@@ -25,6 +25,7 @@ export interface Role {
   is_active: boolean;
   version: number;
   permissions: string[];
+  has_hidden_permissions: boolean;
 }
 
 export interface RoleTemplate {
@@ -44,6 +45,7 @@ export interface RoleCreatePayload {
 }
 
 export interface RoleUpdatePayload {
+  expected_version: number;
   name?: string;
   description?: string | null;
   permissions?: string[];
@@ -56,6 +58,7 @@ export interface Assignment {
   membership_id: string;
   branch_id: string | null;
   role_id: string;
+  role_name: string | null;
   password_required: boolean;
   is_active: boolean;
 }
@@ -65,6 +68,7 @@ export type UserStatus = "pending" | "active" | "suspended" | "offboarded";
 export interface UserWithAssignments {
   id: string;
   membership_id: string;
+  is_tenant_owner: boolean;
   email: string;
   full_name: string;
   phone: string | null;

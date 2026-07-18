@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_access_token
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
-from app.domains.roles.models import Role, RolePermission, UserAssignment
+from app.domains.roles.models import (
+    Role,
+    RolePermission,
+    TenantMembership,
+    UserAssignment,
+)
+from app.domains.roles.repository import RolesRepository
+from app.domains.roles.service import RolesService
 
 
 async def test_me_without_token_returns_401(auth_client: AsyncClient) -> None:
@@ -40,6 +48,7 @@ async def test_me_with_valid_token_returns_user(
     assert body["full_name"] == "Me User"
     assert body["is_developer"] is False
     assert body["is_administrator"] is False
+    assert body["is_tenant_owner"] is False
     assert body["level"] == 4
 
 
@@ -92,6 +101,85 @@ async def test_me_rejects_stale_support_claims(
     assert response.json()["error"]["code"] == "authentication_required"
 
 
+@pytest.mark.parametrize(
+    "membership_status",
+    ["pending", "suspended", "offboarded"],
+)
+async def test_me_rejects_inactive_tenant_membership(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+    membership_status: str,
+) -> None:
+    tenant = await FoundationService(FoundationRepository(db_session)).create_tenant(
+        payload={
+            "name": f"Inactive me {membership_status}",
+            "contact_email": f"inactive-me-{membership_status}@aurum.tj",
+        }
+    )
+    user = await make_user(
+        email=f"me-{membership_status}@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
+    db_session.add(
+        TenantMembership(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            full_name=user.full_name,
+            status=membership_status,
+        )
+    )
+    await db_session.flush()
+    token = create_access_token(
+        user.id,
+        tenant_id=tenant.id,
+        is_developer=False,
+        is_administrator=False,
+    )
+
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+async def test_me_reports_active_tenant_ownership(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    tenant = await FoundationService(FoundationRepository(db_session)).create_tenant(
+        payload={
+            "name": "Owner identity",
+            "contact_email": "owner-identity@aurum.tj",
+        }
+    )
+    owner, _membership, _ownership, _role = await RolesService(
+        RolesRepository(db_session)
+    ).provision_owner(
+        tenant_id=tenant.id,
+        email="me-owner@aurum.tj",
+        full_name="Owner",
+    )
+    token = create_access_token(
+        owner.id,
+        tenant_id=tenant.id,
+        is_developer=False,
+        is_administrator=False,
+    )
+
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_tenant_owner"] is True
+    assert response.json()["level"] == 3
+
+
 async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
     auth_client: AsyncClient,
     db_session: AsyncSession,
@@ -115,8 +203,24 @@ async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
     db_session.add(role)
     await db_session.flush()
     await db_session.refresh(role)
+    membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        full_name=user.full_name,
+        status="active",
+    )
+    db_session.add(membership)
+    await db_session.flush()
+    await db_session.refresh(membership)
     db_session.add(RolePermission(role_id=role.id, permission_code="roles.assign"))
-    db_session.add(UserAssignment(user_id=user.id, tenant_id=tenant.id, role_id=role.id))
+    db_session.add(
+        UserAssignment(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            membership_id=membership.id,
+            role_id=role.id,
+        )
+    )
     await db_session.flush()
 
     token = create_access_token(
@@ -155,13 +259,30 @@ async def test_me_ignores_assignments_to_inactive_roles(
         name="Inactive owner",
         level=3,
         is_system=False,
-        is_active=False,
     )
     db_session.add(role)
     await db_session.flush()
     await db_session.refresh(role)
+    membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        full_name=user.full_name,
+        status="active",
+    )
+    db_session.add(membership)
+    await db_session.flush()
+    await db_session.refresh(membership)
     db_session.add(RolePermission(role_id=role.id, permission_code="users.invite"))
-    db_session.add(UserAssignment(user_id=user.id, tenant_id=tenant.id, role_id=role.id))
+    db_session.add(
+        UserAssignment(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            membership_id=membership.id,
+            role_id=role.id,
+        )
+    )
+    await db_session.flush()
+    role.is_active = False
     await db_session.flush()
 
     token = create_access_token(
