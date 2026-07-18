@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   listNotifications,
@@ -18,6 +18,7 @@ export function useNotificationsQuery(params: NotificationsListParams, enabled =
   return useQuery({
     queryKey: notificationsKeys.list(params),
     queryFn: () => listNotifications(params),
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

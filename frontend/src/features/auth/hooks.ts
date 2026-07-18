@@ -4,6 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 
 import { logoutRequest, verifyLoginCode } from "./api";
 import { getPendingRefreshOperationId } from "./refreshOperation";
+import { clearClientSession } from "./session";
 import { type LoginVerifyRequest } from "./types";
 
 export function useAuth() {
@@ -11,12 +12,12 @@ export function useAuth() {
   const user = useAuthStore((s) => s.user);
   const hydrated = useAuthStore((s) => s.hydrated);
   const setTokens = useAuthStore((s) => s.setTokens);
-  const clear = useAuthStore((s) => s.clear);
 
   const login = useCallback(
     async (payload: LoginVerifyRequest) => {
       const result = await verifyLoginCode(payload);
       if ("access_token" in result) {
+        clearClientSession();
         setTokens(result);
       }
       return result;
@@ -30,8 +31,8 @@ export function useAuth() {
     } catch {
       // Whatever the server says, the client-side session is over.
     }
-    clear();
-  }, [clear]);
+    clearClientSession();
+  }, []);
 
   return {
     isAuthenticated: accessToken !== null,

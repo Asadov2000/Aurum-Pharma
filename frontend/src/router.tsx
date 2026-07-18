@@ -3,25 +3,11 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
-  Outlet,
-  type RouteComponent,
 } from "@tanstack/react-router";
-import { Suspense, type ReactNode } from "react";
 import { z } from "zod";
 
-import { AppLayout } from "@/components/layout/AppLayout";
-import { AuthGuard } from "@/features/auth/AuthGuard";
+import { RootLayout } from "@/components/layout/RootLayout";
 import { LoginPage } from "@/features/auth/LoginPage";
-
-const routePending = (
-  <div
-    role="status"
-    aria-live="polite"
-    className="flex min-h-48 items-center justify-center text-sm text-foreground-muted"
-  >
-    Загрузка…
-  </div>
-);
 
 const DashboardPage = lazyRouteComponent(
   () => import("@/features/dashboard/DashboardPage"),
@@ -43,14 +29,8 @@ const SettingsPage = lazyRouteComponent(
   () => import("@/features/foundation/SettingsPage"),
   "SettingsPage",
 );
-const UsersPage = lazyRouteComponent(
-  () => import("@/features/roles/UsersPage"),
-  "UsersPage",
-);
-const RolesPage = lazyRouteComponent(
-  () => import("@/features/roles/RolesPage"),
-  "RolesPage",
-);
+const UsersPage = lazyRouteComponent(() => import("@/features/roles/UsersPage"), "UsersPage");
+const RolesPage = lazyRouteComponent(() => import("@/features/roles/RolesPage"), "RolesPage");
 const CatalogPage = lazyRouteComponent(
   () => import("@/features/catalog/CatalogPage"),
   "CatalogPage",
@@ -72,18 +52,12 @@ const IncomingDetailPage = lazyRouteComponent(
   "IncomingDetailPage",
 );
 const POSPage = lazyRouteComponent(() => import("@/features/pos/POSPage"), "POSPage");
-const SalesPage = lazyRouteComponent(
-  () => import("@/features/sales/SalesPage"),
-  "SalesPage",
-);
+const SalesPage = lazyRouteComponent(() => import("@/features/sales/SalesPage"), "SalesPage");
 const BillingPage = lazyRouteComponent(
   () => import("@/features/billing/BillingPage"),
   "BillingPage",
 );
-const AuditPage = lazyRouteComponent(
-  () => import("@/features/audit/AuditPage"),
-  "AuditPage",
-);
+const AuditPage = lazyRouteComponent(() => import("@/features/audit/AuditPage"), "AuditPage");
 const OnboardingPage = lazyRouteComponent(
   () => import("@/features/onboarding/OnboardingPage"),
   "OnboardingPage",
@@ -98,141 +72,121 @@ const ReportsPage = lazyRouteComponent(
 );
 
 const rootRoute = createRootRoute({
-  component: () => <Outlet />,
+  component: RootLayout,
 });
-
-// Single helper so every protected page gets the same shell + guard.
-function protect(node: ReactNode): JSX.Element {
-  return (
-    <AuthGuard>
-      <AppLayout>{node}</AppLayout>
-    </AuthGuard>
-  );
-}
-
-function protectedPage(Page: RouteComponent): RouteComponent {
-  const ProtectedPage = () =>
-    protect(
-      <Suspense fallback={routePending}>
-        <Page />
-      </Suspense>,
-    );
-  ProtectedPage.preload = Page.preload;
-  return ProtectedPage;
-}
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: protectedPage(DashboardPage),
+  component: DashboardPage,
 });
 
 const tenantsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/tenants",
-  component: protectedPage(TenantsPage),
+  component: TenantsPage,
 });
 
 const branchesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/branches",
-  component: protectedPage(BranchesPage),
+  component: BranchesPage,
 });
 
 const registersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/registers",
-  component: protectedPage(RegistersPage),
+  component: RegistersPage,
 });
 
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
-  component: protectedPage(SettingsPage),
+  component: SettingsPage,
 });
 
 const usersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/users",
-  component: protectedPage(UsersPage),
+  component: UsersPage,
 });
 
 const rolesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/roles",
-  component: protectedPage(RolesPage),
+  component: RolesPage,
 });
 
 const catalogRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/catalog",
-  component: protectedPage(CatalogPage),
+  component: CatalogPage,
 });
 
 const batchesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/batches",
-  component: protectedPage(BatchesPage),
+  component: BatchesPage,
 });
 
 const suppliersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/suppliers",
-  component: protectedPage(SuppliersPage),
+  component: SuppliersPage,
 });
 
 const incomingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/incoming",
-  component: protectedPage(IncomingPage),
+  component: IncomingPage,
 });
 
 const incomingDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/incoming/$id",
-  component: protectedPage(IncomingDetailPage),
+  component: IncomingDetailPage,
 });
 
 const posRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/pos",
-  component: protectedPage(POSPage),
+  component: POSPage,
 });
 
 const salesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/sales",
-  component: protectedPage(SalesPage),
+  component: SalesPage,
 });
 
 const billingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/billing",
-  component: protectedPage(BillingPage),
+  component: BillingPage,
 });
 
 const auditRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/audit",
-  component: protectedPage(AuditPage),
+  component: AuditPage,
 });
 
 const onboardingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/onboarding",
-  component: protectedPage(OnboardingPage),
+  component: OnboardingPage,
 });
 
 const notificationsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/notifications",
-  component: protectedPage(NotificationsPage),
+  component: NotificationsPage,
 });
 
 const reportsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/reports",
-  component: protectedPage(ReportsPage),
+  component: ReportsPage,
 });
 
 const loginSearchSchema = z.object({

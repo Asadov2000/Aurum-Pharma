@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   acceptIncoming,
@@ -28,6 +28,7 @@ export function useIncomingListQuery(params: IncomingSearchParams, enabled = tru
   return useQuery({
     queryKey: incomingKeys.list(params),
     queryFn: () => listIncoming(params),
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

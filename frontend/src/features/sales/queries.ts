@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getSaleDetails, listSales, refundSale } from "./api";
 import { type RefundPayload, type SaleSearchParams } from "./types";
@@ -12,6 +12,7 @@ export function useSalesQuery(params: SaleSearchParams, enabled = true) {
   return useQuery({
     queryKey: salesKeys.list(params),
     queryFn: () => listSales(params),
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

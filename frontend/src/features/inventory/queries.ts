@@ -1,11 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  getBatch,
-  listBatches,
-  listMovements,
-  writeOff,
-} from "./api";
+import { getBatch, listBatches, listMovements, writeOff } from "./api";
 import { type BatchSearchParams, type WriteOffCreatePayload } from "./types";
 
 export const inventoryKeys = {
@@ -18,6 +13,7 @@ export function useBatchesQuery(params: BatchSearchParams, enabled = true) {
   return useQuery({
     queryKey: inventoryKeys.list(params),
     queryFn: () => listBatches(params),
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

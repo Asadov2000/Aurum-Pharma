@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   createAssignment,
@@ -31,6 +31,7 @@ export function useUsersQuery(enabled = true, page = 1, pageSize = 50) {
   return useQuery({
     queryKey: [...rolesKeys.users, page, pageSize] as const,
     queryFn: () => listUsers(page, pageSize),
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

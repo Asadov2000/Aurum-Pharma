@@ -3,6 +3,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { useMeQuery } from "./queries";
 import { isConfirmedAuthFailure } from "./failures";
+import { clearClientSession } from "./session";
 import { useAuthStore } from "@/stores/auth";
 
 export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | null {
@@ -10,7 +11,6 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
   const user = useAuthStore((s) => s.user);
   const hydrated = useAuthStore((s) => s.hydrated);
   const setUser = useAuthStore((s) => s.setUser);
-  const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
   const location = useRouterState({ select: (s) => s.location });
 
@@ -28,10 +28,10 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
 
   useEffect(() => {
     if (error && isConfirmedAuthFailure(error)) {
-      clear();
+      clearClientSession();
       navigate({ to: "/login", search: { from: location.pathname } });
     }
-  }, [error, clear, navigate, location.pathname]);
+  }, [error, navigate, location.pathname]);
 
   if (!hydrated || accessToken === null) return null;
   if (isLoading && user === null) {

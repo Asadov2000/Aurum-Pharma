@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   addBarcode,
@@ -32,6 +32,7 @@ export function useCatalogQuery(params: CatalogSearchParams, enabled = true) {
   return useQuery({
     queryKey: catalogKeys.list(params),
     queryFn: () => listCatalog(params),
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

@@ -132,6 +132,7 @@ test.describe("Auth", () => {
   });
 
   test("invalid code surfaces a friendly error", async ({ page }) => {
+    clearLoginRateLimit(DEV.email);
     await page.goto("/login", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Email").fill(DEV.email);
     await page.getByRole("button", { name: /Получить код/ }).click();

@@ -44,6 +44,7 @@ export default defineConfig(({ mode }) => ({
         "./src/main.tsx",
         "./src/router.tsx",
         "./src/features/auth/LoginPage.tsx",
+        "./src/features/**/*Page.tsx",
       ],
     },
   },

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   createSupplier,
@@ -55,6 +55,7 @@ export function useSupplierReturnsQuery(
   return useQuery({
     queryKey: suppliersKeys.returns(params),
     queryFn: () => listSupplierReturns(params),
+    placeholderData: keepPreviousData,
     enabled,
   });
 }
