@@ -33,6 +33,13 @@ describe("describeApiError", () => {
     expect(describeApiError(err)).toMatch(/данные рецепта/i);
   });
 
+  it("explains when another employee already has the register shift", () => {
+    const err = axiosErrorWith(409, {
+      error: { code: "conflict", message: "Register already has an open shift" },
+    });
+    expect(describeApiError(err)).toMatch(/смена другого сотрудника/i);
+  });
+
   it("falls back to the code category when the message is unknown", () => {
     const err = axiosErrorWith(409, {
       error: { code: "conflict", message: "Some brand-new untranslated message" },

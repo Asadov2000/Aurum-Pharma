@@ -127,11 +127,13 @@ async def get_current_shift(
     shift = await service.get_current_shift(
         user_id=user.user_id,
         register_id=register_id,
+        can_manage_tenant=_can_view_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for_any(
             "pos.shift_open",
             "pos.shift_close",
             "pos.sell",
         ),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return ShiftRead.model_validate(shift) if shift is not None else None
 

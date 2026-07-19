@@ -146,4 +146,20 @@ describe("POSPage", () => {
       });
     });
   });
+
+  it("recovers an already-open shift after a conflicting open response", async () => {
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockResolvedValueOnce(null).mockResolvedValue(OPEN_SHIFT);
+    openShift.mockRejectedValueOnce(new Error("response lost"));
+    renderPage();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Открыть смену/i }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Смена открыта/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Не удалось открыть смену/i)).not.toBeInTheDocument();
+  });
 });

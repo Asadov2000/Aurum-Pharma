@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, CardContent, Input, Label, Modal, Textarea } from "@/components/ui";
@@ -5,7 +6,7 @@ import { downloadBlob } from "@/lib/download";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { getZReportXlsx } from "./api";
-import { useCloseShift, useCurrentShiftQuery, useOpenShift } from "./queries";
+import { posKeys, useCloseShift, useCurrentShiftQuery, useOpenShift } from "./queries";
 import { type PosMode } from "./usePosMode";
 
 export function ShiftBar({
@@ -16,6 +17,7 @@ export function ShiftBar({
   mode?: PosMode;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
+  const queryClient = useQueryClient();
   const openMutation = useOpenShift();
   const closeMutation = useCloseShift();
   const [openingCash, setOpeningCash] = useState("0");
@@ -35,6 +37,11 @@ export function ShiftBar({
     try {
       await openMutation.mutateAsync({ register_id: registerId, opening_cash: openingCash });
     } catch (err) {
+      const refreshed = await shiftQuery.refetch();
+      if (refreshed.data) {
+        queryClient.setQueryData(posKeys.shift(registerId), refreshed.data);
+        return;
+      }
       setTopError(describeApiError(err, "Не удалось открыть смену"));
     }
   };

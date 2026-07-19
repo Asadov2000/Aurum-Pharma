@@ -32,6 +32,8 @@ const MESSAGE_MAP: Record<string, string> = {
   "Sale not found": "Продажа не найдена.",
   "Shift is not open": "Смена не открыта. Откройте смену, чтобы продолжить.",
   "No open shift for this register": "Для этой кассы нет открытой смены.",
+  "Register already has an open shift":
+    "На этой кассе уже открыта смена другого сотрудника. Выберите другую кассу или попросите управляющего закрыть смену.",
   "Shift not found": "Смена не найдена.",
   "Register not found": "Касса не найдена.",
   "Register is inactive": "Касса неактивна.",

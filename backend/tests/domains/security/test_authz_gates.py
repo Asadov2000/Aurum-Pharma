@@ -238,6 +238,29 @@ async def _assert_atomic_checkout_access(
     assert manager_recovery.json() == manager_checkout.json()
 
 
+async def _assert_current_shift_visibility(
+    client: AsyncClient,
+    *,
+    register_id: UUID,
+    shift_id: UUID,
+    peer_headers: dict[str, str],
+    manager_headers: dict[str, str],
+) -> None:
+    peer_response = await client.get(
+        f"/api/v1/shifts/current?register_id={register_id}",
+        headers=peer_headers,
+    )
+    manager_response = await client.get(
+        f"/api/v1/shifts/current?register_id={register_id}",
+        headers=manager_headers,
+    )
+
+    assert peer_response.status_code == 200
+    assert peer_response.json() is None
+    assert manager_response.status_code == 200
+    assert manager_response.json()["id"] == str(shift_id)
+
+
 @pytest.mark.parametrize("path", REPORT_READ_PATHS)
 async def test_sensitive_reads_require_reports_view(
     db_session: AsyncSession, client: AsyncClient, path: str
@@ -970,6 +993,13 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
             "payments": [{"payment_method": "cash", "amount": "10.00"}],
         }
         manager_headers = {"Authorization": f"Bearer {_token(manager)}"}
+        await _assert_current_shift_visibility(
+            client,
+            register_id=register.id,
+            shift_id=shift.id,
+            peer_headers=peer_headers,
+            manager_headers=manager_headers,
+        )
         await _assert_atomic_checkout_access(
             client,
             peer_headers=peer_headers,

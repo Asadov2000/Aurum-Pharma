@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,6 +48,34 @@ async def test_cannot_open_two_shifts_on_same_register(
             opened_by_user_id=s["cashier"].id,
             opening_cash=Decimal("0"),
         )
+
+
+async def test_manager_can_resume_another_cashiers_open_shift(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    s = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    shift = await service.open_shift(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        opened_by_user_id=s["cashier"].id,
+        opening_cash=Decimal("100.00"),
+    )
+    manager_id = uuid4()
+
+    cashier_view = await service.get_current_shift(
+        user_id=manager_id,
+        register_id=s["register"].id,
+    )
+    manager_view = await service.get_current_shift(
+        user_id=manager_id,
+        register_id=s["register"].id,
+        can_manage_tenant=True,
+    )
+
+    assert cashier_view is None
+    assert manager_view is not None
+    assert manager_view.id == shift.id
 
 
 async def test_open_shift_rejects_register_on_inactive_branch(

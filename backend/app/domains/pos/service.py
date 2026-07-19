@@ -134,9 +134,21 @@ class POSService:
         *,
         user_id: UUID,
         register_id: UUID,
+        can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> Shift | None:
         shift = await self.repo.get_open_shift_for_user(user_id, register_id)
+        if shift is None and (can_manage_tenant or bool(allowed_manage_branch_ids)):
+            managed_shift = await self.repo.get_open_shift_for_register(register_id)
+            if managed_shift is not None and (
+                can_manage_tenant
+                or (
+                    allowed_manage_branch_ids is not None
+                    and managed_shift.branch_id in allowed_manage_branch_ids
+                )
+            ):
+                shift = managed_shift
         if shift is not None:
             self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
         return shift
