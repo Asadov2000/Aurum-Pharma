@@ -1,4 +1,5 @@
 import { HomeIcon, type NavItem } from "./Sidebar";
+import { canAccessPath, type AppRoutePath, type RouteAccessContext } from "./routeAccess";
 
 /** Builds the sidebar items for the current user. Kept out of AppLayout so it
  *  can be unit-tested (and so AppLayout stays a component-only module). */
@@ -7,53 +8,35 @@ export function buildNav(
   hasTenant: boolean,
   isTenantOwner: boolean,
   permissions: readonly string[],
+  isDeveloper = false,
 ): NavItem[] {
-  const can = (code: string): boolean => isSupport || permissions.includes(code);
-  const canAny = (codes: readonly string[]): boolean => codes.some((code) => can(code));
-  const hasPermission = (code: string): boolean => permissions.includes(code);
-  const hasAnyPermission = (codes: readonly string[]): boolean =>
-    codes.some((code) => hasPermission(code));
+  const context: RouteAccessContext = {
+    isDeveloper,
+    isAdministrator: isSupport && !isDeveloper,
+    isTenantOwner,
+    hasTenant,
+    permissions,
+  };
+  const candidates: Array<NavItem & { to: AppRoutePath }> = [
+    { to: "/", label: "Главная", icon: <HomeIcon /> },
+    { to: "/admin/tenants", label: "Тенанты" },
+    { to: "/onboarding", label: "Старт" },
+    { to: "/branches", label: "Точки" },
+    { to: "/registers", label: "Кассы" },
+    { to: "/users", label: "Пользователи" },
+    { to: "/roles", label: "Роли" },
+    { to: "/catalog", label: "Каталог" },
+    { to: "/suppliers", label: "Поставщики" },
+    { to: "/incoming", label: "Приходы" },
+    { to: "/batches", label: "Партии" },
+    { to: "/pos", label: "Касса" },
+    { to: "/sales", label: "Чеки" },
+    { to: "/billing", label: "Биллинг" },
+    { to: "/reports", label: "Отчёты" },
+    { to: "/audit", label: "Аудит" },
+    { to: "/notifications", label: "Уведомления" },
+    { to: "/settings", label: "Настройки" },
+  ];
 
-  // «Главная» is the owner dashboard (gated by reports.view on the backend).
-  // Hide it from users who'd only get a 403 — e.g. sellers.
-  const items: NavItem[] = can("reports.view")
-    ? [{ to: "/", label: "Главная", icon: <HomeIcon /> }]
-    : [];
-  if (isSupport) {
-    items.push({ to: "/admin/tenants", label: "Тенанты" });
-  }
-  if (hasTenant) {
-    items.push({ to: "/onboarding", label: "Старт" });
-    items.push({ to: "/branches", label: "Точки" });
-    items.push({ to: "/registers", label: "Кассы" });
-    if (hasPermission("users.view")) {
-      items.push({ to: "/users", label: "Пользователи" });
-    }
-    if (
-      isTenantOwner &&
-      hasAnyPermission(["roles.create", "roles.update", "roles.assign"])
-    ) {
-      items.push({ to: "/roles", label: "Роли" });
-    }
-    if (can("catalog.view")) items.push({ to: "/catalog", label: "Каталог" });
-    if (can("suppliers.view")) items.push({ to: "/suppliers", label: "Поставщики" });
-    if (can("incoming.view")) items.push({ to: "/incoming", label: "Приходы" });
-    if (can("reports.view")) items.push({ to: "/batches", label: "Партии" });
-    if (canAny(["pos.shift_open", "pos.sell", "pos.shift_close"])) {
-      items.push({ to: "/pos", label: "Касса" });
-    }
-    if (canAny(["sales.view.own", "sales.view.tenant"])) {
-      items.push({ to: "/sales", label: "Чеки" });
-    }
-    if (can("reports.view")) {
-      items.push({ to: "/billing", label: "Биллинг" });
-      items.push({ to: "/reports", label: "Отчёты" });
-    }
-    if (canAny(["audit.view.own", "audit.view.tenant", "audit.view.global"])) {
-      items.push({ to: "/audit", label: "Аудит" });
-    }
-    items.push({ to: "/notifications", label: "Уведомления" });
-    if (can("settings.update")) items.push({ to: "/settings", label: "Настройки" });
-  }
-  return items;
+  return candidates.filter((item) => canAccessPath(item.to, context));
 }

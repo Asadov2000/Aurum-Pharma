@@ -13,6 +13,16 @@ vi.mock("@/features/suppliers/api", () => ({
   createSupplierReturn: vi.fn(),
 }));
 
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => ({
+    user: {
+      home_tenant_id: "t-1",
+      is_developer: false,
+      permissions: ["suppliers.view", "suppliers.create", "suppliers.update"],
+    },
+  }),
+}));
+
 import { SuppliersPage } from "@/features/suppliers/SuppliersPage";
 
 function renderPage() {

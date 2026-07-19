@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -20,7 +20,7 @@ from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.audit.models import AuditLog
 from app.domains.audit.repository import AuditRepository
 from app.domains.audit.schemas import AuditEntry, AuditPage
-from app.domains.audit.service import AuditService
+from app.domains.audit.service import DEFAULT_REPORT_TIMEZONE, AuditService
 
 router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 admin_router = APIRouter(prefix="/api/v1/admin/audit", tags=["admin", "audit"])
@@ -36,6 +36,17 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     if user.tenant_id is None:
         raise BusinessRuleError("Request is not scoped to a tenant")
     return user.tenant_id
+
+
+async def _report_timezone(
+    service: AuditService,
+    tenant_id: UUID | None,
+    date_from: date | None,
+    date_to: date | None,
+) -> str:
+    if date_from is None and date_to is None:
+        return DEFAULT_REPORT_TIMEZONE
+    return await service.get_report_timezone(tenant_id)
 
 
 async def require_developer(
@@ -65,8 +76,8 @@ def _to_page(
 async def my_audit(
     user: Annotated[CurrentUser, Depends(require_permission("audit.view.own"))],
     service: Annotated[AuditService, Depends(_service)],
-    date_from: Annotated[datetime | None, Query()] = None,
-    date_to: Annotated[datetime | None, Query()] = None,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
     action: Annotated[str | None, Query()] = None,
     table_name: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -79,6 +90,12 @@ async def my_audit(
         table_name=table_name,
         date_from=date_from,
         date_to=date_to,
+        report_timezone=await _report_timezone(
+            service,
+            user.tenant_id,
+            date_from,
+            date_to,
+        ),
         page=page,
         page_size=page_size,
     )
@@ -90,8 +107,8 @@ async def tenant_audit(
     user: Annotated[CurrentUser, Depends(require_permission("audit.view.tenant"))],
     service: Annotated[AuditService, Depends(_service)],
     user_id: Annotated[UUID | None, Query()] = None,
-    date_from: Annotated[datetime | None, Query()] = None,
-    date_to: Annotated[datetime | None, Query()] = None,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
     action: Annotated[str | None, Query()] = None,
     table_name: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -104,6 +121,12 @@ async def tenant_audit(
         table_name=table_name,
         date_from=date_from,
         date_to=date_to,
+        report_timezone=await _report_timezone(
+            service,
+            user.tenant_id,
+            date_from,
+            date_to,
+        ),
         page=page,
         page_size=page_size,
     )
@@ -116,8 +139,8 @@ async def global_audit(
     service: Annotated[AuditService, Depends(_service)],
     tenant_id: Annotated[UUID | None, Query()] = None,
     user_id: Annotated[UUID | None, Query()] = None,
-    date_from: Annotated[datetime | None, Query()] = None,
-    date_to: Annotated[datetime | None, Query()] = None,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
     action: Annotated[str | None, Query()] = None,
     table_name: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -130,6 +153,12 @@ async def global_audit(
         table_name=table_name,
         date_from=date_from,
         date_to=date_to,
+        report_timezone=await _report_timezone(
+            service,
+            tenant_id,
+            date_from,
+            date_to,
+        ),
         page=page,
         page_size=page_size,
         global_scope=True,

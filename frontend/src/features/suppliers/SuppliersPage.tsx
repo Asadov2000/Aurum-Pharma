@@ -13,6 +13,8 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { useSuppliersQuery } from "./queries";
@@ -20,6 +22,9 @@ import { SupplierForm } from "./SupplierForm";
 import { type Supplier } from "./types";
 
 export function SuppliersPage(): JSX.Element {
+  const { user } = useAuth();
+  const canCreate = hasPermission(user, "suppliers.create");
+  const canUpdate = hasPermission(user, "suppliers.update");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [creating, setCreating] = useState(false);
@@ -29,7 +34,7 @@ export function SuppliersPage(): JSX.Element {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Поставщики</h1>
-        <Button onClick={() => setCreating(true)}>+ Новый поставщик</Button>
+        {canCreate && <Button onClick={() => setCreating(true)}>+ Новый поставщик</Button>}
       </div>
       <Switch
         label="Показывать неактивных"
@@ -54,7 +59,7 @@ export function SuppliersPage(): JSX.Element {
               <TH>Телефон</TH>
               <TH>Email</TH>
               <TH>Статус</TH>
-              <TH className="text-right">Действия</TH>
+              {canUpdate && <TH className="text-right">Действия</TH>}
             </TR>
           </THead>
           <TBody>
@@ -71,32 +76,36 @@ export function SuppliersPage(): JSX.Element {
                     <Badge tone="neutral">Неактивен</Badge>
                   )}
                 </TD>
-                <TD className="text-right">
-                  <Button variant="ghost" size="sm" onClick={() => setEditing(s)}>
-                    Изменить
-                  </Button>
-                </TD>
+                {canUpdate && (
+                  <TD className="text-right">
+                    <Button variant="ghost" size="sm" onClick={() => setEditing(s)}>
+                      Изменить
+                    </Button>
+                  </TD>
+                )}
               </TR>
             ))}
           </TBody>
         </Table>
       )}
-      <Modal
-        open={creating || editing !== null}
-        onClose={() => {
-          setCreating(false);
-          setEditing(null);
-        }}
-        title={editing ? `Редактирование: ${editing.name}` : "Новый поставщик"}
-      >
-        <SupplierForm
-          supplier={editing}
+      {(canCreate || canUpdate) && (
+        <Modal
+          open={creating || editing !== null}
           onClose={() => {
             setCreating(false);
             setEditing(null);
           }}
-        />
-      </Modal>
+          title={editing ? `Редактирование: ${editing.name}` : "Новый поставщик"}
+        >
+          <SupplierForm
+            supplier={editing}
+            onClose={() => {
+              setCreating(false);
+              setEditing(null);
+            }}
+          />
+        </Modal>
+      )}
     </div>
   );
 }

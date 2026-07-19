@@ -16,13 +16,11 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 
 import { describeApiError } from "./errors";
-import {
-  useBranchesQuery,
-  useDeleteRegister,
-  useRegistersQuery,
-} from "./queries";
+import { useBranchesQuery, useDeleteRegister, useRegistersQuery } from "./queries";
 import { RegisterForm } from "./RegisterForm";
 import { type PrinterType, type Register } from "./types";
 
@@ -34,6 +32,11 @@ const printerLabel: Record<PrinterType, string> = {
 };
 
 export function RegistersPage(): JSX.Element {
+  const { user } = useAuth();
+  const canCreate = hasPermission(user, "registers.create");
+  const canUpdate = hasPermission(user, "registers.update");
+  const canDelete = hasPermission(user, "registers.delete");
+  const showActions = canUpdate || canDelete;
   const [branchFilter, setBranchFilter] = useState<string>("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [editing, setEditing] = useState<Register | null>(null);
@@ -42,17 +45,14 @@ export function RegistersPage(): JSX.Element {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const branches = useBranchesQuery(true);
-  const { data, isLoading, error } = useRegistersQuery(
-    branchFilter || null,
-    includeInactive,
-  );
+  const { data, isLoading, error } = useRegistersQuery(branchFilter || null, includeInactive);
   const deleteMutation = useDeleteRegister();
 
   const branchNameById = (id: string): string =>
     branches.data?.find((b) => b.id === id)?.name ?? id.slice(0, 8);
 
   const confirmDelete = async () => {
-    if (!pendingDelete) return;
+    if (!pendingDelete || !canDelete) return;
     setDeleteError(null);
     try {
       await deleteMutation.mutateAsync(pendingDelete.id);
@@ -66,7 +66,7 @@ export function RegistersPage(): JSX.Element {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Кассы</h1>
-        <Button onClick={() => setCreating(true)}>+ Новая касса</Button>
+        {canCreate && <Button onClick={() => setCreating(true)}>+ Новая касса</Button>}
       </div>
       <div className="flex items-end gap-4">
         <div>
@@ -108,7 +108,7 @@ export function RegistersPage(): JSX.Element {
               <TH>Точка</TH>
               <TH>Принтер</TH>
               <TH>Статус</TH>
-              <TH className="text-right">Действия</TH>
+              {showActions && <TH className="text-right">Действия</TH>}
             </TR>
           </THead>
           <TBody>
@@ -124,63 +124,71 @@ export function RegistersPage(): JSX.Element {
                     <Badge tone="neutral">Неактивна</Badge>
                   )}
                 </TD>
-                <TD className="text-right">
-                  <Button variant="ghost" size="sm" onClick={() => setEditing(r)}>
-                    Изменить
-                  </Button>
-                  {r.is_active && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setDeleteError(null);
-                        setPendingDelete(r);
-                      }}
-                      isLoading={deleteMutation.isPending}
-                    >
-                      Удалить
-                    </Button>
-                  )}
-                </TD>
+                {showActions && (
+                  <TD className="text-right">
+                    {canUpdate && (
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(r)}>
+                        Изменить
+                      </Button>
+                    )}
+                    {canDelete && r.is_active && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setDeleteError(null);
+                          setPendingDelete(r);
+                        }}
+                        isLoading={deleteMutation.isPending}
+                      >
+                        Удалить
+                      </Button>
+                    )}
+                  </TD>
+                )}
               </TR>
             ))}
           </TBody>
         </Table>
       )}
-      <Modal
-        open={creating || editing !== null}
-        onClose={() => {
-          setCreating(false);
-          setEditing(null);
-        }}
-        title={editing ? `Редактирование: ${editing.name}` : "Новая касса"}
-      >
-        <RegisterForm
-          register={editing}
+      {(canCreate || canUpdate) && (
+        <Modal
+          open={creating || editing !== null}
           onClose={() => {
             setCreating(false);
             setEditing(null);
           }}
+          title={editing ? `Редактирование: ${editing.name}` : "Новая касса"}
+        >
+          <RegisterForm
+            register={editing}
+            onClose={() => {
+              setCreating(false);
+              setEditing(null);
+            }}
+          />
+        </Modal>
+      )}
+      {canDelete && (
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          title="Деактивировать кассу"
+          message={
+            <>
+              Деактивировать кассу «{pendingDelete?.name}»?
+              {deleteError && <span className="mt-2 block text-danger">{deleteError}</span>}
+            </>
+          }
+          confirmLabel="Деактивировать"
+          variant="danger"
+          isLoading={deleteMutation.isPending}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => {
+            setPendingDelete(null);
+            setDeleteError(null);
+          }}
         />
-      </Modal>
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        title="Деактивировать кассу"
-        message={
-          <>
-            Деактивировать кассу «{pendingDelete?.name}»?
-            {deleteError && <span className="mt-2 block text-danger">{deleteError}</span>}
-          </>
-        }
-        confirmLabel="Деактивировать"
-        variant="danger"
-        isLoading={deleteMutation.isPending}
-        onConfirm={() => void confirmDelete()}
-        onCancel={() => {
-          setPendingDelete(null);
-          setDeleteError(null);
-        }}
-      />
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { AuthGuard } from "@/features/auth/AuthGuard";
 
 import { AppLayout } from "./AppLayout";
+import { RouteAccessGuard } from "./RouteAccessGuard";
 
 const routePending = (
   <div
@@ -24,9 +25,11 @@ export function RootLayout(): JSX.Element {
   return (
     <AuthGuard>
       <AppLayout>
-        <Suspense fallback={routePending}>
-          <Outlet />
-        </Suspense>
+        <RouteAccessGuard>
+          <Suspense fallback={routePending}>
+            <Outlet />
+          </Suspense>
+        </RouteAccessGuard>
       </AppLayout>
     </AuthGuard>
   );

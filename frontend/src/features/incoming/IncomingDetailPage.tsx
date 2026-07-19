@@ -18,6 +18,8 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { hasAnyPermission, hasPermission } from "@/features/auth/permissions";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { describeApiError } from "@/features/foundation/errors";
 import { useSuppliersQuery } from "@/features/suppliers/queries";
@@ -32,10 +34,22 @@ import {
 } from "./queries";
 
 export function IncomingDetailPage(): JSX.Element {
+  const { user } = useAuth();
+  const canEdit = hasPermission(user, "incoming.create");
+  const canDiscoverBranches = hasAnyPermission(user, [
+    "branches.view",
+    "registers.view",
+    "pos.shift_open",
+    "pos.shift_close",
+    "pos.sell",
+    "incoming.view",
+    "incoming.create",
+  ]);
+  const canViewSuppliers = hasPermission(user, "suppliers.view");
   const { id } = useParams({ from: "/incoming/$id" });
   const { data: doc, isLoading, error } = useIncomingDocQuery(id);
-  const branches = useBranchesQuery(true);
-  const suppliers = useSuppliersQuery(true);
+  const branches = useBranchesQuery(true, canDiscoverBranches);
+  const suppliers = useSuppliersQuery(true, canViewSuppliers);
   const accept = useAcceptIncoming();
   const reject = useRejectIncoming();
   const deleteItem = useDeleteIncomingItem();
@@ -70,6 +84,7 @@ export function IncomingDetailPage(): JSX.Element {
   const isDraft = doc.status === "draft";
 
   const onAccept = async () => {
+    if (!canEdit) return;
     setTopError(null);
     try {
       await accept.mutateAsync(doc.id);
@@ -80,6 +95,7 @@ export function IncomingDetailPage(): JSX.Element {
   };
 
   const onReject = async () => {
+    if (!canEdit) return;
     setTopError(null);
     try {
       await reject.mutateAsync(doc.id);
@@ -90,7 +106,7 @@ export function IncomingDetailPage(): JSX.Element {
   };
 
   const onDeleteItem = async () => {
-    if (!pendingDeleteItemId) return;
+    if (!pendingDeleteItemId || !canEdit) return;
     setDeleteItemError(null);
     try {
       await deleteItem.mutateAsync({ documentId: doc.id, itemId: pendingDeleteItemId });
@@ -109,13 +125,17 @@ export function IncomingDetailPage(): JSX.Element {
           </Button>
         </Link>
         <div className="flex gap-2">
-          {isDraft && doc.items.length > 0 && (
+          {canEdit && isDraft && doc.items.length > 0 && (
             <Button onClick={() => setDocAction("accept")} isLoading={accept.isPending}>
               Принять
             </Button>
           )}
-          {isDraft && (
-            <Button variant="secondary" onClick={() => setDocAction("reject")} isLoading={reject.isPending}>
+          {canEdit && isDraft && (
+            <Button
+              variant="secondary"
+              onClick={() => setDocAction("reject")}
+              isLoading={reject.isPending}
+            >
               Отклонить
             </Button>
           )}
@@ -135,10 +155,7 @@ export function IncomingDetailPage(): JSX.Element {
           <Field label="Дата" value={new Date(doc.document_date).toLocaleDateString("ru-RU")} />
           <Field label="Точка" value={branchName} />
           <Field label="Поставщик" value={supplierName} />
-          <Field
-            label="Сумма"
-            value={`${Number(doc.total_amount).toFixed(2)} ${doc.currency}`}
-          />
+          <Field label="Сумма" value={`${Number(doc.total_amount).toFixed(2)} ${doc.currency}`} />
           {doc.notes && (
             <div className="col-span-2">
               <p className="text-xs text-foreground-muted">Комментарий</p>
@@ -152,7 +169,7 @@ export function IncomingDetailPage(): JSX.Element {
 
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium text-foreground">Позиции ({doc.items.length})</h2>
-        {isDraft && <Button onClick={() => setAdding(true)}>+ Добавить позицию</Button>}
+        {canEdit && isDraft && <Button onClick={() => setAdding(true)}>+ Добавить позицию</Button>}
       </div>
 
       {doc.items.length === 0 ? (
@@ -167,7 +184,7 @@ export function IncomingDetailPage(): JSX.Element {
               <TH className="text-right">Закуп.</TH>
               <TH className="text-right">Розн.</TH>
               <TH className="text-right">Сумма</TH>
-              <TH></TH>
+              {canEdit && <TH></TH>}
             </TR>
           </THead>
           <TBody>
@@ -188,67 +205,77 @@ export function IncomingDetailPage(): JSX.Element {
                 <TD className="text-right font-mono">
                   {(Number(it.qty) * Number(it.purchase_price)).toFixed(2)}
                 </TD>
-                <TD className="text-right">
-                  {isDraft && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setDeleteItemError(null);
-                        setPendingDeleteItemId(it.id);
-                      }}
-                      isLoading={deleteItem.isPending}
-                    >
-                      Удалить
-                    </Button>
-                  )}
-                </TD>
+                {canEdit && (
+                  <TD className="text-right">
+                    {isDraft && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setDeleteItemError(null);
+                          setPendingDeleteItemId(it.id);
+                        }}
+                        isLoading={deleteItem.isPending}
+                      >
+                        Удалить
+                      </Button>
+                    )}
+                  </TD>
+                )}
               </TR>
             ))}
           </TBody>
         </Table>
       )}
 
-      <Modal open={adding} onClose={() => setAdding(false)} title="Добавить позицию">
-        <AddItemForm documentId={doc.id} onClose={() => setAdding(false)} />
-      </Modal>
-      <ConfirmDialog
-        open={docAction === "accept"}
-        title="Принять приход"
-        message="Будут созданы партии в наличии. Действие необратимо."
-        confirmLabel="Принять"
-        isLoading={accept.isPending}
-        onConfirm={() => void onAccept()}
-        onCancel={() => setDocAction(null)}
-      />
-      <ConfirmDialog
-        open={docAction === "reject"}
-        title="Отклонить приход"
-        message="Документ останется в истории со статусом отклонённого."
-        confirmLabel="Отклонить"
-        variant="danger"
-        isLoading={reject.isPending}
-        onConfirm={() => void onReject()}
-        onCancel={() => setDocAction(null)}
-      />
-      <ConfirmDialog
-        open={pendingDeleteItemId !== null}
-        title="Удалить позицию"
-        message={
-          <>
-            Позиция будет удалена из черновика прихода.
-            {deleteItemError && <span className="mt-2 block text-danger">{deleteItemError}</span>}
-          </>
-        }
-        confirmLabel="Удалить"
-        variant="danger"
-        isLoading={deleteItem.isPending}
-        onConfirm={() => void onDeleteItem()}
-        onCancel={() => {
-          setPendingDeleteItemId(null);
-          setDeleteItemError(null);
-        }}
-      />
+      {canEdit && (
+        <Modal open={adding} onClose={() => setAdding(false)} title="Добавить позицию">
+          <AddItemForm documentId={doc.id} onClose={() => setAdding(false)} />
+        </Modal>
+      )}
+      {canEdit && (
+        <ConfirmDialog
+          open={docAction === "accept"}
+          title="Принять приход"
+          message="Будут созданы партии в наличии. Действие необратимо."
+          confirmLabel="Принять"
+          isLoading={accept.isPending}
+          onConfirm={() => void onAccept()}
+          onCancel={() => setDocAction(null)}
+        />
+      )}
+      {canEdit && (
+        <ConfirmDialog
+          open={docAction === "reject"}
+          title="Отклонить приход"
+          message="Документ останется в истории со статусом отклонённого."
+          confirmLabel="Отклонить"
+          variant="danger"
+          isLoading={reject.isPending}
+          onConfirm={() => void onReject()}
+          onCancel={() => setDocAction(null)}
+        />
+      )}
+      {canEdit && (
+        <ConfirmDialog
+          open={pendingDeleteItemId !== null}
+          title="Удалить позицию"
+          message={
+            <>
+              Позиция будет удалена из черновика прихода.
+              {deleteItemError && <span className="mt-2 block text-danger">{deleteItemError}</span>}
+            </>
+          }
+          confirmLabel="Удалить"
+          variant="danger"
+          isLoading={deleteItem.isPending}
+          onConfirm={() => void onDeleteItem()}
+          onCancel={() => {
+            setPendingDeleteItemId(null);
+            setDeleteItemError(null);
+          }}
+        />
+      )}
     </div>
   );
 }

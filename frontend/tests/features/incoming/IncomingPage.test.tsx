@@ -42,6 +42,16 @@ vi.mock("@/features/suppliers/api", () => ({
   createSupplierReturn: vi.fn(),
 }));
 
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => ({
+    user: {
+      home_tenant_id: "t-1",
+      is_developer: false,
+      permissions: ["incoming.view", "incoming.create", "branches.view", "suppliers.view"],
+    },
+  }),
+}));
+
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
   useNavigate: () => vi.fn(),

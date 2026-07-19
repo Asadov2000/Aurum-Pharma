@@ -13,16 +13,22 @@ and client-facing payloads.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 
+from app.core.time import local_day_range
 from app.domains.audit.models import AuditLog
 from app.domains.audit.repository import AuditRepository
+from app.domains.foundation.repository import FoundationRepository
 
 logger = structlog.get_logger("audit.service")
+
+DEFAULT_REPORT_TIMEZONE = "Asia/Dushanbe"
+DateFilter = date | datetime
 
 
 SENSITIVE_FIELDS: set[str] = {
@@ -77,11 +83,59 @@ def _redact_dict(blob: dict[str, Any] | None) -> dict[str, Any] | None:
     return cast(dict[str, Any], _redact_sensitive_payload(blob))
 
 
+def _safe_timezone(value: str | None) -> str:
+    candidate = value or DEFAULT_REPORT_TIMEZONE
+    try:
+        ZoneInfo(candidate)
+    except (ValueError, ZoneInfoNotFoundError):
+        return DEFAULT_REPORT_TIMEZONE
+    return candidate
+
+
+def audit_date_bounds(
+    *,
+    date_from: DateFilter | None,
+    date_to: DateFilter | None,
+    report_timezone: str,
+) -> tuple[datetime | None, datetime | None, datetime | None]:
+    """Convert calendar filters to UTC bounds without losing the end date.
+
+    The tuple contains ``(start_inclusive, end_inclusive, end_exclusive)``.
+    Date-only values use a half-open local-day range. Datetime values remain
+    inclusive for compatibility with older internal callers.
+    """
+    timezone = _safe_timezone(report_timezone)
+
+    start_inclusive: datetime | None = None
+    if date_from is not None:
+        if isinstance(date_from, datetime):
+            start_inclusive = date_from
+        else:
+            start_inclusive, _ = local_day_range(date_from, timezone)
+
+    end_inclusive: datetime | None = None
+    end_exclusive: datetime | None = None
+    if date_to is not None:
+        if isinstance(date_to, datetime):
+            end_inclusive = date_to
+        else:
+            _, end_exclusive = local_day_range(date_to, timezone)
+
+    return start_inclusive, end_inclusive, end_exclusive
+
+
 class AuditService:
     def __init__(self, repo: AuditRepository) -> None:
         self.repo = repo
 
     # ---- search ----
+
+    async def get_report_timezone(self, tenant_id: UUID | None) -> str:
+        """Read the tenant's calendar timezone, with a safe pilot default."""
+        if tenant_id is None:
+            return DEFAULT_REPORT_TIMEZONE
+        settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
+        return _safe_timezone(settings.report_timezone if settings is not None else None)
 
     async def search(
         self,
@@ -91,20 +145,27 @@ class AuditService:
         action: str | None = None,
         table_name: str | None = None,
         record_id: UUID | None = None,
-        date_from: datetime | None = None,
-        date_to: datetime | None = None,
+        date_from: DateFilter | None = None,
+        date_to: DateFilter | None = None,
+        report_timezone: str = DEFAULT_REPORT_TIMEZONE,
         page: int = 1,
         page_size: int = 50,
         global_scope: bool = False,
     ) -> tuple[list[AuditLog], int]:
+        start_inclusive, end_inclusive, end_exclusive = audit_date_bounds(
+            date_from=date_from,
+            date_to=date_to,
+            report_timezone=report_timezone,
+        )
         return await self.repo.search(
             tenant_id=tenant_id,
             user_id=user_id,
             action=action,
             table_name=table_name,
             record_id=record_id,
-            date_from=date_from,
-            date_to=date_to,
+            date_from=start_inclusive,
+            date_to=end_inclusive,
+            date_to_exclusive=end_exclusive,
             page=page,
             page_size=page_size,
             global_scope=global_scope,

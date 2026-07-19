@@ -33,8 +33,9 @@ const scopeLabel: Record<AuditScope, string> = {
 export function AuditPage(): JSX.Element {
   const { user } = useAuth();
   const canViewGlobalAudit = Boolean(user?.is_developer);
+  const defaultScope: AuditScope = canViewGlobalAudit && !user?.home_tenant_id ? "global" : "my";
 
-  const [scope, setScope] = useState<AuditScope>("my");
+  const [scope, setScope] = useState<AuditScope>(defaultScope);
   const [action, setAction] = useState("");
   const [tableName, setTableName] = useState("");
   const [userId, setUserId] = useState("");
@@ -50,8 +51,11 @@ export function AuditPage(): JSX.Element {
     table_name: tableName || undefined,
     user_id: userId || undefined,
     tenant_id: tenantId || undefined,
-    date_from: dateFrom ? new Date(dateFrom).toISOString() : undefined,
-    date_to: dateTo ? new Date(dateTo).toISOString() : undefined,
+    // Keep date inputs as calendar dates. The API resolves them in the
+    // pharmacy timezone; converting with `new Date("YYYY-MM-DD")` would first
+    // interpret midnight as UTC and shift the selected day for Tajik users.
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
     page,
     page_size: PAGE_SIZE,
   });
@@ -144,6 +148,7 @@ export function AuditPage(): JSX.Element {
             id="date_from"
             type="date"
             value={dateFrom}
+            max={dateTo || undefined}
             onChange={(e) => {
               setDateFrom(e.target.value);
               setPage(1);
@@ -156,6 +161,7 @@ export function AuditPage(): JSX.Element {
             id="date_to"
             type="date"
             value={dateTo}
+            min={dateFrom || undefined}
             onChange={(e) => {
               setDateTo(e.target.value);
               setPage(1);
@@ -193,26 +199,18 @@ export function AuditPage(): JSX.Element {
             </THead>
             <TBody>
               {data.items.map((e) => (
-                <TR
-                  key={e.id}
-                  className="cursor-pointer"
-                  onClick={() => setOpened(e)}
-                >
+                <TR key={e.id} className="cursor-pointer" onClick={() => setOpened(e)}>
                   <TD className="whitespace-nowrap">
                     {new Date(e.created_at).toLocaleString("ru-RU")}
                   </TD>
                   <TD>
-                    <Badge tone={actionTone(e.action)}>
-                      {actionLabel[e.action] ?? e.action}
-                    </Badge>
+                    <Badge tone={actionTone(e.action)}>{actionLabel[e.action] ?? e.action}</Badge>
                   </TD>
                   <TD>{tableLabel[e.table_name] ?? e.table_name}</TD>
                   <TD className="font-mono text-xs">
                     {e.record_id ? e.record_id.slice(0, 8) : "—"}
                   </TD>
-                  <TD className="font-mono text-xs">
-                    {e.user_id ? e.user_id.slice(0, 8) : "—"}
-                  </TD>
+                  <TD className="font-mono text-xs">{e.user_id ? e.user_id.slice(0, 8) : "—"}</TD>
                   <TD className="font-mono text-xs">{e.ip_address ?? "—"}</TD>
                 </TR>
               ))}

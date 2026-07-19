@@ -19,12 +19,15 @@ type Editor = { mode: "create" } | { mode: "edit"; role: Role } | null;
 export function RolesPage(): JSX.Element {
   const { user } = useAuth();
   const hasTenant = Boolean(user?.home_tenant_id);
+  const isDeveloper = user?.is_developer === true;
+  const isSupport = isDeveloper || user?.is_administrator === true;
   const userPermissions = user?.permissions ?? [];
-  const canCreate = userPermissions.includes("roles.create");
-  const canUpdate = userPermissions.includes("roles.update");
-  const canAssign = userPermissions.includes("roles.assign");
+  const canCreate = isDeveloper || userPermissions.includes("roles.create");
+  const canUpdate = isDeveloper || userPermissions.includes("roles.update");
+  const canAssign = isDeveloper || userPermissions.includes("roles.assign");
   const canView =
-    hasTenant && user?.is_tenant_owner === true && (canCreate || canUpdate || canAssign);
+    hasTenant &&
+    (isSupport || (user?.is_tenant_owner === true && (canCreate || canUpdate || canAssign)));
 
   const roles = useRolesQuery(canView);
   const perms = usePermissionsQuery(canView);

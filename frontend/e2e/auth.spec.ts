@@ -28,15 +28,15 @@ test.describe("Auth", () => {
   test("retries a protected request after global MFA step-up", async ({ page }) => {
     await loginInBrowser(page, DEV);
     makeSupportSessionRequireStepUp(DEV.email);
-    await page.goto("/audit");
-    await expect(page.getByRole("link", { name: "Тенанты" })).toBeVisible();
 
     const deniedRequest = page.waitForResponse(
       (response) =>
         response.url().includes("/api/v1/admin/audit/global") && response.status() === 403,
     );
-    await page.locator("#scope").selectOption("global");
+    await page.goto("/audit");
     await deniedRequest;
+    await expect(page.getByRole("link", { name: "Тенанты" })).toBeVisible();
+    await expect(page.locator("#scope")).toHaveValue("global");
 
     const dialog = page.getByRole("dialog", { name: "Подтверждение действия" });
     await expect(dialog).toBeVisible();

@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const searchAudit = vi.fn();
 const authState = vi.hoisted(() => ({
-  user: { is_developer: false, is_administrator: false },
+  user: {
+    is_developer: false,
+    is_administrator: false,
+    home_tenant_id: null as string | null,
+  },
 }));
 
 vi.mock("@/features/audit/api", () => ({
@@ -45,7 +49,11 @@ const ENTRY = {
 describe("AuditPage", () => {
   beforeEach(() => {
     searchAudit.mockReset();
-    authState.user = { is_developer: false, is_administrator: false };
+    authState.user = {
+      is_developer: false,
+      is_administrator: false,
+      home_tenant_id: null,
+    };
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -57,6 +65,22 @@ describe("AuditPage", () => {
     expect(await screen.findByText(/События пока не записаны/i)).toBeInTheDocument();
     expect(searchAudit).toHaveBeenCalledWith(
       expect.objectContaining({ scope: "my", page: 1, page_size: 50 }),
+    );
+  });
+
+  it("defaults an unscoped developer to global audit", async () => {
+    authState.user = {
+      is_developer: true,
+      is_administrator: false,
+      home_tenant_id: null,
+    };
+    searchAudit.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 50 });
+
+    renderPage();
+
+    expect(await screen.findByText(/События пока не записаны/i)).toBeInTheDocument();
+    expect(searchAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "global", page: 1, page_size: 50 }),
     );
   });
 
@@ -101,8 +125,33 @@ describe("AuditPage", () => {
       target: { value: "delete" },
     });
     await waitFor(() => {
+      expect(searchAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "delete" }));
+    });
+  });
+
+  it("passes calendar dates to the API without converting them through UTC", async () => {
+    searchAudit.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 50,
+    });
+    renderPage();
+    await screen.findByText(/События пока не записаны/i);
+
+    fireEvent.change(screen.getByLabelText(/^От$/), {
+      target: { value: "2026-07-19" },
+    });
+    fireEvent.change(screen.getByLabelText(/^До$/), {
+      target: { value: "2026-07-19" },
+    });
+
+    await waitFor(() => {
       expect(searchAudit).toHaveBeenLastCalledWith(
-        expect.objectContaining({ action: "delete" }),
+        expect.objectContaining({
+          date_from: "2026-07-19",
+          date_to: "2026-07-19",
+        }),
       );
     });
   });

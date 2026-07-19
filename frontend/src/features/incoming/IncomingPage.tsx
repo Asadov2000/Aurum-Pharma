@@ -19,6 +19,8 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { hasAnyPermission, hasPermission } from "@/features/auth/permissions";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { describeApiError } from "@/features/foundation/errors";
 import { useSuppliersQuery } from "@/features/suppliers/queries";
@@ -31,6 +33,18 @@ import { type IncomingStatus } from "./types";
 const PAGE_SIZE = 25;
 
 export function IncomingPage(): JSX.Element {
+  const { user } = useAuth();
+  const canCreate = hasPermission(user, "incoming.create");
+  const canDiscoverBranches = hasAnyPermission(user, [
+    "branches.view",
+    "registers.view",
+    "pos.shift_open",
+    "pos.shift_close",
+    "pos.sell",
+    "incoming.view",
+    "incoming.create",
+  ]);
+  const canViewSuppliers = hasPermission(user, "suppliers.view");
   const [branchFilter, setBranchFilter] = useState<string>("");
   const [supplierFilter, setSupplierFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
@@ -41,8 +55,8 @@ export function IncomingPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
 
-  const branches = useBranchesQuery(true);
-  const suppliers = useSuppliersQuery(true);
+  const branches = useBranchesQuery(true, canDiscoverBranches);
+  const suppliers = useSuppliersQuery(true, canViewSuppliers);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -67,12 +81,7 @@ export function IncomingPage(): JSX.Element {
   );
   const { data, isLoading, error } = useIncomingListQuery(params);
   const filtersActive = Boolean(
-    branchFilter ||
-      supplierFilter ||
-      statusFilter ||
-      documentNumberInput ||
-      dateFrom ||
-      dateTo,
+    branchFilter || supplierFilter || statusFilter || documentNumberInput || dateFrom || dateTo,
   );
 
   const branchName = (id: string) =>
@@ -84,7 +93,7 @@ export function IncomingPage(): JSX.Element {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Приходы</h1>
-        <Button onClick={() => setCreating(true)}>+ Новый приход</Button>
+        {canCreate && <Button onClick={() => setCreating(true)}>+ Новый приход</Button>}
       </div>
 
       <FilterBar>
@@ -100,44 +109,48 @@ export function IncomingPage(): JSX.Element {
             className="w-44"
           />
         </div>
-        <div>
-          <Label htmlFor="branch_filter">Точка</Label>
-          <Select
-            id="branch_filter"
-            value={branchFilter}
-            onChange={(e) => {
-              setBranchFilter(e.target.value);
-              setPage(1);
-            }}
-            className="w-44"
-          >
-            <option value="">Все</option>
-            {branches.data?.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="supplier_filter">Поставщик</Label>
-          <Select
-            id="supplier_filter"
-            value={supplierFilter}
-            onChange={(e) => {
-              setSupplierFilter(e.target.value);
-              setPage(1);
-            }}
-            className="w-44"
-          >
-            <option value="">Все</option>
-            {suppliers.data?.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        </div>
+        {canDiscoverBranches && (
+          <div>
+            <Label htmlFor="branch_filter">Точка</Label>
+            <Select
+              id="branch_filter"
+              value={branchFilter}
+              onChange={(e) => {
+                setBranchFilter(e.target.value);
+                setPage(1);
+              }}
+              className="w-44"
+            >
+              <option value="">Все</option>
+              {branches.data?.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+        {canViewSuppliers && (
+          <div>
+            <Label htmlFor="supplier_filter">Поставщик</Label>
+            <Select
+              id="supplier_filter"
+              value={supplierFilter}
+              onChange={(e) => {
+                setSupplierFilter(e.target.value);
+                setPage(1);
+              }}
+              className="w-44"
+            >
+              <option value="">Все</option>
+              {suppliers.data?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         <div>
           <Label htmlFor="status_filter">Статус</Label>
           <Select
@@ -255,18 +268,15 @@ export function IncomingPage(): JSX.Element {
               ))}
             </TBody>
           </Table>
-          <Pagination
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={data.total}
-            onPage={setPage}
-          />
+          <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onPage={setPage} />
         </>
       )}
 
-      <Modal open={creating} onClose={() => setCreating(false)} title="Новый приход">
-        <NewIncomingForm onClose={() => setCreating(false)} />
-      </Modal>
+      {canCreate && (
+        <Modal open={creating} onClose={() => setCreating(false)} title="Новый приход">
+          <NewIncomingForm onClose={() => setCreating(false)} />
+        </Modal>
+      )}
     </div>
   );
 }

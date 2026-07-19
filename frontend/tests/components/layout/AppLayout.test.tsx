@@ -14,6 +14,8 @@ const SELLER_PERMS = [
 const OWNER_PERMS = [
   ...SELLER_PERMS,
   "reports.view",
+  "branches.view",
+  "registers.view",
   "users.view",
   "roles.create",
   "suppliers.view",
@@ -25,7 +27,10 @@ describe("buildNav — dashboard visibility", () => {
   it("hides «Главная» (dashboard) from a tenant user without reports.view (seller)", () => {
     const items = buildNav(false, true, false, SELLER_PERMS);
     expect(labels(items)).not.toContain("Главная");
-    // …but the seller still gets the tenant workspace items.
+    expect(items.some((i) => i.to === "/branches")).toBe(false);
+    expect(items.some((i) => i.to === "/registers")).toBe(false);
+    expect(items.some((i) => i.to === "/onboarding")).toBe(false);
+    // The seller still gets the sections explicitly granted to the role.
     expect(items.some((i) => i.to === "/pos")).toBe(true);
   });
 
@@ -39,6 +44,14 @@ describe("buildNav — dashboard visibility", () => {
     const items = buildNav(true, false, false, []);
     expect(items[0]?.to).toBe("/");
     expect(items.some((i) => i.to === "/admin/tenants")).toBe(true);
+  });
+
+  it("shows global audit only to an unscoped developer", () => {
+    const adminItems = buildNav(true, false, false, []);
+    const developerItems = buildNav(true, false, false, [], true);
+
+    expect(adminItems.some((item) => item.to === "/audit")).toBe(false);
+    expect(developerItems.some((item) => item.to === "/audit")).toBe(true);
   });
 });
 
@@ -71,6 +84,14 @@ describe("buildNav — team management visibility", () => {
 
     const ownerRoleManager = buildNav(false, true, true, ["roles.update"]);
     expect(labels(ownerRoleManager)).toContain("Роли");
+  });
+
+  it("lets scoped support inspect the role catalogue without exposing unrelated sections", () => {
+    const items = buildNav(true, true, false, []);
+
+    expect(items.some((item) => item.to === "/roles")).toBe(true);
+    expect(items.some((item) => item.to === "/catalog")).toBe(false);
+    expect(items.some((item) => item.to === "/settings")).toBe(false);
   });
 });
 

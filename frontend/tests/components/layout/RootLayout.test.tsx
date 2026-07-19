@@ -34,6 +34,10 @@ vi.mock("@/components/layout/AppLayout", async () => {
   };
 });
 
+vi.mock("@/components/layout/RouteAccessGuard", () => ({
+  RouteAccessGuard: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 import { RootLayout } from "@/components/layout/RootLayout";
 
 describe("RootLayout", () => {

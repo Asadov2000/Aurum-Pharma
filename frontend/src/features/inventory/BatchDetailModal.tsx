@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import { Badge, Button, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { movementLabel } from "./labels";
@@ -14,6 +16,8 @@ export function BatchDetailModal({
   batchId: string;
   onClose: () => void;
 }): JSX.Element {
+  const { user } = useAuth();
+  const canWriteOff = hasPermission(user, "batches.write_off");
   const batchQuery = useBatchQuery(batchId);
   const movementsQuery = useMovementsQuery(batchId);
   const [writeOffOpen, setWriteOffOpen] = useState(false);
@@ -35,40 +39,30 @@ export function BatchDetailModal({
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 text-sm">
         <Field label="Номер партии" value={b.batch_number ?? "—"} mono />
-        <Field
-          label="Срок годности"
-          value={new Date(b.expires_at).toLocaleDateString("ru-RU")}
-        />
+        <Field label="Срок годности" value={new Date(b.expires_at).toLocaleDateString("ru-RU")} />
         <Field
           label="Произведена"
-          value={
-            b.manufactured_at
-              ? new Date(b.manufactured_at).toLocaleDateString("ru-RU")
-              : "—"
-          }
+          value={b.manufactured_at ? new Date(b.manufactured_at).toLocaleDateString("ru-RU") : "—"}
         />
         <Field
           label="Цена закупки / продажи"
           value={`${Number(b.purchase_price).toFixed(2)} / ${Number(b.sale_price).toFixed(2)} ${b.currency}`}
         />
-        <Field
-          label="Количество"
-          value={`${b.qty_remaining} из ${b.qty_initial}`}
-        />
+        <Field label="Количество" value={`${b.qty_remaining} из ${b.qty_initial}`} />
         <div>
           <p className="text-xs text-foreground-muted">Статус</p>
           {b.is_blocked ? (
-            <Badge tone="danger">
-              Заблокирована{b.block_reason ? `: ${b.block_reason}` : ""}
-            </Badge>
+            <Badge tone="danger">Заблокирована{b.block_reason ? `: ${b.block_reason}` : ""}</Badge>
           ) : (
             <Badge tone="success">Активна</Badge>
           )}
         </div>
       </div>
 
-      {!b.is_blocked && Number(b.qty_remaining) > 0 && (
-        writeOffOpen ? (
+      {canWriteOff &&
+        !b.is_blocked &&
+        Number(b.qty_remaining) > 0 &&
+        (writeOffOpen ? (
           <WriteOffForm
             batchId={b.id}
             maxQty={b.qty_remaining}
@@ -78,8 +72,7 @@ export function BatchDetailModal({
           <Button variant="secondary" onClick={() => setWriteOffOpen(true)}>
             Списать
           </Button>
-        )
-      )}
+        ))}
 
       <div>
         <p className="mb-2 text-sm font-medium text-foreground-secondary">История движений</p>

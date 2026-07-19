@@ -1,16 +1,8 @@
 import { useEffect, useState } from "react";
 
-import {
-  Badge,
-  Button,
-  Modal,
-  Table,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-} from "@/components/ui";
+import { Badge, Button, Modal, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 import { paymentMethodLabel } from "@/features/pos/labels";
 import { ReceiptPrintModal } from "@/features/pos/ReceiptPrintModal";
 import { type PaymentMethod } from "@/features/pos/types";
@@ -27,6 +19,8 @@ export function SaleDetailModal({
   row: SaleListItem;
   onClose: () => void;
 }): JSX.Element {
+  const { user } = useAuth();
+  const canRefund = hasPermission(user, "pos.refund");
   // currentId can swap to a freshly-created return sale (after refund) or to
   // the parent sale (when viewing a return), so navigation stays in-modal.
   const [currentId, setCurrentId] = useState(row.id);
@@ -52,9 +46,7 @@ export function SaleDetailModal({
       className="max-w-2xl"
     >
       {error && (
-        <p className="text-sm text-danger">
-          {describeApiError(error, "Не удалось загрузить чек")}
-        </p>
+        <p className="text-sm text-danger">{describeApiError(error, "Не удалось загрузить чек")}</p>
       )}
       {isLoading || !data ? (
         <p className="text-sm text-foreground-muted">Загрузка…</p>
@@ -77,7 +69,10 @@ export function SaleDetailModal({
 
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Field label="Дата" value={fmtDate(data.completed_at)} />
-            <Field label="Сумма" value={`${Number(data.total_amount).toFixed(2)} ${data.currency}`} />
+            <Field
+              label="Сумма"
+              value={`${Number(data.total_amount).toFixed(2)} ${data.currency}`}
+            />
             {data.parent_sale_id && (
               <div className="col-span-2">
                 <Button
@@ -138,7 +133,8 @@ export function SaleDetailModal({
               🖨 Печать чека
             </Button>
             {/* Refund only from a completed forward sale that has none yet. */}
-            {data.sale_type === "sale" &&
+            {canRefund &&
+              data.sale_type === "sale" &&
               data.status === "completed" &&
               !(isOriginalRow && row.has_refund) && (
                 <Button onClick={() => setRefundOpen(true)}>Оформить возврат</Button>
@@ -150,7 +146,7 @@ export function SaleDetailModal({
         </div>
       )}
 
-      {refundOpen && data && (
+      {canRefund && refundOpen && data && (
         <RefundModal
           sale={data}
           onClose={() => setRefundOpen(false)}

@@ -74,6 +74,7 @@ class AuditRepository:
         record_id: UUID | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        date_to_exclusive: datetime | None = None,
         page: int = 1,
         page_size: int = 50,
         global_scope: bool = False,
@@ -101,6 +102,8 @@ class AuditRepository:
             clauses.append(AuditLog.created_at >= date_from)
         if date_to is not None:
             clauses.append(AuditLog.created_at <= date_to)
+        if date_to_exclusive is not None:
+            clauses.append(AuditLog.created_at < date_to_exclusive)
 
         list_stmt = select(AuditLog)
         count_stmt = select(func.count()).select_from(AuditLog)

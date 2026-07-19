@@ -53,6 +53,10 @@ BRANCH_DISCOVERY_PERMISSIONS = (
     "pos.shift_open",
     "pos.shift_close",
     "pos.sell",
+    # Incoming operators need to resolve the points assigned to their
+    # incoming capability when creating or reviewing a document.
+    "incoming.view",
+    "incoming.create",
 )
 REGISTER_DISCOVERY_PERMISSIONS = (
     "registers.view",

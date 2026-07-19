@@ -465,6 +465,10 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
         )
 
         headers = {"Authorization": f"Bearer {_token(branch_user)}"}
+        branches_resp = await client.get("/api/v1/branches", headers=headers)
+        assert branches_resp.status_code == 200
+        assert [item["id"] for item in branches_resp.json()] == [str(branch_a.id)]
+
         own_payload = {
             "branch_id": str(branch_a.id),
             "supplier_id": str(supplier.id),
