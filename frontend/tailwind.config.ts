@@ -61,24 +61,24 @@ export default {
         },
       },
       fontFamily: {
-        // Body / UI workhorse.
+        // Local system fonts keep the app fast and deterministic offline.
         sans: [
-          "Inter",
+          "Segoe UI",
           "system-ui",
           "-apple-system",
-          "Segoe UI",
           "Roboto",
           "Helvetica Neue",
           "Arial",
           "sans-serif",
         ],
-        // Display: headings/titles. Geometric, calm, confident — never decorative.
+        // Headings use the same metrics to avoid layout shifts after startup.
         display: [
-          "Sora",
-          "Inter",
+          "Segoe UI",
           "system-ui",
           "-apple-system",
-          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
           "sans-serif",
         ],
       },

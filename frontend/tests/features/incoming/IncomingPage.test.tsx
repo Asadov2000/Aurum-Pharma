@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listIncoming = vi.fn();
@@ -119,7 +119,7 @@ describe("IncomingPage", () => {
   });
 
   it("renders an empty-state hint when there are no documents", async () => {
-    listIncoming.mockResolvedValueOnce([]);
+    listIncoming.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
     listBranches.mockResolvedValueOnce([BRANCH]);
     listSuppliers.mockResolvedValueOnce([SUPPLIER]);
     renderPage();
@@ -127,7 +127,7 @@ describe("IncomingPage", () => {
   });
 
   it("resolves branch and supplier ids to names from the lookups", async () => {
-    listIncoming.mockResolvedValueOnce([DOC]);
+    listIncoming.mockResolvedValueOnce({ items: [DOC], total: 1, page: 1, page_size: 25 });
     listBranches.mockResolvedValueOnce([BRANCH]);
     listSuppliers.mockResolvedValueOnce([SUPPLIER]);
     renderPage();
@@ -138,5 +138,32 @@ describe("IncomingPage", () => {
     expect(within(row).getByText("Прима-Фарм")).toBeInTheDocument();
     expect(within(row).getByText(/Черновик/)).toBeInTheDocument();
     expect(within(row).getByText(/1500\.00 TJS/)).toBeInTheDocument();
+  });
+
+  it("requests only the selected page and resets pagination after filtering", async () => {
+    listIncoming.mockResolvedValue({ items: [DOC], total: 26, page: 1, page_size: 25 });
+    listBranches.mockResolvedValue([BRANCH]);
+    listSuppliers.mockResolvedValue([SUPPLIER]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Вперёд/ }));
+    await waitFor(() =>
+      expect(listIncoming).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2, page_size: 25 }),
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Номер документа"), {
+      target: { value: "INV-001" },
+    });
+    await waitFor(() =>
+      expect(listIncoming).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          document_number: "INV-001",
+          page: 1,
+          page_size: 25,
+        }),
+      ),
+    );
   });
 });

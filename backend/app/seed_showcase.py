@@ -18,6 +18,7 @@ from app.seed_e2e import main as seed_e2e_base
 from app.showcase.profiles import PROFILES, get_profile
 from app.showcase.seeder import (
     is_showcase_complete,
+    reconcile_showcase_email_domains,
     require_clean_showcase_base,
     seed_showcase_dataset,
 )
@@ -100,6 +101,7 @@ async def run(profile_name: str) -> int:
                 database_name=database_name,
                 session_user=session_user,
             )
+            await reconcile_showcase_email_domains(session)
             if await is_showcase_complete(session):
                 print(
                     json.dumps(

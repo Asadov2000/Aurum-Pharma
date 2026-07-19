@@ -14,6 +14,7 @@ from app.core.errors import BusinessRuleError
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.schemas import (
     IncomingDocumentCreate,
+    IncomingDocumentList,
     IncomingDocumentRead,
     IncomingDocumentUpdate,
     IncomingDocumentWithItems,
@@ -41,32 +42,39 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
 # ---- documents ----
 
 
-@router.get("", response_model=list[IncomingDocumentRead])
+@router.get("", response_model=IncomingDocumentList)
 async def list_incoming(
     user: Annotated[CurrentUser, Depends(require_permission("incoming.view"))],
     service: Annotated[IncomingService, Depends(_service)],
     branch_id: Annotated[UUID | None, Query()] = None,
     supplier_id: Annotated[UUID | None, Query()] = None,
     status_q: Annotated[str | None, Query(alias="status")] = None,
+    document_number: Annotated[str | None, Query(max_length=100)] = None,
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
-) -> list[IncomingDocumentRead]:
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> IncomingDocumentList:
     branch_scope = user.branch_scope_for("incoming.view")
     if branch_scope is not None and branch_id is not None and branch_id not in branch_scope:
-        return []
-    effective_branch_id = branch_id
-    if branch_scope is not None and branch_id is None and len(branch_scope) == 1:
-        effective_branch_id = next(iter(branch_scope))
-    docs = await service.list_documents(
-        branch_id=effective_branch_id,
+        return IncomingDocumentList(items=[], total=0, page=page, page_size=page_size)
+    docs, total = await service.list_documents(
+        branch_id=branch_id,
+        branch_ids=branch_scope,
         supplier_id=supplier_id,
         status=status_q,
+        document_number=document_number,
         date_from=date_from,
         date_to=date_to,
+        page=page,
+        page_size=page_size,
     )
-    if branch_scope is not None:
-        docs = [d for d in docs if d.branch_id in branch_scope]
-    return [IncomingDocumentRead.model_validate(d) for d in docs]
+    return IncomingDocumentList(
+        items=[IncomingDocumentRead.model_validate(d) for d in docs],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post(

@@ -148,9 +148,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000/api/v1
     container_name: aurum-demo-frontend
-    environment:
-      VITE_API_URL: http://localhost:8000/api/v1
     volumes:
       - frontend-vite-cache:/app/node_modules/.vite
     ports:
@@ -158,7 +158,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    command: pnpm dev --host 0.0.0.0 --strictPort
+    command: pnpm preview --host 0.0.0.0 --port 5173 --strictPort
     init: true
     restart: unless-stopped
 

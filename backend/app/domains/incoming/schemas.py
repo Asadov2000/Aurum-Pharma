@@ -81,5 +81,12 @@ class IncomingDocumentRead(BaseModel):
     accepted_at: datetime | None
 
 
+class IncomingDocumentList(BaseModel):
+    items: list[IncomingDocumentRead]
+    total: int
+    page: int
+    page_size: int
+
+
 class IncomingDocumentWithItems(IncomingDocumentRead):
     items: list[IncomingItemRead]

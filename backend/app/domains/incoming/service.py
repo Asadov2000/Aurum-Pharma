@@ -63,17 +63,25 @@ class IncomingService:
         self,
         *,
         branch_id: UUID | None = None,
+        branch_ids: set[UUID] | None = None,
         supplier_id: UUID | None = None,
         status: str | None = None,
+        document_number: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
-    ) -> list[IncomingDocument]:
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IncomingDocument], int]:
         return await self.repo.list_documents(
             branch_id=branch_id,
+            branch_ids=branch_ids,
             supplier_id=supplier_id,
             status=status,
+            document_number=document_number,
             date_from=date_from,
             date_to=date_to,
+            page=page,
+            page_size=page_size,
         )
 
     async def get_document(

@@ -186,6 +186,16 @@ _CHECKS = (
             """),
     ),
     _ValidationCheck(
+        name="reserved_showcase_login_domains",
+        statement=text("""
+            /* showcase:reserved_showcase_login_domains */
+            SELECT COUNT(*)::bigint
+            FROM public.app_user
+            WHERE status IN ('invited', 'active')
+              AND email_lower LIKE '%@showcase.aurum.invalid'
+            """),
+    ),
+    _ValidationCheck(
         name="tenant_scope_mismatches",
         statement=text("""
             /* showcase:tenant_scope_mismatches */

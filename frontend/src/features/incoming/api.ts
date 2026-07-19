@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import {
   type IncomingDocument,
   type IncomingDocumentCreatePayload,
+  type IncomingDocumentList,
   type IncomingDocumentUpdatePayload,
   type IncomingDocumentWithItems,
   type IncomingItem,
@@ -11,14 +12,17 @@ import {
   type IncomingSearchParams,
 } from "./types";
 
-export async function listIncoming(params: IncomingSearchParams): Promise<IncomingDocument[]> {
-  const { data } = await api.get<IncomingDocument[]>("/incoming", {
+export async function listIncoming(params: IncomingSearchParams): Promise<IncomingDocumentList> {
+  const { data } = await api.get<IncomingDocumentList>("/incoming", {
     params: {
       branch_id: params.branch_id || undefined,
       supplier_id: params.supplier_id || undefined,
       status: params.status || undefined,
+      document_number: params.document_number || undefined,
       date_from: params.date_from || undefined,
       date_to: params.date_to || undefined,
+      page: params.page,
+      page_size: params.page_size,
     },
   });
   return data;

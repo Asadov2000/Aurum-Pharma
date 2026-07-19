@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -10,10 +11,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, NotFoundError
+from app.domains.catalog.models import TenantCatalog
+from app.domains.foundation.models import Branch, Tenant
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.service import IncomingService
 from app.domains.inventory.models import Batch
 from app.domains.inventory.repository import InventoryRepository
+from app.domains.suppliers.models import Supplier
+
+Scaffold = Callable[[], Awaitable[tuple[Tenant, Branch, TenantCatalog, Supplier]]]
 
 
 async def test_create_incoming_draft(db_session: AsyncSession, scaffold) -> None:
@@ -30,6 +36,37 @@ async def test_create_incoming_draft(db_session: AsyncSession, scaffold) -> None
     )
     assert doc.status == "draft"
     assert doc.total_amount == Decimal("0.00")
+
+
+async def test_list_incoming_is_searchable_and_paginated(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, _item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    today = date.today()
+
+    for index in range(5):
+        await service.create_document(
+            tenant_id=tenant.id,
+            fields={
+                "branch_id": branch.id,
+                "supplier_id": supplier.id,
+                "document_date": today - timedelta(days=index),
+                "document_number": f"ПР-{100 + index}",
+            },
+        )
+
+    page_rows, total = await service.list_documents(page=2, page_size=2)
+    search_rows, search_total = await service.list_documents(
+        document_number="пр-103",
+        page=1,
+        page_size=2,
+    )
+
+    assert total == 5
+    assert [row.document_number for row in page_rows] == ["ПР-102", "ПР-103"]
+    assert search_total == 1
+    assert [row.document_number for row in search_rows] == ["ПР-103"]
 
 
 async def test_incoming_document_refs_must_match_tenant(db_session: AsyncSession, scaffold) -> None:

@@ -32,30 +32,57 @@ class IncomingRepository:
         self,
         *,
         branch_id: UUID | None = None,
+        branch_ids: set[UUID] | None = None,
         supplier_id: UUID | None = None,
         status: str | None = None,
+        document_number: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
-    ) -> list[IncomingDocument]:
-        stmt = select(IncomingDocument)
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IncomingDocument], int]:
+        if branch_ids is not None and not branch_ids:
+            return [], 0
+
         clauses: list[Any] = []
         if branch_id is not None:
             clauses.append(IncomingDocument.branch_id == branch_id)
+        if branch_ids is not None:
+            clauses.append(IncomingDocument.branch_id.in_(sorted(branch_ids, key=str)))
         if supplier_id is not None:
             clauses.append(IncomingDocument.supplier_id == supplier_id)
         if status is not None:
             clauses.append(IncomingDocument.status == status)
+        if document_number:
+            clauses.append(
+                IncomingDocument.document_number.icontains(
+                    document_number.strip(),
+                    autoescape=True,
+                )
+            )
         if date_from is not None:
             clauses.append(IncomingDocument.document_date >= date_from)
         if date_to is not None:
             clauses.append(IncomingDocument.document_date <= date_to)
+
+        count_stmt = select(func.count()).select_from(IncomingDocument)
+        stmt = select(IncomingDocument)
         if clauses:
+            count_stmt = count_stmt.where(and_(*clauses))
             stmt = stmt.where(and_(*clauses))
-        stmt = stmt.order_by(
-            IncomingDocument.document_date.desc(), IncomingDocument.created_at.desc()
+
+        total = int((await self.session.execute(count_stmt)).scalar_one())
+        stmt = (
+            stmt.order_by(
+                IncomingDocument.document_date.desc(),
+                IncomingDocument.created_at.desc(),
+                IncomingDocument.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
         )
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
 
     async def update_document(self, doc: IncomingDocument, **fields: Any) -> IncomingDocument:
         for k, v in fields.items():

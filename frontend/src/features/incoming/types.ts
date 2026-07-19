@@ -38,6 +38,13 @@ export interface IncomingDocumentWithItems extends IncomingDocument {
   items: IncomingItem[];
 }
 
+export interface IncomingDocumentList {
+  items: IncomingDocument[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface IncomingDocumentCreatePayload {
   branch_id: string;
   supplier_id: string;
@@ -79,6 +86,9 @@ export interface IncomingSearchParams {
   branch_id?: string;
   supplier_id?: string;
   status?: IncomingStatus;
+  document_number?: string;
   date_from?: string;
   date_to?: string;
+  page?: number;
+  page_size?: number;
 }

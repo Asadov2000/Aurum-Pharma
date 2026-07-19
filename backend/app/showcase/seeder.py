@@ -13,7 +13,7 @@ from typing import cast
 from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.schema import Table
 from sqlalchemy.sql.selectable import FromClause
@@ -58,8 +58,45 @@ SHOWCASE_NAMESPACE = UUID("95947fc5-29b0-4fc5-9be8-75580c7f5ba4")
 LOCAL_TIMEZONE = ZoneInfo("Asia/Dushanbe")
 SHOWCASE_TENANT_LEGAL_NAME = "ООО «Аурум Фарма Демо»"
 EMPLOYEE_PASSWORD = "DemoUser1234"
+SHOWCASE_EMAIL_DOMAIN = "showcase.aurum.tj"
+LEGACY_SHOWCASE_EMAIL_DOMAIN = "showcase.aurum.invalid"
 
 Row = dict[str, object]
+
+
+def showcase_email(local_part: str) -> str:
+    """Return a login-compatible address used only by the local showcase."""
+
+    return f"{local_part}@{SHOWCASE_EMAIL_DOMAIN}"
+
+
+async def reconcile_showcase_email_domains(session: AsyncSession) -> None:
+    """Upgrade already-seeded showcase contacts from the rejected legacy domain."""
+
+    legacy_suffix = f"@{LEGACY_SHOWCASE_EMAIL_DOMAIN}"
+    current_suffix = f"@{SHOWCASE_EMAIL_DOMAIN}"
+    statements = (
+        update(AppUser)
+        .where(AppUser.email.endswith(legacy_suffix))
+        .values(email=func.replace(AppUser.email, legacy_suffix, current_suffix)),
+        update(Tenant)
+        .where(Tenant.contact_email.endswith(legacy_suffix))
+        .values(contact_email=func.replace(Tenant.contact_email, legacy_suffix, current_suffix)),
+        update(Supplier)
+        .where(Supplier.email.endswith(legacy_suffix))
+        .values(email=func.replace(Supplier.email, legacy_suffix, current_suffix)),
+        update(NotificationDelivery)
+        .where(NotificationDelivery.recipient.endswith(legacy_suffix))
+        .values(
+            recipient=func.replace(
+                NotificationDelivery.recipient,
+                legacy_suffix,
+                current_suffix,
+            )
+        ),
+    )
+    for statement in statements:
+        await session.execute(statement)
 
 
 @dataclass(frozen=True, slots=True)
@@ -505,7 +542,7 @@ async def prepare_main_tenant(
     tenant.legal_name = SHOWCASE_TENANT_LEGAL_NAME
     tenant.inn_or_tin = "DEMO-TIN-020000000"
     tenant.registration_number = "DEMO-REG-TJ-2026-0001"
-    tenant.contact_email = "office@showcase.aurum.invalid"
+    tenant.contact_email = showcase_email("office")
     tenant.contact_phone = "+992 00 000 00 01"
     tenant.legal_address = "г. Душанбе, проспект Рудаки, 58"
     tenant.status = "active"
@@ -739,7 +776,7 @@ async def seed_roles_and_employees(
         user_rows.append(
             {
                 "id": user_id,
-                "email": f"{employee.key}@showcase.aurum.invalid",
+                "email": showcase_email(employee.key),
                 "full_name": employee.full_name,
                 "phone": f"+992 00 000 {index + 10:02d} {index + 20:02d}",
                 "password_hash": password_hashes.get(employee.key),
@@ -827,7 +864,7 @@ async def seed_suppliers(
                 "inn_or_tin": f"DEMO-SUP-{index + 1:06d}",
                 "contact_person": f"Контакт поставщика {index + 1}",
                 "phone": f"+992 00 100 {index + 10:02d} {index + 30:02d}",
-                "email": f"supplier-{index + 1}@showcase.aurum.invalid",
+                "email": showcase_email(f"supplier-{index + 1}"),
                 "address": "Республика Таджикистан, демонстрационный адрес",
                 "notes": notes,
                 "is_active": index != len(_SUPPLIERS) - 1,
@@ -2077,7 +2114,7 @@ async def seed_notifications(
                     "id": _uuid(f"notification-delivery:{index}"),
                     "notification_id": notification_id,
                     "channel": "email",
-                    "recipient": "owner@showcase.aurum.invalid",
+                    "recipient": showcase_email("owner"),
                     "status": "sent",
                     "error_message": None,
                     "attempts": 1,
@@ -2104,7 +2141,7 @@ async def seed_extra_tenants(
                 "name": name,
                 "legal_name": f"ООО «{name}»",
                 "inn_or_tin": f"DEMO-TENANT-{index:06d}",
-                "contact_email": f"tenant-{index}@showcase.aurum.invalid",
+                "contact_email": showcase_email(f"tenant-{index}"),
                 "contact_phone": f"+992 00 200 {index:02d} {index + 20:02d}",
                 "legal_address": "Республика Таджикистан, демонстрационный адрес",
                 "status": status,
@@ -2113,7 +2150,7 @@ async def seed_extra_tenants(
         )
         owner, membership, _ownership, _role = await roles.provision_owner(
             tenant_id=tenant.id,
-            email=f"owner-{index}@showcase.aurum.invalid",
+            email=showcase_email(f"owner-{index}"),
             full_name=f"Владелец демо-организации {index}",
         )
         if status in {"active", "trial", "grace_period"}:

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import EmailStr, TypeAdapter
 
 from app.seed_showcase import require_showcase_confirmation
 from app.showcase.catalog import showcase_catalog_rows
 from app.showcase.profiles import PROFILES, get_profile
-from app.showcase.seeder import _ean13
+from app.showcase.seeder import _EMPLOYEES, _ean13, showcase_email
 
 
 def test_realistic_profile_is_representative_without_being_stress_volume() -> None:
@@ -55,6 +56,15 @@ def test_generated_internal_ean13_has_valid_checksum(sequence: int) -> None:
     assert len(barcode) == 13
     assert barcode.startswith("299")
     assert weighted_sum % 10 == 0
+
+
+def test_active_showcase_employee_emails_are_login_compatible() -> None:
+    email_adapter = TypeAdapter(EmailStr)
+
+    for employee in _EMPLOYEES:
+        if employee.active:
+            email = showcase_email(employee.key)
+            assert str(email_adapter.validate_python(email)) == email
 
 
 def test_showcase_guard_accepts_only_exact_isolated_target() -> None:
