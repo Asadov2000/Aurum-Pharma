@@ -39,6 +39,12 @@ class DirectoryUser:
 
 
 @dataclass(frozen=True)
+class UserSessionRevocationResult:
+    result: str
+    revoked_count: int
+
+
+@dataclass(frozen=True)
 class AuthorizationSnapshot:
     """One statement-level authorization view with its revision coordinates."""
 
@@ -345,6 +351,33 @@ class RolesRepository:
             .execution_options(populate_existing=True)
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def revoke_user_sessions(
+        self,
+        *,
+        tenant_id: UUID,
+        target_user_id: UUID,
+    ) -> UserSessionRevocationResult:
+        row = (
+            (
+                await self.session.execute(
+                    text(
+                        "SELECT * FROM public.revoke_tenant_user_auth_sessions("
+                        ":tenant_id, :target_user_id)"
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "target_user_id": target_user_id,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        return UserSessionRevocationResult(
+            result=str(row["result"]),
+            revoked_count=int(row["revoked_count"]),
+        )
 
     async def find_membership_by_email(
         self,

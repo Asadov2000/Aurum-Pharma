@@ -121,6 +121,11 @@ class UserListResponse(BaseModel):
     page_size: int
 
 
+class UserSessionRevokeResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    revoked_count: int = Field(ge=0)
+
+
 class InviteUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

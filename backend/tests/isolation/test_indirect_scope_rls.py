@@ -997,6 +997,203 @@ async def test_blocking_user_revokes_sessions_immediately(
     assert state["revoked_reason"] == "membership_suspended"
 
 
+async def test_administrative_session_revocation_is_tenant_scoped_and_audited(
+    support_engine_iso: AsyncEngine,
+    app_engine_iso: AsyncEngine,
+    indirect_scope_rows: IndirectScopeRows,
+) -> None:
+    rows = indirect_scope_rows
+    target_session_ids: list[str] = []
+    async with support_engine_iso.begin() as conn:
+        for index in range(2):
+            target_session_ids.append(
+                str(
+                    (
+                        await conn.execute(
+                            text(
+                                "INSERT INTO session "
+                                "(user_id, refresh_token_hash, expires_at) "
+                                "VALUES (:user_id, :refresh_hash, "
+                                "pg_catalog.now() + INTERVAL '1 day') RETURNING id"
+                            ),
+                            {
+                                "user_id": rows.user_ids[2],
+                                "refresh_hash": hash_token(f"tenant-revoke-{index}-{rows.token}"),
+                            },
+                        )
+                    ).scalar_one()
+                )
+            )
+        outsider_session_id = str(
+            (
+                await conn.execute(
+                    text(
+                        "INSERT INTO session "
+                        "(user_id, refresh_token_hash, expires_at) "
+                        "VALUES (:user_id, :refresh_hash, "
+                        "pg_catalog.now() + INTERVAL '1 day') RETURNING id"
+                    ),
+                    {
+                        "user_id": rows.user_ids[1],
+                        "refresh_hash": hash_token(f"outsider-revoke-{rows.token}"),
+                    },
+                )
+            ).scalar_one()
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO tenant_ownership (tenant_id, membership_id) "
+                "SELECT :tenant_id, id FROM tenant_membership "
+                "WHERE tenant_id = :tenant_id AND user_id = :user_id"
+            ),
+            {
+                "tenant_id": rows.tenant_ids[0],
+                "user_id": rows.user_ids[3],
+            },
+        )
+
+    async with app_engine_iso.begin() as conn:
+        await _set_app_context(
+            conn,
+            tenant_id=rows.tenant_ids[0],
+            user_id=rows.user_ids[0],
+        )
+        revoked = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT * FROM public.revoke_tenant_user_auth_sessions("
+                        ":tenant_id, :target_user_id)"
+                    ),
+                    {
+                        "tenant_id": rows.tenant_ids[0],
+                        "target_user_id": rows.user_ids[2],
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        outsider = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT * FROM public.revoke_tenant_user_auth_sessions("
+                        ":tenant_id, :target_user_id)"
+                    ),
+                    {
+                        "tenant_id": rows.tenant_ids[0],
+                        "target_user_id": rows.user_ids[1],
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        protected_owner = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT * FROM public.revoke_tenant_user_auth_sessions("
+                        ":tenant_id, :target_user_id)"
+                    ),
+                    {
+                        "tenant_id": rows.tenant_ids[0],
+                        "target_user_id": rows.user_ids[3],
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert dict(revoked) == {"result": "revoked", "revoked_count": 2}
+    assert dict(outsider) == {"result": "not_found", "revoked_count": 0}
+    assert dict(protected_owner) == {"result": "protected", "revoked_count": 0}
+
+    async with support_engine_iso.begin() as conn:
+        fresh_target_session_id = str(
+            (
+                await conn.execute(
+                    text(
+                        "INSERT INTO session "
+                        "(user_id, refresh_token_hash, expires_at) "
+                        "VALUES (:user_id, :refresh_hash, "
+                        "pg_catalog.now() + INTERVAL '1 day') RETURNING id"
+                    ),
+                    {
+                        "user_id": rows.user_ids[2],
+                        "refresh_hash": hash_token(f"unauthorized-revoke-{rows.token}"),
+                    },
+                )
+            ).scalar_one()
+        )
+
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[3],
+        statement=(
+            "SELECT * FROM public.revoke_tenant_user_auth_sessions(" ":tenant_id, :target_user_id)"
+        ),
+        params={
+            "tenant_id": rows.tenant_ids[0],
+            "target_user_id": rows.user_ids[2],
+        },
+    )
+
+    async with support_engine_iso.begin() as conn:
+        session_rows = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT id, revoked_at, revoked_reason FROM session "
+                        "WHERE id = ANY(CAST(:session_ids AS UUID[]))"
+                    ),
+                    {
+                        "session_ids": [
+                            *target_session_ids,
+                            outsider_session_id,
+                            fresh_target_session_id,
+                        ]
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        audit_row = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT user_id, tenant_id, record_id, metadata "
+                        "FROM audit_log "
+                        "WHERE action = 'UPDATE' "
+                        "AND table_name = 'session' "
+                        "AND record_id = :target_user_id "
+                        "AND metadata ->> 'event' = 'tenant_user_sessions_revoked' "
+                        "ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"target_user_id": rows.user_ids[2]},
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    by_id = {str(row["id"]): row for row in session_rows}
+    assert all(
+        by_id[session_id]["revoked_reason"] == "tenant_admin_revoked"
+        for session_id in target_session_ids
+    )
+    assert by_id[outsider_session_id]["revoked_at"] is None
+    assert by_id[fresh_target_session_id]["revoked_at"] is None
+    assert str(audit_row["user_id"]) == rows.user_ids[0]
+    assert str(audit_row["tenant_id"]) == rows.tenant_ids[0]
+    assert str(audit_row["record_id"]) == rows.user_ids[2]
+    assert audit_row["metadata"]["revoked_count"] == 2
+
+
 async def test_role_and_subscription_writes_are_isolated(
     app_engine_iso: AsyncEngine,
     indirect_scope_rows: IndirectScopeRows,

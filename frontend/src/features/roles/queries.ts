@@ -9,6 +9,7 @@ import {
   listUsers,
   offboardUser,
   revokeAssignment,
+  revokeUserSessions,
   suspendUser,
   updateRole,
   updateUser,
@@ -110,6 +111,10 @@ export function useOffboardUser() {
       void qc.invalidateQueries({ queryKey: rolesKeys.users });
     },
   });
+}
+
+export function useRevokeUserSessions() {
+  return useMutation({ mutationFn: (id: string) => revokeUserSessions(id) });
 }
 
 export function useCreateAssignment() {

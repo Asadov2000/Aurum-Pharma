@@ -13,3 +13,4 @@ export { Skeleton, SkeletonRows } from "./Skeleton";
 export { Pagination } from "./Pagination";
 export { ConfirmDialog } from "./ConfirmDialog";
 export { FilterBar } from "./FilterBar";
+export { ActionMenu, type ActionMenuItem } from "./ActionMenu";

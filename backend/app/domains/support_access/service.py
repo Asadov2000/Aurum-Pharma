@@ -24,9 +24,12 @@ SUPPORT_ROLE_CAPABILITIES = (
     "roles.assign",
     "roles.create",
     "roles.update",
+    "users.block",
     "users.view",
 )
-SUPPORT_WRITE_CAPABILITIES = frozenset({"roles.assign", "roles.create", "roles.update"})
+SUPPORT_WRITE_CAPABILITIES = frozenset(
+    {"roles.assign", "roles.create", "roles.update", "users.block"}
+)
 
 
 class SupportAccessService:
