@@ -32,6 +32,7 @@ describe("buildNav — dashboard visibility", () => {
     expect(items.some((i) => i.to === "/onboarding")).toBe(false);
     // The seller still gets the sections explicitly granted to the role.
     expect(items.some((i) => i.to === "/pos")).toBe(true);
+    expect(items.some((i) => i.to === "/security")).toBe(true);
   });
 
   it("shows «Главная» to a tenant user with reports.view (owner)", () => {
@@ -44,6 +45,7 @@ describe("buildNav — dashboard visibility", () => {
     const items = buildNav(true, false, false, []);
     expect(items[0]?.to).toBe("/");
     expect(items.some((i) => i.to === "/admin/tenants")).toBe(true);
+    expect(items.some((i) => i.to === "/security")).toBe(true);
   });
 
   it("shows global audit only to an unscoped developer", () => {

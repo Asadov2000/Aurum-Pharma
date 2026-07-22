@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy import delete, text
 from sqlalchemy.engine import RowMapping
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.models import EmailCode, Session
@@ -43,6 +44,17 @@ class AuthSessionRecord:
     user_id: UUID
     expires_at: datetime
     reuse_presented_token: bool
+
+
+@dataclass(frozen=True)
+class ActiveSessionRecord:
+    id: UUID
+    user_agent: str | None
+    ip_address: str | None
+    created_at: datetime
+    last_used_at: datetime
+    expires_at: datetime
+    is_current: bool
 
 
 @dataclass(frozen=True)
@@ -113,6 +125,23 @@ def _auth_session_from_row(row: RowMapping) -> AuthSessionRecord:
     )
 
 
+def _active_session_from_row(row: RowMapping) -> ActiveSessionRecord:
+    return ActiveSessionRecord(
+        id=cast(UUID, row["id"]),
+        user_agent=cast(str | None, row["user_agent"]),
+        ip_address=cast(str | None, row["ip_address"]),
+        created_at=cast(datetime, row["created_at"]),
+        last_used_at=cast(datetime, row["last_used_at"]),
+        expires_at=cast(datetime, row["expires_at"]),
+        is_current=bool(row["is_current"]),
+    )
+
+
+def _is_insufficient_privilege(error: DBAPIError) -> bool:
+    sqlstate = getattr(error.orig, "sqlstate", None)
+    return isinstance(sqlstate, str) and sqlstate == "42501"
+
+
 def _mfa_challenge_from_row(row: RowMapping) -> MfaChallengeRecord:
     return MfaChallengeRecord(
         user_id=cast(UUID, row["user_id"]),
@@ -170,10 +199,18 @@ class AuthRepository:
     async def get_user_by_id(
         self, user_id: UUID, *, session_id: UUID | None = None
     ) -> AuthUserRecord | None:
-        result = await self.session.execute(
-            text("SELECT * FROM public.lookup_auth_user_by_id(:user_id, :session_id)"),
-            {"user_id": user_id, "session_id": session_id},
-        )
+        try:
+            result = await self.session.execute(
+                text("SELECT * FROM public.lookup_auth_user_by_id(:user_id, :session_id)"),
+                {"user_id": user_id, "session_id": session_id},
+            )
+        except DBAPIError as error:
+            # A revoked/expired sid is deliberately rejected inside the
+            # SECURITY DEFINER function. At the auth boundary it is an invalid
+            # session, not an internal server failure.
+            if _is_insufficient_privilege(error):
+                return None
+            raise
         row = result.mappings().one_or_none()
         return _auth_user_from_row(row) if row is not None else None
 
@@ -544,6 +581,56 @@ class AuthRepository:
     # -------------------------------------------------------------------------
     # session
     # -------------------------------------------------------------------------
+
+    async def list_active_sessions(
+        self,
+        *,
+        user_id: UUID,
+        current_session_id: UUID | None,
+    ) -> list[ActiveSessionRecord]:
+        result = await self.session.execute(
+            text("SELECT * FROM public.lookup_auth_sessions(" ":user_id, :current_session_id)"),
+            {
+                "user_id": user_id,
+                "current_session_id": current_session_id,
+            },
+        )
+        return [_active_session_from_row(row) for row in result.mappings().all()]
+
+    async def revoke_session_by_id(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        current_session_id: UUID,
+    ) -> str:
+        result = await self.session.execute(
+            text(
+                "SELECT public.revoke_auth_session_by_id("
+                ":user_id, :session_id, :current_session_id)"
+            ),
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "current_session_id": current_session_id,
+            },
+        )
+        return cast(str, result.scalar_one())
+
+    async def revoke_other_sessions(
+        self,
+        *,
+        user_id: UUID,
+        current_session_id: UUID,
+    ) -> int:
+        result = await self.session.execute(
+            text("SELECT public.revoke_other_auth_sessions(" ":user_id, :current_session_id)"),
+            {
+                "user_id": user_id,
+                "current_session_id": current_session_id,
+            },
+        )
+        return int(result.scalar_one())
 
     async def create_session_from_email_code(
         self,

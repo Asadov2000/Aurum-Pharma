@@ -41,6 +41,25 @@ export interface MeResponse {
   permissions: string[];
 }
 
+export interface ActiveSession {
+  id: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+  last_used_at: string;
+  expires_at: string;
+  is_current: boolean;
+}
+
+export interface SessionListResponse {
+  items: ActiveSession[];
+}
+
+export interface SessionRevokeResponse {
+  status: "ok";
+  revoked_count: number;
+}
+
 export interface LoginCodeRequest {
   email: string;
 }

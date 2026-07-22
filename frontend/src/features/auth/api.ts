@@ -1,6 +1,7 @@
 import { api, withoutAuth, withoutRefresh } from "@/lib/api";
 
 import {
+  type ActiveSession,
   type LoginCodeRequest,
   type LoginCodeResponse,
   type LoginVerifyResponse,
@@ -11,6 +12,8 @@ import {
   type MfaCodeRequest,
   type MfaEnrollmentSetup,
   type MfaRecoveryRequest,
+  type SessionListResponse,
+  type SessionRevokeResponse,
   type TokenPair,
 } from "./types";
 
@@ -78,5 +81,20 @@ export async function logoutRequest(operationId: string | null): Promise<void> {
 
 export async function fetchMe(): Promise<MeResponse> {
   const { data } = await api.get<MeResponse>("/auth/me");
+  return data;
+}
+
+export async function listActiveSessions(): Promise<ActiveSession[]> {
+  const { data } = await api.get<SessionListResponse>("/auth/sessions");
+  return data.items;
+}
+
+export async function revokeActiveSession(sessionId: string): Promise<SessionRevokeResponse> {
+  const { data } = await api.delete<SessionRevokeResponse>(`/auth/sessions/${sessionId}`);
+  return data;
+}
+
+export async function revokeOtherSessions(): Promise<SessionRevokeResponse> {
+  const { data } = await api.post<SessionRevokeResponse>("/auth/sessions/revoke-others");
   return data;
 }

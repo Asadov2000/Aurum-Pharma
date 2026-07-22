@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  apiLogin,
   clearLoginRateLimit,
   currentTotp,
   DEV,
@@ -58,6 +59,31 @@ test.describe("Auth", () => {
     await expect(page.getByRole("link", { name: "Точки" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Тенанты" })).toHaveCount(0);
+  });
+
+  test("owner reviews and revokes other active sessions", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+    await apiLogin(page.request, OWNER);
+    await page.goto("/security");
+
+    await expect(page.getByRole("heading", { name: "Безопасность" })).toBeVisible();
+    const revokeOthers = page.getByRole("button", { name: "Завершить остальные" });
+    await expect(revokeOthers).toBeEnabled();
+    await revokeOthers.click();
+
+    const dialog = page.getByRole("dialog", { name: "Завершить остальные сеансы?" });
+    await expect(dialog).toBeVisible();
+    const revokedResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/auth/sessions/revoke-others") && response.status() === 200,
+    );
+    await dialog.getByRole("button", { name: "Завершить остальные" }).click();
+    const revoked = (await (await revokedResponse).json()) as { revoked_count: number };
+
+    expect(revoked.revoked_count).toBeGreaterThan(0);
+    await expect(page.getByText(/Завершено сеансов:/)).toBeVisible();
+    await expect(page.getByText("Сеансы (1)")).toBeVisible();
+    await expect(page.getByText("Текущий сеанс")).toBeVisible();
   });
 
   test("retries refresh with the same operation after a lost response", async ({ page }) => {

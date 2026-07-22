@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, Request, Response, status
 from redis.asyncio import Redis
@@ -21,6 +21,7 @@ from app.core.deps import (
 from app.core.errors import AuthenticationError
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
+    ActiveSessionResponse,
     LoginCodeRequest,
     LoginCodeResponse,
     LoginCodeVerify,
@@ -34,6 +35,8 @@ from app.domains.auth.schemas import (
     MfaRecoveryRequest,
     MfaStepUpRequest,
     RefreshRequest,
+    SessionListResponse,
+    SessionRevokeResponse,
     TokenResponse,
 )
 from app.domains.auth.service import AuthService, MfaLoginChallenge
@@ -326,6 +329,52 @@ async def logout(
         )
     _clear_refresh_cookie(response)
     return LogoutResponse()
+
+
+@router.get("/sessions", response_model=SessionListResponse)
+async def list_sessions(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_auth_state_service)],
+) -> SessionListResponse:
+    _set_auth_no_store(response)
+    sessions = await service.list_sessions(
+        user_id=user.user_id,
+        current_session_id=user.session_id,
+    )
+    return SessionListResponse(
+        items=[ActiveSessionResponse.model_validate(session) for session in sessions]
+    )
+
+
+@router.post("/sessions/revoke-others", response_model=SessionRevokeResponse)
+async def revoke_other_sessions(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_auth_state_service)],
+) -> SessionRevokeResponse:
+    _set_auth_no_store(response)
+    revoked_count = await service.revoke_other_sessions(
+        user_id=user.user_id,
+        current_session_id=user.session_id,
+    )
+    return SessionRevokeResponse(revoked_count=revoked_count)
+
+
+@router.delete("/sessions/{session_id}", response_model=SessionRevokeResponse)
+async def revoke_session(
+    session_id: UUID,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_auth_state_service)],
+) -> SessionRevokeResponse:
+    _set_auth_no_store(response)
+    await service.revoke_session(
+        user_id=user.user_id,
+        session_id=session_id,
+        current_session_id=user.session_id,
+    )
+    return SessionRevokeResponse(revoked_count=1)
 
 
 @router.get("/me", response_model=MeResponse)

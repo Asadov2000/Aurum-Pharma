@@ -128,6 +128,13 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M10.5 21a2 2 0 0 0 3 0" />
     </Svg>
   ),
+  // Безопасность — ключ / account access
+  "/security": (
+    <Svg>
+      <circle cx="8" cy="15" r="3" />
+      <path d="m10.2 12.8 8.3-8.3M15 7l2 2M17 5l2 2" />
+    </Svg>
+  ),
   // Настройки — gear
   "/settings": (
     <Svg>

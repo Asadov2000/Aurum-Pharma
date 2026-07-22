@@ -75,8 +75,10 @@
 - [ ] Запретить self-assignment, изменение собственной границы полномочий,
       назначение protected-ролей и удаление последнего владельца.
 - [x] TOTP для support-уровней 1–2, защищённое восстановление и аудит recovery.
-- [ ] Session inventory, принудительный logout, rotation/revocation и уведомление
-      о подозрительном входе.
+- [x] Self-service session inventory и ручной отзыв своих активных сеансов с
+      немедленным прекращением доступа.
+- [ ] Административный принудительный logout пользователя и уведомление о
+      подозрительном входе.
 - [ ] Проверить branch-scoped permissions во всех доменах, не только в roles;
       permission должен действовать только в филиале, где выдана роль.
 - [ ] Изменения membership, ownership, role capabilities, assignments и support
@@ -114,7 +116,7 @@
 
 1. Scoped authorization, account/membership/ownership и безопасный конструктор
    из ADR-0007.
-2. Session inventory, принудительный logout и уведомления о подозрительных входах.
+2. Административный принудительный logout и уведомления о подозрительных входах.
 3. Отдельный production compose/reverse-proxy профиль и секреты.
 4. Backup/restore job с одноразовой проверкой восстановления.
 5. DB-инварианты POS и полный refund/void sync-контур.

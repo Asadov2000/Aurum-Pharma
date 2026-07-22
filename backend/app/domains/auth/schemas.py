@@ -93,6 +93,27 @@ class LogoutResponse(BaseModel):
     status: str = "ok"
 
 
+class ActiveSessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_agent: str | None
+    ip_address: str | None
+    created_at: datetime
+    last_used_at: datetime
+    expires_at: datetime
+    is_current: bool
+
+
+class SessionListResponse(BaseModel):
+    items: list[ActiveSessionResponse]
+
+
+class SessionRevokeResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    revoked_count: int = Field(ge=0)
+
+
 class MeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

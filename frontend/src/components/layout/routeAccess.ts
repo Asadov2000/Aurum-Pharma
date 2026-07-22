@@ -33,6 +33,7 @@ export type AppRoutePath =
   | "/reports"
   | "/audit"
   | "/notifications"
+  | "/security"
   | "/settings";
 
 export interface RouteAccessContext {
@@ -84,6 +85,9 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   // Notifications are tied to the authenticated account, not to a tenant
   // permission, and therefore remain available to support users too.
   if (isPath(pathname, "/notifications")) return true;
+  // Session inventory is account-scoped and deliberately independent of a
+  // tenant role, so a cashier can protect their own account as well.
+  if (isPath(pathname, "/security")) return true;
   // Global audit is a developer-only support surface and does not require a
   // selected tenant. Scoped tenant audit still follows explicit permissions.
   if (isPath(pathname, "/audit")) {
@@ -172,5 +176,6 @@ export const routeLabel: Record<AppRoutePath, string> = {
   "/reports": "Отчёты",
   "/audit": "Аудит",
   "/notifications": "Уведомления",
+  "/security": "Безопасность",
   "/settings": "Настройки",
 };

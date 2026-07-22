@@ -11,8 +11,9 @@ once the roles domain (migration 0004) is on disk.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
+from ipaddress import ip_address, ip_network
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from redis.exceptions import RedisError
 from app.core.config import get_settings
 from app.core.errors import (
     AuthenticationError,
+    ConflictError,
     NotFoundError,
     RateLimitError,
     ServiceUnavailableError,
@@ -45,7 +47,11 @@ from app.core.security import (
     verify_password,
 )
 from app.core.time import utc_now
-from app.domains.auth.repository import AuthRepository, EmailCodeIssueStatus
+from app.domains.auth.repository import (
+    ActiveSessionRecord,
+    AuthRepository,
+    EmailCodeIssueStatus,
+)
 
 if TYPE_CHECKING:
     from app.domains.auth.repository import (
@@ -62,6 +68,20 @@ LOGIN_BLOCK_DURATION = timedelta(minutes=15)
 MFA_CHALLENGE_DURATION = timedelta(minutes=5)
 MFA_ATTEMPT_LIMIT = 5
 MFA_ATTEMPT_WINDOW_SECONDS = 15 * 60
+
+
+def _mask_session_ip(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = ip_address(value)
+    except ValueError:
+        return None
+    if parsed.version == 4:
+        first, second, _, _ = str(parsed).split(".")
+        return f"{first}.{second}.x.x"
+    network = ip_network(f"{parsed}/64", strict=False)
+    return f"{network.network_address.compressed}/64"
 
 
 class AuthTokens(NamedTuple):
@@ -696,7 +716,72 @@ class AuthService:
         )
 
     # -------------------------------------------------------------------------
-    # 5. Logout (idempotent)
+    # 5. Session inventory and revocation
+    # -------------------------------------------------------------------------
+
+    async def list_sessions(
+        self,
+        *,
+        user_id: UUID,
+        current_session_id: UUID | None,
+    ) -> list[ActiveSessionRecord]:
+        sessions = await self.repo.list_active_sessions(
+            user_id=user_id,
+            current_session_id=current_session_id,
+        )
+        return [
+            replace(session, ip_address=_mask_session_ip(session.ip_address))
+            for session in sessions
+        ]
+
+    async def revoke_session(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        current_session_id: UUID | None,
+    ) -> None:
+        if current_session_id is None:
+            raise AuthenticationError("Authenticated session is missing")
+        result = await self.repo.revoke_session_by_id(
+            user_id=user_id,
+            session_id=session_id,
+            current_session_id=current_session_id,
+        )
+        if result == "current":
+            raise ConflictError("Current session must be ended with logout")
+        if result == "not_found":
+            raise NotFoundError("Session not found")
+        if result != "revoked":
+            raise RuntimeError("Unexpected session revocation result")
+        logger.info(
+            "session_revoked",
+            user_id=str(user_id),
+            session_id=str(session_id),
+        )
+
+    async def revoke_other_sessions(
+        self,
+        *,
+        user_id: UUID,
+        current_session_id: UUID | None,
+    ) -> int:
+        if current_session_id is None:
+            raise AuthenticationError("Authenticated session is missing")
+        revoked_count = await self.repo.revoke_other_sessions(
+            user_id=user_id,
+            current_session_id=current_session_id,
+        )
+        logger.info(
+            "other_sessions_revoked",
+            user_id=str(user_id),
+            session_id=str(current_session_id),
+            revoked_count=revoked_count,
+        )
+        return revoked_count
+
+    # -------------------------------------------------------------------------
+    # 6. Logout (idempotent)
     # -------------------------------------------------------------------------
 
     async def logout(self, refresh_token: str, operation_id: UUID | None = None) -> None:
@@ -718,7 +803,7 @@ class AuthService:
             logger.info("logout", user_id=str(user_id))
 
     # -------------------------------------------------------------------------
-    # 6. /me
+    # 7. /me
     # -------------------------------------------------------------------------
 
     async def get_user_info(self, user_id: UUID) -> AuthUserRecord:

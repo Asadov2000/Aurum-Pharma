@@ -66,6 +66,10 @@ const NotificationsPage = lazyRouteComponent(
   () => import("@/features/notifications/NotificationsPage"),
   "NotificationsPage",
 );
+const SecurityPage = lazyRouteComponent(
+  () => import("@/features/auth/SecurityPage"),
+  "SecurityPage",
+);
 const ReportsPage = lazyRouteComponent(
   () => import("@/features/reports/ReportsPage"),
   "ReportsPage",
@@ -183,6 +187,12 @@ const notificationsRoute = createRoute({
   component: NotificationsPage,
 });
 
+const securityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security",
+  component: SecurityPage,
+});
+
 const reportsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/reports",
@@ -219,6 +229,7 @@ const routeTree = rootRoute.addChildren([
   auditRoute,
   onboardingRoute,
   notificationsRoute,
+  securityRoute,
   reportsRoute,
   loginRoute,
 ]);

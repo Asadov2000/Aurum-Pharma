@@ -20,6 +20,7 @@ describe("route access", () => {
     expect(canAccessPath("/catalog", SELLER)).toBe(true);
     expect(canAccessPath("/sales", SELLER)).toBe(true);
     expect(canAccessPath("/audit", SELLER)).toBe(true);
+    expect(canAccessPath("/security", SELLER)).toBe(true);
     expect(canAccessPath("/branches", SELLER)).toBe(false);
     expect(canAccessPath("/registers", SELLER)).toBe(false);
     expect(canAccessPath("/settings", SELLER)).toBe(false);
@@ -42,6 +43,7 @@ describe("route access", () => {
     expect(canAccessPath("/", support)).toBe(true);
     expect(canAccessPath("/admin/tenants", support)).toBe(true);
     expect(canAccessPath("/notifications", support)).toBe(true);
+    expect(canAccessPath("/security", support)).toBe(true);
     expect(canAccessPath("/catalog", support)).toBe(false);
     expect(canAccessPath("/roles", support)).toBe(false);
   });

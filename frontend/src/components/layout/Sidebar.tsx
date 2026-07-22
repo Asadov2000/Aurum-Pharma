@@ -28,7 +28,10 @@ const SECTIONS: { caption?: string; routes: string[] }[] = [
   { caption: "Склад", routes: ["/catalog", "/batches", "/incoming", "/suppliers"] },
   { caption: "Аналитика", routes: ["/reports", "/audit"] },
   { caption: "Управление", routes: ["/users", "/roles", "/branches", "/registers"] },
-  { caption: "Система", routes: ["/billing", "/notifications", "/settings"] },
+  {
+    caption: "Система",
+    routes: ["/billing", "/notifications", "/security", "/settings"],
+  },
   { caption: "Администрирование", routes: ["/admin/tenants"] },
 ];
 
