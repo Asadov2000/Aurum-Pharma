@@ -30,6 +30,7 @@ from app.domains.roles.schemas import (
     RoleWithPermissions,
     TemplateWithPermissions,
     UserListResponse,
+    UserSessionRevokeResponse,
     UserUpdate,
     UserWithAssignments,
 )
@@ -317,6 +318,24 @@ async def block_user(
         target_user_id=user_id,
     )
     return {"status": "suspended"}
+
+
+@router.post(
+    "/users/{user_id}/sessions/revoke",
+    response_model=UserSessionRevokeResponse,
+)
+async def revoke_user_sessions(
+    user_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("users.block"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> UserSessionRevokeResponse:
+    revoked_count = await service.revoke_user_sessions(
+        actor_id=user.user_id,
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+    )
+    return UserSessionRevokeResponse(revoked_count=revoked_count)
 
 
 @router.delete("/users/{user_id}")

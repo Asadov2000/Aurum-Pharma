@@ -79,11 +79,11 @@ async def test_session_is_scoped_audited_and_immediately_revocable(
         tenant_id=tenant.id,
         reason="Настройка ролей перед пилотным запуском",
         duration_minutes=15,
-        requested_capabilities=["users.view", "roles.create", "roles.update"],
+        requested_capabilities=["users.view", "users.block", "roles.create", "roles.update"],
     )
 
     assert session.tenant_id == tenant.id
-    assert session.capabilities == ("roles.create", "roles.update", "users.view")
+    assert session.capabilities == ("roles.create", "roles.update", "users.block", "users.view")
     assert session.is_read_only is False
     audit = (
         (

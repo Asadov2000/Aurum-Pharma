@@ -2,8 +2,9 @@ import { useState } from "react";
 
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
+  ActionMenu,
+  type ActionMenuItem,
   Badge,
-  Button,
   ConfirmDialog,
   Modal,
   Pagination,
@@ -21,12 +22,18 @@ import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { AssignmentsPanel } from "./AssignmentsPanel";
-import { useOffboardUser, useSuspendUser, useUpdateUser, useUsersQuery } from "./queries";
+import {
+  useOffboardUser,
+  useRevokeUserSessions,
+  useSuspendUser,
+  useUpdateUser,
+  useUsersQuery,
+} from "./queries";
 import { type UserStatus, type UserWithAssignments } from "./types";
 import { UserProfileForm } from "./UserProfileForm";
 
 type Row = UserWithAssignments;
-type PendingAction = { type: "suspend" | "offboard"; user: Row };
+type PendingAction = { type: "sessions" | "suspend" | "offboard"; user: Row };
 
 const PAGE_SIZE = 50;
 
@@ -57,6 +64,7 @@ export function UsersPage(): JSX.Element {
   const canView = permissions.includes("users.view");
   const canUpdate = (isTenantOwner || isSupportScoped) && permissions.includes("users.update");
   const canSuspend = (isTenantOwner || isSupportScoped) && permissions.includes("users.block");
+  const canRevokeSessions = canSuspend;
   const canOffboard = (isTenantOwner || isSupportScoped) && permissions.includes("users.delete");
   const canAssign = (isTenantOwner || isSupportScoped) && permissions.includes("roles.assign");
   const showActions = canUpdate || canSuspend || canOffboard || canAssign;
@@ -66,10 +74,12 @@ export function UsersPage(): JSX.Element {
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [activatingUserId, setActivatingUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const users = useUsersQuery(hasTenant && canView, page, PAGE_SIZE);
   const suspendMutation = useSuspendUser();
   const offboardMutation = useOffboardUser();
+  const revokeSessionsMutation = useRevokeUserSessions();
   const activateMutation = useUpdateUser();
 
   const rows = users.data?.items ?? [];
@@ -85,21 +95,34 @@ export function UsersPage(): JSX.Element {
 
   const ask = (type: PendingAction["type"], target: Row) => {
     setActionError(null);
+    setActionNotice(null);
     setPending({ type, user: target });
   };
 
   const runPending = async () => {
     if (!pending) return;
     setActionError(null);
-    const mutation = pending.type === "suspend" ? suspendMutation : offboardMutation;
-    const fallback =
-      pending.type === "suspend"
-        ? "Не удалось приостановить сотрудника"
-        : "Не удалось уволить сотрудника";
     try {
-      await mutation.mutateAsync(pending.user.id);
+      if (pending.type === "sessions") {
+        const result = await revokeSessionsMutation.mutateAsync(pending.user.id);
+        setActionNotice(
+          result.revoked_count > 0
+            ? `Завершено активных сеансов: ${result.revoked_count}`
+            : "У сотрудника нет активных сеансов.",
+        );
+      } else if (pending.type === "suspend") {
+        await suspendMutation.mutateAsync(pending.user.id);
+      } else {
+        await offboardMutation.mutateAsync(pending.user.id);
+      }
       setPending(null);
     } catch (error) {
+      const fallback =
+        pending.type === "sessions"
+          ? "Не удалось завершить сеансы сотрудника"
+          : pending.type === "suspend"
+            ? "Не удалось приостановить сотрудника"
+            : "Не удалось уволить сотрудника";
       setActionError(describeApiError(error, fallback));
     }
   };
@@ -130,6 +153,11 @@ export function UsersPage(): JSX.Element {
       <h1 className="text-2xl font-semibold text-foreground">Сотрудники</h1>
 
       {actionError && pending === null && <p className="text-sm text-danger">{actionError}</p>}
+      {actionNotice && (
+        <p className="text-sm text-success-foreground" role="status">
+          {actionNotice}
+        </p>
+      )}
 
       {users.error ? (
         <p className="text-sm text-danger">
@@ -172,14 +200,51 @@ export function UsersPage(): JSX.Element {
                   !isSuspended(member.status) &&
                   member.status !== "pending" &&
                   !isOffboarded(member.status);
+                const canRevokeMemberSessions =
+                  canRevokeSessions &&
+                  member.id !== user?.id &&
+                  member.status === "active" &&
+                  (!isOwnerMembership || user?.is_developer === true);
                 const canOffboardMember =
                   canOffboard && !protectsLifecycle && !isOffboarded(member.status);
-                const hasActions =
-                  canEditMember ||
-                  canActivateMember ||
-                  canAssignMember ||
-                  canSuspendMember ||
-                  canOffboardMember;
+                const actions: ActionMenuItem[] = [];
+                if (canEditMember) {
+                  actions.push({
+                    label: "Профиль",
+                    onSelect: () => setProfileUserId(member.id),
+                  });
+                }
+                if (canActivateMember) {
+                  actions.push({
+                    label: member.status === "pending" ? "Активировать" : "Возобновить",
+                    onSelect: () => void activateMembership(member),
+                  });
+                }
+                if (canAssignMember) {
+                  actions.push({
+                    label: "Роли",
+                    onSelect: () => setAssignmentUserId(member.id),
+                  });
+                }
+                if (canRevokeMemberSessions) {
+                  actions.push({
+                    label: "Завершить сеансы",
+                    onSelect: () => ask("sessions", member),
+                  });
+                }
+                if (canSuspendMember) {
+                  actions.push({
+                    label: "Приостановить",
+                    onSelect: () => ask("suspend", member),
+                  });
+                }
+                if (canOffboardMember) {
+                  actions.push({
+                    label: "Уволить",
+                    tone: "danger",
+                    onSelect: () => ask("offboard", member),
+                  });
+                }
 
                 return (
                   <TR key={member.id}>
@@ -212,46 +277,16 @@ export function UsersPage(): JSX.Element {
                         : "—"}
                     </TD>
                     {showActions && (
-                      <TD className="text-right whitespace-nowrap">
-                        {canEditMember && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setProfileUserId(member.id)}
-                          >
-                            Профиль
-                          </Button>
-                        )}
-                        {canActivateMember && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                      <TD className="w-16 text-right">
+                        {actions.length > 0 ? (
+                          <ActionMenu
+                            label={`Действия для ${member.full_name}`}
+                            items={actions}
                             isLoading={activateMutation.isPending && activatingUserId === member.id}
-                            onClick={() => void activateMembership(member)}
-                          >
-                            {member.status === "pending" ? "Активировать" : "Возобновить"}
-                          </Button>
+                          />
+                        ) : (
+                          <span className="text-foreground-muted">—</span>
                         )}
-                        {canAssignMember && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setAssignmentUserId(member.id)}
-                          >
-                            Роли
-                          </Button>
-                        )}
-                        {canSuspendMember && (
-                          <Button variant="ghost" size="sm" onClick={() => ask("suspend", member)}>
-                            Приостановить
-                          </Button>
-                        )}
-                        {canOffboardMember && (
-                          <Button variant="ghost" size="sm" onClick={() => ask("offboard", member)}>
-                            Уволить
-                          </Button>
-                        )}
-                        {!hasActions && <span className="text-foreground-muted">—</span>}
                       </TD>
                     )}
                   </TR>
@@ -295,10 +330,21 @@ export function UsersPage(): JSX.Element {
 
       <ConfirmDialog
         open={pending !== null}
-        title={pending?.type === "suspend" ? "Приостановить доступ" : "Уволить сотрудника"}
+        title={
+          pending?.type === "sessions"
+            ? "Завершить активные сеансы"
+            : pending?.type === "suspend"
+              ? "Приостановить доступ"
+              : "Уволить сотрудника"
+        }
         message={
           <>
-            {pending?.type === "suspend" ? (
+            {pending?.type === "sessions" ? (
+              <>
+                Завершить все сеансы «{pending.user.full_name}»? Сотрудник будет немедленно выведен
+                из системы, но сможет войти снова.
+              </>
+            ) : pending?.type === "suspend" ? (
               <>Приостановить доступ для «{pending?.user.full_name}»? Сотрудник не сможет войти.</>
             ) : (
               <>Уволить «{pending?.user.full_name}»? Действие необратимо.</>
@@ -306,9 +352,19 @@ export function UsersPage(): JSX.Element {
             {actionError && <span className="mt-2 block text-danger">{actionError}</span>}
           </>
         }
-        confirmLabel={pending?.type === "suspend" ? "Приостановить" : "Уволить"}
+        confirmLabel={
+          pending?.type === "sessions"
+            ? "Завершить сеансы"
+            : pending?.type === "suspend"
+              ? "Приостановить"
+              : "Уволить"
+        }
         variant="danger"
-        isLoading={suspendMutation.isPending || offboardMutation.isPending}
+        isLoading={
+          revokeSessionsMutation.isPending ||
+          suspendMutation.isPending ||
+          offboardMutation.isPending
+        }
         onConfirm={() => void runPending()}
         onCancel={() => {
           setPending(null);

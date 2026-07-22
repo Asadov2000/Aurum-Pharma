@@ -554,6 +554,34 @@ class RolesService:
             target_status="suspended",
         )
 
+    async def revoke_user_sessions(
+        self,
+        *,
+        actor_id: UUID,
+        tenant_id: UUID,
+        target_user_id: UUID,
+    ) -> int:
+        result = await self.repo.revoke_user_sessions(
+            tenant_id=tenant_id,
+            target_user_id=target_user_id,
+        )
+        if result.result == "self":
+            raise BusinessRuleError("Use your security page to end your own sessions")
+        if result.result == "not_found":
+            raise NotFoundError("Membership not found")
+        if result.result == "protected":
+            raise PermissionDeniedError("Protected account sessions cannot be ended here")
+        if result.result != "revoked":
+            raise RuntimeError("Unexpected administrative session revocation result")
+        logger.info(
+            "tenant_user_sessions_revoked",
+            actor_user_id=str(actor_id),
+            target_user_id=str(target_user_id),
+            tenant_id=str(tenant_id),
+            revoked_count=result.revoked_count,
+        )
+        return result.revoked_count
+
     async def soft_delete_user(
         self,
         *,

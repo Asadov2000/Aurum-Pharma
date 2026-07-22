@@ -10,7 +10,7 @@ import { activateSupportContext } from "./context";
 import { useStartSupportSession, useSupportCapabilities } from "./queries";
 
 const schema = z.object({
-  mode: z.enum(["read", "roles"]),
+  mode: z.enum(["read", "roles", "security"]),
   reason: z
     .string()
     .trim()
@@ -35,6 +35,7 @@ const ROLE_CAPABILITIES = [
   "roles.update",
   "roles.assign",
 ];
+const SECURITY_CAPABILITIES = ["users.view", "users.block"];
 
 export function SupportAccessForm({
   tenantId,
@@ -63,10 +64,13 @@ export function SupportAccessForm({
     }
 
     const available = new Set(capabilities.data?.map((capability) => capability.code) ?? []);
-    const requested =
+    const requested = (
       parsed.data.mode === "roles"
-        ? ROLE_CAPABILITIES.filter((code) => available.has(code))
-        : ["users.view"].filter((code) => available.has(code));
+        ? ROLE_CAPABILITIES
+        : parsed.data.mode === "security"
+          ? SECURITY_CAPABILITIES
+          : ["users.view"]
+    ).filter((code) => available.has(code));
     if (requested.length === 0) {
       setTopError("Для выбранного режима нет доступных действий.");
       return;
@@ -97,7 +101,7 @@ export function SupportAccessForm({
 
       <fieldset>
         <legend className="text-sm font-medium text-foreground">Режим</legend>
-        <div className="mt-2 grid grid-cols-2 gap-2">
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
           <label className="rounded-md border border-border p-3 text-sm">
             <input type="radio" value="read" {...form.register("mode")} />
             <span className="ml-2 font-medium">Только просмотр</span>
@@ -105,6 +109,10 @@ export function SupportAccessForm({
           <label className="rounded-md border border-border p-3 text-sm">
             <input type="radio" value="roles" {...form.register("mode")} />
             <span className="ml-2 font-medium">Роли и назначения</span>
+          </label>
+          <label className="rounded-md border border-border p-3 text-sm">
+            <input type="radio" value="security" {...form.register("mode")} />
+            <span className="ml-2 font-medium">Безопасность</span>
           </label>
         </div>
       </fieldset>

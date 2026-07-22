@@ -7,6 +7,7 @@ const listRoles = vi.fn();
 const updateUser = vi.fn();
 const suspendUser = vi.fn();
 const offboardUser = vi.fn();
+const revokeUserSessions = vi.fn();
 const createAssignment = vi.fn();
 const listBranches = vi.fn();
 
@@ -20,6 +21,7 @@ vi.mock("@/features/roles/api", () => ({
   updateUser: (...args: unknown[]) => updateUser(...args),
   suspendUser: (...args: unknown[]) => suspendUser(...args),
   offboardUser: (...args: unknown[]) => offboardUser(...args),
+  revokeUserSessions: (...args: unknown[]) => revokeUserSessions(...args),
   createAssignment: (...args: unknown[]) => createAssignment(...args),
   revokeAssignment: vi.fn(),
 }));
@@ -56,6 +58,12 @@ function renderPage() {
       <UsersPage />
     </QueryClientProvider>,
   );
+}
+
+async function openUserActions(fullName = "Иван Сотрудник") {
+  const trigger = await screen.findByRole("button", { name: `Действия для ${fullName}` });
+  fireEvent.click(trigger);
+  return trigger;
 }
 
 const MANAGED_ROLE = {
@@ -126,6 +134,7 @@ describe("UsersPage", () => {
     updateUser.mockReset();
     suspendUser.mockReset();
     offboardUser.mockReset();
+    revokeUserSessions.mockReset();
     createAssignment.mockReset();
     listBranches.mockReset();
     listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE]);
@@ -133,6 +142,7 @@ describe("UsersPage", () => {
     updateUser.mockResolvedValue({});
     suspendUser.mockResolvedValue(undefined);
     offboardUser.mockResolvedValue(undefined);
+    revokeUserSessions.mockResolvedValue({ status: "ok", revoked_count: 1 });
     createAssignment.mockResolvedValue({ id: "assignment-new" });
   });
 
@@ -162,10 +172,12 @@ describe("UsersPage", () => {
     renderPage();
 
     expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Профиль" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Роли" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Приостановить" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Уволить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Профиль" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Роли" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Приостановить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Завершить сеансы" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Действия для/ })).not.toBeInTheDocument();
   });
 
   it("gates profile and assignment actions independently", async () => {
@@ -178,10 +190,11 @@ describe("UsersPage", () => {
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
 
-    expect(await screen.findByRole("button", { name: "Профиль" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Роли" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Приостановить" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Уволить" })).not.toBeInTheDocument();
+    await openUserActions();
+    expect(await screen.findByRole("menuitem", { name: "Профиль" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Роли" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Приостановить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
   });
 
   it("updates a profile only through users.update", async () => {
@@ -194,7 +207,8 @@ describe("UsersPage", () => {
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Профиль" }));
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Профиль" }));
     fireEvent.change(await screen.findByLabelText("ФИО"), {
       target: { value: "Иван Обновлённый" },
     });
@@ -222,7 +236,8 @@ describe("UsersPage", () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Активировать" }));
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Активировать" }));
 
     await waitFor(() => expect(updateUser).toHaveBeenCalledTimes(1));
     expect(updateUser).toHaveBeenCalledWith("member-1", { status: "active" });
@@ -238,7 +253,8 @@ describe("UsersPage", () => {
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Роли" }));
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
     fireEvent.click(await screen.findByRole("button", { name: "+ Назначить роль" }));
     expect(screen.queryByRole("option", { name: "Aurum Administrator" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Роль"), {
@@ -273,10 +289,32 @@ describe("UsersPage", () => {
     renderPage();
 
     expect(await screen.findByText("владелец")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Профиль" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Роли" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Приостановить" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Уволить" })).not.toBeInTheDocument();
+    await openUserActions();
+    expect(screen.getByRole("menuitem", { name: "Профиль" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Роли" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Приостановить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Завершить сеансы" })).not.toBeInTheDocument();
+  });
+
+  it("ends employee sessions only after an explicit confirmation", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.block"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Завершить сеансы" }));
+    expect(screen.getByText(/будет немедленно выведен из системы/i)).toBeInTheDocument();
+    const confirmButtons = screen.getAllByRole("button", { name: "Завершить сеансы" });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]!);
+
+    await waitFor(() => expect(revokeUserSessions).toHaveBeenCalledWith("member-1"));
+    expect(await screen.findByRole("status")).toHaveTextContent("Завершено активных сеансов: 1");
   });
 
   it("gates suspend and offboard with their own permissions", async () => {
@@ -289,8 +327,9 @@ describe("UsersPage", () => {
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     const firstRender = renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Приостановить" }));
-    expect(screen.queryByRole("button", { name: "Уволить" })).not.toBeInTheDocument();
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Приостановить" }));
+    expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
     const suspendButtons = screen.getAllByRole("button", { name: "Приостановить" });
     fireEvent.click(suspendButtons[suspendButtons.length - 1]!);
     await waitFor(() => expect(suspendUser).toHaveBeenCalledWith("member-1"));
@@ -305,8 +344,9 @@ describe("UsersPage", () => {
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
 
-    expect(await screen.findByRole("button", { name: "Уволить" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Приостановить" })).not.toBeInTheDocument();
+    await openUserActions();
+    expect(await screen.findByRole("menuitem", { name: "Уволить" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Приостановить" })).not.toBeInTheDocument();
   });
 
   it("renders pagination and refetches the selected page", async () => {

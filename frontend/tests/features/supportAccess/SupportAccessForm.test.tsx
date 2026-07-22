@@ -23,6 +23,7 @@ vi.mock("@/features/supportAccess/queries", () => ({
       { code: "roles.create" },
       { code: "roles.update" },
       { code: "roles.assign" },
+      { code: "users.block" },
     ],
     isLoading: false,
     isError: false,
@@ -97,6 +98,25 @@ describe("SupportAccessForm", () => {
       await screen.findByText("Укажите причину подробнее, минимум 10 символов"),
     ).toBeInTheDocument();
     expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+
+  it("opens a separate account-security scope", async () => {
+    render(<SupportAccessForm tenantId={SESSION.tenant_id} tenantName="Шифо" onClose={() => {}} />);
+
+    fireEvent.click(screen.getByLabelText("Безопасность"));
+    fireEvent.change(screen.getByLabelText("Причина доступа"), {
+      target: { value: "Завершение подозрительных сеансов" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Открыть доступ" }));
+
+    await waitFor(() => expect(mocks.mutate).toHaveBeenCalledTimes(1));
+    expect(mocks.mutate).toHaveBeenCalledWith({
+      tenant_id: SESSION.tenant_id,
+      reason: "Завершение подозрительных сеансов",
+      duration_minutes: 15,
+      capabilities: ["users.view", "users.block"],
+    });
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/users" });
   });
 
   it("disables cancellation while the support session is being opened", async () => {

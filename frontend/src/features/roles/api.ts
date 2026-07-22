@@ -63,6 +63,15 @@ export async function offboardUser(userId: string): Promise<void> {
   await api.delete(`/users/${userId}`);
 }
 
+export async function revokeUserSessions(
+  userId: string,
+): Promise<{ status: "ok"; revoked_count: number }> {
+  const { data } = await api.post<{ status: "ok"; revoked_count: number }>(
+    `/users/${userId}/sessions/revoke`,
+  );
+  return data;
+}
+
 export async function createAssignment(
   userId: string,
   payload: AssignmentCreatePayload,
