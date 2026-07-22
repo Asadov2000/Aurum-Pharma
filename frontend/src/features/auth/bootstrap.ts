@@ -8,7 +8,7 @@ import { useAuthStore } from "@/stores/auth";
 import { refreshTokensRequest } from "./api";
 import { isConfirmedAuthFailure, isTransientRefreshFailure } from "./failures";
 import { getOrCreateRefreshOperationId } from "./refreshOperation";
-import { clearClientSession } from "./session";
+import { clearClientSession, clearClientSupportContext } from "./session";
 import { requestMfaStepUp } from "./stepUpCoordinator";
 
 const DEFAULT_RETRY_DELAYS_MS = [0, 300, 900] as const;
@@ -71,6 +71,7 @@ export function bootstrapAuth(): void {
     refreshTokens: refreshSessionFromCookie,
     requestMfaStepUp,
     onAuthFailure: clearClientSession,
+    onSupportAccessFailure: clearClientSupportContext,
   });
   if (!onlineListenerInstalled) {
     window.addEventListener("online", runBootstrapRefresh);

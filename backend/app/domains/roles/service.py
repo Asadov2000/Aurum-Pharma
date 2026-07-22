@@ -627,8 +627,9 @@ class RolesService:
         actor_permissions: set[str],
         actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
         actor_is_developer: bool,
+        actor_is_administrator: bool,
     ) -> bool:
-        if actor_is_developer:
+        if actor_is_developer or actor_is_administrator:
             return True
         if permission_code not in actor_permissions:
             return False
@@ -644,6 +645,7 @@ class RolesService:
         actor_permissions: set[str],
         actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
         actor_is_developer: bool,
+        actor_is_administrator: bool,
     ) -> None:
         if not self._capability_allows_target_scope(
             permission_code="roles.assign",
@@ -651,6 +653,7 @@ class RolesService:
             actor_permissions=actor_permissions,
             actor_permission_scopes=actor_permission_scopes,
             actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
         ):
             raise PermissionDeniedError("Assignment is outside your authorized branch scope")
 
@@ -662,6 +665,7 @@ class RolesService:
         actor_permissions: set[str],
         actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
         actor_is_developer: bool,
+        actor_is_administrator: bool,
     ) -> None:
         unavailable = sorted(
             code
@@ -672,6 +676,7 @@ class RolesService:
                 actor_permissions=actor_permissions,
                 actor_permission_scopes=actor_permission_scopes,
                 actor_is_developer=actor_is_developer,
+                actor_is_administrator=actor_is_administrator,
             )
         )
         if unavailable:
@@ -775,6 +780,7 @@ class RolesService:
             actor_permissions=actor_permissions,
             actor_permission_scopes=actor_permission_scopes,
             actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
         )
         self._assert_role_delegation_at_scope(
             role_codes=role_codes,
@@ -782,6 +788,7 @@ class RolesService:
             actor_permissions=actor_permissions,
             actor_permission_scopes=actor_permission_scopes,
             actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
         )
         existing = await self.repo.list_assignments_for_user(
             target_user_id,
@@ -852,6 +859,7 @@ class RolesService:
             actor_permissions=actor_permissions,
             actor_permission_scopes=actor_permission_scopes,
             actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
         )
         self._assert_role_delegation_at_scope(
             role_codes=await self.repo.get_role_permissions(role.id),
@@ -859,6 +867,7 @@ class RolesService:
             actor_permissions=actor_permissions,
             actor_permission_scopes=actor_permission_scopes,
             actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
         )
         await self.repo.deactivate_assignment(assignment_id, tenant_id=tenant_id)
         await self.invalidate_user_perms(target_user_id, tenant_id)

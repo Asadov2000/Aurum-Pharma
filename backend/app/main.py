@@ -39,6 +39,7 @@ from app.domains.onboarding import router as onboarding_router
 from app.domains.pos import router as pos_router
 from app.domains.roles import router as roles_router
 from app.domains.suppliers import router as suppliers_router
+from app.domains.support_access import router as support_access_router
 from app.domains.sync.router import admin_router as sync_admin_router
 from app.domains.sync.router import router as sync_router
 from app.middleware.auth_context import AuthContextMiddleware
@@ -77,7 +78,12 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Aurum-Support-Session",
+        "X-Request-ID",
+    ],
     expose_headers=["X-Request-ID"],
 )
 
@@ -99,6 +105,7 @@ register_error_handlers(app)
 app.include_router(auth_router)
 app.include_router(foundation_admin_router)
 app.include_router(foundation_tenant_router)
+app.include_router(support_access_router)
 app.include_router(roles_router)
 app.include_router(catalog_router)
 app.include_router(inventory_router)

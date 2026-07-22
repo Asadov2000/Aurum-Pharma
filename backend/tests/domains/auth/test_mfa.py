@@ -233,6 +233,7 @@ async def test_mfa_enrollment_encrypts_secret_and_activates_recovery_codes(
     assert all(code not in stored_hashes for code in enrolled.recovery_codes)
     assert claims["sid"]
     assert claims["mfa_at"]
+    assert claims["tenant_id"] is None
 
     refreshed = await auth_client.post(
         "/api/v1/auth/refresh",
@@ -243,6 +244,7 @@ async def test_mfa_enrollment_encrypts_secret_and_activates_recovery_codes(
     refreshed_claims = decode_access_token(refreshed.json()["access_token"])
     assert refreshed_claims["sid"] != claims["sid"]
     assert refreshed_claims["mfa_at"] == claims["mfa_at"]
+    assert refreshed_claims["tenant_id"] is None
     assert refreshed.headers["cache-control"] == "no-store"
 
 

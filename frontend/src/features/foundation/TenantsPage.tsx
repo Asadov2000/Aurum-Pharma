@@ -20,6 +20,7 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { AdminBillingDrawer } from "@/features/billing/AdminBillingDrawer";
+import { SupportAccessForm } from "@/features/supportAccess/SupportAccessForm";
 
 import { describeApiError } from "./errors";
 import { useTenantsQuery } from "./queries";
@@ -54,6 +55,8 @@ export function TenantsPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const [billingTenant, setBillingTenant] = useState<Tenant | null>(null);
   const [memberTenant, setMemberTenant] = useState<Tenant | null>(null);
+  const [supportTenant, setSupportTenant] = useState<Tenant | null>(null);
+  const [supportRequestPending, setSupportRequestPending] = useState(false);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const { data, isLoading, error } = useTenantsQuery(canManageTenants);
@@ -144,6 +147,17 @@ export function TenantsPage(): JSX.Element {
                       variant="ghost"
                       size="sm"
                       disabled={t.status === "archived"}
+                      onClick={() => {
+                        setSupportRequestPending(false);
+                        setSupportTenant(t);
+                      }}
+                    >
+                      Открыть доступ
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={t.status === "archived"}
                       title={
                         t.status === "archived"
                           ? "В архивную аптеку нельзя добавить сотрудника"
@@ -195,6 +209,22 @@ export function TenantsPage(): JSX.Element {
             tenantId={memberTenant.id}
             tenantName={memberTenant.name}
             onClose={() => setMemberTenant(null)}
+          />
+        )}
+      </Modal>
+      <Modal
+        open={supportTenant !== null}
+        onClose={() => {
+          if (!supportRequestPending) setSupportTenant(null);
+        }}
+        title="Защищённый доступ"
+      >
+        {supportTenant && (
+          <SupportAccessForm
+            tenantId={supportTenant.id}
+            tenantName={supportTenant.name}
+            onClose={() => setSupportTenant(null)}
+            onPendingChange={setSupportRequestPending}
           />
         )}
       </Modal>

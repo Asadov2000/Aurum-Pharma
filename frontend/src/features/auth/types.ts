@@ -33,12 +33,22 @@ export interface MeResponse {
   is_developer: boolean;
   is_administrator: boolean;
   home_tenant_id: string | null;
+  active_tenant_id: string | null;
   status: string;
   last_login_at: string | null;
   level: number;
   is_tenant_owner: boolean;
   branch_assignments: Record<string, string>;
   permissions: string[];
+  support_access: {
+    id: string;
+    tenant_id: string;
+    tenant_name: string;
+    reason: string;
+    capabilities: string[];
+    is_read_only: boolean;
+    expires_at: string;
+  } | null;
 }
 
 export interface ActiveSession {

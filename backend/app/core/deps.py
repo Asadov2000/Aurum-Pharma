@@ -41,29 +41,14 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
     Always inject this dependency with ``scope="function"`` so the transaction
     commits before a client can issue a follow-up request.
     """
-    tenant_id = getattr(request.state, "tenant_id", None)
-    user_id = getattr(request.state, "user_id", None)
-    is_support = bool(getattr(request.state, "is_support_session", False))
+    await _resolve_support_access_context(request)
     use_support_pool = bool(getattr(request.state, "use_support_pool", False))
 
     sessionmaker = SupportSessionLocal if use_support_pool else AppSessionLocal
 
     async with sessionmaker() as session:
         async with session.begin():
-            if tenant_id is not None:
-                await session.execute(
-                    text("SELECT set_config('app.tenant_id', :v, true)"),
-                    {"v": str(tenant_id)},
-                )
-            if user_id is not None:
-                await session.execute(
-                    text("SELECT set_config('app.user_id', :v, true)"),
-                    {"v": str(user_id)},
-                )
-            if is_support:
-                await session.execute(
-                    text("SELECT set_config('app.support_session', 'true', true)"),
-                )
+            await _seed_request_db_context(request, session)
             yield session
 
 
@@ -75,9 +60,7 @@ async def get_auth_db(request: Request) -> AsyncIterator[AsyncSession]:
     use this narrower dependency and commit only expected authentication
     outcomes. Unexpected failures still roll back.
     """
-    tenant_id = getattr(request.state, "tenant_id", None)
-    user_id = getattr(request.state, "user_id", None)
-    is_support = bool(getattr(request.state, "is_support_session", False))
+    await _resolve_support_access_context(request)
     use_support_pool = bool(getattr(request.state, "use_support_pool", False))
 
     sessionmaker = SupportSessionLocal if use_support_pool else AppSessionLocal
@@ -85,20 +68,7 @@ async def get_auth_db(request: Request) -> AsyncIterator[AsyncSession]:
     async with sessionmaker() as session:
         transaction = await session.begin()
         try:
-            if tenant_id is not None:
-                await session.execute(
-                    text("SELECT set_config('app.tenant_id', :v, true)"),
-                    {"v": str(tenant_id)},
-                )
-            if user_id is not None:
-                await session.execute(
-                    text("SELECT set_config('app.user_id', :v, true)"),
-                    {"v": str(user_id)},
-                )
-            if is_support:
-                await session.execute(
-                    text("SELECT set_config('app.support_session', 'true', true)"),
-                )
+            await _seed_request_db_context(request, session)
             yield session
         except (AuthenticationError, RateLimitError, NotFoundError):
             if transaction.is_active:
@@ -121,27 +91,10 @@ async def get_support_auth_db(request: Request) -> AsyncIterator[AsyncSession]:
     limited to SECURITY DEFINER auth functions and never receives raw SQL from
     the request.
     """
-    tenant_id = getattr(request.state, "tenant_id", None)
-    user_id = getattr(request.state, "user_id", None)
-    is_support = bool(getattr(request.state, "is_support_session", False))
-
     async with SupportSessionLocal() as session:
         transaction = await session.begin()
         try:
-            if tenant_id is not None:
-                await session.execute(
-                    text("SELECT set_config('app.tenant_id', :v, true)"),
-                    {"v": str(tenant_id)},
-                )
-            if user_id is not None:
-                await session.execute(
-                    text("SELECT set_config('app.user_id', :v, true)"),
-                    {"v": str(user_id)},
-                )
-            if is_support:
-                await session.execute(
-                    text("SELECT set_config('app.support_session', 'true', true)"),
-                )
+            await _seed_request_db_context(request, session)
             yield session
         except (AuthenticationError, RateLimitError, NotFoundError):
             if transaction.is_active:
@@ -158,6 +111,156 @@ async def get_support_auth_db(request: Request) -> AsyncIterator[AsyncSession]:
 
 async def get_redis() -> Redis:
     return redis_client
+
+
+async def _resolve_support_access_context(request: Request) -> None:
+    """Validate a tenant support session through the privileged pool.
+
+    Tenant business queries still run as ``aurum_app`` and therefore remain
+    subject to RLS. The privileged connection is used only for this bounded
+    lookup; its session never reaches a domain repository.
+    """
+
+    if bool(getattr(request.state, "invalid_support_access", False)):
+        raise PermissionDeniedError(
+            "Support access session is invalid",
+            details={"reason": "support_access_inactive"},
+        )
+    support_access_session_id = getattr(
+        request.state,
+        "support_access_session_id",
+        None,
+    )
+    if support_access_session_id is None or bool(
+        getattr(request.state, "support_access_resolved", False)
+    ):
+        return
+
+    user_id = getattr(request.state, "user_id", None)
+    auth_session_id = getattr(request.state, "auth_session_id", None)
+    if auth_session_id is None:
+        raise PermissionDeniedError(
+            "Support access is not bound to this authentication session",
+            details={"reason": "support_access_inactive"},
+        )
+    async with SupportSessionLocal() as validation_session:
+        async with validation_session.begin():
+            row = (
+                (
+                    await validation_session.execute(
+                        text("""
+                        WITH RECURSIVE auth_lineage AS (
+                          SELECT
+                            auth_session.id,
+                            auth_session.rotated_from_session_id
+                          FROM public.session AS auth_session
+                          WHERE auth_session.id = :auth_session_id
+                            AND auth_session.user_id = :user_id
+                            AND auth_session.revoked_at IS NULL
+                            AND auth_session.expires_at > statement_timestamp()
+
+                          UNION ALL
+
+                          SELECT
+                            parent.id,
+                            parent.rotated_from_session_id
+                          FROM public.session AS parent
+                          JOIN auth_lineage AS child
+                            ON parent.id = child.rotated_from_session_id
+                          WHERE parent.user_id = :user_id
+                        )
+                        SELECT
+                          access_session.tenant_id,
+                          tenant.name AS tenant_name,
+                          access_session.reason,
+                          access_session.expires_at,
+                          access_session.is_read_only,
+                          array_agg(
+                            capability.permission_code
+                            ORDER BY capability.permission_code
+                          ) AS capabilities
+                        FROM public.support_access_session AS access_session
+                        JOIN public.tenant AS tenant
+                          ON tenant.id = access_session.tenant_id
+                        JOIN public.app_user AS actor
+                          ON actor.id = access_session.actor_user_id
+                        JOIN public.support_access_capability AS capability
+                          ON capability.support_access_session_id = access_session.id
+                         AND capability.tenant_id = access_session.tenant_id
+                        WHERE access_session.id = :support_access_session_id
+                          AND access_session.actor_user_id = :user_id
+                          AND access_session.actor_session_id IN (
+                            SELECT auth_lineage.id FROM auth_lineage
+                          )
+                          AND access_session.revoked_at IS NULL
+                          AND access_session.expires_at > statement_timestamp()
+                          AND actor.status = 'active'
+                          AND (actor.is_developer OR actor.is_administrator)
+                        GROUP BY access_session.id, tenant.name
+                        """),
+                        {
+                            "support_access_session_id": support_access_session_id,
+                            "user_id": user_id,
+                            "auth_session_id": auth_session_id,
+                        },
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+
+    if row is None:
+        raise PermissionDeniedError(
+            "Support access session is expired, revoked, or unavailable",
+            details={"reason": "support_access_inactive"},
+        )
+    request.state.tenant_id = row["tenant_id"]
+    request.state.is_support_session = True
+    request.state.support_access_capabilities = tuple(row["capabilities"])
+    request.state.support_access_reason = row["reason"]
+    request.state.support_access_expires_at = row["expires_at"]
+    request.state.support_access_tenant_name = row["tenant_name"]
+    request.state.support_access_is_read_only = bool(row["is_read_only"])
+    request.state.support_access_resolved = True
+
+
+async def _seed_request_db_context(request: Request, session: AsyncSession) -> None:
+    """Bind the validated request identity to the database transaction."""
+
+    await _resolve_support_access_context(request)
+    tenant_id = getattr(request.state, "tenant_id", None)
+    user_id = getattr(request.state, "user_id", None)
+    support_access_session_id = getattr(
+        request.state,
+        "support_access_session_id",
+        None,
+    )
+    auth_session_id = getattr(request.state, "auth_session_id", None)
+    if user_id is not None:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :v, true)"),
+            {"v": str(user_id)},
+        )
+
+    if tenant_id is not None:
+        await session.execute(
+            text("SELECT set_config('app.tenant_id', :v, true)"),
+            {"v": str(tenant_id)},
+        )
+    if support_access_session_id is not None:
+        await session.execute(
+            text("SELECT set_config('app.support_access_session_id', :v, true)"),
+            {"v": str(support_access_session_id)},
+        )
+    if auth_session_id is not None:
+        await session.execute(
+            text("SELECT set_config('app.auth_session_id', :v, true)"),
+            {"v": str(auth_session_id)},
+        )
+    if bool(getattr(request.state, "is_support_session", False)):
+        await session.execute(
+            text("SELECT set_config('app.support_session', 'true', true)"),
+        )
 
 
 def _required_uuid_claim(claims: Mapping[str, object], key: str) -> UUID:
@@ -213,6 +316,11 @@ class CurrentUser:
     subject_revision: int | None = None
     membership_status: str | None = None
     is_tenant_owner: bool = False
+    support_access_session_id: UUID | None = None
+    support_access_reason: str | None = None
+    support_access_expires_at: datetime | None = None
+    support_access_tenant_name: str | None = None
+    support_access_is_read_only: bool | None = None
 
     @property
     def level(self) -> int:
@@ -247,7 +355,7 @@ class CurrentUser:
         ``None`` means the capability was granted by a tenant-wide assignment;
         an empty set means it is absent or has no usable branch scope.
         """
-        if self.is_developer:
+        if self.is_developer and self.support_access_session_id is None:
             return None
         if permission_code not in self.permissions:
             return set()
@@ -255,7 +363,7 @@ class CurrentUser:
         return None if scope is None else set(scope)
 
     def branch_scope_for_any(self, *permission_codes: str) -> set[UUID] | None:
-        if self.is_developer:
+        if self.is_developer and self.support_access_session_id is None:
             return None
         combined: set[UUID] = set()
         for code in permission_codes:
@@ -269,7 +377,7 @@ class CurrentUser:
 
     def branch_scope_for_all(self, *permission_codes: str) -> set[UUID] | None:
         """Intersect scopes when an operation requires multiple capabilities."""
-        if self.is_developer:
+        if self.is_developer and self.support_access_session_id is None:
             return None
         combined: set[UUID] | None = None
         for code in permission_codes:
@@ -280,7 +388,7 @@ class CurrentUser:
         return combined
 
     def has_tenant_scope(self, permission_code: str) -> bool:
-        return self.is_developer or (
+        return (self.is_developer and self.support_access_session_id is None) or (
             permission_code in self.permissions
             and self.permission_scopes.get(permission_code, frozenset()) is None
         )
@@ -317,7 +425,74 @@ async def _validate_support_session(
         raise AuthenticationError("Support session is inactive")
 
 
+@dataclass
+class _AuthorizationContext:
+    permissions: set[str] = field(default_factory=set)
+    permission_scopes: dict[str, frozenset[UUID] | None] = field(default_factory=dict)
+    branch_assignments: dict[str, str] = field(default_factory=dict)
+    assignment_levels: dict[str, int] = field(default_factory=dict)
+    policy_revision: int | None = None
+    subject_revision: int | None = None
+    membership_status: str | None = None
+    is_tenant_owner: bool = False
+
+
+async def _load_authorization_context(
+    *,
+    request: Request,
+    db: AsyncSession,
+    redis: Redis,
+    user_id: UUID,
+    tenant_id: UUID | None,
+    support_access_session_id: UUID | None,
+) -> _AuthorizationContext:
+    context = _AuthorizationContext()
+    if support_access_session_id is not None:
+        context.permissions = set(getattr(request.state, "support_access_capabilities", ()))
+        context.permission_scopes = {code: None for code in context.permissions}
+        return context
+    if tenant_id is None:
+        return context
+
+    # Local imports keep the auth/roles module dependency graph acyclic.
+    from app.domains.roles.repository import RolesRepository
+    from app.domains.roles.service import RolesService
+
+    service = RolesService(RolesRepository(db), redis=redis)
+    membership = await service.repo.get_membership_for_user(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    context.membership_status = membership.status if membership is not None else None
+    context.is_tenant_owner = await service.repo.has_active_ownership(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    snapshot = await service.get_authorization_snapshot(user_id, tenant_id)
+    context.permissions = set(snapshot.permissions)
+    context.permission_scopes = dict(snapshot.permission_scopes)
+    context.policy_revision = snapshot.policy_revision
+    context.subject_revision = snapshot.subject_revision
+
+    assignments = await service.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
+    active = [
+        assignment
+        for assignment in assignments
+        if assignment.is_active and context.membership_status == "active"
+    ]
+    roles_by_id = await service.repo.roles_by_ids([assignment.role_id for assignment in active])
+    for assignment in active:
+        role = roles_by_id.get(assignment.role_id)
+        if role is None or not role.is_active:
+            continue
+        key = str(assignment.branch_id) if assignment.branch_id is not None else "tenant"
+        context.branch_assignments[key] = str(assignment.role_id)
+        context.assignment_levels[key] = role.level
+    return context
+
+
 async def current_user(
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
     redis: Annotated[Redis, Depends(get_redis)],
     authorization: Annotated[str | None, Header()] = None,
@@ -329,12 +504,22 @@ async def current_user(
     claims = decode_access_token(token)
 
     user_id = _required_uuid_claim(claims, "sub")
-    tenant_id = _optional_uuid_claim(claims, "tenant_id")
+    token_tenant_id = _optional_uuid_claim(claims, "tenant_id")
     session_id = _optional_uuid_claim(claims, "sid")
     mfa_verified_at = _optional_timestamp_claim(claims, "mfa_at")
 
     is_dev = bool(claims.get("is_developer", False))
     is_admin = bool(claims.get("is_administrator", False))
+    support_access_session_id = getattr(
+        request.state,
+        "support_access_session_id",
+        None,
+    )
+    tenant_id = (
+        getattr(request.state, "tenant_id", None)
+        if support_access_session_id is not None
+        else token_tenant_id
+    )
 
     # JWTs are short-lived snapshots, but blocking and support-role removal
     # must take effect immediately. Re-check the global identity before any
@@ -358,55 +543,23 @@ async def current_user(
             session_id=session_id,
             mfa_verified_at=mfa_verified_at,
         )
-    if tenant_id is not None and (
-        identity.home_tenant_id != tenant_id or identity.membership_status != "active"
+    if (is_dev or is_admin) and token_tenant_id is not None and support_access_session_id is None:
+        raise AuthenticationError("Support tenant access requires a scoped support session")
+    if (
+        support_access_session_id is None
+        and tenant_id is not None
+        and (identity.home_tenant_id != tenant_id or identity.membership_status != "active")
     ):
         raise AuthenticationError("Tenant membership is inactive")
 
-    permissions: set[str] = set()
-    permission_scopes: dict[str, frozenset[UUID] | None] = {}
-    branch_assignments: dict[str, str] = {}
-    assignment_levels: dict[str, int] = {}
-    policy_revision: int | None = None
-    subject_revision: int | None = None
-    membership_status: str | None = None
-    is_tenant_owner = False
-
-    if tenant_id is not None:
-        # Local import — roles depends on auth at module level, can't import
-        # the other way without a circular reference.
-        from app.domains.roles.repository import RolesRepository
-        from app.domains.roles.service import RolesService
-
-        service = RolesService(RolesRepository(db), redis=redis)
-        membership = await service.repo.get_membership_for_user(
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
-        membership_status = membership.status if membership is not None else None
-        is_tenant_owner = await service.repo.has_active_ownership(
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
-        authorization_snapshot = await service.get_authorization_snapshot(user_id, tenant_id)
-        permissions = set(authorization_snapshot.permissions)
-        permission_scopes = dict(authorization_snapshot.permission_scopes)
-        policy_revision = authorization_snapshot.policy_revision
-        subject_revision = authorization_snapshot.subject_revision
-
-        # branch_assignments: {branch_id_str | "tenant": role_id_str}
-        assignments = await service.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
-        active_assignments = [
-            a for a in assignments if a.is_active and membership_status == "active"
-        ]
-        roles_by_id = await service.repo.roles_by_ids([a.role_id for a in active_assignments])
-        for a in active_assignments:
-            role = roles_by_id.get(a.role_id)
-            if role is None or not role.is_active:
-                continue
-            key = str(a.branch_id) if a.branch_id is not None else "tenant"
-            branch_assignments[key] = str(a.role_id)
-            assignment_levels[key] = role.level
+    authz = await _load_authorization_context(
+        request=request,
+        db=db,
+        redis=redis,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        support_access_session_id=support_access_session_id,
+    )
 
     return CurrentUser(
         user_id=user_id,
@@ -415,14 +568,31 @@ async def current_user(
         is_administrator=is_admin,
         session_id=session_id,
         mfa_verified_at=mfa_verified_at,
-        permissions=permissions,
-        permission_scopes=permission_scopes,
-        branch_assignments=branch_assignments,
-        assignment_levels=assignment_levels,
-        policy_revision=policy_revision,
-        subject_revision=subject_revision,
-        membership_status=membership_status,
-        is_tenant_owner=is_tenant_owner,
+        permissions=authz.permissions,
+        permission_scopes=authz.permission_scopes,
+        branch_assignments=authz.branch_assignments,
+        assignment_levels=authz.assignment_levels,
+        policy_revision=authz.policy_revision,
+        subject_revision=authz.subject_revision,
+        membership_status=authz.membership_status,
+        is_tenant_owner=authz.is_tenant_owner,
+        support_access_session_id=support_access_session_id,
+        support_access_reason=getattr(request.state, "support_access_reason", None),
+        support_access_expires_at=getattr(
+            request.state,
+            "support_access_expires_at",
+            None,
+        ),
+        support_access_tenant_name=getattr(
+            request.state,
+            "support_access_tenant_name",
+            None,
+        ),
+        support_access_is_read_only=getattr(
+            request.state,
+            "support_access_is_read_only",
+            None,
+        ),
     )
 
 
@@ -447,6 +617,14 @@ async def require_recent_support_mfa(
     return user
 
 
+async def require_support(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    if not (user.is_developer or user.is_administrator):
+        raise PermissionDeniedError("Support privileges required")
+    return user
+
+
 async def require_recent_mfa_if_support(
     user: Annotated[CurrentUser, Depends(current_user)],
 ) -> CurrentUser:
@@ -465,7 +643,7 @@ def require_permission(code: str):  # type: ignore[no-untyped-def]
     async def _checker(
         user: Annotated[CurrentUser, Depends(current_user)],
     ) -> CurrentUser:
-        if user.is_developer:
+        if user.is_developer and user.support_access_session_id is None:
             return user
         if code in user.permissions:
             return user
@@ -480,7 +658,7 @@ def require_any_permission(*codes: str):  # type: ignore[no-untyped-def]
     async def _checker(
         user: Annotated[CurrentUser, Depends(current_user)],
     ) -> CurrentUser:
-        if user.is_developer:
+        if user.is_developer and user.support_access_session_id is None:
             return user
         if any(code in user.permissions for code in codes):
             return user
@@ -495,7 +673,8 @@ def require_tenant_permission(code: str):  # type: ignore[no-untyped-def]
     async def _checker(
         user: Annotated[CurrentUser, Depends(current_user)],
     ) -> CurrentUser:
-        if not user.is_developer and code not in user.permissions:
+        has_developer_bypass = user.is_developer and user.support_access_session_id is None
+        if not has_developer_bypass and code not in user.permissions:
             raise PermissionDeniedError(f"Missing permission: {code}")
         if user.has_tenant_scope(code):
             return user

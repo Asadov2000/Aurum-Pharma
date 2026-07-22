@@ -17,15 +17,11 @@ import {
   TR,
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
+import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { AssignmentsPanel } from "./AssignmentsPanel";
-import {
-  useOffboardUser,
-  useSuspendUser,
-  useUpdateUser,
-  useUsersQuery,
-} from "./queries";
+import { useOffboardUser, useSuspendUser, useUpdateUser, useUsersQuery } from "./queries";
 import { type UserStatus, type UserWithAssignments } from "./types";
 import { UserProfileForm } from "./UserProfileForm";
 
@@ -53,14 +49,16 @@ const isOffboarded = (status: UserStatus): boolean => status === "offboarded";
 
 export function UsersPage(): JSX.Element {
   const { user } = useAuth();
-  const hasTenant = Boolean(user?.home_tenant_id);
+  const tenantId = activeTenantId(user);
+  const hasTenant = Boolean(tenantId);
   const isTenantOwner = user?.is_tenant_owner === true;
+  const isSupportScoped = user?.support_access !== null && user?.support_access !== undefined;
   const permissions = user?.permissions ?? [];
   const canView = permissions.includes("users.view");
-  const canUpdate = isTenantOwner && permissions.includes("users.update");
-  const canSuspend = isTenantOwner && permissions.includes("users.block");
-  const canOffboard = isTenantOwner && permissions.includes("users.delete");
-  const canAssign = isTenantOwner && permissions.includes("roles.assign");
+  const canUpdate = (isTenantOwner || isSupportScoped) && permissions.includes("users.update");
+  const canSuspend = (isTenantOwner || isSupportScoped) && permissions.includes("users.block");
+  const canOffboard = (isTenantOwner || isSupportScoped) && permissions.includes("users.delete");
+  const canAssign = (isTenantOwner || isSupportScoped) && permissions.includes("roles.assign");
   const showActions = canUpdate || canSuspend || canOffboard || canAssign;
 
   const [assignmentUserId, setAssignmentUserId] = useState<string | null>(null);
@@ -167,9 +165,7 @@ export function UsersPage(): JSX.Element {
                   (member.status === "pending" || member.status === "suspended") &&
                   !protectsLifecycle;
                 const canAssignMember =
-                  canAssign &&
-                  member.status === "active" &&
-                  !protectsLifecycle;
+                  canAssign && member.status === "active" && !protectsLifecycle;
                 const canSuspendMember =
                   canSuspend &&
                   !protectsLifecycle &&
@@ -177,9 +173,7 @@ export function UsersPage(): JSX.Element {
                   member.status !== "pending" &&
                   !isOffboarded(member.status);
                 const canOffboardMember =
-                  canOffboard &&
-                  !protectsLifecycle &&
-                  !isOffboarded(member.status);
+                  canOffboard && !protectsLifecycle && !isOffboarded(member.status);
                 const hasActions =
                   canEditMember ||
                   canActivateMember ||
@@ -292,7 +286,7 @@ export function UsersPage(): JSX.Element {
         {assignmentUser && (
           <AssignmentsPanel
             user={assignmentUser}
-            tenantId={user?.home_tenant_id ?? null}
+            tenantId={tenantId}
             canManage={canAssign}
             onClose={() => setAssignmentUserId(null)}
           />

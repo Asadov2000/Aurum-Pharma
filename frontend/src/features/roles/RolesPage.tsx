@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Modal } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
+import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { RoleBuilderModal } from "./RoleBuilderModal";
@@ -18,16 +19,21 @@ type Editor = { mode: "create" } | { mode: "edit"; role: Role } | null;
 
 export function RolesPage(): JSX.Element {
   const { user } = useAuth();
-  const hasTenant = Boolean(user?.home_tenant_id);
+  const tenantId = activeTenantId(user);
+  const hasTenant = Boolean(tenantId);
   const isDeveloper = user?.is_developer === true;
   const isSupport = isDeveloper || user?.is_administrator === true;
+  const isSupportScoped = user?.support_access !== null && user?.support_access !== undefined;
   const userPermissions = user?.permissions ?? [];
-  const canCreate = isDeveloper || userPermissions.includes("roles.create");
-  const canUpdate = isDeveloper || userPermissions.includes("roles.update");
-  const canAssign = isDeveloper || userPermissions.includes("roles.assign");
+  const developerBypass = isDeveloper && !isSupportScoped;
+  const canCreate = developerBypass || userPermissions.includes("roles.create");
+  const canUpdate = developerBypass || userPermissions.includes("roles.update");
+  const canAssign = developerBypass || userPermissions.includes("roles.assign");
+  const canManageRoles = canCreate || canUpdate || canAssign;
   const canView =
     hasTenant &&
-    (isSupport || (user?.is_tenant_owner === true && (canCreate || canUpdate || canAssign)));
+    ((isSupportScoped && isSupport && canManageRoles) ||
+      (user?.is_tenant_owner === true && canManageRoles));
 
   const roles = useRolesQuery(canView);
   const perms = usePermissionsQuery(canView);
@@ -56,9 +62,7 @@ export function RolesPage(): JSX.Element {
     );
   }
 
-  const tenantRoles = (roles.data ?? []).filter((role) =>
-    isManageableRole(role, user?.home_tenant_id),
-  );
+  const tenantRoles = (roles.data ?? []).filter((role) => isManageableRole(role, tenantId));
 
   const grantableCodes = new Set(permName.keys());
 

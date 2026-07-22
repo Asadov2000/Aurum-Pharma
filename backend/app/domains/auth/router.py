@@ -37,6 +37,7 @@ from app.domains.auth.schemas import (
     RefreshRequest,
     SessionListResponse,
     SessionRevokeResponse,
+    SupportAccessContextResponse,
     TokenResponse,
 )
 from app.domains.auth.service import AuthService, MfaLoginChallenge
@@ -387,7 +388,25 @@ async def me(
     info = await service.get_user_info(user.user_id)
     me_data = MeResponse.model_validate(info)
     me_data.level = user.level
+    me_data.active_tenant_id = user.tenant_id
     me_data.is_tenant_owner = user.is_tenant_owner
     me_data.branch_assignments = user.branch_assignments
     me_data.permissions = sorted(user.permissions)
+    if (
+        user.support_access_session_id is not None
+        and user.tenant_id is not None
+        and user.support_access_tenant_name is not None
+        and user.support_access_reason is not None
+        and user.support_access_expires_at is not None
+        and user.support_access_is_read_only is not None
+    ):
+        me_data.support_access = SupportAccessContextResponse(
+            id=user.support_access_session_id,
+            tenant_id=user.tenant_id,
+            tenant_name=user.support_access_tenant_name,
+            reason=user.support_access_reason,
+            capabilities=sorted(user.permissions),
+            is_read_only=user.support_access_is_read_only,
+            expires_at=user.support_access_expires_at,
+        )
     return me_data

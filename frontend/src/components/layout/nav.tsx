@@ -9,10 +9,12 @@ export function buildNav(
   isTenantOwner: boolean,
   permissions: readonly string[],
   isDeveloper = false,
+  isSupportScoped = false,
 ): NavItem[] {
   const context: RouteAccessContext = {
     isDeveloper,
     isAdministrator: isSupport && !isDeveloper,
+    isSupportScoped,
     isTenantOwner,
     hasTenant,
     permissions,

@@ -1,4 +1,5 @@
 import { type MeResponse } from "@/features/auth/types";
+import { activeTenantId } from "@/features/auth/tenantContext";
 
 export const BRANCH_VIEW_PERMISSIONS = ["branches.view"] as const;
 export const REGISTER_VIEW_PERMISSIONS = ["registers.view"] as const;
@@ -39,6 +40,7 @@ export type AppRoutePath =
 export interface RouteAccessContext {
   isDeveloper: boolean;
   isAdministrator: boolean;
+  isSupportScoped: boolean;
   isTenantOwner: boolean;
   hasTenant: boolean;
   permissions: readonly string[];
@@ -48,8 +50,9 @@ export function getRouteAccessContext(user: MeResponse | null | undefined): Rout
   return {
     isDeveloper: user?.is_developer === true,
     isAdministrator: user?.is_administrator === true,
+    isSupportScoped: user?.support_access !== null && user?.support_access !== undefined,
     isTenantOwner: user?.is_tenant_owner === true,
-    hasTenant: Boolean(user?.home_tenant_id),
+    hasTenant: Boolean(activeTenantId(user)),
     permissions: user?.permissions ?? [],
   };
 }
@@ -57,7 +60,7 @@ export function getRouteAccessContext(user: MeResponse | null | undefined): Rout
 function hasPermission(context: RouteAccessContext, code: string): boolean {
   // The backend has a temporary developer bypass for ordinary tenant routes;
   // administrator access still comes from the scoped permission snapshot.
-  return context.isDeveloper || context.permissions.includes(code);
+  return (context.isDeveloper && !context.isSupportScoped) || context.permissions.includes(code);
 }
 
 function hasAnyPermission(context: RouteAccessContext, codes: readonly string[]): boolean {
@@ -92,7 +95,7 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   // selected tenant. Scoped tenant audit still follows explicit permissions.
   if (isPath(pathname, "/audit")) {
     return (
-      context.isDeveloper ||
+      (context.isDeveloper && !context.isSupportScoped) ||
       (context.hasTenant && hasAnyPermission(context, AUDIT_VIEW_PERMISSIONS))
     );
   }
@@ -113,8 +116,7 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   }
   if (isPath(pathname, "/roles")) {
     return (
-      context.isDeveloper ||
-      context.isAdministrator ||
+      (context.isSupportScoped && hasAnyPermission(context, ROLE_MANAGEMENT_PERMISSIONS)) ||
       (context.isTenantOwner && hasAnyPermission(context, ROLE_MANAGEMENT_PERMISSIONS))
     );
   }
@@ -139,9 +141,9 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   if (isPath(pathname, "/billing") || isPath(pathname, "/reports")) {
     return hasPermission(context, "reports.view");
   }
-  // Unknown paths are left to the router's not-found handling. This keeps a
-  // future route from being accidentally hidden until its capability is added.
-  return true;
+  // A scoped support identity is fail-closed: a newly added route must opt in
+  // before it can become visible inside a tenant context.
+  return !context.isSupportScoped;
 }
 
 const FALLBACK_PATHS: readonly AppRoutePath[] = [

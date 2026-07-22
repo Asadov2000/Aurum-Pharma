@@ -144,6 +144,31 @@ describe("RolesPage", () => {
     expect(listPermissions).not.toHaveBeenCalled();
   });
 
+  it("does not expose the role catalog to scoped support with only users.view", () => {
+    mockUser = {
+      active_tenant_id: "tenant-1",
+      home_tenant_id: null,
+      is_developer: true,
+      is_administrator: false,
+      is_tenant_owner: false,
+      permissions: ["users.view"],
+      support_access: {
+        id: "support-session-1",
+        tenant_id: "tenant-1",
+        tenant_name: "Аптека Сино",
+        reason: "Проверка учетных записей",
+        capabilities: ["users.view"],
+        is_read_only: true,
+        expires_at: "2030-01-01T00:00:00Z",
+      },
+    };
+    renderPage();
+
+    expect(screen.getByText(/нет доступа к управлению ролями/i)).toBeInTheDocument();
+    expect(listRoles).not.toHaveBeenCalled();
+    expect(listPermissions).not.toHaveBeenCalled();
+  });
+
   it("renders a request error without an empty-state fallback", async () => {
     listRoles.mockRejectedValue(new Error("roles failed"));
     renderPage();

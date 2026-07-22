@@ -24,6 +24,7 @@ from app.core.deps import (
     require_any_permission,
     require_permission,
     require_recent_support_mfa,
+    require_support,
 )
 from app.core.errors import AuthenticationError, BusinessRuleError, PermissionDeniedError
 from app.domains.foundation.repository import FoundationRepository
@@ -70,14 +71,6 @@ async def _service(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> FoundationService:
     return FoundationService(FoundationRepository(db))
-
-
-async def require_support(
-    user: Annotated[CurrentUser, Depends(current_user)],
-) -> CurrentUser:
-    if not (user.is_developer or user.is_administrator):
-        raise PermissionDeniedError("Support privileges required")
-    return user
 
 
 def _current_tenant_or_400(user: CurrentUser) -> UUID:

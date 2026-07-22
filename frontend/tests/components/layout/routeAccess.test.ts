@@ -9,6 +9,7 @@ import {
 const SELLER: RouteAccessContext = {
   isDeveloper: false,
   isAdministrator: false,
+  isSupportScoped: false,
   isTenantOwner: false,
   hasTenant: true,
   permissions: ["catalog.view", "pos.shift_open", "pos.sell", "sales.view.own", "audit.view.own"],
@@ -35,6 +36,7 @@ describe("route access", () => {
     const support: RouteAccessContext = {
       isDeveloper: false,
       isAdministrator: true,
+      isSupportScoped: false,
       isTenantOwner: false,
       hasTenant: false,
       permissions: [],
@@ -52,6 +54,7 @@ describe("route access", () => {
     const developer: RouteAccessContext = {
       isDeveloper: true,
       isAdministrator: false,
+      isSupportScoped: false,
       isTenantOwner: false,
       hasTenant: false,
       permissions: [],
@@ -70,17 +73,35 @@ describe("route access", () => {
     const scopedSupport: RouteAccessContext = {
       isDeveloper: false,
       isAdministrator: true,
+      isSupportScoped: true,
       isTenantOwner: false,
       hasTenant: true,
-      permissions: [],
+      permissions: ["users.view", "roles.update"],
     };
 
     expect(canAccessPath("/roles", scopedSupport)).toBe(true);
+    expect(canAccessPath("/users", scopedSupport)).toBe(true);
     expect(canAccessPath("/", scopedSupport)).toBe(false);
     expect(canAccessPath("/catalog", scopedSupport)).toBe(false);
+    expect(
+      canAccessPath("/roles", {
+        ...scopedSupport,
+        permissions: ["users.view"],
+      }),
+    ).toBe(false);
   });
 
   it("leaves unknown paths to the router", () => {
     expect(canAccessPath("/future-section", SELLER)).toBe(true);
+  });
+
+  it("denies unknown paths inside a scoped support context", () => {
+    expect(
+      canAccessPath("/future-section", {
+        ...SELLER,
+        isAdministrator: true,
+        isSupportScoped: true,
+      }),
+    ).toBe(false);
   });
 });

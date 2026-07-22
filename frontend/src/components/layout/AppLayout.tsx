@@ -4,6 +4,8 @@ import { Button } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/features/auth/hooks";
 import { MfaStepUpDialog } from "@/features/auth/MfaStepUpDialog";
+import { activeTenantId } from "@/features/auth/tenantContext";
+import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
 
 import { OfflineStatusBanner } from "./OfflineStatusBanner";
 import { PwaInstallButton } from "./PwaInstallButton";
@@ -20,10 +22,17 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const mobileDrawerRef = useRef<HTMLDivElement>(null);
   const mobileCloseButtonRef = useRef<HTMLButtonElement>(null);
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
-  const hasTenant = Boolean(user?.home_tenant_id);
+  const hasTenant = Boolean(activeTenantId(user));
   const isTenantOwner = Boolean(user?.is_tenant_owner);
   const perms = user?.permissions ?? [];
-  const items = buildNav(isSupport, hasTenant, isTenantOwner, perms, user?.is_developer === true);
+  const items = buildNav(
+    isSupport,
+    hasTenant,
+    isTenantOwner,
+    perms,
+    user?.is_developer === true,
+    user?.support_access !== null && user?.support_access !== undefined,
+  );
 
   // Clean identity: a recognizable name + a quiet caption. We have no role name
   // in the payload, so the caption is the support role (dev/admin) when set, or
@@ -192,6 +201,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
               </Button>
             </div>
           </header>
+          <SupportAccessBanner />
           <OfflineStatusBanner />
           <ServerStatusBanner />
           <PwaUpdateBanner />

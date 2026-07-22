@@ -11,6 +11,7 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
     <a href={to}>{children}</a>
   ),
+  useNavigate: () => vi.fn(),
 }));
 
 vi.mock("@/features/foundation/api", () => ({
@@ -34,6 +35,12 @@ vi.mock("@/features/foundation/api", () => ({
 let mockUser: Record<string, unknown> = {};
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => ({ user: mockUser }),
+}));
+
+vi.mock("@/features/supportAccess/SupportAccessForm", () => ({
+  SupportAccessForm: ({ onPendingChange }: { onPendingChange?: (pending: boolean) => void }) => (
+    <button onClick={() => onPendingChange?.(true)}>Начать защищённый запрос</button>
+  ),
 }));
 
 import { TenantsPage } from "@/features/foundation/TenantsPage";
@@ -91,6 +98,17 @@ describe("TenantsPage", () => {
     expect(await screen.findByText("Demo Pharmacy")).toBeInTheDocument();
     expect(screen.getByText("owner@aurum.tj")).toBeInTheDocument();
     expect(screen.getByText(/Активен/)).toBeInTheDocument();
+  });
+
+  it("keeps the support dialog open while its request is pending", async () => {
+    listTenants.mockResolvedValueOnce([SAMPLE]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть доступ" }));
+    fireEvent.click(screen.getByRole("button", { name: "Начать защищённый запрос" }));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+
+    expect(screen.getByRole("dialog", { name: "Защищённый доступ" })).toBeInTheDocument();
   });
 
   it("blocks direct access for a non-support account", () => {

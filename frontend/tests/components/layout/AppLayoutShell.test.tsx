@@ -21,27 +21,22 @@ vi.mock("@/features/auth/hooks", () => ({
 }));
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    children,
-    to,
-    ...props
-  }: {
-    children: React.ReactNode;
-    to: string;
-  }) => (
+  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => (
     <a href={to} {...props}>
       {children}
     </a>
   ),
-  useRouterState: <T,>({
-    select,
-  }: {
-    select: (state: { location: { pathname: string } }) => T;
-  }) => select({ location: { pathname: "/pos" } }),
+  useRouterState: <T,>({ select }: { select: (state: { location: { pathname: string } }) => T }) =>
+    select({ location: { pathname: "/pos" } }),
+  useNavigate: () => vi.fn(),
 }));
 
 vi.mock("@/components/layout/ServerStatusBanner", () => ({
   ServerStatusBanner: () => null,
+}));
+
+vi.mock("@/features/supportAccess/SupportAccessBanner", () => ({
+  SupportAccessBanner: () => null,
 }));
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -80,9 +75,7 @@ describe("AppLayout shell", () => {
     const main = screen.getByRole("main");
 
     expect(header).not.toBeNull();
-    expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(
-      badge,
-    );
+    expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(badge);
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
     expect(within(main).getByText("Page content")).toBeInTheDocument();
   });
@@ -100,9 +93,7 @@ describe("AppLayout shell", () => {
     const main = screen.getByRole("main");
 
     expect(stickyShell).not.toBeNull();
-    expect(within(stickyShell as HTMLElement).getByTestId("offline-status-banner")).toBe(
-      banner,
-    );
+    expect(within(stickyShell as HTMLElement).getByTestId("offline-status-banner")).toBe(banner);
     expect(within(main).queryByTestId("offline-status-banner")).not.toBeInTheDocument();
   });
 });

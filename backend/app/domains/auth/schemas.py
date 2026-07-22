@@ -114,6 +114,16 @@ class SessionRevokeResponse(BaseModel):
     revoked_count: int = Field(ge=0)
 
 
+class SupportAccessContextResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    tenant_name: str
+    reason: str
+    capabilities: list[str]
+    is_read_only: bool
+    expires_at: datetime
+
+
 class MeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -123,6 +133,7 @@ class MeResponse(BaseModel):
     is_developer: bool
     is_administrator: bool
     home_tenant_id: UUID | None
+    active_tenant_id: UUID | None = None
     status: str
     last_login_at: datetime | None
     level: int = 4
@@ -133,3 +144,4 @@ class MeResponse(BaseModel):
     # Effective permission codes (resolved from roles, cached in Redis). Lets the
     # UI hide nav/actions the user can't use. Not in the JWT — sent in the body.
     permissions: list[str] = []
+    support_access: SupportAccessContextResponse | None = None

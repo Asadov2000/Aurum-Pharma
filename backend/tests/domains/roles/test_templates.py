@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
-from app.core.deps import get_db
-from app.core.security import create_access_token
+from app.core.deps import _seed_request_db_context, get_db
+from app.core.security import create_access_token, decode_access_token
 from app.domains.roles.models import Permission, RolePermission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
+from app.domains.support_access.repository import SupportAccessRepository
+from app.domains.support_access.service import SupportAccessService
 from app.main import app
 from tests.auth_helpers import create_support_access_token
 
@@ -127,24 +131,59 @@ async def test_administrator_has_explicit_catalog_access_but_no_role_write_bypas
     make_tenant,
     make_user,
 ) -> None:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    tenant = await make_tenant()
+    administrator = await make_user(
+        email="catalog-admin@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
+    administrator.is_administrator = True
+    await db_session.flush()
+    token = await create_support_access_token(db_session, administrator)
+    actor_session_id = UUID(str(decode_access_token(token)["sid"]))
+    support_service = SupportAccessService(SupportAccessRepository(db_session))
+    support_session = await support_service.start_session(
+        actor_user_id=administrator.id,
+        actor_session_id=actor_session_id,
+        actor_is_developer=False,
+        actor_is_administrator=True,
+        tenant_id=tenant.id,
+        reason="Read the tenant user directory without role access",
+        duration_minutes=10,
+        requested_capabilities=["users.view"],
+    )
+
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        request.state.support_access_resolved = True
+        request.state.tenant_id = tenant.id
+        request.state.is_support_session = True
+        request.state.support_access_capabilities = support_session.capabilities
+        request.state.support_access_reason = support_session.reason
+        request.state.support_access_expires_at = support_session.expires_at
+        request.state.support_access_tenant_name = support_session.tenant_name
+        request.state.support_access_is_read_only = support_session.is_read_only
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override
     try:
-        tenant = await make_tenant()
-        administrator = await make_user(
-            email="catalog-admin@aurum.tj",
-            home_tenant_id=tenant.id,
-        )
-        administrator.is_administrator = True
-        await db_session.flush()
-        token = await create_support_access_token(
-            db_session,
-            administrator,
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Aurum-Support-Session": str(support_session.id),
+        }
+        users_only_response = await client.get("/api/v1/permissions", headers=headers)
+        assert users_only_response.status_code == 403
+
+        support_session = await support_service.start_session(
+            actor_user_id=administrator.id,
+            actor_session_id=actor_session_id,
+            actor_is_developer=False,
+            actor_is_administrator=True,
             tenant_id=tenant.id,
+            reason="Read the tenant role catalogue without write access",
+            duration_minutes=10,
+            requested_capabilities=["roles.assign"],
         )
-        headers = {"Authorization": f"Bearer {token}"}
+        headers["X-Aurum-Support-Session"] = str(support_session.id)
 
         catalog_response = await client.get("/api/v1/permissions", headers=headers)
         assert catalog_response.status_code == 200

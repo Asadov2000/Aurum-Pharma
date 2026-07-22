@@ -78,7 +78,11 @@ def _role_with_permissions(
 async def require_role_catalog_access(
     user: Annotated[CurrentUser, Depends(current_user)],
 ) -> CurrentUser:
-    if user.is_developer or user.is_administrator:
+    if (user.is_developer or user.is_administrator) and user.support_access_session_id is None:
+        return user
+    if user.support_access_session_id is not None and user.permissions.intersection(
+        {"roles.assign", "roles.create", "roles.update"}
+    ):
         return user
     if user.is_tenant_owner and user.permissions.intersection(
         {"users.view", "roles.assign", "roles.create", "roles.update"}

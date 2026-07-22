@@ -88,10 +88,14 @@ describe("buildNav — team management visibility", () => {
     expect(labels(ownerRoleManager)).toContain("Роли");
   });
 
-  it("lets scoped support inspect the role catalogue without exposing unrelated sections", () => {
-    const items = buildNav(true, true, false, []);
+  it("shows scoped support only the sections granted to the active context", () => {
+    const userViewer = buildNav(true, true, false, ["users.view"], false, true);
+    expect(userViewer.some((item) => item.to === "/roles")).toBe(false);
+    expect(userViewer.some((item) => item.to === "/users")).toBe(true);
 
+    const items = buildNav(true, true, false, ["users.view", "roles.update"], false, true);
     expect(items.some((item) => item.to === "/roles")).toBe(true);
+    expect(items.some((item) => item.to === "/users")).toBe(true);
     expect(items.some((item) => item.to === "/catalog")).toBe(false);
     expect(items.some((item) => item.to === "/settings")).toBe(false);
   });

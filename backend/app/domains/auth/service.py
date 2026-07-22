@@ -332,7 +332,7 @@ class AuthService:
         )
         access_token = create_access_token(
             user.id,
-            tenant_id=user.home_tenant_id,
+            tenant_id=(None if user.is_developer or user.is_administrator else user.home_tenant_id),
             is_developer=user.is_developer,
             is_administrator=user.is_administrator,
             session_id=session_id,
@@ -701,7 +701,7 @@ class AuthService:
 
         access_token = create_access_token(
             user.id,
-            tenant_id=user.home_tenant_id,
+            tenant_id=(None if user.is_developer or user.is_administrator else user.home_tenant_id),
             is_developer=user.is_developer,
             is_administrator=user.is_administrator,
             session_id=rotated.id,
