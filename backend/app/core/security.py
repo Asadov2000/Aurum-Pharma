@@ -82,6 +82,11 @@ def generate_refresh_token() -> str:
     return secrets.token_hex(32)
 
 
+def generate_device_id() -> str:
+    """Stable browser identifier; it is never an authentication credential."""
+    return secrets.token_hex(32)
+
+
 def derive_rotated_refresh_token(refresh_token: str, operation_id: UUID) -> str:
     """Derive the retry-stable successor for one refresh operation.
 

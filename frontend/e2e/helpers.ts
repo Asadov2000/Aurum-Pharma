@@ -37,15 +37,7 @@ export function makeSupportSessionRequireStepUp(email: string): void {
     "UPDATE session SET mfa_verified_at=now()-INTERVAL '11 minutes' " +
     `WHERE user_id=${userIdQuery} AND revoked_at IS NULL; ` +
     `UPDATE support_mfa SET last_used_counter=NULL WHERE user_id=${userIdQuery};`;
-  dockerExec(E2E_POSTGRES_CONTAINER, [
-    "psql",
-    "-U",
-    "postgres",
-    "-d",
-    E2E_POSTGRES_DB,
-    "-c",
-    sql,
-  ]);
+  dockerExec(E2E_POSTGRES_CONTAINER, ["psql", "-U", "postgres", "-d", E2E_POSTGRES_DB, "-c", sql]);
 }
 export const TENANT_ID = process.env.E2E_TENANT_ID ?? "";
 
@@ -71,6 +63,7 @@ export interface TokenPair {
 
 const REFRESH_COOKIE_NAME = "aurum_refresh_token";
 const REFRESH_COOKIE_PATH = "/api/v1/auth";
+const DEVICE_COOKIE_NAME = "aurum_device_id";
 
 function decodeBase32(value: string): Buffer {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -180,6 +173,7 @@ export async function loginInBrowser(page: Page, creds: Creds): Promise<TokenPai
 
 export async function installBrowserSession(page: Page, tokens: TokenPair): Promise<void> {
   const value = refreshCookieValue(tokens.refresh_cookie);
+  const deviceValue = optionalCookieValue(tokens.refresh_cookie, DEVICE_COOKIE_NAME);
   const apiUrl = new URL(API);
   if (page.url() !== "about:blank") {
     await page.goto("about:blank");
@@ -196,18 +190,36 @@ export async function installBrowserSession(page: Page, tokens: TokenPair): Prom
       sameSite: "Lax",
     },
   ]);
+  if (deviceValue) {
+    await page.context().addCookies([
+      {
+        name: DEVICE_COOKIE_NAME,
+        value: deviceValue,
+        domain: apiUrl.hostname,
+        path: REFRESH_COOKIE_PATH,
+        httpOnly: true,
+        secure: apiUrl.protocol === "https:",
+        sameSite: "Lax",
+      },
+    ]);
+  }
 }
 
 function refreshCookieValue(setCookieHeader: string | undefined): string {
-  if (!setCookieHeader) {
-    throw new Error("Missing refresh Set-Cookie header from /auth/login/verify");
-  }
-  const escapedName = REFRESH_COOKIE_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = new RegExp(`(?:^|,\\s*)${escapedName}=([^;]+)`).exec(setCookieHeader);
-  if (!match?.[1]) {
+  const value = optionalCookieValue(setCookieHeader, REFRESH_COOKIE_NAME);
+  if (!value) {
     throw new Error("Refresh Set-Cookie header does not contain aurum_refresh_token");
   }
-  return match[1];
+  return value;
+}
+
+function optionalCookieValue(
+  setCookieHeader: string | undefined,
+  cookieName: string,
+): string | undefined {
+  if (!setCookieHeader) return undefined;
+  const escapedName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|,\\s*|\\n)${escapedName}=([^;]+)`).exec(setCookieHeader)?.[1];
 }
 
 /**

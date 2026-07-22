@@ -1,22 +1,12 @@
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 
-import {
-  Badge,
-  Button,
-  Label,
-  Select,
-  Switch,
-  TableEmpty,
-} from "@/components/ui";
+import { Badge, Button, Label, Select, Switch, TableEmpty } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
 
 import { knownEvents, severityLabel, severityOptions, severityTone } from "./labels";
-import {
-  useMarkAllRead,
-  useMarkRead,
-  useNotificationsQuery,
-} from "./queries";
+import { useMarkAllRead, useMarkRead, useNotificationsQuery } from "./queries";
 import { type Notification, type Severity } from "./types";
 
 export function Inbox(): JSX.Element {
@@ -123,6 +113,7 @@ function Item({
   isPending: boolean;
 }): JSX.Element {
   const isUnread = n.read_at === null;
+  const isNewDeviceAlert = n.event_type === "security.new_device_login";
   const eventTitle = knownEvents.find((e) => e.key === n.event_type)?.title ?? n.event_type;
   return (
     <li
@@ -131,14 +122,21 @@ function Item({
         isUnread ? "border-input bg-surface" : "border-border bg-foreground/[0.03]",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 space-y-1">
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge tone={severityTone[n.severity]}>{severityLabel[n.severity]}</Badge>
-            <span className="text-xs text-foreground-muted">{eventTitle}</span>
+            {eventTitle !== n.title && (
+              <span className="text-xs text-foreground-muted">{eventTitle}</span>
+            )}
             {isUnread && <Badge tone="info">новое</Badge>}
           </div>
-          <p className={cn("text-sm", isUnread ? "font-medium text-foreground" : "text-foreground-secondary")}>
+          <p
+            className={cn(
+              "text-sm",
+              isUnread ? "font-medium text-foreground" : "text-foreground-secondary",
+            )}
+          >
             {n.title}
           </p>
           {n.body && <p className="text-sm text-foreground-secondary">{n.body}</p>}
@@ -146,11 +144,21 @@ function Item({
             {new Date(n.created_at).toLocaleString("ru-RU")}
           </p>
         </div>
-        {isUnread && (
-          <Button variant="ghost" size="sm" onClick={onMark} isLoading={isPending}>
-            Прочитано
-          </Button>
-        )}
+        <div className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0">
+          {isNewDeviceAlert && (
+            <Link
+              to="/security"
+              className="inline-flex h-8 items-center justify-center rounded-md border border-input bg-surface px-3 text-sm font-semibold text-foreground transition-colors duration-fast hover:bg-foreground/5"
+            >
+              Проверить сеансы
+            </Link>
+          )}
+          {isUnread && (
+            <Button variant="ghost" size="sm" onClick={onMark} isLoading={isPending}>
+              Прочитано
+            </Button>
+          )}
+        </div>
       </div>
     </li>
   );

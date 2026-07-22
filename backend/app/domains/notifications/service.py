@@ -34,6 +34,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
+from app.domains.notifications.events import MANDATORY_EVENT_TYPES
 from app.domains.notifications.models import (
     Notification,
     NotificationDelivery,
@@ -98,11 +99,17 @@ class NotificationsService:
     ) -> list[NotificationSubscription]:
         out: list[NotificationSubscription] = []
         for item in items:
+            event_type = str(item["event_type"])
+            channels = list(item.get("channels", ["in_app"]))
+            is_enabled = bool(item.get("is_enabled", True))
+            if event_type in MANDATORY_EVENT_TYPES:
+                channels = list(dict.fromkeys(["in_app", *channels]))
+                is_enabled = True
             sub = await self.repo.upsert_subscription(
                 user_id=user_id,
-                event_type=item["event_type"],
-                channels=item.get("channels", ["in_app"]),
-                is_enabled=item.get("is_enabled", True),
+                event_type=event_type,
+                channels=channels,
+                is_enabled=is_enabled,
             )
             out.append(sub)
         return out
@@ -129,7 +136,8 @@ class NotificationsService:
             user_id=user_id,
             event_type=event_type,
         )
-        if sub is not None and not sub.is_enabled:
+        is_mandatory = event_type in MANDATORY_EVENT_TYPES
+        if sub is not None and not sub.is_enabled and not is_mandatory:
             logger.info(
                 "notify_skipped_opt_out",
                 user_id=str(user_id),
@@ -137,6 +145,8 @@ class NotificationsService:
             )
             return None
         channels: list[str] = list(sub.channels) if sub is not None else ["in_app"]
+        if is_mandatory and "in_app" not in channels:
+            channels.insert(0, "in_app")
 
         notification = await self.repo.create_notification(
             tenant_id=tenant_id,

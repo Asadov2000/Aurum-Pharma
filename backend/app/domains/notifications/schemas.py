@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.domains.notifications.events import MANDATORY_EVENT_TYPES
 
 SEVERITIES = {"info", "warning", "error", "critical"}
 CHANNELS = {"in_app", "email", "telegram", "sms"}
@@ -47,6 +49,14 @@ class SubscriptionPatch(BaseModel):
         if bad:
             raise ValueError(f"unknown channel(s): {bad}; allowed {sorted(CHANNELS)}")
         return v
+
+    @model_validator(mode="after")
+    def _protect_mandatory_security_events(self) -> Self:
+        if self.event_type in MANDATORY_EVENT_TYPES and (
+            not self.is_enabled or "in_app" not in self.channels
+        ):
+            raise ValueError("mandatory security notifications must remain enabled in-app")
+        return self
 
 
 class SubscriptionsBulkPatch(BaseModel):

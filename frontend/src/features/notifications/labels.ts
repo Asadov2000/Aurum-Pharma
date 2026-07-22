@@ -7,15 +7,13 @@ export const severityLabel: Record<Severity, string> = {
   critical: "Критическое",
 };
 
-export const severityTone: Record<
-  Severity,
-  "neutral" | "success" | "warning" | "danger" | "info"
-> = {
-  info: "info",
-  warning: "warning",
-  error: "danger",
-  critical: "danger",
-};
+export const severityTone: Record<Severity, "neutral" | "success" | "warning" | "danger" | "info"> =
+  {
+    info: "info",
+    warning: "warning",
+    error: "danger",
+    critical: "danger",
+  };
 
 export const severityOptions: Severity[] = ["info", "warning", "error", "critical"];
 
@@ -44,9 +42,16 @@ export interface EventDef {
   key: string;
   title: string;
   description: string;
+  mandatory?: boolean;
 }
 
 export const knownEvents: EventDef[] = [
+  {
+    key: "security.new_device_login",
+    title: "Вход с нового устройства",
+    description: "Успешный вход из ранее неизвестного браузера или приложения.",
+    mandatory: true,
+  },
   {
     key: "license_expiring",
     title: "Истекает лицензия",
