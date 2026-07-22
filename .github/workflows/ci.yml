@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
+  workflow_dispatch:
+  schedule:
+    # 06:30 in Tajikistan (UTC+5): catches dependency and runner drift daily.
+    - cron: "30 1 * * *"
 
 permissions:
   contents: read
@@ -36,7 +41,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -49,7 +54,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf
         ports:
           - 6379:6379
         options: >-
@@ -88,7 +93,174 @@ jobs:
       - name: Install locked dependencies
         run: poetry install --no-root --with dev --sync
 
+      - name: Cache Mypy analysis
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: backend/.mypy_cache
+          key: ${{ runner.os }}-mypy-${{ hashFiles('backend/poetry.lock', 'backend/app/**/*.py') }}
+          restore-keys: |
+            ${{ runner.os }}-mypy-
+
+      - name: Start MinIO
+        run: |
+          docker run --detach \
+            --name aurum-ci-minio \
+            --publish 9000:9000 \
+            --env MINIO_ROOT_USER=minioadmin \
+            --env MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+            server /data
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:9000/minio/health/live > /dev/null; then
+              echo "MinIO is ready"
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs aurum-ci-minio
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Create PostgreSQL app and support roles
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+        run: |
+          test -n "$POSTGRES_SERVICE_ID"
+          docker exec -i \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_DB=aurum_test \
+            -e AURUM_APP_PASSWORD=aurum_app_pw \
+            -e AURUM_SUPPORT_PASSWORD=aurum_support_pw \
+            "$POSTGRES_SERVICE_ID" sh -s < ../infra/postgres/init.sh
+
+      - name: Verify migration roundtrip on disposable CI database
+        run: |
+          poetry run alembic upgrade head
+          poetry run alembic downgrade 0055
+          poetry run alembic upgrade head
+
+      - name: Ruff
+        run: poetry run ruff check app tests
+
+      - name: Black
+        run: poetry run black --check app tests
+
+      - name: Mypy
+        run: poetry run mypy app
+
+      - name: Pytest
+        run: |
+          mkdir -p test-results
+          poetry run pytest tests/ -q --durations=25 --junitxml=test-results/pytest.xml
+
+      - name: Upload backend test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-test-results-${{ github.run_attempt }}
+          path: backend/test-results/pytest.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop MinIO
+        if: always()
+        run: |
+          if docker container inspect aurum-ci-minio > /dev/null 2>&1; then
+            docker rm --force aurum-ci-minio
+          fi
+
+  frontend:
+    name: Frontend quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          version: 9.12.0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: |
+          mkdir -p test-results
+          pnpm exec vitest run tests \
+            --reporter=dot \
+            --reporter=junit \
+            --outputFile.junit=test-results/vitest.xml
+
+      - name: Upload frontend test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-test-results-${{ github.run_attempt }}
+          path: frontend/test-results/vitest.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Production build
+        # TypeScript was checked above; avoid running tsc twice in the same job.
+        run: pnpm exec vite build
+
+  dependency-audit:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.3.4
+
+      - name: Cache Poetry environment
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: backend/.venv
+          key: ${{ runner.os }}-python-3.12-poetry-${{ hashFiles('backend/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-python-3.12-poetry-
+
+      - name: Install locked Python dependencies
+        working-directory: backend
+        run: |
+          poetry check --lock
+          poetry install --no-root --with dev --sync
+
       - name: Audit Python dependencies
+        working-directory: backend
         shell: bash
         run: |
           report=.pip-audit.json
@@ -136,77 +308,6 @@ jobs:
           echo "::error title=Python audit unavailable::No complete report after 3 attempts"
           exit 1
 
-      - name: Start MinIO
-        run: |
-          docker run --detach \
-            --name aurum-ci-minio \
-            --publish 9000:9000 \
-            --env MINIO_ROOT_USER=minioadmin \
-            --env MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data
-
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://localhost:9000/minio/health/live > /dev/null; then
-              echo "MinIO is ready"
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              docker logs aurum-ci-minio
-              exit 1
-            fi
-            sleep 2
-          done
-
-      - name: Create PostgreSQL app and support roles
-        env:
-          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
-        run: |
-          test -n "$POSTGRES_SERVICE_ID"
-          docker exec -i \
-            -e POSTGRES_USER=postgres \
-            -e POSTGRES_DB=aurum_test \
-            -e AURUM_APP_PASSWORD=aurum_app_pw \
-            -e AURUM_SUPPORT_PASSWORD=aurum_support_pw \
-            "$POSTGRES_SERVICE_ID" sh -s < ../infra/postgres/init.sh
-
-      - name: Verify migration roundtrip on disposable CI database
-        run: |
-          poetry run alembic upgrade head
-          poetry run alembic downgrade 0055
-          poetry run alembic upgrade head
-
-      - name: Ruff
-        run: poetry run ruff check app tests
-
-      - name: Black
-        run: poetry run black --check app tests
-
-      - name: Mypy
-        run: poetry run mypy app
-
-      - name: Pytest
-        run: poetry run pytest tests/ -q
-
-      - name: Stop MinIO
-        if: always()
-        run: |
-          if docker container inspect aurum-ci-minio > /dev/null 2>&1; then
-            docker rm --force aurum-ci-minio
-          fi
-
-  frontend:
-    name: Frontend quality gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    defaults:
-      run:
-        working-directory: frontend
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
       - name: Setup pnpm
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
         with:
@@ -219,29 +320,26 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
-      - name: Install locked dependencies
+      - name: Install locked JavaScript dependencies
+        working-directory: frontend
         run: pnpm install --frozen-lockfile
 
       - name: Audit JavaScript dependencies
+        working-directory: frontend
         run: pnpm audit --audit-level high
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Unit tests
-        run: pnpm test
-
-      - name: Production build
-        run: pnpm build
 
   e2e:
     name: Chromium E2E
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    needs: [backend, frontend]
+    env:
+      CI: "true"
+      COMPOSE_FILE: docker-compose.e2e.yml
+      COMPOSE_PROJECT_NAME: aurum-e2e-ci
+      E2E_API_URL: http://localhost:18000/api/v1
+      E2E_BASE_URL: http://localhost:15173
+      E2E_POSTGRES_DB: aurum
+      E2E_RETRIES: ${{ github.event_name == 'schedule' && '0' || '1' }}
 
     steps:
       - name: Checkout
@@ -263,17 +361,29 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Resolve Playwright version
+        id: playwright-version
+        working-directory: frontend
+        shell: bash
+        run: echo "version=$(node -p \"require('@playwright/test/package.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ steps.playwright-version.outputs.version }}
+
       - name: Install Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Prepare development environment
-        run: cp .env.example .env
-
       - name: Start isolated application stack
+        shell: bash
         run: |
           docker compose up -d --build postgres redis minio backend celery-worker frontend
           docker compose ps
+          echo "E2E_POSTGRES_CONTAINER=$(docker compose ps --quiet postgres)" >> "$GITHUB_ENV"
+          echo "E2E_REDIS_CONTAINER=$(docker compose ps --quiet redis)" >> "$GITHUB_ENV"
 
       - name: Migrate and seed disposable E2E database
         run: |
@@ -302,13 +412,11 @@ jobs:
             done
           }
 
-          wait_for_url "Backend" "http://localhost:8000/healthz"
-          wait_for_url "Frontend" "http://localhost:5173"
+          wait_for_url "Backend" "http://localhost:18000/healthz"
+          wait_for_url "Frontend" "http://localhost:15173"
 
       - name: Run Playwright E2E
         working-directory: frontend
-        env:
-          CI: "true"
         run: pnpm e2e
 
       - name: Show service logs on failure
@@ -321,7 +429,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-${{ github.run_attempt }}
           path: |
             frontend/test-results
             frontend/playwright-report
@@ -331,3 +439,34 @@ jobs:
       - name: Stop isolated application stack
         if: always()
         run: docker compose down -v --remove-orphans
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs: [backend, frontend, dependency-audit, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Verify all required jobs
+        shell: bash
+        env:
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          AUDIT_RESULT: ${{ needs['dependency-audit'].result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+        run: |
+          failed=0
+          for result in \
+            "backend:$BACKEND_RESULT" \
+            "frontend:$FRONTEND_RESULT" \
+            "dependency-audit:$AUDIT_RESULT" \
+            "e2e:$E2E_RESULT"; do
+            name="${result%%:*}"
+            status="${result#*:}"
+            printf '%s: %s\n' "$name" "$status" | tee -a "$GITHUB_STEP_SUMMARY"
+            if [ "$status" != "success" ]; then
+              failed=1
+            fi
+          done
+          exit "$failed"

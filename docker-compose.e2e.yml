@@ -14,7 +14,7 @@ x-backend-environment: &backend-environment
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
     environment:
       POSTGRES_DB: aurum
       POSTGRES_USER: postgres
@@ -33,7 +33,7 @@ services:
     restart: "no"
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf
     command: redis-server --appendonly no
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -43,7 +43,7 @@ services:
     restart: "no"
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -76,10 +76,7 @@ services:
     restart: "no"
 
   celery-worker:
-    image: aurum-pharma-e2e-celery-worker:local
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: aurum-pharma-e2e-backend:local
     environment: *backend-environment
     depends_on:
       postgres:
@@ -96,11 +93,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    environment:
-      VITE_API_URL: http://localhost:18000/api/v1
+      args:
+        VITE_API_URL: http://localhost:18000/api/v1
     ports:
       - "15173:5173"
-    command: pnpm dev --host 0.0.0.0
+    command: pnpm preview --host 0.0.0.0 --port 5173
     restart: "no"
 
 volumes:

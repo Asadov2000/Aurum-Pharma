@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
+const isCI = process.env.CI === "true";
+const ciRetries = process.env.E2E_RETRIES === "0" ? 0 : 1;
 
 // Defaults target the local dev stack. `pnpm e2e:isolated` overrides the URLs
 // and Docker container IDs so tests never mutate shared development data.
@@ -14,11 +16,12 @@ export default defineConfig({
   // Sequential by default — POS/inventory tests assert global DB state.
   workers: 1,
   fullyParallel: false,
-  // Two retries absorb transient infra hiccups (Docker Desktop pipe drops,
-  // slow cold Vite chunks) without masking real product bugs — a genuinely
-  // broken flow fails every attempt.
-  retries: 2,
-  reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
+  // Local Docker Desktop gets two recovery attempts. CI retries once for
+  // diagnostics, but failOnFlakyTests keeps a recovered test blocking.
+  retries: isCI ? ciRetries : 2,
+  failOnFlakyTests: isCI,
+  forbidOnly: isCI,
+  reporter: isCI ? "list" : [["list"], ["html", { open: "never" }]],
   use: {
     baseURL,
     // Backend API base; helpers use it directly for seed.
