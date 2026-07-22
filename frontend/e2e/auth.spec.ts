@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 
 import {
   apiLogin,
@@ -84,6 +84,27 @@ test.describe("Auth", () => {
     await expect(page.getByText(/Завершено сеансов:/)).toBeVisible();
     await expect(page.getByText("Сеансы (1)")).toBeVisible();
     await expect(page.getByText("Текущий сеанс")).toBeVisible();
+  });
+
+  test("warns the owner about a login from a new device", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+    const otherDevice = await request.newContext();
+    try {
+      await apiLogin(otherDevice, OWNER);
+    } finally {
+      await otherDevice.dispose();
+    }
+
+    await page.goto("/notifications");
+    const alert = page
+      .getByRole("listitem")
+      .filter({ hasText: "Вход с нового устройства" })
+      .first();
+    await expect(alert).toBeVisible();
+    await alert.getByRole("link", { name: "Проверить сеансы" }).click();
+
+    await expect(page).toHaveURL(/\/security$/);
+    await expect(page.getByRole("heading", { name: "Безопасность" })).toBeVisible();
   });
 
   test("retries refresh with the same operation after a lost response", async ({ page }) => {

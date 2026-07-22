@@ -270,6 +270,7 @@ CREATE TABLE session (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id             UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   refresh_token_hash  TEXT NOT NULL,           -- sha256(refresh_token)
+  device_id_hash      TEXT,                    -- sha256(HttpOnly device ID)
   user_agent          TEXT,
   ip_address          INET,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -284,6 +285,8 @@ CREATE TABLE session (
 CREATE INDEX ix_session_user ON session (user_id) WHERE revoked_at IS NULL;
 CREATE UNIQUE INDEX ux_session_refresh_hash ON session (refresh_token_hash);
 CREATE INDEX ix_session_expires ON session (expires_at) WHERE revoked_at IS NULL;
+CREATE INDEX ix_session_user_device ON session (user_id, device_id_hash)
+  WHERE device_id_hash IS NOT NULL;
 
 -- session.mfa_verified_at хранит базовую MFA-проверку входа support-аккаунта.
 -- Step-up не записывается в refresh-сессию: его время существует только в
@@ -1555,6 +1558,14 @@ CREATE TABLE notification_subscription (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, event_type)
 );
+
+-- Уведомление о новом устройстве обязательно и всегда остаётся in-app.
+ALTER TABLE notification_subscription
+  ADD CONSTRAINT ck_notification_subscription_mandatory_security
+  CHECK (
+    event_type <> 'security.new_device_login'
+    OR (is_enabled AND channels @> '["in_app"]'::JSONB)
+  );
 
 -- =============================================================================
 -- NOTIFICATION_DELIVERY (доставка по внешним каналам — email, telegram)

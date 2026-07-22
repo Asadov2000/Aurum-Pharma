@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listNotifications = vi.fn();
@@ -7,6 +8,14 @@ const markRead = vi.fn();
 const markAllRead = vi.fn();
 const listSubscriptions = vi.fn();
 const patchSubscriptions = vi.fn();
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ to, children, ...props }: ComponentProps<"a"> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
 
 vi.mock("@/features/notifications/api", () => ({
   listNotifications: (...a: unknown[]) => listNotifications(...a),
@@ -49,6 +58,15 @@ const READ = {
   read_at: "2026-05-22T09:00:00Z",
 };
 
+const SECURITY_ALERT = {
+  ...UNREAD,
+  id: "n-security",
+  event_type: "security.new_device_login",
+  title: "Вход с нового устройства",
+  body: "Если это были не вы, проверьте активные сеансы.",
+  data: { reason: "new_device", action: "review_sessions" },
+};
+
 describe("NotificationsPage", () => {
   beforeEach(() => {
     listNotifications.mockReset();
@@ -85,6 +103,17 @@ describe("NotificationsPage", () => {
     });
   });
 
+  it("links a new-device warning to session security", async () => {
+    listNotifications.mockResolvedValueOnce([SECURITY_ALERT]);
+    renderPage();
+
+    expect(await screen.findByText("Вход с нового устройства")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Проверить сеансы" })).toHaveAttribute(
+      "href",
+      "/security",
+    );
+  });
+
   it("disables 'Отметить все' when nothing is unread", async () => {
     listNotifications.mockResolvedValueOnce([READ]);
     renderPage();
@@ -115,6 +144,8 @@ describe("NotificationsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Подписки" }));
     expect(await screen.findByText("Истекает лицензия")).toBeInTheDocument();
     expect(screen.getByText(/Заканчивается пробный период/i)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Обязательное" })).toBeDisabled();
+    expect(screen.getAllByRole("checkbox", { name: "В системе" })[0]).toBeDisabled();
     // Telegram label appears on every event card (5×), so just assert ≥1.
     expect(screen.getAllByText(/Telegram \(Этап 2\)/i).length).toBeGreaterThanOrEqual(1);
   });

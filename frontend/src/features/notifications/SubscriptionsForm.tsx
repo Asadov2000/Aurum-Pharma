@@ -3,12 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Switch } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 
-import {
-  allChannels,
-  channelAvailable,
-  channelLabel,
-  knownEvents,
-} from "./labels";
+import { allChannels, channelAvailable, channelLabel, knownEvents } from "./labels";
 import { usePatchSubscriptions, useSubscriptionsQuery } from "./queries";
 import { type Channel, type Subscription } from "./types";
 
@@ -27,7 +22,13 @@ function rowsFromServer(subs: Subscription[]): Map<string, Row> {
     });
   }
   for (const e of knownEvents) {
-    if (!map.has(e.key)) {
+    const current = map.get(e.key);
+    if (e.mandatory) {
+      map.set(e.key, {
+        is_enabled: true,
+        channels: new Set<Channel>(["in_app", ...(current?.channels ?? [])]),
+      });
+    } else if (!current) {
       // Backend default: ["in_app"] + enabled. Surface that to the user
       // so the visible state matches what the system will actually do.
       map.set(e.key, { is_enabled: true, channels: new Set<Channel>(["in_app"]) });
@@ -91,6 +92,7 @@ export function SubscriptionsForm(): JSX.Element {
           key: e.key,
           title: e.title,
           description: e.description,
+          mandatory: e.mandatory === true,
           row: rows.get(e.key),
         }))
         .filter((x) => x.row !== undefined),
@@ -108,12 +110,12 @@ export function SubscriptionsForm(): JSX.Element {
   return (
     <div className="space-y-4">
       <p className="text-sm text-foreground-secondary">
-        Выберите, какие события и по каким каналам вы хотите получать. По умолчанию все
-        события приходят в систему.
+        Выберите, какие события и по каким каналам вы хотите получать. По умолчанию все события
+        приходят в систему.
       </p>
 
       <div className="space-y-3">
-        {ordered.map(({ key, title, description, row }) => {
+        {ordered.map(({ key, title, description, mandatory, row }) => {
           const r = row!;
           return (
             <Card key={key}>
@@ -124,9 +126,10 @@ export function SubscriptionsForm(): JSX.Element {
                     <p className="mt-1 text-xs text-foreground-muted">{description}</p>
                   </div>
                   <Switch
-                    label={r.is_enabled ? "Включено" : "Выключено"}
+                    label={mandatory ? "Обязательное" : r.is_enabled ? "Включено" : "Выключено"}
                     checked={r.is_enabled}
                     onChange={(e) => toggleEnabled(key, e.target.checked)}
+                    disabled={mandatory}
                   />
                 </div>
               </CardHeader>
@@ -137,14 +140,10 @@ export function SubscriptionsForm(): JSX.Element {
                     return (
                       <Switch
                         key={ch}
-                        label={
-                          available
-                            ? channelLabel[ch]
-                            : `${channelLabel[ch]} (Этап 2)`
-                        }
+                        label={available ? channelLabel[ch] : `${channelLabel[ch]} (Этап 2)`}
                         checked={r.channels.has(ch)}
                         onChange={() => toggleChannel(key, ch)}
-                        disabled={!available || !r.is_enabled}
+                        disabled={mandatory || !available || !r.is_enabled}
                       />
                     );
                   })}

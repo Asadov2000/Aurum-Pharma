@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
@@ -15,8 +18,10 @@ from app.domains.foundation.service import FoundationService
 from app.domains.notifications.models import (
     Notification,
     NotificationDelivery,
+    NotificationSubscription,
 )
 from app.domains.notifications.repository import NotificationsRepository
+from app.domains.notifications.schemas import SubscriptionPatch
 from app.domains.notifications.service import NotificationsService
 
 
@@ -145,6 +150,45 @@ async def test_disabled_subscription_skips_notify(
         .all()
     )
     assert found == []
+
+
+async def test_mandatory_security_subscription_cannot_be_disabled(
+    db_session: AsyncSession,
+) -> None:
+    _tenant, user = await _make_tenant_and_user(db_session)
+    service = NotificationsService(NotificationsRepository(db_session))
+
+    with pytest.raises(ValidationError):
+        SubscriptionPatch(
+            event_type="security.new_device_login",
+            channels=[],
+            is_enabled=False,
+        )
+
+    with pytest.raises(IntegrityError):
+        async with db_session.begin_nested():
+            db_session.add(
+                NotificationSubscription(
+                    user_id=user.id,
+                    event_type="security.new_device_login",
+                    channels=[],
+                    is_enabled=False,
+                )
+            )
+            await db_session.flush()
+
+    updated = await service.upsert_subscriptions(
+        user_id=user.id,
+        items=[
+            {
+                "event_type": "security.new_device_login",
+                "channels": [],
+                "is_enabled": False,
+            }
+        ],
+    )
+    assert updated[0].is_enabled is True
+    assert updated[0].channels == ["in_app"]
 
 
 async def test_attempt_delivery_marks_sent(db_session: AsyncSession) -> None:

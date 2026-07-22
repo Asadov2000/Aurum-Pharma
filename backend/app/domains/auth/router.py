@@ -19,6 +19,7 @@ from app.core.deps import (
     get_support_auth_db,
 )
 from app.core.errors import AuthenticationError
+from app.core.security import generate_device_id
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
     ActiveSessionResponse,
@@ -45,6 +46,8 @@ from app.domains.auth.service import AuthService, MfaLoginChallenge
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 _REFRESH_COOKIE_PATH = "/api/v1/auth"
+_DEVICE_COOKIE_NAME = "aurum_device_id"
+_DEVICE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 
 
 def _client_ip(request: Request) -> str:
@@ -61,6 +64,26 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         key=settings.REFRESH_COOKIE_NAME,
         value=refresh_token,
         max_age=settings.REFRESH_TOKEN_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.refresh_cookie_secure,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+        path=_REFRESH_COOKIE_PATH,
+    )
+
+
+def _device_id_from_request(request: Request) -> str:
+    value = request.cookies.get(_DEVICE_COOKIE_NAME, "")
+    if len(value) == 64 and all(char in "0123456789abcdef" for char in value):
+        return value
+    return generate_device_id()
+
+
+def _set_device_cookie(response: Response, device_id: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=_DEVICE_COOKIE_NAME,
+        value=device_id,
+        max_age=_DEVICE_COOKIE_MAX_AGE,
         httponly=True,
         secure=settings.refresh_cookie_secure,
         samesite=settings.REFRESH_COOKIE_SAMESITE,
@@ -158,13 +181,16 @@ async def verify_login_code(
     service: Annotated[AuthService, Depends(_auth_state_service)],
 ) -> TokenResponse | MfaChallengeResponse:
     _set_auth_no_store(response)
+    device_id = _device_id_from_request(request)
     result = await service.verify_login_code(
         email=str(payload.email),
         code=payload.code,
         password=payload.password,
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
+        device_id=device_id,
     )
+    _set_device_cookie(response, device_id)
     if isinstance(result, MfaLoginChallenge):
         return MfaChallengeResponse(
             status=result.status,
@@ -209,12 +235,15 @@ async def complete_mfa_enrollment(
     service: Annotated[AuthService, Depends(_support_auth_state_service)],
 ) -> TokenResponse:
     _set_auth_no_store(response)
+    device_id = _device_id_from_request(request)
     result = await service.complete_mfa_enrollment(
         challenge_token=payload.challenge_token,
         code=payload.code,
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
+        device_id=device_id,
     )
+    _set_device_cookie(response, device_id)
     _set_refresh_cookie(response, result.refresh_token)
     return TokenResponse(
         access_token=result.access_token,
@@ -230,12 +259,15 @@ async def verify_mfa(
     service: Annotated[AuthService, Depends(_support_auth_state_service)],
 ) -> TokenResponse:
     _set_auth_no_store(response)
+    device_id = _device_id_from_request(request)
     result = await service.verify_mfa(
         challenge_token=payload.challenge_token,
         code=payload.code,
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
+        device_id=device_id,
     )
+    _set_device_cookie(response, device_id)
     _set_refresh_cookie(response, result.refresh_token)
     return TokenResponse(
         access_token=result.access_token,

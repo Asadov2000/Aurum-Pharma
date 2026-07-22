@@ -35,6 +35,7 @@ from app.core.security import (
     derive_mfa_encryption_key,
     derive_rotated_refresh_token,
     generate_code_salt,
+    generate_device_id,
     generate_email_code,
     generate_recovery_codes,
     generate_refresh_token,
@@ -163,6 +164,26 @@ class AuthService:
         except RedisError as exc:
             raise ServiceUnavailableError("MFA attempt guard is unavailable") from exc
 
+    async def _register_login_device(
+        self,
+        *,
+        session_id: UUID,
+        refresh_token: str,
+        device_id: str | None,
+    ) -> None:
+        status = await self.repo.register_session_device(
+            session_id=session_id,
+            refresh_token_hash=hash_token(refresh_token),
+            device_id_hash=hash_token(device_id or generate_device_id()),
+        )
+        if status not in {"baseline", "known_device", "new_device"}:
+            raise RuntimeError("Authentication device registration failed")
+        if status == "new_device":
+            logger.warning(
+                "new_login_device_detected",
+                session_id=str(session_id),
+            )
+
     # -------------------------------------------------------------------------
     # 1. Request an email code
     # -------------------------------------------------------------------------
@@ -215,6 +236,7 @@ class AuthService:
         password: str | None,
         ip_address: str,
         user_agent: str | None = None,
+        device_id: str | None = None,
     ) -> AuthTokens | MfaLoginChallenge:
         email_lower = email.strip().lower()
         now = utc_now()
@@ -330,6 +352,11 @@ class AuthService:
             tenant_id=user.home_tenant_id,
             accepted_at=now,
         )
+        await self._register_login_device(
+            session_id=session_id,
+            refresh_token=refresh_token,
+            device_id=device_id,
+        )
         access_token = create_access_token(
             user.id,
             tenant_id=(None if user.is_developer or user.is_administrator else user.home_tenant_id),
@@ -424,7 +451,13 @@ class AuthService:
         refresh_token: str,
         ip_address: str,
         user_agent: str | None,
+        device_id: str | None,
     ) -> AuthTokens:
+        await self._register_login_device(
+            session_id=session_record.session_id,
+            refresh_token=refresh_token,
+            device_id=device_id,
+        )
         access_token = create_access_token(
             session_record.user_id,
             tenant_id=None,
@@ -462,6 +495,7 @@ class AuthService:
         code: str,
         ip_address: str,
         user_agent: str | None = None,
+        device_id: str | None = None,
     ) -> AuthTokens:
         challenge = await self._get_mfa_challenge(
             challenge_token=challenge_token,
@@ -500,6 +534,7 @@ class AuthService:
             refresh_token=refresh_token,
             ip_address=ip_address,
             user_agent=user_agent,
+            device_id=device_id,
         )
 
     async def verify_mfa(
@@ -509,6 +544,7 @@ class AuthService:
         code: str,
         ip_address: str,
         user_agent: str | None = None,
+        device_id: str | None = None,
     ) -> AuthTokens:
         challenge = await self._get_mfa_challenge(
             challenge_token=challenge_token,
@@ -551,6 +587,7 @@ class AuthService:
             refresh_token=refresh_token,
             ip_address=ip_address,
             user_agent=user_agent,
+            device_id=device_id,
         )
 
     async def recover_mfa(

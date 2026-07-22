@@ -661,6 +661,26 @@ class AuthRepository:
         )
         return cast(UUID | None, result.scalar_one())
 
+    async def register_session_device(
+        self,
+        *,
+        session_id: UUID,
+        refresh_token_hash: str,
+        device_id_hash: str,
+    ) -> str:
+        result = await self.session.execute(
+            text(
+                "SELECT public.register_auth_session_device("
+                ":session_id, :refresh_token_hash, :device_id_hash)"
+            ),
+            {
+                "session_id": session_id,
+                "refresh_token_hash": refresh_token_hash,
+                "device_id_hash": device_id_hash,
+            },
+        )
+        return str(result.scalar_one())
+
     async def accept_tenant_invitation(
         self,
         *,

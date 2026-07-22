@@ -373,6 +373,7 @@ async def test_login_verify_sets_httponly_refresh_cookie(
     assert "refresh_token" not in body
     set_cookie = response.headers["set-cookie"]
     assert "aurum_refresh_token=" in set_cookie
+    assert "aurum_device_id=" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "Path=/api/v1/auth" in set_cookie
     assert "SameSite=lax" in set_cookie
