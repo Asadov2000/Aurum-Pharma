@@ -1,6 +1,6 @@
 # Security Release Plan
 
-Дата ревизии: 2026-07-18.
+Дата ревизии: 2026-07-23.
 
 Абсолютно неуязвимого приложения не бывает. Цель Aurum Pharma — уменьшить
 вероятность инцидента, ограничить его последствия и иметь проверенное
@@ -47,18 +47,21 @@
 
 ### P0: инфраструктура и данные
 
-- [ ] Production-образы без dev-серверов и `--reload`; запуск от non-root.
-- [ ] TLS на внешнем контуре; PostgreSQL, Redis, MinIO и Prometheus не публикуются
+- [x] Production-образы без dev-серверов и `--reload`; backend и Caddy работают
+      от non-root с read-only root filesystem и удалёнными capabilities.
+- [x] TLS на внешнем контуре; PostgreSQL, Redis, MinIO и Prometheus не публикуются
       на host-интерфейс.
-- [ ] Секреты выдаются через secret manager/Docker secrets, а не через fallback в
-      compose или committed `.env`.
+- [x] Секреты выдаются через Docker secrets из внешнего защищённого каталога, а
+      не через fallback в compose или committed `.env`; MinIO runtime account
+      отделён от root.
 - [x] Реализованы отдельные active/pending key versions, переходный keyring,
       идемпотентная support-only операция перешифрования и operator runbook.
 - [ ] Независимый `MFA_ENCRYPTION_KEY` выдан в secret manager каждой
       staging/production-среды до первого support-enrollment; ротация отрепетирована
       на staging с проверенным backup и rollback.
 - [ ] Production/staging fail-closed: HTTPS для CORS origins, secure cookies,
-      encrypted Redis/MinIO/DB transport и отсутствие default credentials.
+      trusted Host/proxy и отсутствие default credentials уже enforced;
+      encrypted Redis/MinIO/DB transport ещё не реализован.
 - [ ] PostgreSQL backup с WAL/PITR, версионирование MinIO, шифрование,
       off-site-копия, retention и регулярный restore-test с измеренными RPO/RTO.
 
@@ -88,8 +91,8 @@
       sessions записываются в неизменяемый аудит с точным before/after diff.
 - [ ] Доступ support к tenant выполняется только через короткую support session
       с причиной, явным scope и step-up MFA.
-- [ ] Trusted-proxy allowlist для client IP; не принимать произвольный
-      `X-Forwarded-For`.
+- [x] Trusted-proxy allowlist для client IP; forwarded headers принимаются
+      только от фиксированного адреса Caddy.
 
 ### P0: деньги, рецепты и бизнес-целостность
 
@@ -105,8 +108,9 @@
 ## P1 после закрытия P0
 
 - [ ] Образы закреплены по digest, генерируется SBOM и выполняется image scan.
-- [ ] Enforcing CSP, HSTS и Permissions-Policy устанавливаются на production
-      reverse proxy для SPA; внешние fonts/scripts убраны или разрешены nonce/hash.
+- [ ] Enforcing CSP и Permissions-Policy установлены на production Caddy;
+      inline theme script вынесен во внешний файл. HSTS включается только после
+      staging-проверки восстановления TLS.
 - [ ] Логи используют allowlist и redaction; в логах/трейсах нет cookies,
       Authorization, email пациентов, рецептов и закупочных цен.
 - [ ] Prometheus получает token через secret file, порт 9090 закрыт извне,
@@ -119,9 +123,9 @@
 
 1. Scoped authorization, account/membership/ownership и безопасный конструктор
    из ADR-0007.
-2. Отдельный production compose/reverse-proxy профиль и секреты.
-3. Backup/restore job с одноразовой проверкой восстановления.
-4. DB-инварианты POS и полный refund/void sync-контур.
+2. Backup/restore job с одноразовой проверкой восстановления.
+3. DB-инварианты POS и полный refund/void sync-контур.
+4. Внутренний TLS для PostgreSQL, Redis и MinIO.
 5. mTLS/device identity, зашифрованная локальная БД и trusted time для Edge.
 6. Подписанный Windows-дистрибутив и безопасное обновление.
 

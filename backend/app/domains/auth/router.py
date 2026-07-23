@@ -120,10 +120,13 @@ def _assert_cookie_refresh_origin(request: Request) -> None:
     SameSite cookies block common cross-site cases, but an explicit Origin check
     makes the boundary visible in app code and catches permissive edge mistakes.
     """
+    settings = get_settings()
     origin = request.headers.get("origin")
     if origin is None:
+        if settings.ENVIRONMENT != "development":
+            raise AuthenticationError("Refresh session origin is required")
         return
-    allowed = set(get_settings().CORS_ORIGINS)
+    allowed = set(settings.CORS_ORIGINS)
     if origin not in allowed:
         raise AuthenticationError("Refresh session origin is not allowed")
 

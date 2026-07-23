@@ -2,17 +2,131 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import os
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 logger = logging.getLogger("aurum.config")
 
 # Example/dev values that must never reach production.
 _DEFAULT_DB_PASSWORDS = ("aurum_app_pw", "aurum_support_pw", ":postgres@")
+
+
+def _database_security_problems(name: str, url: str) -> list[str]:
+    problems: list[str] = []
+    if any(password in url for password in _DEFAULT_DB_PASSWORDS):
+        problems.append(f"{name} uses a default/example DB password")
+    try:
+        parsed = make_url(url)
+    except ArgumentError:
+        problems.append(f"{name} is not a valid database URL")
+        return problems
+
+    if not parsed.username or not parsed.password or not parsed.host:
+        problems.append(f"{name} must contain a host and dedicated credentials")
+    return problems
+
+
+def _cors_security_problems(origins: list[str]) -> tuple[list[str], set[str]]:
+    if not origins:
+        return (
+            ["CORS_ORIGINS must contain the exact HTTPS application origin"],
+            set(),
+        )
+
+    hosts: set[str] = set()
+    for origin in origins:
+        try:
+            parsed = urlsplit(origin)
+            hostname = parsed.hostname
+        except ValueError:
+            hostname = None
+            parsed = None
+        if (
+            parsed is None
+            or parsed.scheme != "https"
+            or not hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or hostname in {"localhost", "127.0.0.1", "::1"}
+        ):
+            return (
+                [
+                    "CORS_ORIGINS must use exact public HTTPS origins "
+                    "without paths or credentials"
+                ],
+                set(),
+            )
+        hosts.add(hostname.lower())
+    return [], hosts
+
+
+def _trusted_host_security_problems(
+    configured_hosts: list[str],
+    cors_hosts: set[str],
+) -> list[str]:
+    trusted_hosts = {host.lower() for host in configured_hosts}
+    if not trusted_hosts or any("*" in host for host in trusted_hosts):
+        return ["TRUSTED_HOSTS must contain exact hostnames without wildcards"]
+    if not cors_hosts.issubset(trusted_hosts):
+        return ["TRUSTED_HOSTS must include every CORS origin hostname"]
+    return []
+
+
+def _proxy_security_problems(proxy_ips: list[str]) -> list[str]:
+    if not proxy_ips:
+        return ["TRUSTED_PROXY_IPS must contain the reverse proxy address"]
+    for value in proxy_ips:
+        try:
+            network = ipaddress.ip_network(value, strict=False)
+        except ValueError:
+            return ["TRUSTED_PROXY_IPS contains an invalid IP address or network"]
+        if network.prefixlen == 0:
+            return ["TRUSTED_PROXY_IPS must not trust every source"]
+    return []
+
+
+def _redis_security_problems(url: str) -> list[str]:
+    try:
+        parsed = urlsplit(url)
+        valid = (
+            parsed.scheme in {"redis", "rediss"} and bool(parsed.hostname) and bool(parsed.password)
+        )
+    except ValueError:
+        valid = False
+    return [] if valid else ["REDIS_URL must contain a host and dedicated password"]
+
+
+def _minio_security_problems(access_key: str, secret_key: str) -> list[str]:
+    if "minioadmin" in (access_key, secret_key) or len(access_key) < 16 or len(secret_key) < 32:
+        return ["MINIO_ACCESS_KEY/MINIO_SECRET_KEY must be strong, independent credentials"]
+    return []
+
+
+def _email_security_problems(
+    host: str,
+    user: str,
+    password: str,
+    sender: str,
+    use_tls: bool,
+) -> list[str]:
+    problems: list[str] = []
+    if not host or host.lower() == "localhost" or not user or not password or "@" not in sender:
+        problems.append("Production SMTP settings must contain dedicated credentials")
+    if not use_tls:
+        problems.append("EMAIL_USE_TLS must be true outside development")
+    return problems
 
 
 class Settings(BaseSettings):
@@ -26,12 +140,12 @@ class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     DEPLOYMENT_PROFILE: Literal["cloud", "edge_shadow"] = "cloud"
 
-    DATABASE_URL_APP: str
-    DATABASE_URL_SUPPORT: str
+    DATABASE_URL_APP: str = Field(repr=False)
+    DATABASE_URL_SUPPORT: str = Field(repr=False)
 
-    REDIS_URL: str = "redis://redis:6379/0"
+    REDIS_URL: str = Field(default="redis://redis:6379/0", repr=False)
 
-    JWT_SECRET: str
+    JWT_SECRET: str = Field(repr=False)
     JWT_ALGORITHM: str = "HS256"
     MFA_ENCRYPTION_KEY: SecretStr | None = None
     MFA_ENCRYPTION_KEY_VERSION: int = Field(default=1, ge=1, le=32767)
@@ -48,10 +162,14 @@ class Settings(BaseSettings):
     METRICS_TOKEN: SecretStr | None = None
 
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    TRUSTED_HOSTS: list[str] = Field(
+        default_factory=lambda: ["localhost", "127.0.0.1", "testserver"]
+    )
+    TRUSTED_PROXY_IPS: list[str] = Field(default_factory=list)
 
     MINIO_ENDPOINT: str = "minio:9000"
-    MINIO_ACCESS_KEY: str = "minioadmin"
-    MINIO_SECRET_KEY: str = "minioadmin"
+    MINIO_ACCESS_KEY: str = Field(default="minioadmin", repr=False)
+    MINIO_SECRET_KEY: str = Field(default="minioadmin", repr=False)
     MINIO_BUCKET: str = "aurum"
     MINIO_SECURE: bool = False
 
@@ -62,7 +180,7 @@ class Settings(BaseSettings):
     EMAIL_HOST: str = "localhost"
     EMAIL_PORT: int = 587
     EMAIL_USER: str = ""
-    EMAIL_PASSWORD: str = ""
+    EMAIL_PASSWORD: str = Field(default="", repr=False)
     EMAIL_FROM: str = "no-reply@aurum-pharma.tj"
     EMAIL_USE_TLS: bool = True
 
@@ -129,28 +247,41 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _guard_production_secrets(self) -> Settings:
+    def _guard_non_development_security(self) -> Settings:
         """Fail fast if a deployment would start with insecure configuration.
         Development keeps working with the defaults used in docker-compose and
         tests; staging uses the production-style operational gates."""
-        if self.ENVIRONMENT != "production":
+        if self.ENVIRONMENT == "development":
             return self
 
         problems: list[str] = []
         if len(self.JWT_SECRET) < 32 or "change-me" in self.JWT_SECRET.lower():
-            problems.append("JWT_SECRET must be a strong secret (≥32 chars, not the placeholder)")
-        if "minioadmin" in (self.MINIO_ACCESS_KEY, self.MINIO_SECRET_KEY):
-            problems.append(
-                "MINIO_ACCESS_KEY/MINIO_SECRET_KEY must not be the default 'minioadmin'"
-            )
+            problems.append("JWT_SECRET must be a strong secret (>=32 chars, not the placeholder)")
+        problems.extend(_minio_security_problems(self.MINIO_ACCESS_KEY, self.MINIO_SECRET_KEY))
         for name, url in (
             ("DATABASE_URL_APP", self.DATABASE_URL_APP),
             ("DATABASE_URL_SUPPORT", self.DATABASE_URL_SUPPORT),
         ):
-            if any(p in url for p in _DEFAULT_DB_PASSWORDS):
-                problems.append(f"{name} uses a default/example DB password")
-        if self.REFRESH_COOKIE_SAMESITE == "none" and not self.refresh_cookie_secure:
-            problems.append("REFRESH_COOKIE_SAMESITE=none requires REFRESH_COOKIE_SECURE=true")
+            problems.extend(_database_security_problems(name, url))
+
+        if not self.refresh_cookie_secure:
+            problems.append("REFRESH_COOKIE_SECURE must be true outside development")
+
+        cors_problems, cors_hosts = _cors_security_problems(self.CORS_ORIGINS)
+        problems.extend(cors_problems)
+        problems.extend(_trusted_host_security_problems(self.TRUSTED_HOSTS, cors_hosts))
+        problems.extend(_proxy_security_problems(self.TRUSTED_PROXY_IPS))
+        problems.extend(_redis_security_problems(self.REDIS_URL))
+        problems.extend(
+            _email_security_problems(
+                self.EMAIL_HOST,
+                self.EMAIL_USER,
+                self.EMAIL_PASSWORD,
+                self.EMAIL_FROM,
+                self.EMAIL_USE_TLS,
+            )
+        )
+
         if self.EDGE_SYNC_ENABLED:
             problems.append(
                 "EDGE_SYNC_ENABLED uses development token auth; production requires mTLS"
@@ -172,14 +303,16 @@ class Settings(BaseSettings):
                 "Refusing to start in production with insecure config:\n- " + "\n- ".join(problems)
             )
 
-        # Non-fatal: object-storage traffic should be encrypted in production.
+        # Non-fatal for the first single-host perimeter: object-storage TLS is
+        # still a release blocker and remains tracked in the security plan.
         if not self.MINIO_SECURE:
             logger.warning(
-                "MINIO_SECURE=false in production — object storage traffic is unencrypted"
+                "MINIO_SECURE=false outside development - object storage traffic is unencrypted"
             )
         return self
 
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    secrets_dir = os.environ.get("AURUM_SECRETS_DIR")
+    return Settings(_secrets_dir=secrets_dir or None)

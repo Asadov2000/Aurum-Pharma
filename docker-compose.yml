@@ -19,7 +19,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       # Probes the superuser (always exists). aurum_app is created later by
       # init.sh and would race with the first healthcheck. start_period covers
@@ -44,7 +44,7 @@ services:
       - postgres-test-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d aurum_test"]
       interval: 5s
@@ -60,7 +60,7 @@ services:
     volumes:
       - redis-data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -78,8 +78,8 @@ services:
     volumes:
       - minio-data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -99,7 +99,7 @@ services:
       PYTHONPATH: /app
     volumes: *backend-dev-volumes
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -178,7 +178,7 @@ services:
       - ./frontend/e2e:/app/e2e:ro
       - frontend-vite-cache:/app/node_modules/.vite
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     command: pnpm dev --host 0.0.0.0
     restart: unless-stopped
 
@@ -189,7 +189,7 @@ services:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     restart: unless-stopped
 
 volumes:

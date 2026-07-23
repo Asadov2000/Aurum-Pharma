@@ -1,11 +1,11 @@
-"""Response security headers — enabled only in production so dev/test (and the
+"""Response security headers enabled outside development so dev/test (and the
 e2e suite) are unaffected.
 
 The backend serves API responses (JSON / XLSX / PDF) and /docs, not the SPA's
 HTML (that's served by the static host / reverse proxy). So:
 - The hard headers (nosniff, frame DENY, referrer) harden API/doc responses and
   cannot break the SPA.
-- CSP is sent as **Report-Only** by default — it never blocks, only reports —
+- CSP is sent as **Report-Only** by default; it never blocks and only reports
   because the effective SPA Content-Security-Policy must live on the frontend
   host that serves index.html. Flip `csp_report_only=False` once a real policy
   has been validated there.

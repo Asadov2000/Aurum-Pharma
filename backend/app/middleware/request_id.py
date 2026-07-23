@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+
+_SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
@@ -18,7 +21,8 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
-        request_id = request.headers.get(self.HEADER) or str(uuid.uuid4())
+        supplied = request.headers.get(self.HEADER, "")
+        request_id = supplied if _SAFE_REQUEST_ID.fullmatch(supplied) else str(uuid.uuid4())
         request.state.request_id = request_id
 
         structlog.contextvars.clear_contextvars()

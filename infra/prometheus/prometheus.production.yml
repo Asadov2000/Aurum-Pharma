@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: aurum-backend
+    metrics_path: /metrics
+    authorization:
+      credentials_file: /run/secrets/METRICS_TOKEN
+    static_configs:
+      - targets: ["backend:8000"]

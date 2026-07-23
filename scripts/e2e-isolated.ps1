@@ -84,6 +84,8 @@ try {
     Invoke-E2ECompose exec -T backend alembic upgrade head
     Invoke-E2ECompose exec -T -e AURUM_E2E_SEED=1 backend python -m app.seed_e2e
     Invoke-E2ECompose exec -T backend python -m app.seed_demo
+    Invoke-E2ECompose restart frontend
+    Wait-HttpOk "E2E frontend after restart" "http://localhost:15173"
 
     [Environment]::SetEnvironmentVariable(
         "E2E_API_URL",
