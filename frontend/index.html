@@ -13,23 +13,7 @@
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <!-- Set the theme before first paint to avoid a flash of the wrong theme. -->
-    <script>
-      (function () {
-        try {
-          var pref = localStorage.getItem("theme:preference") || "system";
-          var dark =
-            pref === "dark" ||
-            (pref === "system" &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches);
-          document.documentElement.setAttribute(
-            "data-theme",
-            dark ? "dark" : "light",
-          );
-        } catch (e) {
-          document.documentElement.setAttribute("data-theme", "light");
-        }
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

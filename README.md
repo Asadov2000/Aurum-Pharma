@@ -35,6 +35,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1
 - Postgres (тестовый): `localhost:5433`, БД `aurum_test`
 - Redis: `localhost:6379`
 
+## Production-периметр
+
+Отдельный production Compose, non-root образы, Caddy/TLS и Docker secrets
+описаны в [production deployment runbook](docs/runbooks/production-deployment.md).
+Этот контур нельзя публиковать для пилота до закрытия оставшихся P0-блокеров из
+[security release plan](docs/security-release-plan.md).
+
 ## Структура
 
 ```

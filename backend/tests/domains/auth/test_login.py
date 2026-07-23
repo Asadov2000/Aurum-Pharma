@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -458,6 +460,26 @@ async def test_refresh_endpoint_blocks_untrusted_origin_for_cookie_session(
         "/api/v1/auth/refresh",
         headers={"Origin": "https://evil.example"},
     )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+async def test_refresh_endpoint_requires_origin_in_production(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth_router_module = importlib.import_module("app.domains.auth.router")
+    monkeypatch.setattr(
+        auth_router_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            ENVIRONMENT="production",
+            CORS_ORIGINS=["https://pharmacy.example.com"],
+        ),
+    )
+
+    response = await auth_client.post("/api/v1/auth/refresh")
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"

@@ -440,10 +440,130 @@ jobs:
         if: always()
         run: docker compose down -v --remove-orphans
 
+  production-containers:
+    name: Production container gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Validate production Compose model
+        shell: bash
+        run: |
+          docker compose \
+            --env-file .env.production.example \
+            --file docker-compose.production.yml \
+            config --quiet
+
+          docker compose \
+            --env-file .env.production.example \
+            --file docker-compose.production.yml \
+            config --format json > "$RUNNER_TEMP/production-compose.json"
+
+          python - "$RUNNER_TEMP/production-compose.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as source:
+              model = json.load(source)
+
+          published = sorted(
+              name for name, service in model["services"].items() if service.get("ports")
+          )
+          assert published == ["gateway"], f"unexpected published services: {published}"
+
+          for name in ("app", "data", "monitoring"):
+              assert model["networks"][name]["internal"] is True, (
+                  f"{name} network must be internal"
+              )
+
+          hardened = ("backend", "celery-worker", "celery-beat", "gateway")
+          for name in hardened:
+              service = model["services"][name]
+              assert service["read_only"] is True, (
+                  f"{name} root filesystem must be read-only"
+              )
+              assert service["cap_drop"] == ["ALL"], f"{name} must drop all capabilities"
+              assert "no-new-privileges:true" in service["security_opt"], (
+                  f"{name} must prevent privilege escalation"
+              )
+
+          backend_command = " ".join(model["services"]["backend"]["command"])
+          assert "--reload" not in backend_command, "backend Compose command enables reload"
+          PY
+
+      - name: Build production backend
+        run: >-
+          docker build
+          --pull
+          --file backend/Dockerfile.production
+          --tag aurum-backend:ci
+          backend
+
+      - name: Build production gateway
+        run: >-
+          docker build
+          --pull
+          --file frontend/Dockerfile.production
+          --tag aurum-gateway:ci
+          frontend
+
+      - name: Verify hardened image metadata
+        shell: bash
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' aurum-backend:ci)" = "10001:10001"
+          test "$(docker image inspect --format '{{.Config.User}}' aurum-gateway:ci)" = "10001:10001"
+
+          backend_cmd="$(docker image inspect --format '{{json .Config.Cmd}}' aurum-backend:ci)"
+          if grep -q -- '--reload' <<<"$backend_cmd"; then
+            echo "::error title=Unsafe production command::Backend image contains --reload"
+            exit 1
+          fi
+
+      - name: Validate production Caddy configuration
+        run: >-
+          docker run --rm
+          --env AURUM_DOMAIN=pharmacy.example.com
+          --env AURUM_ACME_EMAIL=ops@example.com
+          --entrypoint caddy
+          aurum-gateway:ci
+          validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Smoke-test hardened gateway runtime
+        shell: bash
+        run: |
+          container=aurum-gateway-runtime-check
+          trap 'docker rm --force --volumes "$container" >/dev/null 2>&1 || true' EXIT
+
+          docker run --detach \
+            --name "$container" \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --env AURUM_DOMAIN=localhost \
+            --env AURUM_ACME_EMAIL=ops@example.com \
+            --volume /data \
+            --volume /config \
+            aurum-gateway:ci
+
+          for attempt in {1..15}; do
+            if docker exec "$container" \
+              wget --quiet --spider http://127.0.0.1:9080/healthz; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "$container"
+          exit 1
+
   ci-gate:
     name: CI gate
     if: always()
-    needs: [backend, frontend, dependency-audit, e2e]
+    needs: [backend, frontend, dependency-audit, e2e, production-containers]
     runs-on: ubuntu-latest
     timeout-minutes: 2
 
@@ -455,13 +575,15 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           AUDIT_RESULT: ${{ needs['dependency-audit'].result }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          PRODUCTION_CONTAINERS_RESULT: ${{ needs['production-containers'].result }}
         run: |
           failed=0
           for result in \
             "backend:$BACKEND_RESULT" \
             "frontend:$FRONTEND_RESULT" \
             "dependency-audit:$AUDIT_RESULT" \
-            "e2e:$E2E_RESULT"; do
+            "e2e:$E2E_RESULT" \
+            "production-containers:$PRODUCTION_CONTAINERS_RESULT"; do
             name="${result%%:*}"
             status="${result#*:}"
             printf '%s: %s\n' "$name" "$status" | tee -a "$GITHUB_STEP_SUMMARY"

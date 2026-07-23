@@ -1,11 +1,12 @@
 """FastAPI entry point.
 
 Middleware order matters: Starlette wraps middleware bottom-up, so the *last*
-`add_middleware` call ends up outermost. We want:
+`add_middleware` call ends up outermost. In non-development environments we want:
 
-    request → RequestId → AuthContext → CORS → app
+    request → SecurityHeaders → trusted proxy/host → RequestId
+            → AuthContext → CORS → app
 
-So we add CORS first, then AuthContext, then RequestId last.
+So inner application middleware is added first and perimeter middleware last.
 """
 
 from __future__ import annotations
@@ -16,8 +17,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.core.config import get_settings
 from app.core.db import app_engine, support_engine
@@ -69,6 +73,9 @@ app = FastAPI(
     title=settings.APP_NAME,
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if settings.ENVIRONMENT == "development" else None,
+    redoc_url="/redoc" if settings.ENVIRONMENT == "development" else None,
+    openapi_url="/openapi.json" if settings.ENVIRONMENT == "development" else None,
 )
 
 # CRITICAL: with allow_credentials=True, allow_methods / allow_headers MUST be
@@ -93,11 +100,17 @@ app.add_middleware(
     enabled=settings.DEPLOYMENT_PROFILE == "edge_shadow",
 )
 app.add_middleware(RequestIdMiddleware)
-# Outermost: stamps security headers on every response. Production-only so
-# dev/test/e2e are untouched; CSP ships Report-Only (see middleware docstring).
+if settings.ENVIRONMENT != "development":
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.TRUSTED_HOSTS)
+    app.add_middleware(
+        ProxyHeadersMiddleware,
+        trusted_hosts=settings.TRUSTED_PROXY_IPS,
+    )
+# Outermost: stamps security headers on every non-development response. Dev/test
+# remain untouched; CSP ships Report-Only because the SPA enforces its own policy.
 app.add_middleware(
     SecurityHeadersMiddleware,
-    enabled=settings.ENVIRONMENT == "production",
+    enabled=settings.ENVIRONMENT != "development",
 )
 
 register_error_handlers(app)
@@ -124,7 +137,7 @@ app.include_router(sync_router)
 
 
 @app.get("/healthz", tags=["meta"])
-async def healthz() -> dict[str, object]:
+async def healthz() -> JSONResponse:
     db_ok = False
     redis_ok = False
 
@@ -133,15 +146,18 @@ async def healthz() -> dict[str, object]:
             result = await conn.execute(text("SELECT 1"))
             db_ok = result.scalar() == 1
     except Exception as exc:
-        logger.warning("healthz_db_fail", error=str(exc))
+        logger.warning("healthz_db_fail", error_type=type(exc).__name__)
 
     try:
         redis_ok = bool(await redis_client.ping())
     except Exception as exc:
-        logger.warning("healthz_redis_fail", error=str(exc))
+        logger.warning("healthz_redis_fail", error_type=type(exc).__name__)
 
     status = "ok" if db_ok and redis_ok else "degraded"
-    return {"status": status, "db": db_ok, "redis": redis_ok}
+    return JSONResponse(
+        status_code=200 if status == "ok" else 503,
+        content={"status": status, "db": db_ok, "redis": redis_ok},
+    )
 
 
 @app.get("/metrics", include_in_schema=False)

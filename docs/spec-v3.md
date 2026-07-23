@@ -635,17 +635,19 @@ Middleware выбирает пул в зависимости от пользов
 
 ### 15.1 Этап 1: что включено
 
-- ✅ **HTTPS** через nginx + Let's Encrypt (на деплое)
-- ✅ **Secure headers** (HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin)
+- ✅ **HTTPS** через Caddy с автоматическим ACME в отдельном production-профиле
+- 🟡 **Secure headers**: enforcing CSP, X-Frame-Options, nosniff,
+  Referrer-Policy и Permissions-Policy готовы; HSTS включается после staging
 - ✅ **bcrypt** для паролей (12 rounds)
 - ✅ **sha256+salt** для коротких email-кодов (bcrypt избыточен для коротких кодов)
 - ✅ **sha256** для refresh-токенов в БД (без соли — токены сами по себе 256-bit entropy)
 - ✅ **RLS** на уровне БД (защита-в-глубину)
 - ✅ **Audit-log** через триггеры
-- ✅ **Rate-limiting** в nginx (общий) и в коде (на login)
+- 🟡 **Rate-limiting** для auth/OTP реализован в коде; общий limit и DDoS-контроль
+  обязательны на доверенном edge/WAF до публичного пилота
 - ✅ **CORS** жёстко настроенный (явный список origins, allow-credentials, конкретные methods/headers)
 - ✅ **CSP** базовый (`default-src 'self'`, можно ослабить при необходимости для inline-стилей)
-- ✅ **Cloudflare** как DNS + базовый WAF (free tier) — на деплое
+- 🟡 **Cloudflare** или другой WAF подключается после настройки trusted proxy CIDR
 
 ### 15.2 Что НЕ входит в Этап 1
 

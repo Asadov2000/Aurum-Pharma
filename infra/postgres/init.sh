@@ -1,16 +1,49 @@
 #!/bin/bash
 # Initial database bootstrap: creates app and support roles.
 # Runs once on first container startup (Postgres official entrypoint).
-# Envvars are interpolated by bash heredoc (plain .sql files would not substitute).
-set -e
+# Passwords can come from development environment variables or production
+# Docker-secret files. psql reads them with \getenv and quotes them as SQL
+# literals, so punctuation in a strong password cannot alter the statement.
+set -eu
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-    CREATE ROLE aurum_app WITH LOGIN PASSWORD '${AURUM_APP_PASSWORD}';
-    CREATE ROLE aurum_support WITH LOGIN PASSWORD '${AURUM_SUPPORT_PASSWORD}' BYPASSRLS;
+load_secret() {
+    name="$1"
+    file_name="${name}_FILE"
+    value="$(printenv "$name" 2>/dev/null || true)"
+    file_path="$(printenv "$file_name" 2>/dev/null || true)"
 
-    REVOKE ALL PRIVILEGES ON DATABASE ${POSTGRES_DB} FROM PUBLIC;
-    GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO aurum_app;
-    GRANT ALL PRIVILEGES ON DATABASE ${POSTGRES_DB} TO aurum_support;
+    if [ -n "$value" ] && [ -n "$file_path" ]; then
+        echo "$name and $file_name cannot both be set" >&2
+        exit 1
+    fi
+    if [ -n "$file_path" ]; then
+        [ -f "$file_path" ] || {
+            echo "$file_name does not point to a readable file" >&2
+            exit 1
+        }
+        value="$(cat "$file_path")"
+    fi
+    [ -n "$value" ] || {
+        echo "$name is required" >&2
+        exit 1
+    }
+    export "$name=$value"
+}
+
+load_secret AURUM_APP_PASSWORD
+load_secret AURUM_SUPPORT_PASSWORD
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
+    \getenv app_password AURUM_APP_PASSWORD
+    \getenv support_password AURUM_SUPPORT_PASSWORD
+    \getenv database_name POSTGRES_DB
+
+    CREATE ROLE aurum_app WITH LOGIN PASSWORD :'app_password';
+    CREATE ROLE aurum_support WITH LOGIN PASSWORD :'support_password' BYPASSRLS;
+
+    REVOKE ALL PRIVILEGES ON DATABASE :"database_name" FROM PUBLIC;
+    GRANT CONNECT ON DATABASE :"database_name" TO aurum_app;
+    GRANT ALL PRIVILEGES ON DATABASE :"database_name" TO aurum_support;
     -- Runtime code may use objects in public, but only the migration/support
     -- role may create or replace them. This keeps SECURITY DEFINER functions
     -- out of reach of the application role.
@@ -89,3 +122,5 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     GRANT EXECUTE ON FUNCTION public.gen_random_uuid()
         TO aurum_app, aurum_support;
 EOSQL
+
+unset AURUM_APP_PASSWORD AURUM_SUPPORT_PASSWORD
