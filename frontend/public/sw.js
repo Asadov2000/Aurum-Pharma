@@ -1,5 +1,3 @@
-/* eslint-env serviceworker */
-
 const CACHE_NAME = "aurum-pharma-static-v1";
 const STATIC_ASSET_PATTERN = /\.(?:css|ico|js|png|svg|webmanifest|woff2?)$/i;
 

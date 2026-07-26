@@ -49,7 +49,7 @@ export function dockerExec(container: string, args: string[]): string {
       });
     } catch (error) {
       if (isErrno(error) && error.code === "ENOENT") {
-        throw new Error(hostOnlyMessage);
+        throw new Error(hostOnlyMessage, { cause: error });
       }
       if (!isTransientDockerError(error) || attempt === attempts) {
         throw error;

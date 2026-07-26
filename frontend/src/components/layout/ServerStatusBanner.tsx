@@ -29,7 +29,7 @@ export function ServerStatusBanner({
       }
 
       setIsOnline(true);
-      let isHealthy = false;
+      let isHealthy: boolean;
       try {
         isHealthy = await checkHealth(signal);
       } catch {
