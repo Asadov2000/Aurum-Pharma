@@ -1,8 +1,15 @@
 import { api } from "@/lib/api";
 import { type ZReport } from "@/features/pos/types";
 
+import { type ShiftHistoryList, type ShiftHistoryParams } from "./types";
+
 export async function getZReport(shiftId: string): Promise<ZReport> {
   const { data } = await api.get<ZReport>(`/shifts/${shiftId}/z-report`);
+  return data;
+}
+
+export async function listShiftHistory(params: ShiftHistoryParams): Promise<ShiftHistoryList> {
+  const { data } = await api.get<ShiftHistoryList>("/shifts", { params });
   return data;
 }
 

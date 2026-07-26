@@ -99,6 +99,13 @@ async def test_build_z_report_aggregates_and_breakdown(
     assert z.cash_difference == closed.closing_difference
     assert z.difference_reason == "пересчёт кассы"
 
+    api_report = await service.z_report(shift.id)
+    assert api_report["register_id"] == s["register"].id
+    assert api_report["cashier_user_id"] == s["cashier"].id
+    assert api_report["totals"]["sales_total"] == Decimal("40.00")
+    assert api_report["totals"]["returns_total"] == Decimal("10.00")
+    assert api_report["totals"]["by_method"]["mixed"] == Decimal("10.00")
+
 
 async def test_z_report_full_refund_counts_sale_and_return(
     db_session: AsyncSession, pos_scaffold

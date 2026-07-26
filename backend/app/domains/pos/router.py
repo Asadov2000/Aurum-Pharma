@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -43,6 +43,8 @@ from app.domains.pos.schemas import (
     SaleListItem,
     SaleRead,
     ShiftCloseRequest,
+    ShiftHistoryItem,
+    ShiftHistoryList,
     ShiftOpenRequest,
     ShiftRead,
     ZReport,
@@ -136,6 +138,44 @@ async def get_current_shift(
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return ShiftRead.model_validate(shift) if shift is not None else None
+
+
+@router.get("/shifts", response_model=ShiftHistoryList)
+async def list_shifts(
+    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    service: Annotated[POSService, Depends(_service)],
+    shift_status: Annotated[
+        Literal["open", "closed", "suspended"] | None,
+        Query(alias="status"),
+    ] = None,
+    branch_id: Annotated[UUID | None, Query()] = None,
+    register_id: Annotated[UUID | None, Query()] = None,
+    cashier_id: Annotated[UUID | None, Query()] = None,
+    cashier_query: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=50)] = 25,
+) -> ShiftHistoryList:
+    rows, total = await service.list_shifts(
+        tenant_id=_current_tenant_or_400(user),
+        status=shift_status,
+        branch_id=branch_id,
+        register_id=register_id,
+        cashier_id=cashier_id,
+        cashier_query=cashier_query,
+        date_from=date_from,
+        date_to=date_to,
+        allowed_branch_ids=user.branch_scope_for("reports.view"),
+        page=page,
+        page_size=page_size,
+    )
+    return ShiftHistoryList(
+        items=[ShiftHistoryItem.model_validate(row) for row in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post(

@@ -11,18 +11,36 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { paymentMethodLabel } from "@/features/pos/labels";
-import { type PaymentMethod, type ZReport } from "@/features/pos/types";
+import { type ZReport } from "@/features/pos/types";
 
-const KNOWN_METHODS: PaymentMethod[] = ["cash", "card", "bank_transfer"];
+const METHOD_LABELS = {
+  cash: "Наличные",
+  card: "Карта",
+  bank_transfer: "Банковский перевод",
+  mixed: "Смешанная оплата",
+} as const;
 
-export function ZReportCard({ report }: { report: ZReport }): JSX.Element {
+export function ZReportCard({
+  report,
+  branchName,
+  registerName,
+  cashierName,
+  reportTimezone,
+}: {
+  report: ZReport;
+  branchName?: string;
+  registerName?: string;
+  cashierName?: string | null;
+  reportTimezone: string;
+}): JSX.Element {
   // totals is a free-form dict; we extract known fields and pass the
   // rest through so unrecognised keys still render rather than disappear.
   const totals = report.totals ?? {};
   const totalSales = pickNumber(totals, "sales_total") ?? pickNumber(totals, "total_sales") ?? 0;
   const totalReturns =
     pickNumber(totals, "returns_total") ?? pickNumber(totals, "total_returns") ?? 0;
+  const totalDiscounts =
+    pickNumber(totals, "discounts_total") ?? pickNumber(totals, "total_discounts") ?? 0;
 
   const cashDiff = Number(report.closing_difference ?? 0);
   const diffTone = cashDiff === 0 ? "success" : cashDiff > 0 ? "info" : "danger";
@@ -38,18 +56,31 @@ export function ZReportCard({ report }: { report: ZReport }): JSX.Element {
           <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3">
             <Field
               label="Открыта"
-              value={new Date(report.opened_at).toLocaleString("ru-RU")}
+              value={new Date(report.opened_at).toLocaleString("ru-RU", {
+                timeZone: reportTimezone,
+              })}
             />
             <Field
               label="Закрыта"
               value={
                 report.closed_at
-                  ? new Date(report.closed_at).toLocaleString("ru-RU")
+                  ? new Date(report.closed_at).toLocaleString("ru-RU", {
+                      timeZone: reportTimezone,
+                    })
                   : "—"
               }
             />
-            <Field label="Касса" value={report.register_id.slice(0, 8)} mono />
-            <Field label="Кассир" value={report.cashier_user_id.slice(0, 8)} mono />
+            {branchName && <Field label="Точка" value={branchName} />}
+            <Field
+              label="Касса"
+              value={registerName ?? report.register_id.slice(0, 8)}
+              mono={!registerName}
+            />
+            <Field
+              label="Кассир"
+              value={cashierName ?? report.cashier_user_id.slice(0, 8)}
+              mono={!cashierName}
+            />
             <Field
               label="Продажи / Возвраты"
               value={`${report.sales_count} / ${report.returns_count}`}
@@ -83,8 +114,9 @@ export function ZReportCard({ report }: { report: ZReport }): JSX.Element {
           <CardTitle>Обороты</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3">
             <Field label="Продажи всего" value={fmt(totalSales)} mono />
+            <Field label="Скидки" value={fmt(totalDiscounts)} mono />
             <Field label="Возвраты всего" value={fmt(totalReturns)} mono />
           </div>
 
@@ -110,10 +142,12 @@ function ByMethodTable({ totals }: { totals: Record<string, unknown> }): JSX.Ele
     | undefined;
   if (!byMethod || typeof byMethod !== "object") return null;
 
-  const rows = KNOWN_METHODS.map((m) => ({
-    method: m,
-    amount: pickNumber(byMethod, m) ?? 0,
-  })).filter((r) => r.amount !== 0);
+  const rows = Object.keys(METHOD_LABELS)
+    .map((method) => ({
+      method: method as keyof typeof METHOD_LABELS,
+      amount: pickNumber(byMethod, method) ?? 0,
+    }))
+    .filter((r) => r.amount !== 0);
 
   if (rows.length === 0) return null;
 
@@ -130,7 +164,7 @@ function ByMethodTable({ totals }: { totals: Record<string, unknown> }): JSX.Ele
         <TBody>
           {rows.map((r) => (
             <TR key={r.method}>
-              <TD>{paymentMethodLabel[r.method]}</TD>
+              <TD>{METHOD_LABELS[r.method]}</TD>
               <TD className="text-right font-mono">{fmt(r.amount)}</TD>
             </TR>
           ))}

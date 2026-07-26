@@ -84,11 +84,12 @@ test.describe("Shift close → Z-report", () => {
     // Shift returns to the open-form state — wait for it to settle.
     await expect(page.getByLabel("Касса на начало смены")).toBeVisible({ timeout: 15_000 });
 
-    // ---- /reports: shift_id prefills from localStorage ----
+    // ---- /reports: choose the closed shift from readable history ----
+    await page.evaluate(() => window.localStorage.removeItem("pos:lastClosedShiftId"));
     await page.goto("/reports");
-    const shiftIdInput = page.getByLabel(/ID смены/);
-    await expect(shiftIdInput).not.toHaveValue("");
-    await page.getByRole("button", { name: /Загрузить/ }).click();
+    const shiftRow = page.locator("tbody tr").filter({ hasText: register.name });
+    await expect(shiftRow).toContainText(branch.name);
+    await shiftRow.getByRole("button", { name: "Открыть" }).click();
 
     // Three cards rendered — assert via heading roles so we don't collide
     // with sidebar links or field labels named "Касса".

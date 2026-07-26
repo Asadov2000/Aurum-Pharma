@@ -58,12 +58,14 @@ BRANCH_DISCOVERY_PERMISSIONS = (
     # incoming capability when creating or reviewing a document.
     "incoming.view",
     "incoming.create",
+    "reports.view",
 )
 REGISTER_DISCOVERY_PERMISSIONS = (
     "registers.view",
     "pos.shift_open",
     "pos.shift_close",
     "pos.sell",
+    "reports.view",
 )
 
 

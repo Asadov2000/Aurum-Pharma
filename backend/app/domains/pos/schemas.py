@@ -46,6 +46,35 @@ class ShiftRead(BaseModel):
     notes: str | None
 
 
+class ShiftHistoryItem(BaseModel):
+    id: UUID
+    branch_id: UUID
+    branch_name: str
+    register_id: UUID
+    register_name: str
+    cashier_user_id: UUID
+    cashier_name: str | None
+    opened_at: datetime
+    closed_at: datetime | None
+    status: str
+    opening_cash: Decimal
+    closing_cash_actual: Decimal | None
+    closing_cash_expected: Decimal | None
+    closing_difference: Decimal | None
+    sales_total: Decimal
+    returns_total: Decimal
+    sales_count: int
+    returns_count: int
+    currency: str
+
+
+class ShiftHistoryList(BaseModel):
+    items: list[ShiftHistoryItem]
+    total: int
+    page: int
+    page_size: int
+
+
 class ZReport(BaseModel):
     shift_id: UUID
     opened_at: datetime
@@ -386,7 +415,9 @@ class ZReportData(BaseModel):
     # header
     pharmacy_name: str
     branch_name: str
+    register_id: UUID
     register_name: str
+    cashier_user_id: UUID
     cashier_name: str | None
     opened_at: datetime
     closed_at: datetime | None

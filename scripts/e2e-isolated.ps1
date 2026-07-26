@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param()
+param(
+    [Parameter(Position = 0)]
+    [string[]]$PlaywrightArgs = @()
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -135,7 +138,12 @@ try {
     $exitCode = 1
     $ErrorActionPreference = "Continue"
     try {
-        & pnpm e2e
+        if ($PlaywrightArgs.Count -gt 0) {
+            & pnpm e2e -- @PlaywrightArgs
+        }
+        else {
+            & pnpm e2e
+        }
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -151,6 +159,16 @@ catch {
 finally {
     if ($insideFrontend) {
         Pop-Location
+    }
+
+    if ($null -ne $failure) {
+        Write-Host "E2E failed; collecting service logs before cleanup..."
+        try {
+            & docker @composeArgs logs --no-color --tail 200 backend frontend
+        }
+        catch {
+            Write-Warning "Unable to collect E2E service logs: $($_.Exception.Message)"
+        }
     }
 
     Write-Host "Removing disposable E2E containers and volumes..."
