@@ -6,6 +6,7 @@ const downloadBlob = vi.fn();
 
 vi.mock("@/features/reports/api", () => ({
   getZReport: vi.fn(),
+  listShiftHistory: vi.fn(),
   getSalesSummaryXlsx: vi.fn(),
   getStockOnDateXlsx: (...a: unknown[]) => getStockOnDateXlsx(...a),
 }));
@@ -16,6 +17,8 @@ vi.mock("@/lib/download", () => ({
 
 vi.mock("@/features/foundation/queries", () => ({
   useBranchesQuery: () => ({ data: [] }),
+  useRegistersQuery: () => ({ data: [] }),
+  useTenantSettingsQuery: () => ({ data: { report_timezone: "Asia/Dushanbe" } }),
 }));
 
 import { StockOnDateCard } from "@/features/reports/ReportsPage";

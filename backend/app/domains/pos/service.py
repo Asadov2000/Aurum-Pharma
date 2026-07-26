@@ -153,6 +153,46 @@ class POSService:
             self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
         return shift
 
+    async def list_shifts(
+        self,
+        *,
+        tenant_id: UUID,
+        status: str | None,
+        branch_id: UUID | None,
+        register_id: UUID | None,
+        cashier_id: UUID | None,
+        cashier_query: str | None,
+        date_from: date | None,
+        date_to: date | None,
+        allowed_branch_ids: set[UUID] | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise BusinessRuleError("date_from must be on or before date_to")
+        if (
+            branch_id is not None
+            and allowed_branch_ids is not None
+            and branch_id not in allowed_branch_ids
+        ):
+            raise PermissionDeniedError("Branch access denied")
+
+        normalized_cashier_query = cashier_query.strip() if cashier_query is not None else None
+        return await self.repo.list_shifts(
+            tenant_id=tenant_id,
+            status=status,
+            branch_id=branch_id,
+            register_id=register_id,
+            cashier_id=cashier_id,
+            cashier_query=normalized_cashier_query or None,
+            date_from=date_from,
+            date_to=date_to,
+            branch_ids=allowed_branch_ids,
+            page=page,
+            page_size=page_size,
+            tz=await self._report_tz(tenant_id),
+        )
+
     async def close_shift(
         self,
         *,
@@ -206,24 +246,28 @@ class POSService:
         *,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> dict[str, Any]:
-        shift = await self.repo.get_shift(shift_id)
-        if shift is None:
-            raise NotFoundError("Shift not found")
-        self._assert_branch_allowed(shift.branch_id, allowed_branch_ids=allowed_branch_ids)
-        totals = shift.totals or await self.repo.shift_totals(shift_id)
+        report = await self.build_z_report(
+            shift_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
         return {
-            "shift_id": shift.id,
-            "opened_at": shift.opened_at,
-            "closed_at": shift.closed_at,
-            "register_id": shift.register_id,
-            "cashier_user_id": shift.opened_by_user_id,
-            "opening_cash": shift.opening_cash,
-            "closing_cash_actual": shift.closing_cash_actual,
-            "closing_cash_expected": shift.closing_cash_expected,
-            "closing_difference": shift.closing_difference,
-            "totals": totals,
-            "sales_count": int(totals.get("sales_count", 0)),
-            "returns_count": int(totals.get("returns_count", 0)),
+            "shift_id": report.shift_id,
+            "opened_at": report.opened_at,
+            "closed_at": report.closed_at,
+            "register_id": report.register_id,
+            "cashier_user_id": report.cashier_user_id,
+            "opening_cash": report.initial_cash,
+            "closing_cash_actual": report.actual_cash,
+            "closing_cash_expected": report.expected_cash,
+            "closing_difference": report.cash_difference,
+            "totals": {
+                "sales_total": report.total_sales,
+                "returns_total": report.total_refunds,
+                "discounts_total": report.total_discounts,
+                "by_method": report.payment_breakdown.model_dump(),
+            },
+            "sales_count": report.sales_count,
+            "returns_count": report.returns_count,
         }
 
     # =========================================================================
@@ -921,7 +965,9 @@ class POSService:
             status=shift.status,
             pharmacy_name=tenant.name if tenant is not None else "",
             branch_name=branch.name if branch is not None else "",
+            register_id=shift.register_id,
             register_name=register.name if register is not None else "",
+            cashier_user_id=shift.opened_by_user_id,
             cashier_name=cashier_name,
             opened_at=shift.opened_at,
             closed_at=shift.closed_at,

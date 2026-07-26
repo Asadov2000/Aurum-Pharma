@@ -93,6 +93,7 @@ export interface TenantSettings {
   pin_mode_enabled: boolean;
   draft_sale_lifetime_min: number;
   prescription_warning_text: string;
+  report_timezone: string;
   updated_at: string;
 }
 

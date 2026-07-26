@@ -3,42 +3,79 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getZReport = vi.fn();
+const listShiftHistory = vi.fn();
 const getSalesSummaryXlsx = vi.fn();
 const getStockOnDateXlsx = vi.fn();
 const getZReportXlsx = vi.fn();
 const listBranches = vi.fn();
+const listRegisters = vi.fn();
+const getTenantSettings = vi.fn();
 
 vi.mock("@/features/reports/api", () => ({
-  getZReport: (...a: unknown[]) => getZReport(...a),
-  getSalesSummaryXlsx: (...a: unknown[]) => getSalesSummaryXlsx(...a),
-  getStockOnDateXlsx: (...a: unknown[]) => getStockOnDateXlsx(...a),
+  getZReport: (...args: unknown[]) => getZReport(...args),
+  listShiftHistory: (...args: unknown[]) => listShiftHistory(...args),
+  getSalesSummaryXlsx: (...args: unknown[]) => getSalesSummaryXlsx(...args),
+  getStockOnDateXlsx: (...args: unknown[]) => getStockOnDateXlsx(...args),
 }));
 
 vi.mock("@/features/pos/api", () => ({
-  getZReportXlsx: (...a: unknown[]) => getZReportXlsx(...a),
+  getZReportXlsx: (...args: unknown[]) => getZReportXlsx(...args),
 }));
 
 vi.mock("@/features/foundation/api", () => ({
-  listBranches: (...a: unknown[]) => listBranches(...a),
+  listBranches: (...args: unknown[]) => listBranches(...args),
+  listRegisters: (...args: unknown[]) => listRegisters(...args),
+  getTenantSettings: (...args: unknown[]) => getTenantSettings(...args),
 }));
 
 import { ReportsPage } from "@/features/reports/ReportsPage";
 
 function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <QueryClientProvider client={qc}>
+    <QueryClientProvider client={queryClient}>
       <ReportsPage />
     </QueryClientProvider>,
   );
 }
 
-const Z_REPORT = {
-  shift_id: "sh-1",
+const SHIFT = {
+  id: "shift-1",
+  branch_id: "branch-1",
+  branch_name: "Аптека Рудаки",
+  register_id: "register-1",
+  register_name: "Касса 01",
+  cashier_user_id: "cashier-1",
+  cashier_name: "Малика Саидова",
   opened_at: "2026-05-23T08:00:00Z",
   closed_at: "2026-05-23T20:00:00Z",
-  register_id: "r-deadbeef",
-  cashier_user_id: "u-cafe1234",
+  status: "closed",
+  opening_cash: "100.00",
+  closing_cash_actual: "1250.00",
+  closing_cash_expected: "1250.00",
+  closing_difference: "0.00",
+  sales_total: "1200.00",
+  returns_total: "50.00",
+  sales_count: 12,
+  returns_count: 1,
+  currency: "TJS",
+} as const;
+
+const SHIFT_LIST = {
+  items: [SHIFT],
+  total: 1,
+  page: 1,
+  page_size: 25,
+};
+
+const Z_REPORT = {
+  shift_id: SHIFT.id,
+  opened_at: SHIFT.opened_at,
+  closed_at: SHIFT.closed_at,
+  register_id: SHIFT.register_id,
+  cashier_user_id: SHIFT.cashier_user_id,
   opening_cash: "100.00",
   closing_cash_actual: "1250.00",
   closing_cash_expected: "1250.00",
@@ -56,51 +93,84 @@ describe("ReportsPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
     getZReport.mockReset();
+    listShiftHistory.mockReset();
     getSalesSummaryXlsx.mockReset();
     getStockOnDateXlsx.mockReset();
     getZReportXlsx.mockReset();
     listBranches.mockReset();
+    listRegisters.mockReset();
+    getTenantSettings.mockReset();
     listBranches.mockResolvedValue([]);
+    listRegisters.mockResolvedValue([]);
+    getTenantSettings.mockResolvedValue({ report_timezone: "Asia/Dushanbe" });
+    listShiftHistory.mockResolvedValue(SHIFT_LIST);
   });
+
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it("disables 'Загрузить' until a shift_id is typed", () => {
-    renderPage();
-    const btn = screen.getByRole("button", { name: /Загрузить/i });
-    expect(btn).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("ID смены"), {
-      target: { value: "sh-1" },
-    });
-    expect(btn).not.toBeDisabled();
-  });
-
-  it("renders the Z-report when the API returns data", async () => {
+  it("shows resolved shift history and opens a Z-report without a UUID field", async () => {
     getZReport.mockResolvedValueOnce(Z_REPORT);
     renderPage();
-    fireEvent.change(screen.getByLabelText("ID смены"), {
-      target: { value: "sh-1" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /Загрузить/i }));
+
+    expect(await screen.findByText("Аптека Рудаки")).toBeInTheDocument();
+    expect(screen.getByText("Касса 01")).toBeInTheDocument();
+    expect(screen.getByText("Малика Саидова")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/ID смены/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+
     await waitFor(() => {
-      expect(getZReport).toHaveBeenCalledWith("sh-1");
+      expect(getZReport).toHaveBeenCalledWith(SHIFT.id);
     });
-    // "На начало" is unique to the cash card; using it avoids the duplicate
-    // "Касса" string (CardTitle + Field label).
     expect(await screen.findByText("На начало")).toBeInTheDocument();
-    // sales_count / returns_count
-    expect(screen.getByText("12 / 1")).toBeInTheDocument();
-    // matching close balance → success badge with "сходится"
-    expect(screen.getByText(/сходится/i)).toBeInTheDocument();
-    // Per-method row from totals.by_method
-    expect(screen.getByText("Наличные")).toBeInTheDocument();
+    expect(screen.getAllByText("Аптека Рудаки").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Малика Саидова").length).toBeGreaterThan(0);
   });
 
-  it("preloads the last-closed shift id from localStorage", () => {
-    window.localStorage.setItem("pos:lastClosedShiftId", "sh-from-storage");
+  it("loads the last closed shift automatically when it is in recent history", async () => {
+    window.localStorage.setItem("pos:lastClosedShiftId", SHIFT.id);
+    getZReport.mockResolvedValueOnce(Z_REPORT);
+
     renderPage();
-    const input = screen.getByLabelText("ID смены") as HTMLInputElement;
-    expect(input.value).toBe("sh-from-storage");
+
+    await waitFor(() => {
+      expect(getZReport).toHaveBeenCalledWith(SHIFT.id);
+    });
+    expect(await screen.findByText(/сходится/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Открыт" })).toBeInTheDocument();
+  });
+
+  it("applies cashier search only after submitting filters", async () => {
+    renderPage();
+    await screen.findByText("Малика Саидова");
+    expect(listShiftHistory).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByLabelText("Кассир"), {
+      target: { value: "Малика" },
+    });
+    expect(listShiftHistory).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Показать" }));
+
+    await waitFor(() => {
+      expect(listShiftHistory).toHaveBeenLastCalledWith(
+        expect.objectContaining({ cashier_query: "Малика" }),
+      );
+    });
+  });
+
+  it("renders a useful empty state", async () => {
+    listShiftHistory.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Закрытых смен не найдено")).toBeInTheDocument();
   });
 });

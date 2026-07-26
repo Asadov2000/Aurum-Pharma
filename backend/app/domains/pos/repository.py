@@ -95,6 +95,133 @@ class POSRepository:
         await self.session.refresh(shift)
         return shift
 
+    async def list_shifts(
+        self,
+        *,
+        tenant_id: UUID,
+        status: str | None,
+        branch_id: UUID | None,
+        register_id: UUID | None,
+        cashier_id: UUID | None,
+        cashier_query: str | None,
+        date_from: date | None,
+        date_to: date | None,
+        branch_ids: set[UUID] | None,
+        page: int,
+        page_size: int,
+        tz: str,
+    ) -> tuple[list[dict[str, Any]], int]:
+        clauses = ["sh.tenant_id = :tenant_id"]
+        params: dict[str, Any] = {"tenant_id": str(tenant_id)}
+
+        if status is not None:
+            clauses.append("sh.status = :status")
+            params["status"] = status
+        if branch_id is not None:
+            clauses.append("sh.branch_id = :branch_id")
+            params["branch_id"] = str(branch_id)
+        if branch_ids is not None:
+            clauses.append(
+                self._branch_scope_predicate(
+                    params,
+                    branch_ids,
+                    prefix="shift_branch",
+                    column="sh.branch_id",
+                )
+            )
+        if register_id is not None:
+            clauses.append("sh.register_id = :register_id")
+            params["register_id"] = str(register_id)
+        if cashier_id is not None:
+            clauses.append("sh.opened_by_user_id = :cashier_id")
+            params["cashier_id"] = str(cashier_id)
+        if cashier_query is not None:
+            clauses.append("strpos(lower(u.full_name), lower(:cashier_query)) > 0")
+            params["cashier_query"] = cashier_query
+        if date_from is not None:
+            start, _ = local_day_range(date_from, tz)
+            clauses.append("sh.opened_at >= :date_from")
+            params["date_from"] = start
+        if date_to is not None:
+            _, end = local_day_range(date_to, tz)
+            clauses.append("sh.opened_at < :date_to")
+            params["date_to"] = end
+
+        where = " AND ".join(clauses)
+        joins = """
+            FROM shift AS sh
+            JOIN branch AS b ON b.id = sh.branch_id
+            JOIN register AS reg ON reg.id = sh.register_id
+            LEFT JOIN app_user AS u ON u.id = sh.opened_by_user_id
+        """
+        total = int(
+            (
+                await self.session.execute(
+                    text(f"SELECT count(*) {joins} WHERE {where}"),
+                    params,
+                )
+            ).scalar_one()
+        )
+
+        page_params = {
+            **params,
+            "limit": page_size,
+            "offset": (page - 1) * page_size,
+        }
+        rows = (
+            await self.session.execute(
+                text(f"""
+                    SELECT
+                      sh.id,
+                      sh.branch_id,
+                      b.name AS branch_name,
+                      sh.register_id,
+                      reg.name AS register_name,
+                      sh.opened_by_user_id AS cashier_user_id,
+                      u.full_name AS cashier_name,
+                      sh.opened_at,
+                      sh.closed_at,
+                      sh.status,
+                      sh.opening_cash,
+                      sh.closing_cash_actual,
+                      sh.closing_cash_expected,
+                      sh.closing_difference,
+                      shift_sales.sales_total,
+                      shift_sales.returns_total,
+                      COALESCE((sh.totals ->> 'sales_count')::integer, 0) AS sales_count,
+                      COALESCE((sh.totals ->> 'returns_count')::integer, 0)
+                        AS returns_count,
+                      sh.currency
+                    {joins}
+                    LEFT JOIN LATERAL (
+                      SELECT
+                        COALESCE(
+                          SUM(sale.total_amount) FILTER (
+                            WHERE sale.sale_type = 'sale'
+                              AND sale.status IN ('completed', 'voided')
+                          ),
+                          0
+                        ) AS sales_total,
+                        COALESCE(
+                          SUM(sale.total_amount) FILTER (
+                            WHERE sale.sale_type = 'return'
+                              AND sale.status = 'completed'
+                          ),
+                          0
+                        ) AS returns_total
+                      FROM sale
+                      WHERE sale.shift_id = sh.id
+                        AND sale.is_test = false
+                    ) AS shift_sales ON true
+                    WHERE {where}
+                    ORDER BY sh.opened_at DESC, sh.id DESC
+                    LIMIT :limit OFFSET :offset
+                """),
+                page_params,
+            )
+        ).mappings()
+        return [dict(row) for row in rows], total
+
     # -------- sale --------
 
     async def create_sale(self, **fields: Any) -> Sale:
@@ -480,6 +607,7 @@ class POSRepository:
         branch_ids: set[UUID],
         *,
         prefix: str,
+        column: str = "s.branch_id",
     ) -> str:
         if not branch_ids:
             return "1 = 0"
@@ -488,7 +616,7 @@ class POSRepository:
             key = f"{prefix}_{idx}"
             branch_keys.append(f":{key}")
             params[key] = str(allowed_branch_id)
-        return f"s.branch_id IN ({', '.join(branch_keys)})"
+        return f"{column} IN ({', '.join(branch_keys)})"
 
     @staticmethod
     def _append_sales_visibility_clause(
