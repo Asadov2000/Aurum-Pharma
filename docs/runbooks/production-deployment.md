@@ -84,6 +84,11 @@ docker compose \
 docker compose \
   --env-file /etc/aurum/production.env \
   --file docker-compose.production.yml \
+  --profile maintenance run --rm db-role-bootstrap
+
+docker compose \
+  --env-file /etc/aurum/production.env \
+  --file docker-compose.production.yml \
   --profile maintenance run --rm migrate
 ```
 
@@ -129,9 +134,11 @@ ss -lntup
 
 1. Создайте backup и подтвердите возможность восстановления.
 2. Соберите новый неизменяемый `AURUM_IMAGE_TAG`.
-3. Выполните `migrate`.
-4. Пересоздайте backend, Celery и gateway.
-5. Выполните smoke-тесты.
+3. Выполните `db-role-bootstrap`; он идемпотентно нормализует роли и перед
+   revision 0067 создаёт недостающие `aurum_migrator`/`aurum_schema_owner`.
+4. Выполните `migrate`.
+5. Пересоздайте backend, Celery и gateway.
+6. Выполните smoke-тесты.
 
 Откат приложения выполняется возвратом предыдущего image tag только при
 обратно-совместимой схеме. Production-БД не откатывается миграцией вниз. Если

@@ -90,6 +90,35 @@ async def _assert_rls_denied(
                 await transaction.rollback()
 
 
+async def _cleanup_indirect_scope_rows(
+    *,
+    support_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
+    tenant_ids: list[str],
+    user_ids: list[str],
+) -> None:
+    if not tenant_ids and not user_ids:
+        return
+    async with support_engine.begin() as conn:
+        if tenant_ids:
+            await conn.execute(
+                text("DELETE FROM tenant WHERE id = ANY(CAST(:ids AS UUID[]))"),
+                {"ids": tenant_ids},
+            )
+    if tenant_ids:
+        async with maintenance_engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM audit_log WHERE tenant_id = ANY(CAST(:ids AS UUID[]))"),
+                {"ids": tenant_ids},
+            )
+    if user_ids:
+        async with support_engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM app_user WHERE id = ANY(CAST(:ids AS UUID[]))"),
+                {"ids": user_ids},
+            )
+
+
 async def test_indirect_scope_policy_contract(
     support_engine_iso: AsyncEngine,
 ) -> None:
@@ -169,6 +198,7 @@ class IndirectScopeRows:
 @pytest_asyncio.fixture
 async def indirect_scope_rows(
     support_engine_iso: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> AsyncIterator[IndirectScopeRows]:
     token = uuid4().hex[:12]
     tenant_ids: list[str] = []
@@ -444,24 +474,12 @@ async def indirect_scope_rows(
             permission_codes=tuple(permission_codes),
         )
     finally:
-        if tenant_ids or user_ids:
-            async with support_engine_iso.begin() as conn:
-                if tenant_ids:
-                    await conn.execute(
-                        text("DELETE FROM tenant WHERE id = ANY(CAST(:ids AS UUID[]))"),
-                        {"ids": tenant_ids},
-                    )
-                    await conn.execute(
-                        text(
-                            "DELETE FROM audit_log " "WHERE tenant_id = ANY(CAST(:ids AS UUID[]))"
-                        ),
-                        {"ids": tenant_ids},
-                    )
-                if user_ids:
-                    await conn.execute(
-                        text("DELETE FROM app_user WHERE id = ANY(CAST(:ids AS UUID[]))"),
-                        {"ids": user_ids},
-                    )
+        await _cleanup_indirect_scope_rows(
+            support_engine=support_engine_iso,
+            maintenance_engine=maintenance_engine,
+            tenant_ids=tenant_ids,
+            user_ids=user_ids,
+        )
 
 
 async def test_indirect_scope_reads_are_isolated(

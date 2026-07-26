@@ -12,9 +12,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:?Set AURUM_APP_PASSWORD}
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:?Set AURUM_SUPPORT_PASSWORD}
+      AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:?Set AURUM_MIGRATOR_PASSWORD}
     volumes:
       - edge-postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d aurum_edge"]
       interval: 5s
@@ -23,23 +25,39 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  edge-db-role-bootstrap:
+    profiles: ["edge-shadow"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_HOST: edge-postgres
+      POSTGRES_DB: aurum_edge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:?Set AURUM_APP_PASSWORD}
+      AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:?Set AURUM_SUPPORT_PASSWORD}
+      AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:?Set AURUM_MIGRATOR_PASSWORD}
+    volumes:
+      - ./infra/postgres:/opt/aurum/postgres:ro
+    depends_on:
+      edge-postgres:
+        condition: service_healthy
+    command: ["sh", "/opt/aurum/postgres/bootstrap-roles.sh"]
+
   edge-migrate:
     profiles: ["edge-shadow"]
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL_APP: ${EDGE_DATABASE_URL_APP:?Set EDGE_DATABASE_URL_APP}
       DATABASE_URL_SUPPORT: ${EDGE_DATABASE_URL_SUPPORT:?Set EDGE_DATABASE_URL_SUPPORT}
-      # Settings requires this field, but the migration process never signs JWTs.
-      JWT_SECRET: edge-migrate-has-no-http-auth-surface
+      DATABASE_URL_MIGRATION: ${EDGE_DATABASE_URL_MIGRATION:?Set EDGE_DATABASE_URL_MIGRATION}
       PYTHONPATH: /app
     volumes:
       - ./backend:/app
     depends_on:
-      edge-postgres:
-        condition: service_healthy
-    command: alembic upgrade head
+      edge-db-role-bootstrap:
+        condition: service_completed_successfully
+    command: python -m app.migrate upgrade head
 
   edge-worker:
     profiles: ["edge-shadow"]

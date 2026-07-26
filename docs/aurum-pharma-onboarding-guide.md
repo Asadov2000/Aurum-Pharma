@@ -46,7 +46,7 @@ Aurum Pharma — SaaS-система автоматизации аптек дл�
 ```powershell
 cd C:\Users\Asadov\Desktop\A-Pharma
 docker compose up -d
-docker compose exec backend alembic upgrade head
+powershell -ExecutionPolicy Bypass -File .\scripts\migrate-local.ps1
 docker compose exec backend python -m app.seed_demo
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1
 ```

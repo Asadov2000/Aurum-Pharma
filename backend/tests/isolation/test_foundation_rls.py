@@ -66,6 +66,7 @@ async def _set_support_flag(conn: AsyncConnection) -> None:
 async def test_tenant_a_does_not_see_branches_of_tenant_b(
     support_engine_iso: AsyncEngine,
     app_engine_iso: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> None:
     tenant_ids: list[str] = []
     try:
@@ -192,6 +193,8 @@ async def test_tenant_a_does_not_see_branches_of_tenant_b(
                     text("DELETE FROM tenant WHERE id = ANY(:ids)"),
                     {"ids": tenant_ids},
                 )
+
+            async with maintenance_engine.begin() as conn:
                 await conn.execute(
                     text("DELETE FROM audit_log WHERE tenant_id = ANY(:ids)"),
                     {"ids": tenant_ids},

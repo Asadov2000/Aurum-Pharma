@@ -15,11 +15,11 @@ from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
 
 AUDIT_TABLE_PRIVILEGES_SQL = """
-SELECT privilege_type
-FROM information_schema.role_table_grants
-WHERE table_schema = 'public'
-  AND table_name = 'audit_log'
-  AND grantee = 'aurum_app'
+SELECT
+  has_table_privilege('aurum_app', 'public.audit_log', 'SELECT') AS can_select,
+  has_table_privilege('aurum_app', 'public.audit_log', 'INSERT') AS can_insert,
+  has_table_privilege('aurum_app', 'public.audit_log', 'UPDATE') AS can_update,
+  has_table_privilege('aurum_app', 'public.audit_log', 'DELETE') AS can_delete
 """
 
 AUDIT_FUNCTION_SECURITY_SQL = """
@@ -73,11 +73,13 @@ async def test_audit_privileges_are_least_privilege(
     support_engine_audit: AsyncEngine,
 ) -> None:
     async with support_engine_audit.connect() as conn:
-        table_privileges_result = await conn.execute(text(AUDIT_TABLE_PRIVILEGES_SQL))
-        table_privileges = set(table_privileges_result.scalars())
+        table_privileges = (await conn.execute(text(AUDIT_TABLE_PRIVILEGES_SQL))).one()
         security = (await conn.execute(text(AUDIT_FUNCTION_SECURITY_SQL))).one()
 
-    assert table_privileges == {"SELECT"}
+    assert table_privileges.can_select is True
+    assert table_privileges.can_insert is False
+    assert table_privileges.can_update is False
+    assert table_privileges.can_delete is False
     assert security.can_create is False
     assert security.can_execute_trigger is False
     assert security.can_append is True
@@ -88,6 +90,7 @@ async def test_audit_privileges_are_least_privilege(
 async def test_app_uses_validated_append_and_cannot_tamper(
     support_engine_audit: AsyncEngine,
     app_engine_audit: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> None:
     tenant_id: str | None = None
     branch_id: str | None = None
@@ -197,6 +200,8 @@ async def test_app_uses_validated_append_and_cannot_tamper(
                     text("DELETE FROM tenant WHERE id = CAST(:tenant_id AS UUID)"),
                     {"tenant_id": tenant_id},
                 )
+
+            async with maintenance_engine.begin() as conn:
                 await conn.execute(
                     text("DELETE FROM audit_log " "WHERE tenant_id = CAST(:tenant_id AS UUID)"),
                     {"tenant_id": tenant_id},

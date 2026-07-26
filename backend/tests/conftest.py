@@ -38,6 +38,9 @@ _LOCAL_TEST_DATABASE_URL_APP = (
 _LOCAL_TEST_DATABASE_URL_SUPPORT = (
     "postgresql+asyncpg://aurum_support:aurum_support_pw@postgres-test:5432/aurum_test"
 )
+_LOCAL_TEST_DATABASE_URL_MIGRATION = (
+    "postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@postgres-test:5432/aurum_test"
+)
 
 
 def _require_disposable_test_database(url: str, variable_name: str) -> None:
@@ -50,13 +53,21 @@ _test_database_url_app = os.getenv("TEST_DATABASE_URL_APP", _LOCAL_TEST_DATABASE
 _test_database_url_support = os.getenv(
     "TEST_DATABASE_URL_SUPPORT", _LOCAL_TEST_DATABASE_URL_SUPPORT
 )
+_test_database_url_migration = os.getenv(
+    "TEST_DATABASE_URL_MIGRATION", _LOCAL_TEST_DATABASE_URL_MIGRATION
+)
 _require_disposable_test_database(_test_database_url_app, "TEST_DATABASE_URL_APP")
 _require_disposable_test_database(_test_database_url_support, "TEST_DATABASE_URL_SUPPORT")
+_require_disposable_test_database(
+    _test_database_url_migration,
+    "TEST_DATABASE_URL_MIGRATION",
+)
 
 # Configure the application before importing it: every engine created during
 # test collection must point at the disposable test database, never shared dev.
 os.environ["DATABASE_URL_APP"] = _test_database_url_app
 os.environ["DATABASE_URL_SUPPORT"] = _test_database_url_support
+os.environ["DATABASE_URL_MIGRATION"] = _test_database_url_migration
 
 
 @pytest_asyncio.fixture
@@ -67,6 +78,21 @@ async def db_engine() -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(
         settings.DATABASE_URL_SUPPORT,
         poolclass=NullPool,
+    )
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def maintenance_engine() -> AsyncIterator[AsyncEngine]:
+    """Owner-scoped engine used only for test teardown and global state repair."""
+
+    engine = create_async_engine(
+        _test_database_url_migration,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"role": "aurum_schema_owner"}},
     )
     try:
         yield engine

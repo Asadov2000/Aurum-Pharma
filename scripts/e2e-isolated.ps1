@@ -25,17 +25,35 @@ foreach ($name in $environmentNames) {
 }
 
 function Invoke-E2ECompose {
-    & docker @composeArgs @args
-    if ($LASTEXITCODE -ne 0) {
-        throw "docker compose failed with exit code $LASTEXITCODE"
+    $previousPreference = $ErrorActionPreference
+    $exitCode = 1
+    $ErrorActionPreference = "Continue"
+    try {
+        & docker @composeArgs @args
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "docker compose failed with exit code $exitCode"
     }
 }
 
 function Get-E2EContainerId {
     param([Parameter(Mandatory = $true)][string]$Service)
 
-    $containerIds = & docker @composeArgs ps --quiet $Service
-    $exitCode = $LASTEXITCODE
+    $previousPreference = $ErrorActionPreference
+    $containerIds = @()
+    $exitCode = 1
+    $ErrorActionPreference = "Continue"
+    try {
+        $containerIds = & docker @composeArgs ps --quiet $Service
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
     $containerId = @($containerIds)[0]
     if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
         throw "Unable to resolve the disposable $Service container"
@@ -76,12 +94,14 @@ try {
 
     Write-Host "Resetting disposable E2E stack..."
     Invoke-E2ECompose down --volumes --remove-orphans
-    Invoke-E2ECompose up --detach --build postgres redis minio backend celery-worker frontend
+    Invoke-E2ECompose up --detach --build postgres redis minio
+    Invoke-E2ECompose run --rm db-role-bootstrap
+    Invoke-E2ECompose run --rm --build migrate
+    Invoke-E2ECompose up --detach --build backend celery-worker frontend
 
     Wait-HttpOk "E2E backend" "http://localhost:18000/healthz"
     Wait-HttpOk "E2E frontend" "http://localhost:15173"
 
-    Invoke-E2ECompose exec -T backend alembic upgrade head
     Invoke-E2ECompose exec -T -e AURUM_E2E_SEED=1 backend python -m app.seed_e2e
     Invoke-E2ECompose exec -T backend python -m app.seed_demo
     Invoke-E2ECompose restart frontend
@@ -98,7 +118,11 @@ try {
         (Get-E2EContainerId "postgres"),
         "Process"
     )
-    [Environment]::SetEnvironmentVariable("E2E_POSTGRES_DB", "aurum", "Process")
+    $e2eDatabase = [Environment]::GetEnvironmentVariable("AURUM_E2E_DATABASE", "Process")
+    if ([string]::IsNullOrWhiteSpace($e2eDatabase)) {
+        $e2eDatabase = "aurum"
+    }
+    [Environment]::SetEnvironmentVariable("E2E_POSTGRES_DB", $e2eDatabase, "Process")
     [Environment]::SetEnvironmentVariable(
         "E2E_REDIS_CONTAINER",
         (Get-E2EContainerId "redis"),
@@ -107,9 +131,18 @@ try {
 
     Push-Location (Join-Path $workspace "frontend")
     $insideFrontend = $true
-    & pnpm e2e
-    if ($LASTEXITCODE -ne 0) {
-        throw "Playwright failed with exit code $LASTEXITCODE"
+    $previousPreference = $ErrorActionPreference
+    $exitCode = 1
+    $ErrorActionPreference = "Continue"
+    try {
+        & pnpm e2e
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "Playwright failed with exit code $exitCode"
     }
 }
 catch {
