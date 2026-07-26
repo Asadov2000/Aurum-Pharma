@@ -342,11 +342,8 @@ WITH protected_owners AS (
   FROM pg_catalog.pg_roles AS roles
   WHERE roles.rolname IN (
     'aurum_support',
-    (
-      SELECT pg_catalog.pg_get_userbyid(databases.datdba)
-      FROM pg_catalog.pg_database AS databases
-      WHERE databases.datname = current_database()
-    )
+    'aurum_schema_owner',
+    'aurum_migrator'
   )
 ),
 object_types(object_type) AS (
@@ -469,7 +466,7 @@ JOIN pg_catalog.pg_namespace AS schemas
 JOIN pg_catalog.pg_roles AS owners
   ON owners.oid = routines.proowner
 WHERE schemas.nspname = 'public'
-  AND owners.rolname = 'aurum_support'
+  AND owners.rolname = 'aurum_schema_owner'
 ORDER BY routines.proname
 """
 
@@ -672,7 +669,7 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         "public_has_privileges": False,
     }
     assert {row["relname"] for row in view_security} == RUNTIME_VIEWS
-    assert all(row["owner"] == "aurum_support" for row in view_security)
+    assert all(row["owner"] == "aurum_schema_owner" for row in view_security)
     assert {
         row["attname"] for row in sync_outbox_column_privileges if row["can_insert"]
     } == SYNC_OUTBOX_INSERT_COLUMNS
@@ -1124,71 +1121,24 @@ async def test_runtime_role_can_use_required_extension_functions(
     assert result == {"trigram_matches": True, "uuid_generated": True}
 
 
-async def test_new_support_objects_are_private_by_default(
+@pytest.mark.parametrize(
+    "ddl",
+    (
+        "CREATE TABLE public.support_must_not_create_table (id INTEGER)",
+        "CREATE SEQUENCE public.support_must_not_create_sequence",
+        (
+            "CREATE FUNCTION public.support_must_not_create_function() "
+            "RETURNS INTEGER LANGUAGE SQL AS 'SELECT 1'"
+        ),
+    ),
+)
+async def test_support_cannot_create_database_objects(
     support_engine_privileges: AsyncEngine,
+    ddl: str,
 ) -> None:
-    suffix = uuid4().hex
-    table_name = f"runtime_default_table_{suffix}"
-    sequence_name = f"runtime_default_sequence_{suffix}"
-    function_name = f"runtime_default_function_{suffix}"
-
-    async with support_engine_privileges.connect() as conn:
-        transaction = await conn.begin()
-        try:
-            await conn.execute(text(f"CREATE TABLE public.{table_name} (id INTEGER)"))
-            await conn.execute(text(f"CREATE SEQUENCE public.{sequence_name}"))
-            await conn.execute(
-                text(
-                    f"CREATE FUNCTION public.{function_name}() RETURNS INTEGER "
-                    "LANGUAGE SQL AS 'SELECT 1'"
-                )
-            )
-            result = (
-                (
-                    await conn.execute(
-                        text("""
-                        SELECT
-                          EXISTS (
-                            SELECT 1
-                            FROM pg_catalog.unnest(ARRAY[
-                              'SELECT', 'INSERT', 'UPDATE', 'DELETE',
-                              'TRUNCATE', 'REFERENCES', 'TRIGGER'
-                            ]) AS checks(privilege)
-                            WHERE pg_catalog.has_table_privilege(
-                              'aurum_app', :table_name, checks.privilege
-                            )
-                          ) AS app_has_table_privilege,
-                          EXISTS (
-                            SELECT 1
-                            FROM pg_catalog.unnest(
-                              ARRAY['USAGE', 'SELECT', 'UPDATE']
-                            ) AS checks(privilege)
-                            WHERE pg_catalog.has_sequence_privilege(
-                              'aurum_app', :sequence_name, checks.privilege
-                            )
-                          ) AS app_has_sequence_privilege,
-                          pg_catalog.has_function_privilege(
-                            'aurum_app', :function_name, 'EXECUTE'
-                          ) AS app_can_execute_function
-                        """),
-                        {
-                            "table_name": f"public.{table_name}",
-                            "sequence_name": f"public.{sequence_name}",
-                            "function_name": f"public.{function_name}()",
-                        },
-                    )
-                )
-                .mappings()
-                .one()
-            )
-
-            assert result == {
-                "app_has_table_privilege": False,
-                "app_has_sequence_privilege": False,
-                "app_can_execute_function": False,
-            }
-        finally:
-            await transaction.rollback()
+    with pytest.raises(DBAPIError):
+        async with support_engine_privileges.begin() as conn:
+            await conn.execute(text(ddl))
 
 
 async def test_runtime_views_apply_invoker_tenant_rls(
@@ -1276,12 +1226,5 @@ async def test_runtime_views_apply_invoker_tenant_rls(
             async with support_engine_privileges.begin() as conn:
                 await conn.execute(
                     text("DELETE FROM tenant WHERE id = ANY(CAST(:tenant_ids AS UUID[]))"),
-                    {"tenant_ids": tenant_ids},
-                )
-                await conn.execute(
-                    text(
-                        "DELETE FROM audit_log "
-                        "WHERE tenant_id = ANY(CAST(:tenant_ids AS UUID[]))"
-                    ),
                     {"tenant_ids": tenant_ids},
                 )

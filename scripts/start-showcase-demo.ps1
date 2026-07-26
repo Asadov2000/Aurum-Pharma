@@ -17,6 +17,7 @@ $secretHexLengths = [ordered]@{
     AURUM_DEMO_POSTGRES_PASSWORD = 64
     AURUM_DEMO_APP_PASSWORD = 64
     AURUM_DEMO_SUPPORT_PASSWORD = 64
+    AURUM_DEMO_MIGRATOR_PASSWORD = 64
     AURUM_DEMO_REDIS_PASSWORD = 64
     AURUM_DEMO_JWT_SECRET = 96
     AURUM_DEMO_MFA_ENCRYPTION_KEY = 96
@@ -247,11 +248,38 @@ function New-ShowcaseEnvironmentFile {
     }
 }
 
+function Add-MissingShowcaseMigratorSecret {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $key = "AURUM_DEMO_MIGRATOR_PASSWORD"
+    $hasKey = [System.IO.File]::ReadAllLines($Path) |
+        Where-Object { $_ -match "^$key=" }
+    if ($hasKey) {
+        return
+    }
+    if ($DryRun) {
+        throw "$environmentFileName needs a one-time migration-secret upgrade"
+    }
+
+    $value = New-CryptographicHex -ByteCount 32
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::AppendAllText(
+        $Path,
+        [Environment]::NewLine + "$key=$value" + [Environment]::NewLine,
+        $utf8NoBom
+    )
+    Protect-LocalSecretFile -Path $Path
+}
+
 function Ensure-ShowcaseEnvironment {
     Assert-EnvironmentFileIsIgnored
     Assert-NoProcessSecretOverrides
 
     if (Test-Path -LiteralPath $environmentFile) {
+        Add-MissingShowcaseMigratorSecret -Path $environmentFile
         Assert-ValidShowcaseEnvironmentFile -Path $environmentFile
         if (-not $DryRun) {
             Protect-LocalSecretFile -Path $environmentFile
@@ -289,9 +317,18 @@ function Invoke-DockerCommand {
         return
     }
 
-    & docker @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Title failed with exit code $LASTEXITCODE"
+    $previousPreference = $ErrorActionPreference
+    $exitCode = 1
+    $ErrorActionPreference = "Continue"
+    try {
+        & docker @Arguments
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "$Title failed with exit code $exitCode"
     }
 }
 
@@ -400,12 +437,20 @@ if (-not $SkipBuild) {
 }
 
 Invoke-DemoCompose `
-    -Title "Start isolated showcase infrastructure and backend" `
-    -Arguments @("up", "--detach", "postgres", "redis", "minio", "backend")
+    -Title "Start isolated showcase infrastructure" `
+    -Arguments @("up", "--detach", "postgres", "redis", "minio")
+
+Invoke-DemoCompose `
+    -Title "Bootstrap showcase database roles" `
+    -Arguments @("run", "--rm", "db-role-bootstrap")
 
 Invoke-DemoCompose `
     -Title "Apply showcase database migrations" `
-    -Arguments @("exec", "-T", "backend", "alembic", "upgrade", "head")
+    -Arguments @("run", "--rm", "migrate")
+
+Invoke-DemoCompose `
+    -Title "Start showcase backend" `
+    -Arguments @("up", "--detach", "backend")
 
 Wait-HttpOk `
     -Name "Showcase backend" `

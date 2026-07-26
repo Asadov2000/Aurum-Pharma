@@ -6,7 +6,7 @@ import os
 
 from sqlalchemy import URL
 
-from alembic.config import CommandLine
+from app.migrate import run_alembic
 
 TARGET_REVISION = "0032"
 
@@ -20,8 +20,11 @@ def main() -> None:
         port=5432,
         database=os.environ["MIGRATION_DB_NAME"],
     )
-    os.environ["DATABASE_URL_SUPPORT"] = owner_url.render_as_string(hide_password=False)
-    CommandLine().main(argv=["upgrade", TARGET_REVISION])
+    run_alembic(
+        "upgrade",
+        owner_url.render_as_string(hide_password=False),
+        TARGET_REVISION,
+    )
 
 
 if __name__ == "__main__":

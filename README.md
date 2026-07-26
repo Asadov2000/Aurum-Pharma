@@ -14,7 +14,7 @@ docker compose up -d
 Применить миграции БД:
 
 ```bash
-docker compose exec backend alembic upgrade head
+powershell -ExecutionPolicy Bypass -File .\scripts\migrate-local.ps1
 ```
 
 Проверить локальное demo-состояние на Windows:

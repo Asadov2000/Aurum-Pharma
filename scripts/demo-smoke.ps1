@@ -180,7 +180,7 @@ Wait-HttpOk "Frontend" "http://localhost:5173"
 
 Write-Step "Checking demo seed data"
 $baseSeedHint = "base dev seed is missing; do not recreate dev@/admin@/owner@ manually"
-$migrationHint = "run docker compose exec backend alembic upgrade head; if it still fails, stop"
+$migrationHint = "run scripts/migrate-local.ps1; if it still fails, stop"
 $demoSeedHint = "run docker compose exec backend python -m app.seed_demo"
 
 $users = [int](Invoke-SqlScalar "SELECT count(*) FROM app_user WHERE email_lower IN ('dev@aurum.tj','admin@aurum.tj','owner@aurum.tj');")

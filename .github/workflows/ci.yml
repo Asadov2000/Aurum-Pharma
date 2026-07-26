@@ -28,8 +28,10 @@ jobs:
       ENVIRONMENT: development
       DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
       DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
+      DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
+      TEST_DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
       REDIS_URL: redis://localhost:6379/0
       JWT_SECRET: ci-only-secret-do-not-use-outside-tests-123456
       CORS_ORIGINS: '["http://localhost:5173"]'
@@ -123,23 +125,322 @@ jobs:
             sleep 2
           done
 
-      - name: Create PostgreSQL app and support roles
+      - name: Build a real legacy 0066 database
         env:
           POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
         run: |
           test -n "$POSTGRES_SERVICE_ID"
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          CREATE ROLE aurum_app
+            LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
+            NOREPLICATION NOBYPASSRLS PASSWORD 'aurum_app_pw';
+          CREATE ROLE aurum_support
+            LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
+            NOREPLICATION BYPASSRLS PASSWORD 'aurum_support_pw';
+          ALTER SCHEMA public OWNER TO aurum_support;
+          GRANT ALL PRIVILEGES ON DATABASE aurum_test TO aurum_support;
+          GRANT CONNECT ON DATABASE aurum_test TO aurum_app;
+          SQL
+          poetry run python -m app.migrate legacy-upgrade 0029
+          POSTGRES_USER=postgres \
+          POSTGRES_PASSWORD=postgres \
+          MIGRATION_DB_HOST=localhost \
+          MIGRATION_DB_NAME=aurum_test \
+            poetry run python -m app.db_owner_migrate
+          poetry run python -m app.migrate legacy-upgrade 0066
+
+      - name: Bootstrap separated PostgreSQL roles and privileges
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+        run: |
+          test -n "$POSTGRES_SERVICE_ID"
+          docker cp \
+            ../infra/postgres/role-contract.sql \
+            "$POSTGRES_SERVICE_ID:/tmp/role-contract.sql"
+          docker cp \
+            ../infra/postgres/bootstrap-roles.sh \
+            "$POSTGRES_SERVICE_ID:/tmp/bootstrap-roles.sh"
+          docker exec "$POSTGRES_SERVICE_ID" sh -c '
+            printf %s postgres > /tmp/aurum-postgres-password
+            printf %s aurum_app_pw > /tmp/aurum-app-password
+            printf %s aurum_support_pw > /tmp/aurum-support-password
+            printf %s aurum_migrator_pw > /tmp/aurum-migrator-password
+          '
           docker exec -i \
+            -e POSTGRES_HOST=127.0.0.1 \
+            -e POSTGRES_PORT=5432 \
             -e POSTGRES_USER=postgres \
             -e POSTGRES_DB=aurum_test \
-            -e AURUM_APP_PASSWORD=aurum_app_pw \
-            -e AURUM_SUPPORT_PASSWORD=aurum_support_pw \
-            "$POSTGRES_SERVICE_ID" sh -s < ../infra/postgres/init.sh
+            -e POSTGRES_PASSWORD_FILE=/tmp/aurum-postgres-password \
+            -e AURUM_APP_PASSWORD_FILE=/tmp/aurum-app-password \
+            -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
+            -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
+            "$POSTGRES_SERVICE_ID" sh -c '
+              unset \
+                POSTGRES_PASSWORD \
+                AURUM_APP_PASSWORD \
+                AURUM_SUPPORT_PASSWORD \
+                AURUM_MIGRATOR_PASSWORD
+              exec sh /tmp/bootstrap-roles.sh
+            '
 
-      - name: Verify migration roundtrip on disposable CI database
+      - name: Verify cluster-safe migration roundtrip
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
         run: |
-          poetry run alembic upgrade head
-          poetry run alembic downgrade 0055
-          poetry run alembic upgrade head
+          run_role_bootstrap() {
+            docker exec -i \
+              -e POSTGRES_HOST=127.0.0.1 \
+              -e POSTGRES_PORT=5432 \
+              -e POSTGRES_USER=postgres \
+              -e POSTGRES_DB=aurum_test \
+              -e POSTGRES_PASSWORD_FILE=/tmp/aurum-postgres-password \
+              -e AURUM_APP_PASSWORD_FILE=/tmp/aurum-app-password \
+              -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
+              -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
+              "$POSTGRES_SERVICE_ID" sh -c '
+                unset \
+                  POSTGRES_PASSWORD \
+                  AURUM_APP_PASSWORD \
+                  AURUM_SUPPORT_PASSWORD \
+                  AURUM_MIGRATOR_PASSWORD
+                exec sh /tmp/bootstrap-roles.sh
+              '
+          }
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE DATABASE aurum_sentinel_test OWNER aurum_support"
+          if poetry run python -m app.migrate upgrade head; then
+            echo "0067 upgrade ignored a support-owned sentinel database"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d postgres -Atc \
+              "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'aurum_sentinel_test'"
+          )" = "aurum_support"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "DROP DATABASE aurum_sentinel_test"
+
+          docker exec -u postgres "$POSTGRES_SERVICE_ID" \
+            mkdir -p /tmp/aurum-support-tablespace
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE TABLESPACE aurum_support_sentinel OWNER aurum_support LOCATION '/tmp/aurum-support-tablespace'"
+          if poetry run python -m app.migrate upgrade head; then
+            echo "0067 upgrade ignored a support-owned sentinel tablespace"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d postgres -Atc \
+              "SELECT pg_get_userbyid(spcowner) FROM pg_tablespace WHERE spcname = 'aurum_support_sentinel'"
+          )" = "aurum_support"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "DROP TABLESPACE aurum_support_sentinel"
+
+          poetry run python -m app.migrate upgrade head
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE DATABASE aurum_sentinel_test OWNER aurum_schema_owner"
+          if poetry run python -m app.migrate downgrade 0066 --allow-test-downgrade; then
+            echo "0067 downgrade ignored an owner-owned sentinel database"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d postgres -Atc \
+              "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'aurum_sentinel_test'"
+          )" = "aurum_schema_owner"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "DROP DATABASE aurum_sentinel_test"
+
+          docker exec -u postgres "$POSTGRES_SERVICE_ID" \
+            mkdir -p /tmp/aurum-owner-tablespace
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE TABLESPACE aurum_owner_sentinel OWNER aurum_schema_owner LOCATION '/tmp/aurum-owner-tablespace'"
+          if poetry run python -m app.migrate downgrade 0066 --allow-test-downgrade; then
+            echo "0067 downgrade ignored an owner-owned sentinel tablespace"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d postgres -Atc \
+              "SELECT pg_get_userbyid(spcowner) FROM pg_tablespace WHERE spcname = 'aurum_owner_sentinel'"
+          )" = "aurum_schema_owner"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "DROP TABLESPACE aurum_owner_sentinel"
+
+          poetry run python -m app.migrate downgrade 0055 --allow-test-downgrade
+          run_role_bootstrap
+          poetry run python -m app.migrate upgrade head
+
+      - name: Verify revision bootstrap fails closed
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+        run: |
+          run_role_contract() {
+            docker exec -i \
+              -e POSTGRES_HOST=127.0.0.1 \
+              -e POSTGRES_PORT=5432 \
+              -e POSTGRES_USER=postgres \
+              -e POSTGRES_DB=aurum_test \
+              -e POSTGRES_PASSWORD_FILE=/tmp/aurum-postgres-password \
+              -e AURUM_APP_PASSWORD_FILE=/tmp/aurum-app-password \
+              -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
+              -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
+              "$POSTGRES_SERVICE_ID" sh -c '
+                unset \
+                  POSTGRES_PASSWORD \
+                  AURUM_APP_PASSWORD \
+                  AURUM_SUPPORT_PASSWORD \
+                  AURUM_MIGRATOR_PASSWORD
+                exec sh /tmp/bootstrap-roles.sh
+              '
+          }
+
+          database_security_state() {
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc "
+                WITH role_state AS (
+                  SELECT
+                    rolname,
+                    rolcanlogin,
+                    rolinherit,
+                    rolsuper,
+                    rolcreatedb,
+                    rolcreaterole,
+                    rolreplication,
+                    rolbypassrls,
+                    pg_catalog.md5(COALESCE(rolpassword, '')) AS password_fingerprint
+                  FROM pg_catalog.pg_authid
+                  WHERE rolname IN (
+                    'aurum_app',
+                    'aurum_support',
+                    'aurum_migrator',
+                    'aurum_schema_owner'
+                  )
+                ),
+                membership_state AS (
+                  SELECT
+                    granted.rolname AS granted_role,
+                    member.rolname AS member_role,
+                    membership.admin_option,
+                    membership.inherit_option,
+                    membership.set_option
+                  FROM pg_catalog.pg_auth_members AS membership
+                  JOIN pg_catalog.pg_roles AS granted
+                    ON granted.oid = membership.roleid
+                  JOIN pg_catalog.pg_roles AS member
+                    ON member.oid = membership.member
+                  WHERE granted.rolname LIKE 'aurum_%'
+                     OR member.rolname LIKE 'aurum_%'
+                ),
+                database_state AS (
+                  SELECT
+                    pg_catalog.pg_get_userbyid(datdba) AS owner,
+                    datacl::TEXT AS acl
+                  FROM pg_catalog.pg_database
+                  WHERE datname = current_database()
+                )
+                SELECT pg_catalog.md5(
+                  COALESCE((
+                    SELECT pg_catalog.jsonb_agg(
+                      pg_catalog.to_jsonb(role_state)
+                      ORDER BY rolname
+                    )::TEXT
+                    FROM role_state
+                  ), '') ||
+                  COALESCE((
+                    SELECT pg_catalog.jsonb_agg(
+                      pg_catalog.to_jsonb(membership_state)
+                      ORDER BY granted_role, member_role
+                    )::TEXT
+                    FROM membership_state
+                  ), '') ||
+                  COALESCE((
+                    SELECT pg_catalog.to_jsonb(database_state)::TEXT
+                    FROM database_state
+                  ), '')
+                )
+              "
+          }
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "DELETE FROM public.alembic_version"
+          before_state="$(database_security_state)"
+          if run_role_contract; then
+            echo "bootstrap accepted an empty revision ledger"
+            exit 1
+          fi
+          test "$before_state" = "$(database_security_state)"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "INSERT INTO public.alembic_version(version_num) VALUES ('0067')"
+          run_role_contract
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "INSERT INTO public.alembic_version(version_num) VALUES ('0066')"
+          before_state="$(database_security_state)"
+          if run_role_contract; then
+            echo "bootstrap accepted a multi-head revision ledger"
+            exit 1
+          fi
+          test "$before_state" = "$(database_security_state)"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "DELETE FROM public.alembic_version WHERE version_num = '0066'"
+          run_role_contract
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "UPDATE public.alembic_version SET version_num = '9999'"
+          before_state="$(database_security_state)"
+          if run_role_contract; then
+            echo "bootstrap accepted an unknown revision"
+            exit 1
+          fi
+          test "$before_state" = "$(database_security_state)"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "UPDATE public.alembic_version SET version_num = '0067'"
+          run_role_contract
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "ALTER TABLE public.alembic_version RENAME TO alembic_version_missing"
+          before_state="$(database_security_state)"
+          if run_role_contract; then
+            echo "bootstrap accepted a missing revision ledger in a populated database"
+            exit 1
+          fi
+          test "$before_state" = "$(database_security_state)"
+          if poetry run python -m app.migrate upgrade head; then
+            echo "migration runner accepted a missing revision ledger in a populated database"
+            exit 1
+          fi
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "ALTER TABLE public.alembic_version_missing RENAME TO alembic_version"
+          run_role_contract
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "CREATE SCHEMA shadow; CREATE TABLE shadow.alembic_version(version_num TEXT); INSERT INTO shadow.alembic_version VALUES ('9999')"
+          run_role_contract
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "DROP SCHEMA shadow CASCADE"
 
       - name: Ruff
         run: poetry run ruff check app tests
@@ -380,14 +681,16 @@ jobs:
       - name: Start isolated application stack
         shell: bash
         run: |
-          docker compose up -d --build postgres redis minio backend celery-worker frontend
+          docker compose up -d --build postgres redis minio
+          docker compose run --rm db-role-bootstrap
+          docker compose run --rm --build migrate
+          docker compose up -d --build backend celery-worker frontend
           docker compose ps
           echo "E2E_POSTGRES_CONTAINER=$(docker compose ps --quiet postgres)" >> "$GITHUB_ENV"
           echo "E2E_REDIS_CONTAINER=$(docker compose ps --quiet redis)" >> "$GITHUB_ENV"
 
       - name: Migrate and seed disposable E2E database
         run: |
-          docker compose exec -T backend alembic upgrade head
           docker compose exec -T -e AURUM_E2E_SEED=1 backend python -m app.seed_e2e
           docker compose exec -T backend python -m app.seed_demo
 
@@ -455,19 +758,31 @@ jobs:
           docker compose \
             --env-file .env.production.example \
             --file docker-compose.production.yml \
+            --profile maintenance \
             config --quiet
 
           docker compose \
             --env-file .env.production.example \
             --file docker-compose.production.yml \
+            --profile maintenance \
             config --format json > "$RUNNER_TEMP/production-compose.json"
 
-          python - "$RUNNER_TEMP/production-compose.json" <<'PY'
+          docker compose \
+            --env-file .env.example \
+            --file docker-compose.yml \
+            --profile maintenance \
+            config --format json > "$RUNNER_TEMP/development-compose.json"
+
+          python - \
+            "$RUNNER_TEMP/production-compose.json" \
+            "$RUNNER_TEMP/development-compose.json" <<'PY'
           import json
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as source:
               model = json.load(source)
+          with open(sys.argv[2], encoding="utf-8") as source:
+              development_model = json.load(source)
 
           published = sorted(
               name for name, service in model["services"].items() if service.get("ports")
@@ -492,6 +807,63 @@ jobs:
 
           backend_command = " ".join(model["services"]["backend"]["command"])
           assert "--reload" not in backend_command, "backend Compose command enables reload"
+
+          runtime_services = ("backend", "celery-worker", "celery-beat")
+          forbidden_runtime_environment = {
+              "DATABASE_URL_MIGRATION",
+              "POSTGRES_PASSWORD",
+              "AURUM_APP_PASSWORD",
+              "AURUM_SUPPORT_PASSWORD",
+              "AURUM_MIGRATOR_PASSWORD",
+              "TEST_DATABASE_URL_APP",
+              "TEST_DATABASE_URL_SUPPORT",
+              "TEST_DATABASE_URL_MIGRATION",
+              "MINIO_ROOT_USER",
+              "MINIO_ROOT_PASSWORD",
+          }
+          for compose_model in (model, development_model):
+              for name in runtime_services:
+                  environment = set(
+                      compose_model["services"][name].get("environment", {})
+                  )
+                  leaked = environment & forbidden_runtime_environment
+                  assert not leaked, (
+                      f"{name} receives maintenance environment: {sorted(leaked)}"
+                  )
+
+          forbidden_runtime_secrets = {
+              "postgres_password",
+              "aurum_migrator_password",
+              "database_url_migration",
+          }
+          for name in runtime_services:
+              mounted = {
+                  secret["source"] for secret in model["services"][name].get("secrets", [])
+              }
+              assert not mounted & forbidden_runtime_secrets, (
+                  f"{name} receives maintenance secrets: "
+                  f"{sorted(mounted & forbidden_runtime_secrets)}"
+              )
+
+          migrate_secrets = {
+              secret["source"]
+              for secret in model["services"]["migrate"].get("secrets", [])
+          }
+          assert migrate_secrets == {
+              "database_url_support",
+              "database_url_migration",
+          }, f"unexpected migrate secrets: {sorted(migrate_secrets)}"
+
+          bootstrap_secrets = {
+              secret["source"]
+              for secret in model["services"]["db-role-bootstrap"].get("secrets", [])
+          }
+          assert bootstrap_secrets == {
+              "postgres_password",
+              "aurum_app_password",
+              "aurum_support_password",
+              "aurum_migrator_password",
+          }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
           PY
 
       - name: Build production backend

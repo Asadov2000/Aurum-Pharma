@@ -29,29 +29,66 @@ function Invoke-Checked {
 $previousErrorActionPreference = $ErrorActionPreference
 try {
     $ErrorActionPreference = "Continue"
-    $currentOutput = & docker compose exec -T backend alembic current 2>&1
-    $currentExitCode = $LASTEXITCODE
+    $versionTableOutput = & docker compose exec -T postgres psql `
+        -U postgres -d aurum -Atc `
+        "SELECT pg_catalog.to_regclass('public.alembic_version')" 2>&1
+    $versionTableExitCode = $LASTEXITCODE
 }
 finally {
     $ErrorActionPreference = $previousErrorActionPreference
 }
 
-if ($currentExitCode -ne 0) {
-    throw "Cannot read the current Alembic revision"
+if ($versionTableExitCode -ne 0) {
+    throw "Cannot inspect the Alembic version table"
 }
 
-$revisionMatches = [regex]::Matches(($currentOutput -join "`n"), "\b(\d{4})\b")
-$currentRevision = if ($revisionMatches.Count -gt 0) {
-    [int]$revisionMatches[$revisionMatches.Count - 1].Groups[1].Value
+$versionTableExists = -not [string]::IsNullOrWhiteSpace(
+    ($versionTableOutput -join "`n").Trim()
+)
+$currentOutput = @()
+if ($versionTableExists) {
+    try {
+        $ErrorActionPreference = "Continue"
+        $currentOutput = & docker compose exec -T postgres psql `
+            -U postgres -d aurum -Atc `
+            "SELECT count(*)::text || '|' || COALESCE(min(version_num), '') FROM public.alembic_version" 2>&1
+        $currentExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($currentExitCode -ne 0) {
+        throw "Cannot read the current Alembic revision"
+    }
+    $revisionRows = @(
+        $currentOutput |
+            ForEach-Object { $_.ToString().Trim() } |
+            Where-Object { $_ -match "^\d+\|.*$" }
+    )
+    if ($revisionRows.Count -ne 1) {
+        throw "Alembic revision query returned an ambiguous result"
+    }
+    $revisionParts = $revisionRows[0].Split("|", 2)
+    if ($revisionParts[0] -ne "1" -or $revisionParts[1] -notmatch "^\d{4}$") {
+        throw "Alembic revision ledger must contain exactly one valid revision"
+    }
+    $currentRevision = [int]$revisionParts[1]
+    if ($currentRevision -lt 1 -or $currentRevision -gt 67) {
+        throw "Alembic revision is unknown to this release"
+    }
 }
 else {
-    0
+    Invoke-Checked "Validating that the database is genuinely empty" @(
+        "docker", "compose", "--profile", "maintenance", "run", "--rm", "db-role-bootstrap"
+    )
+    $currentRevision = 0
 }
 
 if ($currentRevision -lt 32) {
     if ($currentRevision -lt 30) {
         Invoke-Checked "Applying support-role migrations through 0029" @(
-            "docker", "compose", "exec", "-T", "backend", "alembic", "upgrade", "0029"
+            "docker", "compose", "--profile", "maintenance", "run", "--rm",
+            "migrate", "python", "-m", "app.migrate", "legacy-upgrade", "0029"
         )
     }
     Invoke-Checked "Applying database-owner hardening through revision 0032" @(
@@ -59,6 +96,10 @@ if ($currentRevision -lt 32) {
     )
 }
 
-Invoke-Checked "Applying remaining support-role migrations" @(
-    "docker", "compose", "exec", "-T", "backend", "alembic", "upgrade", "head"
+Invoke-Checked "Bootstrapping separated database roles" @(
+    "docker", "compose", "--profile", "maintenance", "run", "--rm", "db-role-bootstrap"
+)
+
+Invoke-Checked "Applying remaining migrations with isolated credentials" @(
+    "docker", "compose", "--profile", "maintenance", "run", "--rm", "migrate"
 )

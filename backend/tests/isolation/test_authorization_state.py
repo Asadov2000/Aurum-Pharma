@@ -76,6 +76,7 @@ async def _create_assignment(
 async def test_assignment_gate_rejects_inactive_permission(
     support_engine_authorization: AsyncEngine,
     app_engine_authorization: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> None:
     suffix = uuid4().hex
     tenant_id = ""
@@ -211,11 +212,8 @@ async def test_assignment_gate_rejects_inactive_permission(
             await connection.execute(
                 text("UPDATE public.permission SET is_active = true WHERE code = 'roles.assign'")
             )
+        async with support_engine_authorization.begin() as connection:
             if tenant_id:
-                await connection.execute(
-                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
-                    {"tenant_id": tenant_id},
-                )
                 await connection.execute(
                     text("DELETE FROM public.user_assignment WHERE tenant_id = :tenant_id"),
                     {"tenant_id": tenant_id},
@@ -228,7 +226,14 @@ async def test_assignment_gate_rejects_inactive_permission(
                     text("DELETE FROM public.tenant WHERE id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
-            if user_ids:
+        if tenant_id:
+            async with maintenance_engine.begin() as connection:
+                await connection.execute(
+                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
+                    {"tenant_id": tenant_id},
+                )
+        if user_ids:
+            async with support_engine_authorization.begin() as connection:
                 await connection.execute(
                     text(
                         "DELETE FROM public.app_user " "WHERE id = ANY(CAST(:user_ids AS UUID[]))"
@@ -239,6 +244,7 @@ async def test_assignment_gate_rejects_inactive_permission(
 
 async def test_membership_history_rejects_direct_delete_but_allows_tenant_cascade(
     support_engine_authorization: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> None:
     suffix = uuid4().hex
     tenant_id = ""
@@ -315,14 +321,17 @@ async def test_membership_history_rejects_direct_delete_but_allows_tenant_cascad
         async with support_engine_authorization.begin() as connection:
             if tenant_id:
                 await connection.execute(
-                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
-                    {"tenant_id": tenant_id},
-                )
-                await connection.execute(
                     text("DELETE FROM public.tenant WHERE id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
-            if user_id:
+        if tenant_id:
+            async with maintenance_engine.begin() as connection:
+                await connection.execute(
+                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
+                    {"tenant_id": tenant_id},
+                )
+        if user_id:
+            async with support_engine_authorization.begin() as connection:
                 await connection.execute(
                     text("DELETE FROM public.app_user WHERE id = :user_id"),
                     {"user_id": user_id},

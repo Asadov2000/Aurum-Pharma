@@ -1,0 +1,267 @@
+\getenv app_password AURUM_APP_PASSWORD
+\getenv support_password AURUM_SUPPORT_PASSWORD
+\getenv migrator_password AURUM_MIGRATOR_PASSWORD
+\getenv database_name POSTGRES_DB
+
+-- The revision ledger may be absent only before the first migration. Extension
+-- objects created by init.sh are allowed, but any application object means the
+-- ledger was removed or renamed and bootstrap must stop without changing ACLs.
+DO $$
+DECLARE
+    unexpected_object TEXT;
+BEGIN
+    IF pg_catalog.to_regclass('public.alembic_version') IS NOT NULL THEN
+        RETURN;
+    END IF;
+
+    SELECT object_name
+    INTO unexpected_object
+    FROM (
+        SELECT 'schema:' || pg_catalog.quote_ident(schemas.nspname) AS object_name
+        FROM pg_catalog.pg_namespace AS schemas
+        WHERE schemas.nspname NOT IN ('public', 'information_schema')
+          AND schemas.nspname !~ '^pg_'
+
+        UNION ALL
+
+        SELECT pg_catalog.format(
+            'relation:%I.%I',
+            schemas.nspname,
+            relations.relname
+        )
+        FROM pg_catalog.pg_class AS relations
+        JOIN pg_catalog.pg_namespace AS schemas
+          ON schemas.oid = relations.relnamespace
+        WHERE schemas.nspname NOT IN ('pg_catalog', 'information_schema')
+          AND schemas.nspname !~ '^pg_toast'
+          AND relations.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_depend AS dependencies
+              WHERE dependencies.classid = 'pg_class'::REGCLASS
+                AND dependencies.objid = relations.oid
+                AND dependencies.deptype = 'e'
+          )
+
+        UNION ALL
+
+        SELECT pg_catalog.format(
+            'routine:%I.%I',
+            schemas.nspname,
+            routines.proname
+        )
+        FROM pg_catalog.pg_proc AS routines
+        JOIN pg_catalog.pg_namespace AS schemas
+          ON schemas.oid = routines.pronamespace
+        WHERE schemas.nspname NOT IN ('pg_catalog', 'information_schema')
+          AND schemas.nspname !~ '^pg_'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_depend AS dependencies
+              WHERE dependencies.classid = 'pg_proc'::REGCLASS
+                AND dependencies.objid = routines.oid
+                AND dependencies.deptype = 'e'
+          )
+
+        UNION ALL
+
+        SELECT pg_catalog.format(
+            'type:%I.%I',
+            schemas.nspname,
+            types.typname
+        )
+        FROM pg_catalog.pg_type AS types
+        JOIN pg_catalog.pg_namespace AS schemas
+          ON schemas.oid = types.typnamespace
+        WHERE schemas.nspname NOT IN ('pg_catalog', 'information_schema')
+          AND schemas.nspname !~ '^pg_'
+          AND types.typtype IN ('d', 'e')
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_depend AS dependencies
+              WHERE dependencies.classid = 'pg_type'::REGCLASS
+                AND dependencies.objid = types.oid
+                AND dependencies.deptype = 'e'
+          )
+
+        UNION ALL
+
+        SELECT 'extension:' || pg_catalog.quote_ident(extensions.extname)
+        FROM pg_catalog.pg_extension AS extensions
+        WHERE extensions.extname NOT IN (
+            'plpgsql',
+            'pgcrypto',
+            'pg_trgm',
+            'unaccent'
+        )
+    ) AS unexpected_objects
+    LIMIT 1;
+
+    IF unexpected_object IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Alembic revision ledger is missing from a non-empty database (%)',
+            unexpected_object;
+    END IF;
+END
+$$;
+
+SELECT 'CREATE ROLE aurum_app'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_app'
+)
+\gexec
+
+SELECT 'CREATE ROLE aurum_support'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_support'
+)
+\gexec
+
+SELECT 'CREATE ROLE aurum_schema_owner'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_schema_owner'
+)
+\gexec
+
+SELECT 'CREATE ROLE aurum_migrator'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_migrator'
+)
+\gexec
+
+ALTER ROLE aurum_app WITH
+    LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    PASSWORD :'app_password';
+ALTER ROLE aurum_support WITH
+    LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS
+    PASSWORD :'support_password';
+ALTER ROLE aurum_schema_owner WITH
+    NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+ALTER ROLE aurum_migrator WITH
+    LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    PASSWORD :'migrator_password';
+
+-- This contract runs as the PostgreSQL bootstrap superuser. The target role
+-- never needs CREATEDB, even transiently, to receive this one fixed database.
+ALTER DATABASE :"database_name" OWNER TO aurum_schema_owner;
+
+GRANT aurum_schema_owner TO aurum_migrator
+    WITH ADMIN FALSE, INHERIT TRUE, SET TRUE;
+GRANT aurum_support TO aurum_migrator
+    WITH ADMIN FALSE, INHERIT TRUE, SET TRUE;
+
+SELECT pg_catalog.format(
+    'REVOKE %I FROM %I',
+    granted.rolname,
+    member.rolname
+)
+FROM pg_catalog.pg_auth_members AS membership
+JOIN pg_catalog.pg_roles AS granted
+  ON granted.oid = membership.roleid
+JOIN pg_catalog.pg_roles AS member
+  ON member.oid = membership.member
+WHERE (
+    granted.rolname IN ('aurum_schema_owner', 'aurum_migrator')
+    AND member.rolname IN ('aurum_app', 'aurum_support')
+) OR (
+    granted.rolname = 'aurum_support'
+    AND member.rolname = 'aurum_app'
+)
+\gexec
+
+REVOKE ALL PRIVILEGES ON DATABASE :"database_name"
+    FROM PUBLIC, aurum_app, aurum_support, aurum_migrator;
+GRANT CONNECT ON DATABASE :"database_name" TO aurum_app, aurum_migrator;
+
+DO $$
+DECLARE
+    current_revision TEXT;
+    revision_count BIGINT;
+    revision_number INTEGER;
+BEGIN
+    IF pg_catalog.to_regclass('public.alembic_version') IS NULL THEN
+        -- A fresh database has no revision ledger yet. Legacy migrations
+        -- through 0066 require the support role to own and create objects.
+        EXECUTE pg_catalog.format(
+            'GRANT ALL PRIVILEGES ON DATABASE %I TO aurum_support',
+            current_database()
+        );
+    ELSE
+        SELECT pg_catalog.count(*), pg_catalog.min(version_num)
+        INTO revision_count, current_revision
+        FROM public.alembic_version;
+
+        IF revision_count <> 1 OR current_revision IS NULL THEN
+            RAISE EXCEPTION
+                'Alembic revision ledger must contain exactly one row';
+        END IF;
+        IF current_revision !~ '^[0-9]{4}$' THEN
+            RAISE EXCEPTION
+                'Unsupported Alembic revision format in database role bootstrap';
+        END IF;
+
+        revision_number := current_revision::INTEGER;
+        IF revision_number < 1 OR revision_number > 67 THEN
+            RAISE EXCEPTION
+                'Unknown Alembic revision in database role bootstrap: %',
+                current_revision;
+        ELSIF revision_number >= 67 THEN
+            EXECUTE pg_catalog.format(
+                'GRANT CONNECT ON DATABASE %I TO aurum_support',
+                current_database()
+            );
+        ELSE
+            EXECUTE pg_catalog.format(
+                'GRANT ALL PRIVILEGES ON DATABASE %I TO aurum_support',
+                current_database()
+            );
+        END IF;
+    END IF;
+END
+$$;
+
+-- Extension implementation functions are commonly owned by postgres rather
+-- than the extension owner. Only the cluster bootstrap can normalize their
+-- ACLs on an existing installation.
+DO $$
+DECLARE
+    extension_function REGPROCEDURE;
+BEGIN
+    FOR extension_function IN
+        SELECT routines.oid::REGPROCEDURE
+        FROM pg_catalog.pg_proc AS routines
+        JOIN pg_catalog.pg_depend AS dependencies
+          ON dependencies.classid = 'pg_proc'::REGCLASS
+         AND dependencies.objid = routines.oid
+         AND dependencies.deptype = 'e'
+        JOIN pg_catalog.pg_extension AS extensions
+          ON extensions.oid = dependencies.refobjid
+        WHERE extensions.extname IN ('pgcrypto', 'pg_trgm', 'unaccent')
+    LOOP
+        EXECUTE pg_catalog.format(
+            'REVOKE ALL PRIVILEGES ON FUNCTION %s '
+            'FROM PUBLIC, aurum_app, aurum_support',
+            extension_function
+        );
+    END LOOP;
+
+    IF pg_catalog.to_regprocedure('public.similarity_op(text,text)') IS NOT NULL THEN
+        GRANT EXECUTE ON FUNCTION public.similarity_op(TEXT, TEXT)
+            TO aurum_app, aurum_support, aurum_schema_owner;
+    END IF;
+    IF pg_catalog.to_regprocedure('public.gen_random_uuid()') IS NOT NULL THEN
+        GRANT EXECUTE ON FUNCTION public.gen_random_uuid()
+            TO aurum_app, aurum_support, aurum_schema_owner;
+    END IF;
+    IF pg_catalog.to_regprocedure('public.pgp_sym_encrypt(text,text)') IS NOT NULL THEN
+        GRANT EXECUTE ON FUNCTION public.pgp_sym_encrypt(TEXT, TEXT)
+            TO aurum_support, aurum_schema_owner;
+        GRANT EXECUTE ON FUNCTION public.pgp_sym_encrypt(TEXT, TEXT, TEXT)
+            TO aurum_support, aurum_schema_owner;
+        GRANT EXECUTE ON FUNCTION public.pgp_sym_decrypt(BYTEA, TEXT)
+            TO aurum_support, aurum_schema_owner;
+        GRANT EXECUTE ON FUNCTION public.pgp_sym_decrypt(BYTEA, TEXT, TEXT)
+            TO aurum_support, aurum_schema_owner;
+    END IF;
+END
+$$;

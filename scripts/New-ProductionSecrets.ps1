@@ -62,6 +62,7 @@ function Write-Secret {
 $postgresPassword = New-RandomHex -Bytes 32
 $appPassword = New-RandomHex -Bytes 32
 $supportPassword = New-RandomHex -Bytes 32
+$migratorPassword = New-RandomHex -Bytes 32
 $redisPassword = New-RandomHex -Bytes 32
 $minioRootUser = New-RandomHex -Bytes 10
 $minioRootPassword = New-RandomHex -Bytes 32
@@ -82,11 +83,15 @@ try {
 Write-Secret -Name "POSTGRES_PASSWORD" -Value $postgresPassword
 Write-Secret -Name "AURUM_APP_PASSWORD" -Value $appPassword
 Write-Secret -Name "AURUM_SUPPORT_PASSWORD" -Value $supportPassword
+Write-Secret -Name "AURUM_MIGRATOR_PASSWORD" -Value $migratorPassword
 Write-Secret -Name "DATABASE_URL_APP" -Value (
     "postgresql+asyncpg://aurum_app:{0}@postgres:5432/aurum" -f $appPassword
 )
 Write-Secret -Name "DATABASE_URL_SUPPORT" -Value (
     "postgresql+asyncpg://aurum_support:{0}@postgres:5432/aurum" -f $supportPassword
+)
+Write-Secret -Name "DATABASE_URL_MIGRATION" -Value (
+    "postgresql+asyncpg://aurum_migrator:{0}@postgres:5432/aurum" -f $migratorPassword
 )
 Write-Secret -Name "REDIS_PASSWORD" -Value $redisPassword
 Write-Secret -Name "REDIS_URL" -Value ("redis://:{0}@redis:6379/0" -f $redisPassword)
@@ -123,4 +128,4 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     }
 }
 
-Write-Host "Created 16 production secret files in a protected external directory."
+Write-Host "Created 18 production secret files in a protected external directory."

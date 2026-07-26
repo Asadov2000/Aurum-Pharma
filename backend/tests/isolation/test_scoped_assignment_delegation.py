@@ -46,6 +46,7 @@ async def _set_actor_context(
 async def test_aurum_app_cannot_mix_role_capability_and_assignment_branch(
     db_engine: AsyncEngine,
     app_engine_scoped_assignment: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> None:
     tenant_id = uuid4()
     actor_id = uuid4()
@@ -341,13 +342,17 @@ async def test_aurum_app_cannot_mix_role_capability_and_assignment_branch(
             {"tenant_id": tenant_id},
         )
         await support.execute(
-            text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
-            {"tenant_id": tenant_id},
-        )
-        await support.execute(
             text("DELETE FROM public.tenant WHERE id = :tenant_id"),
             {"tenant_id": tenant_id},
         )
+
+    async with maintenance_engine.begin() as connection:
+        await connection.execute(
+            text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
+            {"tenant_id": tenant_id},
+        )
+
+    async with db_engine.begin() as support:
         await support.execute(
             text("DELETE FROM public.app_user WHERE id IN (:actor_id, :target_id)"),
             {"actor_id": actor_id, "target_id": target_id},

@@ -5,6 +5,58 @@ x-backend-dev-volumes: &backend-dev-volumes
   - ./backend/alembic.ini:/app/alembic.ini:ro
   - ./backend/pyproject.toml:/app/pyproject.toml:ro
 
+x-backend-runtime-environment: &backend-runtime-environment
+  - ENVIRONMENT
+  - DEPLOYMENT_PROFILE
+  - DATABASE_URL_APP
+  - DATABASE_URL_SUPPORT
+  - REDIS_URL
+  - JWT_SECRET
+  - JWT_ALGORITHM
+  - MFA_ENCRYPTION_KEY
+  - MFA_ENCRYPTION_KEY_VERSION
+  - MFA_ENCRYPTION_PREVIOUS_KEYS
+  - ACCESS_TOKEN_MINUTES
+  - REFRESH_TOKEN_DAYS
+  - MFA_STEP_UP_MINUTES
+  - REFRESH_COOKIE_NAME
+  - REFRESH_COOKIE_SAMESITE
+  - REFRESH_COOKIE_SECURE
+  - METRICS_TOKEN
+  - CORS_ORIGINS
+  - TRUSTED_HOSTS
+  - TRUSTED_PROXY_IPS
+  - MINIO_ENDPOINT
+  - MINIO_ACCESS_KEY
+  - MINIO_SECRET_KEY
+  - MINIO_BUCKET
+  - MINIO_SECURE
+  - MAX_IMPORT_FILE_MB
+  - EMAIL_HOST
+  - EMAIL_PORT
+  - EMAIL_USER
+  - EMAIL_PASSWORD
+  - EMAIL_FROM
+  - EMAIL_USE_TLS
+  - APP_NAME
+  - LOG_LEVEL
+  - EDGE_SYNC_ENABLED
+  - EDGE_SYNC_MAX_CLOCK_SKEW_SECONDS
+  - EDGE_SYNC_NONCE_TTL_SECONDS
+  - EDGE_SYNC_REQUESTS_PER_MINUTE
+  - EDGE_SYNC_CLOUD_URL
+  - EDGE_SYNC_CREDENTIAL
+  - EDGE_SYNC_POLL_SECONDS
+  - EDGE_SYNC_BATCH_SIZE
+  - EDGE_BOOTSTRAP_TTL_SECONDS
+  - EDGE_BOOTSTRAP_CHUNK_SIZE
+  - EDGE_BOOTSTRAP_MAX_EVENTS
+  - EDGE_WRITER_READINESS_ENABLED
+  - EDGE_WRITER_ACTIVATION_ENABLED
+  - PYTHONPATH=/app
+  - WATCHFILES_FORCE_POLLING=true
+  - WATCHFILES_POLL_DELAY_MS=1000
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -15,9 +67,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:-aurum_app_pw}
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
+      AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
+      - ./infra/postgres:/opt/aurum/postgres:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -40,9 +95,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:-aurum_app_pw}
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
+      AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
     volumes:
       - postgres-test-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
+      - ./infra/postgres:/opt/aurum/postgres:ro
     ports:
       - "127.0.0.1:5433:5432"
     healthcheck:
@@ -92,11 +150,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aurum-backend
-    env_file: .env
-    environment:
-      WATCHFILES_FORCE_POLLING: "true"
-      WATCHFILES_POLL_DELAY_MS: "1000"
-      PYTHONPATH: /app
+    environment: *backend-runtime-environment
     volumes: *backend-dev-volumes
     ports:
       - "127.0.0.1:8000:8000"
@@ -113,7 +167,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    env_file: .env
     environment:
       PYTHONPATH: /app
       POSTGRES_USER: postgres
@@ -126,14 +179,45 @@ services:
         condition: service_healthy
     command: python -m app.db_owner_migrate
 
+  db-role-bootstrap:
+    profiles: ["maintenance"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: aurum
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:-aurum_app_pw}
+      AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
+      AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
+    volumes:
+      - ./infra/postgres:/opt/aurum/postgres:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "/opt/aurum/postgres/bootstrap-roles.sh"]
+
+  migrate:
+    profiles: ["maintenance"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL_SUPPORT: ${DATABASE_URL_SUPPORT:-postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/aurum}
+      DATABASE_URL_MIGRATION: ${DATABASE_URL_MIGRATION:-postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@postgres:5432/aurum}
+    volumes: *backend-dev-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: python -m app.migrate upgrade head
+
   celery-worker:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aurum-celery-worker
-    env_file: .env
-    environment:
-      PYTHONPATH: /app
+    environment: *backend-runtime-environment
     volumes: *backend-dev-volumes
     depends_on:
       redis:
@@ -148,9 +232,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aurum-celery-beat
-    env_file: .env
-    environment:
-      PYTHONPATH: /app
+    environment: *backend-runtime-environment
     volumes: *backend-dev-volumes
     depends_on:
       redis:

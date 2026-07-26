@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 @pytest.mark.parametrize("second_operation", ["revoke", "suspend"])
 async def test_concurrent_last_owner_damage_is_serialized(
     db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
     second_operation: str,
 ) -> None:
     tenant_id = uuid4()
@@ -142,11 +143,15 @@ async def test_concurrent_last_owner_damage_is_serialized(
                 text("DELETE FROM public.tenant WHERE id = :tenant_id"),
                 {"tenant_id": tenant_id},
             )
-            await connection.execute(
-                text("DELETE FROM public.app_user " "WHERE id IN (:user_a_id, :user_b_id)"),
-                {"user_a_id": user_a_id, "user_b_id": user_b_id},
-            )
+
+        async with maintenance_engine.begin() as connection:
             await connection.execute(
                 text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
                 {"tenant_id": tenant_id},
+            )
+
+        async with db_engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM public.app_user " "WHERE id IN (:user_a_id, :user_b_id)"),
+                {"user_a_id": user_a_id, "user_b_id": user_b_id},
             )

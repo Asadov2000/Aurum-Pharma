@@ -75,6 +75,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
       AURUM_APP_PASSWORD_FILE: /run/secrets/AURUM_APP_PASSWORD
       AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
+      AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -82,9 +83,12 @@ services:
         target: AURUM_APP_PASSWORD
       - source: aurum_support_password
         target: AURUM_SUPPORT_PASSWORD
+      - source: aurum_migrator_password
+        target: AURUM_MIGRATOR_PASSWORD
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
     networks:
       - data
     healthcheck:
@@ -190,13 +194,72 @@ services:
       - ALL
     restart: "no"
 
-  migrate:
-    <<: *backend-service
+  db-role-bootstrap:
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
     profiles: ["maintenance"]
-    command: ["alembic", "upgrade", "head"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: aurum
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
+      AURUM_APP_PASSWORD_FILE: /run/secrets/AURUM_APP_PASSWORD
+      AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
+      AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
+    secrets:
+      - source: postgres_password
+        target: POSTGRES_PASSWORD
+      - source: aurum_app_password
+        target: AURUM_APP_PASSWORD
+      - source: aurum_support_password
+        target: AURUM_SUPPORT_PASSWORD
+      - source: aurum_migrator_password
+        target: AURUM_MIGRATOR_PASSWORD
+    volumes:
+      - ./infra/postgres:/opt/aurum/postgres:ro
+    networks:
+      - data
     depends_on:
       postgres:
         condition: service_healthy
+    command: ["sh", "/opt/aurum/postgres/bootstrap-roles.sh"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"
+
+  migrate:
+    image: "aurum-pharma-backend:${AURUM_IMAGE_TAG:-local}"
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    profiles: ["maintenance"]
+    environment:
+      AURUM_SECRETS_DIR: /run/secrets
+      PYTHONPATH: /app
+    secrets:
+      - source: database_url_support
+        target: DATABASE_URL_SUPPORT
+      - source: database_url_migration
+        target: DATABASE_URL_MIGRATION
+    networks:
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "app.migrate", "upgrade", "head"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    init: true
     restart: "no"
 
   backend:
@@ -229,7 +292,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import json,urllib.request; request=urllib.request.Request('http://127.0.0.1:8000/healthz',headers={'Host':'$$AURUM_DOMAIN'}); response=urllib.request.urlopen(request,timeout=5); assert json.load(response)['status']=='ok'\"",
+          'python -c "import json,urllib.request; request=urllib.request.Request(''http://127.0.0.1:8000/healthz'',headers={''Host'':''$$AURUM_DOMAIN''}); response=urllib.request.urlopen(request,timeout=5); assert json.load(response)[''status'']==''ok''"',
         ]
       interval: 10s
       timeout: 7s
@@ -341,10 +404,14 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_APP_PASSWORD"
   aurum_support_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_SUPPORT_PASSWORD"
+  aurum_migrator_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_MIGRATOR_PASSWORD"
   database_url_app:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_APP"
   database_url_support:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_SUPPORT"
+  database_url_migration:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_MIGRATION"
   redis_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_PASSWORD"
   redis_url:

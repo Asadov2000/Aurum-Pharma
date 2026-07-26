@@ -1,7 +1,7 @@
 x-backend-environment: &backend-environment
   ENVIRONMENT: development
-  DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@postgres:5432/aurum
-  DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/aurum
+  DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
+  DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
   REDIS_URL: redis://redis:6379/0
   JWT_SECRET: e2e-only-secret-do-not-use-outside-tests-123456
   CORS_ORIGINS: '["http://localhost:15173"]'
@@ -16,16 +16,19 @@ services:
   postgres:
     image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
     environment:
-      POSTGRES_DB: aurum
+      POSTGRES_DB: ${AURUM_E2E_DATABASE:-aurum}
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       AURUM_APP_PASSWORD: aurum_app_pw
       AURUM_SUPPORT_PASSWORD: aurum_support_pw
+      AURUM_MIGRATOR_PASSWORD: aurum_migrator_pw
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d aurum"]
+      test:
+        ["CMD-SHELL", "pg_isready -U postgres -d ${AURUM_E2E_DATABASE:-aurum}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -55,6 +58,39 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    restart: "no"
+
+  db-role-bootstrap:
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${AURUM_E2E_DATABASE:-aurum}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      AURUM_APP_PASSWORD: aurum_app_pw
+      AURUM_SUPPORT_PASSWORD: aurum_support_pw
+      AURUM_MIGRATOR_PASSWORD: aurum_migrator_pw
+    volumes:
+      - ./infra/postgres:/opt/aurum/postgres:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "/opt/aurum/postgres/bootstrap-roles.sh"]
+    restart: "no"
+
+  migrate:
+    image: aurum-pharma-e2e-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
+      DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: python -m app.migrate upgrade head
     restart: "no"
 
   backend:

@@ -48,9 +48,11 @@ services:
       POSTGRES_PASSWORD: "${AURUM_DEMO_POSTGRES_PASSWORD:?AURUM_DEMO_POSTGRES_PASSWORD is required}"
       AURUM_APP_PASSWORD: "${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}"
       AURUM_SUPPORT_PASSWORD: "${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}"
+      AURUM_MIGRATOR_PASSWORD: "${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -104,6 +106,39 @@ services:
       retries: 20
     restart: unless-stopped
 
+  db-role-bootstrap:
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: aurum_demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${AURUM_DEMO_POSTGRES_PASSWORD:?AURUM_DEMO_POSTGRES_PASSWORD is required}"
+      AURUM_APP_PASSWORD: "${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}"
+      AURUM_SUPPORT_PASSWORD: "${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}"
+      AURUM_MIGRATOR_PASSWORD: "${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}"
+    volumes:
+      - ./infra/postgres:/opt/aurum/postgres:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "/opt/aurum/postgres/bootstrap-roles.sh"]
+    restart: "no"
+
+  migrate:
+    image: aurum-pharma-demo-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL_SUPPORT: "postgresql+asyncpg://aurum_support:${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}@postgres:5432/aurum_demo"
+      DATABASE_URL_MIGRATION: "postgresql+asyncpg://aurum_migrator:${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}@postgres:5432/aurum_demo"
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: python -m app.migrate upgrade head
+    restart: "no"
+
   backend:
     <<: *backend-service
     container_name: aurum-demo-backend
@@ -114,7 +149,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl -fsS http://localhost:8000/healthz | grep -q '\"status\":\"ok\"'",
+          'curl -fsS http://localhost:8000/healthz | grep -q ''"status":"ok"''',
         ]
       interval: 5s
       timeout: 5s
