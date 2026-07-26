@@ -23,6 +23,7 @@ from app.domains.roles.models import (
 from app.domains.roles.repository import RolesRepository
 from app.main import app
 from tests.auth_helpers import create_support_access_token
+from tests.platform_access_helpers import create_test_platform_user
 
 
 async def _support_token(db: AsyncSession, user: AppUser) -> str:
@@ -39,6 +40,13 @@ async def _make_tenant(db: AsyncSession):  # type: ignore[no-untyped-def]
 
 async def _make_user(db: AsyncSession, **flags: bool) -> AppUser:
     nick = uuid4().hex[:8]
+    if flags.get("is_developer") or flags.get("is_administrator"):
+        return await create_test_platform_user(
+            db,
+            access_kind=("developer" if flags.get("is_developer") else "administrator"),
+            email=f"u-{nick}@aurum.tj",
+            full_name="Actor",
+        )
     u = AppUser(email=f"u-{nick}@aurum.tj", full_name="Actor", status="active", **flags)
     db.add(u)
     await db.flush()

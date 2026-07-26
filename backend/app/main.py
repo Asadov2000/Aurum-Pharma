@@ -40,6 +40,7 @@ from app.domains.incoming import router as incoming_router
 from app.domains.inventory import router as inventory_router
 from app.domains.notifications import router as notifications_router
 from app.domains.onboarding import router as onboarding_router
+from app.domains.platform_access import router as platform_access_router
 from app.domains.pos import router as pos_router
 from app.domains.roles import router as roles_router
 from app.domains.suppliers import router as suppliers_router
@@ -119,6 +120,7 @@ app.include_router(auth_router)
 app.include_router(foundation_admin_router)
 app.include_router(foundation_tenant_router)
 app.include_router(support_access_router)
+app.include_router(platform_access_router)
 app.include_router(roles_router)
 app.include_router(catalog_router)
 app.include_router(inventory_router)

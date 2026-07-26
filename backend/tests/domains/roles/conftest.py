@@ -23,6 +23,7 @@ from app.domains.roles.models import (
 )
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
+from tests.platform_access_helpers import create_test_platform_user
 
 
 @pytest_asyncio.fixture
@@ -52,7 +53,21 @@ async def make_user(db_session: AsyncSession):  # type: ignore[no-untyped-def]
         status: str = "active",
         membership_status: str = "active",
         is_owner: bool = False,
+        is_developer: bool = False,
+        is_administrator: bool = False,
     ) -> AppUser:
+        if is_developer or is_administrator:
+            if is_developer and is_administrator:
+                raise ValueError("A test platform account must have one access kind")
+            if home_tenant_id is not None:
+                raise ValueError("A platform account cannot have a tenant")
+            return await create_test_platform_user(
+                db_session,
+                access_kind="developer" if is_developer else "administrator",
+                email=email,
+                full_name=full_name,
+                status=status,
+            )
         u = AppUser(
             email=email or f"u-{uuid4().hex[:8]}@aurum.tj",
             full_name=full_name,

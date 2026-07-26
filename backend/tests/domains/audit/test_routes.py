@@ -9,9 +9,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
-from app.domains.auth.models import AppUser
 from app.main import app
 from tests.auth_helpers import create_support_access_token
+from tests.platform_access_helpers import create_test_platform_user
 
 
 async def test_global_audit_is_only_available_in_admin_namespace(
@@ -21,15 +21,12 @@ async def test_global_audit_is_only_available_in_admin_namespace(
     async def _override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
-    developer = AppUser(
+    developer = await create_test_platform_user(
+        db_session,
+        access_kind="developer",
         email=f"global-audit-developer-{uuid4().hex}@aurum.tj",
         full_name="Aurum developer",
-        status="active",
-        is_developer=True,
-        is_administrator=False,
     )
-    db_session.add(developer)
-    await db_session.flush()
     token = await create_support_access_token(
         db_session,
         developer,
@@ -60,15 +57,12 @@ async def test_global_audit_rejects_aurum_administrator(
     async def _override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
-    administrator = AppUser(
+    administrator = await create_test_platform_user(
+        db_session,
+        access_kind="administrator",
         email=f"global-audit-admin-{uuid4().hex}@aurum.tj",
         full_name="Aurum administrator",
-        status="active",
-        is_developer=False,
-        is_administrator=True,
     )
-    db_session.add(administrator)
-    await db_session.flush()
     token = await create_support_access_token(
         db_session,
         administrator,

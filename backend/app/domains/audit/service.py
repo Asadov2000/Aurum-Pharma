@@ -242,7 +242,7 @@ class AuditService:
             "old_values": _redact_dict(entry.old_values),
             "new_values": _redact_dict(entry.new_values),
             "changed_fields": _redact_dict(entry.changed_fields),
-            "ip_address": entry.ip_address,
+            "ip_address": (str(entry.ip_address) if entry.ip_address is not None else None),
             "user_agent": entry.user_agent,
             "metadata": _redact_dict(entry.metadata_json),
             "created_at": entry.created_at,
