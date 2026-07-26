@@ -142,9 +142,8 @@ async def test_scoped_administrator_revokes_employee_sessions_with_explicit_capa
     tenant = await make_tenant()
     administrator = await make_user(
         email="session-security-admin@aurum.tj",
-        home_tenant_id=tenant.id,
+        is_administrator=True,
     )
-    administrator.is_administrator = True
     employee = await make_user(home_tenant_id=tenant.id)
     employee_session = await _session(db_session, employee)
     employee_session_id = employee_session.id

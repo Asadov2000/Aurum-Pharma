@@ -134,10 +134,8 @@ async def test_administrator_has_explicit_catalog_access_but_no_role_write_bypas
     tenant = await make_tenant()
     administrator = await make_user(
         email="catalog-admin@aurum.tj",
-        home_tenant_id=tenant.id,
+        is_administrator=True,
     )
-    administrator.is_administrator = True
-    await db_session.flush()
     token = await create_support_access_token(db_session, administrator)
     actor_session_id = UUID(str(decode_access_token(token)["sid"]))
     support_service = SupportAccessService(SupportAccessRepository(db_session))

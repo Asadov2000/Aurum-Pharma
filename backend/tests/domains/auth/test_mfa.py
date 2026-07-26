@@ -39,6 +39,10 @@ from app.domains.auth.models import (
 )
 from app.main import app
 from tests.domains.auth.test_login import _seed_code
+from tests.platform_access_helpers import (
+    archive_test_platform_user,
+    create_test_platform_user,
+)
 
 _PASSWORD = "Very-Strong-Test-Password-42"
 
@@ -704,36 +708,29 @@ async def test_support_mfa_flow_works_through_real_app_and_support_pools(
     await app_engine.dispose()
     await support_engine.dispose()
     try:
-        async with db_engine.begin() as connection:
-            user_id = str(
-                (
-                    await connection.execute(
-                        text(
-                            "INSERT INTO public.app_user "
-                            "(email, full_name, password_hash, is_developer, status) "
-                            "VALUES (:email, 'MFA pool test', :password_hash, true, 'active') "
-                            "RETURNING id"
-                        ),
-                        {
-                            "email": email,
-                            "password_hash": hash_password(_PASSWORD),
-                        },
-                    )
-                ).scalar_one()
-            )
-            await connection.execute(
-                text(
-                    "INSERT INTO public.email_code "
-                    "(email_lower, code_hash, code_salt, purpose, ip_address, expires_at) "
-                    "VALUES (:email, :code_hash, :salt, 'login', '127.0.0.1', "
-                    "now() + interval '10 minutes')"
-                ),
-                {
-                    "email": email,
-                    "code_hash": hash_code(code, salt),
-                    "salt": salt,
-                },
-            )
+        async with AsyncSession(db_engine, expire_on_commit=False) as setup_session:
+            async with setup_session.begin():
+                user = await create_test_platform_user(
+                    setup_session,
+                    access_kind="developer",
+                    email=email,
+                    full_name="MFA pool test",
+                    password_hash=hash_password(_PASSWORD),
+                )
+                user_id = str(user.id)
+                await setup_session.execute(
+                    text(
+                        "INSERT INTO public.email_code "
+                        "(email_lower, code_hash, code_salt, purpose, ip_address, expires_at) "
+                        "VALUES (:email, :code_hash, :salt, 'login', '127.0.0.1', "
+                        "now() + interval '10 minutes')"
+                    ),
+                    {
+                        "email": email,
+                        "code_hash": hash_code(code, salt),
+                        "salt": salt,
+                    },
+                )
 
         login = await client.post(
             "/api/v1/auth/login/verify",
@@ -770,26 +767,31 @@ async def test_support_mfa_flow_works_through_real_app_and_support_pools(
     finally:
         await app_engine.dispose()
         await support_engine.dispose()
-        async with db_engine.begin() as connection:
-            if user_id is not None:
-                await connection.execute(
-                    text(
-                        "DELETE FROM public.audit_log "
-                        "WHERE user_id = CAST(:user_id AS UUID) "
-                        "OR record_id = CAST(:user_id AS UUID)"
-                    ),
-                    {"user_id": user_id},
+        async with AsyncSession(db_engine, expire_on_commit=False) as cleanup_session:
+            async with cleanup_session.begin():
+                await cleanup_session.execute(
+                    text("DELETE FROM public.login_attempt WHERE email_lower = :email"),
+                    {"email": email},
                 )
-            await connection.execute(
-                text("DELETE FROM public.login_attempt WHERE email_lower = :email"),
-                {"email": email},
-            )
-            await connection.execute(
-                text("DELETE FROM public.email_code WHERE email_lower = :email"),
-                {"email": email},
-            )
-            if user_id is not None:
-                await connection.execute(
-                    text("DELETE FROM public.app_user WHERE id = CAST(:user_id AS UUID)"),
-                    {"user_id": user_id},
+                await cleanup_session.execute(
+                    text("DELETE FROM public.email_code WHERE email_lower = :email"),
+                    {"email": email},
                 )
+                if user_id is not None:
+                    user = await cleanup_session.get(AppUser, UUID(user_id))
+                    if user is not None:
+                        await cleanup_session.execute(
+                            text(
+                                "DELETE FROM public.auth_mfa_challenge " "WHERE user_id = :user_id"
+                            ),
+                            {"user_id": user.id},
+                        )
+                        await cleanup_session.execute(
+                            text("DELETE FROM public.support_mfa " "WHERE user_id = :user_id"),
+                            {"user_id": user.id},
+                        )
+                        await cleanup_session.execute(
+                            text("DELETE FROM public.session " "WHERE user_id = :user_id"),
+                            {"user_id": user.id},
+                        )
+                        await archive_test_platform_user(cleanup_session, user=user)

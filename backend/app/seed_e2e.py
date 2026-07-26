@@ -83,10 +83,41 @@ async def main() -> None:
                 full_name="Aurum Administrator",
                 password_hash=hash_password("Admin1234"),
                 is_developer=False,
-                is_administrator=True,
+                is_administrator=False,
                 status="active",
                 activated_at=now,
             )
+            await session.execute(
+                text("SELECT set_config('app.user_id', :user_id, true)"),
+                {"user_id": str(developer.id)},
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO public.platform_access_grant (
+                      user_id,
+                      access_kind,
+                      status,
+                      requested_by,
+                      request_reason_code,
+                      request_reason,
+                      requires_approval
+                    ) VALUES (
+                      :administrator_id,
+                      'administrator',
+                      'active',
+                      :developer_id,
+                      'other',
+                      'Disposable development seed account',
+                      false
+                    )
+                    """),
+                {
+                    "administrator_id": administrator.id,
+                    "developer_id": developer.id,
+                },
+            )
+            await session.execute(text("SELECT set_config('app.user_id', '', true)"))
+            await session.refresh(administrator)
             await session.execute(
                 text("""
                     INSERT INTO public.support_mfa (

@@ -31,6 +31,7 @@ from app.domains.support_access.repository import SupportAccessRepository
 from app.domains.support_access.service import SupportAccessService
 from app.main import app
 from tests.auth_helpers import create_support_access_token
+from tests.platform_access_helpers import create_test_platform_user
 
 
 async def _auth_session_id(db: AsyncSession, actor: AppUser) -> tuple[str, UUID]:
@@ -50,17 +51,12 @@ async def _tenant(db: AsyncSession):  # type: ignore[no-untyped-def]
 
 async def _support_user(db: AsyncSession, *, developer: bool = False) -> AppUser:
     suffix = uuid4().hex[:8]
-    user = AppUser(
+    return await create_test_platform_user(
+        db,
+        access_kind="developer" if developer else "administrator",
         email=f"support-{suffix}@aurum.tj",
         full_name="Support Operator",
-        is_developer=developer,
-        is_administrator=not developer,
-        status="active",
     )
-    db.add(user)
-    await db.flush()
-    await db.refresh(user)
-    return user
 
 
 async def test_session_is_scoped_audited_and_immediately_revocable(
@@ -120,8 +116,13 @@ async def test_session_is_scoped_audited_and_immediately_revocable(
     request.state.is_support_session = True
     request.state.support_access_resolved = True
     request.state.tenant_id = tenant.id
+    request.state.request_id = "support-context-test"
     await _seed_request_db_context(request, db_session)
 
+    assert (
+        await db_session.scalar(text("SELECT current_setting('app.request_id', true)"))
+        == "support-context-test"
+    )
     assert await db_session.scalar(text("SELECT public.is_support_session()")) is False
     assert await db_session.scalar(text("SELECT public.is_tenant_support_session()")) is True
     assert (
@@ -252,6 +253,7 @@ async def test_start_endpoint_requires_support_mfa_and_returns_no_bearer_secret(
 class _RuntimeSupportScenario:
     tenant_id: UUID
     other_tenant_id: UUID
+    developer_id: UUID
     actor_id: UUID
     actor_auth_session_id: UUID
     other_auth_session_id: UUID
@@ -302,16 +304,85 @@ async def _create_runtime_support_scenario(
             "other_role_name": f"Other role {suffix}",
         },
     )
+    developer_id = await connection.scalar(text("""
+            SELECT platform_grant.user_id
+            FROM public.platform_access_grant AS platform_grant
+            JOIN public.app_user AS account
+              ON account.id = platform_grant.user_id
+             AND account.status = 'active'
+            WHERE platform_grant.access_kind = 'developer'
+              AND platform_grant.status = 'active'
+            ORDER BY platform_grant.requested_at
+            LIMIT 1
+            """))
+    if developer_id is None:
+        developer_grant_count = int(
+            await connection.scalar(
+                text(
+                    "SELECT count(*) FROM public.platform_access_grant "
+                    "WHERE access_kind = 'developer'"
+                )
+            )
+            or 0
+        )
+        if developer_grant_count:
+            raise RuntimeError("Test database lacks an active Developer")
+        developer_id = (
+            await connection.execute(
+                text("""
+                    INSERT INTO public.app_user (
+                      email,
+                      full_name,
+                      is_developer,
+                      status
+                    ) VALUES (
+                      :email,
+                      'Runtime fixture Developer',
+                      true,
+                      'active'
+                    )
+                    RETURNING id
+                    """),
+                {"email": f"runtime-developer-{suffix}@example.invalid"},
+            )
+        ).scalar_one()
     actor_id = (
         await connection.execute(
             text(
                 "INSERT INTO public.app_user "
-                "(email, full_name, is_administrator, status) "
-                "VALUES (:email, 'Scoped support', true, 'active') RETURNING id"
+                "(email, full_name, status) "
+                "VALUES (:email, 'Scoped support', 'active') RETURNING id"
             ),
             {"email": f"actor-{suffix}@example.invalid"},
         )
     ).scalar_one()
+    await connection.execute(
+        text("SELECT set_config('app.user_id', :developer_id, true)"),
+        {"developer_id": str(developer_id)},
+    )
+    await connection.execute(
+        text("""
+            INSERT INTO public.platform_access_grant (
+              user_id,
+              access_kind,
+              status,
+              requested_by,
+              request_reason_code,
+              request_reason,
+              requires_approval
+            ) VALUES (
+              :actor_id,
+              'administrator',
+              'active',
+              :developer_id,
+              'other',
+              'Runtime support isolation fixture',
+              false
+            )
+            """),
+        {"actor_id": actor_id, "developer_id": developer_id},
+    )
+    await connection.execute(text("SELECT set_config('app.user_id', '', true)"))
     auth_sessions = list(
         (
             await connection.execute(
@@ -346,53 +417,6 @@ async def _create_runtime_support_scenario(
     )
     actor_auth_session_id = auth_sessions[0]
     other_auth_session_id = auth_sessions[1]
-    await connection.execute(
-        text("""
-            INSERT INTO public.tenant_membership (
-              tenant_id,
-              user_id,
-              full_name,
-              status
-            ) VALUES (
-              :tenant_id,
-              :actor_id,
-              'Scoped support tenant member',
-              'active'
-            )
-            """),
-        {"tenant_id": tenant_id, "actor_id": actor_id},
-    )
-    tenant_member_role_id = (
-        await connection.execute(
-            text("""
-                INSERT INTO public.role (tenant_id, name, level)
-                VALUES (:tenant_id, :name, 4)
-                RETURNING id
-                """),
-            {
-                "tenant_id": tenant_id,
-                "name": f"Hybrid member role {suffix}",
-            },
-        )
-    ).scalar_one()
-    await connection.execute(
-        text("""
-            INSERT INTO public.role_permission (role_id, permission_code)
-            VALUES (:role_id, 'roles.assign')
-            """),
-        {"role_id": tenant_member_role_id},
-    )
-    await connection.execute(
-        text("""
-            INSERT INTO public.user_assignment (user_id, tenant_id, role_id)
-            VALUES (:actor_id, :tenant_id, :role_id)
-            """),
-        {
-            "actor_id": actor_id,
-            "tenant_id": tenant_id,
-            "role_id": tenant_member_role_id,
-        },
-    )
     support_session_id = (
         await connection.execute(
             text("""
@@ -446,6 +470,7 @@ async def _create_runtime_support_scenario(
     return _RuntimeSupportScenario(
         tenant_id=tenant_id,
         other_tenant_id=other_tenant_id,
+        developer_id=developer_id,
         actor_id=actor_id,
         actor_auth_session_id=actor_auth_session_id,
         other_auth_session_id=other_auth_session_id,
@@ -481,6 +506,10 @@ async def _retire_runtime_support_actor(
     scenario: _RuntimeSupportScenario,
 ) -> None:
     await connection.execute(
+        text("SELECT set_config('app.user_id', :developer_id, true)"),
+        {"developer_id": str(scenario.developer_id)},
+    )
+    await connection.execute(
         text("""
             UPDATE public.session
             SET
@@ -493,7 +522,7 @@ async def _retire_runtime_support_actor(
     await connection.execute(
         text("""
             UPDATE public.app_user
-            SET status = 'archived', is_administrator = false
+            SET status = 'archived'
             WHERE id = :actor_id
             """),
         {"actor_id": scenario.actor_id},

@@ -20,6 +20,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     LargeBinary,
     SmallInteger,
     String,
@@ -82,6 +83,75 @@ class AppUser(Base):
             "status IN ('invited','active','blocked','archived')",
             name="ck_app_user_status",
         ),
+    )
+
+
+class PlatformAccessGrant(Base):
+    """Protected Developer/Administrator grant history.
+
+    ``AppUser.is_developer`` and ``is_administrator`` remain temporary
+    compatibility projections maintained by database triggers.
+    """
+
+    __tablename__ = "platform_access_grant"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    access_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="SET NULL"),
+    )
+    request_reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    request_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    requires_approval: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    approval_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="SET NULL"),
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approval_reason_code: Mapped[str | None] = mapped_column(Text)
+    approval_reason: Mapped[str | None] = mapped_column(Text)
+    revoked_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="SET NULL"),
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoke_reason_code: Mapped[str | None] = mapped_column(Text)
+    revoke_reason: Mapped[str | None] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "access_kind IN ('developer','administrator')",
+            name="ck_platform_access_grant_kind",
+        ),
+        CheckConstraint(
+            "status IN ('pending','active','revoked','expired')",
+            name="ck_platform_access_grant_status",
+        ),
+        CheckConstraint("version >= 1", name="ck_platform_access_grant_version"),
     )
 
 

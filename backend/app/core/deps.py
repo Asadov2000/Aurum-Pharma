@@ -236,6 +236,12 @@ async def _seed_request_db_context(request: Request, session: AsyncSession) -> N
         None,
     )
     auth_session_id = getattr(request.state, "auth_session_id", None)
+    request_id = getattr(request.state, "request_id", None)
+    if request_id is not None:
+        await session.execute(
+            text("SELECT set_config('app.request_id', :v, true)"),
+            {"v": str(request_id)},
+        )
     if user_id is not None:
         await session.execute(
             text("SELECT set_config('app.user_id', :v, true)"),
@@ -614,6 +620,16 @@ async def require_recent_support_mfa(
             "Recent MFA verification required",
             details={"reason": "mfa_step_up_required"},
         )
+    return user
+
+
+async def require_recent_developer_mfa(
+    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
+) -> CurrentUser:
+    if not user.is_developer:
+        raise PermissionDeniedError("Developer privileges required")
+    if user.tenant_id is not None or user.support_access_session_id is not None:
+        raise PermissionDeniedError("Global Developer context required")
     return user
 
 
