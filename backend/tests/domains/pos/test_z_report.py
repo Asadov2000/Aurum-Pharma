@@ -5,7 +5,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError
@@ -19,6 +18,7 @@ async def _complete_sale(
     *,
     qty: Decimal,
     payments: list[tuple[str, Decimal]],
+    is_test: bool = False,
 ):  # type: ignore[no-untyped-def]
     sale = await service.create_sale(
         tenant_id=s["tenant"].id,
@@ -28,6 +28,8 @@ async def _complete_sale(
     created, _ = await service.add_item(sale_id=sale.id, catalog_id=s["item"].id, qty=qty)
     for method, amount in payments:
         await service.add_payment(sale_id=sale.id, payment_method=method, amount=amount)
+    if is_test:
+        await service.repo.update_sale(sale, is_test=True)
     await service.complete(sale_id=sale.id)
     return sale, created
 
@@ -132,12 +134,13 @@ async def test_z_report_full_refund_counts_sale_and_return(
     )
     shift = await service.repo.get_open_shift_for_register(s["register"].id)
     assert shift is not None
-    await service.close_shift(
+    closed = await service.close_shift(
         shift_id=shift.id,
         closing_cash_actual=Decimal("0"),
         closed_by_user_id=s["cashier"].id,
         notes=None,
     )
+    assert closed.closing_cash_expected == Decimal("0")
 
     z = await service.build_z_report(shift.id)
     assert z.total_sales == Decimal("100.00")
@@ -158,11 +161,12 @@ async def test_z_report_excludes_test_sales(db_session: AsyncSession, pos_scaffo
         opening_cash=Decimal("0"),
     )
     await _complete_sale(service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))])
-    test_sale, _ = await _complete_sale(
-        service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))]
-    )
-    await db_session.execute(
-        text("UPDATE sale SET is_test = true WHERE id = :id"), {"id": str(test_sale.id)}
+    await _complete_sale(
+        service,
+        s,
+        qty=Decimal("1"),
+        payments=[("cash", Decimal("10"))],
+        is_test=True,
     )
 
     shift = await service.repo.get_open_shift_for_register(s["register"].id)

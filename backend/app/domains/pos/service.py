@@ -1,9 +1,9 @@
 """Business logic for POS — shifts, sales, complete (FEFO + SELECT FOR UPDATE),
-refunds with parent voiding, prescription requirement.
+linked return documents, prescription requirement.
 
 Critical invariants:
-- A completed (or voided) sale is IMMUTABLE — any mutating method asserts
-  `_assert_draft` first.
+- A completed sale and all its components are immutable. Corrections are new
+  linked return documents; a fully refunded state is derived for reads.
 - complete() takes a lock on every batch it touches via SELECT FOR UPDATE
   before inserting the negative movement, so two concurrent completes
   serialize correctly and the second sees the up-to-date qty_remaining.
@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
-from datetime import date
+from collections.abc import Callable, Mapping
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -81,8 +81,14 @@ logger = structlog.get_logger("pos.service")
 
 
 class POSService:
-    def __init__(self, repo: POSRepository) -> None:
+    def __init__(
+        self,
+        repo: POSRepository,
+        *,
+        now: Callable[[], datetime] = utc_now,
+    ) -> None:
         self.repo = repo
+        self._now = now
 
     # =========================================================================
     # Shifts
@@ -231,7 +237,7 @@ class POSService:
         return await self.repo.update_shift(
             shift,
             status="closed",
-            closed_at=utc_now(),
+            closed_at=self._now(),
             closed_by_user_id=closed_by_user_id,
             closing_cash_actual=closing_cash_actual,
             closing_cash_expected=expected,
@@ -757,6 +763,14 @@ class POSService:
             raise NotFoundError("Sale not found")
         return sale
 
+    async def get_sale_lifecycle(self, sale: Sale) -> dict[str, object]:
+        lifecycle = await self.repo.sale_lifecycle(sale)
+        return {
+            "status": lifecycle.status,
+            "voided_at": lifecycle.voided_at,
+            "voided_by_sale_id": lifecycle.voided_by_sale_id,
+        }
+
     async def _lock_sale(self, sale_id: UUID) -> Sale:
         sale = await self.repo.lock_sale(sale_id)
         if sale is None:
@@ -872,6 +886,7 @@ class POSService:
             )
         items = await self.repo.list_items(sale.id)
         payments = await self.repo.list_payments(sale.id)
+        lifecycle = await self.repo.sale_lifecycle(sale)
 
         tenant = await self.repo.session.get(Tenant, sale.tenant_id)
         branch = await self.repo.session.get(Branch, sale.branch_id)
@@ -900,7 +915,7 @@ class POSService:
         return ReceiptData(
             sale_id=sale.id,
             is_refund=sale.sale_type == "return",
-            status=sale.status,
+            status=lifecycle.status,
             pharmacy_name=tenant.name if tenant is not None else "",
             branch_name=branch.name if branch is not None else "",
             branch_address=branch.address if branch is not None else None,
@@ -1611,7 +1626,7 @@ class POSService:
         completed = await self.repo.update_sale(
             sale,
             status="completed",
-            completed_at=utc_now(),
+            completed_at=self._now(),
             receipt_number=receipt,
             receipt_seq=receipt_seq,
         )
@@ -1799,8 +1814,8 @@ class POSService:
           - belong to the parent sale,
           - have qty <= original item qty - already refunded.
 
-        On success the parent gets `voided_at`/`voided_by_sale_id` only if
-        the refund covers EVERY original line in full.
+        The parent row remains immutable. A fully refunded display state is
+        derived from completed linked return documents.
         """
         per_item = self._aggregate_refund_items(items)
         effective_operation_id = operation_id or uuid4()
@@ -1874,22 +1889,15 @@ class POSService:
         await self.repo.update_sale(
             return_sale,
             status="completed",
-            completed_at=utc_now(),
+            completed_at=self._now(),
             receipt_number=receipt,
             receipt_seq=receipt_seq,
             total_amount=total,
         )
 
-        # Mark parent as voided iff this refund made every original line
-        # 100% refunded.
+        # Keep the finalized parent row unchanged. The read model derives the
+        # "voided" state once completed returns cover every original line.
         full = self._is_fully_refunded(parent_items, already_refunded, per_item)
-        if full:
-            await self.repo.update_sale(
-                parent,
-                voided_at=utc_now(),
-                voided_by_sale_id=return_sale.id,
-                status="voided",
-            )
 
         logger.info(
             "refund_completed",

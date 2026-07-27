@@ -109,8 +109,8 @@ async def test_sale_invisible_across_tenants(
                 text(
                     "INSERT INTO sale (tenant_id, branch_id, register_id, "
                     "shift_id, cashier_user_id, status) VALUES "
-                    "(:ta,:ba,:ra,:sa,:ua,'completed'),"
-                    "(:tb,:bb,:rb,:sb,:ub,'completed') RETURNING id"
+                    "(:ta,:ba,:ra,:sa,:ua,'draft'),"
+                    "(:tb,:bb,:rb,:sb,:ub,'draft') RETURNING id"
                 ),
                 {
                     "ta": tenant_ids[0],

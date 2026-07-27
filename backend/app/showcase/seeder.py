@@ -1536,7 +1536,7 @@ def build_shifts(
     return shifts
 
 
-async def seed_sales_and_shifts(  # noqa: PLR0912,PLR0915 - one immutable plan
+async def seed_sales_and_shifts(  # noqa: PLR0915 - one immutable plan
     session: AsyncSession,
     *,
     tenant_id: UUID,
@@ -1564,7 +1564,7 @@ async def seed_sales_and_shifts(  # noqa: PLR0912,PLR0915 - one immutable plan
     for sale in all_sales:
         local_date = sale.occurred_at.astimezone(LOCAL_TIMEZONE).date()
         shift = shifts[(sale.register_id, local_date)]
-        if sale.status == "completed":
+        if sale.status in {"completed", "voided"}:
             count_key = "sales_count" if sale.sale_type == "sale" else "returns_count"
             current_count = totals_by_shift[shift.id][count_key]
             if not isinstance(current_count, int):
@@ -1574,7 +1574,8 @@ async def seed_sales_and_shifts(  # noqa: PLR0912,PLR0915 - one immutable plan
                 current_amount = totals_by_shift[shift.id][payment.method]
                 if not isinstance(current_amount, Decimal):
                     raise RuntimeError("Invalid shift payment accumulator")
-                totals_by_shift[shift.id][payment.method] = current_amount + payment.amount
+                signed_amount = -payment.amount if sale.sale_type == "return" else payment.amount
+                totals_by_shift[shift.id][payment.method] = current_amount + signed_amount
 
     shift_rows: list[Row] = []
     for shift in shifts.values():
@@ -1636,11 +1637,9 @@ async def seed_sales_and_shifts(  # noqa: PLR0912,PLR0915 - one immutable plan
                 "shift_id": shift_id,
                 "sale_type": sale.sale_type,
                 "parent_sale_id": sale.parent_sale_id,
-                # A full refund forms a FK cycle: the return points to its
-                # original and the original points back to the return. Insert
-                # the original as completed, then apply the valid void
-                # transition after both rows exist.
-                "status": "completed" if sale.status == "voided" else sale.status,
+                # Components are inserted only while the parent is a draft.
+                # The whole generated document set is finalized below.
+                "status": "draft",
                 "receipt_number": sale.receipt_number,
                 "receipt_seq": sale.receipt_seq,
                 "operation_id": operation_id,
@@ -1744,25 +1743,34 @@ async def seed_sales_and_shifts(  # noqa: PLR0912,PLR0915 - one immutable plan
     await _bulk_insert(session, PrescriptionLog.__table__, prescription_rows)
     await _bulk_insert(session, BatchMovement.__table__, movement_rows)
 
-    for original in (sale for sale in sales if sale.status == "voided"):
-        await session.execute(
-            text("""
-                UPDATE public.sale
-                SET
-                  status = 'voided',
-                  voided_at = :voided_at,
-                  voided_by_sale_id = :voided_by_sale_id
-                WHERE id = :sale_id
-                  AND tenant_id = :tenant_id
-                  AND status = 'completed'
-                """),
-            {
-                "voided_at": original.voided_at,
-                "voided_by_sale_id": original.voided_by_sale_id,
-                "sale_id": original.id,
-                "tenant_id": tenant_id,
-            },
-        )
+    await session.execute(
+        text("""
+            UPDATE public.sale
+            SET status = 'completed'
+            WHERE tenant_id = :tenant_id
+              AND id = ANY(:sale_ids)
+              AND sale_type = 'sale'
+              AND status = 'draft'
+            """),
+        {
+            "tenant_id": tenant_id,
+            "sale_ids": [sale.id for sale in all_sales],
+        },
+    )
+    await session.execute(
+        text("""
+            UPDATE public.sale
+            SET status = 'completed'
+            WHERE tenant_id = :tenant_id
+              AND id = ANY(:sale_ids)
+              AND sale_type = 'return'
+              AND status = 'draft'
+            """),
+        {
+            "tenant_id": tenant_id,
+            "sale_ids": [sale.id for sale in all_sales],
+        },
+    )
 
     for register_id, last_receipt_seq in counters.items():
         register = registers_by_id[register_id]

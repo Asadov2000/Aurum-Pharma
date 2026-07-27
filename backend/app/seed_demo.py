@@ -24,8 +24,8 @@ What it does (all money is Decimal / NUMERIC, currency TJS):
 
 Idempotency: master is insert-missing; the tenant catalog/stock/sales block is
 guarded by a sentinel (master-linked tenant_catalog rows). Re-running is a
-no-op for the tenant block unless SEED_DEMO_FORCE=1, which wipes the demo's
-catalog/stock/sales first and rebuilds.
+no-op for the tenant block. SEED_DEMO_FORCE=1 is accepted only before the
+tenant has finalized receipts; immutable financial history is never erased.
 """
 
 from __future__ import annotations
@@ -33,8 +33,9 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -62,6 +63,13 @@ _RND = random.Random(42)  # deterministic prices/qty/expiries across runs
 
 def _money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _fixed_clock(value: datetime) -> Callable[[], datetime]:
+    def now() -> datetime:
+        return value
+
+    return now
 
 
 def _ean13(seq: int) -> str:
@@ -164,8 +172,24 @@ async def _get_demo(session: AsyncSession) -> Tenant:
 
 
 async def _clean_demo(session: AsyncSession, tenant_id: UUID) -> None:
-    """Wipe the demo's catalogue + stock + sales so a re-seed starts clean.
-    Child rows first; branches/registers/suppliers/users are left as-is."""
+    """Reset a pre-sale demo only; finalized financial history is immutable."""
+    finalized_count = int(
+        (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM sale "
+                    "WHERE tenant_id = :tenant_id AND status <> 'draft'"
+                ),
+                {"tenant_id": tenant_id},
+            )
+        ).scalar_one()
+    )
+    if finalized_count:
+        raise RuntimeError(
+            "Demo tenant has finalized receipts; recreate the disposable demo "
+            "database instead of deleting financial history"
+        )
+
     for table in (
         "sale_payment",
         "sale_item",
@@ -377,8 +401,19 @@ async def _seed_sales(
     _ = shift
     done = 0
     for _i in range(target_count):
+        completed_at = utc_now()
+        if _RND.random() < 0.70:
+            completed_at -= timedelta(
+                days=_RND.randint(1, 14),
+                hours=_RND.randint(0, 8),
+                minutes=_RND.randint(0, 59),
+            )
         sale = await pos.create_sale(
             tenant_id=tenant.id, register_id=register_id, cashier_user_id=cashier_id
+        )
+        await pos.repo.update_sale(
+            sale,
+            created_at=completed_at - timedelta(minutes=_RND.randint(1, 7)),
         )
         added = 0
         for cat in _RND.sample(otc, k=_RND.randint(1, 3)):
@@ -394,18 +429,8 @@ async def _seed_sales(
         fresh = await pos.get_sale(sale.id)
         method = _RND.choice(["cash", "cash", "card"])
         await pos.add_payment(sale_id=sale.id, payment_method=method, amount=fresh.total_amount)
-        await pos.complete(sale_id=sale.id)
-        # Back-date ~70% across the last 14 days so reports aren't all "today".
-        if _RND.random() < 0.70:
-            ts = utc_now() - timedelta(
-                days=_RND.randint(1, 14),
-                hours=_RND.randint(0, 8),
-                minutes=_RND.randint(0, 59),
-            )
-            await session.execute(
-                text("UPDATE sale SET created_at = :ts, completed_at = :ts WHERE id = :s"),
-                {"ts": ts, "s": sale.id},
-            )
+        timed_pos = POSService(POSRepository(session), now=_fixed_clock(completed_at))
+        await timed_pos.complete(sale_id=sale.id)
         done += 1
     print(f"sale: +{done} продаж (смена открыта)")
     return done

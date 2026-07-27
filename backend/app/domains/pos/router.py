@@ -469,8 +469,9 @@ async def get_sale(
         ),
         allowed_view_branch_ids=_sale_view_branch_scope(user),
     )
+    lifecycle = await service.get_sale_lifecycle(sale)
     return SaleDetails(
-        **SaleRead.model_validate(sale).model_dump(),
+        **SaleRead.model_validate(sale).model_copy(update=lifecycle).model_dump(),
         items=[
             SaleItemRead.model_validate(si).model_copy(
                 update={
