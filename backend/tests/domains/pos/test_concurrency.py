@@ -11,14 +11,13 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.errors import BusinessRuleError
 from app.domains.auth.models import AppUser
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
-from app.domains.foundation.models import Tenant
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.inventory.models import Batch, BatchMovement
@@ -44,6 +43,7 @@ class CommittedPOS:
 @pytest_asyncio.fixture
 async def committed_pos(
     db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], CommittedPOS]]:
     factory = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
     initial_qty = Decimal("20")
@@ -111,9 +111,42 @@ async def committed_pos(
     try:
         yield factory, context
     finally:
-        async with factory.begin() as session:
-            await session.execute(delete(Tenant).where(Tenant.id == context.tenant_id))
-            await session.execute(delete(AppUser).where(AppUser.id == context.cashier_id))
+        guarded_tables = (
+            ("prescription_log", "trg_guard_prescription_log_immutability"),
+            ("sale_payment", "trg_guard_sale_payment_immutability"),
+            ("sale_item", "trg_guard_sale_item_immutability"),
+            ("sale", "trg_guard_sale_immutability"),
+        )
+        async with maintenance_engine.begin() as connection:
+            for table, trigger in guarded_tables:
+                await connection.execute(
+                    text(f"ALTER TABLE public.{table} DISABLE TRIGGER {trigger}")
+                )
+
+        try:
+            async with db_engine.begin() as connection:
+                await connection.execute(
+                    text("SELECT set_config('app.support_session', 'true', true)")
+                )
+                await connection.execute(
+                    text("DELETE FROM public.tenant WHERE id = :tenant_id"),
+                    {"tenant_id": context.tenant_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM public.app_user WHERE id = :user_id"),
+                    {"user_id": context.cashier_id},
+                )
+            async with maintenance_engine.begin() as connection:
+                await connection.execute(
+                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
+                    {"tenant_id": context.tenant_id},
+                )
+        finally:
+            async with maintenance_engine.begin() as connection:
+                for table, trigger in reversed(guarded_tables):
+                    await connection.execute(
+                        text(f"ALTER TABLE public.{table} ENABLE TRIGGER {trigger}")
+                    )
 
 
 async def _create_paid_sale(

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -21,6 +22,41 @@ from app.domains.pos.models import (
     SalePayment,
     Shift,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SaleLifecycle:
+    status: str
+    voided_at: datetime | None
+    voided_by_sale_id: UUID | None
+
+
+_FULL_REFUND_SQL = """
+  s.sale_type = 'sale'
+  AND EXISTS (
+    SELECT 1
+    FROM sale_item original_item
+    WHERE original_item.sale_id = s.id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM sale_item original_item
+    WHERE original_item.sale_id = s.id
+      AND original_item.qty <> COALESCE(
+        (
+          SELECT SUM(return_item.qty)
+          FROM sale_item return_item
+          JOIN sale return_sale
+            ON return_sale.id = return_item.sale_id
+           AND return_sale.parent_sale_id = s.id
+           AND return_sale.sale_type = 'return'
+           AND return_sale.status = 'completed'
+          WHERE return_item.parent_sale_item_id = original_item.id
+        ),
+        0
+      )
+  )
+"""
 
 
 class POSRepository:
@@ -272,6 +308,52 @@ class POSRepository:
         await self.session.refresh(sale)
         return sale
 
+    async def sale_lifecycle(self, sale: Sale) -> SaleLifecycle:
+        if sale.status != "completed" or sale.sale_type != "sale":
+            return SaleLifecycle(
+                status=sale.status,
+                voided_at=sale.voided_at,
+                voided_by_sale_id=sale.voided_by_sale_id,
+            )
+
+        row = (
+            (
+                await self.session.execute(
+                    text(f"""
+                    SELECT
+                      ({_FULL_REFUND_SQL}) AS fully_refunded,
+                      final_return.completed_at AS voided_at,
+                      final_return.id AS voided_by_sale_id
+                    FROM sale s
+                    LEFT JOIN LATERAL (
+                      SELECT return_sale.id, return_sale.completed_at
+                      FROM sale return_sale
+                      WHERE return_sale.parent_sale_id = s.id
+                        AND return_sale.sale_type = 'return'
+                        AND return_sale.status = 'completed'
+                      ORDER BY return_sale.completed_at DESC NULLS LAST, return_sale.id DESC
+                      LIMIT 1
+                    ) final_return ON true
+                    WHERE s.id = :sale_id
+                    """),
+                    {"sale_id": sale.id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None or not bool(row["fully_refunded"]):
+            return SaleLifecycle(
+                status=sale.status,
+                voided_at=sale.voided_at,
+                voided_by_sale_id=sale.voided_by_sale_id,
+            )
+        return SaleLifecycle(
+            status="voided",
+            voided_at=row["voided_at"],
+            voided_by_sale_id=row["voided_by_sale_id"],
+        )
+
     async def list_items(self, sale_id: UUID) -> list[SaleItem]:
         stmt = select(SaleItem).where(SaleItem.sale_id == sale_id).order_by(SaleItem.position.asc())
         result = await self.session.execute(stmt)
@@ -441,13 +523,17 @@ class POSRepository:
         """Aggregates payments grouped by method for sales in this shift,
         plus sales_count / returns_count. Test (is_test) sales are excluded —
         they never represent real money."""
+        signed_payment = case(
+            (Sale.sale_type == "return", -SalePayment.amount),
+            else_=SalePayment.amount,
+        )
         payment_sum_stmt = (
-            select(SalePayment.payment_method, func.coalesce(func.sum(SalePayment.amount), 0))
+            select(SalePayment.payment_method, func.coalesce(func.sum(signed_payment), 0))
             .join(Sale, Sale.id == SalePayment.sale_id)
             .where(
                 and_(
                     Sale.shift_id == shift_id,
-                    Sale.status == "completed",
+                    Sale.status.in_(("completed", "voided")),
                     Sale.is_test.is_(False),
                 )
             )
@@ -468,7 +554,7 @@ class POSRepository:
             .where(
                 and_(
                     Sale.shift_id == shift_id,
-                    Sale.status == "completed",
+                    Sale.status.in_(("completed", "voided")),
                     Sale.sale_type == "sale",
                     Sale.is_test.is_(False),
                 )
@@ -750,7 +836,13 @@ class POSRepository:
         params["offset"] = (page - 1) * page_size
         rows_sql = text(f"""
             SELECT
-              s.id, s.receipt_number, s.completed_at, s.status,
+              s.id, s.receipt_number, s.completed_at,
+              CASE
+                WHEN s.status = 'voided'
+                  OR (s.status = 'completed' AND ({_FULL_REFUND_SQL}))
+                THEN 'voided'
+                ELSE s.status
+              END AS status,
               s.total_amount, s.currency, s.parent_sale_id,
               s.sale_type = 'return' AS is_refund,
               b.name  AS branch_name,
@@ -835,7 +927,14 @@ class POSRepository:
         # --- detail rows: every receipt in range, any status/type ---
         rows_sql = text(f"""
             SELECT
-              s.completed_at, s.receipt_number, s.status, s.sale_type,
+              s.completed_at, s.receipt_number,
+              CASE
+                WHEN s.status = 'voided'
+                  OR (s.status = 'completed' AND ({_FULL_REFUND_SQL}))
+                THEN 'voided'
+                ELSE s.status
+              END AS status,
+              s.sale_type,
               s.total_amount AS gross, s.currency,
               b.name AS branch_name,
               u.full_name AS cashier_name,

@@ -222,6 +222,8 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_platform_account_status",
     "trg_guard_platform_membership_scope",
     "trg_guard_role_permission_mutation",
+    "trg_guard_sale_child_immutability",
+    "trg_guard_sale_immutability",
     "trg_guard_user_assignment_scope",
     "trg_guard_sync_activation_bootstrap",
     "trg_guard_sync_activation_bootstrap_chunk",

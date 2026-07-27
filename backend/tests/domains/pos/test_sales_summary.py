@@ -3,7 +3,7 @@ empty-period file."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -24,14 +24,29 @@ async def _today(db: AsyncSession) -> date:
     ).scalar_one()
 
 
-async def _complete_sale(service: POSService, s, *, qty, payments):  # type: ignore[no-untyped-def]
+async def _complete_sale(  # type: ignore[no-untyped-def]
+    service: POSService,
+    s,
+    *,
+    qty,
+    payments,
+    completed_at: datetime | None = None,
+    is_test: bool = False,
+):
     sale = await service.create_sale(
         tenant_id=s["tenant"].id, register_id=s["register"].id, cashier_user_id=s["cashier"].id
     )
     created, _ = await service.add_item(sale_id=sale.id, catalog_id=s["item"].id, qty=qty)
     for method, amount in payments:
         await service.add_payment(sale_id=sale.id, payment_method=method, amount=amount)
-    await service.complete(sale_id=sale.id)
+    if is_test:
+        await service.repo.update_sale(sale, is_test=True)
+    completion_service = (
+        service
+        if completed_at is None
+        else POSService(service.repo, now=lambda value=completed_at: value)
+    )
+    await completion_service.complete(sale_id=sale.id)
     return sale, created
 
 
@@ -207,11 +222,13 @@ async def test_sales_summary_dates_use_tenant_timezone(
         opened_by_user_id=s["cashier"].id,
         opening_cash=Decimal("0"),
     )
-    sale, _ = await _complete_sale(service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))])
     # 2026-06-15 01:00 Dushanbe == 2026-06-14 20:00 UTC.
-    await db_session.execute(
-        text("UPDATE sale SET completed_at = '2026-06-14 20:00:00+00' WHERE id = :id"),
-        {"id": str(sale.id)},
+    await _complete_sale(
+        service,
+        s,
+        qty=Decimal("1"),
+        payments=[("cash", Decimal("10"))],
+        completed_at=datetime(2026, 6, 14, 20, 0, tzinfo=UTC),
     )
 
     local_day = await service.build_sales_summary(
@@ -245,11 +262,12 @@ async def test_sales_summary_excludes_test_sales(db_session: AsyncSession, pos_s
         opening_cash=Decimal("0"),
     )
     await _complete_sale(service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))])
-    test_sale, _ = await _complete_sale(
-        service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))]
-    )
-    await db_session.execute(
-        text("UPDATE sale SET is_test = true WHERE id = :id"), {"id": str(test_sale.id)}
+    await _complete_sale(
+        service,
+        s,
+        qty=Decimal("1"),
+        payments=[("cash", Decimal("10"))],
+        is_test=True,
     )
 
     today = await _today(db_session)

@@ -3,8 +3,8 @@ sales_summary, stock_on_date, dashboard.today_sales). Asia/Dushanbe is UTC+5,
 so local day D = [D-1 19:00Z, D 19:00Z). We pin completed_at/created_at to the
 four edge instants and assert in/out matches the old ::date semantics exactly.
 
-Sales are immutable through POS, so we complete them normally and then set the
-timestamp directly — allowed in tests."""
+Sales are immutable after completion, so tests inject the completion clock
+instead of rewriting finalized rows."""
 
 from __future__ import annotations
 
@@ -42,7 +42,11 @@ async def _open_shift(service: POSService, s) -> None:  # type: ignore[no-untype
         pass  # already open
 
 
-async def _complete_sale_at(db: AsyncSession, service: POSService, s, ts: datetime):  # type: ignore[no-untyped-def]
+async def _complete_sale_at(  # type: ignore[no-untyped-def]
+    service: POSService,
+    s,
+    ts: datetime,
+):
     sale = await service.create_sale(
         tenant_id=s["tenant"].id,
         register_id=s["register"].id,
@@ -50,12 +54,8 @@ async def _complete_sale_at(db: AsyncSession, service: POSService, s, ts: dateti
     )
     await service.add_item(sale_id=sale.id, catalog_id=s["item"].id, qty=Decimal(1))
     await service.add_payment(sale_id=sale.id, payment_method="cash", amount=Decimal(10))
-    await service.complete(sale_id=sale.id)
-    await db.execute(
-        text("UPDATE sale SET completed_at = :ts WHERE id = :id"),
-        {"ts": ts, "id": sale.id},
-    )
-    await db.flush()
+    timed_service = POSService(service.repo, now=lambda value=ts: value)
+    await timed_service.complete(sale_id=sale.id)
     return sale
 
 
@@ -64,7 +64,7 @@ async def test_list_sales_local_day_boundaries(db_session: AsyncSession, pos_sca
     service = POSService(POSRepository(db_session))
     await _open_shift(service, s)
     for ts in (PREV_2359, DAY_0001, DAY_2359, NEXT_0001):
-        await _complete_sale_at(db_session, service, s, ts)
+        await _complete_sale_at(service, s, ts)
 
     _, total = await POSRepository(db_session).list_sales(
         tenant_id=s["tenant"].id,
@@ -90,7 +90,7 @@ async def test_sales_summary_local_day_boundaries(db_session: AsyncSession, pos_
     service = POSService(POSRepository(db_session))
     await _open_shift(service, s)
     for ts in (PREV_2359, DAY_0001, DAY_2359, NEXT_0001):
-        await _complete_sale_at(db_session, service, s, ts)
+        await _complete_sale_at(service, s, ts)
 
     summary = await POSRepository(db_session).sales_summary(
         tenant_id=s["tenant"].id,
@@ -144,8 +144,8 @@ async def test_today_sales_counts_only_local_today(db_session: AsyncSession, pos
         today_local - timedelta(days=1), time(12, 0), ZoneInfo(TZ)
     ).astimezone(UTC)
 
-    await _complete_sale_at(db_session, service, s, today_noon)
-    await _complete_sale_at(db_session, service, s, yesterday_noon)
+    await _complete_sale_at(service, s, today_noon)
+    await _complete_sale_at(service, s, yesterday_noon)
 
     row = await DashboardRepository(db_session).today_sales(s["tenant"].id, tz=TZ)
     assert int(row["receipts"]) == 1

@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.core.security import create_access_token
-from app.core.time import utc_now
 from app.domains.auth.models import AppUser
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
@@ -606,16 +605,27 @@ async def test_cashier_cannot_view_another_cashiers_sale(
             opened_by_user_id=cashier.id,
             opening_cash=Decimal("0"),
         )
+        item = await _create_stocked_item(
+            db_session,
+            tenant_id=tenant.id,
+            branch_id=branch.id,
+        )
         sale = await pos.create_sale(
             tenant_id=tenant.id,
             register_id=register.id,
             cashier_user_id=cashier.id,
         )
-        sale.status = "completed"
-        sale.completed_at = utc_now()
-        sale.receipt_seq = 1
-        sale.receipt_number = f"SEC-{nick}"
-        await db_session.flush()
+        await pos.add_item(
+            sale_id=sale.id,
+            catalog_id=item.id,
+            qty=Decimal("1"),
+        )
+        await pos.add_payment(
+            sale_id=sale.id,
+            payment_method="cash",
+            amount=Decimal("10"),
+        )
+        sale = await pos.complete(sale_id=sale.id)
 
         cashier_resp = await client.get(
             f"/api/v1/sales/{sale.id}",
@@ -725,6 +735,18 @@ async def test_sales_list_keeps_each_capability_paired_with_its_branch_scope(
             branch_id=team_branch.id,
         )
 
+        stocked_items = {
+            own_branch.id: await _create_stocked_item(
+                db_session,
+                tenant_id=tenant.id,
+                branch_id=own_branch.id,
+            ),
+            team_branch.id: await _create_stocked_item(
+                db_session,
+                tenant_id=tenant.id,
+                branch_id=team_branch.id,
+            ),
+        }
         sales = []
         for register, cashier in (
             (own_register, viewer),
@@ -742,12 +764,18 @@ async def test_sales_list_keeps_each_capability_paired_with_its_branch_scope(
                 register_id=register.id,
                 cashier_user_id=cashier.id,
             )
-            sale.status = "completed"
-            sale.completed_at = utc_now()
-            sale.receipt_seq = len(sales) + 1
-            sale.receipt_number = f"MIX-{nick}-{len(sales) + 1}"
-            sales.append(sale)
-        await db_session.flush()
+            item = stocked_items[register.branch_id]
+            await pos.add_item(
+                sale_id=sale.id,
+                catalog_id=item.id,
+                qty=Decimal("1"),
+            )
+            await pos.add_payment(
+                sale_id=sale.id,
+                payment_method="cash",
+                amount=Decimal("10"),
+            )
+            sales.append(await pos.complete(sale_id=sale.id))
 
         headers = {"Authorization": f"Bearer {_token(viewer)}"}
         combined = await client.get("/api/v1/sales", headers=headers)

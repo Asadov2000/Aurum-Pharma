@@ -4,9 +4,10 @@ the reports.view authorization gate."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -83,13 +84,29 @@ async def _seed(db: AsyncSession):  # type: ignore[no-untyped-def]
     return tenant, register, cashier, item, pos
 
 
-async def _sell(pos, tenant, register, cashier, item, *, qty, paid):  # type: ignore[no-untyped-def]
+async def _sell(  # type: ignore[no-untyped-def]
+    pos,
+    tenant,
+    register,
+    cashier,
+    item,
+    *,
+    qty,
+    paid,
+    completed_at: datetime | None = None,
+    is_test: bool = False,
+):
     sale = await pos.create_sale(
         tenant_id=tenant.id, register_id=register.id, cashier_user_id=cashier.id
     )
     created, _ = await pos.add_item(sale_id=sale.id, catalog_id=item.id, qty=qty)
     await pos.add_payment(sale_id=sale.id, payment_method="cash", amount=paid)
-    await pos.complete(sale_id=sale.id)
+    if is_test:
+        await pos.repo.update_sale(sale, is_test=True)
+    completion_service = (
+        pos if completed_at is None else POSService(pos.repo, now=lambda value=completed_at: value)
+    )
+    await completion_service.complete(sale_id=sale.id)
     return sale, created
 
 
@@ -101,26 +118,33 @@ async def test_today_sales_uses_tenant_timezone(db_session: AsyncSession) -> Non
     """A sale stamped 00:30 Dushanbe (= the previous UTC day) belongs to the
     local 'today'; one stamped yesterday-local does not."""
     tenant, register, cashier, item, pos = await _seed(db_session)
-    a, _ = await _sell(pos, tenant, register, cashier, item, qty=Decimal("1"), paid=Decimal("10"))
-    b, _ = await _sell(pos, tenant, register, cashier, item, qty=Decimal("1"), paid=Decimal("10"))
-
-    # A → today 00:30 Dushanbe (its UTC instant is the previous day ~19:30Z).
-    await db_session.execute(
-        text(
-            "UPDATE sale SET completed_at = "
-            "(date_trunc('day', now() AT TIME ZONE 'Asia/Dushanbe') + interval '30 minutes') "
-            "AT TIME ZONE 'Asia/Dushanbe' WHERE id = :id"
-        ),
-        {"id": str(a.id)},
+    timezone = ZoneInfo("Asia/Dushanbe")
+    today_local = datetime.now(timezone).date()
+    today_0030 = datetime.combine(today_local, time(0, 30), timezone).astimezone(UTC)
+    yesterday_noon = datetime.combine(
+        today_local - timedelta(days=1),
+        time(12),
+        timezone,
+    ).astimezone(UTC)
+    await _sell(
+        pos,
+        tenant,
+        register,
+        cashier,
+        item,
+        qty=Decimal("1"),
+        paid=Decimal("10"),
+        completed_at=today_0030,
     )
-    # B → yesterday noon Dushanbe (clearly the previous local day).
-    await db_session.execute(
-        text(
-            "UPDATE sale SET completed_at = "
-            "(date_trunc('day', now() AT TIME ZONE 'Asia/Dushanbe') - interval '12 hours') "
-            "AT TIME ZONE 'Asia/Dushanbe' WHERE id = :id"
-        ),
-        {"id": str(b.id)},
+    await _sell(
+        pos,
+        tenant,
+        register,
+        cashier,
+        item,
+        qty=Decimal("1"),
+        paid=Decimal("10"),
+        completed_at=yesterday_noon,
     )
 
     summary = await _dash(db_session).get_summary(tenant.id)
@@ -131,11 +155,15 @@ async def test_today_sales_uses_tenant_timezone(db_session: AsyncSession) -> Non
 async def test_today_sales_excludes_test_sales(db_session: AsyncSession) -> None:
     tenant, register, cashier, item, pos = await _seed(db_session)
     await _sell(pos, tenant, register, cashier, item, qty=Decimal("1"), paid=Decimal("10"))
-    test_sale, _ = await _sell(
-        pos, tenant, register, cashier, item, qty=Decimal("1"), paid=Decimal("10")
-    )
-    await db_session.execute(
-        text("UPDATE sale SET is_test = true WHERE id = :id"), {"id": str(test_sale.id)}
+    await _sell(
+        pos,
+        tenant,
+        register,
+        cashier,
+        item,
+        qty=Decimal("1"),
+        paid=Decimal("10"),
+        is_test=True,
     )
 
     summary = await _dash(db_session).get_summary(tenant.id)

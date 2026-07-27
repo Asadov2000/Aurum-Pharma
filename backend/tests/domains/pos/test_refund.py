@@ -1,4 +1,4 @@
-"""Refund flow — partial vs full, parent voiding, inventory return."""
+"""Refund flow — partial vs full, immutable parent, inventory return."""
 
 from __future__ import annotations
 
@@ -69,7 +69,9 @@ async def test_partial_refund_does_not_void_parent(db_session: AsyncSession, pos
     assert batch_after.qty_remaining == qty_before + Decimal("2.000")
 
 
-async def test_full_refund_voids_parent(db_session: AsyncSession, pos_scaffold) -> None:
+async def test_full_refund_derives_voided_state_without_mutating_parent(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
     service, s, parent, item = await _open_shift_and_sell(db_session, pos_scaffold, qty=3)
 
     ret = await service.refund(
@@ -81,9 +83,14 @@ async def test_full_refund_voids_parent(db_session: AsyncSession, pos_scaffold) 
     )
 
     await db_session.refresh(parent)
-    assert parent.status == "voided"
-    assert parent.voided_at is not None
-    assert parent.voided_by_sale_id == ret.id
+    assert parent.status == "completed"
+    assert parent.voided_at is None
+    assert parent.voided_by_sale_id is None
+
+    lifecycle = await service.repo.sale_lifecycle(parent)
+    assert lifecycle.status == "voided"
+    assert lifecycle.voided_at == ret.completed_at
+    assert lifecycle.voided_by_sale_id == ret.id
 
 
 async def test_voided_sale_receipt_number_is_never_reused(
@@ -178,9 +185,11 @@ async def test_double_refund_tracks_already_refunded(
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
-    # Now the parent is fully refunded
+    # The persisted parent remains immutable; its read model becomes voided.
     await db_session.refresh(parent)
-    assert parent.status == "voided"
+    assert parent.status == "completed"
+    lifecycle = await service.repo.sale_lifecycle(parent)
+    assert lifecycle.status == "voided"
 
     # A third refund must fail (nothing left)
     with pytest.raises(BusinessRuleError):

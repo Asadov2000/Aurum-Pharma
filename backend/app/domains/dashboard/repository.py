@@ -26,8 +26,8 @@ class DashboardRepository:
 
     async def today_sales(self, tenant_id: UUID, *, tz: str = "Asia/Dushanbe") -> dict[str, Any]:
         # Gross sales for the local "today", matching the sales-summary report:
-        # a forward sale counts once it has completed_at (so a sale refunded the
-        # same day — now status='voided' — stays in gross); test sales excluded;
+        # a forward sale counts once it has completed_at (so a sale fully
+        # refunded the same day still stays in gross); test sales excluded;
         # the day boundary is the tenant timezone, not UTC. Sargable half-open
         # range on completed_at uses ix_sale_tenant(tenant_id, completed_at).
         today_local = datetime.now(ZoneInfo(tz)).date()
