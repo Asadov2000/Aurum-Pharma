@@ -78,20 +78,33 @@ test.describe("Runtime surface", () => {
       };
       type WebViewTarget = Window & {
         __aurumDesktopMessages?: DesktopMessage[];
+        chrome?: {
+          webview?: {
+            postMessage(message: DesktopMessage): void;
+          };
+        };
       };
 
       const target = window as WebViewTarget;
       target.__aurumDesktopMessages = [];
-      Object.defineProperty(target, "chrome", {
-        configurable: true,
-        value: {
-          webview: {
-            postMessage(message: DesktopMessage) {
-              target.__aurumDesktopMessages?.push(message);
-            },
-          },
+      const webview = {
+        postMessage(message: DesktopMessage) {
+          target.__aurumDesktopMessages?.push(message);
         },
-      });
+      };
+      if (target.chrome) {
+        Object.defineProperty(target.chrome, "webview", {
+          configurable: true,
+          value: webview,
+        });
+      } else {
+        Object.defineProperty(target, "chrome", {
+          configurable: true,
+          value: {
+            webview,
+          },
+        });
+      }
     });
 
     await loginInBrowser(page, OWNER);

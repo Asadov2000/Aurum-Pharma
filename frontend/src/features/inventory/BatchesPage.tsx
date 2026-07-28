@@ -3,7 +3,7 @@ import { useState } from "react";
 import {
   Badge,
   Button,
-  FilterBar,
+  ConfigurableFilterBar,
   Label,
   Modal,
   Pagination,
@@ -18,6 +18,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
@@ -30,6 +31,7 @@ import { type ExpiryStatus } from "./types";
 const PAGE_SIZE = 50;
 
 export function BatchesPage(): JSX.Element {
+  const filterPreferenceKey = useFilterPreferenceKey("batches");
   const [branchId, setBranchId] = useState("");
   const [catalogId, setCatalogId] = useState("");
   const [expiry, setExpiry] = useState<ExpiryStatus | "">("");
@@ -61,66 +63,125 @@ export function BatchesPage(): JSX.Element {
         </span>
       </div>
 
-      <FilterBar>
-        <div className="w-72">
-          <Label htmlFor="catalog">Товар</Label>
-          <CatalogPicker
-            value={catalogId}
-            onChange={(id) => {
-              setCatalogId(id);
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "product",
+            label: "Товар",
+            content: (
+              <div className="w-64 sm:w-72">
+                <Label htmlFor="catalog">Товар</Label>
+                <CatalogPicker
+                  value={catalogId}
+                  onChange={(id) => {
+                    setCatalogId(id);
+                    setPage(1);
+                  }}
+                  placeholder="Найти по названию…"
+                  clearable
+                />
+              </div>
+            ),
+            active: Boolean(catalogId),
+            onClear: () => {
+              setCatalogId("");
               setPage(1);
-            }}
-            placeholder="Найти по названию…"
-            clearable
-          />
-        </div>
-        <div>
-          <Label htmlFor="branch">Точка</Label>
-          <Select
-            id="branch"
-            value={branchId}
-            onChange={(e) => {
-              setBranchId(e.target.value);
+            },
+            alwaysVisible: true,
+          },
+          {
+            id: "branch",
+            label: "Точка",
+            content: (
+              <div>
+                <Label htmlFor="branch">Точка</Label>
+                <Select
+                  id="branch"
+                  value={branchId}
+                  onChange={(e) => {
+                    setBranchId(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-56"
+                >
+                  <option value="">Все точки</option>
+                  {branches.data?.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(branchId),
+            onClear: () => {
+              setBranchId("");
               setPage(1);
-            }}
-            className="w-56"
-          >
-            <option value="">Все точки</option>
-            {branches.data?.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="expiry">Срок годности</Label>
-          <Select
-            id="expiry"
-            value={expiry}
-            onChange={(e) => {
-              setExpiry(e.target.value as ExpiryStatus | "");
+            },
+            defaultVisible: true,
+          },
+          {
+            id: "expiry",
+            label: "Срок годности",
+            content: (
+              <div>
+                <Label htmlFor="expiry">Срок годности</Label>
+                <Select
+                  id="expiry"
+                  value={expiry}
+                  onChange={(e) => {
+                    setExpiry(e.target.value as ExpiryStatus | "");
+                    setPage(1);
+                  }}
+                  className="w-56"
+                >
+                  <option value="">Все</option>
+                  {expiryOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {expiryLabel[s]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(expiry),
+            onClear: () => {
+              setExpiry("");
               setPage(1);
-            }}
-            className="w-56"
-          >
-            <option value="">Все</option>
-            {expiryOptions.map((s) => (
-              <option key={s} value={s}>
-                {expiryLabel[s]}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <Switch
-          label="Показывать пустые партии"
-          checked={showEmpty}
-          onChange={(e) => {
-            setShowEmpty(e.target.checked);
-            setPage(1);
-          }}
-        />
-      </FilterBar>
+            },
+            defaultVisible: true,
+          },
+          {
+            id: "empty",
+            label: "Пустые партии",
+            content: (
+              <div className="flex h-10 items-center">
+                <Switch
+                  label="Показывать пустые партии"
+                  checked={showEmpty}
+                  onChange={(e) => {
+                    setShowEmpty(e.target.checked);
+                    setPage(1);
+                  }}
+                />
+              </div>
+            ),
+            active: showEmpty,
+            onClear: () => {
+              setShowEmpty(false);
+              setPage(1);
+            },
+          },
+        ]}
+        onResetValues={() => {
+          setBranchId("");
+          setCatalogId("");
+          setExpiry("");
+          setShowEmpty(false);
+          setPage(1);
+        }}
+      />
 
       {error && (
         <p className="text-sm text-danger">

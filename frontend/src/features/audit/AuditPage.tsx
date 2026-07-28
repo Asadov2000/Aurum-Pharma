@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import {
   Badge,
+  ConfigurableFilterBar,
   Input,
   Label,
   Pagination,
@@ -14,6 +15,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { describeApiError } from "@/features/foundation/errors";
 
@@ -32,6 +34,7 @@ const scopeLabel: Record<AuditScope, string> = {
 
 export function AuditPage(): JSX.Element {
   const { user } = useAuth();
+  const filterPreferenceKey = useFilterPreferenceKey("audit");
   const canViewGlobalAudit = Boolean(user?.is_developer);
   const defaultScope: AuditScope = canViewGlobalAudit && !user?.home_tenant_id ? "global" : "my";
 
@@ -69,106 +72,194 @@ export function AuditPage(): JSX.Element {
         <span className="text-sm text-foreground-muted">всего: {total}</span>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-3">
-        <div>
-          <Label htmlFor="scope">Область</Label>
-          <Select
-            id="scope"
-            value={scope}
-            onChange={(e) => {
-              setScope(e.target.value as AuditScope);
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "scope",
+            label: "Область",
+            content: (
+              <div>
+                <Label htmlFor="scope">Область</Label>
+                <Select
+                  id="scope"
+                  value={scope}
+                  onChange={(e) => {
+                    const nextScope = e.target.value as AuditScope;
+                    setScope(nextScope);
+                    if (nextScope === "my") setUserId("");
+                    if (nextScope !== "global") setTenantId("");
+                    setPage(1);
+                  }}
+                  className="w-52"
+                >
+                  <option value="my">{scopeLabel.my}</option>
+                  <option value="tenant">{scopeLabel.tenant}</option>
+                  {canViewGlobalAudit && <option value="global">{scopeLabel.global}</option>}
+                </Select>
+              </div>
+            ),
+            active: scope !== defaultScope,
+            onClear: () => {
+              setScope(defaultScope);
+              setUserId("");
+              setTenantId("");
               setPage(1);
-            }}
-            className="w-52"
-          >
-            <option value="my">{scopeLabel.my}</option>
-            <option value="tenant">{scopeLabel.tenant}</option>
-            {canViewGlobalAudit && <option value="global">{scopeLabel.global}</option>}
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="action">Действие</Label>
-          <Input
-            id="action"
-            placeholder="insert / update / …"
-            value={action}
-            onChange={(e) => {
-              setAction(e.target.value);
+            },
+            alwaysVisible: true,
+          },
+          {
+            id: "action",
+            label: "Действие",
+            content: (
+              <div>
+                <Label htmlFor="action">Действие</Label>
+                <Input
+                  id="action"
+                  placeholder="insert / update / …"
+                  value={action}
+                  onChange={(e) => {
+                    setAction(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-44"
+                />
+              </div>
+            ),
+            active: Boolean(action),
+            onClear: () => {
+              setAction("");
               setPage(1);
-            }}
-            className="w-44"
-          />
-        </div>
-        <div>
-          <Label htmlFor="table_name">Таблица</Label>
-          <Input
-            id="table_name"
-            placeholder="batch / sale / …"
-            value={tableName}
-            onChange={(e) => {
-              setTableName(e.target.value);
+            },
+            defaultVisible: true,
+          },
+          {
+            id: "table",
+            label: "Раздел данных",
+            content: (
+              <div>
+                <Label htmlFor="table_name">Таблица</Label>
+                <Input
+                  id="table_name"
+                  placeholder="batch / sale / …"
+                  value={tableName}
+                  onChange={(e) => {
+                    setTableName(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-44"
+                />
+              </div>
+            ),
+            active: Boolean(tableName),
+            onClear: () => {
+              setTableName("");
               setPage(1);
-            }}
-            className="w-44"
-          />
-        </div>
-        {(scope === "tenant" || scope === "global") && (
-          <div>
-            <Label htmlFor="user_id">User ID</Label>
-            <Input
-              id="user_id"
-              placeholder="UUID"
-              value={userId}
-              onChange={(e) => {
-                setUserId(e.target.value);
-                setPage(1);
-              }}
-              className="w-44"
-            />
-          </div>
-        )}
-        {scope === "global" && (
-          <div>
-            <Label htmlFor="tenant_id">Tenant ID</Label>
-            <Input
-              id="tenant_id"
-              placeholder="UUID"
-              value={tenantId}
-              onChange={(e) => {
-                setTenantId(e.target.value);
-                setPage(1);
-              }}
-              className="w-44"
-            />
-          </div>
-        )}
-        <div>
-          <Label htmlFor="date_from">От</Label>
-          <Input
-            id="date_from"
-            type="date"
-            value={dateFrom}
-            max={dateTo || undefined}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
+            },
+          },
+          {
+            id: "user",
+            label: "Пользователь",
+            content: (
+              <div>
+                <Label htmlFor="user_id">User ID</Label>
+                <Input
+                  id="user_id"
+                  placeholder="UUID"
+                  value={userId}
+                  onChange={(e) => {
+                    setUserId(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-44"
+                />
+              </div>
+            ),
+            active: Boolean(userId),
+            onClear: () => {
+              setUserId("");
               setPage(1);
-            }}
-          />
-        </div>
-        <div>
-          <Label htmlFor="date_to">До</Label>
-          <Input
-            id="date_to"
-            type="date"
-            value={dateTo}
-            min={dateFrom || undefined}
-            onChange={(e) => {
-              setDateTo(e.target.value);
+            },
+            available: scope === "tenant" || scope === "global",
+          },
+          {
+            id: "tenant",
+            label: "Аптека",
+            content: (
+              <div>
+                <Label htmlFor="tenant_id">Tenant ID</Label>
+                <Input
+                  id="tenant_id"
+                  placeholder="UUID"
+                  value={tenantId}
+                  onChange={(e) => {
+                    setTenantId(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-44"
+                />
+              </div>
+            ),
+            active: Boolean(tenantId),
+            onClear: () => {
+              setTenantId("");
               setPage(1);
-            }}
-          />
-        </div>
-      </div>
+            },
+            available: scope === "global",
+          },
+          {
+            id: "period",
+            label: "Период",
+            content: (
+              <div className="grid w-64 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="date_from">От</Label>
+                  <Input
+                    id="date_from"
+                    type="date"
+                    value={dateFrom}
+                    max={dateTo || undefined}
+                    onChange={(e) => {
+                      setDateFrom(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="date_to">До</Label>
+                  <Input
+                    id="date_to"
+                    type="date"
+                    value={dateTo}
+                    min={dateFrom || undefined}
+                    onChange={(e) => {
+                      setDateTo(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+              </div>
+            ),
+            active: Boolean(dateFrom || dateTo),
+            onClear: () => {
+              setDateFrom("");
+              setDateTo("");
+              setPage(1);
+            },
+            defaultVisible: true,
+          },
+        ]}
+        onResetValues={() => {
+          setScope(defaultScope);
+          setAction("");
+          setTableName("");
+          setUserId("");
+          setTenantId("");
+          setDateFrom("");
+          setDateTo("");
+          setPage(1);
+        }}
+      />
 
       {error && (
         <p className="text-sm text-danger">

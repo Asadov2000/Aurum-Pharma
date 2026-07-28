@@ -51,15 +51,18 @@ class InventoryRepository:
         """Returns (rows, total). Rows include the expiry_status column from
         v_batch_with_expiry_status. show_empty=True falls back to plain
         batch table (the view skips qty_remaining = 0)."""
+        expiry_case = (
+            "CASE "
+            "WHEN b.expires_at <= CURRENT_DATE THEN 'expired' "
+            "WHEN b.expires_at <= CURRENT_DATE + INTERVAL '1 month' THEN 'red' "
+            "WHEN b.expires_at <= CURRENT_DATE + INTERVAL '3 months' THEN 'orange' "
+            "WHEN b.expires_at <= CURRENT_DATE + INTERVAL '6 months' THEN 'yellow' "
+            "ELSE 'normal' END"
+        )
         if show_empty:
             base = "FROM batch b WHERE 1=1"
             extra_cols = (
-                ", CASE "
-                "WHEN b.expires_at <= CURRENT_DATE THEN 'expired' "
-                "WHEN b.expires_at <= CURRENT_DATE + INTERVAL '1 month' THEN 'red' "
-                "WHEN b.expires_at <= CURRENT_DATE + INTERVAL '3 months' THEN 'orange' "
-                "WHEN b.expires_at <= CURRENT_DATE + INTERVAL '6 months' THEN 'yellow' "
-                "ELSE 'normal' END AS expiry_status, "
+                f", {expiry_case} AS expiry_status, "
                 "(b.expires_at - CURRENT_DATE) AS days_to_expiry"
             )
         else:
@@ -85,13 +88,14 @@ class InventoryRepository:
                     params[key] = allowed_branch_id
                 clauses.append(f"AND b.branch_id IN ({', '.join(branch_keys)})")
         if expiry_status:
-            clauses.append("AND b.expiry_status = :expiry_status")
+            expiry_filter = expiry_case if show_empty else "b.expiry_status"
+            clauses.append(f"AND ({expiry_filter}) = :expiry_status")
             params["expiry_status"] = expiry_status
 
         where = " ".join(clauses)
         list_sql = (
             f"SELECT b.* {extra_cols} {base} {where} "
-            f"ORDER BY b.expires_at ASC LIMIT :limit OFFSET :offset"
+            f"ORDER BY b.expires_at ASC, b.id ASC LIMIT :limit OFFSET :offset"
         )
         count_sql = (
             f"SELECT COUNT(*) {base} {where}"

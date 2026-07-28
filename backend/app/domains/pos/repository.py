@@ -877,7 +877,7 @@ class POSRepository:
             LEFT JOIN app_user u ON u.id = s.cashier_user_id
             LEFT JOIN sale parent ON parent.id = s.parent_sale_id
             WHERE {where}
-            ORDER BY s.completed_at DESC
+            ORDER BY s.completed_at DESC, s.id DESC
             LIMIT :limit OFFSET :offset
             """)
         rows = (await self.session.execute(rows_sql, params)).mappings().all()

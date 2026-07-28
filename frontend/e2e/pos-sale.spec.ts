@@ -206,7 +206,13 @@ test.describe("POS sale (owner)", () => {
     await expect(batchCatalogOption).toBeVisible({ timeout: 30_000 });
     await batchCatalogOption.click();
     // FEFO drained FEFO-A entirely (qty → 0); the page hides empty batches
-    // by default, so flip the toggle on first.
+    // by default, so add the optional filter and flip the toggle on first.
+    await page.getByRole("button", { name: /^Фильтры/ }).click();
+    await page
+      .getByRole("dialog", { name: "Настройка фильтров" })
+      .getByRole("checkbox", { name: "Пустые партии" })
+      .check();
+    await page.keyboard.press("Escape");
     // Switch UI hides the real <input> behind a styled span — Playwright's
     // visibility check refuses to click it without force.
     await page.getByLabel(/Показывать пустые партии/).check({ force: true });

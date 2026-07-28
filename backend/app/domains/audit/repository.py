@@ -111,7 +111,7 @@ class AuditRepository:
             list_stmt = list_stmt.where(and_(*clauses))
             count_stmt = count_stmt.where(and_(*clauses))
         list_stmt = (
-            list_stmt.order_by(AuditLog.created_at.desc())
+            list_stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
             .limit(page_size)
             .offset((page - 1) * page_size)
         )

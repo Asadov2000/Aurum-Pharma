@@ -9,7 +9,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  FilterBar,
+  ConfigurableFilterBar,
   Input,
   Label,
   Pagination,
@@ -23,6 +23,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useBranchesQuery, useRegistersQuery } from "@/features/foundation/queries";
 import { describeApiError } from "@/lib/errorMessages";
 
@@ -83,10 +84,12 @@ export function ShiftHistoryPanel({
   onSelect,
   reportTimezone,
 }: ShiftHistoryPanelProps): JSX.Element {
+  const filterPreferenceKey = useFilterPreferenceKey("reports-shift-history");
   const defaults = useMemo(() => defaultFilters(reportTimezone), [reportTimezone]);
   const form = useForm<FilterValues>({ defaultValues: defaults });
   const [filters, setFilters] = useState<FilterValues>(defaults);
   const [page, setPage] = useState(1);
+  const watchedFilters = form.watch();
   const branchId = form.watch("branch_id");
   const branches = useBranchesQuery(false);
   const registers = useRegistersQuery(branchId || null, false);
@@ -136,62 +139,136 @@ export function ShiftHistoryPanel({
         </CardHeader>
         <CardContent>
           <form onSubmit={(event) => void applyFilters(event)}>
-            <FilterBar>
-              <div>
-                <Label htmlFor="shift_date_from">Открыта с</Label>
-                <Input id="shift_date_from" type="date" {...form.register("date_from")} />
-              </div>
-              <div>
-                <Label htmlFor="shift_date_to">По</Label>
-                <Input id="shift_date_to" type="date" {...form.register("date_to")} />
-                {form.formState.errors.date_to && (
-                  <p className="mt-1 text-xs text-danger">
-                    {form.formState.errors.date_to.message}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="shift_branch">Точка</Label>
-                <Select
-                  id="shift_branch"
-                  className="w-44"
-                  {...form.register("branch_id", {
-                    onChange: () => form.setValue("register_id", ""),
-                  })}
-                >
-                  <option value="">Все доступные</option>
-                  {branches.data?.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="shift_register">Касса</Label>
-                <Select id="shift_register" className="w-44" {...form.register("register_id")}>
-                  <option value="">Все доступные</option>
-                  {registers.data?.map((register) => (
-                    <option key={register.id} value={register.id}>
-                      {register.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="shift_cashier">Кассир</Label>
-                <Input
-                  id="shift_cashier"
-                  className="w-44"
-                  placeholder="Имя сотрудника"
-                  {...form.register("cashier_query")}
-                />
-              </div>
-              <Button type="submit">Показать</Button>
-              <Button type="button" variant="secondary" onClick={resetFilters}>
-                Сбросить
-              </Button>
-            </FilterBar>
+            <ConfigurableFilterBar
+              preferenceKey={filterPreferenceKey}
+              filters={[
+                {
+                  id: "period",
+                  label: "Период",
+                  content: (
+                    <div className="grid w-64 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor="shift_date_from">Открыта с</Label>
+                        <Input id="shift_date_from" type="date" {...form.register("date_from")} />
+                      </div>
+                      <div>
+                        <Label htmlFor="shift_date_to">По</Label>
+                        <Input id="shift_date_to" type="date" {...form.register("date_to")} />
+                        {form.formState.errors.date_to && (
+                          <p className="mt-1 text-xs text-danger">
+                            {form.formState.errors.date_to.message}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ),
+                  active:
+                    watchedFilters.date_from !== defaults.date_from ||
+                    watchedFilters.date_to !== defaults.date_to,
+                  onClear: () => {
+                    form.setValue("date_from", defaults.date_from);
+                    form.setValue("date_to", defaults.date_to);
+                    setFilters((current) => ({
+                      ...current,
+                      date_from: defaults.date_from,
+                      date_to: defaults.date_to,
+                    }));
+                    setPage(1);
+                    onSelect(null);
+                  },
+                  defaultVisible: true,
+                },
+                {
+                  id: "branch",
+                  label: "Точка",
+                  content: (
+                    <div>
+                      <Label htmlFor="shift_branch">Точка</Label>
+                      <Select
+                        id="shift_branch"
+                        className="w-44"
+                        {...form.register("branch_id", {
+                          onChange: () => form.setValue("register_id", ""),
+                        })}
+                      >
+                        <option value="">Все доступные</option>
+                        {branches.data?.map((branch) => (
+                          <option key={branch.id} value={branch.id}>
+                            {branch.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  ),
+                  active: Boolean(watchedFilters.branch_id),
+                  onClear: () => {
+                    form.setValue("branch_id", "");
+                    form.setValue("register_id", "");
+                    setFilters((current) => ({
+                      ...current,
+                      branch_id: "",
+                      register_id: "",
+                    }));
+                    setPage(1);
+                    onSelect(null);
+                  },
+                  defaultVisible: true,
+                },
+                {
+                  id: "register",
+                  label: "Касса",
+                  content: (
+                    <div>
+                      <Label htmlFor="shift_register">Касса</Label>
+                      <Select
+                        id="shift_register"
+                        className="w-44"
+                        {...form.register("register_id")}
+                      >
+                        <option value="">Все доступные</option>
+                        {registers.data?.map((register) => (
+                          <option key={register.id} value={register.id}>
+                            {register.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  ),
+                  active: Boolean(watchedFilters.register_id),
+                  onClear: () => {
+                    form.setValue("register_id", "");
+                    setFilters((current) => ({ ...current, register_id: "" }));
+                    setPage(1);
+                    onSelect(null);
+                  },
+                },
+                {
+                  id: "cashier",
+                  label: "Кассир",
+                  content: (
+                    <div>
+                      <Label htmlFor="shift_cashier">Кассир</Label>
+                      <Input
+                        id="shift_cashier"
+                        className="w-44"
+                        placeholder="Имя сотрудника"
+                        {...form.register("cashier_query")}
+                      />
+                    </div>
+                  ),
+                  active: Boolean(watchedFilters.cashier_query),
+                  onClear: () => {
+                    form.setValue("cashier_query", "");
+                    setFilters((current) => ({ ...current, cashier_query: "" }));
+                    setPage(1);
+                    onSelect(null);
+                  },
+                  defaultVisible: true,
+                },
+              ]}
+              onResetValues={resetFilters}
+              actions={<Button type="submit">Показать</Button>}
+            />
           </form>
           {filterOptionsError && (
             <p className="mt-2 text-xs text-danger">

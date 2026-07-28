@@ -1,7 +1,16 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 
-import { Badge, Button, Label, Select, Switch, TableEmpty } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  ConfigurableFilterBar,
+  Label,
+  Select,
+  Switch,
+  TableEmpty,
+} from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +19,7 @@ import { useMarkAllRead, useMarkRead, useNotificationsQuery } from "./queries";
 import { type Notification, type Severity } from "./types";
 
 export function Inbox(): JSX.Element {
+  const filterPreferenceKey = useFilterPreferenceKey("notifications");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [severity, setSeverity] = useState<Severity | "">("");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -36,43 +46,72 @@ export function Inbox(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-3">
-        <Switch
-          label="Только непрочитанные"
-          checked={unreadOnly}
-          onChange={(e) => setUnreadOnly(e.target.checked)}
-        />
-        <div>
-          <Label htmlFor="severity">Уровень</Label>
-          <Select
-            id="severity"
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value as Severity | "")}
-            className="w-52"
-          >
-            <option value="">Все</option>
-            {severityOptions.map((s) => (
-              <option key={s} value={s}>
-                {severityLabel[s]}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-sm text-foreground-muted">
-            непрочитанных: <span className="font-mono">{unreadCount}</span>
-          </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void onMarkAll()}
-            disabled={unreadCount === 0}
-            isLoading={markAll.isPending}
-          >
-            Отметить все
-          </Button>
-        </div>
-      </div>
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "unread",
+            label: "Только непрочитанные",
+            content: (
+              <div className="flex h-10 items-center">
+                <Switch
+                  label="Только непрочитанные"
+                  checked={unreadOnly}
+                  onChange={(e) => setUnreadOnly(e.target.checked)}
+                />
+              </div>
+            ),
+            active: unreadOnly,
+            onClear: () => setUnreadOnly(false),
+            defaultVisible: true,
+          },
+          {
+            id: "severity",
+            label: "Уровень",
+            content: (
+              <div>
+                <Label htmlFor="severity">Уровень</Label>
+                <Select
+                  id="severity"
+                  value={severity}
+                  onChange={(e) => setSeverity(e.target.value as Severity | "")}
+                  className="w-52"
+                >
+                  <option value="">Все</option>
+                  {severityOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {severityLabel[s]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(severity),
+            onClear: () => setSeverity(""),
+            defaultVisible: true,
+          },
+        ]}
+        onResetValues={() => {
+          setUnreadOnly(false);
+          setSeverity("");
+        }}
+        actions={
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-sm text-foreground-muted">
+              непрочитанных: <span className="font-mono">{unreadCount}</span>
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void onMarkAll()}
+              disabled={unreadCount === 0}
+              isLoading={markAll.isPending}
+            >
+              Отметить все
+            </Button>
+          </div>
+        }
+      />
 
       {error && (
         <p className="text-sm text-danger">
