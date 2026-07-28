@@ -296,6 +296,30 @@ describe("SaleArea atomic checkout", () => {
     expect(checkoutSale).toHaveBeenCalledTimes(1);
   });
 
+  it("requires confirmation before F2 clears a non-empty draft", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+
+    renderArea();
+    await screen.findByText(/Остаток/);
+
+    const closeShift = screen.getByRole("button", { name: /Закрыть смену/i });
+    expect(closeShift).toBeDisabled();
+
+    fireEvent.keyDown(window, { key: "F2" });
+    expect(screen.getByRole("dialog", { name: "Начать новую продажу" })).toBeInTheDocument();
+    expect(window.localStorage.getItem(draftKey(REG))).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Очистить чек" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Начать новую продажу" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem(draftKey(REG))).toBeNull();
+  });
+
   it("does not open the cash drawer for a card checkout", async () => {
     let operationId = "";
     seedDraftSale(SALE.id);

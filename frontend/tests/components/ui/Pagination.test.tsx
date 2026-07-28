@@ -8,7 +8,7 @@ describe("Pagination", () => {
     render(<Pagination page={2} pageSize={10} total={35} onPage={vi.fn()} />);
     expect(screen.getByText("Всего:")).toBeInTheDocument();
     expect(screen.getByText("35")).toBeInTheDocument();
-    expect(screen.getByText("Стр. 2 / 4")).toBeInTheDocument();
+    expect(screen.getByText("2 из 4")).toBeInTheDocument();
   });
 
   it("disables «Назад» on the first page", () => {

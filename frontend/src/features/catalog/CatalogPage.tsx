@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  ActionMenu,
   Badge,
   Button,
   ConfigurableFilterBar,
@@ -8,6 +9,7 @@ import {
   Input,
   Label,
   Modal,
+  PageHeader,
   Pagination,
   Select,
   SkeletonRows,
@@ -75,15 +77,17 @@ export function CatalogPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Каталог</h1>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => setImporting(true)}>
-            Импорт из файла
-          </Button>
-          <Button onClick={() => setCreating(true)}>+ Новая позиция</Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Каталог"
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setImporting(true)}>
+              Импорт из файла
+            </Button>
+            <Button onClick={() => setCreating(true)}>+ Новая позиция</Button>
+          </>
+        }
+      />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -92,7 +96,7 @@ export function CatalogPage(): JSX.Element {
             id: "search",
             label: "Поиск",
             content: (
-              <div className="w-64 sm:w-80">
+              <div className="w-full sm:w-80">
                 <Label htmlFor="q">Поиск (название, МНН, производитель)</Label>
                 <Input
                   id="q"
@@ -123,7 +127,7 @@ export function CatalogPage(): JSX.Element {
                     setDispensing(e.target.value as DispensingType | "");
                     setPage(1);
                   }}
-                  className="w-52"
+                  className="w-full sm:w-52"
                 >
                   <option value="">Все</option>
                   {dispensingOptions.map((d) => (
@@ -151,7 +155,10 @@ export function CatalogPage(): JSX.Element {
       />
 
       {error && (
-        <p className="text-sm text-danger">
+        <p
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
           {describeApiError(error, "Не удалось загрузить каталог")}
         </p>
       )}
@@ -163,10 +170,9 @@ export function CatalogPage(): JSX.Element {
           <TableEmpty title="Ничего не найдено">Измените запрос или фильтр отпуска.</TableEmpty>
         ) : (
           <TableEmpty
-            icon="💊"
             title="Каталог пуст"
             action={
-              <div className="flex justify-center gap-2">
+              <div className="flex flex-wrap justify-center gap-2">
                 <Button variant="secondary" onClick={() => setImporting(true)}>
                   Импорт из файла
                 </Button>
@@ -179,49 +185,58 @@ export function CatalogPage(): JSX.Element {
         )
       ) : (
         <>
-          <Table>
+          <Table className="min-w-[720px] table-fixed">
             <THead>
               <TR>
-                <TH>Торговое название</TH>
-                <TH>МНН</TH>
-                <TH>Форма / дозировка</TH>
-                <TH>Отпуск</TH>
-                <TH>Цена</TH>
-                <TH>Статус</TH>
-                <TH className="text-right">Действия</TH>
+                <TH className="w-[16%]">Торговое название</TH>
+                <TH className="w-[23%]">МНН</TH>
+                <TH className="w-[27%]">Форма / дозировка</TH>
+                <TH className="w-[13%]">Отпуск</TH>
+                <TH className="w-[10%]">Цена</TH>
+                <TH className="w-[8%]">Статус</TH>
+                <TH className="w-12 text-right">
+                  <span className="sr-only">Действия</span>
+                </TH>
               </TR>
             </THead>
             <TBody>
               {data.items.map((it) => (
                 <TR key={it.id}>
-                  <TD className="font-medium">{it.brand_name}</TD>
-                  <TD>{it.inn ?? "—"}</TD>
+                  <TD className="break-words font-medium">{it.brand_name}</TD>
+                  <TD className="break-words">{it.inn ?? "—"}</TD>
                   <TD>
                     {[it.form, it.dosage].filter(Boolean).join(" / ") || "—"}
                     {it.pack_size && (
-                      <span className="ml-2 text-xs text-foreground-muted">№ {it.pack_size}</span>
+                      <span className="ml-2 text-xs text-foreground-muted">· {it.pack_size}</span>
                     )}
                   </TD>
-                  <TD>{dispensingLabel[it.dispensing_type]}</TD>
-                  <TD>
+                  <TD className="break-words">{dispensingLabel[it.dispensing_type]}</TD>
+                  <TD className="whitespace-nowrap">
                     {it.base_price ? `${parseFloat(it.base_price).toFixed(2)} ${it.currency}` : "—"}
                   </TD>
-                  <TD>
+                  <TD className="whitespace-nowrap">
                     {it.is_active ? (
                       <Badge tone="success">активна</Badge>
                     ) : (
                       <Badge tone="neutral">архив</Badge>
                     )}
                   </TD>
-                  <TD className="text-right whitespace-nowrap">
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(it)}>
-                      Изменить
-                    </Button>
-                    {it.is_active && (
-                      <Button variant="ghost" size="sm" onClick={() => setConfirmItem(it)}>
-                        Архив
-                      </Button>
-                    )}
+                  <TD className="w-12 text-right">
+                    <ActionMenu
+                      label={`Действия для ${it.brand_name}`}
+                      items={[
+                        { label: "Изменить", onSelect: () => setEditing(it) },
+                        ...(it.is_active
+                          ? [
+                              {
+                                label: "Архивировать",
+                                onSelect: () => setConfirmItem(it),
+                                tone: "danger" as const,
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
                   </TD>
                 </TR>
               ))}

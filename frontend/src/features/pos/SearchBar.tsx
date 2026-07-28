@@ -1,6 +1,6 @@
 import { forwardRef, useRef, useState } from "react";
 
-import { Button } from "@/components/ui";
+import { Button, Label } from "@/components/ui";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { cn } from "@/lib/utils";
 
@@ -14,7 +14,11 @@ export type ScannerStatus = "ready" | "scanning" | "off";
 export const SearchBar = forwardRef<
   HTMLInputElement,
   {
-    onAdd: (catalogId: string, name: string, qty: number) => void;
+    onAdd: (
+      catalogId: string,
+      name: string,
+      qty: number,
+    ) => boolean | void | Promise<boolean | void>;
     busy?: boolean;
     scanner?: ScannerStatus;
     touch?: boolean;
@@ -28,23 +32,34 @@ export const SearchBar = forwardRef<
   // fresh and the empty field lets the global Enter shortcut pay (see SaleArea).
   const [pickerKey, setPickerKey] = useState(0);
   const qtyRef = useRef<HTMLInputElement>(null);
+  const submitLockRef = useRef(false);
 
-  const submit = () => {
+  const submit = async () => {
     const q = Number(qty);
-    if (!catalogId || q <= 0) return;
-    onAdd(catalogId, name, q);
-    setCatalogId("");
-    setName("");
-    setQty("1");
-    setPickerKey((k) => k + 1);
+    if (!catalogId || q <= 0 || submitLockRef.current) return;
+    submitLockRef.current = true;
+    try {
+      const accepted = await onAdd(catalogId, name, q);
+      if (accepted === false) return;
+      setCatalogId("");
+      setName("");
+      setQty("1");
+      setPickerKey((k) => k + 1);
+    } finally {
+      submitLockRef.current = false;
+    }
   };
 
   return (
-    <div className="space-y-2 rounded-xl border border-border bg-surface p-3 shadow-sm">
-      <div className="flex items-end gap-2">
+    <div className="space-y-2 rounded-lg border border-border bg-surface p-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_4rem_auto] items-end gap-2">
         <div className="min-w-0 flex-1">
+          <Label htmlFor="pos-product-search" className="sr-only">
+            Товар
+          </Label>
           <CatalogPicker
             key={pickerKey}
+            id="pos-product-search"
             ref={ref}
             value={catalogId}
             onChange={(id, brand) => {
@@ -71,7 +86,7 @@ export const SearchBar = forwardRef<
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              submit();
+              void submit();
             }
           }}
           aria-label="Количество"
@@ -81,7 +96,7 @@ export const SearchBar = forwardRef<
           )}
         />
         <Button
-          onClick={submit}
+          onClick={() => void submit()}
           isLoading={busy}
           disabled={!catalogId}
           size={touch ? "xl" : "md"}
@@ -94,7 +109,7 @@ export const SearchBar = forwardRef<
           <span
             className={cn(
               "inline-block h-2 w-2 rounded-full",
-              scanner === "scanning" ? "animate-pulse bg-info" : "bg-success",
+              scanner === "scanning" ? "bg-info" : "bg-success",
             )}
             aria-hidden="true"
           />

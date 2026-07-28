@@ -20,7 +20,13 @@ const expiryTextClass: Record<ExpiryStatus, string> = {
 
 /** Batch number + expiry date + a coloured days-to-expiry hint for a cart line.
  *  Also disambiguates two lines of the same product (FEFO split). */
-function BatchExpiry({ item, fallback }: { item: SaleItem; fallback?: string }): JSX.Element | null {
+function BatchExpiry({
+  item,
+  fallback,
+}: {
+  item: SaleItem;
+  fallback?: string;
+}): JSX.Element | null {
   const status = expiryStatusFromDays(item.days_to_expiry);
   const date = item.expires_at ? new Date(item.expires_at).toLocaleDateString("ru-RU") : null;
   const label = item.batch_number ?? fallback ?? null;
@@ -70,9 +76,7 @@ export function CartList({
 }): JSX.Element {
   if (items.length === 0) {
     return (
-      <TableEmpty icon="🧾" title="Чек пуст">
-        Отсканируйте штрихкод или найдите товар в поиске.
-      </TableEmpty>
+      <TableEmpty title="Чек пуст">Отсканируйте штрихкод или найдите товар в поиске.</TableEmpty>
     );
   }
 
@@ -139,7 +143,7 @@ export function CartList({
   );
 
   return (
-    <ul className="space-y-2">
+    <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
       {groups.map((g) => {
         const first = g.items[0];
         if (!first) return null;
@@ -151,7 +155,7 @@ export function CartList({
               key={g.catalogId}
               data-testid="cart-item"
               className={cn(
-                "flex items-center gap-3 rounded-xl border border-border bg-surface px-4 shadow-sm",
+                "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
                 touch ? "py-4" : "py-3",
                 windowed && "pos-cv",
               )}
@@ -165,7 +169,9 @@ export function CartList({
                 </p>
                 <BatchExpiry item={first} />
               </div>
-              {lineControls(first, g.name)}
+              <div className="flex w-full items-center justify-end gap-1 sm:w-auto">
+                {lineControls(first, g.name)}
+              </div>
             </li>
           );
         }
@@ -174,13 +180,7 @@ export function CartList({
         const groupQty = g.items.reduce((s, it) => s + Number(it.qty), 0);
         const groupTotal = g.items.reduce((s, it) => s + Number(it.total_price), 0);
         return (
-          <li
-            key={g.catalogId}
-            className={cn(
-              "overflow-hidden rounded-xl border border-border bg-surface shadow-sm",
-              windowed && "pos-cv",
-            )}
-          >
+          <li key={g.catalogId} className={cn("overflow-hidden bg-surface", windowed && "pos-cv")}>
             <div className="flex items-center justify-between gap-3 border-b border-border bg-foreground/[0.02] px-4 py-2">
               <p className={cn("truncate font-medium text-foreground", touch && "text-lg")}>
                 {g.name}
@@ -197,7 +197,10 @@ export function CartList({
                 <div
                   key={it.id}
                   data-testid="cart-item"
-                  className={cn("flex items-center gap-3 px-4", touch ? "py-3" : "py-2.5")}
+                  className={cn(
+                    "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
+                    touch ? "py-3" : "py-2.5",
+                  )}
                 >
                   <div className="min-w-0 flex-1">
                     <BatchExpiry item={it} fallback={`Партия ${idx + 1}`} />
@@ -205,7 +208,9 @@ export function CartList({
                       {Number(it.unit_price).toFixed(2)} {currency} / шт
                     </p>
                   </div>
-                  {lineControls(it, g.name)}
+                  <div className="flex w-full items-center justify-end gap-1 sm:w-auto">
+                    {lineControls(it, g.name)}
+                  </div>
                 </div>
               ))}
             </div>

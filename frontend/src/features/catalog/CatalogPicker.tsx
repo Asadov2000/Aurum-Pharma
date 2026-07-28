@@ -1,10 +1,11 @@
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useId, useRef, useState } from "react";
 
 import { Input } from "@/components/ui";
 
 import { useCatalogQuery } from "./queries";
 
 interface Props {
+  id?: string;
   value: string;
   onChange: (catalogId: string, brandName: string) => void;
   /** Optional initial label shown when `value` is preset (e.g. from URL state). */
@@ -27,6 +28,7 @@ interface Props {
 export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function CatalogPicker(
   {
     value,
+    id,
     onChange,
     initialLabel,
     clearable = false,
@@ -41,18 +43,26 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
   const [debounced, setDebounced] = useState("");
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(text.trim()), 200);
     return () => clearTimeout(t);
   }, [text]);
 
-  const { data } = useCatalogQuery(
+  const {
+    data,
+    isFetching = false,
+    isPlaceholderData = false,
+    error = null,
+  } = useCatalogQuery(
     { q: debounced, page: 1, page_size: 10, branch_id: branchId },
     debounced.length >= 2,
   );
 
-  const items = data?.items ?? [];
+  // keepPreviousData is useful on full tables, but unsafe in a typeahead:
+  // results for the previous query must never be selectable as the new query.
+  const items = isPlaceholderData ? [] : (data?.items ?? []);
 
   // New results → highlight the first one again (set up the "type → Enter" flow).
   useEffect(() => {
@@ -84,14 +94,21 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
   return (
     <div ref={containerRef} className="relative">
       <Input
+        id={id}
         ref={ref}
         value={text}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
+          if (value) onChange("", "");
           setText(e.target.value);
           setOpen(true);
         }}
         onKeyDown={(e) => {
+          if (e.key === "Escape" && listOpen) {
+            e.preventDefault();
+            setOpen(false);
+            return;
+          }
           if (!listOpen || items.length === 0) return;
           if (e.key === "ArrowDown") {
             e.preventDefault();
@@ -110,6 +127,14 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
         placeholder={placeholder}
         invalid={invalid}
         autoComplete="off"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={listOpen}
+        aria-busy={isFetching || undefined}
+        aria-controls={listOpen ? listId : undefined}
+        aria-activedescendant={
+          listOpen && items[highlight] ? `${listId}-${items[highlight]?.id}` : undefined
+        }
         className={clearable && value ? "pr-9" : undefined}
       />
       {clearable && value && (
@@ -128,15 +153,32 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
         </p>
       )}
       {listOpen && (
-        <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-surface shadow-lg">
-          {items.length === 0 ? (
+        <div
+          id={listId}
+          role="listbox"
+          className="absolute z-dropdown mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-surface-raised shadow-lg"
+        >
+          {isFetching ? (
+            <p className="px-3 py-2 text-sm text-foreground-muted" role="status">
+              Поиск…
+            </p>
+          ) : error ? (
+            <p className="px-3 py-2 text-sm text-danger-foreground" role="alert">
+              Не удалось выполнить поиск
+            </p>
+          ) : items.length === 0 ? (
             <p className="px-3 py-2 text-sm italic text-foreground-muted">Ничего не найдено</p>
           ) : (
             items.map((it, idx) => (
               <button
                 key={it.id}
+                id={`${listId}-${it.id}`}
                 type="button"
+                role="option"
+                aria-selected={idx === highlight}
+                tabIndex={-1}
                 data-active={idx === highlight ? "true" : undefined}
+                onMouseDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setHighlight(idx)}
                 onClick={() => choose(it)}
                 className={
@@ -155,9 +197,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
                   <span
                     className={
                       "shrink-0 font-mono tabular-nums text-xs " +
-                      (Number(it.stock_available) <= 0
-                        ? "text-danger"
-                        : "text-foreground-muted")
+                      (Number(it.stock_available) <= 0 ? "text-danger" : "text-foreground-muted")
                     }
                   >
                     {Number(it.stock_available) <= 0 ? "нет" : `${Number(it.stock_available)} шт`}

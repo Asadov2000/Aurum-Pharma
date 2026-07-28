@@ -11,83 +11,111 @@
 @layer base {
   :root,
   [data-theme="light"] {
-    /* surfaces & text — cool clean slate, faint teal cast */
-    --background: 195 30% 97%;
+    /* Quiet neutral workspace with crisp white controls. */
+    --background: 210 20% 97%;
     --surface: 0 0% 100%;
     --surface-raised: 0 0% 100%;
-    --border: 205 25% 89%;
-    --input: 207 22% 80%;
-    --ring: 174 72% 31%;
-    --foreground: 202 45% 11%;
-    --foreground-secondary: 205 25% 27%;
-    --foreground-muted: 205 16% 42%;
+    --border: 214 20% 88%;
+    --input: 214 18% 78%;
+    --ring: 171 72% 32%;
+    --foreground: 215 31% 15%;
+    --foreground-secondary: 215 17% 31%;
+    --foreground-muted: 215 11% 46%;
 
-    /* primary — deep, confident medical teal (AA with white) */
-    --primary: 174 76% 24%;
+    /* Restrained medical teal; white text remains AA compliant. */
+    --primary: 171 74% 27%;
     --primary-foreground: 0 0% 100%;
 
     /* semantic: base / subtle background / readable foreground */
     --success: 152 62% 30%;
     --success-subtle: 150 56% 93%;
     --success-foreground: 154 66% 22%;
+    --success-contrast: 0 0% 100%;
     --warning: 28 82% 37%;
     --warning-subtle: 42 96% 90%;
     --warning-foreground: 26 82% 29%;
     --danger: 1 68% 45%;
     --danger-subtle: 2 80% 95%;
     --danger-foreground: 2 70% 40%;
+    --danger-contrast: 0 0% 100%;
     --info: 211 80% 40%;
     --info-subtle: 211 90% 94%;
     --info-foreground: 213 76% 37%;
 
     /* modal scrim */
-    --overlay: 202 45% 11%;
-    --overlay-opacity: 0.45;
+    --overlay: 215 31% 8%;
+    --overlay-opacity: 0.42;
   }
 
   [data-theme="dark"] {
-    /* deep cool slate — never pure black (avoids the harsh dark default) */
-    --background: 205 38% 8%;
-    --surface: 205 33% 11%;
-    --surface-raised: 205 30% 15%;
-    --border: 205 22% 22%;
-    --input: 205 18% 30%;
-    --ring: 173 70% 44%;
-    --foreground: 200 30% 94%;
-    --foreground-secondary: 205 20% 74%;
-    --foreground-muted: 205 15% 58%;
+    /* Near-neutral charcoal avoids both pure black and a blue-heavy dashboard. */
+    --background: 220 13% 8%;
+    --surface: 220 11% 11%;
+    --surface-raised: 220 10% 14%;
+    --border: 220 9% 23%;
+    --input: 220 8% 31%;
+    --ring: 169 61% 45%;
+    --foreground: 210 20% 95%;
+    --foreground-secondary: 216 14% 74%;
+    --foreground-muted: 216 9% 58%;
 
-    --primary: 172 66% 42%;
-    --primary-foreground: 174 80% 8%;
+    --primary: 168 59% 43%;
+    --primary-foreground: 172 70% 7%;
 
     --success: 152 58% 48%;
     --success-subtle: 152 38% 15%;
     --success-foreground: 150 65% 75%;
+    --success-contrast: 154 80% 7%;
     --warning: 36 90% 52%;
     --warning-subtle: 36 48% 15%;
     --warning-foreground: 42 95% 68%;
     --danger: 2 78% 63%;
     --danger-subtle: 2 40% 18%;
     --danger-foreground: 2 90% 81%;
+    --danger-contrast: 2 55% 10%;
     --info: 211 85% 63%;
     --info-subtle: 211 44% 18%;
     --info-foreground: 211 90% 81%;
 
-    --overlay: 205 50% 3%;
-    --overlay-opacity: 0.6;
+    --overlay: 220 20% 2%;
+    --overlay-opacity: 0.62;
   }
 
   html {
     font-family: theme("fontFamily.sans");
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    scrollbar-gutter: stable;
+  }
+
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
   }
 
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
+    overflow-x: hidden;
     /* Tabular figures everywhere: money, quantities and totals line up in
        columns without touching individual screens. This app is data-dense. */
     font-variant-numeric: tabular-nums;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    touch-action: manipulation;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
   }
 
   /* Headings inherit the display family app-wide. Keep letter spacing at 0:
@@ -112,16 +140,18 @@
     background-color: hsl(var(--overlay) / var(--overlay-opacity));
   }
 
-  /* Skeleton shimmer for loading states. */
+  /* Static skeletons avoid continuous painting on low-end workstations. */
   .skeleton {
-    @apply animate-pulse rounded-md bg-foreground/10;
+    @apply rounded-md bg-foreground/10;
   }
 
   /* Cheap windowing for long POS carts: the browser skips rendering rows that
      are scrolled out of view. The intrinsic size keeps the scrollbar honest. */
-  .pos-cv {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 64px;
+  @supports (content-visibility: auto) {
+    .pos-cv {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 64px;
+    }
   }
 }
 

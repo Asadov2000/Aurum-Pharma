@@ -59,7 +59,7 @@ export function Sidebar({
         className={cn(
           "group flex min-h-9 min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
           active
-            ? "bg-primary text-primary-foreground shadow-sm"
+            ? "bg-primary/10 text-primary"
             : "text-foreground-secondary hover:bg-foreground/5 hover:text-foreground",
         )}
       >
@@ -77,13 +77,13 @@ export function Sidebar({
     <nav
       aria-label="Основная навигация"
       className={cn(
-        "flex flex-col border-r border-border bg-surface px-3 py-4",
+        "flex flex-col border-r border-border bg-surface px-3 py-3.5",
         mode === "desktop" ? "sticky top-0 h-screen" : "h-full shadow-xl",
       )}
     >
-      <div className="flex shrink-0 items-center justify-between gap-3 px-2 pb-4">
+      <div className="flex shrink-0 items-center justify-between gap-3 px-2 pb-3.5">
         <span className="flex min-w-0 items-center gap-2.5">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground shadow-sm">
             <svg
               width="18"
               height="18"
@@ -104,7 +104,7 @@ export function Sidebar({
         {closeButton}
       </div>
 
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-1">
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto pr-1">
         {SECTIONS.map((section, idx) => {
           const present = section.routes
             .map((to) => byRoute.get(to))
@@ -113,7 +113,7 @@ export function Sidebar({
           return (
             <div key={section.caption ?? `top-${idx}`} className="flex flex-col gap-0.5">
               {section.caption && (
-                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase text-foreground-muted">
+                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold text-foreground-muted">
                   {section.caption}
                 </div>
               )}

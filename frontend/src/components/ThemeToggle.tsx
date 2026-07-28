@@ -1,11 +1,7 @@
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
-import {
-  getThemePreference,
-  setThemePreference,
-  type ThemePreference,
-} from "@/lib/theme";
+import { getThemePreference, setThemePreference, type ThemePreference } from "@/lib/theme";
 
 const OPTIONS: { value: ThemePreference; label: string; title: string }[] = [
   { value: "light", label: "☀", title: "Светлая" },
@@ -26,7 +22,7 @@ export function ThemeToggle(): JSX.Element {
     <div
       role="group"
       aria-label="Тема оформления"
-      className="inline-flex items-center rounded-lg border border-border bg-surface p-0.5"
+      className="inline-flex items-center rounded-md border border-border bg-background p-0.5"
     >
       {OPTIONS.map((o) => (
         <button
@@ -39,8 +35,8 @@ export function ThemeToggle(): JSX.Element {
           className={cn(
             "h-7 w-8 rounded-md text-sm transition-colors duration-fast",
             pref === o.value
-              ? "bg-primary text-primary-foreground"
-              : "text-foreground-secondary hover:bg-foreground/5",
+              ? "bg-surface text-foreground shadow-sm"
+              : "text-foreground-muted hover:text-foreground",
           )}
         >
           {o.label}

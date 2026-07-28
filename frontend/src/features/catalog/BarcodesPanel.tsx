@@ -63,7 +63,7 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
   };
 
   return (
-    <div className="space-y-3 rounded-md border border-border bg-foreground/[0.03] p-4">
+    <div className="space-y-3 border-t border-border pt-4">
       <p className="text-sm font-medium text-foreground-secondary">Штрихкоды</p>
       {detail.isLoading ? (
         <p className="text-sm text-foreground-muted">Загрузка…</p>
@@ -74,10 +74,10 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
           {detail.data?.barcodes.map((b) => (
             <li
               key={b.id}
-              className="flex items-center justify-between rounded border border-border bg-surface px-3 py-2"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 py-2"
             >
-              <div className="flex items-center gap-2">
-                <code className="font-mono text-sm">{b.code}</code>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <code className="break-all font-mono text-sm">{b.code}</code>
                 <Badge tone="neutral">{barcodeLabel[b.code_type]}</Badge>
               </div>
               <Button
@@ -96,7 +96,11 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
         </ul>
       )}
 
-      <form onSubmit={onAdd} noValidate className="grid grid-cols-[1fr_140px_auto] gap-2 items-end">
+      <form
+        onSubmit={onAdd}
+        noValidate
+        className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]"
+      >
         <div>
           <Label htmlFor="bc_code">Код</Label>
           <Input

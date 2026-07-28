@@ -16,7 +16,7 @@ describe("SearchBar — keyboard focus flow", () => {
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "Асп" } });
 
-    const result = await screen.findByRole("button", { name: /Аспирин/ });
+    const result = await screen.findByRole("option", { name: /Аспирин/ });
     fireEvent.click(result);
 
     const qty = screen.getByLabelText("Количество");
@@ -29,10 +29,25 @@ describe("SearchBar — keyboard focus flow", () => {
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "Асп" } });
 
-    await screen.findByRole("button", { name: /Аспирин/ });
+    await screen.findByRole("option", { name: /Аспирин/ });
     fireEvent.keyDown(input, { key: "Enter" });
 
     const qty = screen.getByLabelText("Количество");
     await waitFor(() => expect(qty).toHaveFocus());
+  });
+
+  it("keeps the selected product when adding it fails", async () => {
+    const onAdd = vi.fn().mockResolvedValue(false);
+    render(<SearchBar onAdd={onAdd} />);
+    const input = screen.getByPlaceholderText(/Поиск товара/);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Асп" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Аспирин/ }));
+
+    const qty = screen.getByLabelText("Количество");
+    fireEvent.keyDown(qty, { key: "Enter" });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
+    expect(input).toHaveValue("Аспирин");
   });
 });

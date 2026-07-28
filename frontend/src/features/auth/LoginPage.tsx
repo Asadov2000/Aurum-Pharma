@@ -10,6 +10,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  Checkbox,
   FormError,
   Input,
   Label,
@@ -55,8 +56,28 @@ type EnrollmentForm = z.infer<typeof enrollmentSchema>;
 type RecoveryForm = z.infer<typeof recoverySchema>;
 type LoginStep = "email" | "code" | "mfa" | "enroll" | "recovery";
 
+const stepTitle: Record<LoginStep, string> = {
+  email: "Вход в систему",
+  code: "Подтверждение входа",
+  mfa: "Двухфакторная защита",
+  enroll: "Настройка защиты",
+  recovery: "Восстановление доступа",
+};
+
 function extractErrorMessage(err: unknown): string {
   return describeApiError(err, "Не удалось выполнить запрос. Проверьте соединение.");
+}
+
+function LoginError({ message }: { message: string | null }): JSX.Element | null {
+  if (!message) return null;
+  return (
+    <p
+      className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+      role="alert"
+    >
+      {message}
+    </p>
+  );
 }
 
 export function LoginPage(): JSX.Element {
@@ -228,231 +249,246 @@ export function LoginPage(): JSX.Element {
   });
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className={step === "enroll" ? "w-full max-w-lg" : "w-full max-w-sm"}>
-        <CardHeader>
-          <CardTitle>Вход в Aurum Pharma</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {step === "email" ? (
-            <form onSubmit={submitEmail} noValidate className="space-y-4">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  autoFocus
-                  invalid={Boolean(emailForm.formState.errors.email)}
-                  {...emailForm.register("email")}
-                />
-                <FormError>{emailForm.formState.errors.email?.message}</FormError>
-              </div>
-              {topError && <p className="text-sm text-danger">{topError}</p>}
-              <Button type="submit" className="w-full" isLoading={emailForm.formState.isSubmitting}>
-                Получить код
-              </Button>
-            </form>
-          ) : step === "code" ? (
-            <form onSubmit={submitCode} noValidate className="space-y-4">
-              <p className="text-sm text-foreground-secondary">
-                Код отправлен на <span className="font-medium text-foreground">{email}</span>
-              </p>
-              {devCode && (
-                <div className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
-                  <span className="font-medium">Dev-режим:</span> код{" "}
-                  <code className="rounded bg-warning/15 px-1.5 py-0.5 font-mono text-base font-semibold">
-                    {devCode}
-                  </code>
-                  {" — "}уже подставлен в поле ниже.
-                </div>
-              )}
-              <div>
-                <Label htmlFor="code">Код из письма</Label>
-                <Input
-                  id="code"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  autoFocus
-                  invalid={Boolean(codeForm.formState.errors.code)}
-                  {...codeForm.register("code")}
-                />
-                <FormError>{codeForm.formState.errors.code?.message}</FormError>
-              </div>
-              <div>
-                <Label htmlFor="password">Пароль (если задан)</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  {...codeForm.register("password")}
-                />
-                <FormError>{codeForm.formState.errors.password?.message}</FormError>
-              </div>
-              {topError && <p className="text-sm text-danger">{topError}</p>}
-              <Button type="submit" className="w-full" isLoading={codeForm.formState.isSubmitting}>
-                Войти
-              </Button>
-            </form>
-          ) : step === "mfa" ? (
-            <form onSubmit={submitMfa} noValidate className="space-y-4">
-              <p className="text-sm text-foreground-secondary">
-                Введите код из приложения-аутентификатора.
-              </p>
-              <div>
-                <Label htmlFor="mfa-code">Код подтверждения</Label>
-                <Input
-                  id="mfa-code"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  autoFocus
-                  invalid={Boolean(mfaForm.formState.errors.code)}
-                  {...mfaForm.register("code")}
-                />
-                <FormError>{mfaForm.formState.errors.code?.message}</FormError>
-              </div>
-              {topError && <p className="text-sm text-danger">{topError}</p>}
-              <Button type="submit" className="w-full" isLoading={mfaForm.formState.isSubmitting}>
-                Подтвердить
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full"
-                onClick={() => {
-                  setTopError(null);
-                  setStep("recovery");
-                }}
-              >
-                Использовать резервный код
-              </Button>
-            </form>
-          ) : step === "enroll" ? (
-            enrollment ? (
-              <form onSubmit={submitEnrollment} noValidate className="space-y-4">
-                <p className="text-sm text-foreground-secondary">
-                  Добавьте Aurum Pharma в приложение-аутентификатор вручную.
-                </p>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+      <div className={step === "enroll" ? "w-full max-w-lg" : "w-full max-w-sm"}>
+        <header className="mb-5 text-center">
+          <span
+            className="mx-auto grid h-11 w-11 place-items-center rounded-lg bg-primary text-2xl font-medium text-primary-foreground"
+            aria-hidden="true"
+          >
+            +
+          </span>
+          <h1 className="mt-3 text-xl font-semibold text-foreground">Aurum Pharma</h1>
+        </header>
+        <Card>
+          <CardHeader className="border-b-0 pb-1 text-center">
+            <CardTitle>{stepTitle[step]}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {step === "email" ? (
+              <form onSubmit={submitEmail} noValidate className="space-y-4">
                 <div>
-                  <Label>Секретный ключ</Label>
-                  <code className="mt-1 block break-all rounded-md border bg-background-subtle px-3 py-2 font-mono text-sm">
-                    {enrollment.secret}
-                  </code>
-                </div>
-                <div>
-                  <Label>Резервные коды</Label>
-                  <div className="mt-1 grid grid-cols-2 gap-2 rounded-md border bg-background-subtle p-3">
-                    {enrollment.recovery_codes.map((code) => (
-                      <code key={code} className="font-mono text-xs">
-                        {code}
-                      </code>
-                    ))}
-                  </div>
-                </div>
-                <label className="flex items-start gap-2 text-sm text-foreground-secondary">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4"
-                    {...enrollmentForm.register("saved")}
-                  />
-                  <span>Я сохранил резервные коды в безопасном месте</span>
-                </label>
-                <FormError>{enrollmentForm.formState.errors.saved?.message}</FormError>
-                <div>
-                  <Label htmlFor="enrollment-code">Код из приложения</Label>
+                  <Label htmlFor="email">Email</Label>
                   <Input
-                    id="enrollment-code"
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    autoFocus
+                    invalid={Boolean(emailForm.formState.errors.email)}
+                    {...emailForm.register("email")}
+                  />
+                  <FormError>{emailForm.formState.errors.email?.message}</FormError>
+                </div>
+                <LoginError message={topError} />
+                <Button
+                  type="submit"
+                  className="w-full"
+                  isLoading={emailForm.formState.isSubmitting}
+                >
+                  Получить код
+                </Button>
+              </form>
+            ) : step === "code" ? (
+              <form onSubmit={submitCode} noValidate className="space-y-4">
+                <p className="text-sm text-foreground-secondary">
+                  Код отправлен на <span className="font-medium text-foreground">{email}</span>
+                </p>
+                {devCode && (
+                  <div className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
+                    <span className="font-medium">Dev-режим:</span> код{" "}
+                    <code className="rounded bg-warning/15 px-1.5 py-0.5 font-mono text-base font-semibold">
+                      {devCode}
+                    </code>
+                    {" — "}уже подставлен в поле ниже.
+                  </div>
+                )}
+                <div>
+                  <Label htmlFor="code">Код из письма</Label>
+                  <Input
+                    id="code"
                     type="text"
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     maxLength={6}
-                    invalid={Boolean(enrollmentForm.formState.errors.code)}
-                    {...enrollmentForm.register("code")}
+                    autoFocus
+                    invalid={Boolean(codeForm.formState.errors.code)}
+                    {...codeForm.register("code")}
                   />
-                  <FormError>{enrollmentForm.formState.errors.code?.message}</FormError>
+                  <FormError>{codeForm.formState.errors.code?.message}</FormError>
                 </div>
-                {topError && <p className="text-sm text-danger">{topError}</p>}
+                <div>
+                  <Label htmlFor="password">Пароль (если задан)</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete="current-password"
+                    {...codeForm.register("password")}
+                  />
+                  <FormError>{codeForm.formState.errors.password?.message}</FormError>
+                </div>
+                <LoginError message={topError} />
                 <Button
                   type="submit"
                   className="w-full"
-                  isLoading={enrollmentForm.formState.isSubmitting}
+                  isLoading={codeForm.formState.isSubmitting}
                 >
-                  Включить двухфакторную защиту
+                  Войти
                 </Button>
               </form>
-            ) : (
-              <div className="space-y-4">
+            ) : step === "mfa" ? (
+              <form onSubmit={submitMfa} noValidate className="space-y-4">
                 <p className="text-sm text-foreground-secondary">
-                  Подготавливаем двухфакторную защиту.
+                  Введите код из приложения-аутентификатора.
                 </p>
-                {topError && <p className="text-sm text-danger">{topError}</p>}
+                <div>
+                  <Label htmlFor="mfa-code">Код подтверждения</Label>
+                  <Input
+                    id="mfa-code"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    autoFocus
+                    invalid={Boolean(mfaForm.formState.errors.code)}
+                    {...mfaForm.register("code")}
+                  />
+                  <FormError>{mfaForm.formState.errors.code?.message}</FormError>
+                </div>
+                <LoginError message={topError} />
+                <Button type="submit" className="w-full" isLoading={mfaForm.formState.isSubmitting}>
+                  Подтвердить
+                </Button>
                 <Button
                   type="button"
+                  variant="ghost"
                   className="w-full"
                   onClick={() => {
-                    if (!challengeToken) return;
                     setTopError(null);
-                    void beginEnrollment(challengeToken).catch((err: unknown) => {
-                      setTopError(extractErrorMessage(err));
-                    });
+                    setStep("recovery");
                   }}
                 >
-                  Повторить
+                  Использовать резервный код
                 </Button>
-              </div>
-            )
-          ) : (
-            <form onSubmit={submitRecovery} noValidate className="space-y-4">
-              <p className="text-sm text-foreground-secondary">
-                Используйте один из сохранённых одноразовых резервных кодов.
-              </p>
-              <div>
-                <Label htmlFor="recovery-code">Резервный код</Label>
-                <Input
-                  id="recovery-code"
-                  type="text"
-                  autoComplete="off"
-                  autoCapitalize="characters"
-                  autoFocus
-                  invalid={Boolean(recoveryForm.formState.errors.recoveryCode)}
-                  {...recoveryForm.register("recoveryCode")}
-                />
-                <FormError>{recoveryForm.formState.errors.recoveryCode?.message}</FormError>
-              </div>
-              {topError && <p className="text-sm text-danger">{topError}</p>}
+              </form>
+            ) : step === "enroll" ? (
+              enrollment ? (
+                <form onSubmit={submitEnrollment} noValidate className="space-y-4">
+                  <p className="text-sm text-foreground-secondary">
+                    Добавьте Aurum Pharma в приложение-аутентификатор вручную.
+                  </p>
+                  <div>
+                    <Label>Секретный ключ</Label>
+                    <code className="mt-1 block break-all rounded-md border bg-foreground/[0.03] px-3 py-2 font-mono text-sm">
+                      {enrollment.secret}
+                    </code>
+                  </div>
+                  <div>
+                    <Label>Резервные коды</Label>
+                    <div className="mt-1 grid grid-cols-2 gap-2 rounded-md border bg-foreground/[0.03] p-3">
+                      {enrollment.recovery_codes.map((code) => (
+                        <code key={code} className="font-mono text-xs">
+                          {code}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="flex items-start gap-2 text-sm text-foreground-secondary">
+                    <Checkbox className="mt-0.5" {...enrollmentForm.register("saved")} />
+                    <span>Я сохранил резервные коды в безопасном месте</span>
+                  </label>
+                  <FormError>{enrollmentForm.formState.errors.saved?.message}</FormError>
+                  <div>
+                    <Label htmlFor="enrollment-code">Код из приложения</Label>
+                    <Input
+                      id="enrollment-code"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      invalid={Boolean(enrollmentForm.formState.errors.code)}
+                      {...enrollmentForm.register("code")}
+                    />
+                    <FormError>{enrollmentForm.formState.errors.code?.message}</FormError>
+                  </div>
+                  <LoginError message={topError} />
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    isLoading={enrollmentForm.formState.isSubmitting}
+                  >
+                    Включить двухфакторную защиту
+                  </Button>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-foreground-secondary">
+                    Подготавливаем двухфакторную защиту.
+                  </p>
+                  <LoginError message={topError} />
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={() => {
+                      if (!challengeToken) return;
+                      setTopError(null);
+                      void beginEnrollment(challengeToken).catch((err: unknown) => {
+                        setTopError(extractErrorMessage(err));
+                      });
+                    }}
+                  >
+                    Повторить
+                  </Button>
+                </div>
+              )
+            ) : (
+              <form onSubmit={submitRecovery} noValidate className="space-y-4">
+                <p className="text-sm text-foreground-secondary">
+                  Используйте один из сохранённых одноразовых резервных кодов.
+                </p>
+                <div>
+                  <Label htmlFor="recovery-code">Резервный код</Label>
+                  <Input
+                    id="recovery-code"
+                    type="text"
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    autoFocus
+                    invalid={Boolean(recoveryForm.formState.errors.recoveryCode)}
+                    {...recoveryForm.register("recoveryCode")}
+                  />
+                  <FormError>{recoveryForm.formState.errors.recoveryCode?.message}</FormError>
+                </div>
+                <LoginError message={topError} />
+                <Button
+                  type="submit"
+                  className="w-full"
+                  isLoading={recoveryForm.formState.isSubmitting}
+                >
+                  Восстановить доступ
+                </Button>
+              </form>
+            )}
+          </CardContent>
+          {step !== "email" && step !== "enroll" && (
+            <CardFooter>
               <Button
-                type="submit"
-                className="w-full"
-                isLoading={recoveryForm.formState.isSubmitting}
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setTopError(null);
+                  setChallengeToken(null);
+                  setEnrollment(null);
+                  mfaForm.reset();
+                  recoveryForm.reset();
+                  setStep("email");
+                }}
               >
-                Восстановить доступ
+                Изменить email
               </Button>
-            </form>
+            </CardFooter>
           )}
-        </CardContent>
-        {step !== "email" && step !== "enroll" && (
-          <CardFooter>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setTopError(null);
-                setChallengeToken(null);
-                setEnrollment(null);
-                mfaForm.reset();
-                recoveryForm.reset();
-                setStep("email");
-              }}
-            >
-              Изменить email
-            </Button>
-          </CardFooter>
-        )}
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }

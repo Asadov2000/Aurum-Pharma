@@ -4,12 +4,6 @@ import { cn } from "@/lib/utils";
 import { paymentMethodLabel, paymentMethodOptions } from "./labels";
 import { type Payment, type PaymentMethod } from "./types";
 
-const tileIcon: Record<PaymentMethod, string> = {
-  cash: "💵",
-  card: "💳",
-  bank_transfer: "🏦",
-};
-
 /**
  * Right-column payment summary: the big "К ОПЛАТЕ" figure, one-tap payment
  * tiles (each pays the remaining balance in that method), the recorded
@@ -61,9 +55,9 @@ export function PaymentPanel({
   return (
     <div className="flex flex-col gap-4">
       {/* К ОПЛАТЕ */}
-      <div className="rounded-xl border border-border bg-surface p-5 text-center shadow-sm">
-        <p className="text-xs uppercase tracking-wide text-foreground-muted">К оплате</p>
-        <p className="mt-1 font-mono text-5xl font-bold tabular-nums text-primary lg:text-6xl">
+      <div className="rounded-lg border border-border bg-surface p-5 text-center">
+        <p className="text-xs font-semibold text-foreground-muted">К оплате</p>
+        <p className="mt-1 font-mono text-4xl font-bold tabular-nums text-primary">
           {totalDue.toFixed(2)}
         </p>
         <p className="text-sm text-foreground-muted">{currency}</p>
@@ -98,15 +92,13 @@ export function PaymentPanel({
                 (pendingPaymentMethod !== null && pendingPaymentMethod !== m)
               }
               className={cn(
-                "pos-tile flex flex-col items-center justify-center gap-1 rounded-xl border border-border bg-surface p-2 text-center transition-colors",
-                touch ? "min-h-[96px]" : "min-h-[88px]",
+                "pos-tile flex flex-col items-center justify-center gap-2 rounded-lg border border-border bg-surface p-2 text-center transition-colors duration-fast",
+                touch ? "min-h-[92px]" : "min-h-20",
                 "hover:border-primary hover:bg-primary/5 active:bg-primary/10",
                 "disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
-              <span className={cn(touch ? "text-3xl" : "text-2xl")} aria-hidden="true">
-                {tileIcon[m]}
-              </span>
+              <PaymentMethodIcon method={m} />
               <span className={cn("font-medium text-foreground", touch ? "text-base" : "text-sm")}>
                 {paymentMethodLabel[m]}
               </span>
@@ -118,7 +110,7 @@ export function PaymentPanel({
       {/* Recorded payments */}
       {payments.length > 0 && (
         <div className="space-y-2">
-          <ul className="divide-y divide-border rounded-xl border border-border bg-surface text-sm">
+          <ul className="divide-y divide-border rounded-lg border border-border bg-surface text-sm">
             {payments.map((p) => (
               <li key={p.id} className="flex items-center justify-between px-4 py-2">
                 <span className="text-foreground-secondary">
@@ -153,13 +145,13 @@ export function PaymentPanel({
       )}
 
       {!isDraft && completedReceiptNumber && (
-        <div className="space-y-3 rounded-xl border border-success/40 bg-success-subtle p-4 text-center">
+        <div className="space-y-3 rounded-lg border border-success/40 bg-success-subtle p-4 text-center">
           <p className="font-medium text-success-foreground">
-            ✅ Чек № {completedReceiptNumber} оформлен
+            Чек № {completedReceiptNumber} оформлен
           </p>
           {onPrint && (
             <Button size="xl" variant="secondary" className="w-full" onClick={onPrint}>
-              🖨 Печать чека
+              Печать чека
             </Button>
           )}
           {onNewSale && (
@@ -170,5 +162,25 @@ export function PaymentPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function PaymentMethodIcon({ method }: { method: PaymentMethod }): JSX.Element {
+  if (method === "bank_transfer") {
+    return (
+      <span className="text-2xl leading-none text-primary" aria-hidden="true">
+        ⇄
+      </span>
+    );
+  }
+
+  return (
+    <span className="relative block h-5 w-8 rounded-sm border-2 border-primary" aria-hidden="true">
+      {method === "cash" ? (
+        <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary" />
+      ) : (
+        <span className="absolute inset-x-0 top-1 h-0.5 bg-primary" />
+      )}
+    </span>
   );
 }

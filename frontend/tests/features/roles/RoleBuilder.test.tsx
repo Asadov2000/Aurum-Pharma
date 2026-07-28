@@ -122,12 +122,26 @@ describe("RoleBuilderModal", () => {
     expect(screen.queryByText("Увольнение сотрудника")).not.toBeInTheDocument();
   });
 
+  it("searches the permission catalogue and selects a visible group", async () => {
+    renderModal();
+    await screen.findByRole("checkbox", { name: /Продажа/ });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Поиск функций" }), {
+      target: { value: "кассе" },
+    });
+
+    expect(screen.queryByText("Увольнение сотрудника")).not.toBeInTheDocument();
+    const sell = screen.getByRole("checkbox", { name: /Продажа/ });
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать все" }));
+    expect(sell).toBeChecked();
+  });
+
   it("submits a role without a numeric level", async () => {
     renderModal();
     fireEvent.change(await screen.findByLabelText("Название"), {
       target: { value: "  Старший кассир  " },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: /Продажа/ }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Продажа/ }));
     fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
 
     await waitFor(() => expect(createRole).toHaveBeenCalledTimes(1));

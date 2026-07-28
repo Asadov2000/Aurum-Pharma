@@ -67,14 +67,14 @@ export function SaleDetailModal({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <Field label="Дата" value={fmtDate(data.completed_at)} />
             <Field
               label="Сумма"
               value={`${Number(data.total_amount).toFixed(2)} ${data.currency}`}
             />
             {data.parent_sale_id && (
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -87,7 +87,7 @@ export function SaleDetailModal({
           </div>
 
           <div>
-            <p className="mb-1 text-xs uppercase tracking-wide text-foreground-muted">Позиции</p>
+            <p className="mb-1 text-xs font-medium text-foreground-muted">Позиции</p>
             <Table>
               <THead>
                 <TR>
@@ -111,13 +111,13 @@ export function SaleDetailModal({
           </div>
 
           <div>
-            <p className="mb-1 text-xs uppercase tracking-wide text-foreground-muted">Оплаты</p>
+            <p className="mb-1 text-xs font-medium text-foreground-muted">Оплаты</p>
             {data.payments.length === 0 ? (
               <p className="text-sm italic text-foreground-muted">Нет</p>
             ) : (
               <ul className="space-y-1 text-sm">
                 {data.payments.map((p) => (
-                  <li key={p.id} className="flex justify-between">
+                  <li key={p.id} className="flex flex-wrap justify-between gap-2">
                     <span>{paymentMethodLabel[p.payment_method as PaymentMethod]}</span>
                     <span className="font-mono">
                       {Number(p.amount).toFixed(2)} {p.currency}
@@ -128,9 +128,9 @@ export function SaleDetailModal({
             )}
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button variant="secondary" onClick={() => setPrintOpen(true)}>
-              🖨 Печать чека
+              Печать чека
             </Button>
             {/* Refund only from a completed forward sale that has none yet. */}
             {canRefund &&

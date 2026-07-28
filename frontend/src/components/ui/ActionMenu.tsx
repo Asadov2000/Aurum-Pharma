@@ -115,7 +115,7 @@ export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps)
         ref={triggerRef}
         variant="ghost"
         size="sm"
-        className="w-8 px-0 text-xl leading-none"
+        className="h-9 w-9 px-0 text-lg leading-none"
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -135,7 +135,7 @@ export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps)
             role="menu"
             aria-label={label}
             aria-orientation="vertical"
-            className="fixed z-[100] w-56 rounded-md border border-border bg-surface p-1 shadow-lg"
+            className="fixed z-popover w-56 rounded-md border border-border bg-surface-raised p-1 shadow-lg"
             style={position}
             onKeyDown={moveMenuFocus}
           >

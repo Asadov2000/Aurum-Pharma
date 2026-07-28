@@ -8,6 +8,7 @@ import {
   Input,
   Label,
   Modal,
+  PageHeader,
   Pagination,
   Select,
   SkeletonRows,
@@ -87,10 +88,12 @@ export function BranchesPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Точки</h1>
-        {canCreate && <Button onClick={() => setCreating(true)}>+ Новая точка</Button>}
-      </div>
+      <PageHeader
+        title="Точки"
+        actions={
+          canCreate ? <Button onClick={() => setCreating(true)}>+ Новая точка</Button> : undefined
+        }
+      />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -187,9 +190,12 @@ export function BranchesPage(): JSX.Element {
       />
 
       {error && (
-        <p className="text-sm text-danger">
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
           {describeApiError(error, "Не удалось загрузить список")}
-        </p>
+        </div>
       )}
       {isLoading ? (
         <SkeletonRows rows={6} />
@@ -294,7 +300,14 @@ export function BranchesPage(): JSX.Element {
           message={
             <>
               Деактивировать точку «{pendingDelete?.name}»?
-              {deleteError && <span className="mt-2 block text-danger">{deleteError}</span>}
+              {deleteError && (
+                <span
+                  role="alert"
+                  className="mt-2 block rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-danger-foreground"
+                >
+                  {deleteError}
+                </span>
+              )}
             </>
           }
           confirmLabel="Деактивировать"

@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
   ConfirmDialog,
+  PageHeader,
   SkeletonRows,
 } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
@@ -106,7 +107,7 @@ export function SecurityPage(): JSX.Element {
   if (sessionsQuery.isLoading) {
     return (
       <div className="max-w-4xl space-y-5">
-        <h1 className="text-2xl font-semibold text-foreground">Безопасность</h1>
+        <PageHeader title="Безопасность" />
         <Card>
           <CardContent>
             <SkeletonRows rows={3} />
@@ -119,7 +120,7 @@ export function SecurityPage(): JSX.Element {
   if (sessionsQuery.error) {
     return (
       <div className="max-w-2xl space-y-3">
-        <h1 className="text-2xl font-semibold text-foreground">Безопасность</h1>
+        <PageHeader title="Безопасность" />
         <p className="text-sm text-danger">
           {describeApiError(sessionsQuery.error, "Не удалось загрузить активные сеансы")}
         </p>
@@ -132,24 +133,24 @@ export function SecurityPage(): JSX.Element {
 
   return (
     <div className="max-w-4xl space-y-5" data-testid="security-page">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Безопасность</h1>
-          <p className="mt-1 text-sm text-foreground-muted">Активные сеансы аккаунта</p>
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={otherSessions.length === 0}
-          onClick={() => {
-            setActionError(null);
-            setSuccessMessage(null);
-            setConfirmOthers(true);
-          }}
-        >
-          Завершить остальные
-        </Button>
-      </div>
+      <PageHeader
+        title="Безопасность"
+        description="Активные сеансы аккаунта"
+        actions={
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={otherSessions.length === 0}
+            onClick={() => {
+              setActionError(null);
+              setSuccessMessage(null);
+              setConfirmOthers(true);
+            }}
+          >
+            Завершить остальные
+          </Button>
+        }
+      />
 
       {actionError && <p className="text-sm text-danger">{actionError}</p>}
       {successMessage && (
@@ -219,7 +220,7 @@ function SessionRow({
   onRevoke: () => void;
 }): JSX.Element {
   return (
-    <div className="grid gap-4 px-6 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+    <div className="grid gap-4 px-4 py-4 sm:px-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <p className="truncate font-medium text-foreground">

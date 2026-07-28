@@ -8,7 +8,7 @@ import { useBranchesQuery } from "@/features/foundation/queries";
 
 import { useCreateAssignment, useRevokeAssignment, useRolesQuery } from "./queries";
 import { isManageableRole } from "./roleAccess";
-import { type UserWithAssignments } from "./types";
+import { type Assignment, type UserWithAssignments } from "./types";
 
 const schema = z.object({
   role_id: z.string().min(1, "Выберите роль"),
@@ -70,12 +70,23 @@ export function AssignmentsPanel({
       setTopError("Эта точка недоступна для назначения");
       return;
     }
+    const normalizedBranchId = d.branch_id === "" ? null : d.branch_id;
+    const duplicateAssignment = user.assignments.some(
+      (assignment) =>
+        assignment.is_active &&
+        assignment.role_id === d.role_id &&
+        assignment.branch_id === normalizedBranchId,
+    );
+    if (duplicateAssignment) {
+      setTopError("Эта роль уже назначена сотруднику для выбранной области");
+      return;
+    }
     try {
       await createAssignment.mutateAsync({
         userId: user.id,
         payload: {
           role_id: d.role_id,
-          branch_id: d.branch_id === "" ? null : d.branch_id,
+          branch_id: normalizedBranchId,
           password_required: d.password_required,
         },
       });
@@ -101,7 +112,8 @@ export function AssignmentsPanel({
     (role) => role.is_active && isManageableRole(role, tenantId),
   );
   const roleById = (roleId: string) => roles.data?.find((role) => role.id === roleId);
-  const roleName = (roleId: string) => roleById(roleId)?.name ?? roleId.slice(0, 8);
+  const assignmentRoleName = (assignment: Assignment) =>
+    assignment.role_name ?? roleById(assignment.role_id)?.name ?? assignment.role_id.slice(0, 8);
   const canRevokeRole = (roleId: string): boolean => {
     const role = roleById(roleId);
     return Boolean(role && isManageableRole(role, tenantId));
@@ -109,57 +121,85 @@ export function AssignmentsPanel({
   const branchName = (branchId: string | null) =>
     branchId
       ? (branches.data?.find((branch) => branch.id === branchId)?.name ?? branchId.slice(0, 8))
-      : "все точки";
+      : "Все точки аптеки";
+  const activeAssignments = user.assignments.filter((assignment) => assignment.is_active);
+  const revokedAssignments = user.assignments.filter((assignment) => !assignment.is_active);
+  const pendingAssignment =
+    user.assignments.find((assignment) => assignment.id === pendingRevokeId) ?? null;
+
+  const assignmentItem = (assignment: Assignment, showRevoke: boolean) => (
+    <li
+      key={assignment.id}
+      className="flex flex-col gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">{assignmentRoleName(assignment)}</span>
+          <Badge tone={assignment.is_active ? "success" : "neutral"}>
+            {assignment.is_active ? "активна" : "отозвана"}
+          </Badge>
+          {assignment.password_required && <Badge tone="info">пароль при входе</Badge>}
+        </div>
+        <p className="text-xs text-foreground-muted">{branchName(assignment.branch_id)}</p>
+      </div>
+      {showRevoke && canManage && canRevokeRole(assignment.role_id) && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="self-end sm:self-auto"
+          onClick={() => {
+            setRevokeError(null);
+            setPendingRevokeId(assignment.id);
+          }}
+          isLoading={revokeAssignment.isPending && pendingRevokeId === assignment.id}
+        >
+          Отозвать
+        </Button>
+      )}
+    </li>
+  );
 
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-sm text-foreground-muted">Назначения роли</p>
-        {user.assignments.length === 0 ? (
-          <p className="text-sm italic text-foreground-muted">Ролей пока нет</p>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-foreground">Назначенные роли</h3>
+          <Badge tone="neutral">{activeAssignments.length} активных</Badge>
+        </div>
+        {activeAssignments.length === 0 ? (
+          <p className="mt-2 rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-foreground-muted">
+            Активных ролей пока нет
+          </p>
         ) : (
           <ul className="mt-2 space-y-2">
-            {user.assignments.map((a) => (
-              <li
-                key={a.id}
-                className="flex items-center justify-between rounded-md border border-border bg-surface px-3 py-2"
-              >
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{roleName(a.role_id)}</span>
-                    <Badge tone={a.is_active ? "success" : "neutral"}>
-                      {a.is_active ? "активна" : "отозвана"}
-                    </Badge>
-                    {a.password_required && <Badge tone="info">пароль</Badge>}
-                  </div>
-                  <p className="text-xs text-foreground-muted">{branchName(a.branch_id)}</p>
-                </div>
-                {a.is_active && canManage && canRevokeRole(a.role_id) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setRevokeError(null);
-                      setPendingRevokeId(a.id);
-                    }}
-                    isLoading={revokeAssignment.isPending}
-                  >
-                    Отозвать
-                  </Button>
-                )}
-              </li>
-            ))}
+            {activeAssignments.map((assignment) => assignmentItem(assignment, true))}
           </ul>
+        )}
+        {revokedAssignments.length > 0 && (
+          <details className="mt-3 border-t border-border pt-3">
+            <summary className="cursor-pointer text-sm font-medium text-foreground-muted hover:text-foreground">
+              История отозванных ролей · {revokedAssignments.length}
+            </summary>
+            <ul className="mt-2 space-y-2">
+              {revokedAssignments.map((assignment) => assignmentItem(assignment, false))}
+            </ul>
+          </details>
         )}
       </div>
 
       {roles.error && (
-        <p className="text-sm text-danger">
+        <p
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
           {describeApiError(roles.error, "Не удалось загрузить доступные роли")}
         </p>
       )}
       {branches.error && (
-        <p className="text-sm text-danger">
+        <p
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
           {describeApiError(branches.error, "Не удалось загрузить точки")}
         </p>
       )}
@@ -171,13 +211,15 @@ export function AssignmentsPanel({
         <form
           onSubmit={onAdd}
           noValidate
-          className="space-y-3 rounded-md border border-border bg-foreground/[0.03] p-3"
+          className="space-y-3 rounded-lg border border-border bg-background p-3"
         >
+          <h3 className="text-sm font-semibold text-foreground">Новое назначение</h3>
           <div>
             <Label htmlFor="role_id">Роль</Label>
             <Select
               id="role_id"
               invalid={Boolean(form.formState.errors.role_id)}
+              aria-describedby={form.formState.errors.role_id ? "role-id-error" : undefined}
               {...form.register("role_id")}
             >
               <option value="">— выберите —</option>
@@ -187,12 +229,12 @@ export function AssignmentsPanel({
                 </option>
               ))}
             </Select>
-            <FormError>{form.formState.errors.role_id?.message}</FormError>
+            <FormError id="role-id-error">{form.formState.errors.role_id?.message}</FormError>
           </div>
           <div>
             <Label htmlFor="branch_id">Точка</Label>
             <Select id="branch_id" {...form.register("branch_id")}>
-              <option value="">— любая —</option>
+              <option value="">Все точки аптеки</option>
               {branches.data?.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name}
@@ -200,9 +242,16 @@ export function AssignmentsPanel({
               ))}
             </Select>
           </div>
-          <Switch label="Требовать пароль" {...form.register("password_required")} />
-          {topError && <p className="text-sm text-danger">{topError}</p>}
-          <div className="flex justify-end gap-2">
+          <Switch label="Требовать пароль при входе" {...form.register("password_required")} />
+          {topError && (
+            <p
+              className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+              role="alert"
+            >
+              {topError}
+            </p>
+          )}
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
             <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>
               Отмена
             </Button>
@@ -233,7 +282,7 @@ export function AssignmentsPanel({
         <p className="text-sm text-foreground-muted">Нет доступных для назначения ролей.</p>
       ) : null}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end border-t border-border pt-3">
         <Button variant="ghost" onClick={onClose}>
           Закрыть
         </Button>
@@ -244,7 +293,15 @@ export function AssignmentsPanel({
         title="Отозвать роль"
         message={
           <>
-            Роль перестанет действовать для этого пользователя.
+            {pendingAssignment ? (
+              <>
+                Отозвать роль «{assignmentRoleName(pendingAssignment)}» у сотрудника «
+                {user.full_name}» для области «{branchName(pendingAssignment.branch_id)}»? Доступ
+                прекратится сразу.
+              </>
+            ) : (
+              "Роль перестанет действовать для этого сотрудника."
+            )}
             {revokeError && <span className="mt-2 block text-danger">{revokeError}</span>}
           </>
         }

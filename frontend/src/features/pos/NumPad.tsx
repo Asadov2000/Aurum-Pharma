@@ -84,7 +84,7 @@ export default function NumPad({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xs rounded-xl border border-border bg-surface-raised p-4 shadow-xl"
+        className="w-full max-w-xs rounded-lg border border-border bg-surface-raised p-4 shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-label={title}

@@ -14,12 +14,15 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
     <textarea
       ref={ref}
       className={cn(
-        "min-h-[80px] w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground",
-        "placeholder:text-foreground-muted transition-colors",
+        "min-h-[88px] w-full resize-y rounded-md border bg-surface px-3 py-2 text-sm leading-5 text-foreground shadow-sm",
+        "placeholder:text-foreground-muted transition-colors duration-fast",
         "disabled:cursor-not-allowed disabled:opacity-60",
-        invalid ? "border-danger" : "border-input hover:border-foreground/25 focus:border-ring",
+        invalid
+          ? "border-danger"
+          : "border-input hover:border-foreground/30 focus:border-ring focus:bg-surface-raised",
         className,
       )}
+      aria-invalid={invalid || undefined}
       {...rest}
     />
   );

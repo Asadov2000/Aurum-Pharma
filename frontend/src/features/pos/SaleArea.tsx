@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
-import { Button } from "@/components/ui";
+import { Button, ConfirmDialog } from "@/components/ui";
 import { findByBarcode } from "@/features/catalog/api";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
@@ -117,26 +117,32 @@ function checkoutItemsFrom(items: SaleDetails["items"]): { catalog_id: string; q
 
 /**
  * The POS workspace. Owns the shift gate and the active sale, and lays the UI
- * out responsively: two columns on ≥lg (cart left, payment right) and a single
- * stack below lg. `mode` decides touch- vs keyboard-optimised behaviour.
+ * out responsively: two columns on wide screens (cart left, payment right) and
+ * a single stack below that. `mode` decides touch- vs keyboard-optimised behaviour.
  */
 export function SaleArea({
   registerId,
   mode,
   soundOn,
   draftTtlMin,
+  canOpenShift = true,
+  canCloseShift = true,
+  canSell = true,
 }: {
   registerId: string;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
+  canOpenShift?: boolean;
+  canCloseShift?: boolean;
+  canSell?: boolean;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-      {hasShift ? (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+      {hasShift && canSell ? (
         // Key by register so switching registers restores that one's draft.
         <ActiveWorkspace
           key={registerId}
@@ -145,18 +151,17 @@ export function SaleArea({
           mode={mode}
           soundOn={soundOn}
           draftTtlMin={draftTtlMin}
+          canCloseShift={canCloseShift}
         />
       ) : (
-        <>
-          <div className="lg:col-span-7">
-            <div className="flex h-full min-h-[200px] items-center justify-center rounded-xl border border-dashed border-border bg-surface p-8 text-center text-foreground-muted">
-              Откройте смену, чтобы начать продажу →
-            </div>
-          </div>
-          <div className="lg:col-span-5">
-            <ShiftBar registerId={registerId} mode={mode} />
-          </div>
-        </>
+        <div className="mx-auto w-full max-w-3xl xl:col-span-12">
+          <ShiftBar
+            registerId={registerId}
+            mode={mode}
+            canOpen={canOpenShift}
+            canClose={canCloseShift}
+          />
+        </div>
       )}
     </div>
   );
@@ -168,12 +173,14 @@ function ActiveWorkspace({
   mode,
   soundOn,
   draftTtlMin,
+  canCloseShift,
 }: {
   registerId: string;
   branchId: string | null;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
+  canCloseShift: boolean;
 }): JSX.Element {
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
@@ -203,12 +210,17 @@ function ActiveWorkspace({
   const [numpad, setNumpad] = useState<NumPadState | null>(null);
   const [flash, setFlash] = useState<FlashTone | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const flashTimer = useRef<number | undefined>(undefined);
   const completingRef = useRef(false);
   const checkoutRecoveryRef = useRef(false);
   const openedDrawerOperationRef = useRef<string | null>(null);
   const stagedPaymentSequenceRef = useRef(0);
+  const saleIdRef = useRef<string | null>(saleId);
+  const saleCreationRef = useRef<Promise<string> | null>(null);
+  const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
+  saleIdRef.current = saleId;
 
   const createSale = useCreateSale();
   const addItem = useAddSaleItem();
@@ -446,15 +458,25 @@ function ActiveWorkspace({
 
   // Lazily create a draft on the first add so we never leave empty drafts.
   const ensureSaleId = useCallback(async (): Promise<string> => {
-    if (saleId) return saleId;
-    const created = await createSale.mutateAsync(registerId);
-    setSaleId(created.id);
-    setStaleNotice(false);
-    return created.id;
-  }, [saleId, createSale, registerId]);
+    if (saleIdRef.current) return saleIdRef.current;
+    if (saleCreationRef.current) return saleCreationRef.current;
 
-  const onAdd = async (catalogId: string, name: string, qty: number) => {
-    if (saleEditingBlocked) return;
+    const creation = createSale.mutateAsync(registerId).then((created) => {
+      saleIdRef.current = created.id;
+      setSaleId(created.id);
+      setStaleNotice(false);
+      return created.id;
+    });
+    saleCreationRef.current = creation;
+    try {
+      return await creation;
+    } finally {
+      if (saleCreationRef.current === creation) saleCreationRef.current = null;
+    }
+  }, [createSale, registerId]);
+
+  const onAdd = async (catalogId: string, name: string, qty: number): Promise<boolean> => {
+    if (saleEditingBlocked) return false;
     setTopError(null);
     try {
       const id = await ensureSaleId();
@@ -466,8 +488,10 @@ function ActiveWorkspace({
         setPrescriptionOpen(true);
       }
       searchRef.current?.focus();
+      return true;
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось добавить позицию"));
+      return false;
     }
   };
 
@@ -475,7 +499,11 @@ function ActiveWorkspace({
     setTopError(null);
     try {
       const item = await findByBarcode(code);
-      await onAdd(item.id, item.brand_name, 1);
+      const added = await onAdd(item.id, item.brand_name, 1);
+      if (!added) {
+        doFlash("danger");
+        return;
+      }
       doFlash("success");
       if (soundOn) beep();
     } catch (err) {
@@ -486,6 +514,13 @@ function ActiveWorkspace({
         setTopError(describeApiError(err, `Штрихкод ${code} не найден`));
       }
     }
+  };
+
+  const enqueueScan = (code: string) => {
+    scanQueueRef.current = scanQueueRef.current.then(
+      () => onScan(code),
+      () => onScan(code),
+    );
   };
 
   const onQtyChange = async (itemId: string, qty: number) => {
@@ -823,7 +858,33 @@ function ActiveWorkspace({
     }
   };
 
-  const onNewSale = () => {
+  const startNewSale = (): boolean => {
+    if (!clearDraft()) {
+      setTopError(
+        "Не удалось очистить локальное состояние кассы. Новая продажа не начата; перезапустите приложение.",
+      );
+      return false;
+    }
+    completingRef.current = false;
+    if (saleId) {
+      clearPendingPaymentOperation(saleId);
+      clearPendingCompletion(saleId);
+      clearPendingCheckoutOperation(saleId);
+    }
+    saleIdRef.current = null;
+    setSaleId(null);
+    setNameById({});
+    setRequiresRx(false);
+    setPrescription(null);
+    setStagedPayments([]);
+    setPendingCheckout(null);
+    setCheckoutUncertain(false);
+    setTopError(null);
+    setStaleNotice(false);
+    return true;
+  };
+
+  const onNewSale = (): boolean => {
     if (
       completingRef.current ||
       completeSale.isPending ||
@@ -836,29 +897,13 @@ function ActiveWorkspace({
       checkoutUncertain
     ) {
       setTopError("Сначала подтвердите результат текущей денежной операции.");
-      return;
+      return false;
     }
-    if (!clearDraft()) {
-      setTopError(
-        "Не удалось очистить локальное состояние кассы. Новая продажа не начата; перезапустите приложение.",
-      );
-      return;
+    if (isDraft && items.length > 0) {
+      setDiscardConfirmOpen(true);
+      return false;
     }
-    completingRef.current = false;
-    if (saleId) {
-      clearPendingPaymentOperation(saleId);
-      clearPendingCompletion(saleId);
-      clearPendingCheckoutOperation(saleId);
-    }
-    setSaleId(null);
-    setNameById({});
-    setRequiresRx(false);
-    setPrescription(null);
-    setStagedPayments([]);
-    setPendingCheckout(null);
-    setCheckoutUncertain(false);
-    setTopError(null);
-    setStaleNotice(false);
+    return startNewSale();
   };
 
   const onQtyTap = (itemId: string) => {
@@ -889,8 +934,18 @@ function ActiveWorkspace({
   // Keyboard shortcuts. Ref holds the latest handlers so we bind the listener
   // once. F-keys are ignored while any modal/keypad (role="dialog") is open so
   // they don't fire actions hidden behind it.
-  const actionsRef = useRef({ onNewSale, onComplete, onEnterPayCash });
-  actionsRef.current = { onNewSale, onComplete, onEnterPayCash };
+  const actionsRef = useRef({
+    onNewSale,
+    onComplete,
+    onEnterPayCash,
+    canDismissError: !saleEditingBlocked,
+  });
+  actionsRef.current = {
+    onNewSale,
+    onComplete,
+    onEnterPayCash,
+    canDismissError: !saleEditingBlocked,
+  };
 
   useEffect(() => {
     if (!keyboard) return;
@@ -909,8 +964,7 @@ function ActiveWorkspace({
         case "F2":
           if (dialogOpen) return;
           e.preventDefault();
-          actionsRef.current.onNewSale();
-          searchRef.current?.focus();
+          if (actionsRef.current.onNewSale()) searchRef.current?.focus();
           break;
         case "F3":
           if (dialogOpen) return;
@@ -933,7 +987,7 @@ function ActiveWorkspace({
           actionsRef.current.onEnterPayCash();
           break;
         case "Escape":
-          if (!dialogOpen) setTopError(null);
+          if (!dialogOpen && actionsRef.current.canDismissError) setTopError(null);
           break;
       }
     };
@@ -944,10 +998,7 @@ function ActiveWorkspace({
   return (
     <>
       {/* Global barcode capture — only while editing a draft. */}
-      <BarcodeListener
-        enabled={isDraft && !saleEditingBlocked}
-        onScan={(code) => void onScan(code)}
-      />
+      <BarcodeListener enabled={isDraft && !saleEditingBlocked} onScan={enqueueScan} />
 
       {/* Scan feedback: green/red edge flash (collapses to a static border under
           reduced-motion). */}
@@ -963,12 +1014,17 @@ function ActiveWorkspace({
 
       {/* Shift status strip — full width on top, so the selling columns get
           the space (it lived in the right column before). */}
-      <div className="lg:col-span-12">
-        <ShiftBar registerId={registerId} mode={mode} />
+      <div className="xl:col-span-12">
+        <ShiftBar
+          registerId={registerId}
+          mode={mode}
+          canClose={canCloseShift}
+          closeBlocked={saleEditingBlocked || (isDraft && items.length > 0)}
+        />
       </div>
 
       {/* LEFT — search + cart */}
-      <div className="space-y-3 lg:col-span-7">
+      <div className="space-y-3 xl:col-span-7">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-foreground">
             Чек{" "}
@@ -996,7 +1052,7 @@ function ActiveWorkspace({
             <SearchBar
               ref={searchRef}
               onAdd={onAdd}
-              busy={addItem.isPending}
+              busy={createSale.isPending || addItem.isPending}
               touch={touch}
               branchId={branchId ?? undefined}
             />
@@ -1016,7 +1072,7 @@ function ActiveWorkspace({
         />
 
         {topError && (
-          <div className="flex flex-wrap items-center gap-2 text-sm text-danger">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
             <p>{topError}</p>
             {(pendingPayment || completionUncertain || pendingCheckout || checkoutUncertain) && (
               <Button
@@ -1040,8 +1096,8 @@ function ActiveWorkspace({
       </div>
 
       {/* RIGHT — payment, sticky so it's always in view */}
-      <div className="lg:col-span-5">
-        <div className="space-y-4 lg:sticky lg:top-4">
+      <div className="xl:col-span-5">
+        <div className="space-y-4 xl:sticky xl:top-20">
           <PaymentPanel
             totalDue={totalDue}
             totalPaid={totalPaid}
@@ -1100,6 +1156,20 @@ function ActiveWorkspace({
           onClose={() => setPrintOpen(false)}
         />
       )}
+
+      <ConfirmDialog
+        open={discardConfirmOpen}
+        title="Начать новую продажу"
+        message="Текущий незавершённый чек будет очищен. Это действие нельзя отменить."
+        confirmLabel="Очистить чек"
+        variant="danger"
+        onConfirm={() => {
+          if (!startNewSale()) return;
+          setDiscardConfirmOpen(false);
+          requestAnimationFrame(() => searchRef.current?.focus());
+        }}
+        onCancel={() => setDiscardConfirmOpen(false)}
+      />
     </>
   );
 }

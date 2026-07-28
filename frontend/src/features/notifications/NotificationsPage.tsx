@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { cn } from "@/lib/utils";
+import { PageHeader, SegmentedControl } from "@/components/ui";
 
 import { Inbox } from "./Inbox";
 import { SubscriptionsForm } from "./SubscriptionsForm";
@@ -12,43 +12,19 @@ export function NotificationsPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-foreground">Уведомления</h1>
+      <PageHeader title="Уведомления" />
 
-      <div className="flex gap-1 border-b border-border">
-        <TabButton active={tab === "inbox"} onClick={() => setTab("inbox")}>
-          Инбокс
-        </TabButton>
-        <TabButton active={tab === "subscriptions"} onClick={() => setTab("subscriptions")}>
-          Подписки
-        </TabButton>
-      </div>
+      <SegmentedControl
+        value={tab}
+        options={[
+          { value: "inbox", label: "Инбокс" },
+          { value: "subscriptions", label: "Подписки" },
+        ]}
+        onChange={setTab}
+        label="Уведомления"
+      />
 
       {tab === "inbox" ? <Inbox /> : <SubscriptionsForm />}
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "border-b-2 px-4 py-2 text-sm font-medium transition-colors",
-        active
-          ? "border-primary text-foreground"
-          : "border-transparent text-foreground-muted hover:text-foreground-secondary",
-      )}
-    >
-      {children}
-    </button>
   );
 }

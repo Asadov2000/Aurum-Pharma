@@ -7,17 +7,15 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  PageHeader,
+  SkeletonRows,
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { describeApiError } from "@/lib/errorMessages";
 import { cn } from "@/lib/utils";
 
 import { useDashboardSummary } from "./queries";
-import {
-  type ExpiringBatch,
-  type ExpiryStatus,
-  type FinanceSection,
-} from "./types";
+import { type ExpiringBatch, type ExpiryStatus, type FinanceSection } from "./types";
 
 const expiryTone: Record<ExpiryStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
   expired: "danger",
@@ -64,7 +62,7 @@ export function DashboardPage(): JSX.Element {
   if (!hasTenant) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold text-foreground">Главная</h1>
+        <PageHeader title="Главная" />
         <Card>
           <CardHeader>
             <CardTitle>{user?.full_name ?? "Профиль"}</CardTitle>
@@ -73,11 +71,13 @@ export function DashboardPage(): JSX.Element {
             <p>
               <span className="font-medium">Email:</span> {user?.email}
             </p>
-            {user?.is_developer && <p className="text-success-foreground">Developer</p>}
-            {user?.is_administrator && <p className="text-success-foreground">Administrator</p>}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {user?.is_developer && <Badge tone="info">Разработчик</Badge>}
+              {user?.is_administrator && <Badge tone="info">Администратор</Badge>}
+            </div>
             <p className="pt-2 text-foreground-muted">
-              Сводка по аптеке доступна пользователям, привязанным к тенанту.
-              Выберите раздел в меню слева.
+              Сводка по аптеке доступна пользователям, привязанным к тенанту. Выберите раздел в меню
+              слева.
             </p>
           </CardContent>
         </Card>
@@ -87,28 +87,23 @@ export function DashboardPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Главная</h1>
-        {user?.full_name && (
-          <span className="text-sm text-foreground-muted">{user.full_name}</span>
-        )}
-      </div>
+      <PageHeader title="Главная" meta={user?.full_name} />
 
       {error && (
-        <p className="text-sm text-danger">
+        <p
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
           {describeApiError(error, "Не удалось загрузить сводку")}
         </p>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-foreground-muted">Загрузка…</p>
+        <SkeletonRows rows={4} />
       ) : data ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <TodayCard data={data.today} />
-          <ExpiringCard
-            batches={data.expiring.batches}
-            licenses={data.expiring.licenses}
-          />
+          <ExpiringCard batches={data.expiring.batches} licenses={data.expiring.licenses} />
           <FinanceCard data={data.finance} />
           <ChecklistCard
             draftIncoming={data.checklist.draft_incoming_count}
@@ -131,7 +126,7 @@ function TodayCard({ data }: { data: import("./types").TodaySection }): JSX.Elem
       </CardHeader>
       <CardContent className="space-y-3">
         <Metric label="Выручка" value={money(data.revenue, data.currency)} big />
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <Metric label="Чеков" value={String(data.receipts)} />
           <Metric label="Смен" value={String(data.active_shifts)} />
           <Metric label="Кассиров" value={String(data.cashiers_on_shift)} />
@@ -153,12 +148,7 @@ function Metric({
   return (
     <div>
       <p className="text-xs text-foreground-muted">{label}</p>
-      <p
-        className={cn(
-          "font-mono font-semibold text-foreground",
-          big ? "text-2xl" : "text-lg",
-        )}
-      >
+      <p className={cn("font-mono font-semibold text-foreground", big ? "text-2xl" : "text-lg")}>
         {value}
       </p>
     </div>
@@ -181,11 +171,11 @@ function ExpiringCard({
         <CardTitle>Скоро истекает</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {empty && <p className="text-sm text-foreground-muted">Всё в порядке 👌</p>}
+        {empty && <p className="text-sm text-foreground-muted">Всё в порядке</p>}
 
         {batches.length > 0 && (
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-wide text-foreground-muted">Партии</p>
+            <p className="text-xs font-medium text-foreground-muted">Партии</p>
             <ul className="space-y-1">
               {batches.map((b) => (
                 <li key={b.id} className="flex items-center justify-between gap-2 text-sm">
@@ -196,9 +186,7 @@ function ExpiringCard({
                     {b.batch_number ?? b.id.slice(0, 8)}
                   </Link>
                   <Badge tone={expiryTone[b.expiry_status]}>
-                    {b.days_to_expiry <= 0
-                      ? "просрочена"
-                      : `${b.days_to_expiry} дн.`}
+                    {b.days_to_expiry <= 0 ? "просрочена" : `${b.days_to_expiry} дн.`}
                   </Badge>
                 </li>
               ))}
@@ -208,13 +196,10 @@ function ExpiringCard({
 
         {licenses.length > 0 && (
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-wide text-foreground-muted">Лицензии</p>
+            <p className="text-xs font-medium text-foreground-muted">Лицензии</p>
             <ul className="space-y-1">
               {licenses.map((lic) => (
-                <li
-                  key={lic.branch_id}
-                  className="flex items-center justify-between gap-2 text-sm"
-                >
+                <li key={lic.branch_id} className="flex items-center justify-between gap-2 text-sm">
                   <Link
                     to="/branches"
                     className="truncate text-foreground-secondary hover:text-foreground hover:underline"
@@ -247,9 +232,7 @@ function FinanceCard({ data }: { data: FinanceSection }): JSX.Element {
           <p className="text-xs text-foreground-muted">Подписка</p>
           {data.subscription_status ? (
             <div className="flex items-center gap-2">
-              <Badge
-                tone={data.subscription_status === "active" ? "success" : "info"}
-              >
+              <Badge tone={data.subscription_status === "active" ? "success" : "info"}>
                 {subscriptionLabel[data.subscription_status] ?? data.subscription_status}
               </Badge>
               {data.subscription_period_end && (
@@ -266,8 +249,7 @@ function FinanceCard({ data }: { data: FinanceSection }): JSX.Element {
         <div>
           <p className="text-xs text-foreground-muted">Открытые счета</p>
           <p className="font-mono">
-            {data.open_invoices_count} шт ·{" "}
-            {money(data.open_invoices_total, data.currency)}
+            {data.open_invoices_count} шт · {money(data.open_invoices_total, data.currency)}
           </p>
         </div>
 
@@ -308,7 +290,7 @@ function ChecklistCard({
         <CardTitle>Чек-лист</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        {nothing && <p className="text-foreground-muted">Задач нет 🎉</p>}
+        {nothing && <p className="text-foreground-muted">Задач нет</p>}
 
         {draftIncoming > 0 && (
           <Link

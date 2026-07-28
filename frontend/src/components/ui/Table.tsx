@@ -9,16 +9,14 @@ import { cn } from "@/lib/utils";
 
 export function Table({ className, ...rest }: HTMLAttributes<HTMLTableElement>): JSX.Element {
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-surface shadow-sm">
-      <table className={cn("w-full text-sm", className)} {...rest} />
+    <div className="overflow-x-auto rounded-lg border border-border bg-surface">
+      <table className={cn("w-full min-w-max text-sm", className)} {...rest} />
     </div>
   );
 }
 
 export function THead({ children }: { children: ReactNode }): JSX.Element {
-  return (
-    <thead className="border-b border-border bg-foreground/[0.03] text-left">{children}</thead>
-  );
+  return <thead className="border-b border-border bg-background text-left">{children}</thead>;
 }
 
 export function TBody({ children }: { children: ReactNode }): JSX.Element {
@@ -26,7 +24,12 @@ export function TBody({ children }: { children: ReactNode }): JSX.Element {
 }
 
 export function TR({ className, ...rest }: HTMLAttributes<HTMLTableRowElement>): JSX.Element {
-  return <tr className={cn("transition-colors hover:bg-foreground/[0.03]", className)} {...rest} />;
+  return (
+    <tr
+      className={cn("transition-colors duration-fast hover:bg-foreground/[0.025]", className)}
+      {...rest}
+    />
+  );
 }
 
 export function TH({
@@ -36,7 +39,7 @@ export function TH({
   return (
     <th
       className={cn(
-        "px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted",
+        "whitespace-nowrap px-4 py-3 text-xs font-semibold text-foreground-muted",
         className,
       )}
       {...rest}
@@ -44,8 +47,11 @@ export function TH({
   );
 }
 
-export function TD({ className, ...rest }: TdHTMLAttributes<HTMLTableDataCellElement>): JSX.Element {
-  return <td className={cn("px-4 py-3 text-foreground", className)} {...rest} />;
+export function TD({
+  className,
+  ...rest
+}: TdHTMLAttributes<HTMLTableDataCellElement>): JSX.Element {
+  return <td className={cn("px-4 py-3.5 text-foreground", className)} {...rest} />;
 }
 
 /**
@@ -64,8 +70,8 @@ export function TableEmpty({
   action?: ReactNode;
 }): JSX.Element {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-surface px-6 py-12 text-center">
-      {icon && <div className="text-3xl text-foreground-muted">{icon}</div>}
+    <div className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-surface px-6 py-10 text-center">
+      {icon && <div className="text-2xl text-foreground-muted">{icon}</div>}
       {title && <p className="text-base font-medium text-foreground">{title}</p>}
       <p className="text-sm text-foreground-muted">{children}</p>
       {action && <div className="mt-2">{action}</div>}

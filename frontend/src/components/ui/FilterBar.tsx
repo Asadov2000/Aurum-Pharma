@@ -2,8 +2,7 @@ import { type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-/** Shared container for a screen's filter row — one card style across all
- *  list screens (matches the original SalesPage look). */
+/** One dense, responsive toolbar for list filters and their actions. */
 export function FilterBar({
   children,
   className,
@@ -14,7 +13,7 @@ export function FilterBar({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-3",
+        "flex min-w-0 flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-3",
         className,
       )}
     >

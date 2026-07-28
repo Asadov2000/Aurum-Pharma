@@ -116,7 +116,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   }, [mobileNavOpen]);
 
   return (
-    <div className="min-h-screen bg-background lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
+    <div className="min-h-screen bg-background lg:grid lg:grid-cols-[232px_minmax(0,1fr)]">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
@@ -163,7 +163,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       )}
       <div className="flex min-w-0 flex-col">
         <div className="sticky top-0 z-sticky">
-          <header className="flex items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-surface/85 sm:px-6">
+          <header className="flex min-h-14 items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2.5 sm:px-6">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <Button
                 ref={mobileMenuButtonRef}
@@ -193,7 +193,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
               <Button
                 variant="secondary"
                 size="sm"
-                className="h-8 w-8 px-0 sm:w-auto sm:px-3"
+                className="h-9 w-9 px-0 sm:w-auto sm:px-3"
                 onClick={() => void logout()}
               >
                 <LogoutIcon />
@@ -206,7 +206,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
           <ServerStatusBanner />
           <PwaUpdateBanner />
         </div>
-        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 px-4 py-4 sm:px-6 sm:py-6">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="min-w-0 flex-1 px-4 py-5 sm:px-6 sm:py-6 xl:px-8"
+        >
           {children}
         </main>
       </div>

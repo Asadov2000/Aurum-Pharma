@@ -1,7 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
-import { Badge, Button, Card, CardContent, Input, Label, Modal, Textarea } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  Input,
+  Label,
+  Modal,
+  TableEmpty,
+  Textarea,
+} from "@/components/ui";
 import { downloadBlob } from "@/lib/download";
 import { describeApiError } from "@/lib/errorMessages";
 
@@ -12,9 +22,15 @@ import { type PosMode } from "./usePosMode";
 export function ShiftBar({
   registerId,
   mode = "keyboard",
+  canOpen = true,
+  canClose = true,
+  closeBlocked = false,
 }: {
   registerId: string;
   mode?: PosMode;
+  canOpen?: boolean;
+  canClose?: boolean;
+  closeBlocked?: boolean;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const queryClient = useQueryClient();
@@ -29,6 +45,7 @@ export function ShiftBar({
   const shift = shiftQuery.data;
 
   const onOpen = async () => {
+    if (!canOpen) return;
     if (Number(openingCash) < 0) {
       setTopError("Сумма не может быть отрицательной");
       return;
@@ -47,7 +64,7 @@ export function ShiftBar({
   };
 
   const onClose = async () => {
-    if (!shift) return;
+    if (!shift || !canClose || closeBlocked) return;
     if (closingCash === "" || Number(closingCash) < 0) {
       setTopError("Введите фактическую сумму наличных");
       return;
@@ -85,8 +102,11 @@ export function ShiftBar({
   // dialog. Ref keeps the latest closures so the listener binds once.
   const toggleRef = useRef<() => void>(() => {});
   toggleRef.current = () => {
-    if (shift) setCloseOpen(true);
-    else void onOpen();
+    if (shift) {
+      if (canClose && !closeBlocked) setCloseOpen(true);
+    } else if (canOpen) {
+      void onOpen();
+    }
   };
   useEffect(() => {
     if (mode !== "keyboard") return;
@@ -104,29 +124,61 @@ export function ShiftBar({
     return <p className="text-sm text-foreground-muted">Загрузка состояния смены…</p>;
   }
 
+  if (shiftQuery.error) {
+    return (
+      <p
+        className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+        role="alert"
+      >
+        Не удалось загрузить состояние смены. Проверьте соединение и повторите попытку.
+      </p>
+    );
+  }
+
   if (!shift) {
+    if (!canOpen) {
+      return (
+        <TableEmpty title="Смена закрыта">Открытие смены недоступно для этого аккаунта.</TableEmpty>
+      );
+    }
     return (
       <Card>
-        <CardContent className="flex flex-wrap items-end gap-3 py-4">
+        <CardContent className="space-y-4 py-5">
           <div>
-            <Label htmlFor="opening_cash">Касса на начало смены</Label>
-            <Input
-              id="opening_cash"
-              type="text"
-              inputMode="decimal"
-              value={openingCash}
-              onChange={(e) => setOpeningCash(e.target.value)}
-              className="w-40"
-            />
+            <h2 className="text-base font-semibold text-foreground">Открытие смены</h2>
+            <p className="mt-1 text-sm text-foreground-muted">
+              Укажите фактическую наличность в кассе.
+            </p>
           </div>
-          <Button
-            onClick={() => void onOpen()}
-            isLoading={openMutation.isPending}
-            title={mode === "keyboard" ? "Открыть смену (F9)" : undefined}
-          >
-            Открыть смену
-          </Button>
-          {topError && <p className="ml-2 text-sm text-danger">{topError}</p>}
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-0 flex-1">
+              <Label htmlFor="opening_cash">Касса на начало смены</Label>
+              <Input
+                id="opening_cash"
+                type="text"
+                inputMode="decimal"
+                value={openingCash}
+                onChange={(e) => setOpeningCash(e.target.value)}
+                className="w-full"
+              />
+            </div>
+            <Button
+              onClick={() => void onOpen()}
+              isLoading={openMutation.isPending}
+              size={mode === "touch" ? "lg" : "md"}
+              title={mode === "keyboard" ? "Открыть смену (F9)" : undefined}
+            >
+              Открыть смену
+            </Button>
+          </div>
+          {topError && (
+            <p
+              className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+              role="alert"
+            >
+              {topError}
+            </p>
+          )}
         </CardContent>
       </Card>
     );
@@ -135,7 +187,7 @@ export function ShiftBar({
   return (
     <>
       {/* Slim status strip — compact so it doesn't crowd the selling area. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm shadow-sm">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm">
         <Badge tone="success">Смена открыта</Badge>
         <span className="text-foreground-muted">
           Открыта{" "}
@@ -149,18 +201,36 @@ export function ShiftBar({
             {Number(shift.opening_cash).toFixed(2)} {shift.currency}
           </span>
         </span>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="ml-auto"
-          onClick={() => setCloseOpen(true)}
-          title={mode === "keyboard" ? "Закрыть смену (F9)" : undefined}
-        >
-          Закрыть смену
-        </Button>
+        {canClose && closeBlocked && (
+          <span className="text-xs text-warning-foreground">
+            Завершите или очистите текущий чек перед закрытием смены.
+          </span>
+        )}
+        {canClose && (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ml-auto"
+            disabled={closeBlocked}
+            onClick={() => setCloseOpen(true)}
+            title={
+              closeBlocked
+                ? "Сначала завершите или очистите текущий чек"
+                : mode === "keyboard"
+                  ? "Закрыть смену (F9)"
+                  : undefined
+            }
+          >
+            Закрыть смену
+          </Button>
+        )}
       </div>
 
-      <Modal open={closeOpen} onClose={() => setCloseOpen(false)} title="Закрытие смены">
+      <Modal
+        open={canClose && closeOpen}
+        onClose={() => setCloseOpen(false)}
+        title="Закрытие смены"
+      >
         <div className="space-y-3">
           <div>
             <Label htmlFor="closing_cash">Фактическая касса</Label>

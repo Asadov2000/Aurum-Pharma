@@ -8,6 +8,7 @@ import {
   CardTitle,
   Input,
   Label,
+  PageHeader,
   Select,
 } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
@@ -33,7 +34,7 @@ export function ReportsPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-foreground">Отчёты</h1>
+      <PageHeader title="Отчёты" />
 
       <ShiftHistoryPanel
         key={`shift-history-${reportTimezone}`}
@@ -42,24 +43,11 @@ export function ReportsPage(): JSX.Element {
         reportTimezone={reportTimezone}
       />
 
-      {selectedShift && (
-        <ZReportSection shift={selectedShift} reportTimezone={reportTimezone} />
-      )}
+      {selectedShift && <ZReportSection shift={selectedShift} reportTimezone={reportTimezone} />}
 
       <SalesSummaryCard key={`sales-summary-${reportTimezone}`} reportTimezone={reportTimezone} />
 
       <StockOnDateCard key={`stock-date-${reportTimezone}`} reportTimezone={reportTimezone} />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Другие отчёты</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-foreground-secondary">
-            Отчёт по списаниям появится отдельно — для него нужен новый серверный эндпоинт.
-          </p>
-        </CardContent>
-      </Card>
     </div>
   );
 }
@@ -91,7 +79,12 @@ function ZReportSection({
   if (isLoading) return <p className="text-sm text-foreground-muted">Загрузка…</p>;
   if (error) {
     return (
-      <p className="text-sm text-danger">{describeApiError(error, "Не удалось загрузить отчёт")}</p>
+      <p
+        className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+        role="alert"
+      >
+        {describeApiError(error, "Не удалось загрузить отчёт")}
+      </p>
     );
   }
   if (!data) return <p className="text-sm text-foreground-muted">Нет данных</p>;
@@ -102,7 +95,14 @@ function ZReportSection({
           Скачать Z-отчёт (XLSX)
         </Button>
       </div>
-      {dlError && <p className="text-sm text-danger">{dlError}</p>}
+      {dlError && (
+        <p
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
+          {dlError}
+        </p>
+      )}
       <ZReportCard
         report={data}
         branchName={shift.branch_name}
@@ -156,8 +156,8 @@ function SalesSummaryCard({
         <CardTitle>Сводный отчёт по продажам</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="w-full sm:w-auto">
             <Label htmlFor="summary_from">С</Label>
             <Input
               id="summary_from"
@@ -166,18 +166,18 @@ function SalesSummaryCard({
               onChange={(e) => setFrom(e.target.value)}
             />
           </div>
-          <div>
+          <div className="w-full sm:w-auto">
             <Label htmlFor="summary_to">По</Label>
             <Input id="summary_to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
           {hasBranches && (
-            <div>
+            <div className="w-full sm:w-auto">
               <Label htmlFor="summary_branch">Филиал</Label>
               <Select
                 id="summary_branch"
                 value={branchId}
                 onChange={(e) => setBranchId(e.target.value)}
-                className="w-56"
+                className="w-full sm:w-56"
               >
                 <option value="">Все филиалы</option>
                 {branches.data?.map((b) => (
@@ -188,11 +188,23 @@ function SalesSummaryCard({
               </Select>
             </div>
           )}
-          <Button variant="secondary" onClick={() => void onDownload()} isLoading={downloading}>
+          <Button
+            className="w-full sm:w-auto"
+            variant="secondary"
+            onClick={() => void onDownload()}
+            isLoading={downloading}
+          >
             Скачать сводный отчёт (XLSX)
           </Button>
         </div>
-        {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+        {error && (
+          <p
+            className="mt-3 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+            role="alert"
+          >
+            {error}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -204,9 +216,7 @@ export function StockOnDateCard({
   reportTimezone?: string;
 }): JSX.Element {
   const branches = useBranchesQuery(false);
-  const [date, setDate] = useState(() =>
-    calendarDateInTimeZone(new Date(), reportTimezone),
-  );
+  const [date, setDate] = useState(() => calendarDateInTimeZone(new Date(), reportTimezone));
   const [branchId, setBranchId] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,8 +246,8 @@ export function StockOnDateCard({
         <CardTitle>Остатки на дату</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="w-full sm:w-auto">
             <Label htmlFor="stock_date">Дата</Label>
             <Input
               id="stock_date"
@@ -247,13 +257,13 @@ export function StockOnDateCard({
             />
           </div>
           {hasBranches && (
-            <div>
+            <div className="w-full sm:w-auto">
               <Label htmlFor="stock_branch">Филиал</Label>
               <Select
                 id="stock_branch"
                 value={branchId}
                 onChange={(e) => setBranchId(e.target.value)}
-                className="w-56"
+                className="w-full sm:w-56"
               >
                 <option value="">Все филиалы</option>
                 {branches.data?.map((b) => (
@@ -264,11 +274,23 @@ export function StockOnDateCard({
               </Select>
             </div>
           )}
-          <Button variant="secondary" onClick={() => void onDownload()} isLoading={downloading}>
+          <Button
+            className="w-full sm:w-auto"
+            variant="secondary"
+            onClick={() => void onDownload()}
+            isLoading={downloading}
+          >
             Скачать отчёт по остаткам (XLSX)
           </Button>
         </div>
-        {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+        {error && (
+          <p
+            className="mt-3 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+            role="alert"
+          >
+            {error}
+          </p>
+        )}
       </CardContent>
     </Card>
   );

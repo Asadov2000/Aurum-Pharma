@@ -5,6 +5,7 @@ import {
   ConfigurableFilterBar,
   Input,
   Label,
+  PageHeader,
   Pagination,
   Select,
   SkeletonRows,
@@ -74,10 +75,7 @@ export function SalesPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Чеки</h1>
-        <span className="text-sm text-foreground-muted">всего: {total}</span>
-      </div>
+      <PageHeader title="Чеки" meta={<>всего: {total}</>} />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -93,7 +91,7 @@ export function SalesPage(): JSX.Element {
                   value={receiptInput}
                   onChange={(e) => setReceiptInput(e.target.value)}
                   placeholder="000142"
-                  className="w-32"
+                  className="w-full sm:w-32"
                 />
               </div>
             ),
@@ -109,7 +107,7 @@ export function SalesPage(): JSX.Element {
             id: "period",
             label: "Период",
             content: (
-              <div className="grid w-64 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+              <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
                 <div>
                   <Label htmlFor="date_from">С</Label>
                   <Input
@@ -160,7 +158,7 @@ export function SalesPage(): JSX.Element {
                     setRegisterId("");
                     resetPage();
                   }}
-                  className="w-44"
+                  className="w-full sm:w-44"
                 >
                   <option value="">Все</option>
                   {branches.data?.map((b) => (
@@ -192,7 +190,7 @@ export function SalesPage(): JSX.Element {
                     setRegisterId(e.target.value);
                     resetPage();
                   }}
-                  className="w-44"
+                  className="w-full sm:w-44"
                 >
                   <option value="">Все</option>
                   {registers.data?.map((r) => (

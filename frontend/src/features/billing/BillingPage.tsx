@@ -6,6 +6,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  PageHeader,
   Table,
   TableEmpty,
   TBody,
@@ -33,7 +34,7 @@ export function BillingPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-foreground">Биллинг</h1>
+      <PageHeader title="Биллинг" />
 
       {/* SUBSCRIPTION CARD */}
       <Card>
@@ -52,7 +53,7 @@ export function BillingPage(): JSX.Element {
               Подписки пока нет. Свяжитесь с поддержкой, чтобы её активировать.
             </p>
           ) : (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div>
                 <p className="text-xs text-foreground-muted">План</p>
                 <p className="text-lg font-medium">{subscription.data.plan_name}</p>
@@ -140,10 +141,7 @@ export function BillingPage(): JSX.Element {
         </CardContent>
       </Card>
 
-      <InvoiceDetailModal
-        invoiceId={openInvoiceId}
-        onClose={() => setOpenInvoiceId(null)}
-      />
+      <InvoiceDetailModal invoiceId={openInvoiceId} onClose={() => setOpenInvoiceId(null)} />
     </div>
   );
 }

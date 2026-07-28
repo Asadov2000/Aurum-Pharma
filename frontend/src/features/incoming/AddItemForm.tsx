@@ -84,8 +84,9 @@ export function AddItemForm({
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-3">
       <div>
-        <Label>Позиция каталога</Label>
+        <Label htmlFor="incoming-catalog-item">Позиция каталога</Label>
         <CatalogPicker
+          id="incoming-catalog-item"
           value={catalogId}
           onChange={(id) => setCatalogId(id)}
           invalid={Boolean(topError && !catalogId)}

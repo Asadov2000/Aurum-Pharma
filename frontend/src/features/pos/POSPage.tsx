@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { Input, Label, Select, Switch } from "@/components/ui";
+import { Input, Label, PageHeader, Select, Skeleton, Switch, TableEmpty } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 import { useRegistersQuery, useTenantSettingsQuery } from "@/features/foundation/queries";
 import { cn } from "@/lib/utils";
 
@@ -13,7 +15,11 @@ const STORAGE_KEY = "pos:lastRegisterId";
 const SOUND_KEY = "pos:beep";
 
 export function POSPage(): JSX.Element {
+  const { user } = useAuth();
   const { mode, pref, setPref } = usePosMode();
+  const canOpenShift = hasPermission(user, "pos.shift_open");
+  const canCloseShift = hasPermission(user, "pos.shift_close");
+  const canSell = hasPermission(user, "pos.sell");
   const registers = useRegistersQuery(null, false);
   // POS draft TTL comes from tenant settings; fall back until they load (or if
   // the user can't read them).
@@ -60,54 +66,69 @@ export function POSPage(): JSX.Element {
 
   return (
     <div className={cn("space-y-4", mode === "touch" ? "pos--touch" : "pos--keyboard")}>
-      {/* Compact settings strip — register + POS mode + scanner sound on one
-          slim row, so it doesn't eat the cashier's vertical space. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-sm">
-        <h1 className="text-xl font-semibold text-foreground">Касса</h1>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          {registerList && registerList.length === 0 ? (
-            <p className="text-sm text-foreground-muted">
-              Нет активных касс. Создайте кассу в разделе «Кассы».
-            </p>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Label htmlFor="register" className="mb-0 text-xs text-foreground-muted">
-                Касса
-              </Label>
-              {onlyRegister ? (
-                // Single register — auto-selected, shown as a disabled field.
-                <Input
-                  id="register"
-                  className="h-9 w-48"
-                  value={onlyRegister.name}
-                  readOnly
-                  disabled
-                />
-              ) : (
-                <Select
-                  id="register"
-                  value={registerId}
-                  onChange={(e) => setRegisterId(e.target.value)}
-                  className="h-9 w-48"
-                >
-                  <option value="">— выберите —</option>
-                  {registerList?.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </div>
-          )}
-          <ModeToggle pref={pref} setPref={setPref} />
-          <Switch
-            label="Звук сканера"
-            checked={soundOn}
-            onChange={(e) => toggleSound(e.target.checked)}
-          />
-        </div>
-      </div>
+      <PageHeader
+        title="Касса"
+        compact
+        actions={
+          <div className="flex w-full max-w-full flex-wrap items-center gap-x-4 gap-y-2 sm:justify-end">
+            {registers.isLoading ? (
+              <Skeleton className="h-9 w-full sm:w-52" />
+            ) : registerList && registerList.length > 0 ? (
+              <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+                <Label htmlFor="register" className="mb-0 shrink-0 text-foreground-muted">
+                  Касса
+                </Label>
+                {onlyRegister ? (
+                  <Input
+                    id="register"
+                    className="h-9 min-w-0 flex-1 sm:w-52 sm:flex-none"
+                    value={onlyRegister.name}
+                    readOnly
+                    disabled
+                  />
+                ) : (
+                  <Select
+                    id="register"
+                    value={registerId}
+                    onChange={(event) => setRegisterId(event.target.value)}
+                    className="h-9 min-w-0 flex-1 sm:w-52 sm:flex-none"
+                  >
+                    <option value="">— выберите —</option>
+                    {registerList?.map((register) => (
+                      <option key={register.id} value={register.id}>
+                        {register.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </div>
+            ) : null}
+            <ModeToggle pref={pref} setPref={setPref} />
+            <Switch
+              label="Звук сканера"
+              checked={soundOn}
+              onChange={(event) => toggleSound(event.target.checked)}
+            />
+          </div>
+        }
+      />
+
+      {registers.error && (
+        <p
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
+          Не удалось загрузить список касс. Проверьте соединение и обновите страницу.
+        </p>
+      )}
+
+      {registerList && registerList.length === 0 && (
+        <TableEmpty title="Нет активных касс">Создайте рабочую кассу в разделе «Кассы».</TableEmpty>
+      )}
+
+      {registerList && registerList.length > 1 && !registerId && (
+        <TableEmpty title="Касса не выбрана">Выберите рабочую кассу в верхней панели.</TableEmpty>
+      )}
 
       {registerId && (
         <SaleArea
@@ -115,6 +136,9 @@ export function POSPage(): JSX.Element {
           mode={mode}
           soundOn={soundOn}
           draftTtlMin={draftTtlMin}
+          canOpenShift={canOpenShift}
+          canCloseShift={canCloseShift}
+          canSell={canSell}
         />
       )}
     </div>

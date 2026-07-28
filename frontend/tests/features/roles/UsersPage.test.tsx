@@ -251,7 +251,7 @@ describe("UsersPage", () => {
       is_tenant_owner: true,
       permissions: ["users.view", "roles.assign"],
     };
-    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
     renderPage();
 
     await openUserActions();
@@ -269,6 +269,30 @@ describe("UsersPage", () => {
       branch_id: null,
       password_required: false,
     });
+  });
+
+  it("does not submit a duplicate active role for the same scope", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("button", { name: "+ Назначить роль" }));
+    fireEvent.change(screen.getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
+
+    expect(
+      await screen.findByText("Эта роль уже назначена сотруднику для выбранной области"),
+    ).toBeInTheDocument();
+    expect(createAssignment).not.toHaveBeenCalled();
   });
 
   it("protects owner membership from assignment and lifecycle actions", async () => {

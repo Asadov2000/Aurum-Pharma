@@ -1,6 +1,12 @@
-import { Label, Select } from "@/components/ui";
+import { Label, SegmentedControl, type SegmentOption } from "@/components/ui";
 
 import { type PosModePref } from "./usePosMode";
+
+const options: readonly SegmentOption<PosModePref>[] = [
+  { value: "auto", label: "Авто", title: "Выбрать режим по устройству" },
+  { value: "touch", label: "Сенсор", title: "Крупные элементы для сенсорного экрана" },
+  { value: "keyboard", label: "Клавиши", title: "Компактный режим с горячими клавишами" },
+];
 
 /**
  * Per-device override for the POS interaction mode. "Авто" sniffs the hardware;
@@ -14,20 +20,15 @@ export function ModeToggle({
   setPref: (p: PosModePref) => void;
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-2">
-      <Label htmlFor="pos-mode" className="mb-0 text-xs text-foreground-muted">
-        Режим POS
-      </Label>
-      <Select
-        id="pos-mode"
+    <div className="flex flex-wrap items-center gap-2">
+      <Label className="mb-0 text-foreground-muted">Режим</Label>
+      <SegmentedControl
         value={pref}
-        onChange={(e) => setPref(e.target.value as PosModePref)}
-        className="h-9 w-36"
-      >
-        <option value="auto">Авто</option>
-        <option value="touch">Тач</option>
-        <option value="keyboard">Клавиатура</option>
-      </Select>
+        options={options}
+        onChange={setPref}
+        label="Режим кассы"
+        size="sm"
+      />
     </div>
   );
 }

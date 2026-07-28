@@ -2,12 +2,14 @@ import { useMemo, useState } from "react";
 
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
+  ActionMenu,
   Badge,
   Button,
   FilterBar,
   Input,
   Label,
   Modal,
+  PageHeader,
   Pagination,
   SkeletonRows,
   Table,
@@ -83,10 +85,10 @@ export function TenantsPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Тенанты</h1>
-        <Button onClick={() => setCreating(true)}>+ Новая аптека</Button>
-      </div>
+      <PageHeader
+        title="Тенанты"
+        actions={<Button onClick={() => setCreating(true)}>+ Новая аптека</Button>}
+      />
 
       {data && data.length > 0 && (
         <FilterBar>
@@ -106,9 +108,12 @@ export function TenantsPage(): JSX.Element {
       )}
 
       {error ? (
-        <p className="text-sm text-danger">
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
           {describeApiError(error, "Не удалось загрузить список")}
-        </p>
+        </div>
       ) : isLoading ? (
         <SkeletonRows rows={6} />
       ) : !data || data.length === 0 ? (
@@ -136,37 +141,29 @@ export function TenantsPage(): JSX.Element {
                     <Badge tone={statusTone[t.status]}>{statusLabel[t.status]}</Badge>
                   </TD>
                   <TD>{new Date(t.created_at).toLocaleDateString("ru-RU")}</TD>
-                  <TD className="text-right whitespace-nowrap">
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(t)}>
-                      Изменить
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setBillingTenant(t)}>
-                      Биллинг
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={t.status === "archived"}
-                      onClick={() => {
-                        setSupportRequestPending(false);
-                        setSupportTenant(t);
-                      }}
-                    >
-                      Открыть доступ
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={t.status === "archived"}
-                      title={
-                        t.status === "archived"
-                          ? "В архивную аптеку нельзя добавить сотрудника"
-                          : undefined
-                      }
-                      onClick={() => setMemberTenant(t)}
-                    >
-                      Добавить сотрудника
-                    </Button>
+                  <TD className="w-12 text-right">
+                    <ActionMenu
+                      label={`Действия для ${t.name}`}
+                      items={[
+                        { label: "Изменить", onSelect: () => setEditing(t) },
+                        { label: "Биллинг", onSelect: () => setBillingTenant(t) },
+                        ...(t.status === "archived"
+                          ? []
+                          : [
+                              {
+                                label: "Открыть защищённый доступ",
+                                onSelect: () => {
+                                  setSupportRequestPending(false);
+                                  setSupportTenant(t);
+                                },
+                              },
+                              {
+                                label: "Добавить сотрудника",
+                                onSelect: () => setMemberTenant(t),
+                              },
+                            ]),
+                      ]}
+                    />
                   </TD>
                 </TR>
               ))}

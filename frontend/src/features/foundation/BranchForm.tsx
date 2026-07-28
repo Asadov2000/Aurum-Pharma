@@ -2,15 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import {
-  Button,
-  FormError,
-  Input,
-  Label,
-  Select,
-  Switch,
-  Textarea,
-} from "@/components/ui";
+import { Button, FormError, Input, Label, Select, Switch, Textarea } from "@/components/ui";
 
 import { describeApiError } from "./errors";
 import { useCreateBranch, useUpdateBranch } from "./queries";
@@ -131,7 +123,7 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
         <Label htmlFor="address">Адрес</Label>
         <Textarea id="address" {...form.register("address")} />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <Label htmlFor="license_number">Номер лицензии</Label>
           <Input id="license_number" {...form.register("license_number")} />
@@ -141,11 +133,16 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
           <Input id="license_expires_at" type="date" {...form.register("license_expires_at")} />
         </div>
       </div>
-      {isEdit && (
-        <Switch label="Активна" {...form.register("is_active")} />
+      {isEdit && <Switch label="Активна" {...form.register("is_active")} />}
+      {topError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
+          {topError}
+        </div>
       )}
-      {topError && <p className="text-sm text-danger">{topError}</p>}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onClose}>
           Отмена
         </Button>

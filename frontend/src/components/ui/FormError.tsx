@@ -1,14 +1,18 @@
-import { type ReactNode } from "react";
+import { type HTMLAttributes, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
 export function FormError({
   children,
   className,
+  ...rest
 }: {
   children: ReactNode;
-  className?: string;
-}): JSX.Element | null {
+} & HTMLAttributes<HTMLParagraphElement>): JSX.Element | null {
   if (!children) return null;
-  return <p className={cn("mt-1 text-sm text-danger", className)}>{children}</p>;
+  return (
+    <p className={cn("mt-1.5 text-sm text-danger", className)} role="alert" {...rest}>
+      {children}
+    </p>
+  );
 }

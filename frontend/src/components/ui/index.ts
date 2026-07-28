@@ -15,3 +15,6 @@ export { ConfirmDialog } from "./ConfirmDialog";
 export { FilterBar } from "./FilterBar";
 export { ConfigurableFilterBar, type ConfigurableFilter } from "./ConfigurableFilterBar";
 export { ActionMenu, type ActionMenuItem } from "./ActionMenu";
+export { PageHeader } from "./PageHeader";
+export { SegmentedControl, type SegmentOption } from "./SegmentedControl";
+export { Checkbox } from "./Checkbox";

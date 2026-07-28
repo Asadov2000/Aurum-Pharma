@@ -11,16 +11,14 @@ import {
   FormError,
   Input,
   Label,
+  PageHeader,
   Select,
   Textarea,
 } from "@/components/ui";
 
 import { describeApiError } from "./errors";
 import { useTenantSettingsQuery, useUpdateTenantSettings } from "./queries";
-import {
-  type ExpiredSaleMode,
-  type RefundReasonMode,
-} from "./types";
+import { type ExpiredSaleMode, type RefundReasonMode } from "./types";
 
 const expiredSaleModes: ExpiredSaleMode[] = ["strict", "warning", "off"];
 const expiredSaleLabel: Record<ExpiredSaleMode, string> = {
@@ -123,15 +121,23 @@ export function SettingsPage(): JSX.Element {
   });
 
   if (isLoading) {
-    return <p className="text-sm text-foreground-muted">Загрузка…</p>;
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Настройки" />
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
+      </div>
+    );
   }
   if (error || !data) {
     return (
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-foreground">Настройки</h1>
-        <p className="text-sm text-danger">
+      <div className="space-y-4">
+        <PageHeader title="Настройки" />
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
           {describeApiError(error, "Не удалось загрузить настройки")}
-        </p>
+        </div>
         <p className="text-sm text-foreground-muted">
           У учёток developer/administrator нет привязки к тенанту — войдите как owner.
         </p>
@@ -140,14 +146,14 @@ export function SettingsPage(): JSX.Element {
   }
 
   return (
-    <form onSubmit={onSubmit} noValidate className="max-w-2xl space-y-6">
-      <h1 className="text-2xl font-semibold text-foreground">Настройки</h1>
+    <form onSubmit={onSubmit} noValidate className="max-w-3xl space-y-6">
+      <PageHeader title="Настройки" />
 
       <Card>
         <CardHeader>
           <CardTitle>Сроки годности (месяцы)</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-3 gap-4">
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <Label htmlFor="yellow">Жёлтый</Label>
             <Input
@@ -222,7 +228,7 @@ export function SettingsPage(): JSX.Element {
         <CardHeader>
           <CardTitle>Сессии</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-4">
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <Label htmlFor="session_admin_minutes">Админ-панель (минут)</Label>
             <Input
@@ -260,12 +266,28 @@ export function SettingsPage(): JSX.Element {
         </CardContent>
       </Card>
 
-      {topError && <p className="text-sm text-danger">{topError}</p>}
-      {okBanner && <p className="text-sm text-success-foreground">Настройки сохранены.</p>}
+      {topError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
+          {topError}
+        </div>
+      )}
+      {okBanner && (
+        <div
+          role="status"
+          className="rounded-lg border border-success/30 bg-success-subtle px-3 py-2 text-sm leading-5 text-success-foreground"
+        >
+          Настройки сохранены.
+        </div>
+      )}
 
-      <Button type="submit" isLoading={form.formState.isSubmitting}>
-        Сохранить
-      </Button>
+      <div className="flex flex-wrap justify-end">
+        <Button type="submit" isLoading={form.formState.isSubmitting}>
+          Сохранить
+        </Button>
+      </div>
     </form>
   );
 }
