@@ -162,4 +162,23 @@ describe("ConfigurableFilterBar", () => {
     );
     expect(screen.getByLabelText("Точка")).toBeInTheDocument();
   });
+
+  it("clears an active filter when permission makes it unavailable", async () => {
+    const onClear = vi.fn();
+    window.localStorage.setItem(
+      "aurum:filter-layout:v1:test",
+      JSON.stringify(["search", "status"]),
+    );
+    const restricted = filters(onClear).map((filter) =>
+      filter.id === "status" ? { ...filter, available: false } : filter,
+    );
+
+    render(
+      <ConfigurableFilterBar preferenceKey="test" filters={restricted} onResetValues={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(onClear).toHaveBeenCalledTimes(1));
+    expect(screen.queryByLabelText("Статус")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("aurum:filter-layout:v1:test")).toBe('["search"]');
+  });
 });

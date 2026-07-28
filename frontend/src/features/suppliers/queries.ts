@@ -5,16 +5,19 @@ import {
   createSupplierReturn,
   listSupplierReturns,
   listSuppliers,
+  searchSuppliers,
   updateSupplier,
 } from "./api";
 import {
   type SupplierCreatePayload,
   type SupplierReturnCreatePayload,
+  type SupplierSearchParams,
   type SupplierUpdatePayload,
 } from "./types";
 
 export const suppliersKeys = {
   list: (includeInactive: boolean) => ["suppliers", "list", { includeInactive }] as const,
+  search: (params: SupplierSearchParams) => ["suppliers", "search", params] as const,
   returns: (params: { supplier_id?: string; date_from?: string; date_to?: string }) =>
     ["suppliers", "returns", params] as const,
 };
@@ -27,12 +30,22 @@ export function useSuppliersQuery(includeInactive: boolean, enabled = true) {
   });
 }
 
+export function useSupplierSearchQuery(params: SupplierSearchParams, enabled = true) {
+  return useQuery({
+    queryKey: suppliersKeys.search(params),
+    queryFn: ({ signal }) => searchSuppliers(params, signal),
+    placeholderData: keepPreviousData,
+    enabled,
+  });
+}
+
 export function useCreateSupplier() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: SupplierCreatePayload) => createSupplier(payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["suppliers", "list"] });
+      void qc.invalidateQueries({ queryKey: ["suppliers", "search"] });
     },
   });
 }
@@ -44,6 +57,7 @@ export function useUpdateSupplier() {
       updateSupplier(args.id, args.payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["suppliers", "list"] });
+      void qc.invalidateQueries({ queryKey: ["suppliers", "search"] });
     },
   });
 }

@@ -16,6 +16,20 @@ export interface Supplier {
   updated_at: string;
 }
 
+export interface SupplierListResponse {
+  items: Supplier[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface SupplierSearchParams {
+  q?: string;
+  is_active?: boolean;
+  page?: number;
+  page_size?: number;
+}
+
 export interface SupplierCreatePayload {
   name: string;
   legal_name?: string | null;

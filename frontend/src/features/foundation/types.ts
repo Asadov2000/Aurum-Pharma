@@ -125,6 +125,21 @@ export interface Branch {
   updated_at: string;
 }
 
+export interface BranchListResponse {
+  items: Branch[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface BranchSearchParams {
+  q?: string;
+  branch_type?: BranchType;
+  is_active?: boolean;
+  page?: number;
+  page_size?: number;
+}
+
 export interface BranchCreatePayload {
   name: string;
   address?: string | null;
@@ -154,6 +169,22 @@ export interface Register {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface RegisterListResponse {
+  items: Register[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface RegisterSearchParams {
+  q?: string;
+  branch_id?: string;
+  printer_type?: PrinterType;
+  is_active?: boolean;
+  page?: number;
+  page_size?: number;
 }
 
 export interface RegisterCreatePayload {
