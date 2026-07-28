@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -31,11 +31,15 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.schemas import (
     BranchCreate,
     BranchRead,
+    BranchSearchRequest,
+    BranchSearchResponse,
     BranchUpdate,
     OwnerCreate,
     OwnerProvisionRead,
     RegisterCreate,
     RegisterRead,
+    RegisterSearchRequest,
+    RegisterSearchResponse,
     RegisterUpdate,
     TenantCreate,
     TenantRead,
@@ -85,6 +89,11 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
             details={"hint": "Login as a tenant user or pass X-Tenant-Id (phase 2)."},
         )
     return user.tenant_id
+
+
+def _set_search_no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
 
 
 # =============================================================================
@@ -284,6 +293,31 @@ async def list_branches(
     return [BranchRead.model_validate(b) for b in branches]
 
 
+@tenant_router.post("/branches/search", response_model=BranchSearchResponse)
+async def search_branches(
+    payload: BranchSearchRequest,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_permission("branches.view"))],
+    service: Annotated[FoundationService, Depends(_service)],
+) -> BranchSearchResponse:
+    _set_search_no_store(response)
+    items, total = await service.search_branches(
+        tenant_id=_current_tenant_or_400(user),
+        q=payload.q,
+        branch_type=payload.branch_type,
+        is_active=payload.is_active,
+        allowed_branch_ids=user.branch_scope_for("branches.view"),
+        page=payload.page,
+        page_size=payload.page_size,
+    )
+    return BranchSearchResponse(
+        items=[BranchRead.model_validate(item) for item in items],
+        total=total,
+        page=payload.page,
+        page_size=payload.page_size,
+    )
+
+
 @tenant_router.post("/branches", response_model=BranchRead, status_code=status.HTTP_201_CREATED)
 async def create_branch(
     payload: BranchCreate,
@@ -375,6 +409,32 @@ async def list_registers(
     if branch_scope is not None:
         registers = [r for r in registers if r.branch_id in branch_scope]
     return [RegisterRead.model_validate(r) for r in registers]
+
+
+@tenant_router.post("/registers/search", response_model=RegisterSearchResponse)
+async def search_registers(
+    payload: RegisterSearchRequest,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_permission("registers.view"))],
+    service: Annotated[FoundationService, Depends(_service)],
+) -> RegisterSearchResponse:
+    _set_search_no_store(response)
+    items, total = await service.search_registers(
+        tenant_id=_current_tenant_or_400(user),
+        q=payload.q,
+        branch_id=payload.branch_id,
+        printer_type=payload.printer_type,
+        is_active=payload.is_active,
+        allowed_branch_ids=user.branch_scope_for("registers.view"),
+        page=payload.page,
+        page_size=payload.page_size,
+    )
+    return RegisterSearchResponse(
+        items=[RegisterRead.model_validate(item) for item in items],
+        total=total,
+        page=payload.page,
+        page_size=payload.page_size,
+    )
 
 
 @tenant_router.post("/registers", response_model=RegisterRead, status_code=status.HTTP_201_CREATED)

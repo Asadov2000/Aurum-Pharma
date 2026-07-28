@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
@@ -199,6 +199,31 @@ class BranchRead(BaseModel):
     updated_at: datetime
 
 
+class BranchSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    q: str | None = Field(default=None, max_length=200)
+    branch_type: Literal["pharmacy", "pharmacy_post", "kiosk"] | None = None
+    is_active: bool | None = Field(default=None, strict=True)
+    page: int = Field(default=1, ge=1, strict=True)
+    page_size: int = Field(default=50, ge=1, le=200, strict=True)
+
+    @field_validator("q")
+    @classmethod
+    def _normalize_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class BranchSearchResponse(BaseModel):
+    items: list[BranchRead]
+    total: int
+    page: int
+    page_size: int
+
+
 # -----------------------------------------------------------------------------
 # Register
 # -----------------------------------------------------------------------------
@@ -244,3 +269,29 @@ class RegisterRead(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class RegisterSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    q: str | None = Field(default=None, max_length=200)
+    branch_id: UUID | None = None
+    printer_type: Literal["browser", "thermal_58", "thermal_80", "a4"] | None = None
+    is_active: bool | None = Field(default=None, strict=True)
+    page: int = Field(default=1, ge=1, strict=True)
+    page_size: int = Field(default=50, ge=1, le=200, strict=True)
+
+    @field_validator("q")
+    @classmethod
+    def _normalize_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class RegisterSearchResponse(BaseModel):
+    items: list[RegisterRead]
+    total: int
+    page: int
+    page_size: int

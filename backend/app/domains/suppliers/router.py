@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_db, require_permission
@@ -18,6 +18,8 @@ from app.domains.suppliers.schemas import (
     SupplierReturnCreate,
     SupplierReturnCreated,
     SupplierReturnRead,
+    SupplierSearchRequest,
+    SupplierSearchResponse,
     SupplierUpdate,
 )
 from app.domains.suppliers.service import SuppliersService
@@ -35,6 +37,11 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     if user.tenant_id is None:
         raise BusinessRuleError("Request is not scoped to a tenant")
     return user.tenant_id
+
+
+def _set_search_no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
 
 
 # ---- supplier returns (declared first so the router resolves /returns
@@ -96,6 +103,29 @@ async def list_suppliers(
 ) -> list[SupplierRead]:
     items = await service.list_suppliers(include_inactive=include_inactive)
     return [SupplierRead.model_validate(i) for i in items]
+
+
+@router.post("/search", response_model=SupplierSearchResponse)
+async def search_suppliers(
+    payload: SupplierSearchRequest,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_permission("suppliers.view"))],
+    service: Annotated[SuppliersService, Depends(_service)],
+) -> SupplierSearchResponse:
+    _set_search_no_store(response)
+    items, total = await service.search_suppliers(
+        tenant_id=_current_tenant_or_400(user),
+        q=payload.q,
+        is_active=payload.is_active,
+        page=payload.page,
+        page_size=payload.page_size,
+    )
+    return SupplierSearchResponse(
+        items=[SupplierRead.model_validate(item) for item in items],
+        total=total,
+        page=payload.page,
+        page_size=payload.page_size,
+    )
 
 
 @router.post("", response_model=SupplierRead, status_code=status.HTTP_201_CREATED)

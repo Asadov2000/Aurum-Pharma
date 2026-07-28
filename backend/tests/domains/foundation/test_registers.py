@@ -109,3 +109,102 @@ async def test_register_deactivation_rejects_open_shift_but_allows_closed_shift(
 
     deleted = await service.soft_delete_register(register.id)
     assert deleted.is_active is False
+
+
+async def test_search_registers_filters_scope_status_and_tenant(
+    db_session: AsyncSession,
+    make_tenant,
+) -> None:
+    tenant = await make_tenant()
+    other_tenant = await make_tenant()
+    service = FoundationService(FoundationRepository(db_session))
+    branch_a = await service.create_branch(tenant_id=tenant.id, fields={"name": "A"})
+    branch_b = await service.create_branch(tenant_id=tenant.id, fields={"name": "B"})
+    other_branch = await service.create_branch(
+        tenant_id=other_tenant.id,
+        fields={"name": "Other"},
+    )
+    front = await service.create_register(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch_a.id,
+            "name": "Front Desk",
+            "printer_type": "thermal_80",
+        },
+    )
+    await service.create_register(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch_a.id,
+            "name": "Backup",
+            "printer_type": "browser",
+        },
+    )
+    await service.create_register(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch_b.id,
+            "name": "Front Branch B",
+            "printer_type": "thermal_80",
+        },
+    )
+    inactive = await service.create_register(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch_a.id,
+            "name": "Old Front",
+            "printer_type": "thermal_80",
+        },
+    )
+    await service.soft_delete_register(inactive.id)
+    await service.create_register(
+        tenant_id=other_tenant.id,
+        fields={
+            "branch_id": other_branch.id,
+            "name": "Front Other Tenant",
+            "printer_type": "thermal_80",
+        },
+    )
+
+    filtered, filtered_total = await service.search_registers(
+        tenant_id=tenant.id,
+        q="FRONT",
+        branch_id=branch_a.id,
+        printer_type="thermal_80",
+        is_active=True,
+    )
+    assert filtered_total == 1
+    assert filtered[0].id == front.id
+
+    inactive_items, inactive_total = await service.search_registers(
+        tenant_id=tenant.id,
+        is_active=False,
+    )
+    assert inactive_total == 1
+    assert inactive_items[0].id == inactive.id
+
+    scoped, scoped_total = await service.search_registers(
+        tenant_id=tenant.id,
+        allowed_branch_ids={branch_a.id},
+        page=1,
+        page_size=2,
+    )
+    assert scoped_total == 3
+    assert len(scoped) == 2
+
+    repeated, repeated_total = await service.search_registers(
+        tenant_id=tenant.id,
+        allowed_branch_ids={branch_a.id},
+        page=1,
+        page_size=2,
+    )
+    assert repeated_total == scoped_total
+    assert [register.id for register in repeated] == [register.id for register in scoped]
+
+    outside_scope, outside_total = await service.search_registers(
+        tenant_id=tenant.id,
+        branch_id=branch_b.id,
+        allowed_branch_ids={branch_a.id},
+    )
+    assert outside_scope == []
+    assert outside_total == 0

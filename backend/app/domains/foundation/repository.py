@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
 
@@ -89,9 +90,52 @@ class FoundationRepository:
         stmt = select(Branch)
         if not include_inactive:
             stmt = stmt.where(Branch.is_active.is_(True))
-        stmt = stmt.order_by(Branch.created_at.asc())
+        stmt = stmt.order_by(Branch.created_at.asc(), Branch.id.asc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def search_branches(
+        self,
+        *,
+        tenant_id: UUID,
+        q: str | None = None,
+        branch_type: str | None = None,
+        is_active: bool | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Branch], int]:
+        if allowed_branch_ids is not None and not allowed_branch_ids:
+            return [], 0
+
+        clauses: list[ColumnElement[bool]] = [Branch.tenant_id == tenant_id]
+        term = q.strip() if q is not None else ""
+        if term:
+            clauses.append(
+                or_(
+                    Branch.name.icontains(term, autoescape=True),
+                    Branch.address.icontains(term, autoescape=True),
+                    Branch.license_number.icontains(term, autoescape=True),
+                )
+            )
+        if branch_type is not None:
+            clauses.append(Branch.branch_type == branch_type)
+        if is_active is not None:
+            clauses.append(Branch.is_active.is_(is_active))
+        if allowed_branch_ids is not None:
+            clauses.append(Branch.id.in_(sorted(allowed_branch_ids, key=str)))
+
+        count_stmt = select(func.count()).select_from(Branch).where(*clauses)
+        total = int((await self.session.execute(count_stmt)).scalar_one())
+        stmt = (
+            select(Branch)
+            .where(*clauses)
+            .order_by(func.lower(Branch.name).asc(), Branch.id.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all()), total
 
     async def get_branch(self, branch_id: UUID) -> Branch | None:
         return await self.session.get(Branch, branch_id)
@@ -143,9 +187,52 @@ class FoundationRepository:
             stmt = stmt.where(Register.branch_id == branch_id)
         if not include_inactive:
             stmt = stmt.where(Register.is_active.is_(True))
-        stmt = stmt.order_by(Register.created_at.asc())
+        stmt = stmt.order_by(Register.created_at.asc(), Register.id.asc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def search_registers(
+        self,
+        *,
+        tenant_id: UUID,
+        q: str | None = None,
+        branch_id: UUID | None = None,
+        printer_type: str | None = None,
+        is_active: bool | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Register], int]:
+        if allowed_branch_ids is not None:
+            if not allowed_branch_ids:
+                return [], 0
+            if branch_id is not None and branch_id not in allowed_branch_ids:
+                return [], 0
+
+        clauses: list[ColumnElement[bool]] = [Register.tenant_id == tenant_id]
+        term = q.strip() if q is not None else ""
+        if term:
+            clauses.append(Register.name.icontains(term, autoescape=True))
+        if branch_id is not None:
+            clauses.append(Register.branch_id == branch_id)
+        if printer_type is not None:
+            clauses.append(Register.printer_type == printer_type)
+        if is_active is not None:
+            clauses.append(Register.is_active.is_(is_active))
+        if allowed_branch_ids is not None:
+            clauses.append(Register.branch_id.in_(sorted(allowed_branch_ids, key=str)))
+
+        count_stmt = select(func.count()).select_from(Register).where(*clauses)
+        total = int((await self.session.execute(count_stmt)).scalar_one())
+        stmt = (
+            select(Register)
+            .where(*clauses)
+            .order_by(func.lower(Register.name).asc(), Register.id.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all()), total
 
     async def get_register(self, register_id: UUID) -> Register | None:
         return await self.session.get(Register, register_id)
