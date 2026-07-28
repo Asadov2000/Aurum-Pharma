@@ -54,7 +54,7 @@ test.describe("Incoming flow (owner)", () => {
     // debounces at 200ms, then fires the trigram search.
     const searchKey = catalogSearchKey(item.brand_name);
     await pickerInput.fill(searchKey);
-    const option = page.getByRole("button", { name: new RegExp(item.brand_name) });
+    const option = page.getByRole("option", { name: new RegExp(item.brand_name) });
     await expect(option).toBeVisible({ timeout: 15_000 });
     await option.click();
 
@@ -87,7 +87,7 @@ test.describe("Incoming flow (owner)", () => {
     await page.goto("/batches");
     const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
     await batchCatalogPicker.fill(searchKey);
-    const batchCatalogOption = page.getByRole("button", {
+    const batchCatalogOption = page.getByRole("option", {
       name: new RegExp(item.brand_name),
     });
     await expect(batchCatalogOption).toBeVisible({ timeout: 15_000 });

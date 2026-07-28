@@ -10,12 +10,15 @@ const WORKSPACES = [
   { path: "/pos", heading: "Касса" },
 ] as const;
 
-async function expectNoHorizontalOverflow(page: Page) {
+async function expectNoHorizontalOverflow(page: Page, workspace: string) {
   const overflow = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: document.documentElement.clientWidth,
   }));
-  expect(overflow.documentWidth).toBeLessThanOrEqual(overflow.viewportWidth + 1);
+  expect(
+    overflow.documentWidth,
+    `${workspace}: ширина документа ${overflow.documentWidth}px при viewport ${overflow.viewportWidth}px`,
+  ).toBeLessThanOrEqual(overflow.viewportWidth + 1);
 }
 
 test.describe("Interface layout", () => {
@@ -37,7 +40,10 @@ test.describe("Interface layout", () => {
         await expect(
           page.getByRole("heading", { level: 1, name: workspace.heading, exact: true }),
         ).toBeVisible();
-        await expectNoHorizontalOverflow(page);
+        await expectNoHorizontalOverflow(
+          page,
+          `${workspace.path} @ ${viewport.width}x${viewport.height}`,
+        );
       }
     }
   });
@@ -58,7 +64,7 @@ test.describe("Interface layout", () => {
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
     await expect(dialog.getByLabel("Название", { exact: true })).toBeVisible();
-    await expectNoHorizontalOverflow(page);
+    await expectNoHorizontalOverflow(page, "/roles constructor @ 390x844");
   });
 
   test("avoids expensive blur effects in operational screens", async ({ page }) => {

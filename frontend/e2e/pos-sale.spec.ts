@@ -200,7 +200,7 @@ test.describe("POS sale (owner)", () => {
     const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
     await expect(batchCatalogPicker).toBeVisible({ timeout: 30_000 });
     await batchCatalogPicker.fill(searchKey);
-    const batchCatalogOption = page.getByRole("button", {
+    const batchCatalogOption = page.getByRole("option", {
       name: new RegExp(item.brand_name),
     });
     await expect(batchCatalogOption).toBeVisible({ timeout: 30_000 });

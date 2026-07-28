@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 export function Table({ className, ...rest }: HTMLAttributes<HTMLTableElement>): JSX.Element {
   return (
-    <div className="overflow-x-auto rounded-lg border border-border bg-surface">
+    <div className="w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-border bg-surface">
       <table className={cn("w-full min-w-max text-sm", className)} {...rest} />
     </div>
   );
