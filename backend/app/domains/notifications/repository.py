@@ -82,7 +82,7 @@ class NotificationsRepository:
         if severity:
             stmt = stmt.where(Notification.severity == severity)
         stmt = (
-            stmt.order_by(Notification.created_at.desc())
+            stmt.order_by(Notification.created_at.desc(), Notification.id.desc())
             .limit(page_size)
             .offset((page - 1) * page_size)
             .execution_options(populate_existing=True)

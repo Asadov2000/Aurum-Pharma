@@ -80,7 +80,7 @@ HSL-каналов (`H S% L%`), чтобы работали модификато
 primary/secondary/ghost/danger; sizes sm/md/lg/**xl** — большой touch-таргет
 для POS), `Input`, `Select`, `Textarea`, `Label`, `Card`, `Badge` (5 тонов),
 `Switch`, `Modal`, `Table` (+ `TableEmpty` с `title`/`icon`/`action`),
-`FormError`, `Skeleton` / `SkeletonRows`.
+`FormError`, `Skeleton` / `SkeletonRows`, `ConfigurableFilterBar`.
 
 Focus-ring задаётся глобально через `:focus-visible` в `index.css` — виден
 с клавиатуры, не появляется при клике мышью (a11y).
@@ -92,3 +92,6 @@ Focus-ring задаётся глобально через `:focus-visible` в `i
 - Пустые состояния — дружелюбные, с действием («Добавьте первую позицию» +
   кнопка), не «Нет данных».
 - Карточки — мягкая тень + hairline-граница, без резких рамок.
+- Панели списков используют `ConfigurableFilterBar`: значения фильтров принадлежат
+  разделу, а локально сохраняется только состав видимых полей. Полный контракт
+  описан в `docs/configurable-filters.md`.

@@ -84,7 +84,7 @@ class CatalogRepository:
         page: int,
         page_size: int,
     ) -> tuple[list[TenantCatalog], int]:
-        """Trigram search across brand_name + inn. Filters by category and
+        """Trigram search across brand_name, inn, and manufacturer. Filters by category and
         dispensing_type are exact-match. Tenant scoping is handled by RLS;
         we still add deleted_at IS NULL because the policy doesn't filter
         soft-deletes."""
@@ -98,16 +98,20 @@ class CatalogRepository:
         base_stmt = select(TenantCatalog).where(*filters)
         if q:
             # pg_trgm `%` operator with similarity_threshold defaulting to 0.3.
-            base_stmt = base_stmt.where(text("(brand_name % :q OR inn % :q)").bindparams(q=q))
+            base_stmt = base_stmt.where(
+                text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q)
+            )
 
         count_stmt = select(func.count()).select_from(TenantCatalog).where(*filters)
         if q:
-            count_stmt = count_stmt.where(text("(brand_name % :q OR inn % :q)").bindparams(q=q))
+            count_stmt = count_stmt.where(
+                text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q)
+            )
 
         total = int((await self.session.execute(count_stmt)).scalar_one())
 
         list_stmt = (
-            base_stmt.order_by(TenantCatalog.brand_name.asc())
+            base_stmt.order_by(TenantCatalog.brand_name.asc(), TenantCatalog.id.asc())
             .limit(page_size)
             .offset((page - 1) * page_size)
         )

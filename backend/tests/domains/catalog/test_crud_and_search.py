@@ -58,6 +58,27 @@ async def test_search_by_inn_trigram(db_session: AsyncSession, make_tenant) -> N
     assert mine[0].inn == "Парацетамол"
 
 
+async def test_search_by_manufacturer_trigram(db_session: AsyncSession, make_tenant) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Brand A", "manufacturer": "Berlin-Chemie"},
+    )
+    await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Brand B", "manufacturer": "Bayer"},
+    )
+
+    items, _, _ = await service.search(
+        q="berlin", category=None, dispensing_type=None, page=1, page_size=50
+    )
+
+    mine = [item for item in items if item.tenant_id == tenant.id]
+    assert len(mine) == 1
+    assert mine[0].manufacturer == "Berlin-Chemie"
+
+
 async def test_search_filter_by_category(db_session: AsyncSession, make_tenant) -> None:
     tenant = await make_tenant()
     service = CatalogService(CatalogRepository(db_session))

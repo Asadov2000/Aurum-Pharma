@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import {
   Badge,
   Button,
+  ConfigurableFilterBar,
   ConfirmDialog,
-  FilterBar,
   Input,
   Label,
   Modal,
@@ -19,6 +19,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { BarcodesPanel } from "./BarcodesPanel";
@@ -31,6 +32,7 @@ import { type CatalogItem, type DispensingType } from "./types";
 const PAGE_SIZE = 25;
 
 export function CatalogPage(): JSX.Element {
+  const filterPreferenceKey = useFilterPreferenceKey("catalog");
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
   const [dispensing, setDispensing] = useState<DispensingType | "">("");
@@ -83,36 +85,70 @@ export function CatalogPage(): JSX.Element {
         </div>
       </div>
 
-      <FilterBar>
-        <div className="flex-1">
-          <Label htmlFor="q">Поиск (название, МНН, производитель)</Label>
-          <Input
-            id="q"
-            value={qInput}
-            onChange={(e) => setQInput(e.target.value)}
-            placeholder="например: парацетамол"
-          />
-        </div>
-        <div>
-          <Label htmlFor="dispensing">Тип отпуска</Label>
-          <Select
-            id="dispensing"
-            value={dispensing}
-            onChange={(e) => {
-              setDispensing(e.target.value as DispensingType | "");
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "search",
+            label: "Поиск",
+            content: (
+              <div className="w-64 sm:w-80">
+                <Label htmlFor="q">Поиск (название, МНН, производитель)</Label>
+                <Input
+                  id="q"
+                  value={qInput}
+                  onChange={(e) => setQInput(e.target.value)}
+                  placeholder="например: парацетамол"
+                />
+              </div>
+            ),
+            active: Boolean(qInput),
+            onClear: () => {
+              setQInput("");
+              setQ("");
               setPage(1);
-            }}
-            className="w-52"
-          >
-            <option value="">Все</option>
-            {dispensingOptions.map((d) => (
-              <option key={d} value={d}>
-                {dispensingLabel[d]}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </FilterBar>
+            },
+            alwaysVisible: true,
+          },
+          {
+            id: "dispensing",
+            label: "Тип отпуска",
+            content: (
+              <div>
+                <Label htmlFor="dispensing">Тип отпуска</Label>
+                <Select
+                  id="dispensing"
+                  value={dispensing}
+                  onChange={(e) => {
+                    setDispensing(e.target.value as DispensingType | "");
+                    setPage(1);
+                  }}
+                  className="w-52"
+                >
+                  <option value="">Все</option>
+                  {dispensingOptions.map((d) => (
+                    <option key={d} value={d}>
+                      {dispensingLabel[d]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(dispensing),
+            onClear: () => {
+              setDispensing("");
+              setPage(1);
+            },
+            defaultVisible: true,
+          },
+        ]}
+        onResetValues={() => {
+          setQInput("");
+          setQ("");
+          setDispensing("");
+          setPage(1);
+        }}
+      />
 
       {error && (
         <p className="text-sm text-danger">
@@ -124,9 +160,7 @@ export function CatalogPage(): JSX.Element {
         <SkeletonRows rows={6} />
       ) : !data || data.items.length === 0 ? (
         q || dispensing ? (
-          <TableEmpty title="Ничего не найдено">
-            Измените запрос или фильтр отпуска.
-          </TableEmpty>
+          <TableEmpty title="Ничего не найдено">Измените запрос или фильтр отпуска.</TableEmpty>
         ) : (
           <TableEmpty
             icon="💊"
@@ -170,9 +204,7 @@ export function CatalogPage(): JSX.Element {
                   </TD>
                   <TD>{dispensingLabel[it.dispensing_type]}</TD>
                   <TD>
-                    {it.base_price
-                      ? `${parseFloat(it.base_price).toFixed(2)} ${it.currency}`
-                      : "—"}
+                    {it.base_price ? `${parseFloat(it.base_price).toFixed(2)} ${it.currency}` : "—"}
                   </TD>
                   <TD>
                     {it.is_active ? (
@@ -186,11 +218,7 @@ export function CatalogPage(): JSX.Element {
                       Изменить
                     </Button>
                     {it.is_active && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setConfirmItem(it)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => setConfirmItem(it)}>
                         Архив
                       </Button>
                     )}

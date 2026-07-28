@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import {
   Badge,
   Button,
-  FilterBar,
+  ConfigurableFilterBar,
   Input,
   Label,
   Modal,
@@ -19,6 +19,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { hasAnyPermission, hasPermission } from "@/features/auth/permissions";
 import { useBranchesQuery } from "@/features/foundation/queries";
@@ -34,6 +35,7 @@ const PAGE_SIZE = 25;
 
 export function IncomingPage(): JSX.Element {
   const { user } = useAuth();
+  const filterPreferenceKey = useFilterPreferenceKey("incoming");
   const canCreate = hasPermission(user, "incoming.create");
   const canDiscoverBranches = hasAnyPermission(user, [
     "branches.view",
@@ -96,126 +98,182 @@ export function IncomingPage(): JSX.Element {
         {canCreate && <Button onClick={() => setCreating(true)}>+ Новый приход</Button>}
       </div>
 
-      <FilterBar>
-        <div>
-          <Label htmlFor="document_number_filter">Номер документа</Label>
-          <Input
-            id="document_number_filter"
-            value={documentNumberInput}
-            onChange={(e) => {
-              setDocumentNumberInput(e.target.value);
-            }}
-            placeholder="Например, ПР-2401"
-            className="w-44"
-          />
-        </div>
-        {canDiscoverBranches && (
-          <div>
-            <Label htmlFor="branch_filter">Точка</Label>
-            <Select
-              id="branch_filter"
-              value={branchFilter}
-              onChange={(e) => {
-                setBranchFilter(e.target.value);
-                setPage(1);
-              }}
-              className="w-44"
-            >
-              <option value="">Все</option>
-              {branches.data?.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-        )}
-        {canViewSuppliers && (
-          <div>
-            <Label htmlFor="supplier_filter">Поставщик</Label>
-            <Select
-              id="supplier_filter"
-              value={supplierFilter}
-              onChange={(e) => {
-                setSupplierFilter(e.target.value);
-                setPage(1);
-              }}
-              className="w-44"
-            >
-              <option value="">Все</option>
-              {suppliers.data?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-        )}
-        <div>
-          <Label htmlFor="status_filter">Статус</Label>
-          <Select
-            id="status_filter"
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "document_number",
+            label: "Номер документа",
+            content: (
+              <div>
+                <Label htmlFor="document_number_filter">Номер документа</Label>
+                <Input
+                  id="document_number_filter"
+                  value={documentNumberInput}
+                  onChange={(e) => {
+                    setDocumentNumberInput(e.target.value);
+                  }}
+                  placeholder="Например, ПР-2401"
+                  className="w-44"
+                />
+              </div>
+            ),
+            active: Boolean(documentNumberInput),
+            onClear: () => {
+              setDocumentNumberInput("");
+              setDocumentNumber("");
               setPage(1);
-            }}
-            className="w-36"
-          >
-            <option value="">Все</option>
-            {statusOptions.map((s) => (
-              <option key={s} value={s}>
-                {statusLabel[s]}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="date_from_filter">С даты</Label>
-          <Input
-            id="date_from_filter"
-            type="date"
-            value={dateFrom}
-            max={dateTo || undefined}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
+            },
+            alwaysVisible: true,
+          },
+          {
+            id: "branch",
+            label: "Точка",
+            content: (
+              <div>
+                <Label htmlFor="branch_filter">Точка</Label>
+                <Select
+                  id="branch_filter"
+                  value={branchFilter}
+                  onChange={(e) => {
+                    setBranchFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-44"
+                >
+                  <option value="">Все</option>
+                  {branches.data?.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(branchFilter),
+            onClear: () => {
+              setBranchFilter("");
               setPage(1);
-            }}
-            className="w-36"
-          />
-        </div>
-        <div>
-          <Label htmlFor="date_to_filter">По дату</Label>
-          <Input
-            id="date_to_filter"
-            type="date"
-            value={dateTo}
-            min={dateFrom || undefined}
-            onChange={(e) => {
-              setDateTo(e.target.value);
+            },
+            defaultVisible: true,
+            available: canDiscoverBranches,
+          },
+          {
+            id: "supplier",
+            label: "Поставщик",
+            content: (
+              <div>
+                <Label htmlFor="supplier_filter">Поставщик</Label>
+                <Select
+                  id="supplier_filter"
+                  value={supplierFilter}
+                  onChange={(e) => {
+                    setSupplierFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-44"
+                >
+                  <option value="">Все</option>
+                  {suppliers.data?.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(supplierFilter),
+            onClear: () => {
+              setSupplierFilter("");
               setPage(1);
-            }}
-            className="w-36"
-          />
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={!filtersActive}
-          onClick={() => {
-            setBranchFilter("");
-            setSupplierFilter("");
-            setStatusFilter("");
-            setDocumentNumberInput("");
-            setDocumentNumber("");
-            setDateFrom("");
-            setDateTo("");
-            setPage(1);
-          }}
-        >
-          Сбросить
-        </Button>
-      </FilterBar>
+            },
+            available: canViewSuppliers,
+          },
+          {
+            id: "status",
+            label: "Статус",
+            content: (
+              <div>
+                <Label htmlFor="status_filter">Статус</Label>
+                <Select
+                  id="status_filter"
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-36"
+                >
+                  <option value="">Все</option>
+                  {statusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {statusLabel[s]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(statusFilter),
+            onClear: () => {
+              setStatusFilter("");
+              setPage(1);
+            },
+            defaultVisible: true,
+          },
+          {
+            id: "period",
+            label: "Период",
+            content: (
+              <div className="grid w-64 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="date_from_filter">С даты</Label>
+                  <Input
+                    id="date_from_filter"
+                    type="date"
+                    value={dateFrom}
+                    max={dateTo || undefined}
+                    onChange={(e) => {
+                      setDateFrom(e.target.value);
+                      setPage(1);
+                    }}
+                    className="w-36"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="date_to_filter">По дату</Label>
+                  <Input
+                    id="date_to_filter"
+                    type="date"
+                    value={dateTo}
+                    min={dateFrom || undefined}
+                    onChange={(e) => {
+                      setDateTo(e.target.value);
+                      setPage(1);
+                    }}
+                    className="w-36"
+                  />
+                </div>
+              </div>
+            ),
+            active: Boolean(dateFrom || dateTo),
+            onClear: () => {
+              setDateFrom("");
+              setDateTo("");
+              setPage(1);
+            },
+          },
+        ]}
+        onResetValues={() => {
+          setBranchFilter("");
+          setSupplierFilter("");
+          setStatusFilter("");
+          setDocumentNumberInput("");
+          setDocumentNumber("");
+          setDateFrom("");
+          setDateTo("");
+          setPage(1);
+        }}
+      />
 
       {error && (
         <p className="text-sm text-danger">
