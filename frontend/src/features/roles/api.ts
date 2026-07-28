@@ -9,6 +9,7 @@ import {
   type RoleTemplate,
   type RoleUpdatePayload,
   type UserListResponse,
+  type UserSearchParams,
   type UserUpdatePayload,
 } from "./types";
 
@@ -37,10 +38,22 @@ export async function updateRole(roleId: string, payload: RoleUpdatePayload): Pr
   return data;
 }
 
-export async function listUsers(page = 1, pageSize = 50): Promise<UserListResponse> {
-  const { data } = await api.get<UserListResponse>("/users", {
-    params: { page, page_size: pageSize },
-  });
+export async function listUsers(
+  params: UserSearchParams = {},
+  signal?: AbortSignal,
+): Promise<UserListResponse> {
+  const { data } = await api.post<UserListResponse>(
+    "/users/search",
+    {
+      q: params.q || undefined,
+      status: params.status || undefined,
+      role_id: params.role_id || undefined,
+      branch_id: params.branch_id || undefined,
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 50,
+    },
+    { signal },
+  );
   return data;
 }
 

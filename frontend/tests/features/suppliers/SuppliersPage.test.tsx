@@ -2,11 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const listSuppliers = vi.fn();
+const searchSuppliers = vi.fn();
 const createSupplier = vi.fn();
 
 vi.mock("@/features/suppliers/api", () => ({
-  listSuppliers: (...a: unknown[]) => listSuppliers(...a),
+  listSuppliers: vi.fn(),
+  searchSuppliers: (...a: unknown[]) => searchSuppliers(...a),
   createSupplier: (...a: unknown[]) => createSupplier(...a),
   updateSupplier: vi.fn(),
   listSupplierReturns: vi.fn(),
@@ -52,7 +53,8 @@ const SAMPLE = {
 
 describe("SuppliersPage", () => {
   beforeEach(() => {
-    listSuppliers.mockReset();
+    window.localStorage.clear();
+    searchSuppliers.mockReset();
     createSupplier.mockReset();
   });
   afterEach(() => {
@@ -60,13 +62,18 @@ describe("SuppliersPage", () => {
   });
 
   it("renders the empty state when no suppliers exist", async () => {
-    listSuppliers.mockResolvedValueOnce([]);
+    searchSuppliers.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
     renderPage();
     expect(await screen.findByText(/Поставщиков пока нет/i)).toBeInTheDocument();
   });
 
   it("renders rows returned from the API", async () => {
-    listSuppliers.mockResolvedValueOnce([SAMPLE]);
+    searchSuppliers.mockResolvedValueOnce({
+      items: [SAMPLE],
+      total: 1,
+      page: 1,
+      page_size: 25,
+    });
     renderPage();
     expect(await screen.findByText("ОсОО Прима-Фарм")).toBeInTheDocument();
     expect(screen.getByText("Иван Иванов")).toBeInTheDocument();
@@ -74,7 +81,7 @@ describe("SuppliersPage", () => {
   });
 
   it("creates a supplier with empty optionals serialized as null", async () => {
-    listSuppliers.mockResolvedValue([]);
+    searchSuppliers.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
     createSupplier.mockResolvedValueOnce(SAMPLE);
     renderPage();
     await screen.findByText(/Поставщиков пока нет/i);
@@ -99,6 +106,36 @@ describe("SuppliersPage", () => {
         address: null,
         notes: null,
       }),
+    );
+  });
+
+  it("debounces search and applies an explicit inactive status", async () => {
+    searchSuppliers.mockResolvedValue({
+      items: [SAMPLE],
+      total: 1,
+      page: 1,
+      page_size: 25,
+    });
+    renderPage();
+    await screen.findByText("ОсОО Прима-Фарм");
+
+    fireEvent.change(screen.getByLabelText("Поиск"), {
+      target: { value: "  Прима  " },
+    });
+    fireEvent.change(screen.getByLabelText("Статус"), {
+      target: { value: "inactive" },
+    });
+
+    await waitFor(() =>
+      expect(searchSuppliers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          q: "Прима",
+          is_active: false,
+          page: 1,
+          page_size: 25,
+        }),
+        expect.any(AbortSignal),
+      ),
     );
   });
 });

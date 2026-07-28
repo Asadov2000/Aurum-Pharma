@@ -84,6 +84,15 @@ export interface UserListResponse {
   page_size: number;
 }
 
+export interface UserSearchParams {
+  q?: string;
+  status?: UserStatus;
+  role_id?: string;
+  branch_id?: string;
+  page?: number;
+  page_size?: number;
+}
+
 export interface AssignmentCreatePayload {
   role_id: string;
   branch_id?: string | null;

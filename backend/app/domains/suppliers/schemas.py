@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class SupplierCreate(BaseModel):
@@ -48,6 +48,30 @@ class SupplierRead(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class SupplierSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    q: str | None = Field(default=None, max_length=200)
+    is_active: bool | None = Field(default=None, strict=True)
+    page: int = Field(default=1, ge=1, strict=True)
+    page_size: int = Field(default=50, ge=1, le=200, strict=True)
+
+    @field_validator("q")
+    @classmethod
+    def _normalize_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class SupplierSearchResponse(BaseModel):
+    items: list[SupplierRead]
+    total: int
+    page: int
+    page_size: int
 
 
 class SupplierReturnCreate(BaseModel):

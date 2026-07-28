@@ -123,6 +123,7 @@ const usersResponse = (items: unknown[]) => ({
 
 describe("UsersPage", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
@@ -360,6 +361,36 @@ describe("UsersPage", () => {
 
     expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Вперёд/ }));
-    await waitFor(() => expect(listUsers).toHaveBeenCalledWith(2, 50));
+    await waitFor(() =>
+      expect(listUsers).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 2, page_size: 25 }),
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
+  it("debounces private search values and sends filters in the request body contract", async () => {
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+    await screen.findByText("Иван Сотрудник");
+
+    fireEvent.change(screen.getByLabelText("Поиск"), {
+      target: { value: "  Иван  " },
+    });
+    fireEvent.change(screen.getByLabelText("Статус"), {
+      target: { value: "active" },
+    });
+
+    await waitFor(() =>
+      expect(listUsers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          q: "Иван",
+          status: "active",
+          page: 1,
+          page_size: 25,
+        }),
+        expect.any(AbortSignal),
+      ),
+    );
   });
 });

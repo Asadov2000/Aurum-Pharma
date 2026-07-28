@@ -111,6 +111,27 @@ class FoundationService:
     async def list_branches(self, *, include_inactive: bool = False) -> list[Branch]:
         return await self.repo.list_branches(include_inactive=include_inactive)
 
+    async def search_branches(
+        self,
+        *,
+        tenant_id: UUID,
+        q: str | None = None,
+        branch_type: str | None = None,
+        is_active: bool | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Branch], int]:
+        return await self.repo.search_branches(
+            tenant_id=tenant_id,
+            q=q,
+            branch_type=branch_type,
+            is_active=is_active,
+            allowed_branch_ids=allowed_branch_ids,
+            page=page,
+            page_size=page_size,
+        )
+
     async def get_branch(self, branch_id: UUID) -> Branch:
         branch = await self.repo.get_branch(branch_id)
         if branch is None:
@@ -183,6 +204,29 @@ class FoundationService:
     ) -> list[Register]:
         return await self.repo.list_registers(
             branch_id=branch_id, include_inactive=include_inactive
+        )
+
+    async def search_registers(
+        self,
+        *,
+        tenant_id: UUID,
+        q: str | None = None,
+        branch_id: UUID | None = None,
+        printer_type: str | None = None,
+        is_active: bool | None = None,
+        allowed_branch_ids: set[UUID] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Register], int]:
+        return await self.repo.search_registers(
+            tenant_id=tenant_id,
+            q=q,
+            branch_id=branch_id,
+            printer_type=printer_type,
+            is_active=is_active,
+            allowed_branch_ids=allowed_branch_ids,
+            page=page,
+            page_size=page_size,
         )
 
     async def get_register(self, register_id: UUID) -> Register:

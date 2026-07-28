@@ -49,6 +49,23 @@ class SuppliersService:
     async def list_suppliers(self, *, include_inactive: bool = False) -> list[Supplier]:
         return await self.repo.list_suppliers(include_inactive=include_inactive)
 
+    async def search_suppliers(
+        self,
+        *,
+        tenant_id: UUID,
+        q: str | None = None,
+        is_active: bool | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Supplier], int]:
+        return await self.repo.search_suppliers(
+            tenant_id=tenant_id,
+            q=q,
+            is_active=is_active,
+            page=page,
+            page_size=page_size,
+        )
+
     async def get_supplier(self, supplier_id: UUID) -> Supplier:
         supplier = await self.repo.get_supplier(supplier_id)
         if supplier is None:

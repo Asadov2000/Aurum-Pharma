@@ -1,11 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   Badge,
   Button,
+  ConfigurableFilterBar,
   ConfirmDialog,
+  Input,
+  Label,
   Modal,
-  Switch,
+  Pagination,
+  Select,
+  SkeletonRows,
   Table,
   TableEmpty,
   TBody,
@@ -14,13 +19,16 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 
 import { BranchForm } from "./BranchForm";
 import { describeApiError } from "./errors";
-import { useBranchesQuery, useDeleteBranch } from "./queries";
+import { useBranchSearchQuery, useDeleteBranch } from "./queries";
 import { type Branch, type BranchType } from "./types";
+
+const PAGE_SIZE = 25;
 
 const branchTypeLabel: Record<BranchType, string> = {
   pharmacy: "Аптека",
@@ -28,19 +36,43 @@ const branchTypeLabel: Record<BranchType, string> = {
   kiosk: "Киоск",
 };
 
+type StatusFilter = "active" | "inactive" | "all";
+
 export function BranchesPage(): JSX.Element {
   const { user } = useAuth();
+  const filterPreferenceKey = useFilterPreferenceKey("branches");
   const canCreate = hasPermission(user, "branches.create");
   const canUpdate = hasPermission(user, "branches.update");
   const canDelete = hasPermission(user, "branches.delete");
   const showActions = canUpdate || canDelete;
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const [qInput, setQInput] = useState("");
+  const [q, setQ] = useState("");
+  const [branchType, setBranchType] = useState<BranchType | "">("");
+  const [status, setStatus] = useState<StatusFilter>("active");
+  const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Branch | null>(null);
   const [creating, setCreating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Branch | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const { data, isLoading, error } = useBranchesQuery(includeInactive);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQ(qInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [qInput]);
+
+  const { data, isLoading, isFetching, error } = useBranchSearchQuery({
+    q,
+    branch_type: branchType || undefined,
+    is_active: status === "all" ? undefined : status === "active",
+    page,
+    page_size: PAGE_SIZE,
+  });
   const deleteMutation = useDeleteBranch();
+  const rows = data?.items ?? [];
+  const hasFilters = Boolean(q || branchType || status !== "active");
 
   const confirmDelete = async () => {
     if (!pendingDelete || !canDelete) return;
@@ -59,80 +91,184 @@ export function BranchesPage(): JSX.Element {
         <h1 className="text-2xl font-semibold text-foreground">Точки</h1>
         {canCreate && <Button onClick={() => setCreating(true)}>+ Новая точка</Button>}
       </div>
-      <Switch
-        label="Показывать неактивные"
-        checked={includeInactive}
-        onChange={(e) => setIncludeInactive(e.target.checked)}
+
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "search",
+            label: "Поиск",
+            content: (
+              <div className="w-64 sm:w-72">
+                <Label htmlFor="branch_search">Поиск</Label>
+                <Input
+                  id="branch_search"
+                  value={qInput}
+                  onChange={(event) => setQInput(event.target.value)}
+                  placeholder="Название, адрес или лицензия"
+                />
+              </div>
+            ),
+            active: Boolean(qInput.trim()),
+            onClear: () => {
+              setQInput("");
+              setQ("");
+              setPage(1);
+            },
+            alwaysVisible: true,
+          },
+          {
+            id: "type",
+            label: "Тип точки",
+            content: (
+              <div>
+                <Label htmlFor="branch_type_filter">Тип точки</Label>
+                <Select
+                  id="branch_type_filter"
+                  value={branchType}
+                  onChange={(event) => {
+                    setBranchType(event.target.value as BranchType | "");
+                    setPage(1);
+                  }}
+                  className="w-44"
+                >
+                  <option value="">Все типы</option>
+                  {(Object.keys(branchTypeLabel) as BranchType[]).map((type) => (
+                    <option key={type} value={type}>
+                      {branchTypeLabel[type]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(branchType),
+            onClear: () => {
+              setBranchType("");
+              setPage(1);
+            },
+            defaultVisible: true,
+          },
+          {
+            id: "status",
+            label: "Статус",
+            content: (
+              <div>
+                <Label htmlFor="branch_status_filter">Статус</Label>
+                <Select
+                  id="branch_status_filter"
+                  value={status}
+                  onChange={(event) => {
+                    setStatus(event.target.value as StatusFilter);
+                    setPage(1);
+                  }}
+                  className="w-40"
+                >
+                  <option value="active">Активные</option>
+                  <option value="inactive">Неактивные</option>
+                  <option value="all">Все</option>
+                </Select>
+              </div>
+            ),
+            active: status !== "active",
+            onClear: () => {
+              setStatus("active");
+              setPage(1);
+            },
+            defaultVisible: true,
+          },
+        ]}
+        onResetValues={() => {
+          setQInput("");
+          setQ("");
+          setBranchType("");
+          setStatus("active");
+          setPage(1);
+        }}
       />
+
       {error && (
         <p className="text-sm text-danger">
           {describeApiError(error, "Не удалось загрузить список")}
         </p>
       )}
       {isLoading ? (
-        <p className="text-sm text-foreground-muted">Загрузка…</p>
-      ) : !data || data.length === 0 ? (
-        <TableEmpty>Пока нет ни одной точки</TableEmpty>
+        <SkeletonRows rows={6} />
+      ) : rows.length === 0 ? (
+        hasFilters ? (
+          <TableEmpty title="Ничего не найдено">Измените запрос или выбранные фильтры.</TableEmpty>
+        ) : (
+          <TableEmpty>Пока нет ни одной точки</TableEmpty>
+        )
       ) : (
-        <Table>
-          <THead>
-            <TR>
-              <TH>Название</TH>
-              <TH>Тип</TH>
-              <TH>Адрес</TH>
-              <TH>Лицензия</TH>
-              <TH>Статус</TH>
-              {showActions && <TH className="text-right">Действия</TH>}
-            </TR>
-          </THead>
-          <TBody>
-            {data.map((b) => (
-              <TR key={b.id}>
-                <TD className="font-medium">{b.name}</TD>
-                <TD>{branchTypeLabel[b.branch_type]}</TD>
-                <TD className="max-w-xs truncate">{b.address ?? "—"}</TD>
-                <TD>
-                  {b.license_number ?? "—"}
-                  {b.license_expires_at && (
-                    <span className="ml-2 text-xs text-foreground-muted">
-                      до {new Date(b.license_expires_at).toLocaleDateString("ru-RU")}
-                    </span>
-                  )}
-                </TD>
-                <TD>
-                  {b.is_active ? (
-                    <Badge tone="success">Активна</Badge>
-                  ) : (
-                    <Badge tone="neutral">Неактивна</Badge>
-                  )}
-                </TD>
-                {showActions && (
-                  <TD className="text-right">
-                    {canUpdate && (
-                      <Button variant="ghost" size="sm" onClick={() => setEditing(b)}>
-                        Изменить
-                      </Button>
-                    )}
-                    {canDelete && b.is_active && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setDeleteError(null);
-                          setPendingDelete(b);
-                        }}
-                        isLoading={deleteMutation.isPending}
-                      >
-                        Удалить
-                      </Button>
+        <>
+          <Table>
+            <THead>
+              <TR>
+                <TH>Название</TH>
+                <TH>Тип</TH>
+                <TH>Адрес</TH>
+                <TH>Лицензия</TH>
+                <TH>Статус</TH>
+                {showActions && <TH className="text-right">Действия</TH>}
+              </TR>
+            </THead>
+            <TBody>
+              {rows.map((branch) => (
+                <TR key={branch.id}>
+                  <TD className="font-medium">{branch.name}</TD>
+                  <TD>{branchTypeLabel[branch.branch_type]}</TD>
+                  <TD className="max-w-xs truncate">{branch.address ?? "—"}</TD>
+                  <TD>
+                    {branch.license_number ?? "—"}
+                    {branch.license_expires_at && (
+                      <span className="ml-2 text-xs text-foreground-muted">
+                        до {new Date(branch.license_expires_at).toLocaleDateString("ru-RU")}
+                      </span>
                     )}
                   </TD>
-                )}
-              </TR>
-            ))}
-          </TBody>
-        </Table>
+                  <TD>
+                    {branch.is_active ? (
+                      <Badge tone="success">Активна</Badge>
+                    ) : (
+                      <Badge tone="neutral">Неактивна</Badge>
+                    )}
+                  </TD>
+                  {showActions && (
+                    <TD className="text-right">
+                      {canUpdate && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isFetching}
+                          onClick={() => setEditing(branch)}
+                        >
+                          Изменить
+                        </Button>
+                      )}
+                      {canDelete && branch.is_active && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isFetching}
+                          onClick={() => {
+                            setDeleteError(null);
+                            setPendingDelete(branch);
+                          }}
+                          isLoading={deleteMutation.isPending}
+                        >
+                          Удалить
+                        </Button>
+                      )}
+                    </TD>
+                  )}
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={data?.total ?? 0} onPage={setPage} />
+        </>
       )}
+
       {(canCreate || canUpdate) && (
         <Modal
           open={creating || editing !== null}

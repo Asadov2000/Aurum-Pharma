@@ -18,6 +18,7 @@ import {
   type AssignmentCreatePayload,
   type RoleCreatePayload,
   type RoleUpdatePayload,
+  type UserSearchParams,
   type UserUpdatePayload,
 } from "./types";
 
@@ -28,10 +29,10 @@ export const rolesKeys = {
   templates: ["roles", "templates"] as const,
 };
 
-export function useUsersQuery(enabled = true, page = 1, pageSize = 50) {
+export function useUsersQuery(params: UserSearchParams, enabled = true) {
   return useQuery({
-    queryKey: [...rolesKeys.users, page, pageSize] as const,
-    queryFn: () => listUsers(page, pageSize),
+    queryKey: [...rolesKeys.users, params] as const,
+    queryFn: ({ signal }) => listUsers(params, signal),
     placeholderData: keepPreviousData,
     enabled,
   });

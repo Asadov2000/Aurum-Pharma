@@ -67,6 +67,15 @@ function writeSelection(preferenceKey: string, ids: readonly string[]): void {
   }
 }
 
+function hasStoredSelection(preferenceKey: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(storageKey(preferenceKey)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function ConfigurableFilterBar({ ...props }: ConfigurableFilterBarProps): JSX.Element {
   return <ConfigurableFilterBarState key={props.preferenceKey} {...props} />;
 }
@@ -81,18 +90,47 @@ function ConfigurableFilterBarState({
   const menuId = useId();
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
     readSelection(preferenceKey, filters),
   );
 
   const availableFilters = filters.filter((filter) => filter.available !== false);
+  const availableIdsSignature = availableFilters.map((filter) => filter.id).join("\u0000");
+  const unavailableActiveSignature = filters
+    .filter((filter) => filter.available === false && filter.active)
+    .map((filter) => filter.id)
+    .join("\u0000");
   const selectedSet = new Set(selectedIds);
   const visibleFilters = availableFilters.filter(
     (filter) => filter.alwaysVisible || selectedSet.has(filter.id),
   );
   const optionalFilters = availableFilters.filter((filter) => !filter.alwaysVisible);
   const activeCount = availableFilters.filter((filter) => filter.active).length;
+
+  useEffect(() => {
+    if (!unavailableActiveSignature) return;
+    const unavailableActiveIds = new Set(unavailableActiveSignature.split("\u0000"));
+    for (const filter of filtersRef.current) {
+      if (unavailableActiveIds.has(filter.id) && filter.available === false && filter.active) {
+        filter.onClear();
+      }
+    }
+  }, [unavailableActiveSignature]);
+
+  useEffect(() => {
+    const availableIds = new Set(
+      availableIdsSignature ? availableIdsSignature.split("\u0000") : [],
+    );
+    setSelectedIds((current) => {
+      const next = current.filter((id) => availableIds.has(id));
+      if (hasStoredSelection(preferenceKey)) writeSelection(preferenceKey, next);
+      if (next.length === current.length) return current;
+      return next;
+    });
+  }, [availableIdsSignature, preferenceKey]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -168,68 +206,70 @@ function ConfigurableFilterBarState({
         </div>
       ))}
 
-      {optionalFilters.length > 0 && (
-        <div className="relative">
-          <Button
-            ref={triggerRef}
-            variant="secondary"
-            size="sm"
-            aria-haspopup="dialog"
-            aria-expanded={menuOpen}
-            aria-controls={menuOpen ? menuId : undefined}
-            onClick={() => setMenuOpen((open) => !open)}
-          >
-            Фильтры{activeCount > 0 ? ` · ${activeCount}` : ""}
-          </Button>
-          {menuOpen && (
-            <div
-              ref={menuRef}
-              id={menuId}
-              role="dialog"
-              aria-label="Настройка фильтров"
-              className="fixed inset-x-4 bottom-4 z-popover rounded-md border border-border bg-surface-raised p-2 shadow-lg sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-2 sm:w-72"
+      <div className="flex shrink-0 items-end gap-2">
+        {actions}
+        {optionalFilters.length > 0 && (
+          <div className="relative">
+            <Button
+              ref={triggerRef}
+              variant="secondary"
+              size="sm"
+              aria-haspopup="dialog"
+              aria-expanded={menuOpen}
+              aria-controls={menuOpen ? menuId : undefined}
+              onClick={() => setMenuOpen((open) => !open)}
             >
-              <div className="px-2 pb-2 text-sm font-semibold text-foreground">
-                Показывать фильтры
+              Фильтры{activeCount > 0 ? ` · ${activeCount}` : ""}
+            </Button>
+            {menuOpen && (
+              <div
+                ref={menuRef}
+                id={menuId}
+                role="dialog"
+                aria-label="Настройка фильтров"
+                className="fixed inset-x-4 bottom-4 z-popover rounded-md border border-border bg-surface-raised p-2 shadow-lg sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-2 sm:w-72"
+              >
+                <div className="px-2 pb-2 text-sm font-semibold text-foreground">
+                  Показывать фильтры
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {optionalFilters.map((filter) => {
+                    const checked = selectedSet.has(filter.id);
+                    return (
+                      <label
+                        key={filter.id}
+                        className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm text-foreground hover:bg-foreground/5"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => setVisible(filter, event.target.checked)}
+                        />
+                        <span className="min-w-0 flex-1">{filter.label}</span>
+                        {filter.active && <span className="text-xs text-primary">применён</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 border-t border-border pt-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    onClick={restoreDefaultLayout}
+                  >
+                    Вернуть стандартный набор
+                  </Button>
+                </div>
               </div>
-              <div className="max-h-72 overflow-y-auto">
-                {optionalFilters.map((filter) => {
-                  const checked = selectedSet.has(filter.id);
-                  return (
-                    <label
-                      key={filter.id}
-                      className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm text-foreground hover:bg-foreground/5"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) => setVisible(filter, event.target.checked)}
-                      />
-                      <span className="min-w-0 flex-1">{filter.label}</span>
-                      {filter.active && <span className="text-xs text-primary">применён</span>}
-                    </label>
-                  );
-                })}
-              </div>
-              <div className="mt-2 border-t border-border pt-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start"
-                  onClick={restoreDefaultLayout}
-                >
-                  Вернуть стандартный набор
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
 
-      {actions}
-      <Button variant="ghost" size="sm" disabled={activeCount === 0} onClick={onResetValues}>
-        Сбросить{activeCount > 0 ? ` (${activeCount})` : ""}
-      </Button>
+        <Button variant="ghost" size="sm" disabled={activeCount === 0} onClick={onResetValues}>
+          Сбросить{activeCount > 0 ? ` (${activeCount})` : ""}
+        </Button>
+      </div>
     </FilterBar>
   );
 }

@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.domains.auth.models import AppUser
 from app.domains.roles.models import (
@@ -697,12 +698,121 @@ class RolesRepository:
                     TenantMembership.tenant_id == tenant_id,
                 ),
             )
-            .order_by(TenantMembership.full_name.asc(), AppUser.email.asc())
+            .order_by(
+                TenantMembership.full_name.asc(),
+                AppUser.email.asc(),
+                AppUser.id.asc(),
+            )
             .limit(limit)
             .offset(offset)
         )
         result = await self.session.execute(stmt)
         return [_directory_user_from_row(row) for row in result.mappings().all()]
+
+    async def search_users_for_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        role_id: UUID | None = None,
+        branch_id: UUID | None = None,
+        visible_branch_ids: set[UUID] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[DirectoryUser], int]:
+        """Search tenant memberships without exposing rows outside branch scope.
+
+        A tenant-wide active assignment (``branch_id IS NULL``) applies to every
+        selected branch. When role and branch filters are combined, both must
+        match the same active assignment.
+        """
+        if visible_branch_ids is not None:
+            if not visible_branch_ids:
+                return [], 0
+            if branch_id is not None and branch_id not in visible_branch_ids:
+                return [], 0
+
+        clauses: list[ColumnElement[bool]] = [TenantMembership.tenant_id == tenant_id]
+        term = q.strip() if q is not None else ""
+        if term:
+            clauses.append(
+                or_(
+                    TenantMembership.full_name.icontains(term, autoescape=True),
+                    AppUser.email.icontains(term, autoescape=True),
+                    TenantMembership.phone.icontains(term, autoescape=True),
+                )
+            )
+        if status is not None:
+            clauses.append(TenantMembership.status == status)
+
+        if role_id is not None or branch_id is not None or visible_branch_ids is not None:
+            assignment_clauses: list[ColumnElement[bool]] = [
+                UserAssignment.tenant_id == tenant_id,
+                UserAssignment.user_id == AppUser.id,
+                UserAssignment.membership_id == TenantMembership.id,
+                UserAssignment.is_active.is_(True),
+            ]
+            if role_id is not None:
+                assignment_clauses.append(UserAssignment.role_id == role_id)
+            if branch_id is not None:
+                assignment_clauses.append(
+                    or_(
+                        UserAssignment.branch_id == branch_id,
+                        UserAssignment.branch_id.is_(None),
+                    )
+                )
+            if visible_branch_ids is not None:
+                assignment_clauses.append(
+                    or_(
+                        UserAssignment.branch_id.in_(
+                            sorted(visible_branch_ids, key=str),
+                        ),
+                        UserAssignment.branch_id.is_(None),
+                    )
+                )
+            clauses.append(
+                select(UserAssignment.id)
+                .where(*assignment_clauses)
+                .correlate(AppUser, TenantMembership)
+                .exists()
+            )
+
+        count_stmt = (
+            select(func.count(TenantMembership.id))
+            .select_from(AppUser)
+            .join(
+                TenantMembership,
+                and_(
+                    TenantMembership.user_id == AppUser.id,
+                    TenantMembership.tenant_id == tenant_id,
+                ),
+            )
+            .where(*clauses)
+        )
+        total = int((await self.session.execute(count_stmt)).scalar_one())
+
+        stmt = (
+            select(*_DIRECTORY_COLUMNS)
+            .join(
+                TenantMembership,
+                and_(
+                    TenantMembership.user_id == AppUser.id,
+                    TenantMembership.tenant_id == tenant_id,
+                ),
+            )
+            .where(*clauses)
+            .order_by(
+                func.lower(TenantMembership.full_name).asc(),
+                AppUser.email_lower.asc(),
+                AppUser.id.asc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        result = await self.session.execute(stmt)
+        users = [_directory_user_from_row(row) for row in result.mappings().all()]
+        return users, total
 
     # -------------------------------------------------------------------------
     # effective permissions (authoritative database read)

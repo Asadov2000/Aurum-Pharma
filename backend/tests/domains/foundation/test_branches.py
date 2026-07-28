@@ -109,3 +109,71 @@ async def test_branch_deactivation_rejects_open_shift_but_allows_closed_shift(
 
     deleted = await service.soft_delete_branch(blocked.id)
     assert deleted.is_active is False
+
+
+async def test_search_branches_filters_scope_status_and_tenant(
+    db_session: AsyncSession,
+    make_tenant,
+) -> None:
+    tenant = await make_tenant()
+    other_tenant = await make_tenant()
+    service = FoundationService(FoundationRepository(db_session))
+    main = await service.create_branch(
+        tenant_id=tenant.id,
+        fields={
+            "name": "Central Pharmacy",
+            "address": "Dushanbe, Rudaki 10",
+            "branch_type": "pharmacy",
+            "license_number": "LIC-001",
+        },
+    )
+    inactive = await service.create_branch(
+        tenant_id=tenant.id,
+        fields={"name": "North Kiosk", "branch_type": "kiosk"},
+    )
+    await service.create_branch(
+        tenant_id=tenant.id,
+        fields={"name": "South Post", "branch_type": "pharmacy_post"},
+    )
+    await service.soft_delete_branch(inactive.id)
+    await service.create_branch(
+        tenant_id=other_tenant.id,
+        fields={
+            "name": "Dushanbe Foreign",
+            "address": "Dushanbe",
+            "branch_type": "pharmacy",
+        },
+    )
+
+    by_address, address_total = await service.search_branches(
+        tenant_id=tenant.id,
+        q="DUSHANBE",
+    )
+    assert address_total == 1
+    assert by_address[0].id == main.id
+
+    inactive_items, inactive_total = await service.search_branches(
+        tenant_id=tenant.id,
+        branch_type="kiosk",
+        is_active=False,
+    )
+    assert inactive_total == 1
+    assert inactive_items[0].id == inactive.id
+
+    scoped, scoped_total = await service.search_branches(
+        tenant_id=tenant.id,
+        allowed_branch_ids={inactive.id},
+        page=1,
+        page_size=1,
+    )
+    assert scoped_total == 1
+    assert [branch.id for branch in scoped] == [inactive.id]
+
+    repeated, repeated_total = await service.search_branches(
+        tenant_id=tenant.id,
+        allowed_branch_ids={inactive.id},
+        page=1,
+        page_size=1,
+    )
+    assert repeated_total == scoped_total
+    assert [branch.id for branch in repeated] == [branch.id for branch in scoped]

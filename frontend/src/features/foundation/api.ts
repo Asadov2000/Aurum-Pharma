@@ -3,11 +3,15 @@ import { api } from "@/lib/api";
 import {
   type Branch,
   type BranchCreatePayload,
+  type BranchListResponse,
+  type BranchSearchParams,
   type BranchUpdatePayload,
   type OwnerCreatePayload,
   type OwnerProvision,
   type Register,
   type RegisterCreatePayload,
+  type RegisterListResponse,
+  type RegisterSearchParams,
   type RegisterUpdatePayload,
   type Tenant,
   type TenantCreatePayload,
@@ -79,6 +83,24 @@ export async function listBranches(includeInactive = false): Promise<Branch[]> {
   return data;
 }
 
+export async function searchBranches(
+  params: BranchSearchParams,
+  signal?: AbortSignal,
+): Promise<BranchListResponse> {
+  const { data } = await api.post<BranchListResponse>(
+    "/branches/search",
+    {
+      q: params.q || undefined,
+      branch_type: params.branch_type || undefined,
+      is_active: params.is_active,
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 25,
+    },
+    { signal },
+  );
+  return data;
+}
+
 export async function createBranch(payload: BranchCreatePayload): Promise<Branch> {
   const { data } = await api.post<Branch>("/branches", payload);
   return data;
@@ -109,6 +131,25 @@ export async function listRegisters(
       include_inactive: includeInactive,
     },
   });
+  return data;
+}
+
+export async function searchRegisters(
+  params: RegisterSearchParams,
+  signal?: AbortSignal,
+): Promise<RegisterListResponse> {
+  const { data } = await api.post<RegisterListResponse>(
+    "/registers/search",
+    {
+      q: params.q || undefined,
+      branch_id: params.branch_id || undefined,
+      printer_type: params.printer_type || undefined,
+      is_active: params.is_active,
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 25,
+    },
+    { signal },
+  );
   return data;
 }
 

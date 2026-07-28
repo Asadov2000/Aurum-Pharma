@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,8 +18,8 @@ from app.core.deps import (
     require_recent_mfa_if_support,
 )
 from app.core.errors import BusinessRuleError, PermissionDeniedError
-from app.domains.roles.models import Role
-from app.domains.roles.repository import RolesRepository
+from app.domains.roles.models import Role, UserAssignment
+from app.domains.roles.repository import DirectoryUser, RolesRepository
 from app.domains.roles.schemas import (
     AssignmentCreate,
     AssignmentRead,
@@ -30,6 +30,7 @@ from app.domains.roles.schemas import (
     RoleWithPermissions,
     TemplateWithPermissions,
     UserListResponse,
+    UserSearchRequest,
     UserSessionRevokeResponse,
     UserUpdate,
     UserWithAssignments,
@@ -53,6 +54,50 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
             details={"hint": "Login as a tenant user or pass X-Tenant-Id (phase 2)."},
         )
     return user.tenant_id
+
+
+def _set_search_no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+
+
+async def _serialize_user_list(
+    service: RolesService,
+    pairs: list[tuple[DirectoryUser, list[UserAssignment]]],
+    *,
+    total: int,
+    page: int,
+    page_size: int,
+) -> UserListResponse:
+    roles_by_id = await service.repo.roles_by_ids(
+        [assignment.role_id for _member, assignments in pairs for assignment in assignments]
+    )
+    items = [
+        UserWithAssignments(
+            id=user.id,
+            membership_id=user.membership_id,
+            is_tenant_owner=user.is_tenant_owner,
+            email=user.email,
+            full_name=user.full_name,
+            phone=user.phone,
+            status=user.status,
+            last_login_at=user.last_login_at,
+            assignments=[
+                AssignmentRead.model_validate(assignment).model_copy(
+                    update={
+                        "role_name": (
+                            roles_by_id[assignment.role_id].name
+                            if assignment.role_id in roles_by_id
+                            else None
+                        )
+                    }
+                )
+                for assignment in assignments
+            ],
+        )
+        for user, assignments in pairs
+    ]
+    return UserListResponse(items=items, total=total, page=page, page_size=page_size)
 
 
 def _role_with_permissions(
@@ -222,35 +267,41 @@ async def list_users(
 ) -> UserListResponse:
     tenant_id = _current_tenant_or_400(user)
     pairs, total = await service.list_users(tenant_id, page=page, page_size=page_size)
-    roles_by_id = await service.repo.roles_by_ids(
-        [assignment.role_id for _member, assignments in pairs for assignment in assignments]
+    return await _serialize_user_list(
+        service,
+        pairs,
+        total=total,
+        page=page,
+        page_size=page_size,
     )
-    items = [
-        UserWithAssignments(
-            id=u.id,
-            membership_id=u.membership_id,
-            is_tenant_owner=u.is_tenant_owner,
-            email=u.email,
-            full_name=u.full_name,
-            phone=u.phone,
-            status=u.status,
-            last_login_at=u.last_login_at,
-            assignments=[
-                AssignmentRead.model_validate(assignment).model_copy(
-                    update={
-                        "role_name": (
-                            roles_by_id[assignment.role_id].name
-                            if assignment.role_id in roles_by_id
-                            else None
-                        )
-                    }
-                )
-                for assignment in assignments
-            ],
-        )
-        for u, assignments in pairs
-    ]
-    return UserListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.post("/users/search", response_model=UserListResponse)
+async def search_users(
+    payload: UserSearchRequest,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_permission("users.view"))],
+    service: Annotated[RolesService, Depends(_service)],
+) -> UserListResponse:
+    _set_search_no_store(response)
+    tenant_id = _current_tenant_or_400(user)
+    pairs, total = await service.search_users(
+        tenant_id,
+        q=payload.q,
+        status=payload.status,
+        role_id=payload.role_id,
+        branch_id=payload.branch_id,
+        visible_branch_ids=user.branch_scope_for("users.view"),
+        page=payload.page,
+        page_size=payload.page_size,
+    )
+    return await _serialize_user_list(
+        service,
+        pairs,
+        total=total,
+        page=payload.page,
+        page_size=payload.page_size,
+    )
 
 
 @router.post(

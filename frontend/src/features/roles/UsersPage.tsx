@@ -1,13 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
   ActionMenu,
   type ActionMenuItem,
   Badge,
+  ConfigurableFilterBar,
   ConfirmDialog,
+  Input,
+  Label,
   Modal,
   Pagination,
+  Select,
   SkeletonRows,
   Table,
   TableEmpty,
@@ -17,14 +21,17 @@ import {
   THead,
   TR,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
+import { useBranchesQuery } from "@/features/foundation/queries";
 
 import { AssignmentsPanel } from "./AssignmentsPanel";
 import {
   useOffboardUser,
   useRevokeUserSessions,
+  useRolesQuery,
   useSuspendUser,
   useUpdateUser,
   useUsersQuery,
@@ -35,7 +42,7 @@ import { UserProfileForm } from "./UserProfileForm";
 type Row = UserWithAssignments;
 type PendingAction = { type: "sessions" | "suspend" | "offboard"; user: Row };
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
 
 const statusTone: Record<UserStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
   pending: "info",
@@ -56,6 +63,7 @@ const isOffboarded = (status: UserStatus): boolean => status === "offboarded";
 
 export function UsersPage(): JSX.Element {
   const { user } = useAuth();
+  const filterPreferenceKey = useFilterPreferenceKey("users");
   const tenantId = activeTenantId(user);
   const hasTenant = Boolean(tenantId);
   const isTenantOwner = user?.is_tenant_owner === true;
@@ -67,8 +75,15 @@ export function UsersPage(): JSX.Element {
   const canRevokeSessions = canSuspend;
   const canOffboard = (isTenantOwner || isSupportScoped) && permissions.includes("users.delete");
   const canAssign = (isTenantOwner || isSupportScoped) && permissions.includes("roles.assign");
+  const canViewRoles = permissions.includes("roles.view");
+  const canViewBranches = permissions.includes("branches.view");
   const showActions = canUpdate || canSuspend || canOffboard || canAssign;
 
+  const [qInput, setQInput] = useState("");
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState<UserStatus | "">("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [branchFilter, setBranchFilter] = useState("");
   const [assignmentUserId, setAssignmentUserId] = useState<string | null>(null);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -76,13 +91,35 @@ export function UsersPage(): JSX.Element {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const users = useUsersQuery(hasTenant && canView, page, PAGE_SIZE);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQ(qInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [qInput]);
+
+  const users = useUsersQuery(
+    {
+      q,
+      status: status || undefined,
+      role_id: roleFilter || undefined,
+      branch_id: branchFilter || undefined,
+      page,
+      page_size: PAGE_SIZE,
+    },
+    hasTenant && canView,
+  );
+  const roles = useRolesQuery(hasTenant && canViewRoles);
+  const branches = useBranchesQuery(true, hasTenant && canViewBranches);
   const suspendMutation = useSuspendUser();
   const offboardMutation = useOffboardUser();
   const revokeSessionsMutation = useRevokeUserSessions();
   const activateMutation = useUpdateUser();
 
   const rows = users.data?.items ?? [];
+  const hasFilters = Boolean(q || status || roleFilter || branchFilter);
   const assignmentUser = assignmentUserId
     ? (rows.find((candidate) => candidate.id === assignmentUserId) ?? null)
     : null;
@@ -152,6 +189,137 @@ export function UsersPage(): JSX.Element {
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold text-foreground">Сотрудники</h1>
 
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "search",
+            label: "Поиск",
+            content: (
+              <div className="w-64 sm:w-72">
+                <Label htmlFor="user_search">Поиск</Label>
+                <Input
+                  id="user_search"
+                  value={qInput}
+                  onChange={(event) => setQInput(event.target.value)}
+                  placeholder="ФИО, email или телефон"
+                />
+              </div>
+            ),
+            active: Boolean(qInput.trim()),
+            onClear: () => {
+              setQInput("");
+              setQ("");
+              setPage(1);
+            },
+            alwaysVisible: true,
+          },
+          {
+            id: "status",
+            label: "Статус",
+            content: (
+              <div>
+                <Label htmlFor="user_status_filter">Статус</Label>
+                <Select
+                  id="user_status_filter"
+                  value={status}
+                  onChange={(event) => {
+                    setStatus(event.target.value as UserStatus | "");
+                    setPage(1);
+                  }}
+                  className="w-48"
+                >
+                  <option value="">Все статусы</option>
+                  {(Object.keys(statusLabel) as UserStatus[]).map((value) => (
+                    <option key={value} value={value}>
+                      {statusLabel[value]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(status),
+            onClear: () => {
+              setStatus("");
+              setPage(1);
+            },
+            defaultVisible: true,
+          },
+          {
+            id: "role",
+            label: "Роль",
+            content: (
+              <div>
+                <Label htmlFor="user_role_filter">Роль</Label>
+                <Select
+                  id="user_role_filter"
+                  value={roleFilter}
+                  onChange={(event) => {
+                    setRoleFilter(event.target.value);
+                    setPage(1);
+                  }}
+                  className="w-52"
+                >
+                  <option value="">Все роли</option>
+                  {roles.data
+                    ?.filter((role) => role.is_active)
+                    .map((role) => (
+                      <option key={role.id} value={role.id}>
+                        {role.name}
+                      </option>
+                    ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(roleFilter),
+            onClear: () => {
+              setRoleFilter("");
+              setPage(1);
+            },
+            available: canViewRoles,
+          },
+          {
+            id: "branch",
+            label: "Точка",
+            content: (
+              <div>
+                <Label htmlFor="user_branch_filter">Точка</Label>
+                <Select
+                  id="user_branch_filter"
+                  value={branchFilter}
+                  onChange={(event) => {
+                    setBranchFilter(event.target.value);
+                    setPage(1);
+                  }}
+                  className="w-56"
+                >
+                  <option value="">Все точки</option>
+                  {branches.data?.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+            active: Boolean(branchFilter),
+            onClear: () => {
+              setBranchFilter("");
+              setPage(1);
+            },
+            available: canViewBranches,
+          },
+        ]}
+        onResetValues={() => {
+          setQInput("");
+          setQ("");
+          setStatus("");
+          setRoleFilter("");
+          setBranchFilter("");
+          setPage(1);
+        }}
+      />
+
       {actionError && pending === null && <p className="text-sm text-danger">{actionError}</p>}
       {actionNotice && (
         <p className="text-sm text-success-foreground" role="status">
@@ -166,7 +334,11 @@ export function UsersPage(): JSX.Element {
       ) : users.isLoading ? (
         <SkeletonRows rows={6} />
       ) : rows.length === 0 ? (
-        <TableEmpty>К аптеке пока не прикреплены сотрудники</TableEmpty>
+        hasFilters ? (
+          <TableEmpty title="Ничего не найдено">Измените запрос или выбранные фильтры.</TableEmpty>
+        ) : (
+          <TableEmpty>К аптеке пока не прикреплены сотрудники</TableEmpty>
+        )
       ) : (
         <>
           <Table>
@@ -282,7 +454,10 @@ export function UsersPage(): JSX.Element {
                           <ActionMenu
                             label={`Действия для ${member.full_name}`}
                             items={actions}
-                            isLoading={activateMutation.isPending && activatingUserId === member.id}
+                            isLoading={
+                              users.isFetching ||
+                              (activateMutation.isPending && activatingUserId === member.id)
+                            }
                           />
                         ) : (
                           <span className="text-foreground-muted">—</span>

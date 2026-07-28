@@ -64,4 +64,32 @@ test.describe("Configurable filters", () => {
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
   });
+
+  test("sends employee search privately and never persists its value", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+    await page.goto("/users");
+
+    const searchInput = page.getByLabel("Поиск", { exact: true });
+    await expect(searchInput).toBeVisible();
+    const searchRequest = page.waitForRequest((request) => {
+      if (!request.url().endsWith("/api/v1/users/search") || request.method() !== "POST") {
+        return false;
+      }
+      const body = request.postDataJSON() as { q?: string };
+      return body.q === "Demo";
+    });
+
+    await searchInput.fill("Demo");
+    const request = await searchRequest;
+
+    expect(new URL(request.url()).search).toBe("");
+    expect(request.postDataJSON()).toMatchObject({ q: "Demo", page: 1, page_size: 25 });
+
+    const storedValues = await page.evaluate((prefix) => {
+      return Object.entries(window.localStorage)
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([, value]) => value);
+    }, FILTER_LAYOUT_PREFIX);
+    expect(storedValues.join(" ")).not.toContain("Demo");
+  });
 });

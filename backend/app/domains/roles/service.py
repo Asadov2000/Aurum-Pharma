@@ -496,6 +496,43 @@ class RolesService:
             by_user.setdefault(assignment.user_id, []).append(assignment)
         return [(user, by_user.get(user.id, [])) for user in users], total
 
+    async def search_users(
+        self,
+        tenant_id: UUID,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        role_id: UUID | None = None,
+        branch_id: UUID | None = None,
+        visible_branch_ids: set[UUID] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[tuple[DirectoryUser, list[UserAssignment]]], int]:
+        users, total = await self.repo.search_users_for_tenant(
+            tenant_id,
+            q=q,
+            status=status,
+            role_id=role_id,
+            branch_id=branch_id,
+            visible_branch_ids=visible_branch_ids,
+            page=page,
+            page_size=page_size,
+        )
+        assignments = await self.repo.assignments_for_users(
+            [user.id for user in users],
+            tenant_id=tenant_id,
+        )
+        if visible_branch_ids is not None:
+            assignments = [
+                assignment
+                for assignment in assignments
+                if assignment.branch_id is None or assignment.branch_id in visible_branch_ids
+            ]
+        by_user: dict[UUID, list[UserAssignment]] = {}
+        for assignment in assignments:
+            by_user.setdefault(assignment.user_id, []).append(assignment)
+        return [(user, by_user.get(user.id, [])) for user in users], total
+
     async def update_user_profile(
         self,
         *,

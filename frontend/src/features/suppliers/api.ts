@@ -3,9 +3,11 @@ import { api } from "@/lib/api";
 import {
   type Supplier,
   type SupplierCreatePayload,
+  type SupplierListResponse,
   type SupplierReturn,
   type SupplierReturnCreatePayload,
   type SupplierReturnCreated,
+  type SupplierSearchParams,
   type SupplierUpdatePayload,
 } from "./types";
 
@@ -13,6 +15,23 @@ export async function listSuppliers(includeInactive = false): Promise<Supplier[]
   const { data } = await api.get<Supplier[]>("/suppliers", {
     params: { include_inactive: includeInactive },
   });
+  return data;
+}
+
+export async function searchSuppliers(
+  params: SupplierSearchParams,
+  signal?: AbortSignal,
+): Promise<SupplierListResponse> {
+  const { data } = await api.post<SupplierListResponse>(
+    "/suppliers/search",
+    {
+      q: params.q || undefined,
+      is_active: params.is_active,
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 25,
+    },
+    { signal },
+  );
   return data;
 }
 
