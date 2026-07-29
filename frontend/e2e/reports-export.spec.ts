@@ -108,7 +108,7 @@ test.describe("Reports export", () => {
     const dialog = page.locator('div[role="dialog"]');
     await dialog.getByLabel("Фактическая касса").fill("150");
     const zDownload = page.waitForEvent("download");
-    await dialog.locator("button.h-10", { hasText: "Закрыть" }).click();
+    await dialog.getByRole("button", { name: "Подтвердить закрытие смены" }).click();
     expect((await zDownload).suggestedFilename()).toMatch(/\.xlsx$/);
 
     // (3) + (4): the period and stock exports on /reports.

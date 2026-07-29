@@ -67,6 +67,30 @@ test.describe("Interface layout", () => {
     await expectNoHorizontalOverflow(page, "/roles constructor @ 390x844");
   });
 
+  test("persists touch density and keeps its controls usable on a narrow screen", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/catalog");
+    await expect(page.getByRole("heading", { level: 1, name: "Каталог" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Вид интерфейса" }).click();
+    await page.getByRole("button", { name: "Сенсор" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+    expect(
+      await page.getByPlaceholder("например: парацетамол").evaluate((element) => {
+        return element.getBoundingClientRect().height;
+      }),
+    ).toBeGreaterThanOrEqual(44);
+    await page.keyboard.press("Escape");
+    await expectNoHorizontalOverflow(page, "/catalog touch @ 390x844");
+
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+    expect(await page.evaluate(() => window.localStorage.getItem("ui:density"))).toBe("touch");
+  });
+
   test("avoids expensive blur effects in operational screens", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.goto("/pos");

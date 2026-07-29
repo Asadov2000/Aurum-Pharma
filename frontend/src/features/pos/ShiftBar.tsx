@@ -255,7 +255,11 @@ export function ShiftBar({
             <Button variant="ghost" onClick={() => setCloseOpen(false)}>
               Отмена
             </Button>
-            <Button onClick={() => void onClose()} isLoading={closeMutation.isPending}>
+            <Button
+              aria-label="Подтвердить закрытие смены"
+              onClick={() => void onClose()}
+              isLoading={closeMutation.isPending}
+            >
               Закрыть
             </Button>
           </div>

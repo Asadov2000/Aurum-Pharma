@@ -81,6 +81,76 @@
     --overlay-opacity: 0.62;
   }
 
+  :root,
+  [data-density="comfortable"] {
+    --control-height-sm: 2.25rem;
+    --control-height-md: 2.5rem;
+    --control-height-lg: 2.75rem;
+    --control-height-xl: 3.25rem;
+    --control-padding-sm: 0.75rem;
+    --control-padding-md: 1rem;
+    --control-padding-lg: 1.25rem;
+    --control-padding-xl: 1.5rem;
+    --field-padding-x: 0.75rem;
+    --field-padding-y: 0.5rem;
+    --textarea-min-height: 5.5rem;
+    --panel-padding-x: 1.25rem;
+    --panel-padding-y: 1rem;
+    --panel-footer-padding-y: 0.75rem;
+    --table-cell-padding-x: 1rem;
+    --table-head-padding-y: 0.75rem;
+    --table-cell-padding-y: 0.875rem;
+    --segment-height-sm: 1.75rem;
+    --segment-height-md: 2rem;
+    --checkbox-size: 1rem;
+  }
+
+  [data-density="compact"] {
+    --control-height-sm: 2rem;
+    --control-height-md: 2.25rem;
+    --control-height-lg: 2.5rem;
+    --control-height-xl: 3rem;
+    --control-padding-sm: 0.625rem;
+    --control-padding-md: 0.875rem;
+    --control-padding-lg: 1rem;
+    --control-padding-xl: 1.25rem;
+    --field-padding-x: 0.625rem;
+    --field-padding-y: 0.375rem;
+    --textarea-min-height: 4.5rem;
+    --panel-padding-x: 1rem;
+    --panel-padding-y: 0.75rem;
+    --panel-footer-padding-y: 0.625rem;
+    --table-cell-padding-x: 0.75rem;
+    --table-head-padding-y: 0.5rem;
+    --table-cell-padding-y: 0.625rem;
+    --segment-height-sm: 1.75rem;
+    --segment-height-md: 2rem;
+    --checkbox-size: 1rem;
+  }
+
+  [data-density="touch"] {
+    --control-height-sm: 2.75rem;
+    --control-height-md: 3rem;
+    --control-height-lg: 3.25rem;
+    --control-height-xl: 3.5rem;
+    --control-padding-sm: 1rem;
+    --control-padding-md: 1.25rem;
+    --control-padding-lg: 1.5rem;
+    --control-padding-xl: 1.75rem;
+    --field-padding-x: 0.875rem;
+    --field-padding-y: 0.75rem;
+    --textarea-min-height: 7rem;
+    --panel-padding-x: 1.25rem;
+    --panel-padding-y: 1.25rem;
+    --panel-footer-padding-y: 1rem;
+    --table-cell-padding-x: 1.125rem;
+    --table-head-padding-y: 0.875rem;
+    --table-cell-padding-y: 1rem;
+    --segment-height-sm: 2.75rem;
+    --segment-height-md: 3rem;
+    --checkbox-size: 1.5rem;
+  }
+
   html {
     font-family: theme("fontFamily.sans");
     -webkit-font-smoothing: antialiased;

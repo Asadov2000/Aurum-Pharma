@@ -16,7 +16,7 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(function Switch(
     <label
       htmlFor={inputId}
       className={cn(
-        "inline-flex min-h-9 cursor-pointer items-center gap-2 text-sm text-foreground-secondary",
+        "inline-flex min-h-[var(--control-height-sm)] cursor-pointer items-center gap-2 text-sm text-foreground-secondary",
         className,
       )}
     >

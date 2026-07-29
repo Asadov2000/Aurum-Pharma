@@ -7,7 +7,15 @@ export function Card({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JS
 }
 
 export function CardHeader({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={cn("border-b border-border px-5 py-4", className)} {...rest} />;
+  return (
+    <div
+      className={cn(
+        "border-b border-border px-[var(--panel-padding-x)] py-[var(--panel-padding-y)]",
+        className,
+      )}
+      {...rest}
+    />
+  );
 }
 
 export function CardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>): JSX.Element {
@@ -15,9 +23,25 @@ export function CardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElem
 }
 
 export function CardContent({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={cn("px-5 py-4", className)} {...rest} />;
+  return (
+    <div
+      className={cn(
+        "px-[var(--panel-padding-x)] py-[var(--panel-padding-y)]",
+        className,
+      )}
+      {...rest}
+    />
+  );
 }
 
 export function CardFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={cn("border-t border-border px-5 py-3", className)} {...rest} />;
+  return (
+    <div
+      className={cn(
+        "border-t border-border px-[var(--panel-padding-x)] py-[var(--panel-footer-padding-y)]",
+        className,
+      )}
+      {...rest}
+    />
+  );
 }

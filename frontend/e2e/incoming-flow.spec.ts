@@ -78,8 +78,9 @@ test.describe("Incoming flow (owner)", () => {
     await expect(acceptDialog).toBeVisible();
     await acceptDialog.getByRole("button", { name: /^Принять$/ }).click();
 
-    // Status badge flips to "Принят" (or similar accepted-label).
-    await expect(page.getByText(/Принят/)).toBeVisible({ timeout: 15_000 });
+    // Wait for the exact accepted status. A partial match also finds the
+    // "Принять" action before its request has completed.
+    await expect(page.getByText("Принят", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     // Hop over to /batches and filter by the unique catalog item → see the
     // freshly-made batch. Branch options are loaded separately and can lag

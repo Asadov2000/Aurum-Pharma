@@ -188,7 +188,7 @@ export function CatalogPage(): JSX.Element {
           <Table className="min-w-[720px] table-fixed">
             <THead>
               <TR>
-                <TH className="w-[16%]">Торговое название</TH>
+                <TH className="w-[16%]">Название</TH>
                 <TH className="w-[23%]">МНН</TH>
                 <TH className="w-[27%]">Форма / дозировка</TH>
                 <TH className="w-[13%]">Отпуск</TH>

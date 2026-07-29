@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 export function Table({ className, ...rest }: HTMLAttributes<HTMLTableElement>): JSX.Element {
   return (
-    <div className="w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-border bg-surface">
+    <div className="w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-border bg-surface [contain:paint]">
       <table className={cn("w-full min-w-max text-sm", className)} {...rest} />
     </div>
   );
@@ -39,7 +39,7 @@ export function TH({
   return (
     <th
       className={cn(
-        "whitespace-nowrap px-4 py-3 text-xs font-semibold text-foreground-muted",
+        "whitespace-nowrap px-[var(--table-cell-padding-x)] py-[var(--table-head-padding-y)] text-xs font-semibold text-foreground-muted",
         className,
       )}
       {...rest}
@@ -51,7 +51,15 @@ export function TD({
   className,
   ...rest
 }: TdHTMLAttributes<HTMLTableDataCellElement>): JSX.Element {
-  return <td className={cn("px-4 py-3.5 text-foreground", className)} {...rest} />;
+  return (
+    <td
+      className={cn(
+        "px-[var(--table-cell-padding-x)] py-[var(--table-cell-padding-y)] text-foreground",
+        className,
+      )}
+      {...rest}
+    />
+  );
 }
 
 /**

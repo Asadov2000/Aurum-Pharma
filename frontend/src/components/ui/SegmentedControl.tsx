@@ -41,7 +41,9 @@ export function SegmentedControl<T extends string>({
             onClick={() => onChange(option.value)}
             className={cn(
               "min-w-0 rounded-md font-medium transition-colors duration-fast",
-              size === "sm" ? "h-7 px-2 text-xs" : "h-8 px-3 text-sm",
+              size === "sm"
+                ? "h-[var(--segment-height-sm)] px-2 text-xs"
+                : "h-[var(--segment-height-md)] px-3 text-sm",
               selected
                 ? "bg-surface text-foreground shadow-sm"
                 : "text-foreground-muted hover:text-foreground",

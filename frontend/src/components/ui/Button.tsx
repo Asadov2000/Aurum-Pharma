@@ -23,10 +23,10 @@ const variantClasses: Record<Variant, string> = {
 };
 
 const sizeClasses: Record<Size, string> = {
-  sm: "h-9 px-3 text-sm",
-  md: "h-10 px-4 text-sm",
-  lg: "h-11 px-5 text-base",
-  xl: "h-[52px] px-6 text-base",
+  sm: "h-[var(--control-height-sm)] px-[var(--control-padding-sm)] text-sm",
+  md: "h-[var(--control-height-md)] px-[var(--control-padding-md)] text-sm",
+  lg: "h-[var(--control-height-lg)] px-[var(--control-padding-lg)] text-base",
+  xl: "h-[var(--control-height-xl)] px-[var(--control-padding-xl)] text-base",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(

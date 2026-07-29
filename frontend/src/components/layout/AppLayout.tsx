@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { AppearanceMenu } from "@/components/AppearanceMenu";
 import { useAuth } from "@/features/auth/hooks";
 import { MfaStepUpDialog } from "@/features/auth/MfaStepUpDialog";
 import { activeTenantId } from "@/features/auth/tenantContext";
@@ -189,7 +189,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             <div className="flex shrink-0 items-center gap-2 sm:gap-3">
               <PwaInstallButton />
               <RuntimeSurfaceBadge />
-              <ThemeToggle />
+              <AppearanceMenu />
               <Button
                 variant="secondary"
                 size="sm"

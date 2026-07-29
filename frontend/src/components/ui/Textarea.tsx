@@ -14,7 +14,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
     <textarea
       ref={ref}
       className={cn(
-        "min-h-[88px] w-full resize-y rounded-md border bg-surface px-3 py-2 text-sm leading-5 text-foreground shadow-sm",
+        "min-h-[var(--textarea-min-height)] w-full resize-y rounded-md border bg-surface px-[var(--field-padding-x)] py-[var(--field-padding-y)] text-sm leading-5 text-foreground shadow-sm",
         "placeholder:text-foreground-muted transition-colors duration-fast",
         "disabled:cursor-not-allowed disabled:opacity-60",
         invalid
