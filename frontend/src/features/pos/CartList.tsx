@@ -103,22 +103,27 @@ export function CartList({
   // The qty stepper / line total / delete cluster — identical for a standalone
   // row and a grouped batch sub-row.
   const lineControls = (it: SaleItem, name: string): ReactNode => (
-    <>
-      {editable ? (
-        <QtyStepper
-          value={Number(it.qty)}
-          onChange={(q) => onQtyChange(it.id, q)}
-          onValueTap={onQtyTap ? () => onQtyTap(it.id) : undefined}
-          disabled={busy}
-          size={touch ? "lg" : "md"}
-        />
-      ) : (
-        <span className="font-mono tabular-nums text-foreground">×{Number(it.qty)}</span>
-      )}
+    <div
+      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:justify-end sm:gap-1"
+      data-testid="cart-line-controls"
+    >
+      <div className="col-span-2 flex min-w-0 justify-start sm:contents">
+        {editable ? (
+          <QtyStepper
+            value={Number(it.qty)}
+            onChange={(q) => onQtyChange(it.id, q)}
+            onValueTap={onQtyTap ? () => onQtyTap(it.id) : undefined}
+            disabled={busy}
+            size={touch ? "lg" : "md"}
+          />
+        ) : (
+          <span className="font-mono tabular-nums text-foreground">×{Number(it.qty)}</span>
+        )}
+      </div>
 
       <div
         className={cn(
-          "w-24 text-right font-mono font-semibold tabular-nums text-foreground",
+          "min-w-0 text-left font-mono font-semibold tabular-nums text-foreground sm:w-24 sm:text-right",
           touch && "text-lg",
         )}
       >
@@ -139,7 +144,7 @@ export function CartList({
           ✕
         </Button>
       )}
-    </>
+    </div>
   );
 
   return (
@@ -169,9 +174,7 @@ export function CartList({
                 </p>
                 <BatchExpiry item={first} />
               </div>
-              <div className="flex w-full items-center justify-end gap-1 sm:w-auto">
-                {lineControls(first, g.name)}
-              </div>
+              {lineControls(first, g.name)}
             </li>
           );
         }
@@ -208,9 +211,7 @@ export function CartList({
                       {Number(it.unit_price).toFixed(2)} {currency} / шт
                     </p>
                   </div>
-                  <div className="flex w-full items-center justify-end gap-1 sm:w-auto">
-                    {lineControls(it, g.name)}
-                  </div>
+                  {lineControls(it, g.name)}
                 </div>
               ))}
             </div>

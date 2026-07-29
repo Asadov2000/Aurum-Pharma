@@ -81,7 +81,10 @@ export function POSPage(): JSX.Element {
                 {onlyRegister ? (
                   <Input
                     id="register"
-                    className="h-9 min-w-0 flex-1 sm:w-52 sm:flex-none"
+                    className={cn(
+                      "min-w-0 flex-1 sm:w-52 sm:flex-none",
+                      mode === "touch" ? "h-12" : "h-9",
+                    )}
                     value={onlyRegister.name}
                     readOnly
                     disabled
@@ -91,7 +94,10 @@ export function POSPage(): JSX.Element {
                     id="register"
                     value={registerId}
                     onChange={(event) => setRegisterId(event.target.value)}
-                    className="h-9 min-w-0 flex-1 sm:w-52 sm:flex-none"
+                    className={cn(
+                      "min-w-0 flex-1 sm:w-52 sm:flex-none",
+                      mode === "touch" ? "h-12" : "h-9",
+                    )}
                   >
                     <option value="">— выберите —</option>
                     {registerList?.map((register) => (
@@ -103,10 +109,11 @@ export function POSPage(): JSX.Element {
                 )}
               </div>
             ) : null}
-            <ModeToggle pref={pref} setPref={setPref} />
+            <ModeToggle pref={pref} setPref={setPref} touch={mode === "touch"} />
             <Switch
               label="Звук сканера"
               checked={soundOn}
+              className={mode === "touch" ? "min-h-12" : undefined}
               onChange={(event) => toggleSound(event.target.checked)}
             />
           </div>

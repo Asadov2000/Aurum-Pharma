@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  ConfirmDialog,
   FormError,
   Input,
   Label,
@@ -31,6 +32,17 @@ const roleFormSchema = z.object({
 });
 
 type RoleFormValues = z.infer<typeof roleFormSchema>;
+
+interface RoleSubmission {
+  name: string;
+  description: string | null;
+  permissions: string[];
+}
+
+interface PendingDangerousSubmission {
+  values: RoleSubmission;
+  permissions: Permission[];
+}
 
 /** Group permissions by group_code, preserving the API's order (it returns them
  *  sorted by group_code, code), keeping only the ones passed in. */
@@ -63,6 +75,8 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
   const [checked, setChecked] = useState<Set<string>>(() => new Set(role?.permissions ?? []));
   const [permissionSearch, setPermissionSearch] = useState("");
   const [topError, setTopError] = useState<string | null>(null);
+  const [pendingDangerousSubmission, setPendingDangerousSubmission] =
+    useState<PendingDangerousSubmission | null>(null);
 
   // The server returns the grantable catalogue for this actor. The client must
   // neither expand it for support accounts nor infer delegation from JWT data.
@@ -121,6 +135,28 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
     setChecked(new Set(tpl.permissions.filter((c) => visibleCodes.has(c))));
   };
 
+  const saveRole = async (values: RoleSubmission): Promise<void> => {
+    setTopError(null);
+    try {
+      if (mode === "edit" && role) {
+        await updateRole.mutateAsync({
+          id: role.id,
+          payload: {
+            expected_version: role.version,
+            ...values,
+          },
+        });
+      } else {
+        await createRole.mutateAsync(values);
+      }
+      setPendingDangerousSubmission(null);
+      onClose();
+    } catch (err) {
+      setPendingDangerousSubmission(null);
+      setTopError(describeApiError(err, "Не удалось сохранить роль"));
+    }
+  };
+
   const onSubmit = form.handleSubmit(async (values) => {
     form.clearErrors();
     if (editBlocked) {
@@ -137,30 +173,27 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
       }
       return;
     }
-    setTopError(null);
     const codes = [...checked].filter((code) => visibleCodes.has(code));
-    try {
-      if (mode === "edit" && role) {
-        await updateRole.mutateAsync({
-          id: role.id,
-          payload: {
-            expected_version: role.version,
-            name: parsed.data.name,
-            description: parsed.data.description.trim() || null,
-            permissions: codes,
-          },
-        });
-      } else {
-        await createRole.mutateAsync({
-          name: parsed.data.name,
-          description: parsed.data.description.trim() || null,
-          permissions: codes,
-        });
-      }
-      onClose();
-    } catch (err) {
-      setTopError(describeApiError(err, "Не удалось сохранить роль"));
+    const submission: RoleSubmission = {
+      name: parsed.data.name,
+      description: parsed.data.description.trim() || null,
+      permissions: codes,
+    };
+    const originalCodes = new Set(role?.permissions ?? []);
+    const newlyAddedDangerousPermissions = visible.filter(
+      (permission) =>
+        permission.is_dangerous &&
+        codes.includes(permission.code) &&
+        !originalCodes.has(permission.code),
+    );
+    if (newlyAddedDangerousPermissions.length > 0) {
+      setPendingDangerousSubmission({
+        values: submission,
+        permissions: newlyAddedDangerousPermissions,
+      });
+      return;
     }
+    await saveRole(submission);
   });
 
   const submitting = form.formState.isSubmitting || createRole.isPending || updateRole.isPending;
@@ -245,7 +278,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
         </div>
 
         <section className="min-w-0" aria-labelledby="role-functions-heading">
-          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div className="sticky top-0 z-10 -mx-1 mb-3 flex flex-wrap items-end justify-between gap-3 bg-surface-raised px-1 py-2 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:py-0">
             <div>
               <h3 id="role-functions-heading" className="text-sm font-semibold text-foreground">
                 Функции роли
@@ -308,7 +341,13 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
                         disabled={editBlocked}
                         onClick={() => toggleGroup(group.items)}
                       >
-                        {allSelected ? "Снять все" : "Выбрать все"}
+                        {allSelected
+                          ? normalizedSearch
+                            ? "Снять показанные"
+                            : "Снять все"
+                          : normalizedSearch
+                            ? "Выбрать показанные"
+                            : "Выбрать все"}
                       </Button>
                     </div>
                     <div className="space-y-1">
@@ -367,7 +406,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
         </p>
       )}
 
-      <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+      <div className="sticky -bottom-4 z-sticky -mx-4 flex flex-wrap justify-end gap-2 border-t border-border bg-surface-raised px-4 pb-4 pt-3 sm:-mx-5 sm:px-5 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pb-0 lg:pt-4">
         <Button type="button" variant="secondary" onClick={onClose}>
           Отмена
         </Button>
@@ -379,6 +418,30 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
           {mode === "edit" ? "Сохранить" : "Создать роль"}
         </Button>
       </div>
+      <ConfirmDialog
+        open={pendingDangerousSubmission !== null}
+        title="Подтвердите опасные функции"
+        message={
+          pendingDangerousSubmission ? (
+            <div className="space-y-2">
+              <p>Роль получит функции с повышенным риском:</p>
+              <ul className="list-disc space-y-1 pl-5 text-foreground">
+                {pendingDangerousSubmission.permissions.map((permission) => (
+                  <li key={permission.code}>{permission.name}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null
+        }
+        confirmLabel="Подтвердить и сохранить"
+        variant="danger"
+        isLoading={createRole.isPending || updateRole.isPending}
+        onCancel={() => setPendingDangerousSubmission(null)}
+        onConfirm={() => {
+          if (!pendingDangerousSubmission) return;
+          void saveRole(pendingDangerousSubmission.values);
+        }}
+      />
     </form>
   );
 }

@@ -52,8 +52,8 @@ export const SearchBar = forwardRef<
 
   return (
     <div className="space-y-2 rounded-lg border border-border bg-surface p-3">
-      <div className="grid grid-cols-[minmax(0,1fr)_4rem_auto] items-end gap-2">
-        <div className="min-w-0 flex-1">
+      <div className="grid grid-cols-[4rem_minmax(0,1fr)] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_4rem_auto]">
+        <div className="col-span-2 min-w-0 sm:col-span-1">
           <Label htmlFor="pos-product-search" className="sr-only">
             Товар
           </Label>
@@ -75,6 +75,7 @@ export const SearchBar = forwardRef<
             placeholder="Поиск товара по названию…"
             clearable
             branchId={branchId}
+            inputClassName={touch ? "h-14 text-base" : undefined}
           />
         </div>
         <input
@@ -100,6 +101,7 @@ export const SearchBar = forwardRef<
           isLoading={busy}
           disabled={!catalogId}
           size={touch ? "xl" : "md"}
+          className="w-full sm:w-auto"
         >
           Добавить
         </Button>

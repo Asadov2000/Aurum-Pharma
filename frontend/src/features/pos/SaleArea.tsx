@@ -211,7 +211,9 @@ function ActiveWorkspace({
   const [flash, setFlash] = useState<FlashTone | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const [paymentPanelVisible, setPaymentPanelVisible] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const paymentPanelRef = useRef<HTMLDivElement>(null);
   const flashTimer = useRef<number | undefined>(undefined);
   const completingRef = useRef(false);
   const checkoutRecoveryRef = useRef(false);
@@ -449,6 +451,19 @@ function ActiveWorkspace({
   ]);
 
   useEffect(() => () => window.clearTimeout(flashTimer.current), []);
+
+  useEffect(() => {
+    const panel = paymentPanelRef.current;
+    if (!panel || typeof IntersectionObserver === "undefined") return undefined;
+
+    const observer = new IntersectionObserver(
+      ([entry]) =>
+        setPaymentPanelVisible(entry?.isIntersecting === true && entry.intersectionRatio >= 0.35),
+      { threshold: 0.35 },
+    );
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, []);
 
   const doFlash = (tone: FlashTone) => {
     setFlash(tone);
@@ -931,9 +946,9 @@ function ActiveWorkspace({
     if (isDraft && totalDue > 0 && remaining > 0.001) onPayTile("cash");
   };
 
-  // Keyboard shortcuts. Ref holds the latest handlers so we bind the listener
-  // once. F-keys are ignored while any modal/keypad (role="dialog") is open so
-  // they don't fire actions hidden behind it.
+  // Physical keyboard shortcuts stay available on touch-capable laptops.
+  // Ref holds the latest handlers so we bind the listener once. F-keys are
+  // ignored while any modal/keypad (role="dialog") is open.
   const actionsRef = useRef({
     onNewSale,
     onComplete,
@@ -948,8 +963,8 @@ function ActiveWorkspace({
   };
 
   useEffect(() => {
-    if (!keyboard) return;
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       const dialogOpen = document.querySelector('[role="dialog"]') !== null;
       const el = document.activeElement as HTMLElement | null;
       const typing =
@@ -960,6 +975,11 @@ function ActiveWorkspace({
         !!el &&
         (el.tagName === "INPUT" || el.tagName === "TEXTAREA") &&
         ((el as HTMLInputElement).value ?? "").trim() !== "";
+      const interactive =
+        !!el &&
+        el.closest(
+          "button, a[href], select, [role='button'], [role='menuitem'], [role='option']",
+        ) !== null;
       switch (e.key) {
         case "F2":
           if (dialogOpen) return;
@@ -982,7 +1002,7 @@ function ActiveWorkspace({
           searchRef.current?.focus();
           break;
         case "Enter":
-          if (dialogOpen || fieldHasContent) return;
+          if (dialogOpen || fieldHasContent || interactive) return;
           e.preventDefault();
           actionsRef.current.onEnterPayCash();
           break;
@@ -993,7 +1013,7 @@ function ActiveWorkspace({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [keyboard]);
+  }, []);
 
   return (
     <>
@@ -1024,7 +1044,7 @@ function ActiveWorkspace({
       </div>
 
       {/* LEFT — search + cart */}
-      <div className="space-y-3 xl:col-span-7">
+      <div className={cn("space-y-3 xl:col-span-7", isDraft && totalDue > 0 && "pb-20 xl:pb-0")}>
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-foreground">
             Чек{" "}
@@ -1096,7 +1116,7 @@ function ActiveWorkspace({
       </div>
 
       {/* RIGHT — payment, sticky so it's always in view */}
-      <div className="xl:col-span-5">
+      <div ref={paymentPanelRef} className="scroll-mt-20 pb-20 xl:col-span-5 xl:pb-0">
         <div className="space-y-4 xl:sticky xl:top-20">
           <PaymentPanel
             totalDue={totalDue}
@@ -1125,6 +1145,35 @@ function ActiveWorkspace({
           />
         </div>
       </div>
+
+      {isDraft && totalDue > 0 && !paymentPanelVisible && (
+        <div
+          className="fixed inset-x-3 bottom-3 z-sticky mx-auto flex max-w-md items-center justify-between gap-3 rounded-lg border border-border bg-surface-raised p-2 shadow-lg xl:hidden"
+          role="region"
+          aria-label="Краткая сумма чека"
+        >
+          <div className="min-w-0 px-2">
+            <p className="text-xs text-foreground-muted">К оплате</p>
+            <p
+              className="truncate font-mono text-lg font-semibold tabular-nums text-foreground"
+              aria-live="polite"
+            >
+              {Math.max(0, remaining).toFixed(2)} {currency}
+            </p>
+          </div>
+          <Button
+            size="lg"
+            onClick={() => {
+              paymentPanelRef.current?.scrollIntoView({ block: "start" });
+              paymentPanelRef.current
+                ?.querySelector<HTMLElement>(".pos-tile:not(:disabled)")
+                ?.focus();
+            }}
+          >
+            Перейти к оплате
+          </Button>
+        </div>
+      )}
 
       {saleId && (
         <PrescriptionModal

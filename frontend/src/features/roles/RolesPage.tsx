@@ -9,11 +9,16 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  ConfigurableFilterBar,
+  Input,
+  Label,
   Modal,
   PageHeader,
+  Select,
   SkeletonRows,
   TableEmpty,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
@@ -29,9 +34,11 @@ import {
 import { type Role } from "./types";
 
 type Editor = { mode: "create" } | { mode: "edit"; role: Role } | null;
+type RoleStatusFilter = "all" | "active" | "inactive";
 
 export function RolesPage(): JSX.Element {
   const { user } = useAuth();
+  const filterPreferenceKey = useFilterPreferenceKey("roles");
   const tenantId = activeTenantId(user);
   const hasTenant = Boolean(tenantId);
   const isDeveloper = user?.is_developer === true;
@@ -51,6 +58,8 @@ export function RolesPage(): JSX.Element {
   const roles = useRolesQuery(canView);
   const perms = usePermissionsQuery(canView);
   const [editor, setEditor] = useState<Editor>(null);
+  const [roleSearch, setRoleSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<RoleStatusFilter>("all");
 
   const permName = useMemo(() => {
     const m = new Map<string, string>();
@@ -76,6 +85,16 @@ export function RolesPage(): JSX.Element {
   }
 
   const tenantRoles = (roles.data ?? []).filter((role) => isManageableRole(role, tenantId));
+  const normalizedRoleSearch = roleSearch.trim().toLocaleLowerCase("ru-RU");
+  const filteredTenantRoles = tenantRoles.filter((role) => {
+    if (statusFilter === "active" && !role.is_active) return false;
+    if (statusFilter === "inactive" && role.is_active) return false;
+    if (!normalizedRoleSearch) return true;
+    return [role.name, role.description ?? ""]
+      .join(" ")
+      .toLocaleLowerCase("ru-RU")
+      .includes(normalizedRoleSearch);
+  });
 
   const grantableCodes = new Set(permName.keys());
 
@@ -109,11 +128,15 @@ export function RolesPage(): JSX.Element {
             <div className="flex items-center justify-between gap-3 text-xs text-foreground-muted">
               <span>Доступные функции</span>
               <span className="font-mono font-semibold text-foreground">
-                {visiblePermissions.length}
+                {perms.isSuccess ? visiblePermissions.length : "—"}
               </span>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {shownGroups.length === 0 ? (
+              {perms.isLoading ? (
+                <span className="text-xs italic text-foreground-muted">загрузка функций…</span>
+              ) : perms.isError ? (
+                <span className="text-xs text-danger-foreground">данные недоступны</span>
+              ) : shownGroups.length === 0 ? (
                 <span className="text-xs italic text-foreground-muted">нет доступных функций</span>
               ) : (
                 shownGroups.map(([code, count]) => (
@@ -152,7 +175,13 @@ export function RolesPage(): JSX.Element {
     <div className="space-y-5">
       <PageHeader
         title="Роли"
-        meta={!roles.isLoading ? `${tenantRoles.length}` : undefined}
+        meta={
+          !roles.isLoading
+            ? filteredTenantRoles.length === tenantRoles.length
+              ? `${tenantRoles.length}`
+              : `${filteredTenantRoles.length} из ${tenantRoles.length}`
+            : undefined
+        }
         actions={
           canCreate ? (
             <Button onClick={() => setEditor({ mode: "create" })}>+ Создать роль</Button>
@@ -160,8 +189,62 @@ export function RolesPage(): JSX.Element {
         }
       />
 
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "search",
+            label: "Поиск",
+            content: (
+              <div>
+                <Label htmlFor="role-search">Поиск</Label>
+                <Input
+                  id="role-search"
+                  type="search"
+                  value={roleSearch}
+                  onChange={(event) => setRoleSearch(event.target.value)}
+                  placeholder="Название или описание"
+                />
+              </div>
+            ),
+            active: Boolean(roleSearch),
+            onClear: () => setRoleSearch(""),
+            alwaysVisible: true,
+          },
+          {
+            id: "status",
+            label: "Статус",
+            content: (
+              <div>
+                <Label htmlFor="role-status">Статус</Label>
+                <Select
+                  id="role-status"
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value as RoleStatusFilter)}
+                  className="w-full sm:w-44"
+                >
+                  <option value="all">Все роли</option>
+                  <option value="active">Активные</option>
+                  <option value="inactive">Неактивные</option>
+                </Select>
+              </div>
+            ),
+            active: statusFilter !== "all",
+            onClear: () => setStatusFilter("all"),
+            defaultVisible: true,
+          },
+        ]}
+        onResetValues={() => {
+          setRoleSearch("");
+          setStatusFilter("all");
+        }}
+      />
+
       {perms.error && (
-        <p className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
+        <p
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
           {describeApiError(perms.error, "Не удалось загрузить названия функций")}
         </p>
       )}
@@ -171,15 +254,17 @@ export function RolesPage(): JSX.Element {
       ) : (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-foreground-secondary">Роли аптеки</h2>
-          {tenantRoles.length === 0 ? (
+          {filteredTenantRoles.length === 0 ? (
             <TableEmpty title="Роли пока не созданы">
-              {canCreate
-                ? "Создайте первую роль или начните с готового шаблона."
-                : "Управляемых ролей пока нет."}
+              {tenantRoles.length > 0
+                ? "По выбранным фильтрам ролей нет."
+                : canCreate
+                  ? "Создайте первую роль или начните с готового шаблона."
+                  : "Управляемых ролей пока нет."}
             </TableEmpty>
           ) : (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
-              {tenantRoles.map(card)}
+              {filteredTenantRoles.map(card)}
             </div>
           )}
         </section>

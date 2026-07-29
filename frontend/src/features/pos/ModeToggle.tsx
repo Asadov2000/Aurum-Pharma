@@ -15,9 +15,11 @@ const options: readonly SegmentOption<PosModePref>[] = [
 export function ModeToggle({
   pref,
   setPref,
+  touch = false,
 }: {
   pref: PosModePref;
   setPref: (p: PosModePref) => void;
+  touch?: boolean;
 }): JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -27,7 +29,7 @@ export function ModeToggle({
         options={options}
         onChange={setPref}
         label="Режим кассы"
-        size="sm"
+        size={touch ? "lg" : "sm"}
       />
     </div>
   );

@@ -8,6 +8,7 @@ const WORKSPACES = [
   { path: "/users", heading: "Сотрудники" },
   { path: "/roles", heading: "Роли" },
   { path: "/pos", heading: "Касса" },
+  { path: "/billing", heading: "Биллинг" },
 ] as const;
 
 async function expectNoHorizontalOverflow(page: Page, workspace: string) {
@@ -64,7 +65,21 @@ test.describe("Interface layout", () => {
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
     await expect(dialog.getByLabel("Название", { exact: true })).toBeVisible();
+    const saveBounds = await dialog.getByRole("button", { name: "Создать роль" }).boundingBox();
+    expect(saveBounds).not.toBeNull();
+    expect(saveBounds!.y).toBeGreaterThanOrEqual(bounds!.y);
+    expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height);
     await expectNoHorizontalOverflow(page, "/roles constructor @ 390x844");
+  });
+
+  test("keeps the login form usable at the narrow Windows app width", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/login");
+
+    await expect(page.getByRole("heading", { level: 1, name: "Aurum Pharma" })).toBeVisible();
+    await expect(page.getByLabel("Email")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Получить код" })).toBeVisible();
+    await expectNoHorizontalOverflow(page, "/login @ 320x568");
   });
 
   test("persists touch density and keeps its controls usable on a narrow screen", async ({

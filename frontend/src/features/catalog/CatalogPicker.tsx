@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useId, useRef, useState } from "react";
 
 import { Input } from "@/components/ui";
+import { cn } from "@/lib/utils";
 
 import { useCatalogQuery } from "./queries";
 
@@ -14,6 +15,7 @@ interface Props {
   clearable?: boolean;
   placeholder?: string;
   invalid?: boolean;
+  inputClassName?: string;
   /** When set (POS register's branch), each result shows its available stock. */
   branchId?: string;
 }
@@ -34,6 +36,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     clearable = false,
     placeholder = "Начните вводить название…",
     invalid = false,
+    inputClassName,
     branchId,
   },
   ref,
@@ -135,14 +138,14 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
         aria-activedescendant={
           listOpen && items[highlight] ? `${listId}-${items[highlight]?.id}` : undefined
         }
-        className={clearable && value ? "pr-9" : undefined}
+        className={cn(inputClassName, clearable && value && "pr-11")}
       />
       {clearable && value && (
         <button
           type="button"
           onClick={onClear}
           aria-label="Очистить"
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-foreground-muted hover:bg-foreground/5 hover:text-foreground-secondary"
+          className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-md text-foreground-muted hover:bg-foreground/5 hover:text-foreground-secondary"
         >
           ✕
         </button>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listRoles = vi.fn();
@@ -175,5 +175,23 @@ describe("RolesPage", () => {
 
     expect(await screen.findByText(/Не удалось загрузить список/i)).toBeInTheDocument();
     expect(screen.queryByText(/Управляемых ролей пока нет/i)).not.toBeInTheDocument();
+  });
+
+  it("filters the visible tenant roles without exposing protected roles", async () => {
+    listRoles.mockResolvedValue([
+      MANAGED_ROLE,
+      { ...MANAGED_ROLE, id: "role-2", name: "Фармацевт" },
+      SYSTEM_ROLE,
+    ]);
+    renderPage();
+
+    await screen.findByText("Старший кассир");
+    fireEvent.change(screen.getByLabelText("Поиск"), {
+      target: { value: "фарма" },
+    });
+
+    expect(screen.getByText("Фармацевт")).toBeInTheDocument();
+    expect(screen.queryByText("Старший кассир")).not.toBeInTheDocument();
+    expect(screen.queryByText("Aurum Administrator")).not.toBeInTheDocument();
   });
 });

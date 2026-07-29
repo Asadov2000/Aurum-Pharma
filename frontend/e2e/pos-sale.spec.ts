@@ -27,7 +27,9 @@ test.describe("POS sale (owner)", () => {
     clearLoginRateLimit(OWNER.email);
   });
 
-  test("adds an item to the cart from a desktop barcode scanner event", async ({ page }) => {
+  test("adds items from desktop and physical scanners without starting payment", async ({
+    page,
+  }) => {
     test.setTimeout(90_000);
 
     const apiAnon = await request.newContext();
@@ -84,6 +86,25 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
     await expect(page.getByTestId("cart-item").getByText(item.brand_name)).toBeVisible();
     await expect(page.getByText("18.00", { exact: false }).first()).toBeVisible();
+
+    const physicalBarcodeLookup = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/catalog/by-barcode/${barcode}`) && response.ok(),
+    );
+    const physicalItemAdd = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        /\/api\/v1\/sales\/[^/]+\/items$/.test(response.url()) &&
+        response.ok(),
+    );
+    await page.locator('[data-barcode-sink="true"]').focus();
+    await page.keyboard.type(barcode, { delay: 5 });
+    await page.keyboard.press("Enter");
+
+    await physicalBarcodeLookup;
+    await physicalItemAdd;
+    await expect(page.getByText("Оплачено 0.00", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Очистить оплату/i })).toHaveCount(0);
   });
 
   test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({ page }) => {

@@ -132,7 +132,7 @@ describe("RoleBuilderModal", () => {
 
     expect(screen.queryByText("Увольнение сотрудника")).not.toBeInTheDocument();
     const sell = screen.getByRole("checkbox", { name: /Продажа/ });
-    fireEvent.click(screen.getByRole("button", { name: "Выбрать все" }));
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать показанные" }));
     expect(sell).toBeChecked();
   });
 
@@ -151,6 +151,28 @@ describe("RoleBuilderModal", () => {
       permissions: ["pos.sell"],
     });
     expect(createRole.mock.calls[0]?.[0]).not.toHaveProperty("level");
+  });
+
+  it("requires explicit confirmation before adding a dangerous permission", async () => {
+    renderModal();
+    fireEvent.change(await screen.findByLabelText("Название"), {
+      target: { value: "Управляющий" },
+    });
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Увольнение сотрудника/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Подтвердите опасные функции" }),
+    ).toBeInTheDocument();
+    expect(createRole).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить и сохранить" }));
+    await waitFor(() => expect(createRole).toHaveBeenCalledTimes(1));
+    expect(createRole).toHaveBeenCalledWith({
+      name: "Управляющий",
+      description: null,
+      permissions: ["users.delete"],
+    });
   });
 
   it("shows a catalogue error and disables submission", async () => {

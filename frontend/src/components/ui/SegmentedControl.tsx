@@ -18,7 +18,7 @@ export function SegmentedControl<T extends string>({
   options: readonly SegmentOption<T>[];
   onChange: (value: T) => void;
   label: string;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
   className?: string;
 }): JSX.Element {
   return (
@@ -43,7 +43,9 @@ export function SegmentedControl<T extends string>({
               "min-w-0 rounded-md font-medium transition-colors duration-fast",
               size === "sm"
                 ? "h-[var(--segment-height-sm)] px-2 text-xs"
-                : "h-[var(--segment-height-md)] px-3 text-sm",
+                : size === "lg"
+                  ? "h-12 px-4 text-sm"
+                  : "h-[var(--segment-height-md)] px-3 text-sm",
               selected
                 ? "bg-surface text-foreground shadow-sm"
                 : "text-foreground-muted hover:text-foreground",

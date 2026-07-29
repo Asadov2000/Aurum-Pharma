@@ -1,11 +1,8 @@
 import { Badge, Button, Modal, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
 
-import {
-  invoiceStatusLabel,
-  invoiceStatusTone,
-  paymentMethodLabel,
-} from "./labels";
+import { invoiceStatusLabel, invoiceStatusTone, paymentMethodLabel } from "./labels";
+import { formatBillingDate, formatBillingDateTime } from "./format";
 import { useInvoiceQuery } from "./queries";
 
 export function InvoiceDetailModal({
@@ -15,7 +12,7 @@ export function InvoiceDetailModal({
   invoiceId: string | null;
   onClose: () => void;
 }): JSX.Element {
-  const { data, isLoading, error } = useInvoiceQuery(invoiceId);
+  const { data, isLoading, isFetching, error, refetch } = useInvoiceQuery(invoiceId);
 
   return (
     <Modal
@@ -25,14 +22,29 @@ export function InvoiceDetailModal({
       className="max-w-2xl"
     >
       {isLoading ? (
-        <p className="text-sm text-foreground-muted">Загрузка…</p>
-      ) : error || !data ? (
-        <p className="text-sm text-danger">
-          {describeApiError(error, "Не удалось загрузить счёт")}
+        <p className="text-sm text-foreground-muted" role="status">
+          Загрузка счёта…
         </p>
+      ) : error || !data ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2"
+          role="alert"
+        >
+          <p className="text-sm text-danger-foreground">
+            {describeApiError(error, "Не удалось загрузить счёт")}
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            isLoading={isFetching}
+            onClick={() => void refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
       ) : (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <Field
               label="Статус"
               value={
@@ -49,14 +61,8 @@ export function InvoiceDetailModal({
                 </span>
               }
             />
-            <Field
-              label="Выставлен"
-              value={new Date(data.issued_at).toLocaleDateString("ru-RU")}
-            />
-            <Field
-              label="Срок оплаты"
-              value={new Date(data.due_at).toLocaleDateString("ru-RU")}
-            />
+            <Field label="Выставлен" value={formatBillingDate(data.issued_at)} />
+            <Field label="Срок оплаты" value={formatBillingDate(data.due_at)} />
             {Number(data.discount_amount) > 0 && (
               <Field
                 label="Скидка"
@@ -65,12 +71,7 @@ export function InvoiceDetailModal({
                 }`}
               />
             )}
-            {data.paid_at && (
-              <Field
-                label="Оплачен"
-                value={new Date(data.paid_at).toLocaleString("ru-RU")}
-              />
-            )}
+            {data.paid_at && <Field label="Оплачен" value={formatBillingDateTime(data.paid_at)} />}
           </div>
 
           {data.notes && (
@@ -96,9 +97,7 @@ export function InvoiceDetailModal({
                 <TBody>
                   {data.payments.map((p) => (
                     <TR key={p.id}>
-                      <TD className="whitespace-nowrap">
-                        {new Date(p.paid_at).toLocaleString("ru-RU")}
-                      </TD>
+                      <TD className="whitespace-nowrap">{formatBillingDateTime(p.paid_at)}</TD>
                       <TD>{paymentMethodLabel[p.method]}</TD>
                       <TD className="font-mono text-xs">{p.reference ?? "—"}</TD>
                       <TD className="text-right font-mono">
@@ -122,13 +121,7 @@ export function InvoiceDetailModal({
   );
 }
 
-function Field({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}): JSX.Element {
+function Field({ label, value }: { label: string; value: React.ReactNode }): JSX.Element {
   return (
     <div>
       <p className="text-xs text-foreground-muted">{label}</p>

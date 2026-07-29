@@ -14,8 +14,10 @@ export function useAuth() {
   const setTokens = useAuthStore((s) => s.setTokens);
 
   const login = useCallback(
-    async (payload: LoginVerifyRequest) => {
-      const result = await verifyLoginCode(payload);
+    async (payload: LoginVerifyRequest, signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      const result = await verifyLoginCode(payload, signal);
+      signal?.throwIfAborted();
       if ("access_token" in result) {
         clearClientSession();
         setTokens(result);
