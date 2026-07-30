@@ -132,6 +132,7 @@ export function SaleArea({
   paymentMethods,
   mixedPaymentEnabled,
   paymentSettingsLoading,
+  paymentSettingsUnavailable,
   canOpenShift = true,
   canCloseShift = true,
   canSell = true,
@@ -144,6 +145,7 @@ export function SaleArea({
   paymentMethods: PaymentMethod[];
   mixedPaymentEnabled: boolean;
   paymentSettingsLoading: boolean;
+  paymentSettingsUnavailable: boolean;
   canOpenShift?: boolean;
   canCloseShift?: boolean;
   canSell?: boolean;
@@ -166,6 +168,7 @@ export function SaleArea({
           paymentMethods={paymentMethods}
           mixedPaymentEnabled={mixedPaymentEnabled}
           paymentSettingsLoading={paymentSettingsLoading}
+          paymentSettingsUnavailable={paymentSettingsUnavailable}
           canCloseShift={canCloseShift}
           workstationControls={workstationControls}
         />
@@ -197,6 +200,7 @@ function ActiveWorkspace({
   paymentMethods,
   mixedPaymentEnabled,
   paymentSettingsLoading,
+  paymentSettingsUnavailable,
   canCloseShift,
   workstationControls,
 }: {
@@ -208,6 +212,7 @@ function ActiveWorkspace({
   paymentMethods: PaymentMethod[];
   mixedPaymentEnabled: boolean;
   paymentSettingsLoading: boolean;
+  paymentSettingsUnavailable: boolean;
   canCloseShift: boolean;
   workstationControls?: ReactNode;
 }): JSX.Element {
@@ -778,6 +783,7 @@ function ActiveWorkspace({
       !saleId ||
       remaining <= 0.001 ||
       paymentSettingsLoading ||
+      paymentSettingsUnavailable ||
       !paymentMethods.includes(method)
     ) {
       return;
@@ -1057,6 +1063,7 @@ function ActiveWorkspace({
     if (
       defaultMethod &&
       !paymentSettingsLoading &&
+      !paymentSettingsUnavailable &&
       isDraft &&
       totalDue > 0 &&
       remaining > 0.001
@@ -1316,6 +1323,7 @@ function ActiveWorkspace({
                 paymentMethods={paymentMethods}
                 mixedPaymentEnabled={mixedPaymentEnabled}
                 paymentSettingsLoading={paymentSettingsLoading}
+                paymentSettingsUnavailable={paymentSettingsUnavailable}
                 onPayTile={onPayTile}
                 onRetryPendingPayment={
                   pendingPayment

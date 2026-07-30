@@ -198,6 +198,7 @@ function renderArea() {
         paymentMethods={["cash", "card", "qr"]}
         mixedPaymentEnabled
         paymentSettingsLoading={false}
+        paymentSettingsUnavailable={false}
       />
     </QueryClientProvider>,
   );

@@ -45,6 +45,7 @@ export function PaymentPanel({
   paymentMethods,
   mixedPaymentEnabled,
   paymentSettingsLoading,
+  paymentSettingsUnavailable,
   onPayTile,
   onRetryPendingPayment,
   onClearPayments,
@@ -69,6 +70,7 @@ export function PaymentPanel({
   paymentMethods: PaymentMethod[];
   mixedPaymentEnabled: boolean;
   paymentSettingsLoading: boolean;
+  paymentSettingsUnavailable: boolean;
   onPayTile: (method: PaymentMethod, amount?: string) => void;
   onRetryPendingPayment?: () => void;
   onClearPayments?: () => void;
@@ -85,6 +87,8 @@ export function PaymentPanel({
   );
   const [cashReceived, setCashReceived] = useState("");
   const paymentMethodsKey = paymentMethods.join("|");
+  const paymentSettingsBlocked =
+    paymentSettingsLoading || paymentSettingsUnavailable || paymentMethods.length === 0;
   const recordedMethod = payments[0]?.payment_method;
   const lockedMethod =
     !mixedPaymentEnabled &&
@@ -135,7 +139,7 @@ export function PaymentPanel({
 
   const chooseMethod = (method: PaymentMethod) => {
     setActiveMethod(method);
-    if (paymentSettingsLoading) return;
+    if (paymentSettingsBlocked) return;
     const amount =
       method === "cash"
         ? Math.min(Math.max(0, cashReceivedNumber - cashPaid), remaining)
@@ -192,12 +196,19 @@ export function PaymentPanel({
 
       {isDraft ? (
         <>
-          {paymentSettingsLoading ? (
+          {paymentSettingsBlocked ? (
             <div
-              className="flex min-h-14 items-center border-b border-border px-4 text-sm text-foreground-muted"
-              role="status"
+              className={cn(
+                "flex min-h-14 items-center border-b border-border px-4 text-sm",
+                paymentSettingsUnavailable
+                  ? "bg-warning-subtle text-warning-foreground"
+                  : "text-foreground-muted",
+              )}
+              role={paymentSettingsUnavailable ? "alert" : "status"}
             >
-              Загрузка способов оплаты…
+              {paymentSettingsUnavailable
+                ? "Способы оплаты временно недоступны"
+                : "Загрузка способов оплаты…"}
             </div>
           ) : (
             <div
@@ -266,7 +277,15 @@ export function PaymentPanel({
               </div>
             ) : null}
 
-            {selectedMethod === "cash" ? (
+            {paymentSettingsBlocked ? (
+              <div className="flex min-h-56 flex-1 items-center justify-center rounded-md border border-dashed border-border bg-background px-6 text-center">
+                <p className="max-w-xs text-sm leading-6 text-foreground-muted">
+                  {paymentSettingsUnavailable
+                    ? "Новые платежи заблокированы до восстановления связи с сервером настроек."
+                    : "Ожидаем подтверждённые настройки аптеки перед приёмом оплаты."}
+                </p>
+              </div>
+            ) : selectedMethod === "cash" ? (
               <>
                 <label
                   htmlFor="cash-received"

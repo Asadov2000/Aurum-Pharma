@@ -18,6 +18,7 @@ const baseProps = {
   paymentMethods: ["cash", "card", "qr"] as PaymentMethod[],
   mixedPaymentEnabled: true,
   paymentSettingsLoading: false,
+  paymentSettingsUnavailable: false,
   onPayTile: vi.fn(),
   onComplete: vi.fn(),
   completedReceiptNumber: null,
@@ -168,6 +169,23 @@ describe("PaymentPanel", () => {
     render(<PaymentPanel {...baseProps} paymentSettingsLoading />);
 
     expect(screen.getByRole("status")).toHaveTextContent("Загрузка способов оплаты");
+    expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Получено наличными" })).not.toBeInTheDocument();
+  });
+
+  it("fails closed when server payment settings are unavailable", () => {
+    render(
+      <PaymentPanel
+        {...baseProps}
+        paymentMethods={[]}
+        paymentSettingsUnavailable
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Способы оплаты временно недоступны",
+    );
+    expect(screen.getByText(/Новые платежи заблокированы/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
   });
 });

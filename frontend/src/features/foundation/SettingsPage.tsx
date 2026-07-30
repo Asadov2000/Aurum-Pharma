@@ -56,7 +56,7 @@ const paymentMethodCopy: Record<
   },
   qr: {
     title: "QR-код",
-    description: "Оплата по QR-коду через поддерживаемый банк.",
+    description: "Ручная фиксация подтверждённой оплаты по QR-коду банка.",
   },
 };
 

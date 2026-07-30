@@ -54,7 +54,7 @@ async def _open_sale(service: POSService, scaffold):  # type: ignore[no-untyped-
     return sale
 
 
-def test_pos_input_contract_accepts_qr_and_rejects_legacy_bank_transfer() -> None:
+def test_pos_input_contract_accepts_qr_and_legacy_retry_method() -> None:
     operation_id = uuid4()
     assert (
         PaymentAdd.model_validate(
@@ -76,21 +76,76 @@ def test_pos_input_contract_accepts_qr_and_rejects_legacy_bank_transfer() -> Non
         == "qr"
     )
 
-    with pytest.raises(ValueError):
+    assert (
         PaymentAdd.model_validate(
             {
                 "operation_id": operation_id,
                 "payment_method": "bank_transfer",
                 "amount": "10.00",
             }
-        )
-    with pytest.raises(ValueError):
+        ).payment_method
+        == "bank_transfer"
+    )
+    assert (
         SaleCheckoutPayment.model_validate(
             {
                 "payment_method": "bank_transfer",
                 "amount": "10.00",
             }
+        ).payment_method
+        == "bank_transfer"
+    )
+
+
+async def test_new_legacy_bank_transfer_payment_is_rejected_by_service(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    scaffold = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    sale = await _open_sale(service, scaffold)
+
+    with pytest.raises(BusinessRuleError, match="Unsupported"):
+        await service.add_payment(
+            sale_id=sale.id,
+            payment_method="bank_transfer",
+            amount=Decimal("10"),
+            operation_id=uuid4(),
         )
+
+
+async def test_existing_legacy_bank_transfer_payment_can_be_retried(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    scaffold = await pos_scaffold()
+    repo = POSRepository(db_session)
+    service = POSService(repo)
+    sale = await _open_sale(service, scaffold)
+    operation_id = uuid4()
+    operation_hash = service._payment_operation_hash(
+        sale_id=sale.id,
+        payment_method="bank_transfer",
+        amount=Decimal("10"),
+        metadata=None,
+    )
+    existing = await repo.insert_payment(
+        tenant_id=scaffold["tenant"].id,
+        sale_id=sale.id,
+        payment_method="bank_transfer",
+        amount=Decimal("10"),
+        operation_id=operation_id,
+        operation_hash=operation_hash,
+    )
+
+    retried = await service.add_payment(
+        sale_id=sale.id,
+        payment_method="bank_transfer",
+        amount=Decimal("10.00"),
+        operation_id=operation_id,
+    )
+
+    assert retried.id == existing.id
 
 
 async def test_checkout_rejects_disabled_payment_before_creating_sale(

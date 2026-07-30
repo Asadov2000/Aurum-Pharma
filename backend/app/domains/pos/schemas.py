@@ -10,6 +10,10 @@ from uuid import UUID
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator
 
 PAYMENT_METHODS = frozenset({"cash", "card", "qr"})
+# Legacy clients can retry an operation created before QR became a distinct
+# method. POSService still rejects a new bank_transfer after its idempotency
+# lookup, so this wider parsing boundary does not re-enable it for new sales.
+PAYMENT_METHOD_INPUTS = PAYMENT_METHODS | {"bank_transfer"}
 
 
 # ---- shift ----
@@ -115,8 +119,8 @@ class PaymentAdd(BaseModel):
     @field_validator("payment_method")
     @classmethod
     def _check_method(cls, v: str) -> str:
-        if v not in PAYMENT_METHODS:
-            raise ValueError(f"payment_method must be one of {sorted(PAYMENT_METHODS)}")
+        if v not in PAYMENT_METHOD_INPUTS:
+            raise ValueError(f"payment_method must be one of {sorted(PAYMENT_METHOD_INPUTS)}")
         return v
 
 
@@ -137,8 +141,8 @@ class SaleCheckoutPayment(BaseModel):
     @field_validator("payment_method")
     @classmethod
     def _check_method(cls, v: str) -> str:
-        if v not in PAYMENT_METHODS:
-            raise ValueError(f"payment_method must be one of {sorted(PAYMENT_METHODS)}")
+        if v not in PAYMENT_METHOD_INPUTS:
+            raise ValueError(f"payment_method must be one of {sorted(PAYMENT_METHOD_INPUTS)}")
         return v
 
 
