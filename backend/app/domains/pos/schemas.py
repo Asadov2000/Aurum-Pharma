@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator
 
-PAYMENT_METHODS = {"cash", "card", "bank_transfer"}
+PAYMENT_METHODS = frozenset({"cash", "card", "qr"})
 
 
 # ---- shift ----
@@ -403,6 +403,7 @@ class ZReportPaymentBreakdown(BaseModel):
 
     cash: Decimal
     card: Decimal
+    qr: Decimal
     bank_transfer: Decimal
     mixed: Decimal
 
@@ -449,7 +450,7 @@ class SalesSummaryRow(BaseModel):
     cashier_name: str | None
     branch_name: str | None
     kind: str  # "sale" | "return" | "voided"
-    payment_method: str  # cash | card | bank_transfer | mixed | none
+    payment_method: str  # cash | card | qr | bank_transfer | mixed | none
     gross: Decimal
     discount: Decimal
     net: Decimal

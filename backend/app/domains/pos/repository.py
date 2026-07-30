@@ -456,6 +456,11 @@ class POSRepository:
         result = await self.session.execute(stmt)
         return Decimal(str(result.scalar_one()))
 
+    async def payment_methods(self, sale_id: UUID) -> set[str]:
+        stmt = select(SalePayment.payment_method).where(SalePayment.sale_id == sale_id).distinct()
+        result = await self.session.execute(stmt)
+        return set(result.scalars().all())
+
     # -------- prescription_log --------
 
     async def insert_prescription(self, **fields: Any) -> PrescriptionLog:
@@ -543,6 +548,7 @@ class POSRepository:
         totals: dict[str, Any] = {
             "cash": "0",
             "card": "0",
+            "qr": "0",
             "bank_transfer": "0",
         }
         for method, total in result.all():
@@ -646,6 +652,7 @@ class POSRepository:
         breakdown: dict[str, Decimal] = {
             "cash": Decimal("0"),
             "card": Decimal("0"),
+            "qr": Decimal("0"),
             "bank_transfer": Decimal("0"),
             "mixed": Decimal("0"),
         }
@@ -988,6 +995,7 @@ class POSRepository:
         breakdown: dict[str, Decimal] = {
             "cash": Decimal("0"),
             "card": Decimal("0"),
+            "qr": Decimal("0"),
             "bank_transfer": Decimal("0"),
             "mixed": Decimal("0"),
         }

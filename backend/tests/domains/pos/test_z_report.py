@@ -34,6 +34,29 @@ async def _complete_sale(
     return sale, created
 
 
+async def _complete_historical_bank_transfer(
+    service: POSService,
+    s,
+):  # type: ignore[no-untyped-def]
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=sale.id,
+        catalog_id=s["item"].id,
+        qty=Decimal("1"),
+    )
+    await service.repo.insert_payment(
+        tenant_id=s["tenant"].id,
+        sale_id=sale.id,
+        payment_method="bank_transfer",
+        amount=Decimal("10"),
+    )
+    await service.complete(sale_id=sale.id)
+
+
 async def test_build_z_report_aggregates_and_breakdown(
     db_session: AsyncSession, pos_scaffold
 ) -> None:
@@ -46,14 +69,16 @@ async def test_build_z_report_aggregates_and_breakdown(
         opening_cash=Decimal("100"),
     )
 
-    # A: 2 units (20) — all cash. B: 1 unit (10) — card. C: 1 unit (10) — mixed.
+    # Current methods plus one directly inserted historical bank-transfer sale.
     sale_a, created_a = await _complete_sale(
         service, s, qty=Decimal("2"), payments=[("cash", Decimal("20"))]
     )
     await _complete_sale(service, s, qty=Decimal("1"), payments=[("card", Decimal("10"))])
+    await _complete_sale(service, s, qty=Decimal("1"), payments=[("qr", Decimal("10"))])
     await _complete_sale(
         service, s, qty=Decimal("1"), payments=[("cash", Decimal("5")), ("card", Decimal("5"))]
     )
+    await _complete_historical_bank_transfer(service, s)
 
     # Partial refund of A (1 of 2 units) → parent stays completed, one return.
     await service.refund(
@@ -82,16 +107,17 @@ async def test_build_z_report_aggregates_and_breakdown(
     assert z.cashier_name == "Cashier"
 
     # Sales / discounts / returns (A counts even though 1 unit was refunded).
-    assert z.sales_count == 3
-    assert z.total_sales == Decimal("40.00")
+    assert z.sales_count == 5
+    assert z.total_sales == Decimal("60.00")
     assert z.total_discounts == Decimal("0")
     assert z.returns_count == 1
     assert z.total_refunds == Decimal("10.00")
 
-    # Payment breakdown: A→cash, B→card, C→mixed.
+    # New QR and legacy bank-transfer history remain separate report buckets.
     assert z.payment_breakdown.cash == Decimal("20.00")
     assert z.payment_breakdown.card == Decimal("10.00")
-    assert z.payment_breakdown.bank_transfer == Decimal("0")
+    assert z.payment_breakdown.qr == Decimal("10.00")
+    assert z.payment_breakdown.bank_transfer == Decimal("10.00")
     assert z.payment_breakdown.mixed == Decimal("10.00")
 
     # Cash reconciliation mirrors the closed shift.
@@ -104,9 +130,10 @@ async def test_build_z_report_aggregates_and_breakdown(
     api_report = await service.z_report(shift.id)
     assert api_report["register_id"] == s["register"].id
     assert api_report["cashier_user_id"] == s["cashier"].id
-    assert api_report["totals"]["sales_total"] == Decimal("40.00")
+    assert api_report["totals"]["sales_total"] == Decimal("60.00")
     assert api_report["totals"]["returns_total"] == Decimal("10.00")
     assert api_report["totals"]["by_method"]["mixed"] == Decimal("10.00")
+    assert api_report["totals"]["by_method"]["qr"] == Decimal("10.00")
 
 
 async def test_z_report_full_refund_counts_sale_and_return(

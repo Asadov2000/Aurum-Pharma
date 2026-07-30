@@ -24,6 +24,7 @@ _STATUS_LABEL = {"sale": "Завершён", "return": "Возврат", "voided
 _METHOD_LABEL = {
     "cash": "Наличные",
     "card": "Карта",
+    "qr": "QR",
     "bank_transfer": "Перевод",
     "mixed": "Смешанная",
     "none": "—",
@@ -89,6 +90,7 @@ def _summary_sheet(ws: Worksheet, data: SalesSummaryData) -> None:
     for label, amount in (
         ("Наличные", bd.cash),
         ("Карта", bd.card),
+        ("QR", bd.qr),
         ("Перевод", bd.bank_transfer),
         ("Смешанная", bd.mixed),
     ):

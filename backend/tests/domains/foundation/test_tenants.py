@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.foundation.repository import FoundationRepository
@@ -24,6 +27,8 @@ async def test_create_tenant_creates_default_settings(db_session: AsyncSession) 
     assert settings.session_admin_minutes == 480
     assert settings.session_pos_minutes == 480
     assert settings.pin_mode_enabled is False
+    assert settings.pos_payment_methods == ["cash", "card", "qr"]
+    assert settings.pos_mixed_payment_enabled is True
 
 
 async def test_tenant_settings_thresholds_invalid_returns_422(
@@ -52,6 +57,102 @@ async def test_tenant_settings_thresholds_valid(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["expiry_thresholds"] == {"yellow": 9, "orange": 4, "red": 2}
+
+
+@pytest.mark.parametrize(
+    "methods",
+    [
+        [],
+        ["cash", "cash"],
+        ["cash", "bank_transfer"],
+        ["cash", "card", "qr", "cash"],
+    ],
+)
+async def test_tenant_settings_reject_invalid_pos_payment_methods(
+    auth_client: AsyncClient,
+    tenant_admin_token,
+    methods: list[str],
+) -> None:
+    token, _, _ = await tenant_admin_token()
+
+    response = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pos_payment_methods": methods},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_tenant_settings_update_pos_payment_configuration(
+    auth_client: AsyncClient,
+    tenant_admin_token,
+) -> None:
+    token, _, _ = await tenant_admin_token()
+
+    response = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "pos_payment_methods": ["cash", "qr"],
+            "pos_mixed_payment_enabled": False,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["pos_payment_methods"] == ["cash", "qr"]
+    assert response.json()["pos_mixed_payment_enabled"] is False
+
+
+async def test_pos_payment_settings_are_tenant_isolated(
+    auth_client: AsyncClient,
+    tenant_admin_token,
+) -> None:
+    first_token, _, _ = await tenant_admin_token()
+    second_token, _, _ = await tenant_admin_token()
+
+    updated = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "pos_payment_methods": ["qr"],
+            "pos_mixed_payment_enabled": False,
+        },
+    )
+    first = await auth_client.get(
+        "/api/v1/tenant/settings",
+        headers={"Authorization": f"Bearer {first_token}"},
+    )
+    second = await auth_client.get(
+        "/api/v1/tenant/settings",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["pos_payment_methods"] == ["qr"]
+    assert first.json()["pos_mixed_payment_enabled"] is False
+    assert second.json()["pos_payment_methods"] == ["cash", "card", "qr"]
+    assert second.json()["pos_mixed_payment_enabled"] is True
+
+
+async def test_pos_payment_settings_database_check_rejects_duplicates(
+    db_session: AsyncSession,
+    make_tenant,
+) -> None:
+    tenant = await make_tenant()
+
+    with pytest.raises(IntegrityError):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE tenant_settings "
+                    'SET pos_payment_methods = \'["cash","cash"]\'::jsonb '
+                    "WHERE tenant_id = :tenant_id"
+                ),
+                {"tenant_id": tenant.id},
+            )
 
 
 async def test_admin_create_tenant_endpoint(auth_client: AsyncClient, support_token: str) -> None:

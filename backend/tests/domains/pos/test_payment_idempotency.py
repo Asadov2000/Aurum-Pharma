@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, ConflictError
+from app.domains.foundation.repository import FoundationRepository
 from app.domains.pos.models import SalePayment
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import PaymentAdd, PaymentRead
@@ -79,6 +80,10 @@ async def test_payment_retry_returns_existing_for_canonical_payload(
         metadata={"terminal": {"id": "T-1", "sequence": 7}, "approved": True},
     )
     await service.complete(sale_id=sale.id)
+    foundation = FoundationRepository(db_session)
+    settings = await foundation.get_settings(scaffold["tenant"].id)
+    assert settings is not None
+    await foundation.update_settings(settings, pos_payment_methods=["card"])
     second = await service.add_payment(
         sale_id=sale.id,
         payment_method="cash",

@@ -84,6 +84,8 @@ class OwnerProvisionRead(BaseModel):
 # Tenant settings
 # -----------------------------------------------------------------------------
 
+POSPaymentMethod = Literal["cash", "card", "qr"]
+
 
 class ExpiryThresholds(BaseModel):
     """yellow > orange > red, each in months."""
@@ -109,10 +111,22 @@ class TenantSettingsRead(BaseModel):
     session_admin_minutes: int
     session_pos_minutes: int
     pin_mode_enabled: bool
+    pos_payment_methods: list[POSPaymentMethod] = Field(min_length=1, max_length=3)
+    pos_mixed_payment_enabled: bool
     draft_sale_lifetime_min: int
     report_timezone: str
     prescription_warning_text: str
     updated_at: datetime
+
+    @field_validator("pos_payment_methods")
+    @classmethod
+    def _check_unique_pos_payment_methods(
+        cls,
+        value: list[POSPaymentMethod],
+    ) -> list[POSPaymentMethod]:
+        if len(value) != len(set(value)):
+            raise ValueError("pos_payment_methods must contain unique values")
+        return value
 
 
 class TenantSettingsUpdate(BaseModel):
@@ -122,6 +136,12 @@ class TenantSettingsUpdate(BaseModel):
     session_admin_minutes: int | None = Field(default=None, ge=30, le=1440)
     session_pos_minutes: int | None = Field(default=None, ge=30, le=1440)
     pin_mode_enabled: bool | None = None
+    pos_payment_methods: list[POSPaymentMethod] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=3,
+    )
+    pos_mixed_payment_enabled: bool | None = None
     draft_sale_lifetime_min: int | None = Field(default=None, ge=5, le=240)
     report_timezone: str | None = Field(default=None, min_length=1, max_length=64)
     prescription_warning_text: str | None = None
@@ -140,6 +160,16 @@ class TenantSettingsUpdate(BaseModel):
         if v is not None and v not in allowed:
             raise ValueError(f"refund_reason_mode must be one of {sorted(allowed)}")
         return v
+
+    @field_validator("pos_payment_methods")
+    @classmethod
+    def _check_unique_pos_payment_methods(
+        cls,
+        value: list[POSPaymentMethod] | None,
+    ) -> list[POSPaymentMethod] | None:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("pos_payment_methods must contain unique values")
+        return value
 
 
 # -----------------------------------------------------------------------------

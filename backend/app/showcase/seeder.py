@@ -560,7 +560,11 @@ async def prepare_main_tenant(
     settings.refund_reason_mode = "required"
     settings.session_admin_minutes = 240
     settings.session_pos_minutes = 480
-    settings.pin_mode_enabled = False
+    (
+        settings.pin_mode_enabled,
+        settings.pos_payment_methods,
+        settings.pos_mixed_payment_enabled,
+    ) = (False, ["cash", "card", "qr"], True)
     settings.draft_sale_lifetime_min = 30
     settings.report_timezone = "Asia/Dushanbe"
     settings.prescription_warning_text = (
@@ -1289,7 +1293,7 @@ def _payment_plans(
     elif roll < 0.93:
         methods = ("card",)
     elif roll < 0.97:
-        methods = ("bank_transfer",)
+        methods = ("qr",)
     else:
         methods = ("cash", "card")
     if len(methods) == 1:
@@ -1556,6 +1560,7 @@ async def seed_sales_and_shifts(  # noqa: PLR0915 - one immutable plan
         lambda: {
             "cash": Decimal("0"),
             "card": Decimal("0"),
+            "qr": Decimal("0"),
             "bank_transfer": Decimal("0"),
             "sales_count": 0,
             "returns_count": 0,
@@ -1608,6 +1613,7 @@ async def seed_sales_and_shifts(  # noqa: PLR0915 - one immutable plan
                     else {
                         "cash": str(_money(cash_total)),
                         "card": str(_money(_decimal_total(totals["card"]))),
+                        "qr": str(_money(_decimal_total(totals["qr"]))),
                         "bank_transfer": str(_money(_decimal_total(totals["bank_transfer"]))),
                         "sales_count": _integer_total(totals["sales_count"]),
                         "returns_count": _integer_total(totals["returns_count"]),

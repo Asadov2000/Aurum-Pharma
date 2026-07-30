@@ -427,7 +427,7 @@ async def _seed_sales(
             await session.execute(text("DELETE FROM sale WHERE id = :s"), {"s": sale.id})
             continue
         fresh = await pos.get_sale(sale.id)
-        method = _RND.choice(["cash", "cash", "card"])
+        method = _RND.choice(["cash", "cash", "card", "qr"])
         await pos.add_payment(sale_id=sale.id, payment_method=method, amount=fresh.total_amount)
         timed_pos = POSService(POSRepository(session), now=_fixed_clock(completed_at))
         await timed_pos.complete(sale_id=sale.id)
