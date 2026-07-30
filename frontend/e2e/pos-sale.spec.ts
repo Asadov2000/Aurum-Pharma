@@ -31,6 +31,7 @@ test.describe("POS sale (owner)", () => {
     page,
   }) => {
     test.setTimeout(90_000);
+    await page.setViewportSize({ width: 1600, height: 900 });
 
     const apiAnon = await request.newContext();
     const tokens = await apiLogin(apiAnon, OWNER);
@@ -69,6 +70,32 @@ test.describe("POS sale (owner)", () => {
     await page.getByRole("button", { name: "Открыть смену" }).click();
     await expect(page.getByText("Смена открыта")).toBeVisible();
     await expect(page.locator('[data-barcode-sink="true"]')).toBeAttached();
+
+    const quickProducts = page.getByRole("region", { name: "Быстрый выбор" });
+    const currentReceipt = page.getByRole("region", { name: "Текущий чек" });
+    const paymentPanel = page.getByRole("region", { name: "К оплате" });
+    await expect(quickProducts).toBeVisible();
+    await expect(currentReceipt).toBeVisible();
+    await expect(paymentPanel).toBeVisible();
+    await expect(paymentPanel.getByRole("button", { name: "Завершить продажу" })).toBeVisible();
+
+    const [quickBox, receiptBox, paymentBox] = await Promise.all([
+      quickProducts.boundingBox(),
+      currentReceipt.boundingBox(),
+      paymentPanel.boundingBox(),
+    ]);
+    expect(quickBox).not.toBeNull();
+    expect(receiptBox).not.toBeNull();
+    expect(paymentBox).not.toBeNull();
+    expect(quickBox!.x + quickBox!.width).toBeLessThanOrEqual(receiptBox!.x);
+    expect(receiptBox!.x + receiptBox!.width).toBeLessThanOrEqual(paymentBox!.x);
+    expect(Math.abs(quickBox!.y - receiptBox!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(receiptBox!.y - paymentBox!.y)).toBeLessThanOrEqual(1);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
 
     const barcodeLookup = page.waitForResponse(
       (response) =>

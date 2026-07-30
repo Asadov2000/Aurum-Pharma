@@ -279,7 +279,7 @@ export async function addPosItemToCart(
   await expect(option).toBeVisible({ timeout: 15_000 });
   await option.click();
   await page.getByRole("textbox", { name: "Количество" }).fill(args.qty);
-  await page.getByRole("button", { name: "Добавить" }).click();
+  await page.getByRole("button", { name: "Добавить", exact: true }).click();
   await expect(page.getByTestId("cart-item")).toHaveCount(args.expectedCartItems, {
     timeout: 30_000,
   });

@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button, ConfirmDialog } from "@/components/ui";
 import { findByBarcode } from "@/features/catalog/api";
@@ -12,6 +12,7 @@ import { BarcodeListener } from "./BarcodeListener";
 import { CartList } from "./CartList";
 import { PaymentPanel } from "./PaymentPanel";
 import { PrescriptionModal } from "./PrescriptionModal";
+import { QuickProducts } from "./QuickProducts";
 import { ReceiptPrintModal } from "./ReceiptPrintModal";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
@@ -129,6 +130,7 @@ export function SaleArea({
   canOpenShift = true,
   canCloseShift = true,
   canSell = true,
+  workstationControls,
 }: {
   registerId: string;
   mode: PosMode;
@@ -137,12 +139,13 @@ export function SaleArea({
   canOpenShift?: boolean;
   canCloseShift?: boolean;
   canSell?: boolean;
+  workstationControls?: ReactNode;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
 
   return (
-    <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+    <div className="min-w-0">
       {hasShift && canSell ? (
         // Key by register so switching registers restores that one's draft.
         <ActiveWorkspace
@@ -153,9 +156,15 @@ export function SaleArea({
           soundOn={soundOn}
           draftTtlMin={draftTtlMin}
           canCloseShift={canCloseShift}
+          workstationControls={workstationControls}
         />
       ) : (
-        <div className="mx-auto w-full max-w-3xl xl:col-span-12">
+        <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
+          {workstationControls ? (
+            <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
+              {workstationControls}
+            </div>
+          ) : null}
           <ShiftBar
             registerId={registerId}
             mode={mode}
@@ -175,6 +184,7 @@ function ActiveWorkspace({
   soundOn,
   draftTtlMin,
   canCloseShift,
+  workstationControls,
 }: {
   registerId: string;
   branchId: string | null;
@@ -182,6 +192,7 @@ function ActiveWorkspace({
   soundOn: boolean;
   draftTtlMin: number;
   canCloseShift: boolean;
+  workstationControls?: ReactNode;
 }): JSX.Element {
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
@@ -677,7 +688,7 @@ function ActiveWorkspace({
 
   // Touch: tapping a tile opens the keypad pre-filled with the remaining amount
   // (so partial payments are easy). Keyboard/desktop: one tap pays the rest.
-  const onPayTile = (method: PaymentMethod) => {
+  const onPayTile = (method: PaymentMethod, requestedAmount?: string) => {
     if (!saleId || remaining <= 0.001) return;
     if (
       completionUncertain ||
@@ -696,6 +707,13 @@ function ActiveWorkspace({
         return;
       }
       void payLegacy(method, pendingPayment.amount);
+      return;
+    }
+    if (requestedAmount !== undefined) {
+      const amount = Math.min(Number(requestedAmount), remaining);
+      if (Number.isFinite(amount) && amount > 0) {
+        submitPayment(method, amount.toFixed(2));
+      }
       return;
     }
     if (touch) {
@@ -1033,117 +1051,184 @@ function ActiveWorkspace({
         />
       )}
 
-      {/* Shift status strip — full width on top, so the selling columns get
-          the space (it lived in the right column before). */}
-      <div className="xl:col-span-12">
-        <ShiftBar
-          registerId={registerId}
-          mode={mode}
-          canClose={canCloseShift}
-          closeBlocked={saleEditingBlocked || (isDraft && items.length > 0)}
-        />
-      </div>
-
-      {staleNotice && (
-        <p className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground xl:col-span-12">
-          Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую продажу.
-        </p>
-      )}
-
-      {isDraft && (
-        <fieldset disabled={saleEditingBlocked} className="min-w-0 border-0 p-0 xl:col-span-12">
-          <SearchBar
-            ref={searchRef}
-            onAdd={onAdd}
-            busy={createSale.isPending || addItem.isPending}
-            touch={touch}
-            branchId={branchId ?? undefined}
+      <div className="space-y-3">
+        <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
+          {workstationControls ? (
+            <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
+              {workstationControls}
+            </div>
+          ) : null}
+          <ShiftBar
+            registerId={registerId}
+            mode={mode}
+            canClose={canCloseShift}
+            closeBlocked={saleEditingBlocked || (isDraft && items.length > 0)}
           />
-        </fieldset>
-      )}
-
-      {/* CHECK — dense working list with payment beside it on wide screens. */}
-      <div className={cn("space-y-3 xl:col-span-8", isDraft && totalDue > 0 && "pb-20 xl:pb-0")}>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-foreground">
-            Текущий чек{" "}
-            {sale?.receipt_number && (
-              <span className="font-mono text-sm text-foreground-muted">
-                № {sale.receipt_number}
-              </span>
-            )}
-          </h2>
-          {requiresRx && !prescription && (
-            <span className="rounded-full bg-warning-subtle px-2.5 py-0.5 text-xs font-medium text-warning-foreground ring-1 ring-inset ring-warning/30">
-              требуется рецепт
-            </span>
-          )}
         </div>
 
-        <CartList
-          items={items}
-          nameById={nameById}
-          currency={currency}
-          editable={isDraft && !saleEditingBlocked}
-          onQtyChange={(id, q) => void onQtyChange(id, q)}
-          onDelete={(id) => void onDelete(id)}
-          onQtyTap={touch ? onQtyTap : undefined}
-          touch={touch}
-          busy={updateItem.isPending || deleteItem.isPending}
-        />
+        {staleNotice && (
+          <p className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
+            Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую продажу.
+          </p>
+        )}
 
-        {topError && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
-            <p>{topError}</p>
-            {(pendingPayment || completionUncertain || pendingCheckout || checkoutUncertain) && (
+        {isDraft && (
+          <fieldset disabled={saleEditingBlocked} className="min-w-0 border-0 p-0">
+            <SearchBar
+              ref={searchRef}
+              onAdd={onAdd}
+              busy={createSale.isPending || addItem.isPending}
+              touch={touch}
+              branchId={branchId ?? undefined}
+            />
+          </fieldset>
+        )}
+
+        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:grid-cols-[minmax(18rem,1.15fr)_minmax(22rem,1fr)_minmax(18rem,0.78fr)]">
+          <div className="min-w-0 lg:col-span-5 xl:col-auto">
+            <QuickProducts
+              branchId={branchId ?? undefined}
+              onAdd={onAdd}
+              busy={!isDraft || saleEditingBlocked || createSale.isPending || addItem.isPending}
+              touch={touch}
+            />
+          </div>
+
+          <section
+            aria-labelledby="current-receipt-title"
+            className={cn(
+              "flex min-h-[30rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface lg:col-span-7 xl:col-auto",
+              "xl:h-[36rem]",
+              isDraft && totalDue > 0 && "mb-20 xl:mb-0",
+            )}
+          >
+            <header className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4">
+              <div className="min-w-0">
+                <h2
+                  id="current-receipt-title"
+                  className="truncate text-base font-semibold text-foreground"
+                >
+                  Текущий чек
+                  {sale?.receipt_number ? (
+                    <span className="ml-2 font-mono text-xs font-normal text-foreground-muted">
+                      № {sale.receipt_number}
+                    </span>
+                  ) : null}
+                </h2>
+                <p className="text-xs text-foreground-muted">
+                  {items.length === 0
+                    ? "Нет товаров"
+                    : `${items.length} ${productCountLabel(items.length)}`}
+                </p>
+              </div>
+              {requiresRx && !prescription ? (
+                <span className="rounded-full bg-warning-subtle px-2.5 py-0.5 text-xs font-medium text-warning-foreground ring-1 ring-inset ring-warning/30">
+                  требуется рецепт
+                </span>
+              ) : null}
+            </header>
+
+            <div className="hidden grid-cols-[minmax(0,1fr)_8.5rem_5.5rem_2.5rem] gap-2 border-b border-border bg-background px-4 py-2 text-xs font-medium text-foreground-muted sm:grid">
+              <span>Товар</span>
+              <span className="text-center">Количество</span>
+              <span className="text-right">Сумма</span>
+              <span aria-hidden="true" />
+            </div>
+
+            <CartList
+              items={items}
+              nameById={nameById}
+              currency={currency}
+              editable={isDraft && !saleEditingBlocked}
+              onQtyChange={(id, q) => void onQtyChange(id, q)}
+              onDelete={(id) => void onDelete(id)}
+              onQtyTap={touch ? onQtyTap : undefined}
+              touch={touch}
+              busy={updateItem.isPending || deleteItem.isPending}
+              embedded
+            />
+
+            {topError ? (
+              <div className="flex flex-wrap items-center gap-2 border-t border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
+                <p>{topError}</p>
+                {pendingPayment || completionUncertain || pendingCheckout || checkoutUncertain ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    isLoading={saleQuery.isFetching || checkoutReconciling}
+                    onClick={() => {
+                      if (pendingCheckout) {
+                        void recoverCheckout(pendingCheckout, false);
+                      } else {
+                        void saleQuery.refetch();
+                      }
+                    }}
+                  >
+                    Сверить с сервером
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+
+            <footer className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-t border-border bg-background px-3 py-2">
               <Button
                 type="button"
                 size="sm"
-                variant="secondary"
-                isLoading={saleQuery.isFetching || checkoutReconciling}
-                onClick={() => {
-                  if (pendingCheckout) {
-                    void recoverCheckout(pendingCheckout, false);
-                  } else {
-                    void saleQuery.refetch();
-                  }
-                }}
+                variant="ghost"
+                className="text-danger hover:text-danger"
+                disabled={!isDraft || items.length === 0 || saleEditingBlocked}
+                onClick={onNewSale}
               >
-                Сверить с сервером
+                <ClearReceiptIcon />
+                Очистить чек
               </Button>
-            )}
-          </div>
-        )}
-      </div>
+              <div className="ml-auto flex items-baseline gap-4">
+                <span className="text-xs text-foreground-muted">
+                  {items.length} {productCountLabel(items.length)}
+                </span>
+                <strong className="font-mono text-xl tabular-nums text-foreground">
+                  {totalDue.toFixed(2)}{" "}
+                  <span className="font-sans text-xs font-semibold text-foreground-secondary">
+                    {currency}
+                  </span>
+                </strong>
+              </div>
+            </footer>
+          </section>
 
-      {/* PAYMENT — sticky so the total and final action remain in view. */}
-      <div ref={paymentPanelRef} className="scroll-mt-20 pb-20 xl:col-span-4 xl:pb-0">
-        <div className="xl:sticky xl:top-[calc(var(--app-header-height)+0.75rem)]">
-          <PaymentPanel
-            totalDue={totalDue}
-            totalPaid={totalPaid}
-            remaining={remaining}
-            currency={currency}
-            payments={payments}
-            isDraft={isDraft}
-            completing={completeSale.isPending || checkoutSale.isPending || checkoutReconciling}
-            completionUncertain={completionUncertain || checkoutUncertain}
-            payingMethod={payingMethod}
-            pendingPaymentMethod={pendingPayment?.paymentMethod ?? null}
-            onPayTile={onPayTile}
-            onClearPayments={
-              stagedPayments.length > 0 && recordedPayments.length === 0
-                ? () => setStagedPayments([])
-                : undefined
-            }
-            onComplete={() => void onComplete()}
-            completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
-            onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
-            onNewSale={onNewSale}
-            newSaleHint={keyboard ? "Новая продажа (F2)" : undefined}
-            touch={touch}
-            completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
-          />
+          <div
+            ref={paymentPanelRef}
+            className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto"
+          >
+            <div className="xl:sticky xl:top-[calc(var(--app-header-height)+0.75rem)]">
+              <PaymentPanel
+                totalDue={totalDue}
+                totalPaid={totalPaid}
+                remaining={remaining}
+                currency={currency}
+                payments={payments}
+                isDraft={isDraft}
+                completing={completeSale.isPending || checkoutSale.isPending || checkoutReconciling}
+                completionUncertain={completionUncertain || checkoutUncertain}
+                payingMethod={payingMethod}
+                pendingPaymentMethod={pendingPayment?.paymentMethod ?? null}
+                onPayTile={onPayTile}
+                onClearPayments={
+                  stagedPayments.length > 0 && recordedPayments.length === 0
+                    ? () => setStagedPayments([])
+                    : undefined
+                }
+                onComplete={() => void onComplete()}
+                completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
+                onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
+                onNewSale={onNewSale}
+                newSaleHint={keyboard ? "Новая продажа (F2)" : undefined}
+                touch={touch}
+                completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1221,5 +1306,32 @@ function ActiveWorkspace({
         onCancel={() => setDiscardConfirmOpen(false)}
       />
     </>
+  );
+}
+
+function productCountLabel(count: number): string {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "товаров";
+  if (mod10 === 1) return "товар";
+  if (mod10 >= 2 && mod10 <= 4) return "товара";
+  return "товаров";
+}
+
+function ClearReceiptIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
+    </svg>
   );
 }

@@ -63,6 +63,7 @@ export function CartList({
   onQtyTap,
   touch,
   busy,
+  embedded = false,
 }: {
   items: SaleItem[];
   nameById: Record<string, string>;
@@ -73,8 +74,27 @@ export function CartList({
   onQtyTap?: (itemId: string) => void;
   touch?: boolean;
   busy?: boolean;
+  embedded?: boolean;
 }): JSX.Element {
   if (items.length === 0) {
+    if (embedded) {
+      return (
+        <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+          <span
+            aria-hidden="true"
+            className="grid h-12 w-12 place-items-center rounded-full bg-primary/10 text-primary"
+          >
+            <ReceiptIcon />
+          </span>
+          <div>
+            <p className="font-medium text-foreground">Чек пуст</p>
+            <p className="mt-1 max-w-72 text-sm text-foreground-muted">
+              Отсканируйте штрихкод, найдите товар или добавьте его из быстрого выбора.
+            </p>
+          </div>
+        </div>
+      );
+    }
     return (
       <TableEmpty title="Чек пуст">Отсканируйте штрихкод или найдите товар в поиске.</TableEmpty>
     );
@@ -148,7 +168,14 @@ export function CartList({
   );
 
   return (
-    <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+    <ul
+      className={cn(
+        "divide-y divide-border bg-surface",
+        embedded
+          ? "min-h-0 flex-1 overflow-y-auto"
+          : "overflow-hidden rounded-lg border border-border",
+      )}
+    >
       {groups.map((g) => {
         const first = g.items[0];
         if (!first) return null;
@@ -239,6 +266,25 @@ function TrashIcon(): JSX.Element {
       <path d="M9 7V4h6v3" />
       <path d="m6 7 1 13h10l1-13" />
       <path d="M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
+function ReceiptIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z" />
+      <path d="M9 8h6M9 12h6" />
     </svg>
   );
 }

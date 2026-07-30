@@ -63,62 +63,65 @@ export function POSPage(): JSX.Element {
 
   const registerList = registers.data;
   const onlyRegister = registerList?.length === 1 ? registerList[0] : undefined;
+  const workstationControls = (
+    <div className="flex w-full max-w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
+      {registers.isLoading ? (
+        <Skeleton className="h-9 w-full sm:w-52" />
+      ) : registerList && registerList.length > 0 ? (
+        <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-none">
+          <Label htmlFor="register" className="mb-0 shrink-0 text-foreground-muted">
+            Касса
+          </Label>
+          {onlyRegister ? (
+            <Input
+              id="register"
+              className={cn(
+                "min-w-0 flex-1 sm:w-44 sm:flex-none",
+                mode === "touch" ? "h-12" : "h-9",
+              )}
+              value={onlyRegister.name}
+              readOnly
+              disabled
+            />
+          ) : (
+            <Select
+              id="register"
+              value={registerId}
+              onChange={(event) => setRegisterId(event.target.value)}
+              className={cn(
+                "min-w-0 flex-1 sm:w-44 sm:flex-none",
+                mode === "touch" ? "h-12" : "h-9",
+              )}
+            >
+              <option value="">— выберите —</option>
+              {registerList?.map((register) => (
+                <option key={register.id} value={register.id}>
+                  {register.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </div>
+      ) : null}
+      <div className="w-full sm:w-auto">
+        <ModeToggle pref={pref} setPref={setPref} touch={mode === "touch"} />
+      </div>
+      <Switch
+        label="Звук сканера"
+        checked={soundOn}
+        className={cn("w-full sm:w-auto", mode === "touch" && "min-h-12")}
+        onChange={(event) => toggleSound(event.target.checked)}
+      />
+    </div>
+  );
 
   return (
     <div className={cn("space-y-4", mode === "touch" ? "pos--touch" : "pos--keyboard")}>
-      <PageHeader
-        title="Касса"
-        compact
-        actions={
-          <div className="flex w-full max-w-full flex-wrap items-center gap-x-4 gap-y-2 sm:justify-end">
-            {registers.isLoading ? (
-              <Skeleton className="h-9 w-full sm:w-52" />
-            ) : registerList && registerList.length > 0 ? (
-              <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
-                <Label htmlFor="register" className="mb-0 shrink-0 text-foreground-muted">
-                  Касса
-                </Label>
-                {onlyRegister ? (
-                  <Input
-                    id="register"
-                    className={cn(
-                      "min-w-0 flex-1 sm:w-52 sm:flex-none",
-                      mode === "touch" ? "h-12" : "h-9",
-                    )}
-                    value={onlyRegister.name}
-                    readOnly
-                    disabled
-                  />
-                ) : (
-                  <Select
-                    id="register"
-                    value={registerId}
-                    onChange={(event) => setRegisterId(event.target.value)}
-                    className={cn(
-                      "min-w-0 flex-1 sm:w-52 sm:flex-none",
-                      mode === "touch" ? "h-12" : "h-9",
-                    )}
-                  >
-                    <option value="">— выберите —</option>
-                    {registerList?.map((register) => (
-                      <option key={register.id} value={register.id}>
-                        {register.name}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-              </div>
-            ) : null}
-            <ModeToggle pref={pref} setPref={setPref} touch={mode === "touch"} />
-            <Switch
-              label="Звук сканера"
-              checked={soundOn}
-              className={mode === "touch" ? "min-h-12" : undefined}
-              onChange={(event) => toggleSound(event.target.checked)}
-            />
-          </div>
-        }
-      />
+      {!registerId ? (
+        <PageHeader title="Касса" compact actions={workstationControls} />
+      ) : (
+        <h1 className="font-display text-xl font-semibold text-foreground lg:hidden">Касса</h1>
+      )}
 
       {registers.error && (
         <p
@@ -146,6 +149,7 @@ export function POSPage(): JSX.Element {
           canOpenShift={canOpenShift}
           canCloseShift={canCloseShift}
           canSell={canSell}
+          workstationControls={workstationControls}
         />
       )}
     </div>

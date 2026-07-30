@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentShift = vi.fn();
@@ -313,7 +313,11 @@ describe("SaleArea atomic checkout", () => {
     expect(screen.getByRole("dialog", { name: "Начать новую продажу" })).toBeInTheDocument();
     expect(window.localStorage.getItem(draftKey(REG))).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Очистить чек" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Начать новую продажу" })).getByRole("button", {
+        name: "Очистить чек",
+      }),
+    );
 
     await waitFor(() => {
       expect(

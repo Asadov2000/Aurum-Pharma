@@ -3,7 +3,7 @@ import { type PaymentMethod, type SaleStatus, type ShiftStatus } from "./types";
 export const paymentMethodLabel: Record<PaymentMethod, string> = {
   cash: "Наличные",
   card: "Карта",
-  bank_transfer: "Банковский перевод",
+  bank_transfer: "QR-код",
 };
 
 export const paymentMethodOptions: PaymentMethod[] = ["cash", "card", "bank_transfer"];

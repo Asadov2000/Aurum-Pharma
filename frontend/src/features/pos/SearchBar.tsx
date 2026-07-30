@@ -51,82 +51,83 @@ export const SearchBar = forwardRef<
   };
 
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-2 border-primary bg-surface p-2 shadow-sm sm:grid-cols-[minmax(0,1fr)_4rem_auto]">
-        <div className="relative col-span-2 min-w-0 sm:col-span-1">
-          <Label htmlFor="pos-product-search" className="sr-only">
-            Товар
-          </Label>
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-foreground-muted"
-          >
-            <SearchIcon />
-          </span>
-          <CatalogPicker
-            key={pickerKey}
-            id="pos-product-search"
-            ref={ref}
-            value={catalogId}
-            onChange={(id, brand) => {
-              setCatalogId(id);
-              setName(brand);
-              // Picking a product jumps straight to the quantity field, so the
-              // cashier goes name → choose → number → Enter without the mouse.
-              if (id) {
-                qtyRef.current?.focus();
-                qtyRef.current?.select();
-              }
-            }}
-            placeholder="Найти товар или отсканировать штрих-код"
-            clearable
-            branchId={branchId}
-            inputClassName={cn(
-              "h-14 border-transparent bg-transparent pl-11 text-lg shadow-none hover:border-transparent focus:border-transparent focus:bg-transparent",
-              touch && "h-16 text-xl",
-            )}
-          />
-        </div>
-        <input
-          ref={qtyRef}
-          type="text"
-          inputMode="numeric"
-          value={qty}
-          onChange={(e) => setQty(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void submit();
+    <div className="relative grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-[3px] border-primary bg-surface p-2 shadow-sm sm:grid-cols-[minmax(0,1fr)_4.5rem_auto]">
+      <div className="relative col-span-2 min-w-0 sm:col-span-1">
+        <Label htmlFor="pos-product-search" className="sr-only">
+          Товар
+        </Label>
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-foreground"
+        >
+          <SearchIcon />
+        </span>
+        <CatalogPicker
+          key={pickerKey}
+          id="pos-product-search"
+          ref={ref}
+          value={catalogId}
+          onChange={(id, brand) => {
+            setCatalogId(id);
+            setName(brand);
+            // Picking a product jumps straight to the quantity field, so the
+            // cashier goes name → choose → number → Enter without the mouse.
+            if (id) {
+              qtyRef.current?.focus();
+              qtyRef.current?.select();
             }
           }}
-          aria-label="Количество"
-          className={cn(
-            "rounded-md border border-input bg-surface px-2 text-center font-mono text-foreground",
-            touch ? "h-16 w-16 text-xl" : "h-14 w-16 text-lg",
+          placeholder="Найти товар или отсканировать штрих-код"
+          clearable
+          branchId={branchId}
+          inputClassName={cn(
+            "h-20 border-transparent bg-transparent pl-14 text-xl shadow-none hover:border-transparent focus:border-transparent focus:bg-transparent sm:text-2xl",
+            touch && "h-20 text-xl sm:text-2xl",
           )}
         />
-        <Button
-          onClick={() => void submit()}
-          isLoading={busy}
-          disabled={!catalogId}
-          size="xl"
-          className={cn("w-full sm:w-auto", touch && "h-16")}
-        >
-          Добавить
-        </Button>
+        {scanner !== "off" ? (
+          <>
+            <span
+              aria-hidden="true"
+              title={scanner === "scanning" ? "Сканирование" : "Сканер готов"}
+              className={cn(
+                "absolute right-3 top-3 z-10 inline-block h-2.5 w-2.5 rounded-full ring-2 ring-surface",
+                scanner === "scanning" ? "bg-info" : "bg-success",
+              )}
+            />
+            <span className="sr-only" role="status">
+              {scanner === "scanning" ? "Сканирование…" : "Сканер готов"}
+            </span>
+          </>
+        ) : null}
       </div>
-      {scanner !== "off" && (
-        <div className="flex items-center gap-2 px-1 text-xs text-foreground-muted">
-          <span
-            className={cn(
-              "inline-block h-2 w-2 rounded-full",
-              scanner === "scanning" ? "bg-info" : "bg-success",
-            )}
-            aria-hidden="true"
-          />
-          {scanner === "scanning" ? "Сканирование…" : "Сканер готов"}
-        </div>
-      )}
+      <input
+        ref={qtyRef}
+        type="text"
+        inputMode="numeric"
+        value={qty}
+        onChange={(e) => setQty(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void submit();
+          }
+        }}
+        aria-label="Количество"
+        className={cn(
+          "rounded-md border border-input bg-surface px-2 text-center font-mono text-foreground",
+          touch ? "h-16 w-[4.5rem] text-xl" : "h-14 w-[4.5rem] text-lg",
+        )}
+      />
+      <Button
+        onClick={() => void submit()}
+        isLoading={busy}
+        disabled={!catalogId}
+        size="xl"
+        className={cn("w-full min-w-28 sm:w-auto", touch && "h-16")}
+      >
+        Добавить
+      </Button>
     </div>
   );
 });
@@ -134,8 +135,8 @@ export const SearchBar = forwardRef<
 function SearchIcon(): JSX.Element {
   return (
     <svg
-      width="24"
-      height="24"
+      width="34"
+      height="34"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
