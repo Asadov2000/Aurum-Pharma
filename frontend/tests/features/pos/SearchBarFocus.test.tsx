@@ -12,7 +12,7 @@ import { SearchBar } from "@/features/pos/SearchBar";
 describe("SearchBar — keyboard focus flow", () => {
   it("moves focus to the quantity field after a product is picked", async () => {
     render(<SearchBar onAdd={vi.fn()} />);
-    const input = screen.getByPlaceholderText(/Поиск товара/);
+    const input = screen.getByRole("combobox", { name: "Товар" });
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "Асп" } });
 
@@ -25,7 +25,7 @@ describe("SearchBar — keyboard focus flow", () => {
 
   it("moves focus to the quantity field when a product is picked with Enter", async () => {
     render(<SearchBar onAdd={vi.fn()} />);
-    const input = screen.getByPlaceholderText(/Поиск товара/);
+    const input = screen.getByRole("combobox", { name: "Товар" });
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "Асп" } });
 
@@ -39,7 +39,7 @@ describe("SearchBar — keyboard focus flow", () => {
   it("keeps the selected product when adding it fails", async () => {
     const onAdd = vi.fn().mockResolvedValue(false);
     render(<SearchBar onAdd={onAdd} />);
-    const input = screen.getByPlaceholderText(/Поиск товара/);
+    const input = screen.getByRole("combobox", { name: "Товар" });
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "Асп" } });
     fireEvent.click(await screen.findByRole("option", { name: /Аспирин/ }));

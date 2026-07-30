@@ -49,6 +49,53 @@ test.describe("Interface layout", () => {
     }
   });
 
+  test("uses a compact desktop rail and a contained mobile drawer", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/pos");
+
+    const desktopNavigation = page.getByRole("navigation", { name: "Основная навигация" });
+    const navigationBounds = await desktopNavigation.boundingBox();
+    expect(navigationBounds).not.toBeNull();
+    expect(navigationBounds!.width).toBeGreaterThanOrEqual(68);
+    expect(navigationBounds!.width).toBeLessThanOrEqual(76);
+    await expect(page.getByRole("heading", { level: 1, name: "Касса", exact: true })).toBeVisible();
+
+    const expandNavigation = page.getByRole("button", {
+      name: "Показать названия разделов",
+    });
+    await expandNavigation.click();
+    const desktopDrawer = page.getByRole("dialog", { name: "Меню приложения" });
+    await expect(desktopDrawer).toBeVisible();
+    await expect(desktopDrawer.getByText("Aurum Pharma")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(desktopDrawer).toBeHidden();
+    await expect(expandNavigation).toBeFocused();
+
+    await page.setViewportSize({ width: 320, height: 568 });
+    const shellHeader = page.getByTestId("app-shell-header");
+    const headerBounds = await shellHeader.boundingBox();
+    expect(headerBounds).not.toBeNull();
+    expect(headerBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(headerBounds!.x + headerBounds!.width).toBeLessThanOrEqual(320);
+
+    await page.getByRole("button", { name: "Открыть меню" }).click();
+    const mobileDrawer = page.getByRole("dialog", { name: "Меню приложения" });
+    await expect(mobileDrawer).toBeVisible();
+    const drawerBounds = await mobileDrawer.boundingBox();
+    expect(drawerBounds).not.toBeNull();
+    expect(drawerBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(drawerBounds!.x + drawerBounds!.width).toBeLessThanOrEqual(320);
+    expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+
+    await mobileDrawer.getByRole("link", { name: "Роли" }).click();
+    await expect(page).toHaveURL(/\/roles$/);
+    await expect(mobileDrawer).toBeHidden();
+    await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+    await expect(page.getByRole("heading", { level: 1, name: "Роли", exact: true })).toBeVisible();
+    await expectNoHorizontalOverflow(page, "/roles shell @ 320x568");
+  });
+
   test("keeps the role constructor usable on a narrow screen", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await loginInBrowser(page, OWNER);

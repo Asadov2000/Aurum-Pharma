@@ -59,7 +59,9 @@ test.describe("Employee session security", () => {
       const body = (await (await revokedResponse).json()) as { revoked_count: number };
 
       expect(body.revoked_count).toBe(0);
-      await expect(page.getByRole("status")).toHaveText("У сотрудника нет активных сеансов.");
+      await expect(
+        page.getByRole("status").filter({ hasText: "У сотрудника нет активных сеансов." }),
+      ).toHaveText("У сотрудника нет активных сеансов.");
     } finally {
       await ownerApi.dispose();
       await developerApi.dispose();

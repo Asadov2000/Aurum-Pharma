@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
 import { AppearanceMenu } from "@/components/AppearanceMenu";
@@ -7,6 +8,8 @@ import { MfaStepUpDialog } from "@/features/auth/MfaStepUpDialog";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
 
+import { BrandMark } from "./BrandMark";
+import { ConnectivityIndicator } from "./ConnectivityIndicator";
 import { OfflineStatusBanner } from "./OfflineStatusBanner";
 import { PwaInstallButton } from "./PwaInstallButton";
 import { PwaUpdateBanner } from "./PwaUpdateBanner";
@@ -17,10 +20,11 @@ import { buildNav } from "./nav";
 
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const mobileDrawerRef = useRef<HTMLDivElement>(null);
-  const mobileCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const navigationDrawerRef = useRef<HTMLDivElement>(null);
+  const navigationCloseButtonRef = useRef<HTMLButtonElement>(null);
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
   const hasTenant = Boolean(activeTenantId(user));
   const isTenantOwner = Boolean(user?.is_tenant_owner);
@@ -33,6 +37,10 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
     user?.is_developer === true,
     user?.support_access !== null && user?.support_access !== undefined,
   );
+  const activeItem = items.find(
+    (item) => pathname === item.to || (item.to !== "/" && pathname.startsWith(`${item.to}/`)),
+  );
+  const pageTitle = activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma";
 
   // Clean identity: a recognizable name + a quiet caption. We have no role name
   // in the payload, so the caption is the support role (dev/admin) when set, or
@@ -47,12 +55,17 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         : null;
   const initial = name.charAt(0).toUpperCase();
 
+  const openNavigation = (trigger: HTMLButtonElement) => {
+    navigationTriggerRef.current = trigger;
+    setNavigationOpen(true);
+  };
+
   useEffect(() => {
-    if (!mobileNavOpen) return undefined;
+    if (!navigationOpen) return undefined;
 
     const previousActiveElement =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const mobileMenuButton = mobileMenuButtonRef.current;
+    const navigationTrigger = navigationTriggerRef.current;
     const focusableSelector = [
       "a[href]",
       "button:not([disabled])",
@@ -64,14 +77,14 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setMobileNavOpen(false);
+        setNavigationOpen(false);
         return;
       }
       if (event.key !== "Tab") {
         return;
       }
 
-      const drawer = mobileDrawerRef.current;
+      const drawer = navigationDrawerRef.current;
       if (!drawer) {
         return;
       }
@@ -99,7 +112,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
     };
     const previousOverflow = document.body.style.overflow;
     const focusFrame = window.requestAnimationFrame(() => {
-      mobileCloseButtonRef.current?.focus();
+      navigationCloseButtonRef.current?.focus();
     });
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKeyDown);
@@ -110,49 +123,46 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       if (previousActiveElement && document.contains(previousActiveElement)) {
         previousActiveElement.focus();
       } else {
-        mobileMenuButton?.focus();
+        navigationTrigger?.focus();
       }
     };
-  }, [mobileNavOpen]);
+  }, [navigationOpen]);
 
   return (
-    <div className="min-h-screen bg-background lg:grid lg:grid-cols-[232px_minmax(0,1fr)]">
+    <div className="min-h-screen bg-background">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
       >
         Перейти к содержимому
       </a>
-      <div className="hidden lg:block">
-        <Sidebar items={items} />
-      </div>
-      {mobileNavOpen && (
-        <div className="fixed inset-0 z-overlay lg:hidden" role="presentation">
+      {navigationOpen && (
+        <div className="fixed inset-0 z-overlay" role="presentation">
           <button
             type="button"
             aria-label="Закрыть меню через фон"
             className="absolute inset-0 bg-overlay"
-            onClick={() => setMobileNavOpen(false)}
+            onClick={() => setNavigationOpen(false)}
           />
           <div
-            ref={mobileDrawerRef}
+            ref={navigationDrawerRef}
             role="dialog"
             aria-modal="true"
             aria-label="Меню приложения"
-            className="relative z-modal h-full w-[min(20rem,calc(100vw-2rem))]"
+            className="relative z-modal h-full w-[min(17rem,calc(100vw-1rem))]"
           >
             <Sidebar
               items={items}
               mode="drawer"
-              onNavigate={() => setMobileNavOpen(false)}
+              onNavigate={() => setNavigationOpen(false)}
               closeButton={
                 <Button
-                  ref={mobileCloseButtonRef}
+                  ref={navigationCloseButtonRef}
                   variant="ghost"
                   size="sm"
-                  className="h-8 w-8 px-0"
+                  className="h-9 w-9 px-0"
                   aria-label="Закрыть меню"
-                  onClick={() => setMobileNavOpen(false)}
+                  onClick={() => setNavigationOpen(false)}
                 >
                   <CloseIcon />
                 </Button>
@@ -161,59 +171,94 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
           </div>
         </div>
       )}
-      <div className="flex min-w-0 flex-col">
-        <div className="sticky top-0 z-sticky">
-          <header className="flex min-h-14 items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2.5 sm:px-6">
+
+      <header
+        data-testid="app-shell-header"
+        className="sticky top-0 z-sticky border-b border-border bg-surface"
+      >
+        <div className="flex min-h-[var(--app-header-height)] items-stretch">
+          <div className="hidden w-[var(--app-nav-rail-width)] shrink-0 items-center border-r border-border px-4 lg:flex xl:w-60">
+            <BrandMark />
+            <span className="ml-3 hidden truncate font-display text-lg font-semibold text-foreground xl:block">
+              Aurum Pharma
+            </span>
+          </div>
+
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 sm:px-4 xl:px-5">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <Button
-                ref={mobileMenuButtonRef}
                 variant="secondary"
                 size="sm"
                 className="h-9 w-9 shrink-0 px-0 lg:hidden"
                 aria-label="Открыть меню"
-                onClick={() => setMobileNavOpen(true)}
+                aria-expanded={navigationOpen}
+                onClick={(event) => openNavigation(event.currentTarget)}
               >
                 <MenuIcon />
               </Button>
-              <span
-                aria-hidden="true"
-                className="hidden h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-sm font-semibold text-primary sm:grid"
-              >
-                {initial}
+              <span className="truncate font-display text-base font-semibold text-foreground sm:text-lg lg:hidden">
+                Aurum Pharma
               </span>
-              <div className="hidden min-w-0 leading-tight sm:block">
-                <div className="truncate text-sm font-semibold text-foreground">{name}</div>
-                {caption && <div className="truncate text-xs text-foreground-muted">{caption}</div>}
-              </div>
+              <h1 className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
+                {pageTitle}
+              </h1>
             </div>
+
             <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+              <ConnectivityIndicator />
               <PwaInstallButton />
               <RuntimeSurfaceBadge />
+              <div className="hidden min-w-0 items-center gap-2 border-l border-border pl-3 2xl:flex">
+                <span
+                  aria-hidden="true"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-xs font-semibold text-primary"
+                >
+                  {initial}
+                </span>
+                <span className="min-w-0 max-w-44 leading-tight">
+                  <span className="block truncate text-sm font-semibold text-foreground">
+                    {name}
+                  </span>
+                  {caption && (
+                    <span className="block truncate text-xs text-foreground-muted">{caption}</span>
+                  )}
+                </span>
+              </div>
               <AppearanceMenu />
               <Button
                 variant="secondary"
                 size="sm"
-                className="h-9 w-9 px-0 sm:w-auto sm:px-3"
+                className="h-9 w-9 px-0 xl:w-auto xl:px-3"
                 onClick={() => void logout()}
               >
                 <LogoutIcon />
-                <span className="sr-only sm:not-sr-only">Выйти</span>
+                <span className="sr-only xl:not-sr-only">Выйти</span>
               </Button>
             </div>
-          </header>
-          <SupportAccessBanner />
-          <OfflineStatusBanner />
-          <ServerStatusBanner />
-          <PwaUpdateBanner />
+          </div>
+        </div>
+      </header>
+
+      <div data-testid="app-shell-notices">
+        <SupportAccessBanner />
+        <OfflineStatusBanner />
+        <ServerStatusBanner />
+        <PwaUpdateBanner />
+      </div>
+
+      <div className="min-w-0 lg:grid lg:grid-cols-[var(--app-nav-rail-width)_minmax(0,1fr)]">
+        <div className="hidden lg:block">
+          <Sidebar items={items} drawerOpen={navigationOpen} onOpenDrawer={openNavigation} />
         </div>
         <main
           id="main-content"
           tabIndex={-1}
-          className="min-w-0 flex-1 px-4 py-5 sm:px-6 sm:py-6 xl:px-8"
+          className="min-h-[calc(100dvh-var(--app-header-height))] min-w-0 px-3 py-4 sm:px-4 sm:py-5 xl:px-5"
         >
           {children}
         </main>
       </div>
+
       <MfaStepUpDialog />
     </div>
   );

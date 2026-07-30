@@ -1,13 +1,13 @@
 import { type ReactNode } from "react";
 
 /** Tiny inline stroke icons for the sidebar. Kept local (no icon dependency,
- *  matching the project's deliberate "no icon lib" choice) and uniform: 18px,
+ *  matching the project's deliberate "no icon lib" choice) and uniform: 20px,
  *  currentColor, aria-hidden so the link's accessible name stays its label. */
 function Svg({ children }: { children: ReactNode }): JSX.Element {
   return (
     <svg
-      width="18"
-      height="18"
+      width="20"
+      height="20"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

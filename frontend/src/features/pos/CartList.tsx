@@ -138,10 +138,10 @@ export function CartList({
           aria-label={`Удалить ${name}`}
           className={cn(
             "rounded-md p-0 text-foreground-muted hover:text-danger",
-            touch ? "h-14 w-14 text-xl" : "h-10 w-10 text-lg",
+            touch ? "h-14 w-14" : "h-10 w-10",
           )}
         >
-          ✕
+          <TrashIcon />
         </Button>
       )}
     </div>
@@ -219,5 +219,26 @@ export function CartList({
         );
       })}
     </ul>
+  );
+}
+
+function TrashIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h16" />
+      <path d="M9 7V4h6v3" />
+      <path d="m6 7 1 13h10l1-13" />
+      <path d="M10 11v5M14 11v5" />
+    </svg>
   );
 }

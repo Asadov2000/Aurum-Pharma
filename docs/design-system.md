@@ -32,18 +32,18 @@ HSL-каналов (`H S% L%`), чтобы работали модификато
 
 ### Цвета (роли, переключаются темой)
 
-| Класс | Роль |
-|---|---|
-| `bg-background` | фон страницы |
-| `bg-surface` / `bg-surface-raised` | карточки / модалки и поповеры |
-| `border-border` / `border-input` | границы / границы инпутов |
-| `text-foreground` | основной текст |
-| `text-foreground-secondary` | вторичный текст |
-| `text-foreground-muted` | приглушённый текст / подписи |
-| `bg-primary` / `text-primary-foreground` | primary-заливка / текст на ней |
-| `ring-ring` | focus-ring |
-| `text-success` `text-warning` `text-danger` `text-info` | базовые семантические |
-| `bg-{tone}-subtle` / `text-{tone}-foreground` | мягкий фон + текст бейджей |
+| Класс                                                   | Роль                           |
+| ------------------------------------------------------- | ------------------------------ |
+| `bg-background`                                         | фон страницы                   |
+| `bg-surface` / `bg-surface-raised`                      | карточки / модалки и поповеры  |
+| `border-border` / `border-input`                        | границы / границы инпутов      |
+| `text-foreground`                                       | основной текст                 |
+| `text-foreground-secondary`                             | вторичный текст                |
+| `text-foreground-muted`                                 | приглушённый текст / подписи   |
+| `bg-primary` / `text-primary-foreground`                | primary-заливка / текст на ней |
+| `ring-ring`                                             | focus-ring                     |
+| `text-success` `text-warning` `text-danger` `text-info` | базовые семантические          |
+| `bg-{tone}-subtle` / `text-{tone}-foreground`           | мягкий фон + текст бейджей     |
 
 Плюс фиксированная teal-рампа `primary-50…950` для прямого использования
 (графики, акценты).
@@ -81,6 +81,19 @@ HSL-каналов (`H S% L%`), чтобы работали модификато
 первого рендера через `public/theme-init.js`, поэтому интерфейс не скачет при
 загрузке.
 
+### Оболочка приложения
+
+- На desktop используется верхняя продуктовая шапка высотой `64px` и
+  навигационная панель шириной `72px`. Активный раздел показывается цветом и
+  доступным именем; полные названия открываются в drawer поверх содержимого.
+- На узких окнах шапка уменьшается до `56px`, постоянная панель скрывается, а
+  навигация открывается через модальный drawer с удержанием и восстановлением
+  фокуса.
+- Название текущего раздела находится в шапке на desktop и внутри страницы на
+  мобильном экране. Одновременно визуально показывается только один `h1`.
+- Системные статусы и действия оболочки не входят в содержимое страницы.
+  Недоступные по permissions маршруты не рендерятся даже в раскрытом меню.
+
 ## Тёмная тема
 
 - Тумблер (Светлая / Тёмная / Системная) находится в меню «Вид интерфейса»
@@ -96,11 +109,11 @@ HSL-каналов (`H S% L%`), чтобы работали модификато
 
 Все примитивы в `src/components/ui/` используют **только токены** — поэтому
 работают в обеих темах автоматически. Доступные: `Button` (variants
-primary/secondary/ghost/danger; sizes sm/md/lg/**xl** — большой touch-таргет
-для POS), `Input`, `Select`, `Textarea`, `Label`, `Card`, `Badge` (5 тонов),
-`Switch`, `Modal`, `Table` (+ `TableEmpty` с `title`/`icon`/`action`),
-`FormError`, `Skeleton` / `SkeletonRows`, `PageHeader`, `Checkbox`,
-`SegmentedControl`, `ConfigurableFilterBar`.
+primary/secondary/ghost/success/danger; sizes sm/md/lg/**xl** — большой
+touch-таргет для POS), `Input`, `Select`, `Textarea`, `Label`, `Card`, `Badge`
+(5 тонов), `Switch`, `Modal`, `Table` (+ `TableEmpty` с
+`title`/`icon`/`action`), `FormError`, `Skeleton` / `SkeletonRows`,
+`PageHeader`, `Checkbox`, `SegmentedControl`, `ConfigurableFilterBar`.
 
 Focus-ring задаётся глобально через `:focus-visible` в `index.css` — виден
 с клавиатуры, не появляется при клике мышью (a11y).

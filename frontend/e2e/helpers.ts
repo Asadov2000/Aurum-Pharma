@@ -271,7 +271,7 @@ export async function addPosItemToCart(
     searchKey?: string;
   },
 ): Promise<void> {
-  const picker = page.getByPlaceholder(/Поиск товара/);
+  const picker = page.getByRole("combobox", { name: "Товар" });
   await picker.fill(args.searchKey ?? catalogSearchKey(args.brandName));
   const option = page.getByRole("option", {
     name: new RegExp(escapeRegex(args.brandName)),

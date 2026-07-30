@@ -75,6 +75,9 @@ describe("AppLayout shell", () => {
     const main = screen.getByRole("main");
 
     expect(header).not.toBeNull();
+    expect(
+      within(header as HTMLElement).getByRole("heading", { name: "Касса" }),
+    ).toBeInTheDocument();
     expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(badge);
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
     expect(within(main).getByText("Page content")).toBeInTheDocument();
@@ -89,11 +92,13 @@ describe("AppLayout shell", () => {
     );
 
     const banner = screen.getByTestId("offline-status-banner");
-    const stickyShell = banner.closest(".sticky");
+    const notices = banner.closest('[data-testid="app-shell-notices"]');
+    const header = screen.getByTestId("app-shell-header");
     const main = screen.getByRole("main");
 
-    expect(stickyShell).not.toBeNull();
-    expect(within(stickyShell as HTMLElement).getByTestId("offline-status-banner")).toBe(banner);
+    expect(notices).not.toBeNull();
+    expect(within(notices as HTMLElement).getByTestId("offline-status-banner")).toBe(banner);
+    expect(within(header).getByText("Нет сети")).toBeInTheDocument();
     expect(within(main).queryByTestId("offline-status-banner")).not.toBeInTheDocument();
   });
 });

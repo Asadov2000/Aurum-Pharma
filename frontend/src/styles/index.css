@@ -81,6 +81,11 @@
     --overlay-opacity: 0.62;
   }
 
+  :root {
+    --app-header-height: 3.5rem;
+    --app-nav-rail-width: 4.5rem;
+  }
+
   :root,
   [data-density="comfortable"] {
     --control-height-sm: 2.25rem;
@@ -103,6 +108,7 @@
     --segment-height-sm: 1.75rem;
     --segment-height-md: 2rem;
     --checkbox-size: 1rem;
+    --nav-target-size: 2.75rem;
   }
 
   [data-density="compact"] {
@@ -126,6 +132,7 @@
     --segment-height-sm: 1.75rem;
     --segment-height-md: 2rem;
     --checkbox-size: 1rem;
+    --nav-target-size: 2.5rem;
   }
 
   [data-density="touch"] {
@@ -149,6 +156,7 @@
     --segment-height-sm: 2.75rem;
     --segment-height-md: 3rem;
     --checkbox-size: 1.5rem;
+    --nav-target-size: 3.25rem;
   }
 
   html {
@@ -201,6 +209,12 @@
   /* Keyboard-visible focus ring everywhere, without a ring on mouse clicks. */
   :focus-visible {
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@media (min-width: 64rem) {
+  :root {
+    --app-header-height: 4rem;
   }
 }
 

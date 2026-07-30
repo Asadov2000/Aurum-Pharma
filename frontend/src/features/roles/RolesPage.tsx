@@ -178,8 +178,8 @@ export function RolesPage(): JSX.Element {
         meta={
           !roles.isLoading
             ? filteredTenantRoles.length === tenantRoles.length
-              ? `${tenantRoles.length}`
-              : `${filteredTenantRoles.length} из ${tenantRoles.length}`
+              ? `Всего: ${tenantRoles.length}`
+              : `Показано: ${filteredTenantRoles.length} из ${tenantRoles.length}`
             : undefined
         }
         actions={

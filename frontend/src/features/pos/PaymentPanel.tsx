@@ -53,26 +53,38 @@ export function PaymentPanel({
   const settled = remaining <= 0.001;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-3">
       {/* К ОПЛАТЕ */}
-      <div className="rounded-lg border border-border bg-surface p-5 text-center">
-        <p className="text-xs font-semibold text-foreground-muted">К оплате</p>
-        <p className="mt-1 font-mono text-4xl font-bold tabular-nums text-primary">
-          {totalDue.toFixed(2)}
-        </p>
-        <p className="text-sm text-foreground-muted">{currency}</p>
-        {totalDue > 0 && (
-          <div className="mt-3 flex justify-center gap-6 text-sm">
-            <span className="text-foreground-secondary">
-              Оплачено{" "}
-              <span className="font-mono tabular-nums text-foreground">{totalPaid.toFixed(2)}</span>
-            </span>
-            <span className={cn(settled ? "text-success-foreground" : "text-warning-foreground")}>
-              Остаток{" "}
-              <span className="font-mono tabular-nums">{Math.max(0, remaining).toFixed(2)}</span>
-            </span>
+      <div className="border-b border-border px-1 pb-4 pt-1">
+        <div className="flex items-end justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground-secondary">К оплате</p>
+            {totalDue > 0 && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                <span className="text-foreground-secondary">
+                  Оплачено{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {totalPaid.toFixed(2)}
+                  </span>
+                </span>
+                <span
+                  className={cn(settled ? "text-success-foreground" : "text-warning-foreground")}
+                >
+                  Остаток{" "}
+                  <span className="font-mono tabular-nums">
+                    {Math.max(0, remaining).toFixed(2)}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
-        )}
+          <p className="shrink-0 text-right font-mono text-4xl font-bold tabular-nums text-foreground">
+            {totalDue.toFixed(2)}{" "}
+            <span className="font-sans text-sm font-semibold text-foreground-secondary">
+              {currency}
+            </span>
+          </p>
+        </div>
       </div>
 
       {/* Payment tiles */}
@@ -110,7 +122,7 @@ export function PaymentPanel({
       {/* Recorded payments */}
       {payments.length > 0 && (
         <div className="space-y-2">
-          <ul className="divide-y divide-border rounded-lg border border-border bg-surface text-sm">
+          <ul className="divide-y divide-border border-y border-border text-sm">
             {payments.map((p) => (
               <li key={p.id} className="flex items-center justify-between px-4 py-2">
                 <span className="text-foreground-secondary">
@@ -134,12 +146,14 @@ export function PaymentPanel({
       {isDraft && (
         <Button
           size="xl"
+          variant="success"
           className="w-full"
           onClick={onComplete}
           isLoading={completing}
           disabled={totalDue <= 0 || pendingPaymentMethod !== null}
           title={completeHint}
         >
+          <CheckIcon />
           Завершить продажу
         </Button>
       )}
@@ -168,9 +182,23 @@ export function PaymentPanel({
 function PaymentMethodIcon({ method }: { method: PaymentMethod }): JSX.Element {
   if (method === "bank_transfer") {
     return (
-      <span className="text-2xl leading-none text-primary" aria-hidden="true">
-        ⇄
-      </span>
+      <svg
+        aria-hidden="true"
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="text-primary"
+      >
+        <path d="M4 8h14" />
+        <path d="m15 5 3 3-3 3" />
+        <path d="M20 16H6" />
+        <path d="m9 13-3 3 3 3" />
+      </svg>
     );
   }
 
@@ -182,5 +210,23 @@ function PaymentMethodIcon({ method }: { method: PaymentMethod }): JSX.Element {
         <span className="absolute inset-x-0 top-1 h-0.5 bg-primary" />
       )}
     </span>
+  );
+}
+
+function CheckIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m5 12 4 4L19 6" />
+    </svg>
   );
 }

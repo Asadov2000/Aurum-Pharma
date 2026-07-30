@@ -117,8 +117,9 @@ function checkoutItemsFrom(items: SaleDetails["items"]): { catalog_id: string; q
 
 /**
  * The POS workspace. Owns the shift gate and the active sale, and lays the UI
- * out responsively: two columns on wide screens (cart left, payment right) and
- * a single stack below that. `mode` decides touch- vs keyboard-optimised behaviour.
+ * out responsively: primary search across the workspace, cart and payment
+ * columns on wide screens, and a single stack below that. `mode` decides
+ * touch- vs keyboard-optimised behaviour.
  */
 export function SaleArea({
   registerId,
@@ -141,7 +142,7 @@ export function SaleArea({
   const hasShift = Boolean(shiftQuery.data);
 
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+    <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
       {hasShift && canSell ? (
         // Key by register so switching registers restores that one's draft.
         <ActiveWorkspace
@@ -1043,11 +1044,29 @@ function ActiveWorkspace({
         />
       </div>
 
-      {/* LEFT — search + cart */}
-      <div className={cn("space-y-3 xl:col-span-7", isDraft && totalDue > 0 && "pb-20 xl:pb-0")}>
+      {staleNotice && (
+        <p className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground xl:col-span-12">
+          Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую продажу.
+        </p>
+      )}
+
+      {isDraft && (
+        <fieldset disabled={saleEditingBlocked} className="min-w-0 border-0 p-0 xl:col-span-12">
+          <SearchBar
+            ref={searchRef}
+            onAdd={onAdd}
+            busy={createSale.isPending || addItem.isPending}
+            touch={touch}
+            branchId={branchId ?? undefined}
+          />
+        </fieldset>
+      )}
+
+      {/* CHECK — dense working list with payment beside it on wide screens. */}
+      <div className={cn("space-y-3 xl:col-span-8", isDraft && totalDue > 0 && "pb-20 xl:pb-0")}>
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-foreground">
-            Чек{" "}
+            Текущий чек{" "}
             {sale?.receipt_number && (
               <span className="font-mono text-sm text-foreground-muted">
                 № {sale.receipt_number}
@@ -1060,24 +1079,6 @@ function ActiveWorkspace({
             </span>
           )}
         </div>
-
-        {staleNotice && (
-          <p className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
-            Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую продажу.
-          </p>
-        )}
-
-        {isDraft && (
-          <fieldset disabled={saleEditingBlocked} className="min-w-0 border-0 p-0">
-            <SearchBar
-              ref={searchRef}
-              onAdd={onAdd}
-              busy={createSale.isPending || addItem.isPending}
-              touch={touch}
-              branchId={branchId ?? undefined}
-            />
-          </fieldset>
-        )}
 
         <CartList
           items={items}
@@ -1115,9 +1116,9 @@ function ActiveWorkspace({
         )}
       </div>
 
-      {/* RIGHT — payment, sticky so it's always in view */}
-      <div ref={paymentPanelRef} className="scroll-mt-20 pb-20 xl:col-span-5 xl:pb-0">
-        <div className="space-y-4 xl:sticky xl:top-20">
+      {/* PAYMENT — sticky so the total and final action remain in view. */}
+      <div ref={paymentPanelRef} className="scroll-mt-20 pb-20 xl:col-span-4 xl:pb-0">
+        <div className="xl:sticky xl:top-[calc(var(--app-header-height)+0.75rem)]">
           <PaymentPanel
             totalDue={totalDue}
             totalPaid={totalPaid}

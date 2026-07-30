@@ -17,19 +17,24 @@ export function PageHeader({
   compact?: boolean;
   className?: string;
 }): JSX.Element {
+  const hasDesktopSupportingContent =
+    description !== undefined || meta !== undefined || actions !== undefined;
+  const hasDesktopText = description !== undefined || meta !== undefined;
+
   return (
     <header
       className={cn(
         "flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-3",
         compact ? "py-0.5" : "py-1",
+        !hasDesktopSupportingContent && "lg:hidden",
         className,
       )}
     >
-      <div className="min-w-0">
+      <div className={cn("min-w-0", !hasDesktopText && "lg:hidden")}>
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
           <h1
             className={cn(
-              "min-w-0 break-words font-display font-semibold leading-tight text-foreground",
+              "min-w-0 break-words font-display font-semibold leading-tight text-foreground lg:hidden",
               compact ? "text-xl" : "text-2xl",
             )}
           >

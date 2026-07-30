@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils";
 export type ScannerStatus = "ready" | "scanning" | "off";
 
 /**
- * Product search row for the cart's left column: a catalog typeahead, a qty
- * field, an add button, and a small scanner status chip. Adding clears the
- * picker so the cashier can immediately search the next item.
+ * Primary POS search surface: a catalog typeahead, quantity, add action and
+ * scanner status. Adding clears the picker so the next scan/search starts
+ * immediately.
  */
 export const SearchBar = forwardRef<
   HTMLInputElement,
@@ -51,12 +51,18 @@ export const SearchBar = forwardRef<
   };
 
   return (
-    <div className="space-y-2 rounded-lg border border-border bg-surface p-3">
-      <div className="grid grid-cols-[4rem_minmax(0,1fr)] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_4rem_auto]">
-        <div className="col-span-2 min-w-0 sm:col-span-1">
+    <div className="space-y-2">
+      <div className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-2 border-primary bg-surface p-2 shadow-sm sm:grid-cols-[minmax(0,1fr)_4rem_auto]">
+        <div className="relative col-span-2 min-w-0 sm:col-span-1">
           <Label htmlFor="pos-product-search" className="sr-only">
             Товар
           </Label>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-foreground-muted"
+          >
+            <SearchIcon />
+          </span>
           <CatalogPicker
             key={pickerKey}
             id="pos-product-search"
@@ -72,10 +78,13 @@ export const SearchBar = forwardRef<
                 qtyRef.current?.select();
               }
             }}
-            placeholder="Поиск товара по названию…"
+            placeholder="Найти товар или отсканировать штрих-код"
             clearable
             branchId={branchId}
-            inputClassName={touch ? "h-14 text-base" : undefined}
+            inputClassName={cn(
+              "h-14 border-transparent bg-transparent pl-11 text-lg shadow-none hover:border-transparent focus:border-transparent focus:bg-transparent",
+              touch && "h-16 text-xl",
+            )}
           />
         </div>
         <input
@@ -93,21 +102,21 @@ export const SearchBar = forwardRef<
           aria-label="Количество"
           className={cn(
             "rounded-md border border-input bg-surface px-2 text-center font-mono text-foreground",
-            touch ? "h-14 w-16 text-xl" : "h-10 w-16",
+            touch ? "h-16 w-16 text-xl" : "h-14 w-16 text-lg",
           )}
         />
         <Button
           onClick={() => void submit()}
           isLoading={busy}
           disabled={!catalogId}
-          size={touch ? "xl" : "md"}
-          className="w-full sm:w-auto"
+          size="xl"
+          className={cn("w-full sm:w-auto", touch && "h-16")}
         >
           Добавить
         </Button>
       </div>
       {scanner !== "off" && (
-        <div className="flex items-center gap-2 text-xs text-foreground-muted">
+        <div className="flex items-center gap-2 px-1 text-xs text-foreground-muted">
           <span
             className={cn(
               "inline-block h-2 w-2 rounded-full",
@@ -121,3 +130,21 @@ export const SearchBar = forwardRef<
     </div>
   );
 });
+
+function SearchIcon(): JSX.Element {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-4-4" />
+    </svg>
+  );
+}
