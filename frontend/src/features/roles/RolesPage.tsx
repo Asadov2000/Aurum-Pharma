@@ -1,14 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
+  ConfirmDialog,
   ConfigurableFilterBar,
   Input,
   Label,
@@ -58,8 +54,24 @@ export function RolesPage(): JSX.Element {
   const roles = useRolesQuery(canView);
   const perms = usePermissionsQuery(canView);
   const [editor, setEditor] = useState<Editor>(null);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
   const [roleSearch, setRoleSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<RoleStatusFilter>("all");
+
+  const closeEditor = useCallback(() => {
+    setDiscardConfirmationOpen(false);
+    setEditorDirty(false);
+    setEditor(null);
+  }, []);
+
+  const requestEditorClose = useCallback(() => {
+    if (editorDirty) {
+      setDiscardConfirmationOpen(true);
+      return;
+    }
+    closeEditor();
+  }, [closeEditor, editorDirty]);
 
   const permName = useMemo(() => {
     const m = new Map<string, string>();
@@ -98,7 +110,7 @@ export function RolesPage(): JSX.Element {
 
   const grantableCodes = new Set(permName.keys());
 
-  const card = (r: Role) => {
+  const roleRow = (r: Role) => {
     const visiblePermissions = r.permissions.filter((code) => grantableCodes.has(code));
     const editBlocked = perms.isSuccess && hasUnavailableRolePermissions(r);
     const groupCounts = new Map<string, number>();
@@ -111,63 +123,83 @@ export function RolesPage(): JSX.Element {
     const hiddenGroupCount = Math.max(0, roleGroups.length - shownGroups.length);
 
     return (
-      <Card key={r.id} className="flex h-full flex-col">
-        <CardHeader className="border-b-0 pb-2">
-          <div className="flex items-start justify-between gap-2">
-            <CardTitle>{r.name}</CardTitle>
-            <div className="flex shrink-0 gap-1">
-              {!r.is_active && <Badge tone="neutral">неактивна</Badge>}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-1 flex-col gap-4 pt-1">
-          <p className="min-h-10 text-sm leading-5 text-foreground-secondary">
-            {r.description || "Описание роли не задано."}
-          </p>
-          <div className="border-t border-border pt-3">
-            <div className="flex items-center justify-between gap-3 text-xs text-foreground-muted">
-              <span>Доступные функции</span>
-              <span className="font-mono font-semibold text-foreground">
-                {perms.isSuccess ? visiblePermissions.length : "—"}
-              </span>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {perms.isLoading ? (
-                <span className="text-xs italic text-foreground-muted">загрузка функций…</span>
-              ) : perms.isError ? (
-                <span className="text-xs text-danger-foreground">данные недоступны</span>
-              ) : shownGroups.length === 0 ? (
-                <span className="text-xs italic text-foreground-muted">нет доступных функций</span>
-              ) : (
-                shownGroups.map(([code, count]) => (
-                  <Badge key={code} tone="neutral">
-                    {groupLabel(code)} · {count}
-                  </Badge>
-                ))
-              )}
-              {hiddenGroupCount > 0 && <Badge tone="neutral">ещё {hiddenGroupCount}</Badge>}
-            </div>
-            {editBlocked && (
-              <p className="mt-3 text-xs leading-5 text-warning-foreground">
-                Некоторые функции этой роли недоступны для изменения.
+      <li
+        key={r.id}
+        className="grid min-w-0 gap-4 px-4 py-4 md:grid-cols-[minmax(13rem,1.1fr)_minmax(16rem,1.6fr)_7rem_7rem] md:items-center xl:px-5"
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-sm font-semibold text-primary"
+            >
+              {r.name.charAt(0).toLocaleUpperCase("ru-RU")}
+            </span>
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-semibold text-foreground">{r.name}</h3>
+              <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-foreground-secondary">
+                {r.description || "Описание роли не задано."}
               </p>
-            )}
+            </div>
           </div>
-        </CardContent>
-        {canUpdate && (
-          <CardFooter className="flex justify-end">
+        </div>
+
+        <div className="min-w-0">
+          <span className="mb-1.5 block text-xs font-medium text-foreground-muted md:hidden">
+            Доступные функции
+          </span>
+          <div className="flex min-w-0 flex-wrap gap-1.5">
+            {perms.isLoading ? (
+              <span className="text-xs italic text-foreground-muted">загрузка функций…</span>
+            ) : perms.isError ? (
+              <span className="text-xs text-danger-foreground">данные недоступны</span>
+            ) : shownGroups.length === 0 ? (
+              <span className="text-xs italic text-foreground-muted">нет доступных функций</span>
+            ) : (
+              shownGroups.map(([code, count]) => (
+                <Badge key={code} tone="neutral">
+                  {groupLabel(code)} · {count}
+                </Badge>
+              ))
+            )}
+            {hiddenGroupCount > 0 && <Badge tone="neutral">ещё {hiddenGroupCount}</Badge>}
+          </div>
+          {editBlocked && (
+            <p className="mt-2 text-xs leading-5 text-warning-foreground">
+              Некоторые функции этой роли недоступны для изменения.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <span className="mb-1 block text-xs font-medium text-foreground-muted md:hidden">
+            Всего функций
+          </span>
+          <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
+            {perms.isSuccess ? visiblePermissions.length : "—"}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 md:justify-end">
+          <Badge tone={r.is_active ? "success" : "neutral"}>
+            {r.is_active ? "активна" : "неактивна"}
+          </Badge>
+          {canUpdate && (
             <Button
               variant="secondary"
               size="sm"
               disabled={!perms.isSuccess || editBlocked}
               title={editBlocked ? ROLE_EDIT_BLOCKED_MESSAGE : undefined}
-              onClick={() => setEditor({ mode: "edit", role: r })}
+              onClick={() => {
+                setEditorDirty(false);
+                setEditor({ mode: "edit", role: r });
+              }}
             >
               Изменить
             </Button>
-          </CardFooter>
-        )}
-      </Card>
+          )}
+        </div>
+      </li>
     );
   };
 
@@ -184,7 +216,16 @@ export function RolesPage(): JSX.Element {
         }
         actions={
           canCreate ? (
-            <Button onClick={() => setEditor({ mode: "create" })}>+ Создать роль</Button>
+            <Button
+              aria-label="+ Создать роль"
+              onClick={() => {
+                setEditorDirty(false);
+                setEditor({ mode: "create" });
+              }}
+            >
+              <PlusIcon />
+              Создать роль
+            </Button>
           ) : undefined
         }
       />
@@ -253,9 +294,25 @@ export function RolesPage(): JSX.Element {
         <SkeletonRows rows={4} />
       ) : (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-foreground-secondary">Роли аптеки</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-foreground-secondary">Роли аптеки</h2>
+            <div className="flex items-center gap-4 text-xs text-foreground-muted">
+              <span>
+                Активные{" "}
+                <strong className="font-mono font-semibold text-foreground">
+                  {tenantRoles.filter((role) => role.is_active).length}
+                </strong>
+              </span>
+              <span>
+                Доступные функции{" "}
+                <strong className="font-mono font-semibold text-foreground">
+                  {perms.isSuccess ? perms.data.length : "—"}
+                </strong>
+              </span>
+            </div>
+          </div>
           {filteredTenantRoles.length === 0 ? (
-            <TableEmpty title="Роли пока не созданы">
+            <TableEmpty title={tenantRoles.length > 0 ? "Роли не найдены" : "Роли пока не созданы"}>
               {tenantRoles.length > 0
                 ? "По выбранным фильтрам ролей нет."
                 : canCreate
@@ -263,8 +320,14 @@ export function RolesPage(): JSX.Element {
                   : "Управляемых ролей пока нет."}
             </TableEmpty>
           ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
-              {filteredTenantRoles.map(card)}
+            <div className="overflow-hidden rounded-lg border border-border bg-surface">
+              <div className="hidden grid-cols-[minmax(13rem,1.1fr)_minmax(16rem,1.6fr)_7rem_7rem] gap-4 border-b border-border bg-background px-5 py-2.5 text-xs font-semibold text-foreground-muted md:grid">
+                <span>Роль</span>
+                <span>Функции</span>
+                <span>Всего</span>
+                <span className="text-right">Статус</span>
+              </div>
+              <ul className="divide-y divide-border">{filteredTenantRoles.map(roleRow)}</ul>
             </div>
           )}
         </section>
@@ -272,18 +335,47 @@ export function RolesPage(): JSX.Element {
 
       <Modal
         open={editor !== null}
-        onClose={() => setEditor(null)}
+        onClose={requestEditorClose}
         title={editor?.mode === "edit" ? "Изменить роль" : "Создать роль"}
-        className="max-w-5xl"
+        className="max-w-[78rem]"
       >
         {editor && (
           <RoleBuilderModal
             mode={editor.mode}
             role={editor.mode === "edit" ? editor.role : undefined}
-            onClose={() => setEditor(null)}
+            onClose={closeEditor}
+            onCancel={requestEditorClose}
+            onDirtyChange={setEditorDirty}
           />
         )}
       </Modal>
+      <ConfirmDialog
+        open={discardConfirmationOpen}
+        title="Отменить изменения?"
+        message="Внесённые изменения роли не сохранятся."
+        cancelLabel="Продолжить редактирование"
+        confirmLabel="Выйти без сохранения"
+        variant="danger"
+        onCancel={() => setDiscardConfirmationOpen(false)}
+        onConfirm={closeEditor}
+      />
     </div>
+  );
+}
+
+function PlusIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
   );
 }

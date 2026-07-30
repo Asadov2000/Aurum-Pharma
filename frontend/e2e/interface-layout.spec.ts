@@ -97,26 +97,44 @@ test.describe("Interface layout", () => {
   });
 
   test("keeps the role constructor usable on a narrow screen", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.addInitScript(() => {
+      window.localStorage.setItem("ui:density", "touch");
+    });
     await loginInBrowser(page, OWNER);
     await page.goto("/roles");
 
-    await page.getByRole("button", { name: "+ Создать роль" }).click();
+    const createRoleButton = page.getByRole("button", { name: "+ Создать роль" });
+    await createRoleButton.click();
     const dialog = page.getByRole("dialog", { name: "Создать роль" });
     await expect(dialog).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
 
     const bounds = await dialog.boundingBox();
     expect(bounds).not.toBeNull();
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
     expect(bounds!.y).toBeGreaterThanOrEqual(0);
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
-    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(568);
     await expect(dialog.getByLabel("Название", { exact: true })).toBeVisible();
+    const groupSelect = dialog.getByLabel("Раздел функций");
+    await expect(groupSelect).toBeVisible();
+    expect(
+      await groupSelect.evaluate((element) => element.getBoundingClientRect().height),
+    ).toBeGreaterThanOrEqual(44);
     const saveBounds = await dialog.getByRole("button", { name: "Создать роль" }).boundingBox();
     expect(saveBounds).not.toBeNull();
     expect(saveBounds!.y).toBeGreaterThanOrEqual(bounds!.y);
     expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height);
-    await expectNoHorizontalOverflow(page, "/roles constructor @ 390x844");
+    await expectNoHorizontalOverflow(page, "/roles constructor touch @ 320x568");
+
+    await dialog.getByLabel("Название", { exact: true }).fill("Новая роль");
+    await page.keyboard.press("Escape");
+    const discardDialog = page.getByRole("dialog", { name: "Отменить изменения?" });
+    await expect(discardDialog).toBeVisible();
+    await discardDialog.getByRole("button", { name: "Выйти без сохранения" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(createRoleButton).toBeFocused();
   });
 
   test("keeps the login form usable at the narrow Windows app width", async ({ page }) => {

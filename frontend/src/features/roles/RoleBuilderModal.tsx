@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -24,11 +24,17 @@ interface Props {
   mode: "create" | "edit";
   role?: Role;
   onClose: () => void;
+  onCancel?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const roleFormSchema = z.object({
-  name: z.string().trim().min(1, "Введите название роли"),
-  description: z.string(),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Введите название роли")
+    .max(100, "Название должно быть не длиннее 100 символов"),
+  description: z.string().max(500, "Описание должно быть не длиннее 500 символов"),
 });
 
 type RoleFormValues = z.infer<typeof roleFormSchema>;
@@ -59,7 +65,13 @@ function groupBy(perms: Permission[]): { code: string; items: Permission[] }[] {
   return order.map((code) => ({ code, items: byGroup.get(code) ?? [] }));
 }
 
-export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
+export function RoleBuilderModal({
+  mode,
+  role,
+  onClose,
+  onCancel = onClose,
+  onDirtyChange,
+}: Props): JSX.Element {
   const permsQuery = usePermissionsQuery();
   const templatesQuery = useTemplatesQuery(mode === "create");
   const createRole = useCreateRole();
@@ -74,6 +86,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
   const [templateId, setTemplateId] = useState("");
   const [checked, setChecked] = useState<Set<string>>(() => new Set(role?.permissions ?? []));
   const [permissionSearch, setPermissionSearch] = useState("");
+  const [activeGroup, setActiveGroup] = useState("all");
   const [topError, setTopError] = useState<string | null>(null);
   const [pendingDangerousSubmission, setPendingDangerousSubmission] =
     useState<PendingDangerousSubmission | null>(null);
@@ -82,10 +95,14 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
   // neither expand it for support accounts nor infer delegation from JWT data.
   const visible = useMemo(() => permsQuery.data ?? [], [permsQuery.data]);
   const visibleCodes = useMemo(() => new Set(visible.map((p) => p.code)), [visible]);
+  const catalogGroups = useMemo(() => groupBy(visible), [visible]);
   const normalizedSearch = permissionSearch.trim().toLocaleLowerCase("ru-RU");
   const filteredVisible = useMemo(() => {
-    if (!normalizedSearch) return visible;
     return visible.filter((permission) => {
+      if (activeGroup !== "all" && permission.group_code !== activeGroup) {
+        return false;
+      }
+      if (!normalizedSearch) return true;
       const haystack = [
         permission.name,
         permission.description ?? "",
@@ -96,7 +113,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
         .toLocaleLowerCase("ru-RU");
       return haystack.includes(normalizedSearch);
     });
-  }, [normalizedSearch, visible]);
+  }, [activeGroup, normalizedSearch, visible]);
   const groups = useMemo(() => groupBy(filteredVisible), [filteredVisible]);
   const editBlocked =
     mode === "edit" &&
@@ -201,11 +218,29 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
   const selectedDangerousCount = visible.filter(
     (permission) => permission.is_dangerous && checked.has(permission.code),
   ).length;
+  const initialPermissions = useMemo(() => new Set(role?.permissions ?? []), [role?.permissions]);
+  const selectionDirty = !setsEqual(checked, initialPermissions);
+  const editorDirty = form.formState.isDirty || selectionDirty;
+  const selectedByGroup = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const permission of visible) {
+      if (checked.has(permission.code)) {
+        counts.set(permission.group_code, (counts.get(permission.group_code) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [checked, visible]);
+  const nameLength = form.watch("name").length;
+  const descriptionLength = form.watch("description").length;
+
+  useEffect(() => {
+    onDirtyChange?.(editorDirty);
+  }, [editorDirty, onDirtyChange]);
 
   return (
-    <form onSubmit={onSubmit} noValidate className="space-y-5">
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(240px,0.72fr)_minmax(0,1.28fr)]">
-        <div className="space-y-4">
+    <form onSubmit={onSubmit} noValidate className="min-w-0">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[17rem_13rem_minmax(0,1fr)] lg:gap-0">
+        <aside className="min-w-0 space-y-4 lg:border-r lg:border-border lg:pr-5">
           <div>
             <Label htmlFor="role-name">Название</Label>
             <Input
@@ -214,11 +249,15 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
               invalid={Boolean(form.formState.errors.name)}
               aria-describedby={form.formState.errors.name ? "role-name-error" : undefined}
               placeholder="Например: Старший кассир"
+              maxLength={100}
               {...form.register("name")}
             />
-            <FormError className="mt-1.5" id="role-name-error">
-              {form.formState.errors.name?.message}
-            </FormError>
+            <div className="mt-1.5 flex min-h-5 items-start justify-between gap-3">
+              <FormError id="role-name-error">{form.formState.errors.name?.message}</FormError>
+              <span className="ml-auto shrink-0 font-mono text-xs text-foreground-muted">
+                {nameLength}/100
+              </span>
+            </div>
           </div>
 
           <div>
@@ -226,9 +265,22 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
             <Textarea
               id="role-desc"
               disabled={editBlocked}
+              invalid={Boolean(form.formState.errors.description)}
+              aria-describedby={
+                form.formState.errors.description ? "role-description-error" : undefined
+              }
               placeholder="Коротко, для чего эта роль"
+              maxLength={500}
               {...form.register("description")}
             />
+            <div className="mt-1.5 flex min-h-5 items-start justify-between gap-3">
+              <FormError id="role-description-error">
+                {form.formState.errors.description?.message}
+              </FormError>
+              <span className="ml-auto shrink-0 font-mono text-xs text-foreground-muted">
+                {descriptionLength}/500
+              </span>
+            </div>
           </div>
 
           {mode === "create" && (
@@ -261,7 +313,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
             </div>
           )}
 
-          <div className="rounded-lg border border-border bg-background p-3">
+          <div className="rounded-lg border border-border bg-background p-3" aria-live="polite">
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium text-foreground-secondary">Выбрано функций</span>
               <span className="font-mono text-lg font-semibold text-foreground">
@@ -275,9 +327,53 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
               </div>
             )}
           </div>
-        </div>
+        </aside>
 
-        <section className="min-w-0" aria-labelledby="role-functions-heading">
+        <nav
+          aria-label="Разделы функций"
+          className="hidden min-w-0 border-r border-border px-4 lg:block"
+        >
+          <p className="mb-2 text-xs font-semibold text-foreground-muted">Разделы</p>
+          <div className="space-y-1">
+            <button
+              type="button"
+              aria-pressed={activeGroup === "all"}
+              aria-label={`Все функции: ${selectedCount} из ${visible.length} выбрано`}
+              className={groupNavigationClass(activeGroup === "all")}
+              onClick={() => setActiveGroup("all")}
+            >
+              <span>Все функции</span>
+              <span className="font-mono text-xs tabular-nums">
+                {selectedCount}/{visible.length}
+              </span>
+            </button>
+            {catalogGroups.map((group) => {
+              const selected = selectedByGroup.get(group.code) ?? 0;
+              const label = groupLabel(group.code);
+              return (
+                <button
+                  key={group.code}
+                  type="button"
+                  aria-pressed={activeGroup === group.code}
+                  aria-label={`${label}: ${selected} из ${group.items.length} выбрано`}
+                  className={groupNavigationClass(activeGroup === group.code)}
+                  onClick={() => setActiveGroup(group.code)}
+                >
+                  <span className="truncate">{label}</span>
+                  <span className="font-mono text-xs tabular-nums">
+                    {selected}/{group.items.length}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+
+        <section
+          className="min-w-0 lg:pl-5"
+          aria-labelledby="role-functions-heading"
+          data-testid="role-builder-workspace"
+        >
           <div className="sticky top-0 z-10 -mx-1 mb-3 flex flex-wrap items-end justify-between gap-3 bg-surface-raised px-1 py-2 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:py-0">
             <div>
               <h3 id="role-functions-heading" className="text-sm font-semibold text-foreground">
@@ -298,6 +394,24 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
                 onChange={(event) => setPermissionSearch(event.target.value)}
                 placeholder="Найти функцию"
               />
+            </div>
+            <div className="w-full lg:hidden">
+              <Label htmlFor="permission-group">Раздел функций</Label>
+              <Select
+                id="permission-group"
+                value={activeGroup}
+                onChange={(event) => setActiveGroup(event.target.value)}
+              >
+                <option value="all">
+                  Все функции ({selectedCount}/{visible.length})
+                </option>
+                {catalogGroups.map((group) => (
+                  <option key={group.code} value={group.code}>
+                    {groupLabel(group.code)} ({selectedByGroup.get(group.code) ?? 0}/
+                    {group.items.length})
+                  </option>
+                ))}
+              </Select>
             </div>
           </div>
 
@@ -321,24 +435,31 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
               {normalizedSearch ? "По этому запросу функций нет." : "Нет доступных функций."}
             </div>
           ) : (
-            <div className="space-y-3 lg:max-h-[58vh] lg:overflow-y-auto lg:pr-1">
+            <div className="overflow-hidden rounded-lg border border-border bg-surface">
               {groups.map((group) => {
                 const allSelected = group.items.every((permission) => checked.has(permission.code));
+                const selectedInGroup = group.items.filter((permission) =>
+                  checked.has(permission.code),
+                ).length;
                 return (
                   <fieldset
                     key={group.code}
-                    className="rounded-lg border border-border bg-surface p-3"
+                    className="border-0 border-t border-border p-0 first:border-t-0"
                   >
                     <legend className="sr-only">{groupLabel(group.code)}: функции</legend>
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <span className="text-sm font-semibold text-foreground">
-                        {groupLabel(group.code)}
+                    <div className="flex items-center justify-between gap-3 bg-background px-3 py-2.5 sm:px-4">
+                      <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground">
+                        <span className="truncate">{groupLabel(group.code)}</span>
+                        <span className="shrink-0 font-mono text-xs font-normal text-foreground-muted">
+                          {selectedInGroup}/{group.items.length}
+                        </span>
                       </span>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
                         disabled={editBlocked}
+                        aria-pressed={allSelected ? true : selectedInGroup > 0 ? "mixed" : false}
                         onClick={() => toggleGroup(group.items)}
                       >
                         {allSelected
@@ -350,16 +471,18 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
                             : "Выбрать все"}
                       </Button>
                     </div>
-                    <div className="space-y-1">
+                    <div className="divide-y divide-border">
                       {group.items.map((permission) => {
                         const descriptionId = `permission-${permission.code}-description`;
                         return (
                           <label
                             key={permission.code}
-                            className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors duration-fast ${
+                            className={`flex cursor-pointer items-start gap-3 border-l-2 px-3 py-3 transition-colors duration-fast sm:px-4 ${
                               permission.is_dangerous
-                                ? "border-danger/25 bg-danger-subtle/40 hover:border-danger/40"
-                                : "border-transparent hover:bg-foreground/[0.03]"
+                                ? "border-l-danger bg-danger-subtle/35 hover:bg-danger-subtle/55"
+                                : checked.has(permission.code)
+                                  ? "border-l-primary bg-primary/[0.035]"
+                                  : "border-l-transparent hover:bg-foreground/[0.025]"
                             }`}
                           >
                             <Checkbox
@@ -372,6 +495,7 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
                             <span className="min-w-0 flex-1 leading-tight">
                               <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-foreground">
                                 {permission.name}
+                                <Badge tone="neutral">{scopeLabel(permission.scope_type)}</Badge>
                                 {permission.is_dangerous && (
                                   <Badge tone="danger">опасное право</Badge>
                                 )}
@@ -399,15 +523,20 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
 
       {topError && (
         <p
-          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          className="mt-4 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
           role="alert"
         >
           {topError}
         </p>
       )}
 
-      <div className="sticky -bottom-4 z-sticky -mx-4 flex flex-wrap justify-end gap-2 border-t border-border bg-surface-raised px-4 pb-4 pt-3 sm:-mx-5 sm:px-5 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pb-0 lg:pt-4">
-        <Button type="button" variant="secondary" onClick={onClose}>
+      <div className="sticky -bottom-4 z-sticky -mx-4 mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-surface-raised px-4 pb-4 pt-3 sm:-mx-5 sm:px-5">
+        <p className="mr-auto text-xs text-foreground-muted" aria-live="polite">
+          Выбрано:{" "}
+          <strong className="font-mono font-semibold text-foreground">{selectedCount}</strong> из{" "}
+          {visible.length}
+        </p>
+        <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
         <Button
@@ -444,4 +573,28 @@ export function RoleBuilderModal({ mode, role, onClose }: Props): JSX.Element {
       />
     </form>
   );
+}
+
+function groupNavigationClass(active: boolean): string {
+  return [
+    "flex min-h-10 w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors duration-fast",
+    active
+      ? "bg-primary text-primary-foreground"
+      : "text-foreground-secondary hover:bg-foreground/5 hover:text-foreground",
+  ].join(" ");
+}
+
+function scopeLabel(scope: Permission["scope_type"]): string {
+  if (scope === "PLATFORM") return "Платформа";
+  if (scope === "TENANT_ALL") return "Вся аптека";
+  if (scope === "BRANCH_SET") return "По точкам";
+  return "Только свои";
+}
+
+function setsEqual(left: Set<string>, right: Set<string>): boolean {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
 }

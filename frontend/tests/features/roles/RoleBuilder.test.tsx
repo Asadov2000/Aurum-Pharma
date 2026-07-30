@@ -83,11 +83,24 @@ describe("RoleBuilderModal", () => {
   it("renders exactly the server catalogue and marks dangerous permissions", async () => {
     renderModal();
 
-    expect(await screen.findByText("Сотрудники")).toBeInTheDocument();
-    expect(screen.getByText("Касса")).toBeInTheDocument();
+    expect((await screen.findAllByText("Сотрудники")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Касса").length).toBeGreaterThan(0);
     expect(screen.getByText("Продажа товаров на кассе и оформление чеков.")).toBeInTheDocument();
     expect(screen.getByText("опасное право")).toBeInTheDocument();
+    expect(screen.getByText("По точкам")).toBeInTheDocument();
     expect(screen.queryByText(/Уровень роли/i)).not.toBeInTheDocument();
+  });
+
+  it("filters the server catalogue by a visible function group", async () => {
+    renderModal();
+    await screen.findByRole("checkbox", { name: /Продажа/ });
+
+    fireEvent.click(screen.getByRole("button", { name: /Касса: 0 из 1 выбрано/ }));
+
+    expect(screen.getByRole("checkbox", { name: /Продажа/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", { name: /Увольнение сотрудника/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("copies only catalogue permissions from a template", async () => {
