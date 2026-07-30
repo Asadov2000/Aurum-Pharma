@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Input, Label, PageHeader, Select, Skeleton, Switch, TableEmpty } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
+import { normalizePosPaymentMethods } from "@/features/foundation/paymentSettings";
 import { useRegistersQuery, useTenantSettingsQuery } from "@/features/foundation/queries";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,13 @@ export function POSPage(): JSX.Element {
   // the user can't read them).
   const settings = useTenantSettingsQuery();
   const draftTtlMin = settings.data?.draft_sale_lifetime_min ?? DRAFT_TTL_MIN;
+  const configuredPaymentMethods = settings.data?.pos_payment_methods;
+  const paymentMethods = useMemo(
+    () => normalizePosPaymentMethods(configuredPaymentMethods),
+    [configuredPaymentMethods],
+  );
+  const mixedPaymentEnabled = settings.data?.pos_mixed_payment_enabled ?? true;
+  const paymentSettingsLoading = settings.isLoading && settings.data === undefined;
   const [registerId, setRegisterId] = useState<string>(() => {
     return window.localStorage.getItem(STORAGE_KEY) ?? "";
   });
@@ -146,6 +154,9 @@ export function POSPage(): JSX.Element {
           mode={mode}
           soundOn={soundOn}
           draftTtlMin={draftTtlMin}
+          paymentMethods={paymentMethods}
+          mixedPaymentEnabled={mixedPaymentEnabled}
+          paymentSettingsLoading={paymentSettingsLoading}
           canOpenShift={canOpenShift}
           canCloseShift={canCloseShift}
           canSell={canSell}

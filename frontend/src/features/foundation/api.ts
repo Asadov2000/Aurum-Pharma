@@ -21,6 +21,21 @@ import {
   type TenantSettingsUpdatePayload,
   type TenantUpdatePayload,
 } from "./types";
+import { normalizePosPaymentMethods } from "./paymentSettings";
+
+type TenantSettingsResponse = Omit<
+  TenantSettings,
+  "pos_payment_methods" | "pos_mixed_payment_enabled"
+> &
+  Partial<Pick<TenantSettings, "pos_payment_methods" | "pos_mixed_payment_enabled">>;
+
+function normalizeTenantSettings(data: TenantSettingsResponse): TenantSettings {
+  return {
+    ...data,
+    pos_payment_methods: normalizePosPaymentMethods(data.pos_payment_methods),
+    pos_mixed_payment_enabled: data.pos_mixed_payment_enabled ?? true,
+  };
+}
 
 // ---- Tenants (admin) -------------------------------------------------------
 
@@ -63,15 +78,15 @@ export async function createTenantMember(
 // ---- Tenant settings -------------------------------------------------------
 
 export async function getTenantSettings(): Promise<TenantSettings> {
-  const { data } = await api.get<TenantSettings>("/tenant/settings");
-  return data;
+  const { data } = await api.get<TenantSettingsResponse>("/tenant/settings");
+  return normalizeTenantSettings(data);
 }
 
 export async function updateTenantSettings(
   payload: TenantSettingsUpdatePayload,
 ): Promise<TenantSettings> {
-  const { data } = await api.patch<TenantSettings>("/tenant/settings", payload);
-  return data;
+  const { data } = await api.patch<TenantSettingsResponse>("/tenant/settings", payload);
+  return normalizeTenantSettings(data);
 }
 
 // ---- Branches --------------------------------------------------------------

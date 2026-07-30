@@ -21,7 +21,7 @@ import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { useBranchesQuery, useRegistersQuery } from "@/features/foundation/queries";
 import { paymentMethodLabel } from "@/features/pos/labels";
-import { type PaymentMethod } from "@/features/pos/types";
+import { type PaymentMethodRead } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { SaleDetailModal } from "./SaleDetailModal";
@@ -288,7 +288,7 @@ export function SalesPage(): JSX.Element {
                   </TD>
                   <TD className="text-xs text-foreground-secondary">
                     {s.payment_methods
-                      .map((m) => paymentMethodLabel[m as PaymentMethod] ?? m)
+                      .map((m) => paymentMethodLabel[m as PaymentMethodRead] ?? m)
                       .join(", ") || "—"}
                   </TD>
                   <TD>

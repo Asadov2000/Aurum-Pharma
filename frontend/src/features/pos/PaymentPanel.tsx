@@ -4,7 +4,7 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 import { paymentMethodLabel, paymentMethodOptions } from "./labels";
-import { type Payment, type PaymentMethod } from "./types";
+import { type Payment, type PaymentMethod, type PaymentMethodRead } from "./types";
 
 const cashKeys = [
   "7",
@@ -42,7 +42,11 @@ export function PaymentPanel({
   completionUncertain,
   payingMethod,
   pendingPaymentMethod,
+  paymentMethods,
+  mixedPaymentEnabled,
+  paymentSettingsLoading,
   onPayTile,
+  onRetryPendingPayment,
   onClearPayments,
   onComplete,
   completedReceiptNumber,
@@ -60,9 +64,13 @@ export function PaymentPanel({
   isDraft: boolean;
   completing: boolean;
   completionUncertain: boolean;
-  payingMethod: PaymentMethod | null;
-  pendingPaymentMethod: PaymentMethod | null;
+  payingMethod: PaymentMethodRead | null;
+  pendingPaymentMethod: PaymentMethodRead | null;
+  paymentMethods: PaymentMethod[];
+  mixedPaymentEnabled: boolean;
+  paymentSettingsLoading: boolean;
   onPayTile: (method: PaymentMethod, amount?: string) => void;
+  onRetryPendingPayment?: () => void;
   onClearPayments?: () => void;
   onComplete: () => void;
   completedReceiptNumber: string | null;
@@ -72,8 +80,24 @@ export function PaymentPanel({
   touch?: boolean;
   completeHint?: string;
 }): JSX.Element {
-  const [activeMethod, setActiveMethod] = useState<PaymentMethod>("cash");
+  const [activeMethod, setActiveMethod] = useState<PaymentMethod>(
+    () => paymentMethods[0] ?? "cash",
+  );
   const [cashReceived, setCashReceived] = useState("");
+  const paymentMethodsKey = paymentMethods.join("|");
+  const recordedMethod = payments[0]?.payment_method;
+  const lockedMethod =
+    !mixedPaymentEnabled &&
+    recordedMethod !== undefined &&
+    isCurrentPaymentMethod(recordedMethod) &&
+    paymentMethods.includes(recordedMethod)
+      ? recordedMethod
+      : null;
+  const fallbackMethod = lockedMethod ?? paymentMethods[0] ?? "cash";
+  const selectedMethod =
+    paymentMethods.includes(activeMethod) && (lockedMethod === null || activeMethod === lockedMethod)
+      ? activeMethod
+      : fallbackMethod;
   const settled = remaining <= 0.001;
   const cashReceivedNumber = parseCash(cashReceived);
   const nonCashPaid = payments.reduce(
@@ -88,9 +112,21 @@ export function PaymentPanel({
   const change = Math.max(0, cashReceivedNumber - cashDue);
   const cashTenderInsufficient =
     isDraft &&
-    activeMethod === "cash" &&
+    selectedMethod === "cash" &&
     remaining > 0.001 &&
     cashReceivedNumber + 0.001 < remaining;
+  const pendingMethodVisible =
+    pendingPaymentMethod !== null &&
+    isCurrentPaymentMethod(pendingPaymentMethod) &&
+    paymentMethods.includes(pendingPaymentMethod);
+
+  useEffect(() => {
+    setActiveMethod((current) =>
+      paymentMethods.includes(current) && (lockedMethod === null || current === lockedMethod)
+        ? current
+        : fallbackMethod,
+    );
+  }, [fallbackMethod, lockedMethod, paymentMethods, paymentMethodsKey]);
 
   useEffect(() => {
     if (!isDraft || totalDue <= 0 || payments.length > 0) return;
@@ -99,10 +135,12 @@ export function PaymentPanel({
 
   const chooseMethod = (method: PaymentMethod) => {
     setActiveMethod(method);
+    if (paymentSettingsLoading) return;
     const amount =
       method === "cash"
         ? Math.min(Math.max(0, cashReceivedNumber - cashPaid), remaining)
         : Math.max(0, remaining);
+    if (!mixedPaymentEnabled && method === "cash" && amount + 0.001 < remaining) return;
     if (amount > 0) onPayTile(method, amount.toFixed(2));
   };
 
@@ -154,38 +192,81 @@ export function PaymentPanel({
 
       {isDraft ? (
         <>
-          <div className="grid grid-cols-3 border-b border-border">
-            {paymentMethodOptions.map((method) => (
-              <button
-                key={method}
-                type="button"
-                aria-pressed={activeMethod === method}
-                onClick={() => chooseMethod(method)}
-                disabled={
-                  settled ||
-                  payingMethod !== null ||
-                  totalDue <= 0 ||
-                  completing ||
-                  completionUncertain ||
-                  (pendingPaymentMethod !== null && pendingPaymentMethod !== method)
-                }
-                className={cn(
-                  "pos-tile flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 border-r border-border px-1 text-xs font-semibold text-foreground transition-colors duration-fast last:border-r-0 2xl:flex-row 2xl:gap-2 2xl:px-2 2xl:text-sm",
-                  touch && "min-h-16 text-base",
-                  activeMethod === method
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-surface hover:bg-primary/5",
-                  "disabled:cursor-not-allowed disabled:opacity-50",
-                )}
-              >
-                <PaymentMethodIcon method={method} active={activeMethod === method} />
-                <span className="whitespace-nowrap">{paymentMethodLabel[method]}</span>
-              </button>
-            ))}
-          </div>
+          {paymentSettingsLoading ? (
+            <div
+              className="flex min-h-14 items-center border-b border-border px-4 text-sm text-foreground-muted"
+              role="status"
+            >
+              Загрузка способов оплаты…
+            </div>
+          ) : (
+            <div
+              className="grid border-b border-border"
+              style={{
+                gridTemplateColumns: `repeat(${Math.max(1, paymentMethods.length)}, minmax(0, 1fr))`,
+              }}
+            >
+              {paymentMethodOptions
+                .filter((method) => paymentMethods.includes(method))
+                .map((method) => (
+                  <button
+                    key={method}
+                    type="button"
+                    aria-pressed={selectedMethod === method}
+                    onClick={() => chooseMethod(method)}
+                    disabled={
+                      settled ||
+                      payingMethod !== null ||
+                      totalDue <= 0 ||
+                      completing ||
+                      completionUncertain ||
+                      (lockedMethod !== null && lockedMethod !== method) ||
+                      (pendingPaymentMethod !== null && pendingPaymentMethod !== method)
+                    }
+                    className={cn(
+                      "pos-tile flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 border-r border-border px-1 text-xs font-semibold text-foreground transition-colors duration-fast last:border-r-0 2xl:flex-row 2xl:gap-2 2xl:px-2 2xl:text-sm",
+                      touch && "min-h-16 text-base",
+                      selectedMethod === method
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-surface hover:bg-primary/5",
+                      "disabled:cursor-not-allowed disabled:opacity-50",
+                    )}
+                  >
+                    <PaymentMethodIcon method={method} active={selectedMethod === method} />
+                    <span className="whitespace-nowrap">{paymentMethodLabel[method]}</span>
+                  </button>
+                ))}
+            </div>
+          )}
 
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
-            {activeMethod === "cash" ? (
+            {!mixedPaymentEnabled && paymentMethods.length > 1 ? (
+              <p className="mb-3 rounded-md border border-border bg-background px-3 py-2 text-xs leading-5 text-foreground-muted">
+                Смешанная оплата отключена. Весь чек оплачивается одним способом.
+              </p>
+            ) : null}
+
+            {pendingPaymentMethod !== null && !pendingMethodVisible ? (
+              <div className="mb-3 rounded-md border border-warning/40 bg-warning-subtle p-3 text-sm text-warning-foreground">
+                <p>
+                  Восстанавливается ранее начатая оплата:{" "}
+                  <strong>{paymentMethodLabel[pendingPaymentMethod]}</strong>.
+                </p>
+                {onRetryPendingPayment ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="mt-2"
+                    onClick={onRetryPendingPayment}
+                  >
+                    Повторить сохранённую операцию
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {selectedMethod === "cash" ? (
               <>
                 <label
                   htmlFor="cash-received"
@@ -248,10 +329,10 @@ export function PaymentPanel({
               </>
             ) : (
               <div className="flex min-h-56 flex-1 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border bg-background px-6 text-center">
-                <PaymentMethodIcon method={activeMethod} active />
+                <PaymentMethodIcon method={selectedMethod} active />
                 <div>
                   <p className="font-semibold text-foreground">
-                    {paymentMethodLabel[activeMethod]}
+                    {paymentMethodLabel[selectedMethod]}
                   </p>
                   <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-foreground">
                     {Math.max(0, remaining).toFixed(2)}{" "}
@@ -370,7 +451,7 @@ function PaymentMethodIcon({
 }): JSX.Element {
   const colorClass = active ? "text-current" : "text-primary";
 
-  if (method === "bank_transfer") {
+  if (method === "qr") {
     return (
       <svg
         aria-hidden="true"
@@ -402,6 +483,10 @@ function PaymentMethodIcon({
       )}
     </span>
   );
+}
+
+function isCurrentPaymentMethod(method: PaymentMethodRead): method is PaymentMethod {
+  return method === "cash" || method === "card" || method === "qr";
 }
 
 function CheckIcon(): JSX.Element {

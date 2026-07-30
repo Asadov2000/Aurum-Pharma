@@ -1,3 +1,5 @@
+import { type PosPaymentMethod } from "./paymentSettings";
+
 // Mirrors backend Pydantic schemas in app/domains/foundation/schemas.py.
 // Codegen lands in Phase 2 — until then we keep these by hand.
 
@@ -93,6 +95,8 @@ export interface TenantSettings {
   pin_mode_enabled: boolean;
   draft_sale_lifetime_min: number;
   prescription_warning_text: string;
+  pos_payment_methods: PosPaymentMethod[];
+  pos_mixed_payment_enabled: boolean;
   report_timezone: string;
   updated_at: string;
 }
@@ -106,6 +110,8 @@ export interface TenantSettingsUpdatePayload {
   pin_mode_enabled?: boolean;
   draft_sale_lifetime_min?: number;
   prescription_warning_text?: string;
+  pos_payment_methods?: PosPaymentMethod[];
+  pos_mixed_payment_enabled?: boolean;
 }
 
 export type BranchType = "pharmacy" | "pharmacy_post" | "kiosk";

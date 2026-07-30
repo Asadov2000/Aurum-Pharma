@@ -5,7 +5,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { paymentMethodLabel } from "@/features/pos/labels";
 import { ReceiptPrintModal } from "@/features/pos/ReceiptPrintModal";
-import { type PaymentMethod } from "@/features/pos/types";
+import { type PaymentMethodRead } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { useSaleDetailsQuery } from "./queries";
@@ -118,7 +118,10 @@ export function SaleDetailModal({
               <ul className="space-y-1 text-sm">
                 {data.payments.map((p) => (
                   <li key={p.id} className="flex flex-wrap justify-between gap-2">
-                    <span>{paymentMethodLabel[p.payment_method as PaymentMethod]}</span>
+                    <span>
+                      {paymentMethodLabel[p.payment_method as PaymentMethodRead] ??
+                        p.payment_method}
+                    </span>
                     <span className="font-mono">
                       {Number(p.amount).toFixed(2)} {p.currency}
                     </span>

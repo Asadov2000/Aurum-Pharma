@@ -60,7 +60,7 @@ interface CheckoutPayload {
   register_id: string;
   draft_sale_id: string;
   items: { catalog_id: string; qty: string }[];
-  payments: { payment_method: "cash" | "card" | "bank_transfer"; amount: string }[];
+  payments: { payment_method: "cash" | "card" | "qr"; amount: string }[];
   prescription?: { patient_name?: string | null };
 }
 
@@ -130,7 +130,7 @@ const CASH_PAYMENT = {
 
 function checkoutResult(
   operationId: string,
-  paymentMethod: "cash" | "card" | "bank_transfer" = "cash",
+  paymentMethod: "cash" | "card" | "qr" | "bank_transfer" = "cash",
 ) {
   return {
     event_id: "10000000-0000-4000-8000-000000000001",
@@ -162,7 +162,7 @@ function checkoutResult(
 
 function completedSale(
   operationId: string,
-  paymentMethod: "cash" | "card" | "bank_transfer" = "cash",
+  paymentMethod: "cash" | "card" | "qr" | "bank_transfer" = "cash",
 ) {
   return {
     ...SALE,
@@ -190,7 +190,15 @@ function renderArea() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <SaleArea registerId={REG} mode="keyboard" soundOn={false} draftTtlMin={30} />
+      <SaleArea
+        registerId={REG}
+        mode="keyboard"
+        soundOn={false}
+        draftTtlMin={30}
+        paymentMethods={["cash", "card", "qr"]}
+        mixedPaymentEnabled
+        paymentSettingsLoading={false}
+      />
     </QueryClientProvider>,
   );
 }

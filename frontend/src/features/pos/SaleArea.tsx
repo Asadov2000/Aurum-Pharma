@@ -58,6 +58,7 @@ import {
 import {
   type Payment,
   type PaymentMethod,
+  type PaymentMethodRead,
   type PrescriptionLogPayload,
   type SaleCheckoutResult,
   type SaleDetails,
@@ -73,6 +74,7 @@ type NumPadState =
 
 type FlashTone = "success" | "danger";
 type CheckoutRecoveryOutcome = "resolved" | "not-found" | "unavailable" | "conflict";
+type StagedPayment = Omit<Payment, "payment_method"> & { payment_method: PaymentMethod };
 
 function isDefiniteRejection(error: unknown): boolean {
   if (!isAxiosError(error) || error.response === undefined) return false;
@@ -127,6 +129,9 @@ export function SaleArea({
   mode,
   soundOn,
   draftTtlMin,
+  paymentMethods,
+  mixedPaymentEnabled,
+  paymentSettingsLoading,
   canOpenShift = true,
   canCloseShift = true,
   canSell = true,
@@ -136,6 +141,9 @@ export function SaleArea({
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
+  paymentMethods: PaymentMethod[];
+  mixedPaymentEnabled: boolean;
+  paymentSettingsLoading: boolean;
   canOpenShift?: boolean;
   canCloseShift?: boolean;
   canSell?: boolean;
@@ -155,6 +163,9 @@ export function SaleArea({
           mode={mode}
           soundOn={soundOn}
           draftTtlMin={draftTtlMin}
+          paymentMethods={paymentMethods}
+          mixedPaymentEnabled={mixedPaymentEnabled}
+          paymentSettingsLoading={paymentSettingsLoading}
           canCloseShift={canCloseShift}
           workstationControls={workstationControls}
         />
@@ -183,6 +194,9 @@ function ActiveWorkspace({
   mode,
   soundOn,
   draftTtlMin,
+  paymentMethods,
+  mixedPaymentEnabled,
+  paymentSettingsLoading,
   canCloseShift,
   workstationControls,
 }: {
@@ -191,6 +205,9 @@ function ActiveWorkspace({
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
+  paymentMethods: PaymentMethod[];
+  mixedPaymentEnabled: boolean;
+  paymentSettingsLoading: boolean;
   canCloseShift: boolean;
   workstationControls?: ReactNode;
 }): JSX.Element {
@@ -217,8 +234,8 @@ function ActiveWorkspace({
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [requiresRx, setRequiresRx] = useState(init.requiresRx);
   const [prescription, setPrescription] = useState<PrescriptionLogPayload | null>(null);
-  const [stagedPayments, setStagedPayments] = useState<Payment[]>([]);
-  const [payingMethod, setPayingMethod] = useState<PaymentMethod | null>(null);
+  const [stagedPayments, setStagedPayments] = useState<StagedPayment[]>([]);
+  const [payingMethod, setPayingMethod] = useState<PaymentMethodRead | null>(null);
   const [numpad, setNumpad] = useState<NumPadState | null>(null);
   const [flash, setFlash] = useState<FlashTone | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
@@ -264,6 +281,35 @@ function ActiveWorkspace({
     pendingCheckout !== null ||
     pendingPayment !== null ||
     (saleId !== null && sale === null);
+  const paymentMethodsKey = paymentMethods.join("|");
+
+  useEffect(() => {
+    if (stagedPayments.length === 0) return;
+
+    const hasUnavailableMethod = stagedPayments.some(
+      (payment) => !paymentMethods.includes(payment.payment_method),
+    );
+    const stagedTotal = stagedPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount),
+      0,
+    );
+    const violatesSingleMethod =
+      !mixedPaymentEnabled &&
+      (new Set(stagedPayments.map((payment) => payment.payment_method)).size > 1 ||
+        stagedTotal + 0.001 < totalDue);
+
+    if (!hasUnavailableMethod && !violatesSingleMethod) return;
+    setStagedPayments([]);
+    setTopError(
+      "Настройки способов оплаты изменились. Выберите доступный способ оплаты заново.",
+    );
+  }, [
+    mixedPaymentEnabled,
+    paymentMethods,
+    paymentMethodsKey,
+    stagedPayments,
+    totalDue,
+  ]);
 
   const clearDraft = useCallback(() => clearDraftStorage(registerId), [registerId]);
   const persistCompletedReceipt = useCallback(
@@ -571,13 +617,38 @@ function ActiveWorkspace({
     }
   };
 
-  const payLegacy = async (method: PaymentMethod, amount: string) => {
+  const payLegacy = async (method: PaymentMethodRead, amount: string) => {
     if (!saleId) return;
     const amt = Number(amount);
     if (!(amt > 0)) return;
     const normalizedAmount = amt.toFixed(2);
     const storedOperation =
       pendingPayment?.saleId === saleId ? pendingPayment : loadPendingPaymentOperation(saleId);
+    if (
+      !storedOperation &&
+      (method === "bank_transfer" || !paymentMethods.includes(method))
+    ) {
+      setTopError("Этот способ оплаты больше не доступен для новых операций.");
+      return;
+    }
+    const recordedMethod = recordedPayments[0]?.payment_method;
+    if (
+      !mixedPaymentEnabled &&
+      recordedMethod !== undefined &&
+      recordedMethod !== method
+    ) {
+      setTopError("Смешанная оплата отключена. Продолжите оплату тем же способом.");
+      return;
+    }
+    if (
+      !mixedPaymentEnabled &&
+      recordedMethod === undefined &&
+      !storedOperation &&
+      amt + 0.001 < remaining
+    ) {
+      setTopError("Смешанная оплата отключена. Внесите всю оставшуюся сумму одним способом.");
+      return;
+    }
     if (!storedOperation && amt - remaining > 0.001) {
       setTopError(`Сумма оплаты превышает остаток ${remaining.toFixed(2)} ${currency}.`);
       return;
@@ -598,7 +669,10 @@ function ActiveWorkspace({
       return;
     }
     const operation =
-      storedOperation ?? createPendingPaymentOperation(saleId, method, normalizedAmount);
+      storedOperation ??
+      (method === "bank_transfer"
+        ? null
+        : createPendingPaymentOperation(saleId, method, normalizedAmount));
     if (!operation) {
       setTopError(
         "Не удалось сохранить ключ безопасного повтора. Оплата не отправлена; перезапустите приложение.",
@@ -654,8 +728,19 @@ function ActiveWorkspace({
 
   const stagePayment = (method: PaymentMethod, amount: string) => {
     if (!saleId || recordedPayments.length > 0) return;
+    if (!paymentMethods.includes(method)) {
+      setTopError("Этот способ оплаты отключён в настройках аптеки.");
+      return;
+    }
     const numericAmount = Number(amount);
     if (!(numericAmount > 0)) return;
+    if (
+      !mixedPaymentEnabled &&
+      (stagedPayments.length > 0 || numericAmount + 0.001 < remaining)
+    ) {
+      setTopError("Смешанная оплата отключена. Внесите всю сумму одним способом.");
+      return;
+    }
     if (numericAmount - remaining > 0.001) {
       setTopError(
         `Сумма оплаты превышает остаток ${Math.max(0, remaining).toFixed(2)} ${currency}.`,
@@ -689,7 +774,14 @@ function ActiveWorkspace({
   // Touch: tapping a tile opens the keypad pre-filled with the remaining amount
   // (so partial payments are easy). Keyboard/desktop: one tap pays the rest.
   const onPayTile = (method: PaymentMethod, requestedAmount?: string) => {
-    if (!saleId || remaining <= 0.001) return;
+    if (
+      !saleId ||
+      remaining <= 0.001 ||
+      paymentSettingsLoading ||
+      !paymentMethods.includes(method)
+    ) {
+      return;
+    }
     if (
       completionUncertain ||
       checkoutUncertain ||
@@ -957,12 +1049,20 @@ function ActiveWorkspace({
     setNumpad(null);
   };
 
-  // Enter on a ready receipt pays the remaining balance in cash — the most
-  // common tender — in one keystroke (F3→Enter no longer required). F3/F4 and
-  // the sums/logic are unchanged; the handler below guards it so it never fires
-  // while typing in a field or with a dialog open.
-  const onEnterPayCash = () => {
-    if (isDraft && totalDue > 0 && remaining > 0.001) onPayTile("cash");
+  // Enter on a ready receipt uses the first owner-enabled payment method.
+  // The handler below guards it so it never fires while typing in a field or
+  // with a dialog open.
+  const onEnterPayDefault = () => {
+    const defaultMethod = paymentMethods[0];
+    if (
+      defaultMethod &&
+      !paymentSettingsLoading &&
+      isDraft &&
+      totalDue > 0 &&
+      remaining > 0.001
+    ) {
+      onPayTile(defaultMethod);
+    }
   };
 
   // Physical keyboard shortcuts stay available on touch-capable laptops.
@@ -971,13 +1071,13 @@ function ActiveWorkspace({
   const actionsRef = useRef({
     onNewSale,
     onComplete,
-    onEnterPayCash,
+    onEnterPayDefault,
     canDismissError: !saleEditingBlocked,
   });
   actionsRef.current = {
     onNewSale,
     onComplete,
-    onEnterPayCash,
+    onEnterPayDefault,
     canDismissError: !saleEditingBlocked,
   };
 
@@ -1023,7 +1123,7 @@ function ActiveWorkspace({
         case "Enter":
           if (dialogOpen || fieldHasContent || interactive) return;
           e.preventDefault();
-          actionsRef.current.onEnterPayCash();
+          actionsRef.current.onEnterPayDefault();
           break;
         case "Escape":
           if (!dialogOpen && actionsRef.current.canDismissError) setTopError(null);
@@ -1213,7 +1313,15 @@ function ActiveWorkspace({
                 completionUncertain={completionUncertain || checkoutUncertain}
                 payingMethod={payingMethod}
                 pendingPaymentMethod={pendingPayment?.paymentMethod ?? null}
+                paymentMethods={paymentMethods}
+                mixedPaymentEnabled={mixedPaymentEnabled}
+                paymentSettingsLoading={paymentSettingsLoading}
                 onPayTile={onPayTile}
+                onRetryPendingPayment={
+                  pendingPayment
+                    ? () => void payLegacy(pendingPayment.paymentMethod, pendingPayment.amount)
+                    : undefined
+                }
                 onClearPayments={
                   stagedPayments.length > 0 && recordedPayments.length === 0
                     ? () => setStagedPayments([])

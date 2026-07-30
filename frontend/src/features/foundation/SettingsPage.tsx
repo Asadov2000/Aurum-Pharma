@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import {
@@ -13,10 +13,17 @@ import {
   Label,
   PageHeader,
   Select,
+  Switch,
   Textarea,
 } from "@/components/ui";
 
 import { describeApiError } from "./errors";
+import {
+  DEFAULT_POS_PAYMENT_METHODS,
+  POS_PAYMENT_METHODS,
+  normalizePosPaymentMethods,
+  type PosPaymentMethod,
+} from "./paymentSettings";
 import { useTenantSettingsQuery, useUpdateTenantSettings } from "./queries";
 import { type ExpiredSaleMode, type RefundReasonMode } from "./types";
 
@@ -35,6 +42,24 @@ const refundModeLabel: Record<RefundReasonMode, string> = {
   off: "Не запрашивать",
 };
 
+const paymentMethodCopy: Record<
+  PosPaymentMethod,
+  { title: string; description: string }
+> = {
+  cash: {
+    title: "Наличные",
+    description: "Оплата купюрами и монетами с расчётом сдачи.",
+  },
+  card: {
+    title: "Карта",
+    description: "Оплата через банковский терминал.",
+  },
+  qr: {
+    title: "QR-код",
+    description: "Оплата по QR-коду через поддерживаемый банк.",
+  },
+};
+
 const schema = z
   .object({
     yellow: z.number().int().min(1).max(24),
@@ -46,6 +71,10 @@ const schema = z
     session_pos_minutes: z.number().int().min(30).max(1440),
     draft_sale_lifetime_min: z.number().int().min(5).max(240),
     prescription_warning_text: z.string(),
+    pos_payment_methods: z
+      .array(z.enum(POS_PAYMENT_METHODS))
+      .min(1, "Выберите хотя бы один способ оплаты"),
+    pos_mixed_payment_enabled: z.boolean(),
   })
   .refine((v) => v.yellow >= v.orange && v.orange >= v.red, {
     message: "Должно быть жёлтый ≥ оранжевый ≥ красный",
@@ -71,6 +100,8 @@ export function SettingsPage(): JSX.Element {
       session_pos_minutes: 480,
       draft_sale_lifetime_min: 30,
       prescription_warning_text: "",
+      pos_payment_methods: [...DEFAULT_POS_PAYMENT_METHODS],
+      pos_mixed_payment_enabled: true,
     },
   });
 
@@ -86,6 +117,8 @@ export function SettingsPage(): JSX.Element {
       session_pos_minutes: data.session_pos_minutes,
       draft_sale_lifetime_min: data.draft_sale_lifetime_min,
       prescription_warning_text: data.prescription_warning_text,
+      pos_payment_methods: normalizePosPaymentMethods(data.pos_payment_methods),
+      pos_mixed_payment_enabled: data.pos_mixed_payment_enabled ?? true,
     });
   }, [data, form]);
 
@@ -113,6 +146,8 @@ export function SettingsPage(): JSX.Element {
         session_pos_minutes: d.session_pos_minutes,
         draft_sale_lifetime_min: d.draft_sale_lifetime_min,
         prescription_warning_text: d.prescription_warning_text,
+        pos_payment_methods: d.pos_payment_methods,
+        pos_mixed_payment_enabled: d.pos_mixed_payment_enabled,
       });
       setOkBanner(true);
     } catch (err) {
@@ -148,6 +183,91 @@ export function SettingsPage(): JSX.Element {
   return (
     <form onSubmit={onSubmit} noValidate className="max-w-3xl space-y-6">
       <PageHeader title="Настройки" />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Оплата на кассе</CardTitle>
+          <p className="text-sm leading-5 text-foreground-muted">
+            Кассир увидит только включённые способы. Изменения применяются ко всем кассам аптеки.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <Controller
+            control={form.control}
+            name="pos_payment_methods"
+            render={({ field }) => (
+              <div
+                role="group"
+                aria-labelledby="pos-payment-methods-label"
+                aria-describedby="pos-payment-methods-help pos-payment-methods-error"
+                className="space-y-3"
+              >
+                <div>
+                  <p
+                    id="pos-payment-methods-label"
+                    className="text-sm font-medium text-foreground"
+                  >
+                    Доступные способы
+                  </p>
+                  <p id="pos-payment-methods-help" className="mt-1 text-xs text-foreground-muted">
+                    Минимум один способ должен оставаться включённым.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {POS_PAYMENT_METHODS.map((method) => {
+                    const checked = field.value.includes(method);
+                    const isLastEnabled = checked && field.value.length === 1;
+                    const copy = paymentMethodCopy[method];
+                    return (
+                      <div
+                        key={method}
+                        className="flex min-h-24 flex-col justify-between rounded-lg border border-border bg-surface-raised p-3"
+                      >
+                        <Switch
+                          id={`pos-payment-method-${method}`}
+                          label={copy.title}
+                          checked={checked}
+                          disabled={isLastEnabled}
+                          onBlur={field.onBlur}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? [...field.value, method]
+                              : field.value.filter((value) => value !== method);
+                            field.onChange(POS_PAYMENT_METHODS.filter((value) => next.includes(value)));
+                          }}
+                          aria-describedby={`pos-payment-method-${method}-description`}
+                          className="min-h-11 font-medium text-foreground"
+                        />
+                        <p
+                          id={`pos-payment-method-${method}-description`}
+                          className="text-xs leading-5 text-foreground-muted"
+                        >
+                          {copy.description}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <FormError id="pos-payment-methods-error">
+                  {form.formState.errors.pos_payment_methods?.message}
+                </FormError>
+              </div>
+            )}
+          />
+
+          <div className="flex min-h-16 flex-col justify-center gap-1 rounded-lg border border-border bg-background px-3 py-2">
+            <Switch
+              id="pos-mixed-payment-enabled"
+              label="Разрешить смешанную оплату"
+              className="min-h-11 font-medium text-foreground"
+              {...form.register("pos_mixed_payment_enabled")}
+            />
+            <p className="pl-12 text-xs leading-5 text-foreground-muted">
+              Кассир сможет разделить один чек между несколькими способами оплаты.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

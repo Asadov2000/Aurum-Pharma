@@ -16,7 +16,7 @@ import {
   receiptWidthLabel,
   saveReceiptWidth,
 } from "./receiptFormat";
-import { type PaymentMethod, type ReceiptData, type ReceiptWidth } from "./types";
+import { type PaymentMethodRead, type ReceiptData, type ReceiptWidth } from "./types";
 
 /**
  * Print/preview overlay for a single receipt. Renders the receipt as "paper"
@@ -183,7 +183,7 @@ function ReceiptDocument({
         {data.payments.map((p, i) => (
           <Row
             key={i}
-            label={paymentMethodLabel[p.method as PaymentMethod] ?? p.method}
+            label={paymentMethodLabel[p.method as PaymentMethodRead] ?? p.method}
             value={`${money(p.amount)} ${data.currency}`}
           />
         ))}
