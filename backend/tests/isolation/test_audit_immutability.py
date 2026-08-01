@@ -43,6 +43,30 @@ WHERE n.nspname = 'public'
   AND p.proname = 'trg_audit_log'
 """
 
+POS_FINANCIAL_AUDIT_TRIGGERS_SQL = """
+SELECT
+  tables.relname AS table_name,
+  triggers.tgname AS trigger_name,
+  trigger_functions.proname AS function_name,
+  triggers.tgenabled::TEXT AS enabled
+FROM pg_catalog.pg_trigger AS triggers
+JOIN pg_catalog.pg_class AS tables
+  ON tables.oid = triggers.tgrelid
+JOIN pg_catalog.pg_namespace AS schemas
+  ON schemas.oid = tables.relnamespace
+JOIN pg_catalog.pg_proc AS trigger_functions
+  ON trigger_functions.oid = triggers.tgfoid
+WHERE schemas.nspname = 'public'
+  AND tables.relname IN ('batch_movement', 'sale_item', 'sale_payment', 'shift')
+  AND triggers.tgname IN (
+    'trg_audit_batch_movement',
+    'trg_audit_sale_item',
+    'trg_audit_sale_payment',
+    'trg_audit_shift'
+  )
+ORDER BY tables.relname
+"""
+
 
 @pytest_asyncio.fixture
 async def support_engine_audit() -> AsyncIterator[AsyncEngine]:
@@ -75,6 +99,7 @@ async def test_audit_privileges_are_least_privilege(
     async with support_engine_audit.connect() as conn:
         table_privileges = (await conn.execute(text(AUDIT_TABLE_PRIVILEGES_SQL))).one()
         security = (await conn.execute(text(AUDIT_FUNCTION_SECURITY_SQL))).one()
+        pos_triggers = (await conn.execute(text(POS_FINANCIAL_AUDIT_TRIGGERS_SQL))).mappings().all()
 
     assert table_privileges.can_select is True
     assert table_privileges.can_insert is False
@@ -85,6 +110,32 @@ async def test_audit_privileges_are_least_privilege(
     assert security.can_append is True
     assert security.trigger_is_security_definer is True
     assert security.trigger_config == ["search_path=pg_catalog, public, pg_temp"]
+    assert [dict(row) for row in pos_triggers] == [
+        {
+            "table_name": "batch_movement",
+            "trigger_name": "trg_audit_batch_movement",
+            "function_name": "trg_audit_log",
+            "enabled": "O",
+        },
+        {
+            "table_name": "sale_item",
+            "trigger_name": "trg_audit_sale_item",
+            "function_name": "trg_audit_log",
+            "enabled": "O",
+        },
+        {
+            "table_name": "sale_payment",
+            "trigger_name": "trg_audit_sale_payment",
+            "function_name": "trg_audit_log",
+            "enabled": "O",
+        },
+        {
+            "table_name": "shift",
+            "trigger_name": "trg_audit_shift",
+            "function_name": "trg_audit_log",
+            "enabled": "O",
+        },
+    ]
 
 
 async def test_app_uses_validated_append_and_cannot_tamper(

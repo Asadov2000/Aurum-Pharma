@@ -50,4 +50,5 @@ export interface RefundPayload {
   items: RefundLine[];
   reason?: string | null;
   comment?: string | null;
+  external_refund_confirmed?: boolean;
 }

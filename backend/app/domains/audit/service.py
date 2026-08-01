@@ -50,7 +50,10 @@ SENSITIVE_FIELDS: set[str] = {
     "doctor_name",
     "doctor_license",
     "prescription_number",
+    "receipt_snapshot",
     "notes",
+    "comment",
+    "cashier_name",
     "contact_person",
     "purchase_price",
 }

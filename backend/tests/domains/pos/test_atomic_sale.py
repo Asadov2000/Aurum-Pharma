@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, ConflictError
 from app.domains.audit.models import AuditLog
+from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.models import BatchMovement
 from app.domains.pos.models import PrescriptionLog, Sale, SalePayment
 from app.domains.pos.repository import POSRepository
@@ -383,3 +385,42 @@ async def test_atomic_checkout_late_outbox_failure_rolls_back_savepoint(
     assert event is not None
     assert event.event_id == recovered.event_id
     assert event.sequence == 1, "A rolled-back checkout must not consume a stream position"
+
+
+async def test_atomic_checkout_requires_expired_stock_confirmation(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    scaffold = await pos_scaffold(sale_price=10, batch_qty=5)
+    foundation = FoundationRepository(db_session)
+    settings = await foundation.get_settings(scaffold["tenant"].id)
+    assert settings is not None
+    await foundation.update_settings(settings, expired_sale_mode="warning")
+    scaffold["batch"].expires_at = date(2000, 1, 1)
+    await db_session.flush()
+
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, scaffold)
+    operation_id = uuid4()
+
+    with pytest.raises(BusinessRuleError, match="requires cashier confirmation"):
+        async with db_session.begin_nested():
+            await service.checkout(
+                tenant_id=scaffold["tenant"].id,
+                register_id=scaffold["register"].id,
+                cashier_user_id=scaffold["cashier"].id,
+                operation_id=operation_id,
+                items=[(scaffold["item"].id, Decimal("1"))],
+                payments=[("cash", Decimal("10"), None)],
+            )
+
+    completed = await service.checkout(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=operation_id,
+        items=[(scaffold["item"].id, Decimal("1"))],
+        payments=[("cash", Decimal("10"), None)],
+        expired_sale_confirmed=True,
+    )
+    assert completed.operation_id == operation_id

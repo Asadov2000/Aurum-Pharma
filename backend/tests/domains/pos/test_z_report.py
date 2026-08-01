@@ -27,7 +27,12 @@ async def _complete_sale(
     )
     created, _ = await service.add_item(sale_id=sale.id, catalog_id=s["item"].id, qty=qty)
     for method, amount in payments:
-        await service.add_payment(sale_id=sale.id, payment_method=method, amount=amount)
+        await service.add_payment(
+            sale_id=sale.id,
+            payment_method=method,
+            amount=amount,
+            metadata={"external_confirmed": True} if method in {"card", "qr"} else None,
+        )
     if is_test:
         await service.repo.update_sale(sale, is_test=True)
     await service.complete(sale_id=sale.id)

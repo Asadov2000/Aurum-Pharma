@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Body, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -33,6 +33,7 @@ from app.domains.pos.schemas import (
     RefundCreate,
     SaleCheckoutRequest,
     SaleCheckoutResult,
+    SaleCompleteRequest,
     SaleCreate,
     SaleDetails,
     SaleItemAdd,
@@ -70,12 +71,24 @@ def _can_view_tenant_sales(user: CurrentUser) -> bool:
     return user.has_tenant_scope("sales.view.tenant")
 
 
+def _can_manage_tenant_sales(user: CurrentUser) -> bool:
+    return user.has_tenant_scope("pos.manage_sales")
+
+
+def _can_manage_tenant_shifts(user: CurrentUser) -> bool:
+    return user.has_tenant_scope("pos.manage_shifts")
+
+
 def _sale_view_branch_scope(user: CurrentUser) -> set[UUID] | None:
     return user.branch_scope_for("sales.view.tenant")
 
 
 def _sale_manage_branch_scope(user: CurrentUser) -> set[UUID] | None:
-    return user.branch_scope_for("sales.view.tenant")
+    return user.branch_scope_for("pos.manage_sales")
+
+
+def _shift_manage_branch_scope(user: CurrentUser) -> set[UUID] | None:
+    return user.branch_scope_for("pos.manage_shifts")
 
 
 def _effective_report_branch_id(user: CurrentUser, branch_id: UUID | None) -> UUID | None:
@@ -129,13 +142,13 @@ async def get_current_shift(
     shift = await service.get_current_shift(
         user_id=user.user_id,
         register_id=register_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_shifts(user),
         allowed_branch_ids=user.branch_scope_for_any(
             "pos.shift_open",
             "pos.shift_close",
             "pos.sell",
         ),
-        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+        allowed_manage_branch_ids=_shift_manage_branch_scope(user),
     )
     return ShiftRead.model_validate(shift) if shift is not None else None
 
@@ -193,9 +206,9 @@ async def close_shift(
         shift_id=shift_id,
         closing_cash_actual=payload.closing_cash_actual,
         closed_by_user_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_shifts(user),
         allowed_branch_ids=user.branch_scope_for("pos.shift_close"),
-        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+        allowed_manage_branch_ids=_shift_manage_branch_scope(user),
         notes=payload.notes,
     )
     return ShiftRead.model_validate(shift)
@@ -323,7 +336,7 @@ async def create_sale(
         tenant_id=_current_tenant_or_400(user),
         register_id=payload.register_id,
         cashier_user_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
@@ -369,7 +382,8 @@ async def checkout_sale(
             if payload.prescription is not None
             else None
         ),
-        can_manage_tenant=_can_view_tenant_sales(user),
+        expired_sale_confirmed=payload.expired_sale_confirmed,
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=allowed_branch_ids,
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
@@ -388,10 +402,27 @@ async def get_checkout_result(
         tenant_id=_current_tenant_or_400(user),
         operation_id=operation_id,
         actor_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
+
+
+@router.get(
+    "/sales/refund-operations/{operation_id}",
+    response_model=SaleRead,
+)
+async def get_refund_result(
+    operation_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.refund"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> SaleRead:
+    return_sale = await service.get_refund_result(
+        tenant_id=_current_tenant_or_400(user),
+        operation_id=operation_id,
+        allowed_branch_ids=user.branch_scope_for("pos.refund"),
+    )
+    return SaleRead.model_validate(return_sale)
 
 
 @router.get("/sales", response_model=SaleList)
@@ -470,6 +501,9 @@ async def get_sale(
         allowed_view_branch_ids=_sale_view_branch_scope(user),
     )
     lifecycle = await service.get_sale_lifecycle(sale)
+    refunded_quantities = (
+        await service.get_refunded_quantities(sale.id) if sale.sale_type == "sale" else {}
+    )
     return SaleDetails(
         **SaleRead.model_validate(sale).model_copy(update=lifecycle).model_dump(),
         items=[
@@ -478,6 +512,7 @@ async def get_sale(
                     "batch_number": batch_number,
                     "expires_at": expires_at,
                     "days_to_expiry": days_to_expiry,
+                    "refunded_qty": refunded_quantities.get(si.id, Decimal("0")),
                 }
             )
             for (si, batch_number, expires_at, days_to_expiry) in items
@@ -556,8 +591,9 @@ async def add_sale_item(
         sale_id=sale_id,
         catalog_id=payload.catalog_id,
         qty=payload.qty,
+        expired_sale_confirmed=payload.expired_sale_confirmed,
         actor_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
@@ -584,7 +620,7 @@ async def update_sale_item(
         item_id=item_id,
         qty=payload.qty,
         actor_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
@@ -605,7 +641,7 @@ async def delete_sale_item(
         sale_id=sale_id,
         item_id=item_id,
         actor_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
@@ -630,7 +666,7 @@ async def add_payment(
         amount=payload.amount,
         operation_id=payload.operation_id,
         actor_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
         metadata=payload.metadata,
@@ -647,13 +683,15 @@ async def complete_sale(
     sale_id: UUID,
     user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
+    payload: Annotated[SaleCompleteRequest | None, Body()] = None,
 ) -> SaleRead:
     sale = await service.complete(
         sale_id=sale_id,
         actor_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+        expired_sale_confirmed=(payload.expired_sale_confirmed if payload is not None else False),
     )
     return SaleRead.model_validate(sale)
 
@@ -674,7 +712,7 @@ async def add_prescription(
         sale_id=sale_id,
         fields=payload.model_dump(exclude_none=True),
         actor_id=user.user_id,
-        can_manage_tenant=_can_view_tenant_sales(user),
+        can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.handle_prescription"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
@@ -700,7 +738,10 @@ async def refund_sale(
         comment=payload.comment,
         cashier_user_id=user.user_id,
         operation_id=payload.operation_id,
+        external_refund_confirmed=payload.external_refund_confirmed,
+        can_manage_tenant=_can_manage_tenant_shifts(user),
         allowed_branch_ids=user.branch_scope_for("pos.refund"),
+        allowed_manage_branch_ids=_shift_manage_branch_scope(user),
     )
     return SaleRead.model_validate(return_sale)
 

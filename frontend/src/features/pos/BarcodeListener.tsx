@@ -42,8 +42,14 @@ export function BarcodeListener({
       const el = document.activeElement;
       // Don't capture while a real field (search/qty/payment) is focused.
       if (isEditable(el) && el !== sinkRef.current) return;
+      const hadBufferedCharacters = bufRef.current.chars.length > 0;
       const { buf, code } = feedScanKey(bufRef.current, e.key, performance.now());
       bufRef.current = buf;
+      if (e.key === "Enter" && hadBufferedCharacters) {
+        // A malformed, short or slow scanner burst must never fall through to
+        // the POS Enter shortcut and accidentally start a payment.
+        e.preventDefault();
+      }
       if (code) {
         e.preventDefault();
         onScanRef.current(code);

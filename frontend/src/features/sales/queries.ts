@@ -30,10 +30,12 @@ export function useRefundSale() {
   return useMutation({
     mutationFn: (args: { parentSaleId: string; payload: RefundPayload }) =>
       refundSale(args.parentSaleId, args.payload),
-    onSuccess: () => {
+    onSuccess: (returnSale, args) => {
       // The receipt list flips has_refund and a new return row appears;
       // batches get their qty restored.
       void qc.invalidateQueries({ queryKey: ["sales", "list"] });
+      void qc.invalidateQueries({ queryKey: salesKeys.detail(args.parentSaleId) });
+      void qc.invalidateQueries({ queryKey: salesKeys.detail(returnSale.id) });
       void qc.invalidateQueries({ queryKey: ["inventory", "batches"] });
     },
   });

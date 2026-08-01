@@ -947,6 +947,8 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
             tenant_id=tenant.id,
             user_id=manager.id,
             permission_codes={
+                "pos.manage_sales",
+                "pos.manage_shifts",
                 "pos.sell",
                 "pos.shift_close",
                 "sales.view.tenant",

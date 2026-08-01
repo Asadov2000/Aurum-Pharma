@@ -8,6 +8,7 @@ const addPayment = vi.fn();
 const completeSale = vi.fn();
 const checkoutSale = vi.fn();
 const getCheckoutResult = vi.fn();
+const findByBarcode = vi.fn();
 const requestDesktopCashDrawerOpen = vi.fn();
 
 vi.mock("@/features/pos/api", () => ({
@@ -35,7 +36,7 @@ vi.mock("@/features/catalog/queries", () => ({
 }));
 
 vi.mock("@/features/catalog/api", () => ({
-  findByBarcode: vi.fn(),
+  findByBarcode: (...args: unknown[]) => findByBarcode(...args),
 }));
 
 vi.mock("@/lib/desktopBridge", () => ({
@@ -60,8 +61,13 @@ interface CheckoutPayload {
   register_id: string;
   draft_sale_id: string;
   items: { catalog_id: string; qty: string }[];
-  payments: { payment_method: "cash" | "card" | "qr"; amount: string }[];
+  payments: {
+    payment_method: "cash" | "card" | "qr";
+    amount: string;
+    metadata?: { cash_received?: string; external_confirmed?: true };
+  }[];
   prescription?: { patient_name?: string | null };
+  expired_sale_confirmed?: boolean;
 }
 
 const SHIFT = {
@@ -221,7 +227,7 @@ function localStorageContents(): string {
 async function stageCashPayment(): Promise<void> {
   await screen.findByText(/Остаток/);
   fireEvent.keyDown(window, { key: "Enter" });
-  await screen.findByRole("button", { name: /Очистить оплату/i });
+  await screen.findByRole("button", { name: /Сбросить расчёт/i });
 }
 
 describe("SaleArea atomic checkout", () => {
@@ -233,8 +239,13 @@ describe("SaleArea atomic checkout", () => {
     completeSale.mockReset();
     checkoutSale.mockReset();
     getCheckoutResult.mockReset();
+    findByBarcode.mockReset();
     requestDesktopCashDrawerOpen.mockReset();
     getCurrentShift.mockResolvedValue(SHIFT);
+    findByBarcode.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404, data: { detail: "not found" } },
+    });
   });
 
   afterEach(() => {
@@ -274,6 +285,159 @@ describe("SaleArea atomic checkout", () => {
       saleId: SALE.id,
       status: "completed",
     });
+    expect(screen.getByRole("button", { name: /Закрыть смену/i })).toBeEnabled();
+  });
+
+  it("resets only the staged cash calculation and keeps the cart intact", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+
+    renderArea();
+    await stageCashPayment();
+    fireEvent.click(screen.getByRole("button", { name: /Сбросить расчёт/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("cart-item")).toBeInTheDocument();
+    expect(checkoutSale).not.toHaveBeenCalled();
+    expect(addPayment).not.toHaveBeenCalled();
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+      saleId: SALE.id,
+      stagedPayments: [],
+    });
+  });
+
+  it("restores a staged cash calculation with tender and keeps the cart locked", async () => {
+    let operationId = "";
+    window.localStorage.setItem(
+      draftKey(REG),
+      JSON.stringify({
+        saleId: SALE.id,
+        nameById: { "c-1": "Парацетамол" },
+        savedAt: Date.now(),
+        requiresRx: false,
+        stagedPayments: [
+          {
+            payment_method: "cash",
+            amount: "50.00",
+            metadata: { cash_received: "100.00" },
+          },
+        ],
+      }),
+    );
+    getSale
+      .mockResolvedValueOnce(SALE)
+      .mockImplementation(() => Promise.resolve(completedSale(operationId)));
+    checkoutSale.mockImplementation((payload: CheckoutPayload) => {
+      operationId = payload.operation_id;
+      return Promise.resolve(checkoutResult(operationId));
+    });
+
+    renderArea();
+
+    expect(
+      await screen.findByRole("button", { name: /Сбросить расчёт/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Получено наличными/i)).toHaveValue("100,00");
+    expect(screen.queryByRole("button", { name: /Удалить Парацетамол/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+
+    await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
+    expect((checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).payments).toEqual([
+      {
+        payment_method: "cash",
+        amount: "50.00",
+        metadata: { cash_received: "100.00" },
+      },
+    ]);
+  });
+
+  it("supports a partial card and QR mixed payment", async () => {
+    let operationId = "";
+    seedDraftSale(SALE.id);
+    getSale
+      .mockResolvedValueOnce(SALE)
+      .mockImplementation(() => Promise.resolve(completedSale(operationId, "card")));
+    checkoutSale.mockImplementation((payload: CheckoutPayload) => {
+      operationId = payload.operation_id;
+      return Promise.resolve(checkoutResult(operationId, "card"));
+    });
+
+    renderArea();
+    await screen.findByText(/Остаток/);
+    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    const cardPad = await screen.findByRole("dialog", { name: "Сумма оплаты" });
+    fireEvent.click(within(cardPad).getByRole("button", { name: "2" }));
+    fireEvent.click(within(cardPad).getByRole("button", { name: "0" }));
+    fireEvent.click(within(cardPad).getByRole("button", { name: "ОК" }));
+    const cardConfirmation = await screen.findByRole("dialog", {
+      name: "Подтвердить оплату картой",
+    });
+    expect(
+      within(cardConfirmation).getByText(/Aurum не списывает деньги самостоятельно/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(cardConfirmation).getByRole("button", { name: "Оплата подтверждена" }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Сбросить расчёт/i }));
+    const resetDialog = await screen.findByRole("dialog", {
+      name: "Сбросить расчёт оплаты",
+    });
+    expect(within(resetDialog).getByText(/внешнем терминале автоматически не отменится/i)).toBeInTheDocument();
+    fireEvent.click(within(resetDialog).getByRole("button", { name: "Отмена" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /QR/i }));
+    const qrPad = await screen.findByRole("dialog", { name: "Сумма оплаты" });
+    fireEvent.click(within(qrPad).getByRole("button", { name: "ОК" }));
+    const qrConfirmation = await screen.findByRole("dialog", {
+      name: "Подтвердить оплату QR",
+    });
+    fireEvent.click(
+      within(qrConfirmation).getByRole("button", { name: "Оплата подтверждена" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+
+    await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
+    expect((checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).payments).toEqual([
+      {
+        payment_method: "card",
+        amount: "20.00",
+        metadata: { external_confirmed: true },
+      },
+      {
+        payment_method: "qr",
+        amount: "30.00",
+        metadata: { external_confirmed: true },
+      },
+    ]);
+  });
+
+  it("does not stage an external payment until the cashier confirms terminal success", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Сумма оплаты" })).getByRole("button", {
+        name: "ОК",
+      }),
+    );
+
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Подтвердить оплату картой",
+    });
+    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Отмена" }));
+
+    expect(
+      screen.queryByRole("dialog", { name: "Подтвердить оплату картой" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(checkoutSale).not.toHaveBeenCalled();
   });
 
   it("does not submit or open the drawer twice while checkout is pending", async () => {
@@ -306,6 +470,52 @@ describe("SaleArea atomic checkout", () => {
     resolveCheckout(checkoutResult(operationId));
     await waitFor(() => expect(requestDesktopCashDrawerOpen).toHaveBeenCalledTimes(1));
     expect(checkoutSale).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires explicit confirmation when expiry is detected at checkout", async () => {
+    let operationId = "";
+    seedDraftSale(SALE.id);
+    getSale
+      .mockResolvedValueOnce(SALE)
+      .mockImplementation(() => Promise.resolve(completedSale(operationId)));
+    checkoutSale
+      .mockRejectedValueOnce({
+        isAxiosError: true,
+        response: {
+          status: 422,
+          data: {
+            error: {
+              details: { reason: "expired_sale_confirmation_required" },
+            },
+          },
+        },
+      })
+      .mockImplementation((payload: CheckoutPayload) => {
+        operationId = payload.operation_id;
+        return Promise.resolve(checkoutResult(operationId));
+      });
+
+    renderArea();
+    await stageCashPayment();
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Подтвердить просроченный товар",
+    });
+    expect(checkoutSale).toHaveBeenCalledTimes(1);
+    expect((checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).expired_sale_confirmed).toBe(
+      false,
+    );
+    fireEvent.click(
+      within(confirmation).getByRole("button", {
+        name: "Подтвердить и продолжить",
+      }),
+    );
+
+    await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(2));
+    expect((checkoutSale.mock.calls[1]?.[0] as CheckoutPayload).expired_sale_confirmed).toBe(
+      true,
+    );
   });
 
   it("requires confirmation before F2 clears a non-empty draft", async () => {
@@ -350,6 +560,16 @@ describe("SaleArea atomic checkout", () => {
     renderArea();
     await screen.findByText(/Остаток/);
     fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Сумма оплаты" })).getByRole("button", {
+        name: "ОК",
+      }),
+    );
+    fireEvent.click(
+      within(
+        await screen.findByRole("dialog", { name: "Подтвердить оплату картой" }),
+      ).getByRole("button", { name: "Оплата подтверждена" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
@@ -369,7 +589,7 @@ describe("SaleArea atomic checkout", () => {
     cardButton.focus();
     fireEvent.keyDown(cardButton, { key: "Enter" });
 
-    expect(screen.queryByRole("button", { name: /Очистить оплату/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
   });
 
   it("does not treat the barcode scanner terminator as a cash-payment shortcut", async () => {
@@ -387,7 +607,7 @@ describe("SaleArea atomic checkout", () => {
     fireEvent.keyDown(window, { key: "Enter" });
 
     await screen.findByText(/Штрихкод 1234567890123 не найден/i);
-    expect(screen.queryByRole("button", { name: /Очистить оплату/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
     expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
   });
 
@@ -499,6 +719,41 @@ describe("SaleArea atomic checkout", () => {
     });
   });
 
+  it("retries an ambiguous checkout with the same operation id after a temporary 404", async () => {
+    let completedOperationId = "";
+    seedDraftSale(SALE.id);
+    getSale.mockImplementation(() =>
+      Promise.resolve(
+        completedOperationId ? completedSale(completedOperationId) : SALE,
+      ),
+    );
+    checkoutSale
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockImplementation((payload: CheckoutPayload) => {
+        completedOperationId = payload.operation_id;
+        return Promise.resolve(checkoutResult(payload.operation_id));
+      });
+    getCheckoutResult.mockRejectedValue(apiError(404, "not committed yet"));
+
+    renderArea();
+    await stageCashPayment();
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+
+    await waitFor(() => expect(getCheckoutResult).toHaveBeenCalledTimes(1));
+    const firstPayload = checkoutSale.mock.calls[0]?.[0] as CheckoutPayload;
+    expect(loadPendingCheckoutOperation(SALE.id, REG)?.operationId).toBe(
+      firstPayload.operation_id,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+
+    await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(2));
+    const retriedPayload = checkoutSale.mock.calls[1]?.[0] as CheckoutPayload;
+    expect(retriedPayload.operation_id).toBe(firstPayload.operation_id);
+    expect(await screen.findByText(/Чек № R-atomic оформлен/i)).toBeInTheDocument();
+    expect(loadPendingCheckoutOperation(SALE.id, REG)).toBeNull();
+  });
+
   it("clears the operation marker after a definite server rejection", async () => {
     seedDraftSale(SALE.id);
     getSale.mockResolvedValue(SALE);
@@ -511,7 +766,7 @@ describe("SaleArea atomic checkout", () => {
     expect(await screen.findByText(/Не удалось оформить продажу/i)).toBeInTheDocument();
     expect(getCheckoutResult).not.toHaveBeenCalled();
     expect(loadPendingCheckoutOperation(SALE.id, REG)).toBeNull();
-    expect(screen.getByRole("button", { name: /Очистить оплату/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Сбросить расчёт/i })).toBeInTheDocument();
   });
 
   it("does not send checkout when its recovery marker cannot be persisted", async () => {
@@ -574,14 +829,16 @@ describe("SaleArea atomic checkout", () => {
     await screen.findByText(/Остаток/);
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
-    await waitFor(() => expect(completeSale).toHaveBeenCalledWith(SALE.id));
+    await waitFor(() => expect(completeSale).toHaveBeenCalledWith(SALE.id, false));
     expect(checkoutSale).not.toHaveBeenCalled();
     expect(requestDesktopCashDrawerOpen).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces a stored legacy payment payload conflict during reconciliation", async () => {
     seedDraftSale(SALE.id);
-    const pending = createPendingPaymentOperation(SALE.id, "card", "20.00");
+    const pending = createPendingPaymentOperation(SALE.id, "card", "20.00", {
+      external_confirmed: true,
+    });
     if (!pending) throw new Error("pending payment was not persisted");
     getSale.mockResolvedValue({
       ...SALE,

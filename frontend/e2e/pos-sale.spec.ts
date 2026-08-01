@@ -131,7 +131,7 @@ test.describe("POS sale (owner)", () => {
     await physicalBarcodeLookup;
     await physicalItemAdd;
     await expect(page.getByText("Оплачено 0.00", { exact: false })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Очистить оплату/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Сбросить расчёт/i })).toHaveCount(0);
   });
 
   test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({ page }) => {

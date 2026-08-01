@@ -20,7 +20,6 @@ from app.core.security import hash_code, hash_password, hash_token
 CRUD_TABLES = {
     "barcode",
     "batch",
-    "batch_movement",
     "branch",
     "catalog_import_job",
     "incoming_document",
@@ -45,6 +44,10 @@ CRUD_TABLES = {
     "tenant_subscription",
     "wizard_state",
     "write_off",
+}
+
+APPEND_ONLY_TABLES = {
+    "batch_movement",
 }
 
 READ_ONLY_TABLES = {
@@ -215,6 +218,7 @@ CUSTOM_FUNCTIONS = {
     "trg_authorization_user_status_mutation",
     "trg_capture_bootstrap_platform_access",
     "trg_guard_app_user_platform_flags",
+    "trg_guard_batch_movement_immutability",
     "trg_revoke_support_access_on_tenant_archive",
     "trg_guard_branch_writer",
     "trg_guard_platform_account_tenant_scope",
@@ -224,6 +228,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_role_permission_mutation",
     "trg_guard_sale_child_immutability",
     "trg_guard_sale_immutability",
+    "trg_require_sale_receipt_snapshot",
     "trg_guard_user_assignment_scope",
     "trg_guard_sync_activation_bootstrap",
     "trg_guard_sync_activation_bootstrap_chunk",
@@ -652,6 +657,7 @@ async def test_runtime_role_has_only_row_level_table_privileges(
 
     expected_relations = {
         **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
+        **{table: {"SELECT", "INSERT"} for table in APPEND_ONLY_TABLES},
         **{table: {"SELECT"} for table in READ_ONLY_TABLES | RUNTIME_VIEWS},
         **{table: set() for table in NO_ACCESS_TABLES},
     }

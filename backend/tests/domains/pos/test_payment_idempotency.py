@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, ConflictError
+from app.domains.audit.models import AuditLog
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.pos.models import SalePayment
 from app.domains.pos.repository import POSRepository
@@ -46,6 +47,140 @@ def test_payment_add_requires_uuid4() -> None:
         }
     )
     assert payload.operation_id == operation_id
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "operation_id": str(uuid4()),
+            "payment_method": "cash",
+            "amount": "0.00",
+        },
+        {
+            "operation_id": str(uuid4()),
+            "payment_method": "cash",
+            "amount": "10.001",
+        },
+        {
+            "operation_id": str(uuid4()),
+            "payment_method": "cash",
+            "amount": "1000000000000.00",
+        },
+        {
+            "operation_id": str(uuid4()),
+            "payment_method": "cash",
+            "amount": "10.00",
+            "unexpected": True,
+        },
+    ],
+)
+def test_payment_add_rejects_invalid_money_and_unknown_fields(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        PaymentAdd.model_validate(payload)
+
+
+async def test_payment_metadata_is_bounded_and_method_specific(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    scaffold = await pos_scaffold()
+    repo = POSRepository(db_session)
+    service = POSService(repo)
+    await service.open_shift(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        opened_by_user_id=scaffold["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    sale = await service.create_sale(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=sale.id,
+        catalog_id=scaffold["item"].id,
+        qty=Decimal("1"),
+    )
+
+    invalid: list[tuple[str, dict[str, object] | None]] = [
+        ("card", None),
+        ("card", {}),
+        ("card", {"external_confirmed": False}),
+        ("qr", None),
+        ("card", {"cash_received": "10.00"}),
+        ("cash", {"external_confirmed": True}),
+        ("cash", {"cash_received": "9.99"}),
+        ("cash", {"cash_received": "10"}),
+        ("cash", {"payload": "x" * 4096}),
+        ("cash", {"payload": object()}),
+    ]
+    for method, metadata in invalid:
+        with pytest.raises(BusinessRuleError):
+            await service.add_payment(
+                sale_id=sale.id,
+                payment_method=method,
+                amount=Decimal("10.00"),
+                operation_id=uuid4(),
+                metadata=metadata,
+            )
+
+    assert await repo.payments_total(sale.id) == Decimal("0")
+
+
+async def test_payment_audit_redacts_nested_comments_at_rest(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    scaffold = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    await service.open_shift(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        opened_by_user_id=scaffold["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    sale = await service.create_sale(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=sale.id,
+        catalog_id=scaffold["item"].id,
+        qty=Decimal("1"),
+    )
+    payment = await service.add_payment(
+        sale_id=sale.id,
+        payment_method="card",
+        amount=Decimal("10.00"),
+        operation_id=uuid4(),
+        metadata={
+            "external_confirmed": True,
+            "comment": "customer details",
+            "terminal": {"id": "T-1", "comment": "operator note"},
+        },
+    )
+
+    audit_entry = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.table_name == "sale_payment",
+                AuditLog.record_id == payment.id,
+                AuditLog.action == "INSERT",
+            )
+        )
+    ).scalar_one()
+
+    assert audit_entry.new_values is not None
+    metadata = audit_entry.new_values["metadata"]
+    assert metadata["external_confirmed"] is True
+    assert metadata["comment"] == "***"
+    assert metadata["terminal"]["comment"] == "***"
+    assert metadata["terminal"]["id"] == "T-1"
 
 
 async def test_payment_retry_returns_existing_for_canonical_payload(
@@ -147,7 +282,7 @@ async def test_reused_payment_operation_id_rejects_changed_payload(
             payment_method="card",
             amount=Decimal("10"),
             operation_id=operation_id,
-            metadata=metadata,
+            metadata={**metadata, "external_confirmed": True},
         )
     with pytest.raises(ConflictError):
         await service.add_payment(
@@ -218,6 +353,7 @@ async def test_different_operation_ids_cannot_exceed_sale_total(
             payment_method="card",
             amount=Decimal("5"),
             operation_id=uuid4(),
+            metadata={"external_confirmed": True},
         )
 
     assert await repo.payments_total(sale.id) == Decimal("6.00")
@@ -226,6 +362,7 @@ async def test_different_operation_ids_cannot_exceed_sale_total(
         payment_method="card",
         amount=Decimal("4"),
         operation_id=uuid4(),
+        metadata={"external_confirmed": True},
     )
     assert await repo.payments_total(sale.id) == sale.total_amount
 

@@ -7,7 +7,7 @@ event source without loading the same pytest plugin twice.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -35,6 +35,7 @@ async def pos_scaffold(db_session: AsyncSession):  # type: ignore[no-untyped-def
         dispensing_type: str = "otc",
         batch_qty: Decimal | float | int = 100,
         sale_price: Decimal | float | int = 10,
+        movement_created_at: datetime | None = None,
     ):
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
@@ -65,13 +66,18 @@ async def pos_scaffold(db_session: AsyncSession):  # type: ignore[no-untyped-def
             qty_initial=Decimal(str(batch_qty)),
             qty_remaining=Decimal("0"),
         )
+        movement_fields = {
+            "tenant_id": tenant.id,
+            "batch_id": batch.id,
+            "movement_type": "incoming",
+            "qty_delta": Decimal(str(batch_qty)),
+            "source_table": None,
+            "source_id": None,
+        }
+        if movement_created_at is not None:
+            movement_fields["created_at"] = movement_created_at
         await inventory_repo.insert_movement(
-            tenant_id=tenant.id,
-            batch_id=batch.id,
-            movement_type="incoming",
-            qty_delta=Decimal(str(batch_qty)),
-            source_table=None,
-            source_id=None,
+            **movement_fields,
         )
         await db_session.refresh(batch)
         cashier = AppUser(

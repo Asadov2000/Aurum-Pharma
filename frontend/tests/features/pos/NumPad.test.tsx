@@ -13,9 +13,18 @@ describe("NumPad", () => {
     expect(onSubmit).toHaveBeenCalledWith("12");
   });
 
-  it("backspace removes the last character", () => {
+  it("replaces a prefilled value with the first digit", () => {
     const onSubmit = vi.fn();
     render(<NumPad title="t" initial="5" onSubmit={onSubmit} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "7" }));
+    fireEvent.click(screen.getByRole("button", { name: "ОК" }));
+    expect(onSubmit).toHaveBeenCalledWith("7");
+  });
+
+  it("backspace removes the last entered character", () => {
+    const onSubmit = vi.fn();
+    render(<NumPad title="t" onSubmit={onSubmit} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
     fireEvent.click(screen.getByRole("button", { name: "7" }));
     fireEvent.click(screen.getByRole("button", { name: "⌫" }));
     fireEvent.click(screen.getByRole("button", { name: "ОК" }));
@@ -30,6 +39,25 @@ describe("NumPad", () => {
   it("does not submit an empty value", () => {
     const onSubmit = vi.fn();
     render(<NumPad title="t" onSubmit={onSubmit} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "ОК" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("does not submit zero or accept more than two decimal places", () => {
+    const onSubmit = vi.fn();
+    const first = render(<NumPad title="t" onSubmit={onSubmit} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "0" }));
+    fireEvent.click(screen.getByRole("button", { name: "." }));
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+    fireEvent.click(screen.getByRole("button", { name: "3" }));
+    fireEvent.click(screen.getByRole("button", { name: "ОК" }));
+    expect(onSubmit).toHaveBeenCalledWith("0.12");
+
+    onSubmit.mockClear();
+    first.unmount();
+    render(<NumPad title="t" onSubmit={onSubmit} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "0" }));
     fireEvent.click(screen.getByRole("button", { name: "ОК" }));
     expect(onSubmit).not.toHaveBeenCalled();
   });

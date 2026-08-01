@@ -34,14 +34,37 @@ load_secret AURUM_MIGRATOR_PASSWORD
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
-psql \
-    -v ON_ERROR_STOP=1 \
-    --single-transaction \
-    --host "${POSTGRES_HOST:-postgres}" \
-    --port "${POSTGRES_PORT:-5432}" \
-    --username "${POSTGRES_USER:-postgres}" \
-    --dbname "$POSTGRES_DB" \
-    --file "$script_dir/role-contract.sql"
+postgres_host="${POSTGRES_HOST:-postgres}"
+postgres_port="${POSTGRES_PORT:-5432}"
+attempt=1
+max_attempts=30
+
+# The official image briefly accepts connections on its temporary init server
+# before restarting PostgreSQL. Retry only connection failures; SQL errors must
+# still fail immediately so a broken role contract cannot be hidden.
+while :; do
+    set +e
+    psql \
+        -v ON_ERROR_STOP=1 \
+        --single-transaction \
+        --host "$postgres_host" \
+        --port "$postgres_port" \
+        --username "${POSTGRES_USER:-postgres}" \
+        --dbname "$POSTGRES_DB" \
+        --file "$script_dir/role-contract.sql"
+    status=$?
+    set -e
+
+    if [ "$status" -eq 0 ]; then
+        break
+    fi
+    if [ "$status" -ne 2 ] || [ "$attempt" -ge "$max_attempts" ]; then
+        exit "$status"
+    fi
+
+    attempt=$((attempt + 1))
+    sleep 1
+done
 
 unset \
     PGPASSWORD \

@@ -104,11 +104,12 @@ export function useCreateTenantMember() {
 
 // Settings
 
-export function useTenantSettingsQuery(enabled = true) {
+export function useTenantSettingsQuery(enabled = true, refetchOnWindowFocus = false) {
   return useQuery({
     queryKey: foundationKeys.settings,
     queryFn: getTenantSettings,
     enabled,
+    refetchOnWindowFocus,
   });
 }
 

@@ -24,11 +24,12 @@ async def _template_codes(db_session: AsyncSession, template_name: str) -> list[
 
 
 async def test_seed_permissions_count(db_session: AsyncSession) -> None:
-    """45 distinct permissions across 14 groups: 41 base (13 groups) + the
+    """47 distinct permissions across 14 groups: 41 base (13 groups) + the
     sales.view.* 'sales' group from migration 0014 (+1 group, +2 perms) +
-    roles.create / roles.update from migration 0018 (existing 'roles' group)."""
+    roles.create / roles.update from migration 0018 (existing 'roles' group) +
+    explicit POS sale and shift management permissions."""
     count = (await db_session.execute(select(func.count()).select_from(Permission))).scalar_one()
-    assert count == 45
+    assert count == 47
 
     groups = (
         await db_session.execute(select(func.count(func.distinct(Permission.group_code))))

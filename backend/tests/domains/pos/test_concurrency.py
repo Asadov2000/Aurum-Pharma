@@ -112,6 +112,7 @@ async def committed_pos(
         yield factory, context
     finally:
         guarded_tables = (
+            ("batch_movement", "trg_guard_batch_movement_immutability"),
             ("prescription_log", "trg_guard_prescription_log_immutability"),
             ("sale_payment", "trg_guard_sale_payment_immutability"),
             ("sale_item", "trg_guard_sale_item_immutability"),
@@ -569,13 +570,19 @@ async def test_close_and_complete_race_has_consistent_result(committed_pos) -> N
         shift = await session.get(Shift, context.shift_id)
         assert sale is not None
         assert shift is not None
-        assert shift.status == "closed"
-        if sale.status == "completed":
+        if shift.status == "closed":
             assert shift.totals is not None
-            assert shift.totals["sales_count"] == 1
-            assert await _movement_count(session, sale_id, "sale") == 1
+            if sale.status == "completed":
+                assert shift.totals["sales_count"] == 1
+                assert await _movement_count(session, sale_id, "sale") == 1
+            else:
+                assert sale.status == "draft"
+                assert shift.totals["sales_count"] == 0
+                assert await _movement_count(session, sale_id, "sale") == 0
         else:
-            assert sale.status == "draft"
-            assert shift.totals is not None
-            assert shift.totals["sales_count"] == 0
-            assert await _movement_count(session, sale_id, "sale") == 0
+            # Closing a shift that still contains an active draft is rejected.
+            # The concurrently completed sale remains valid and the cashier can
+            # close the shift again after this operation finishes.
+            assert shift.status == "open"
+            assert sale.status == "completed"
+            assert await _movement_count(session, sale_id, "sale") == 1

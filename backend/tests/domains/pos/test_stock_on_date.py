@@ -3,7 +3,7 @@ and the empty → valid-file case."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -58,7 +58,11 @@ async def test_stock_on_date_value_and_totals(db_session: AsyncSession, pos_scaf
 async def test_stock_on_date_excludes_movements_after_the_date(
     db_session: AsyncSession, pos_scaffold
 ) -> None:
-    s = await pos_scaffold(batch_qty=100, sale_price=10)
+    s = await pos_scaffold(
+        batch_qty=100,
+        sale_price=10,
+        movement_created_at=datetime.now(UTC) - timedelta(days=5),
+    )
     service = POSService(POSRepository(db_session))
     await service.open_shift(
         tenant_id=s["tenant"].id,
@@ -67,15 +71,6 @@ async def test_stock_on_date_excludes_movements_after_the_date(
         opening_cash=Decimal("0"),
     )
     await _sell(service, s, qty=Decimal("40"), paid=Decimal("400"))
-
-    # Backdate the +100 incoming to 5 days ago; the -40 sale stays today.
-    await db_session.execute(
-        text(
-            "UPDATE batch_movement SET created_at = now() - interval '5 days' "
-            "WHERE batch_id = :b AND movement_type = 'incoming'"
-        ),
-        {"b": str(s["batch"].id)},
-    )
 
     today = await _today(db_session)
     # 3 days ago: only the incoming counts → full 100 (the later sale is excluded).
@@ -117,16 +112,11 @@ async def test_stock_on_date_empty_is_valid_file(db_session: AsyncSession, pos_s
 async def test_stock_on_date_uses_tenant_timezone(db_session: AsyncSession, pos_scaffold) -> None:
     """A movement at 01:00 Dushanbe (= 20:00 UTC the previous day) counts toward
     the local day's stock, not the previous UTC day. Default tz Asia/Dushanbe."""
-    s = await pos_scaffold(batch_qty=100)
-    service = POSService(POSRepository(db_session))
-    # Incoming at 2026-06-15 01:00 Dushanbe == 2026-06-14 20:00 UTC.
-    await db_session.execute(
-        text(
-            "UPDATE batch_movement SET created_at = '2026-06-14 20:00:00+00' "
-            "WHERE batch_id = :b AND movement_type = 'incoming'"
-        ),
-        {"b": str(s["batch"].id)},
+    s = await pos_scaffold(
+        batch_qty=100,
+        movement_created_at=datetime(2026, 6, 14, 20, 0, tzinfo=UTC),
     )
+    service = POSService(POSRepository(db_session))
 
     # Local day 2026-06-15 sees the incoming → stock present.
     on_15 = await service.build_stock_on_date(
