@@ -17,6 +17,11 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
+const EMPTY_ASSIGNMENT_FORM: FormValues = {
+  role_id: "",
+  branch_id: "",
+  password_required: false,
+};
 
 export function AssignmentsPanel({
   user,
@@ -39,8 +44,14 @@ export function AssignmentsPanel({
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
   const form = useForm<FormValues>({
-    defaultValues: { role_id: "", branch_id: "", password_required: false },
+    defaultValues: EMPTY_ASSIGNMENT_FORM,
   });
+
+  const closeAddForm = () => {
+    form.reset(EMPTY_ASSIGNMENT_FORM);
+    setTopError(null);
+    setAddOpen(false);
+  };
 
   const onAdd = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
@@ -90,8 +101,7 @@ export function AssignmentsPanel({
           password_required: d.password_required,
         },
       });
-      form.reset({ role_id: "", branch_id: "", password_required: false });
-      setAddOpen(false);
+      closeAddForm();
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось назначить роль"));
     }
@@ -113,14 +123,14 @@ export function AssignmentsPanel({
   );
   const roleById = (roleId: string) => roles.data?.find((role) => role.id === roleId);
   const assignmentRoleName = (assignment: Assignment) =>
-    assignment.role_name ?? roleById(assignment.role_id)?.name ?? assignment.role_id.slice(0, 8);
+    assignment.role_name ?? roleById(assignment.role_id)?.name ?? "Недоступная роль";
   const canRevokeRole = (roleId: string): boolean => {
     const role = roleById(roleId);
     return Boolean(role && isManageableRole(role, tenantId));
   };
   const branchName = (branchId: string | null) =>
     branchId
-      ? (branches.data?.find((branch) => branch.id === branchId)?.name ?? branchId.slice(0, 8))
+      ? (branches.data?.find((branch) => branch.id === branchId)?.name ?? "Недоступная точка")
       : "Все точки аптеки";
   const activeAssignments = user.assignments.filter((assignment) => assignment.is_active);
   const revokedAssignments = user.assignments.filter((assignment) => !assignment.is_active);
@@ -130,7 +140,7 @@ export function AssignmentsPanel({
   const assignmentItem = (assignment: Assignment, showRevoke: boolean) => (
     <li
       key={assignment.id}
-      className="flex flex-col gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+      className="flex flex-col gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -140,7 +150,10 @@ export function AssignmentsPanel({
           </Badge>
           {assignment.password_required && <Badge tone="info">пароль при входе</Badge>}
         </div>
-        <p className="text-xs text-foreground-muted">{branchName(assignment.branch_id)}</p>
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-foreground-muted">
+          <ScopeIcon />
+          {branchName(assignment.branch_id)}
+        </p>
       </div>
       {showRevoke && canManage && canRevokeRole(assignment.role_id) && (
         <Button
@@ -161,10 +174,21 @@ export function AssignmentsPanel({
 
   return (
     <div className="space-y-4">
-      <div>
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border pb-4">
+        <div className="min-w-0">
+          <p className="break-words font-semibold text-foreground">{user.full_name}</p>
+          <p className="break-all text-sm text-foreground-muted">{user.email}</p>
+        </div>
+        <Badge tone={activeAssignments.length > 0 ? "success" : "warning"}>
+          Активных: {activeAssignments.length}
+        </Badge>
+      </div>
+
+      <section aria-labelledby="active-assignments-heading">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-foreground">Назначенные роли</h3>
-          <Badge tone="neutral">{activeAssignments.length} активных</Badge>
+          <h3 id="active-assignments-heading" className="text-sm font-semibold text-foreground">
+            Действующий доступ
+          </h3>
         </div>
         {activeAssignments.length === 0 ? (
           <p className="mt-2 rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-foreground-muted">
@@ -185,7 +209,7 @@ export function AssignmentsPanel({
             </ul>
           </details>
         )}
-      </div>
+      </section>
 
       {roles.error && (
         <p
@@ -252,7 +276,7 @@ export function AssignmentsPanel({
             </p>
           )}
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>
+            <Button type="button" variant="ghost" size="sm" onClick={closeAddForm}>
               Отмена
             </Button>
             <Button
@@ -272,7 +296,8 @@ export function AssignmentsPanel({
         !branches.error &&
         manageableRoles.length > 0 ? (
         <Button variant="secondary" onClick={() => setAddOpen(true)}>
-          + Назначить роль
+          <PlusIcon />
+          Назначить роль
         </Button>
       ) : canManage &&
         !roles.isLoading &&
@@ -315,5 +340,42 @@ export function AssignmentsPanel({
         }}
       />
     </div>
+  );
+}
+
+function PlusIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function ScopeIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      className="shrink-0"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
+      <circle cx="12" cy="10" r="2.5" />
+    </svg>
   );
 }

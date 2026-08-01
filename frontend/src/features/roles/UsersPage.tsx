@@ -1,10 +1,18 @@
-import { useEffect, useState } from "react";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
-  ActionMenu,
-  type ActionMenuItem,
   Badge,
+  Button,
   ConfigurableFilterBar,
   ConfirmDialog,
   Input,
@@ -14,21 +22,16 @@ import {
   Pagination,
   Select,
   SkeletonRows,
-  Table,
   TableEmpty,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
+import { cn } from "@/lib/utils";
 
-import { AssignmentsPanel } from "./AssignmentsPanel";
+import { EmployeeDirectory } from "./EmployeeDirectory";
 import {
   useOffboardUser,
   useRevokeUserSessions,
@@ -37,30 +40,66 @@ import {
   useUpdateUser,
   useUsersQuery,
 } from "./queries";
+import { isManageableRole } from "./roleAccess";
 import { type UserStatus, type UserWithAssignments } from "./types";
-import { UserProfileForm } from "./UserProfileForm";
+import { employeeCountLabel, userStatusLabel } from "./userPresentation";
 
 type Row = UserWithAssignments;
 type PendingAction = { type: "sessions" | "suspend" | "offboard"; user: Row };
 
 const PAGE_SIZE = 25;
+const AssignmentsPanel = lazy(async () => {
+  const module = await import("./AssignmentsPanel");
+  return { default: module.AssignmentsPanel };
+});
+const UserProfileForm = lazy(async () => {
+  const module = await import("./UserProfileForm");
+  return { default: module.UserProfileForm };
+});
 
-const statusTone: Record<UserStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
-  pending: "info",
-  active: "success",
-  suspended: "warning",
-  offboarded: "danger",
-};
+interface UserPanelLoadBoundaryProps {
+  children: ReactNode;
+  onClose: () => void;
+}
 
-const statusLabel: Record<UserStatus, string> = {
-  pending: "Ожидает активации",
-  active: "Активен",
-  suspended: "Приостановлен",
-  offboarded: "Уволен",
-};
+interface UserPanelLoadBoundaryState {
+  failed: boolean;
+}
 
-const isSuspended = (status: UserStatus): boolean => status === "suspended";
-const isOffboarded = (status: UserStatus): boolean => status === "offboarded";
+class UserPanelLoadBoundary extends Component<
+  UserPanelLoadBoundaryProps,
+  UserPanelLoadBoundaryState
+> {
+  override state: UserPanelLoadBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): UserPanelLoadBoundaryState {
+    return { failed: true };
+  }
+
+  override render(): ReactNode {
+    if (!this.state.failed) return this.props.children;
+
+    return (
+      <div
+        role="alert"
+        className="grid min-h-48 place-items-center rounded-lg border border-warning/30 bg-warning-subtle p-6 text-center"
+      >
+        <div className="max-w-sm">
+          <h3 className="text-base font-semibold text-foreground">Окно не загрузилось</h3>
+          <p className="mt-2 text-sm leading-6 text-foreground-secondary">
+            Проверьте подключение и обновите страницу.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Button variant="secondary" onClick={this.props.onClose}>
+              Закрыть
+            </Button>
+            <Button onClick={() => window.location.reload()}>Обновить страницу</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
 
 export function UsersPage(): JSX.Element {
   const { user } = useAuth();
@@ -87,11 +126,15 @@ export function UsersPage(): JSX.Element {
   const [branchFilter, setBranchFilter] = useState("");
   const [assignmentUserId, setAssignmentUserId] = useState<string | null>(null);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [profileDirty, setProfileDirty] = useState(false);
+  const [profileDiscardOpen, setProfileDiscardOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [activatingUserId, setActivatingUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const actionTriggers = useRef(new Map<string, HTMLButtonElement>());
+  const actionFocusUserId = useRef<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -120,6 +163,7 @@ export function UsersPage(): JSX.Element {
   const activateMutation = useUpdateUser();
 
   const rows = users.data?.items ?? [];
+  const total = users.data?.total ?? 0;
   const hasFilters = Boolean(q || status || roleFilter || branchFilter);
   const assignmentUser = assignmentUserId
     ? (rows.find((candidate) => candidate.id === assignmentUserId) ?? null)
@@ -127,11 +171,55 @@ export function UsersPage(): JSX.Element {
   const profileUser = profileUserId
     ? (rows.find((candidate) => candidate.id === profileUserId) ?? null)
     : null;
+  const catalogueFailures = [
+    canViewRoles && roles.error ? "роли" : null,
+    canViewBranches && branches.error ? "точки" : null,
+  ].filter((value): value is string => value !== null);
 
-  const roleName = (assignment: Row["assignments"][number]) =>
-    assignment.role_name ?? assignment.role_id.slice(0, 8);
+  const restoreActionFocus = useCallback(() => {
+    const targetId = actionFocusUserId.current;
+    actionFocusUserId.current = null;
+    if (!targetId) return;
+    requestAnimationFrame(() => actionTriggers.current.get(targetId)?.focus());
+  }, []);
+
+  const closeProfile = useCallback(() => {
+    setProfileDiscardOpen(false);
+    setProfileDirty(false);
+    setProfileUserId(null);
+    restoreActionFocus();
+  }, [restoreActionFocus]);
+
+  const requestProfileClose = useCallback(() => {
+    if (profileDirty) {
+      setProfileDiscardOpen(true);
+      return;
+    }
+    closeProfile();
+  }, [closeProfile, profileDirty]);
+
+  const closeAssignments = useCallback(() => {
+    setAssignmentUserId(null);
+    restoreActionFocus();
+  }, [restoreActionFocus]);
+
+  const openProfile = (member: Row) => {
+    actionFocusUserId.current = member.id;
+    setActionError(null);
+    setActionNotice(null);
+    setProfileDirty(false);
+    setProfileUserId(member.id);
+  };
+
+  const openAssignments = (member: Row) => {
+    actionFocusUserId.current = member.id;
+    setActionError(null);
+    setActionNotice(null);
+    setAssignmentUserId(member.id);
+  };
 
   const ask = (type: PendingAction["type"], target: Row) => {
+    actionFocusUserId.current = target.id;
     setActionError(null);
     setActionNotice(null);
     setPending({ type, user: target });
@@ -140,6 +228,7 @@ export function UsersPage(): JSX.Element {
   const runPending = async () => {
     if (!pending) return;
     setActionError(null);
+    const targetName = pending.user.full_name;
     try {
       if (pending.type === "sessions") {
         const result = await revokeSessionsMutation.mutateAsync(pending.user.id);
@@ -150,10 +239,13 @@ export function UsersPage(): JSX.Element {
         );
       } else if (pending.type === "suspend") {
         await suspendMutation.mutateAsync(pending.user.id);
+        setActionNotice(`Доступ сотрудника «${targetName}» приостановлен.`);
       } else {
         await offboardMutation.mutateAsync(pending.user.id);
+        setActionNotice(`Сотрудник «${targetName}» уволен.`);
       }
       setPending(null);
+      restoreActionFocus();
     } catch (error) {
       const fallback =
         pending.type === "sessions"
@@ -166,17 +258,25 @@ export function UsersPage(): JSX.Element {
   };
 
   const activateMembership = async (member: Row) => {
+    actionFocusUserId.current = member.id;
     setActionError(null);
+    setActionNotice(null);
     setActivatingUserId(member.id);
     try {
       await activateMutation.mutateAsync({
         id: member.id,
         payload: { status: "active" },
       });
+      setActionNotice(
+        member.status === "pending"
+          ? `Сотрудник «${member.full_name}» активирован.`
+          : `Доступ сотрудника «${member.full_name}» возобновлён.`,
+      );
     } catch (error) {
       setActionError(describeApiError(error, "Не удалось активировать сотрудника"));
     } finally {
       setActivatingUserId(null);
+      restoreActionFocus();
     }
   };
 
@@ -187,8 +287,18 @@ export function UsersPage(): JSX.Element {
   }
 
   return (
-    <div className="space-y-4">
-      <PageHeader title="Сотрудники" />
+    <div className="space-y-5">
+      <PageHeader
+        title="Сотрудники"
+        description="Сотрудники аптеки, их статусы и назначенные роли."
+        meta={
+          users.data && !users.isPlaceholderData
+            ? hasFilters
+              ? `Найдено: ${total}`
+              : `Всего: ${total}`
+            : undefined
+        }
+      />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -197,10 +307,12 @@ export function UsersPage(): JSX.Element {
             id: "search",
             label: "Поиск",
             content: (
-              <div className="w-64 sm:w-72">
+              <div>
                 <Label htmlFor="user_search">Поиск</Label>
                 <Input
                   id="user_search"
+                  type="search"
+                  autoComplete="off"
                   value={qInput}
                   onChange={(event) => setQInput(event.target.value)}
                   placeholder="ФИО, email или телефон"
@@ -228,12 +340,12 @@ export function UsersPage(): JSX.Element {
                     setStatus(event.target.value as UserStatus | "");
                     setPage(1);
                   }}
-                  className="w-48"
+                  className="w-full xl:w-48"
                 >
                   <option value="">Все статусы</option>
-                  {(Object.keys(statusLabel) as UserStatus[]).map((value) => (
+                  {(Object.keys(userStatusLabel) as UserStatus[]).map((value) => (
                     <option key={value} value={value}>
-                      {statusLabel[value]}
+                      {userStatusLabel[value]}
                     </option>
                   ))}
                 </Select>
@@ -255,15 +367,16 @@ export function UsersPage(): JSX.Element {
                 <Select
                   id="user_role_filter"
                   value={roleFilter}
+                  disabled={roles.isLoading || roles.isError}
                   onChange={(event) => {
                     setRoleFilter(event.target.value);
                     setPage(1);
                   }}
-                  className="w-52"
+                  className="w-full xl:w-52"
                 >
                   <option value="">Все роли</option>
                   {roles.data
-                    ?.filter((role) => role.is_active)
+                    ?.filter((role) => role.is_active && isManageableRole(role, tenantId))
                     .map((role) => (
                       <option key={role.id} value={role.id}>
                         {role.name}
@@ -288,11 +401,12 @@ export function UsersPage(): JSX.Element {
                 <Select
                   id="user_branch_filter"
                   value={branchFilter}
+                  disabled={branches.isLoading || branches.isError}
                   onChange={(event) => {
                     setBranchFilter(event.target.value);
                     setPage(1);
                   }}
-                  className="w-56"
+                  className="w-full xl:w-56"
                 >
                   <option value="">Все точки</option>
                   {branches.data?.map((branch) => (
@@ -321,201 +435,188 @@ export function UsersPage(): JSX.Element {
         }}
       />
 
-      {actionError && pending === null && (
-        <div
+      {catalogueFailures.length > 0 ? (
+        <InlineNotice
+          tone="warning"
           role="alert"
-          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              isLoading={roles.isFetching || branches.isFetching}
+              onClick={() => {
+                if (roles.error) void roles.refetch();
+                if (branches.error) void branches.refetch();
+              }}
+            >
+              Повторить
+            </Button>
+          }
         >
+          Не удалось загрузить справочник: {catalogueFailures.join(" и ")}. Основной список
+          сотрудников доступен.
+        </InlineNotice>
+      ) : null}
+
+      {actionError && pending === null ? (
+        <InlineNotice tone="danger" role="alert">
           {actionError}
-        </div>
-      )}
-      {actionNotice && (
-        <div
-          role="status"
-          className="rounded-lg border border-success/30 bg-success-subtle px-3 py-2 text-sm leading-5 text-success-foreground"
-        >
+        </InlineNotice>
+      ) : null}
+      {actionNotice ? (
+        <InlineNotice tone="success" role="status">
           {actionNotice}
-        </div>
-      )}
+        </InlineNotice>
+      ) : null}
 
-      {users.error ? (
-        <div
-          role="alert"
-          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
-        >
-          {describeApiError(users.error, "Не удалось загрузить сотрудников")}
+      <section className="space-y-3" aria-labelledby="employee-directory-heading">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="employee-directory-heading" className="text-base font-semibold text-foreground">
+              Команда аптеки
+            </h2>
+            <p className="mt-0.5 text-xs text-foreground-muted">
+              Контакты, рабочий статус и действующий доступ.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {users.isFetching && !users.isLoading ? (
+              <span role="status" className="text-xs text-foreground-muted">
+                Обновляем…
+              </span>
+            ) : null}
+            {users.data && !users.isPlaceholderData ? (
+              <Badge tone="neutral" aria-live="polite">
+                {employeeCountLabel(total)}
+              </Badge>
+            ) : null}
+          </div>
         </div>
-      ) : users.isLoading ? (
-        <SkeletonRows rows={6} />
-      ) : rows.length === 0 ? (
-        hasFilters ? (
-          <TableEmpty title="Ничего не найдено">Измените запрос или выбранные фильтры.</TableEmpty>
+
+        {users.error && (!users.data || users.isPlaceholderData) ? (
+          <InlineNotice
+            tone="danger"
+            role="alert"
+            action={
+              <Button
+                variant="secondary"
+                size="sm"
+                isLoading={users.isFetching}
+                onClick={() => void users.refetch()}
+              >
+                Повторить
+              </Button>
+            }
+          >
+            {describeApiError(users.error, "Не удалось загрузить сотрудников")}
+          </InlineNotice>
+        ) : users.isLoading ? (
+          <SkeletonRows rows={6} />
+        ) : rows.length === 0 ? (
+          hasFilters ? (
+            <TableEmpty title="Ничего не найдено">
+              Измените запрос или выбранные фильтры.
+            </TableEmpty>
+          ) : (
+            <TableEmpty>К аптеке пока не прикреплены сотрудники</TableEmpty>
+          )
         ) : (
-          <TableEmpty>К аптеке пока не прикреплены сотрудники</TableEmpty>
-        )
-      ) : (
-        <>
-          <Table>
-            <THead>
-              <TR>
-                <TH>Имя</TH>
-                <TH>Email</TH>
-                <TH>Статус</TH>
-                <TH>Роли</TH>
-                <TH>Последний вход</TH>
-                {showActions && <TH className="text-right">Действия</TH>}
-              </TR>
-            </THead>
-            <TBody>
-              {rows.map((member) => {
-                const activeAssignments = member.assignments.filter(
-                  (assignment) => assignment.is_active,
-                );
-                const isOwnerMembership = member.is_tenant_owner;
-                const protectsLifecycle = isOwnerMembership || member.id === user?.id;
-                const canEditMember = canUpdate && !isOffboarded(member.status);
-                const canActivateMember =
-                  canUpdate &&
-                  (member.status === "pending" || member.status === "suspended") &&
-                  !protectsLifecycle;
-                const canAssignMember =
-                  canAssign && member.status === "active" && !protectsLifecycle;
-                const canSuspendMember =
-                  canSuspend &&
-                  !protectsLifecycle &&
-                  !isSuspended(member.status) &&
-                  member.status !== "pending" &&
-                  !isOffboarded(member.status);
-                const canRevokeMemberSessions =
-                  canRevokeSessions &&
-                  member.id !== user?.id &&
-                  member.status === "active" &&
-                  (!isOwnerMembership || user?.is_developer === true);
-                const canOffboardMember =
-                  canOffboard && !protectsLifecycle && !isOffboarded(member.status);
-                const actions: ActionMenuItem[] = [];
-                if (canEditMember) {
-                  actions.push({
-                    label: "Профиль",
-                    onSelect: () => setProfileUserId(member.id),
-                  });
+          <>
+            {users.error ? (
+              <InlineNotice
+                tone="warning"
+                role="alert"
+                action={
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    isLoading={users.isFetching}
+                    onClick={() => void users.refetch()}
+                  >
+                    Повторить
+                  </Button>
                 }
-                if (canActivateMember) {
-                  actions.push({
-                    label: member.status === "pending" ? "Активировать" : "Возобновить",
-                    onSelect: () => void activateMembership(member),
-                  });
-                }
-                if (canAssignMember) {
-                  actions.push({
-                    label: "Роли",
-                    onSelect: () => setAssignmentUserId(member.id),
-                  });
-                }
-                if (canRevokeMemberSessions) {
-                  actions.push({
-                    label: "Завершить сеансы",
-                    onSelect: () => ask("sessions", member),
-                  });
-                }
-                if (canSuspendMember) {
-                  actions.push({
-                    label: "Приостановить",
-                    onSelect: () => ask("suspend", member),
-                  });
-                }
-                if (canOffboardMember) {
-                  actions.push({
-                    label: "Уволить",
-                    tone: "danger",
-                    onSelect: () => ask("offboard", member),
-                  });
-                }
-
-                return (
-                  <TR key={member.id}>
-                    <TD className="font-medium">
-                      <span className="inline-flex flex-wrap items-center gap-2">
-                        {member.full_name}
-                        {isOwnerMembership && <Badge tone="info">владелец</Badge>}
-                      </span>
-                    </TD>
-                    <TD>{member.email}</TD>
-                    <TD>
-                      <Badge tone={statusTone[member.status]}>{statusLabel[member.status]}</Badge>
-                    </TD>
-                    <TD>
-                      {activeAssignments.length === 0 ? (
-                        <span className="text-foreground-muted">—</span>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {activeAssignments.map((assignment) => (
-                            <Badge key={assignment.id} tone="neutral">
-                              {roleName(assignment)}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </TD>
-                    <TD>
-                      {member.last_login_at
-                        ? new Date(member.last_login_at).toLocaleString("ru-RU")
-                        : "—"}
-                    </TD>
-                    {showActions && (
-                      <TD className="w-16 text-right">
-                        {actions.length > 0 ? (
-                          <ActionMenu
-                            label={`Действия для ${member.full_name}`}
-                            items={actions}
-                            isLoading={
-                              users.isFetching ||
-                              (activateMutation.isPending && activatingUserId === member.id)
-                            }
-                          />
-                        ) : (
-                          <span className="text-foreground-muted">—</span>
-                        )}
-                      </TD>
-                    )}
-                  </TR>
-                );
-              })}
-            </TBody>
-          </Table>
-          <Pagination
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={users.data?.total ?? 0}
-            onPage={setPage}
-          />
-        </>
-      )}
+              >
+                Показаны последние загруженные данные. Обновить список не удалось.
+              </InlineNotice>
+            ) : null}
+            <EmployeeDirectory
+              rows={rows}
+              currentUserId={user?.id}
+              currentUserIsDeveloper={user?.is_developer === true}
+              canUpdate={canUpdate}
+              canSuspend={canSuspend}
+              canRevokeSessions={canRevokeSessions}
+              canOffboard={canOffboard}
+              canAssign={canAssign}
+              showActions={showActions}
+              activatingUserId={activateMutation.isPending ? activatingUserId : null}
+              registerActionTrigger={(userId, element) => {
+                if (element) actionTriggers.current.set(userId, element);
+                else actionTriggers.current.delete(userId);
+              }}
+              onProfile={openProfile}
+              onActivate={(member) => void activateMembership(member)}
+              onAssignments={openAssignments}
+              onRevokeSessions={(member) => ask("sessions", member)}
+              onSuspend={(member) => ask("suspend", member)}
+              onOffboard={(member) => ask("offboard", member)}
+            />
+            <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+          </>
+        )}
+      </section>
 
       <Modal
         open={profileUser !== null}
-        onClose={() => setProfileUserId(null)}
+        onClose={requestProfileClose}
         title={profileUser ? `Профиль: ${profileUser.full_name}` : ""}
+        className="sm:max-w-xl"
       >
-        {profileUser && (
-          <UserProfileForm user={profileUser} onClose={() => setProfileUserId(null)} />
-        )}
+        {profileUser ? (
+          <UserPanelLoadBoundary onClose={closeProfile}>
+            <Suspense fallback={<SkeletonRows rows={3} />}>
+              <UserProfileForm
+                user={profileUser}
+                onSaved={closeProfile}
+                onCancel={requestProfileClose}
+                onDirtyChange={setProfileDirty}
+              />
+            </Suspense>
+          </UserPanelLoadBoundary>
+        ) : null}
       </Modal>
 
       <Modal
         open={assignmentUser !== null}
-        onClose={() => setAssignmentUserId(null)}
+        onClose={closeAssignments}
         title={assignmentUser ? `Роли: ${assignmentUser.full_name}` : ""}
+        className="sm:max-w-2xl"
       >
-        {assignmentUser && (
-          <AssignmentsPanel
-            user={assignmentUser}
-            tenantId={tenantId}
-            canManage={canAssign}
-            onClose={() => setAssignmentUserId(null)}
-          />
-        )}
+        {assignmentUser ? (
+          <UserPanelLoadBoundary onClose={closeAssignments}>
+            <Suspense fallback={<SkeletonRows rows={4} />}>
+              <AssignmentsPanel
+                user={assignmentUser}
+                tenantId={tenantId}
+                canManage={canAssign}
+                onClose={closeAssignments}
+              />
+            </Suspense>
+          </UserPanelLoadBoundary>
+        ) : null}
       </Modal>
+
+      <ConfirmDialog
+        open={profileDiscardOpen}
+        title="Отменить изменения?"
+        message="Изменения профиля сотрудника не сохранятся."
+        cancelLabel="Продолжить редактирование"
+        confirmLabel="Выйти без сохранения"
+        variant="danger"
+        onCancel={() => setProfileDiscardOpen(false)}
+        onConfirm={closeProfile}
+      />
 
       <ConfirmDialog
         open={pending !== null}
@@ -538,14 +639,14 @@ export function UsersPage(): JSX.Element {
             ) : (
               <>Уволить «{pending?.user.full_name}»? Действие необратимо.</>
             )}
-            {actionError && (
+            {actionError ? (
               <span
                 role="alert"
                 className="mt-2 block rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-danger-foreground"
               >
                 {actionError}
               </span>
-            )}
+            ) : null}
           </>
         }
         confirmLabel={
@@ -565,8 +666,41 @@ export function UsersPage(): JSX.Element {
         onCancel={() => {
           setPending(null);
           setActionError(null);
+          restoreActionFocus();
         }}
       />
+    </div>
+  );
+}
+
+function InlineNotice({
+  tone,
+  role,
+  action,
+  children,
+}: {
+  tone: "success" | "warning" | "danger";
+  role: "alert" | "status";
+  action?: ReactNode;
+  children: ReactNode;
+}): JSX.Element {
+  const toneClass =
+    tone === "success"
+      ? "border-success/30 bg-success-subtle text-success-foreground"
+      : tone === "warning"
+        ? "border-warning/30 bg-warning-subtle text-warning-foreground"
+        : "border-danger/30 bg-danger-subtle text-danger-foreground";
+
+  return (
+    <div
+      role={role}
+      className={cn(
+        "flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm leading-5",
+        toneClass,
+      )}
+    >
+      <span className="min-w-0 flex-1">{children}</span>
+      {action}
     </div>
   );
 }

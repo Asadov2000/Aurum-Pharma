@@ -1,5 +1,14 @@
 import { createPortal } from "react-dom";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ForwardedRef,
+  type KeyboardEvent,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -18,15 +27,26 @@ interface ActionMenuProps {
 }
 
 const MENU_WIDTH = 224;
-const MENU_ITEM_HEIGHT = 32;
+// Conservative across compact, comfortable and touch density modes.
+const MENU_ITEM_HEIGHT = 48;
 const VIEWPORT_GUTTER = 8;
 
-export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps): JSX.Element {
+export const ActionMenu = forwardRef<HTMLButtonElement, ActionMenuProps>(function ActionMenu(
+  { label, items, isLoading = false },
+  forwardedRef,
+): JSX.Element {
   const menuId = useId();
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0 });
+  const setTriggerRef = useCallback(
+    (element: HTMLButtonElement | null) => {
+      triggerRef.current = element;
+      setForwardedRef(forwardedRef, element);
+    },
+    [forwardedRef],
+  );
 
   const closeMenu = (restoreFocus = false) => {
     setOpen(false);
@@ -120,10 +140,10 @@ export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps)
   return (
     <>
       <Button
-        ref={triggerRef}
+        ref={setTriggerRef}
         variant="ghost"
         size="sm"
-        className="h-9 w-9 px-0 text-lg leading-none"
+        className="h-[var(--control-height-sm)] w-[var(--control-height-sm)] px-0 text-lg leading-none"
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -147,28 +167,42 @@ export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps)
             style={position}
             onKeyDown={moveMenuFocus}
           >
-            {items.map((item) => (
-              <Button
+            {items.map((item, index) => (
+              <div
                 key={item.label}
-                role="menuitem"
-                tabIndex={-1}
-                variant="ghost"
-                size="sm"
                 className={cn(
-                  "w-full justify-start px-3 font-medium",
-                  item.tone === "danger" && "text-danger hover:bg-danger/10",
+                  item.tone === "danger" && index > 0 && "mt-1 border-t border-border pt-1",
                 )}
-                onClick={() => {
-                  setOpen(false);
-                  item.onSelect();
-                }}
               >
-                {item.label}
-              </Button>
+                <Button
+                  role="menuitem"
+                  tabIndex={-1}
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "w-full justify-start px-3 font-medium",
+                    item.tone === "danger" && "text-danger hover:bg-danger/10",
+                  )}
+                  onClick={() => {
+                    setOpen(false);
+                    item.onSelect();
+                  }}
+                >
+                  {item.label}
+                </Button>
+              </div>
             ))}
           </div>,
           document.body,
         )}
     </>
   );
+});
+
+function setForwardedRef<T>(ref: ForwardedRef<T>, value: T | null): void {
+  if (typeof ref === "function") {
+    ref(value);
+    return;
+  }
+  if (ref) (ref as { current: T | null }).current = value;
 }

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listUsers = vi.fn();
@@ -256,7 +256,7 @@ describe("UsersPage", () => {
 
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
-    fireEvent.click(await screen.findByRole("button", { name: "+ Назначить роль" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }));
     expect(screen.queryByRole("option", { name: "Aurum Administrator" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
@@ -283,7 +283,7 @@ describe("UsersPage", () => {
 
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
-    fireEvent.click(await screen.findByRole("button", { name: "+ Назначить роль" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }));
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
@@ -391,6 +391,60 @@ describe("UsersPage", () => {
         expect.any(AbortSignal),
       ),
     );
+  });
+
+  it("keeps a dense access summary when an employee has many roles", async () => {
+    const assignments = ["Кассир", "Фармацевт", "Кладовщик", "Менеджер"].map((name, index) => ({
+      ...USER_ACTIVE.assignments[0],
+      id: `assignment-${index}`,
+      role_id: `role-${index}`,
+      role_name: name,
+    }));
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments }]));
+    renderPage();
+
+    expect(await screen.findByText("Кассир")).toBeInTheDocument();
+    expect(screen.getByText("Фармацевт")).toBeInTheDocument();
+    expect(screen.getByText("+2")).toBeInTheDocument();
+    expect(screen.queryByText("Кладовщик")).not.toBeInTheDocument();
+    expect(screen.queryByText("Менеджер")).not.toBeInTheDocument();
+  });
+
+  it("warns before discarding profile edits and returns focus to the employee actions", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.update"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    const actionTrigger = await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Профиль" }));
+    fireEvent.change(await screen.findByLabelText("ФИО"), {
+      target: { value: "Иван Несохранённый" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+
+    const discardDialog = await screen.findByRole("dialog", { name: "Отменить изменения?" });
+    fireEvent.click(within(discardDialog).getByRole("button", { name: "Выйти без сохранения" }));
+
+    await waitFor(() => expect(actionTrigger).toHaveFocus());
+    expect(screen.queryByRole("dialog", { name: /Профиль:/ })).not.toBeInTheDocument();
+  });
+
+  it("offers a retry after the employee directory fails to load", async () => {
+    listUsers
+      .mockRejectedValueOnce(new Error("network unavailable"))
+      .mockResolvedValueOnce(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    expect(await screen.findByText("Не удалось загрузить сотрудников")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+
+    expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
+    expect(listUsers).toHaveBeenCalledTimes(2);
   });
 
   it("debounces private search values and sends filters in the request body contract", async () => {
