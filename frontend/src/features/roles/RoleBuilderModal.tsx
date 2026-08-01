@@ -243,7 +243,9 @@ export function RoleBuilderModal({
         }
       }
       setMobilePane("details");
-      if (firstInvalidField) form.setFocus(firstInvalidField);
+      if (firstInvalidField) {
+        window.setTimeout(() => form.setFocus(firstInvalidField), 0);
+      }
       return;
     }
     const codes = [...checked].filter((code) => visibleCodes.has(code));

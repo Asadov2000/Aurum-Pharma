@@ -328,7 +328,7 @@ describe("RoleBuilderModal", () => {
         "true",
       ),
     );
-    expect(screen.getByLabelText("Название")).toHaveFocus();
+    await waitFor(() => expect(screen.getByLabelText("Название")).toHaveFocus());
     expect(screen.getByText("Введите название роли")).toBeInTheDocument();
     expect(createRole).not.toHaveBeenCalled();
   });

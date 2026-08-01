@@ -129,8 +129,15 @@ test.describe("Interface layout", () => {
     expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height);
     await expectNoHorizontalOverflow(page, "/roles constructor touch @ 320x568");
 
-    await dialog.getByRole("button", { name: "О роли", exact: true }).click();
-    await dialog.getByLabel("Название", { exact: true }).fill("Новая роль");
+    await dialog.getByRole("button", { name: "Создать роль" }).click();
+    await expect(dialog.getByRole("button", { name: "О роли", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const roleName = dialog.getByLabel("Название", { exact: true });
+    await expect(roleName).toBeFocused();
+    await expect(dialog.getByText("Введите название роли")).toBeVisible();
+    await roleName.fill("Новая роль");
     await page.keyboard.press("Escape");
     const discardDialog = page.getByRole("dialog", { name: "Отменить изменения?" });
     await expect(discardDialog).toBeVisible();
