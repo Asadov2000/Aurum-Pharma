@@ -141,7 +141,10 @@ test.describe("Interface layout", () => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/login");
 
-    await expect(page.getByRole("heading", { level: 1, name: "Aurum Pharma" })).toBeVisible();
+    await expect(page.getByText("Aurum Pharma", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Вход в систему", exact: true }),
+    ).toBeVisible();
     await expect(page.getByLabel("Email")).toBeVisible();
     await expect(page.getByRole("button", { name: "Получить код" })).toBeVisible();
     await expectNoHorizontalOverflow(page, "/login @ 320x568");
