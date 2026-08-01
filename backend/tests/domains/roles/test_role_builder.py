@@ -13,7 +13,7 @@ from app.core.deps import get_db
 from app.core.errors import PermissionDeniedError, ValidationError
 from app.core.security import create_access_token
 from app.domains.audit.models import AuditLog
-from app.domains.roles.models import Role, RolePermission
+from app.domains.roles.models import Permission, Role, RolePermission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import CUSTOM_ROLE_LEGACY_LEVEL, RolesService
 from app.main import app
@@ -157,6 +157,45 @@ async def test_owner_cannot_grant_global_protected_or_unknown_permission(
             permission_codes=["missing.permission"],
         )
     assert unknown_error.value.details == {"permissions": ["missing.permission"]}
+
+
+async def test_tenant_role_never_receives_platform_scope_from_malformed_catalog(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    repo = RolesRepository(db_session)
+    service = RolesService(repo)
+    permission = await db_session.get(Permission, "pos.sell")
+    assert permission is not None
+    permission.scope_type = "PLATFORM"
+    permission.target_role_type = "tenant"
+    await db_session.flush()
+
+    owner_permissions = await _owner_permissions(repo, owner_role)
+    catalog = await service.list_permissions(
+        actor_id=owner.id,
+        tenant_id=tenant.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+    )
+    assert "pos.sell" not in {item.code for item in catalog}
+
+    with pytest.raises(PermissionDeniedError) as error:
+        await service.create_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            name="Некорректная платформенная роль",
+            description=None,
+            permission_codes=["pos.sell"],
+        )
+    assert error.value.details == {"permissions": ["pos.sell"]}
 
 
 async def test_protected_owner_role_cannot_be_edited(

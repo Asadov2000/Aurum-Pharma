@@ -86,9 +86,42 @@ describe("RoleBuilderModal", () => {
     expect((await screen.findAllByText("Сотрудники")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Касса").length).toBeGreaterThan(0);
     expect(screen.getByText("Продажа товаров на кассе и оформление чеков.")).toBeInTheDocument();
-    expect(screen.getByText("опасное право")).toBeInTheDocument();
+    expect(screen.getByText("критично")).toBeInTheDocument();
+    expect(screen.getByText("MFA")).toBeInTheDocument();
     expect(screen.getByText("По точкам")).toBeInTheDocument();
     expect(screen.queryByText(/Уровень роли/i)).not.toBeInTheDocument();
+  });
+
+  it("drops inactive and platform permissions from a malformed catalogue response", async () => {
+    listPermissions.mockResolvedValue([
+      PERMISSIONS[1],
+      {
+        ...PERMISSIONS[1],
+        code: "catalog.inactive",
+        name: "Неактивная функция",
+        is_active: false,
+      },
+      {
+        ...PERMISSIONS[1],
+        code: "platform.manage",
+        name: "Управление платформой",
+        target_role_type: "platform",
+        scope_type: "PLATFORM",
+      },
+      {
+        ...PERMISSIONS[1],
+        code: "platform.malformed",
+        name: "Некорректная платформенная функция",
+        target_role_type: "tenant",
+        scope_type: "PLATFORM",
+      },
+    ]);
+    renderModal();
+
+    expect(await screen.findByText("Продажа")).toBeInTheDocument();
+    expect(screen.queryByText("Неактивная функция")).not.toBeInTheDocument();
+    expect(screen.queryByText("Управление платформой")).not.toBeInTheDocument();
+    expect(screen.queryByText("Некорректная платформенная функция")).not.toBeInTheDocument();
   });
 
   it("filters the server catalogue by a visible function group", async () => {
@@ -127,6 +160,33 @@ describe("RoleBuilderModal", () => {
     expect(screen.queryByText("Увольнение сотрудника")).not.toBeInTheDocument();
   });
 
+  it("asks before a template replaces a manual permission selection", async () => {
+    listTemplates.mockResolvedValue([
+      {
+        id: "tpl1",
+        name: "Управляющий",
+        slug: "manager",
+        description: null,
+        is_system: true,
+        is_active: true,
+        permissions: ["users.delete"],
+      },
+    ]);
+    renderModal();
+
+    const sell = await screen.findByRole("checkbox", { name: /Продажа/ });
+    fireEvent.click(sell);
+    fireEvent.change(screen.getByLabelText(/Начать из шаблона/), {
+      target: { value: "tpl1" },
+    });
+
+    expect(screen.getByRole("dialog", { name: "Заменить выбранные функции?" })).toBeInTheDocument();
+    expect(sell).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Применить шаблон" }));
+    expect(screen.getByRole("checkbox", { name: /Увольнение сотрудника/ })).toBeChecked();
+    expect(sell).not.toBeChecked();
+  });
+
   it("does not infer extra permissions for a support account", async () => {
     listPermissions.mockResolvedValue([PERMISSIONS[1]]);
     renderModal();
@@ -147,6 +207,18 @@ describe("RoleBuilderModal", () => {
     const sell = screen.getByRole("checkbox", { name: /Продажа/ });
     fireEvent.click(screen.getByRole("button", { name: "Выбрать показанные" }));
     expect(sell).toBeChecked();
+  });
+
+  it("switches to a selected-only permission review", async () => {
+    renderModal();
+    const sell = await screen.findByRole("checkbox", { name: /Продажа/ });
+    fireEvent.click(sell);
+    fireEvent.click(screen.getByRole("button", { name: /Выбрано · 1/ }));
+
+    expect(screen.getByRole("checkbox", { name: /Продажа/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", { name: /Увольнение сотрудника/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("submits a role without a numeric level", async () => {
@@ -175,7 +247,7 @@ describe("RoleBuilderModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
 
     expect(
-      await screen.findByRole("dialog", { name: "Подтвердите опасные функции" }),
+      await screen.findByRole("dialog", { name: "Подтвердите расширение доступа" }),
     ).toBeInTheDocument();
     expect(createRole).not.toHaveBeenCalled();
 
@@ -188,11 +260,96 @@ describe("RoleBuilderModal", () => {
     });
   });
 
+  it("also confirms a permission marked requires_confirmation", async () => {
+    listPermissions.mockResolvedValue([
+      {
+        ...PERMISSIONS[1],
+        code: "reports.export",
+        group_code: "reports",
+        name: "Экспорт отчётов",
+        is_dangerous: false,
+        risk_level: "sensitive",
+        requires_confirmation: true,
+      },
+    ]);
+    renderModal();
+    fireEvent.change(await screen.findByLabelText("Название"), {
+      target: { value: "Аналитик" },
+    });
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Экспорт отчётов/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Подтвердите расширение доступа" }),
+    ).toBeInTheDocument();
+    expect(createRole).not.toHaveBeenCalled();
+  });
+
+  it("also confirms a permission that requires MFA when used", async () => {
+    listPermissions.mockResolvedValue([
+      {
+        ...PERMISSIONS[1],
+        code: "reports.export.full",
+        group_code: "reports",
+        name: "Полный экспорт",
+        risk_level: "critical",
+        requires_step_up: true,
+        requires_confirmation: false,
+      },
+    ]);
+    renderModal();
+    fireEvent.change(await screen.findByLabelText("Название"), {
+      target: { value: "Главный аналитик" },
+    });
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Полный экспорт/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Подтвердите расширение доступа" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/MFA при использовании/)).toBeInTheDocument();
+    expect(createRole).not.toHaveBeenCalled();
+  });
+
+  it("returns to role details and focuses the first invalid field", async () => {
+    renderModal();
+    await screen.findByText("Продажа");
+    fireEvent.click(screen.getByRole("button", { name: /Права доступа/ }));
+
+    expect(screen.getByRole("button", { name: /Права доступа/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "О роли" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(screen.getByLabelText("Название")).toHaveFocus();
+    expect(screen.getByText("Введите название роли")).toBeInTheDocument();
+    expect(createRole).not.toHaveBeenCalled();
+  });
+
   it("shows a catalogue error and disables submission", async () => {
     listPermissions.mockRejectedValue(new Error("catalogue failed"));
     renderModal();
 
     expect(await screen.findByText(/Не удалось загрузить доступные функции/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Создать роль" })).toBeDisabled();
+  });
+
+  it("does not let the keyboard shortcut bypass a loading catalogue", () => {
+    listPermissions.mockReturnValue(new Promise(() => {}));
+    renderModal();
+
+    const name = screen.getByLabelText("Название");
+    fireEvent.change(name, { target: { value: "Новая роль" } });
+    fireEvent.keyDown(name, { key: "Enter", ctrlKey: true });
+
+    expect(createRole).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Создать роль" })).toBeDisabled();
   });
 
@@ -250,13 +407,16 @@ describe("RoleBuilderModal", () => {
     });
 
     await screen.findByText("Продажа");
+    fireEvent.change(screen.getByLabelText(/Описание/), {
+      target: { value: "Обновлённое описание" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(updateRole).toHaveBeenCalledTimes(1));
     expect(updateRole).toHaveBeenCalledWith("role-1", {
       expected_version: 7,
       name: "Кассир",
-      description: null,
+      description: "Обновлённое описание",
       permissions: ["pos.sell"],
     });
   });

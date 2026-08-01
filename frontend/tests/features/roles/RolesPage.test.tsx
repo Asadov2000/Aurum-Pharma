@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listRoles = vi.fn();
@@ -31,7 +32,7 @@ vi.mock("@/components/AccessDeniedCard", () => ({
   AccessDeniedCard: ({ message }: { message: string }) => <div>{message}</div>,
 }));
 
-import { RolesPage } from "@/features/roles/RolesPage";
+import { RoleBuilderLoadBoundary, RolesPage } from "@/features/roles/RolesPage";
 
 const MANAGED_ROLE = {
   id: "role-managed",
@@ -132,7 +133,21 @@ describe("RolesPage", () => {
     renderPage();
 
     expect(await screen.findByText("Старший кассир")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ Создать роль" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Создать роль" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Изменить" })).not.toBeInTheDocument();
+  });
+
+  it("does not request the constructor catalogue for an assignment-only owner", async () => {
+    mockUser = {
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["roles.assign"],
+    };
+    renderPage();
+
+    expect(await screen.findByText("Старший кассир")).toBeInTheDocument();
+    expect(listPermissions).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Создать роль" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Изменить" })).not.toBeInTheDocument();
   });
 
@@ -202,6 +217,60 @@ describe("RolesPage", () => {
     expect(screen.queryByText("Aurum Administrator")).not.toBeInTheDocument();
   });
 
+  it("blocks editing when a role contains a code outside the loaded catalogue", async () => {
+    listRoles.mockResolvedValue([
+      {
+        ...MANAGED_ROLE,
+        permissions: ["pos.sell", "users.delete"],
+        has_hidden_permissions: false,
+      },
+    ]);
+    renderPage();
+
+    expect(await screen.findByText(/Изменение заблокировано/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Изменить" })).toBeDisabled();
+    expect(screen.queryByText("users.delete")).not.toBeInTheDocument();
+  });
+
+  it("fails closed when a tenant catalogue item has platform scope", async () => {
+    listPermissions.mockResolvedValue([
+      {
+        code: "pos.sell",
+        group_code: "pos",
+        name: "Продажа",
+        description: null,
+        is_dangerous: false,
+        is_active: true,
+        scope_type: "PLATFORM",
+        target_role_type: "tenant",
+        risk_level: "normal",
+        requires_step_up: false,
+        requires_confirmation: false,
+      },
+    ]);
+    renderPage();
+
+    expect(await screen.findByText(/Изменение заблокировано/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Изменить" })).toBeDisabled();
+  });
+
+  it("paginates long role lists without rendering every card", async () => {
+    listRoles.mockResolvedValue(
+      Array.from({ length: 9 }, (_, index) => ({
+        ...MANAGED_ROLE,
+        id: `role-${index + 1}`,
+        name: `Роль ${index + 1}`,
+      })),
+    );
+    renderPage();
+
+    expect(await screen.findByText("Роль 1")).toBeInTheDocument();
+    expect(screen.queryByText("Роль 9")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Вперёд/ }));
+    expect(screen.getByText("Роль 9")).toBeInTheDocument();
+    expect(screen.queryByText("Роль 1")).not.toBeInTheDocument();
+  });
+
   it("asks before closing a role draft with unsaved changes", async () => {
     mockUser = {
       home_tenant_id: "tenant-1",
@@ -211,7 +280,7 @@ describe("RolesPage", () => {
     renderPage();
 
     await screen.findByText("Старший кассир");
-    fireEvent.click(screen.getByRole("button", { name: "+ Создать роль" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
     fireEvent.change(await screen.findByLabelText("Название"), {
       target: { value: "Новая роль" },
     });
@@ -225,5 +294,30 @@ describe("RolesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выйти без сохранения" }));
     expect(screen.queryByRole("dialog", { name: "Создать роль" })).not.toBeInTheDocument();
     expect(createRole).not.toHaveBeenCalled();
+  });
+});
+
+function BrokenRoleBuilder(): ReactNode {
+  throw new Error("chunk failed");
+}
+
+describe("RoleBuilderLoadBoundary", () => {
+  it("contains a failed lazy builder instead of crashing the roles page", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onClose = vi.fn();
+
+    try {
+      render(
+        <RoleBuilderLoadBoundary onClose={onClose}>
+          <BrokenRoleBuilder />
+        </RoleBuilderLoadBoundary>,
+      );
+
+      expect(screen.getByRole("alert")).toHaveTextContent("Конструктор не загрузился");
+      fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

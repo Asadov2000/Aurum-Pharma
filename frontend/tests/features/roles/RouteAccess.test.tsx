@@ -113,6 +113,6 @@ describe("RolesPage direct access", () => {
     mockUser = ROLE_BUILDER;
     renderPage(<RolesPage />);
 
-    expect(await screen.findByRole("button", { name: "+ Создать роль" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Создать роль" })).toBeInTheDocument();
   });
 });
