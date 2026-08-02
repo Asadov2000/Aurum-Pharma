@@ -752,6 +752,21 @@ class RolesService:
                 details={"permissions": unavailable},
             )
 
+    async def _assert_assignment_target_is_not_owner(
+        self,
+        *,
+        tenant_id: UUID,
+        membership_id: UUID,
+    ) -> None:
+        ownership = await self.repo.get_active_ownership(
+            tenant_id=tenant_id,
+            membership_id=membership_id,
+        )
+        if ownership is not None:
+            raise PermissionDeniedError(
+                "Owner assignments require the protected ownership workflow"
+            )
+
     async def invite_user(
         self,
         *,
@@ -841,6 +856,10 @@ class RolesService:
                 "Roles can only be prepared for pending or active memberships",
                 details={"membership_status": membership.status},
             )
+        await self._assert_assignment_target_is_not_owner(
+            tenant_id=tenant_id,
+            membership_id=membership.id,
+        )
 
         self._assert_assignment_scope(
             branch_id=branch_id,
@@ -908,6 +927,10 @@ class RolesService:
             or assignment.tenant_id != tenant_id
         ):
             raise NotFoundError("Assignment not found")
+        await self._assert_assignment_target_is_not_owner(
+            tenant_id=tenant_id,
+            membership_id=assignment.membership_id,
+        )
         role = await self.repo.get_role(assignment.role_id)
         if role is None:
             raise NotFoundError("Role not found")

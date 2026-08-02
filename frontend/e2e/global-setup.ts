@@ -1,8 +1,7 @@
 // One-time setup for the disposable E2E database.
 //
-// The owner assignment cannot be created through the support API because
-// support users deliberately have no home tenant. This host-only setup uses
-// the disposable Postgres container and never runs against production.
+// The disposable seed owns creation of the protected owner relationship.
+// This host-only setup validates that invariant before the browser suite runs.
 
 import {
   assertDockerAvailable,
@@ -31,31 +30,34 @@ export default async function globalSetup(): Promise<void> {
   // Keep database preparation in one Docker call. Docker Desktop on Windows
   // can become unstable when the suite shells out repeatedly during startup.
   const tenantId = psql(`
-    SET SESSION AUTHORIZATION aurum_support;
-    SET app.support_session = 'true';
-
-    INSERT INTO user_assignment (user_id, tenant_id, role_id, is_active, password_required)
-    SELECT u.id, u.home_tenant_id, r.id, true, false
-    FROM app_user u, role r
-    WHERE lower(u.email) = 'owner@aurum.tj'
-      AND r.protected_kind = 'tenant_owner'
-      AND r.is_protected = true
-      AND r.is_system = false
-      AND r.tenant_id = u.home_tenant_id
-      AND u.home_tenant_id IS NOT NULL
-    ON CONFLICT (user_id, tenant_id, branch_id)
-      DO UPDATE SET is_active = true, role_id = EXCLUDED.role_id;
-
-    RESET app.support_session;
-    RESET SESSION AUTHORIZATION;
-
     DELETE FROM email_code
     WHERE email_lower IN ('dev@aurum.tj', 'owner@aurum.tj')
       AND created_at > now() - interval '1 minute';
 
-    SELECT home_tenant_id
-    FROM app_user
-    WHERE lower(email) = 'owner@aurum.tj'
+    SELECT u.home_tenant_id
+    FROM app_user u
+    JOIN tenant_membership membership
+      ON membership.tenant_id = u.home_tenant_id
+     AND membership.user_id = u.id
+     AND membership.status = 'active'
+    JOIN tenant_ownership ownership
+      ON ownership.tenant_id = u.home_tenant_id
+     AND ownership.membership_id = membership.id
+     AND ownership.is_active
+    JOIN user_assignment assignment
+      ON assignment.tenant_id = u.home_tenant_id
+     AND assignment.membership_id = membership.id
+     AND assignment.user_id = u.id
+     AND assignment.branch_id IS NULL
+     AND assignment.is_active
+    JOIN role r
+      ON r.id = assignment.role_id
+     AND r.tenant_id = u.home_tenant_id
+     AND r.protected_kind = 'tenant_owner'
+     AND r.is_protected = true
+     AND r.is_system = false
+    WHERE lower(u.email) = 'owner@aurum.tj'
+      AND u.home_tenant_id IS NOT NULL
     LIMIT 1;
   `);
   if (!tenantId) {
@@ -63,7 +65,7 @@ export default async function globalSetup(): Promise<void> {
   }
   process.env.E2E_TENANT_ID = tenantId;
 
-  // Drop effective-permission cache after repairing the owner assignment.
+  // Start every run without stale effective-permission cache entries.
   try {
     dockerExec(E2E_REDIS_CONTAINER, ["redis-cli", "FLUSHDB"]);
   } catch {

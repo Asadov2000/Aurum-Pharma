@@ -32,6 +32,8 @@ from app.domains.roles.models import (
     TenantOwnership,
     UserAssignment,
 )
+from app.domains.roles.repository import RolesRepository
+from app.domains.roles.service import RolesService
 from app.domains.suppliers.repository import SuppliersRepository
 from app.domains.suppliers.service import SuppliersService
 from app.main import app
@@ -57,7 +59,11 @@ async def _override_db(db_session: AsyncSession) -> None:
     app.dependency_overrides[get_db] = _override
 
 
-async def _seed_tenant_subjects(db_session: AsyncSession) -> tuple[Tenant, AppUser, AppUser]:
+async def _seed_tenant_subjects(
+    db_session: AsyncSession,
+    *,
+    admin_is_owner: bool = False,
+) -> tuple[Tenant, AppUser, AppUser]:
     foundation = FoundationService(FoundationRepository(db_session))
     nick = uuid4().hex[:8]
     tenant = await foundation.create_tenant(
@@ -95,13 +101,23 @@ async def _seed_tenant_subjects(db_session: AsyncSession) -> tuple[Tenant, AppUs
     )
     db_session.add_all([regular_membership, admin_membership])
     await db_session.flush()
-    db_session.add(
-        TenantOwnership(
-            tenant_id=tenant.id,
-            membership_id=admin_membership.id,
+    if admin_is_owner:
+        db_session.add(
+            TenantOwnership(
+                tenant_id=tenant.id,
+                membership_id=admin_membership.id,
+            )
         )
-    )
-    await db_session.flush()
+        await db_session.flush()
+        repo = RolesRepository(db_session)
+        owner_role = await RolesService(repo)._ensure_tenant_owner_role(tenant.id, admin.id)
+        await repo.insert_assignment(
+            user_id=admin.id,
+            tenant_id=tenant.id,
+            branch_id=None,
+            role_id=owner_role.id,
+            password_required=False,
+        )
     return tenant, regular, admin
 
 
@@ -512,21 +528,26 @@ async def test_tenant_reads_require_domain_permission(
 ) -> None:
     await _override_db(db_session)
     try:
-        tenant, regular, admin = await _seed_tenant_subjects(db_session)
-        await _assign_permissions(
+        owner_required = path in {"/api/v1/roles", "/api/v1/permissions"}
+        tenant, regular, admin = await _seed_tenant_subjects(
             db_session,
-            tenant_id=tenant.id,
-            user_id=admin.id,
-            permission_codes={
-                "branches.view",
-                "catalog.create",
-                "catalog.view",
-                "pos.shift_open",
-                "registers.view",
-                "settings.update",
-                "users.view",
-            },
+            admin_is_owner=owner_required,
         )
+        if not owner_required:
+            await _assign_permissions(
+                db_session,
+                tenant_id=tenant.id,
+                user_id=admin.id,
+                permission_codes={
+                    "branches.view",
+                    "catalog.create",
+                    "catalog.view",
+                    "pos.shift_open",
+                    "registers.view",
+                    "settings.update",
+                    "users.view",
+                },
+            )
         regular_token = _token(regular)
         admin_token = _token(admin)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
@@ -226,26 +227,24 @@ async def test_actor_cannot_edit_role_assigned_to_self(
     db_session: AsyncSession,
     make_tenant,
     make_owner,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tenant = await make_tenant()
-    owner, membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
     custom_role = Role(
         tenant_id=tenant.id,
-        name="Дополнительная роль владельца",
+        name="Self-managed role",
         level=CUSTOM_ROLE_LEGACY_LEVEL,
     )
     db_session.add(custom_role)
     await db_session.flush()
     await db_session.refresh(custom_role)
-    owner_assignment = (
-        await RolesRepository(db_session).list_assignments_for_user(
-            owner.id,
-            tenant_id=tenant.id,
-        )
-    )[0]
-    owner_assignment.role_id = custom_role.id
-    await db_session.flush()
     repo = RolesRepository(db_session)
+    monkeypatch.setattr(
+        repo,
+        "user_has_active_role",
+        AsyncMock(return_value=True),
+    )
 
     with pytest.raises(PermissionDeniedError, match="own active role"):
         await RolesService(repo).update_role(

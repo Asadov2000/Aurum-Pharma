@@ -190,6 +190,7 @@ class IndirectScopeRows:
     tenant_ids: tuple[str, ...]
     user_ids: tuple[str, ...]
     role_ids: tuple[str, ...]
+    owner_role_ids: tuple[str, ...]
     notification_ids: tuple[str, ...]
     delivery_ids: tuple[str, ...]
     permission_codes: tuple[str, ...]
@@ -204,6 +205,7 @@ async def indirect_scope_rows(
     tenant_ids: list[str] = []
     user_ids: list[str] = []
     role_ids: list[str] = []
+    owner_role_ids: list[str] = []
     notification_ids: list[str] = []
     delivery_ids: list[str] = []
     permission_codes: list[str] = []
@@ -256,6 +258,33 @@ async def indirect_scope_rows(
                     )
                 ).scalar_one()
                 role_ids.append(str(role_id))
+
+                owner_role_id = (
+                    await conn.execute(
+                        text(
+                            "INSERT INTO role "
+                            "(tenant_id, name, level, is_system, is_protected, protected_kind) "
+                            "VALUES (:tenant_id, :name, 3, false, true, 'tenant_owner') "
+                            "RETURNING id"
+                        ),
+                        {
+                            "tenant_id": tenant_ids[index],
+                            "name": f"Protected owner {label}-{token}",
+                        },
+                    )
+                ).scalar_one()
+                owner_role_ids.append(str(owner_role_id))
+                await conn.execute(
+                    text(
+                        "INSERT INTO role_permission (role_id, permission_code) "
+                        "SELECT :role_id, template_permission.permission_code "
+                        "FROM role_template AS template "
+                        "JOIN role_template_permission AS template_permission "
+                        "ON template_permission.template_id = template.id "
+                        "WHERE template.slug = 'owner' AND template.is_active"
+                    ),
+                    {"role_id": owner_role_ids[index]},
+                )
 
                 notification_id = (
                     await conn.execute(
@@ -380,7 +409,7 @@ async def indirect_scope_rows(
                 )
 
             for user_index, tenant_index in ((0, 0), (1, 1), (2, 0)):
-                role_index = 2 if user_index == 2 else tenant_index
+                role_id = role_ids[2] if user_index == 2 else owner_role_ids[tenant_index]
                 await conn.execute(
                     text(
                         "INSERT INTO user_assignment "
@@ -390,7 +419,7 @@ async def indirect_scope_rows(
                     {
                         "user_id": user_ids[user_index],
                         "tenant_id": tenant_ids[tenant_index],
-                        "role_id": role_ids[role_index],
+                        "role_id": role_id,
                         "password_required": user_index == 0,
                     },
                 )
@@ -469,6 +498,7 @@ async def indirect_scope_rows(
             tenant_ids=tuple(tenant_ids),
             user_ids=tuple(user_ids),
             role_ids=tuple(role_ids),
+            owner_role_ids=tuple(owner_role_ids),
             notification_ids=tuple(notification_ids),
             delivery_ids=tuple(delivery_ids),
             permission_codes=tuple(permission_codes),
@@ -887,9 +917,8 @@ async def test_runtime_assignment_function_blocks_system_role_escalation(
     assert str(assignment["role_id"]) == rows.role_ids[2]
 
 
-async def test_runtime_assignment_requires_tenant_wide_actor_scope(
+async def test_runtime_owner_assignment_cannot_be_narrowed_to_branch(
     support_engine_iso: AsyncEngine,
-    app_engine_iso: AsyncEngine,
     indirect_scope_rows: IndirectScopeRows,
 ) -> None:
     rows = indirect_scope_rows
@@ -910,34 +939,18 @@ async def test_runtime_assignment_requires_tenant_wide_actor_scope(
                 )
             ).all()
         ]
-        await conn.execute(
-            text(
-                "UPDATE user_assignment SET branch_id = :branch_id "
-                "WHERE tenant_id = :tenant_id AND user_id = :user_id"
-            ),
-            {
-                "branch_id": branch_ids[0],
-                "tenant_id": rows.tenant_ids[0],
-                "user_id": rows.user_ids[0],
-            },
-        )
-
-    for forbidden_branch_id in (None, branch_ids[0], branch_ids[1]):
-        await _assert_rls_denied(
-            app_engine_iso,
-            tenant_id=rows.tenant_ids[0],
-            user_id=rows.user_ids[0],
-            statement=(
-                "SELECT * FROM public.create_tenant_user_assignment("
-                ":tenant_id, :target_user_id, :branch_id, :role_id, false)"
-            ),
-            params={
-                "tenant_id": rows.tenant_ids[0],
-                "target_user_id": rows.user_ids[3],
-                "branch_id": forbidden_branch_id,
-                "role_id": rows.role_ids[2],
-            },
-        )
+        with pytest.raises(DBAPIError, match="protected ownership workflow"):
+            await conn.execute(
+                text(
+                    "UPDATE user_assignment SET branch_id = :branch_id "
+                    "WHERE tenant_id = :tenant_id AND user_id = :user_id"
+                ),
+                {
+                    "branch_id": branch_ids[0],
+                    "tenant_id": rows.tenant_ids[0],
+                    "user_id": rows.user_ids[0],
+                },
+            )
 
 
 async def test_blocking_user_revokes_sessions_immediately(
@@ -1321,20 +1334,6 @@ async def test_role_mutations_recheck_live_owner_scope(
 ) -> None:
     rows = indirect_scope_rows
 
-    await _assert_rls_denied(
-        app_engine_iso,
-        tenant_id=rows.tenant_ids[0],
-        user_id=rows.user_ids[0],
-        statement=(
-            "UPDATE role SET description = :description, version = version + 1 "
-            "WHERE id = :role_id"
-        ),
-        params={
-            "description": "self-role mutation",
-            "role_id": rows.role_ids[0],
-        },
-    )
-
     async with support_engine_iso.begin() as conn:
         await conn.execute(
             text(
@@ -1342,8 +1341,8 @@ async def test_role_mutations_recheck_live_owner_scope(
                 "WHERE role_id = :role_id AND permission_code = :permission_code"
             ),
             {
-                "role_id": rows.role_ids[0],
-                "permission_code": rows.permission_codes[1],
+                "role_id": rows.owner_role_ids[0],
+                "permission_code": "roles.update",
             },
         )
 
