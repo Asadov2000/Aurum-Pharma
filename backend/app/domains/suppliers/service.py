@@ -1,29 +1,28 @@
-"""Business logic for the suppliers domain.
-
-Note on supplier_return — the spec asks for a warning if the batch did
-not come from this supplier originally. We look up the latest incoming
-document that produced this batch through incoming_item.created_batch_id;
-if it doesn't match (or doesn't exist), we set a warning string without
-blocking the return.
-"""
+"""Business logic for suppliers and supplier returns."""
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfoNotFoundError
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InternalError
 
-from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
-from app.domains.incoming.models import IncomingDocument
-from app.domains.inventory.models import Batch
+from app.core.errors import AurumError, BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.core.time import local_day_range
+from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.suppliers.models import Supplier, SupplierReturn
-from app.domains.suppliers.repository import SuppliersRepository
+from app.domains.suppliers.repository import (
+    SupplierReturnCandidateRow,
+    SupplierReturnRow,
+    SupplierReturnSummaryData,
+    SupplierSearchSummaryData,
+    SuppliersRepository,
+)
 
 logger = structlog.get_logger("suppliers.service")
 
@@ -31,8 +30,6 @@ logger = structlog.get_logger("suppliers.service")
 class SuppliersService:
     def __init__(self, repo: SuppliersRepository) -> None:
         self.repo = repo
-
-    # ---- supplier CRUD ----
 
     async def create_supplier(
         self,
@@ -46,8 +43,16 @@ class SuppliersService:
             payload["created_by"] = created_by
         return await self.repo.create_supplier(**payload)
 
-    async def list_suppliers(self, *, include_inactive: bool = False) -> list[Supplier]:
-        return await self.repo.list_suppliers(include_inactive=include_inactive)
+    async def list_suppliers(
+        self,
+        *,
+        tenant_id: UUID,
+        include_inactive: bool = False,
+    ) -> list[Supplier]:
+        return await self.repo.list_suppliers(
+            tenant_id=tenant_id,
+            include_inactive=include_inactive,
+        )
 
     async def search_suppliers(
         self,
@@ -57,7 +62,7 @@ class SuppliersService:
         is_active: bool | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> tuple[list[Supplier], int]:
+    ) -> tuple[list[Supplier], int, SupplierSearchSummaryData]:
         return await self.repo.search_suppliers(
             tenant_id=tenant_id,
             q=q,
@@ -66,8 +71,25 @@ class SuppliersService:
             page_size=page_size,
         )
 
-    async def get_supplier(self, supplier_id: UUID) -> Supplier:
-        supplier = await self.repo.get_supplier(supplier_id)
+    async def search_supplier_options(
+        self,
+        *,
+        tenant_id: UUID,
+        q: str | None,
+        include_inactive: bool,
+        selected_id: UUID | None,
+        limit: int,
+    ) -> list[Supplier]:
+        return await self.repo.search_supplier_options(
+            tenant_id=tenant_id,
+            q=q,
+            include_inactive=include_inactive,
+            selected_id=selected_id,
+            limit=limit,
+        )
+
+    async def get_supplier(self, supplier_id: UUID, *, tenant_id: UUID) -> Supplier:
+        supplier = await self.repo.get_supplier(supplier_id, tenant_id=tenant_id)
         if supplier is None:
             raise NotFoundError("Supplier not found")
         return supplier
@@ -76,19 +98,19 @@ class SuppliersService:
         self,
         supplier_id: UUID,
         *,
+        tenant_id: UUID,
         fields: dict[str, Any],
         updated_by: UUID | None = None,
     ) -> Supplier:
-        supplier = await self.get_supplier(supplier_id)
+        supplier = await self.get_supplier(supplier_id, tenant_id=tenant_id)
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_supplier(supplier, **fields)
 
-    # ---- supplier_return ----
-
     async def create_return(
         self,
         *,
+        operation_id: UUID,
         tenant_id: UUID,
         supplier_id: UUID,
         batch_id: UUID,
@@ -98,122 +120,189 @@ class SuppliersService:
         source_document_id: UUID | None,
         actor_id: UUID | None,
         allowed_branch_ids: set[UUID] | None = None,
-    ) -> tuple[SupplierReturn, str | None]:
-        """Returns (supplier_return, warning_or_none)."""
-        # Validate supplier and batch exist
-        supplier = await self.get_supplier(supplier_id)
-        if supplier.tenant_id != tenant_id:
-            raise NotFoundError("Supplier not found")
-        if source_document_id is not None:
-            await self._assert_source_document_in_tenant(
-                source_document_id,
-                tenant_id=tenant_id,
+    ) -> SupplierReturn:
+        existing = await self.repo.get_return(operation_id, tenant_id=tenant_id)
+        if existing is not None:
+            self._assert_return_retry_matches(
+                existing,
+                supplier_id=supplier_id,
+                batch_id=batch_id,
+                qty=qty,
+                reason=reason,
+                comment=comment,
+                source_document_id=source_document_id,
             )
+            return existing
 
-        inv_repo = InventoryRepository(self.repo.session)
-        batch = await inv_repo.get_batch(batch_id, tenant_id=tenant_id)
-        if batch is None or batch.tenant_id != tenant_id:
+        await self.get_supplier(supplier_id, tenant_id=tenant_id)
+        batch = await self.repo.get_batch_for_update(batch_id, tenant_id=tenant_id)
+        if batch is None:
             raise NotFoundError("Batch not found")
-        if allowed_branch_ids is not None and batch.branch_id not in allowed_branch_ids:
-            raise PermissionDeniedError("Branch access denied")
+        self._assert_branch_allowed(batch.branch_id, allowed_branch_ids=allowed_branch_ids)
 
-        # Soft check: was this batch really supplied by this supplier?
-        warning = await self._cross_supplier_warning(batch_id=batch_id, supplier_id=supplier_id)
+        origin = await self.repo.get_batch_origin(batch_id, tenant_id=tenant_id)
+        if origin is None:
+            raise BusinessRuleError("Batch has no accepted incoming source")
+        if origin.supplier_id != supplier_id:
+            raise BusinessRuleError("Batch belongs to a different supplier")
+        if origin.branch_id != batch.branch_id:
+            raise BusinessRuleError("Batch source branch does not match the batch branch")
+        if source_document_id is not None and source_document_id != origin.id:
+            raise BusinessRuleError("Source document does not match the selected batch")
 
         amount = (batch.purchase_price * qty).quantize(Decimal("0.01"))
-
-        sr = await self.repo.insert_return(
-            tenant_id=tenant_id,
-            supplier_id=supplier_id,
-            source_document_id=source_document_id,
-            batch_id=batch_id,
-            qty=qty,
-            amount=amount,
-            currency=batch.currency,
-            reason=reason,
-            comment=comment,
-            created_by=actor_id,
-        )
-
-        # Inventory movement (the trigger guards against negative qty)
         try:
-            await inv_repo.insert_movement(
+            async with self.repo.session.begin_nested():
+                supplier_return = await self.repo.insert_return(
+                    id=operation_id,
+                    tenant_id=tenant_id,
+                    supplier_id=supplier_id,
+                    source_document_id=origin.id,
+                    batch_id=batch_id,
+                    qty=qty,
+                    amount=amount,
+                    currency=batch.currency,
+                    reason=reason,
+                    comment=comment,
+                    created_by=actor_id,
+                )
+        except IntegrityError:
+            existing = await self.repo.get_return(operation_id, tenant_id=tenant_id)
+            if existing is None:
+                raise
+            self._assert_return_retry_matches(
+                existing,
+                supplier_id=supplier_id,
+                batch_id=batch_id,
+                qty=qty,
+                reason=reason,
+                comment=comment,
+                source_document_id=origin.id,
+            )
+            return existing
+
+        try:
+            await InventoryRepository(self.repo.session).insert_movement(
                 tenant_id=tenant_id,
                 batch_id=batch_id,
                 movement_type="supplier_return",
                 qty_delta=-qty,
                 source_table="supplier_return",
-                source_id=sr.id,
+                source_id=supplier_return.id,
+                operation_key=f"suppliers:return:{operation_id}",
                 created_by=actor_id,
             )
         except (IntegrityError, InternalError) as exc:
-            msg = str(exc).lower()
-            if "qty_remaining cannot be negative" in msg or "qty_remaining" in msg:
+            message = str(exc).lower()
+            if "qty_remaining cannot be negative" in message or "qty_remaining" in message:
                 raise BusinessRuleError(
                     "Return quantity exceeds batch remaining stock",
                     details={"requested": str(qty)},
                 ) from exc
             raise
+
         await self.repo.session.refresh(batch)
         logger.info(
             "supplier_return",
             batch_id=str(batch_id),
             supplier_id=str(supplier_id),
             qty=str(qty),
-            warning=warning,
         )
-        _ = supplier  # silence unused (held for permissions hook later)
-        return sr, warning
+        return supplier_return
 
-    async def list_returns(
+    async def search_return_candidates(
         self,
-        *,
-        supplier_id: UUID | None = None,
-        date_from: date | datetime | None = None,
-        date_to: date | datetime | None = None,
-        allowed_branch_ids: set[UUID] | None = None,
-    ) -> list[SupplierReturn]:
-        return await self.repo.list_returns(
-            supplier_id=supplier_id,
-            date_from=date_from,
-            date_to=date_to,
-            branch_ids=allowed_branch_ids,
-        )
-
-    # ---- helpers ----
-
-    async def _cross_supplier_warning(self, *, batch_id: UUID, supplier_id: UUID) -> str | None:
-        """If we can find an incoming_item that created this batch and its
-        document.supplier_id != supplier_id — return a warning string."""
-        from app.domains.incoming.models import IncomingDocument, IncomingItem
-
-        stmt = (
-            select(IncomingDocument.supplier_id)
-            .join(IncomingItem, IncomingItem.document_id == IncomingDocument.id)
-            .where(IncomingItem.created_batch_id == batch_id)
-            .limit(1)
-        )
-        result = await self.repo.session.execute(stmt)
-        original_supplier = result.scalar_one_or_none()
-        if original_supplier is None:
-            return None  # batch wasn't created via accept — can't check
-        if original_supplier != supplier_id:
-            return (
-                "Batch was originally supplied by a different supplier; "
-                "the return is recorded anyway."
-            )
-        return None
-
-    async def _assert_source_document_in_tenant(
-        self,
-        source_document_id: UUID,
         *,
         tenant_id: UUID,
+        supplier_id: UUID,
+        branch_id: UUID | None,
+        branch_ids: set[UUID] | None,
+        q: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[SupplierReturnCandidateRow], int]:
+        await self.get_supplier(supplier_id, tenant_id=tenant_id)
+        if branch_id is not None:
+            self._assert_branch_allowed(branch_id, allowed_branch_ids=branch_ids)
+        return await self.repo.search_return_candidates(
+            tenant_id=tenant_id,
+            supplier_id=supplier_id,
+            branch_id=branch_id,
+            branch_ids=branch_ids,
+            q=q,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def search_returns(
+        self,
+        *,
+        tenant_id: UUID,
+        supplier_id: UUID | None,
+        branch_id: UUID | None,
+        branch_ids: set[UUID] | None,
+        reason: str | None,
+        date_from: date | None,
+        date_to: date | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[SupplierReturnRow], SupplierReturnSummaryData, str]:
+        if supplier_id is not None:
+            await self.get_supplier(supplier_id, tenant_id=tenant_id)
+        if branch_id is not None:
+            self._assert_branch_allowed(branch_id, allowed_branch_ids=branch_ids)
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise BusinessRuleError("date_from cannot be later than date_to")
+
+        settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
+        timezone_name = settings.report_timezone if settings is not None else "Asia/Dushanbe"
+        try:
+            created_from = local_day_range(date_from, timezone_name)[0] if date_from else None
+            created_to = local_day_range(date_to, timezone_name)[1] if date_to else None
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
+
+        rows, summary = await self.repo.search_returns(
+            tenant_id=tenant_id,
+            supplier_id=supplier_id,
+            branch_id=branch_id,
+            branch_ids=branch_ids,
+            reason=reason,
+            created_from=created_from,
+            created_to=created_to,
+            page=page,
+            page_size=page_size,
+        )
+        return rows, summary, timezone_name
+
+    @staticmethod
+    def _assert_branch_allowed(
+        branch_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None,
     ) -> None:
-        doc = await self.repo.session.get(IncomingDocument, source_document_id)
-        if doc is None or doc.tenant_id != tenant_id:
-            raise NotFoundError("Incoming document not found")
+        if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("Branch access denied")
 
-
-# Keep imports referenced for the type-checkers / linters.
-_ = (Batch,)
+    @staticmethod
+    def _assert_return_retry_matches(
+        existing: SupplierReturn,
+        *,
+        supplier_id: UUID,
+        batch_id: UUID,
+        qty: Decimal,
+        reason: str,
+        comment: str | None,
+        source_document_id: UUID | None,
+    ) -> None:
+        if (
+            existing.supplier_id != supplier_id
+            or existing.batch_id != batch_id
+            or existing.qty != qty
+            or existing.reason != reason
+            or existing.comment != comment
+            or (
+                source_document_id is not None and existing.source_document_id != source_document_id
+            )
+        ):
+            raise BusinessRuleError("Supplier return operation key was reused with different data")

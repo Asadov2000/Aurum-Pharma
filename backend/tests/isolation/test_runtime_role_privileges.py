@@ -37,7 +37,6 @@ CRUD_TABLES = {
     "sale_payment",
     "shift",
     "supplier",
-    "supplier_return",
     "tenant",
     "tenant_catalog",
     "tenant_settings",
@@ -47,6 +46,7 @@ CRUD_TABLES = {
 
 APPEND_ONLY_TABLES = {
     "batch_movement",
+    "supplier_return",
     "write_off",
 }
 
@@ -220,6 +220,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_app_user_platform_flags",
     "trg_guard_batch_movement_immutability",
     "trg_guard_write_off_immutability",
+    "trg_guard_supplier_return_immutability",
     "trg_revoke_support_access_on_tenant_archive",
     "trg_guard_branch_writer",
     "trg_guard_platform_account_tenant_scope",

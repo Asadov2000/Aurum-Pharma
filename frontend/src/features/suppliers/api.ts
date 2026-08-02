@@ -4,9 +4,14 @@ import {
   type Supplier,
   type SupplierCreatePayload,
   type SupplierListResponse,
-  type SupplierReturn,
+  type SupplierOptionList,
+  type SupplierOptionSearchParams,
+  type SupplierReturnCandidateList,
+  type SupplierReturnCandidateSearchParams,
   type SupplierReturnCreatePayload,
   type SupplierReturnCreated,
+  type SupplierReturnList,
+  type SupplierReturnSearchParams,
   type SupplierSearchParams,
   type SupplierUpdatePayload,
 } from "./types";
@@ -35,6 +40,23 @@ export async function searchSuppliers(
   return data;
 }
 
+export async function searchSupplierOptions(
+  params: SupplierOptionSearchParams,
+  signal?: AbortSignal,
+): Promise<SupplierOptionList> {
+  const { data } = await api.post<SupplierOptionList>(
+    "/suppliers/options/search",
+    {
+      q: params.q || undefined,
+      include_inactive: params.include_inactive ?? false,
+      selected_id: params.selected_id || undefined,
+      limit: params.limit ?? 20,
+    },
+    { signal },
+  );
+  return data;
+}
+
 export async function createSupplier(payload: SupplierCreatePayload): Promise<Supplier> {
   const { data } = await api.post<Supplier>("/suppliers", payload);
   return data;
@@ -48,18 +70,41 @@ export async function updateSupplier(
   return data;
 }
 
-export async function listSupplierReturns(params: {
-  supplier_id?: string;
-  date_from?: string;
-  date_to?: string;
-}): Promise<SupplierReturn[]> {
-  const { data } = await api.get<SupplierReturn[]>("/suppliers/returns", {
-    params: {
+export async function searchSupplierReturns(
+  params: SupplierReturnSearchParams,
+  signal?: AbortSignal,
+): Promise<SupplierReturnList> {
+  const { data } = await api.post<SupplierReturnList>(
+    "/suppliers/returns/search",
+    {
       supplier_id: params.supplier_id || undefined,
+      branch_id: params.branch_id || undefined,
+      reason: params.reason || undefined,
       date_from: params.date_from || undefined,
       date_to: params.date_to || undefined,
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 25,
     },
-  });
+    { signal },
+  );
+  return data;
+}
+
+export async function searchSupplierReturnCandidates(
+  params: SupplierReturnCandidateSearchParams,
+  signal?: AbortSignal,
+): Promise<SupplierReturnCandidateList> {
+  const { data } = await api.post<SupplierReturnCandidateList>(
+    "/suppliers/returns/candidates/search",
+    {
+      supplier_id: params.supplier_id,
+      branch_id: params.branch_id || undefined,
+      q: params.q || undefined,
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 20,
+    },
+    { signal },
+  );
   return data;
 }
 

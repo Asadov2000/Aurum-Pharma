@@ -83,6 +83,21 @@ async def test_management_search_permissions_contracts_and_no_store(
             denied = await client.post(path, json={})
             assert denied.status_code == 403, path
 
+        denied_options = await client.post("/api/v1/suppliers/options/search", json={})
+        assert denied_options.status_code == 403
+
+        actor.permissions = {"incoming.create"}
+        actor.permission_scopes = {"incoming.create": None}
+        incoming_options = await client.post(
+            "/api/v1/suppliers/options/search",
+            json={"q": "Management", "limit": 10},
+        )
+        assert incoming_options.status_code == 200
+        assert incoming_options.headers["cache-control"] == "private, no-store"
+        assert [item["name"] for item in incoming_options.json()["items"]] == [
+            "Management Supplier"
+        ]
+
         actor.permissions = {
             "users.view",
             "branches.view",

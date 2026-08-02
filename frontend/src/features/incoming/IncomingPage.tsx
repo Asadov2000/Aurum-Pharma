@@ -25,7 +25,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { hasAnyPermission, hasPermission } from "@/features/auth/permissions";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { describeApiError } from "@/features/foundation/errors";
-import { useSuppliersQuery } from "@/features/suppliers/queries";
+import { SupplierPicker } from "@/features/suppliers/SupplierPicker";
 
 import { NewIncomingForm } from "./NewIncomingForm";
 import { useIncomingListQuery } from "./queries";
@@ -59,7 +59,6 @@ export function IncomingPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
 
   const branches = useBranchesQuery(true, canDiscoverBranches);
-  const suppliers = useSuppliersQuery(true, canViewSuppliers);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -89,9 +88,6 @@ export function IncomingPage(): JSX.Element {
 
   const branchName = (id: string) =>
     branches.data?.find((b) => b.id === id)?.name ?? id.slice(0, 8);
-  const supplierName = (id: string) =>
-    suppliers.data?.find((s) => s.id === id)?.name ?? id.slice(0, 8);
-
   return (
     <div className="space-y-4">
       <PageHeader
@@ -166,22 +162,18 @@ export function IncomingPage(): JSX.Element {
             content: (
               <div>
                 <Label htmlFor="supplier_filter">Поставщик</Label>
-                <Select
+                <SupplierPicker
                   id="supplier_filter"
                   value={supplierFilter}
-                  onChange={(e) => {
-                    setSupplierFilter(e.target.value);
+                  onChange={(supplierId) => {
+                    setSupplierFilter(supplierId);
                     setPage(1);
                   }}
-                  className="w-full sm:w-44"
-                >
-                  <option value="">Все</option>
-                  {suppliers.data?.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
+                  className="w-full sm:w-52"
+                  placeholder="Все поставщики"
+                  clearable
+                  includeInactive
+                />
               </div>
             ),
             active: Boolean(supplierFilter),
@@ -321,7 +313,7 @@ export function IncomingPage(): JSX.Element {
                   </TD>
                   <TD className="font-mono">{d.document_number ?? "—"}</TD>
                   <TD>{branchName(d.branch_id)}</TD>
-                  <TD>{supplierName(d.supplier_id)}</TD>
+                  <TD>{d.supplier_name ?? d.supplier_id.slice(0, 8)}</TD>
                   <TD>
                     <Badge tone={statusTone[d.status]}>{statusLabel[d.status]}</Badge>
                   </TD>

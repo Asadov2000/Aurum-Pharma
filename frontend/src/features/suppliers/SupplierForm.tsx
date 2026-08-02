@@ -9,17 +9,17 @@ import { useCreateSupplier, useUpdateSupplier } from "./queries";
 import { type Supplier } from "./types";
 
 const schema = z.object({
-  name: z.string().min(1, "Введите название"),
-  legal_name: z.string().optional(),
-  inn_or_tin: z.string().optional(),
-  contact_person: z.string().optional(),
-  phone: z.string().optional(),
+  name: z.string().trim().min(1, "Введите название").max(200, "Не более 200 символов"),
+  legal_name: z.string().max(300, "Не более 300 символов").optional(),
+  inn_or_tin: z.string().max(40, "Не более 40 символов").optional(),
+  contact_person: z.string().max(200, "Не более 200 символов").optional(),
+  phone: z.string().max(50, "Не более 50 символов").optional(),
   email: z
     .string()
     .optional()
     .refine((v) => !v || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), "Некорректный email"),
-  address: z.string().optional(),
-  notes: z.string().optional(),
+  address: z.string().max(500, "Не более 500 символов").optional(),
+  notes: z.string().max(2000, "Не более 2000 символов").optional(),
   is_active: z.boolean(),
 });
 
@@ -127,19 +127,39 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
         </div>
         <div>
           <Label htmlFor="legal_name">Юр. название</Label>
-          <Input id="legal_name" {...form.register("legal_name")} />
+          <Input
+            id="legal_name"
+            invalid={Boolean(form.formState.errors.legal_name)}
+            {...form.register("legal_name")}
+          />
+          <FormError>{form.formState.errors.legal_name?.message}</FormError>
         </div>
         <div>
           <Label htmlFor="inn_or_tin">ИНН/TIN</Label>
-          <Input id="inn_or_tin" {...form.register("inn_or_tin")} />
+          <Input
+            id="inn_or_tin"
+            invalid={Boolean(form.formState.errors.inn_or_tin)}
+            {...form.register("inn_or_tin")}
+          />
+          <FormError>{form.formState.errors.inn_or_tin?.message}</FormError>
         </div>
         <div>
           <Label htmlFor="contact_person">Контактное лицо</Label>
-          <Input id="contact_person" {...form.register("contact_person")} />
+          <Input
+            id="contact_person"
+            invalid={Boolean(form.formState.errors.contact_person)}
+            {...form.register("contact_person")}
+          />
+          <FormError>{form.formState.errors.contact_person?.message}</FormError>
         </div>
         <div>
           <Label htmlFor="phone">Телефон</Label>
-          <Input id="phone" {...form.register("phone")} />
+          <Input
+            id="phone"
+            invalid={Boolean(form.formState.errors.phone)}
+            {...form.register("phone")}
+          />
+          <FormError>{form.formState.errors.phone?.message}</FormError>
         </div>
         <div className="sm:col-span-2">
           <Label htmlFor="email">Email</Label>
@@ -153,11 +173,21 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
         </div>
         <div className="sm:col-span-2">
           <Label htmlFor="address">Адрес</Label>
-          <Textarea id="address" {...form.register("address")} />
+          <Textarea
+            id="address"
+            invalid={Boolean(form.formState.errors.address)}
+            {...form.register("address")}
+          />
+          <FormError>{form.formState.errors.address?.message}</FormError>
         </div>
         <div className="sm:col-span-2">
           <Label htmlFor="notes">Заметки</Label>
-          <Textarea id="notes" {...form.register("notes")} />
+          <Textarea
+            id="notes"
+            invalid={Boolean(form.formState.errors.notes)}
+            {...form.register("notes")}
+          />
+          <FormError>{form.formState.errors.notes?.message}</FormError>
         </div>
         {isEdit && (
           <div className="sm:col-span-2">

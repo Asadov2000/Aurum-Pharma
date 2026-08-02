@@ -4,14 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const searchSuppliers = vi.fn();
 const createSupplier = vi.fn();
+const searchSupplierReturns = vi.fn();
+const searchSupplierReturnCandidates = vi.fn();
+const createSupplierReturn = vi.fn();
 
 vi.mock("@/features/suppliers/api", () => ({
   listSuppliers: vi.fn(),
   searchSuppliers: (...a: unknown[]) => searchSuppliers(...a),
+  searchSupplierOptions: vi.fn(),
   createSupplier: (...a: unknown[]) => createSupplier(...a),
   updateSupplier: vi.fn(),
-  listSupplierReturns: vi.fn(),
-  createSupplierReturn: vi.fn(),
+  searchSupplierReturns: (...a: unknown[]) => searchSupplierReturns(...a),
+  searchSupplierReturnCandidates: (...a: unknown[]) => searchSupplierReturnCandidates(...a),
+  createSupplierReturn: (...a: unknown[]) => createSupplierReturn(...a),
 }));
 
 vi.mock("@/features/auth/hooks", () => ({
@@ -19,7 +24,13 @@ vi.mock("@/features/auth/hooks", () => ({
     user: {
       home_tenant_id: "t-1",
       is_developer: false,
-      permissions: ["suppliers.view", "suppliers.create", "suppliers.update"],
+      permissions: [
+        "suppliers.view",
+        "suppliers.create",
+        "suppliers.update",
+        "incoming.view",
+        "incoming.return",
+      ],
     },
   }),
 }));
@@ -51,18 +62,47 @@ const SAMPLE = {
   updated_at: "2026-05-23T00:00:00Z",
 };
 
+const SUMMARY = {
+  all_count: 1,
+  active_count: 1,
+  inactive_count: 0,
+  with_contact_count: 1,
+};
+
 describe("SuppliersPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
     searchSuppliers.mockReset();
     createSupplier.mockReset();
+    searchSupplierReturns.mockReset();
+    searchSupplierReturnCandidates.mockReset();
+    createSupplierReturn.mockReset();
+    searchSupplierReturns.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 10,
+      summary: { total_qty: "0", total_amount: "0" },
+    });
+    searchSupplierReturnCandidates.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+    });
   });
   afterEach(() => {
     vi.clearAllMocks();
   });
 
   it("renders the empty state when no suppliers exist", async () => {
-    searchSuppliers.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
+    searchSuppliers.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 0, active_count: 0, with_contact_count: 0 },
+    });
     renderPage();
     expect(await screen.findByText(/Поставщиков пока нет/i)).toBeInTheDocument();
   });
@@ -73,6 +113,7 @@ describe("SuppliersPage", () => {
       total: 1,
       page: 1,
       page_size: 25,
+      summary: SUMMARY,
     });
     renderPage();
     expect(await screen.findByText("ОсОО Прима-Фарм")).toBeInTheDocument();
@@ -81,7 +122,13 @@ describe("SuppliersPage", () => {
   });
 
   it("creates a supplier with empty optionals serialized as null", async () => {
-    searchSuppliers.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
+    searchSuppliers.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 0, active_count: 0, with_contact_count: 0 },
+    });
     createSupplier.mockResolvedValueOnce(SAMPLE);
     renderPage();
     await screen.findByText(/Поставщиков пока нет/i);
@@ -115,6 +162,7 @@ describe("SuppliersPage", () => {
       total: 1,
       page: 1,
       page_size: 25,
+      summary: SUMMARY,
     });
     renderPage();
     await screen.findByText("ОсОО Прима-Фарм");
