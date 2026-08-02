@@ -17,15 +17,21 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 
-from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.core.errors import AurumError, BusinessRuleError, NotFoundError, PermissionDeniedError
 from app.core.time import utc_now
 from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Branch
+from app.domains.foundation.repository import FoundationRepository
 from app.domains.incoming.models import IncomingDocument, IncomingItem
-from app.domains.incoming.repository import IncomingRepository
+from app.domains.incoming.repository import (
+    IncomingDocumentDetails,
+    IncomingItemDetails,
+    IncomingRepository,
+)
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.suppliers.models import Supplier
 
@@ -96,6 +102,21 @@ class IncomingService:
         self._assert_branch_allowed(doc.branch_id, allowed_branch_ids=allowed_branch_ids)
         return doc
 
+    async def get_document_details(
+        self,
+        document_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> IncomingDocumentDetails:
+        details = await self.repo.get_document_details(document_id)
+        if details is None:
+            raise NotFoundError("Incoming document not found")
+        self._assert_branch_allowed(
+            details.document.branch_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        return details
+
     async def list_items(
         self,
         document_id: UUID,
@@ -107,6 +128,18 @@ class IncomingService:
             allowed_branch_ids=allowed_branch_ids,
         )
         return await self.repo.list_items(document_id)
+
+    async def list_item_details(
+        self,
+        document_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> list[IncomingItemDetails]:
+        await self.get_document(
+            document_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        return await self.repo.list_item_details(document_id)
 
     async def update_document(
         self,
@@ -194,7 +227,12 @@ class IncomingService:
         items = await self.repo.list_items(document_id)
         if not items:
             raise BusinessRuleError("Cannot accept a document with no items")
-        today = utc_now().date()
+        settings = await FoundationRepository(self.repo.session).get_settings(doc.tenant_id)
+        timezone_name = settings.report_timezone if settings is not None else "Asia/Dushanbe"
+        try:
+            today = utc_now().astimezone(ZoneInfo(timezone_name)).date()
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
         for item in items:
             if item.qty <= 0:
                 raise BusinessRuleError(

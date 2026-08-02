@@ -206,6 +206,72 @@ async def _create_stocked_item(db_session: AsyncSession, *, tenant_id: UUID, bra
     return item
 
 
+async def _assert_incoming_update_contract(
+    client: AsyncClient,
+    *,
+    db_session: AsyncSession,
+    tenant_id: UUID,
+    document_id: str,
+    headers: dict[str, str],
+    nick: str,
+) -> None:
+    clear_number_resp = await client.patch(
+        f"/api/v1/incoming/{document_id}",
+        headers=headers,
+        json={"document_number": None},
+    )
+    assert clear_number_resp.status_code == 200
+    assert clear_number_resp.json()["document_number"] is None
+
+    reject_required_null_resp = await client.patch(
+        f"/api/v1/incoming/{document_id}",
+        headers=headers,
+        json={"branch_id": None},
+    )
+    assert reject_required_null_resp.status_code == 422
+
+    catalog_item = await CatalogService(CatalogRepository(db_session)).create_item(
+        tenant_id=tenant_id,
+        fields={"brand_name": f"Incoming Drug {nick}"},
+    )
+    invalid_precision_resp = await client.post(
+        f"/api/v1/incoming/{document_id}/items",
+        headers=headers,
+        json={
+            "catalog_id": str(catalog_item.id),
+            "expires_at": (date.today() + timedelta(days=180)).isoformat(),
+            "qty": "0.0001",
+            "purchase_price": "1.999",
+            "sale_price": "2.00",
+        },
+    )
+    assert invalid_precision_resp.status_code == 422
+
+    item_resp = await client.post(
+        f"/api/v1/incoming/{document_id}/items",
+        headers=headers,
+        json={
+            "catalog_id": str(catalog_item.id),
+            "batch_number": "BATCH-TO-CLEAR",
+            "manufactured_at": date.today().isoformat(),
+            "expires_at": (date.today() + timedelta(days=180)).isoformat(),
+            "qty": "1.000",
+            "purchase_price": "1.99",
+            "sale_price": "2.00",
+        },
+    )
+    assert item_resp.status_code == 201
+
+    clear_item_resp = await client.patch(
+        f"/api/v1/incoming/{document_id}/items/{item_resp.json()['id']}",
+        headers=headers,
+        json={"batch_number": None, "manufactured_at": None},
+    )
+    assert clear_item_resp.status_code == 200
+    assert clear_item_resp.json()["batch_number"] is None
+    assert clear_item_resp.json()["manufactured_at"] is None
+
+
 async def _assert_atomic_checkout_access(
     client: AsyncClient,
     *,
@@ -493,6 +559,14 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
         own_resp = await client.post("/api/v1/incoming", headers=headers, json=own_payload)
         assert own_resp.status_code == 201
         own_doc_id = own_resp.json()["id"]
+        await _assert_incoming_update_contract(
+            client,
+            db_session=db_session,
+            tenant_id=tenant.id,
+            document_id=own_doc_id,
+            headers=headers,
+            nick=nick,
+        )
 
         other_create_resp = await client.post(
             "/api/v1/incoming",

@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+IncomingQuantity = Annotated[
+    Decimal,
+    Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False),
+]
+IncomingMoney = Annotated[
+    Decimal,
+    Field(ge=0, max_digits=14, decimal_places=2, allow_inf_nan=False),
+]
 
 
 class IncomingDocumentCreate(BaseModel):
@@ -25,15 +35,22 @@ class IncomingDocumentUpdate(BaseModel):
     notes: str | None = None
     document_file_path: str | None = None
 
+    @field_validator("branch_id", "supplier_id", "document_date")
+    @classmethod
+    def required_fields_cannot_be_cleared(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("field cannot be null")
+        return value
+
 
 class IncomingItemBase(BaseModel):
     catalog_id: UUID
     batch_number: str | None = None
     manufactured_at: date | None = None
     expires_at: date
-    qty: Decimal = Field(gt=0)
-    purchase_price: Decimal = Field(ge=0)
-    sale_price: Decimal = Field(ge=0)
+    qty: IncomingQuantity
+    purchase_price: IncomingMoney
+    sale_price: IncomingMoney
 
 
 class IncomingItemUpdate(BaseModel):
@@ -41,9 +58,16 @@ class IncomingItemUpdate(BaseModel):
     batch_number: str | None = None
     manufactured_at: date | None = None
     expires_at: date | None = None
-    qty: Decimal | None = Field(default=None, gt=0)
-    purchase_price: Decimal | None = Field(default=None, ge=0)
-    sale_price: Decimal | None = Field(default=None, ge=0)
+    qty: IncomingQuantity | None = None
+    purchase_price: IncomingMoney | None = None
+    sale_price: IncomingMoney | None = None
+
+    @field_validator("catalog_id", "expires_at", "qty", "purchase_price", "sale_price")
+    @classmethod
+    def required_fields_cannot_be_cleared(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("field cannot be null")
+        return value
 
 
 class IncomingItemRead(BaseModel):
@@ -60,6 +84,10 @@ class IncomingItemRead(BaseModel):
     sale_price: Decimal
     currency: str
     created_batch_id: UUID | None
+    catalog_name: str | None = None
+    catalog_form: str | None = None
+    catalog_dosage: str | None = None
+    catalog_pack_size: str | None = None
 
 
 class IncomingDocumentRead(BaseModel):
@@ -79,6 +107,8 @@ class IncomingDocumentRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     accepted_at: datetime | None
+    branch_name: str | None = None
+    supplier_name: str | None = None
 
 
 class IncomingDocumentList(BaseModel):

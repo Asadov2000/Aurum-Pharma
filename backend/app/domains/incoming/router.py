@@ -103,11 +103,31 @@ async def get_incoming(
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentWithItems:
     branch_scope = user.branch_scope_for("incoming.view")
-    doc = await service.get_document(document_id, allowed_branch_ids=branch_scope)
-    items = await service.list_items(document_id, allowed_branch_ids=branch_scope)
+    details = await service.get_document_details(document_id, allowed_branch_ids=branch_scope)
+    items = await service.list_item_details(document_id, allowed_branch_ids=branch_scope)
     return IncomingDocumentWithItems(
-        **IncomingDocumentRead.model_validate(doc).model_dump(),
-        items=[IncomingItemRead.model_validate(i) for i in items],
+        **IncomingDocumentRead.model_validate(details.document).model_dump(
+            exclude={"branch_name", "supplier_name"}
+        ),
+        branch_name=details.branch_name,
+        supplier_name=details.supplier_name,
+        items=[
+            IncomingItemRead(
+                **IncomingItemRead.model_validate(item.item).model_dump(
+                    exclude={
+                        "catalog_name",
+                        "catalog_form",
+                        "catalog_dosage",
+                        "catalog_pack_size",
+                    }
+                ),
+                catalog_name=item.catalog_name,
+                catalog_form=item.catalog_form,
+                catalog_dosage=item.catalog_dosage,
+                catalog_pack_size=item.catalog_pack_size,
+            )
+            for item in items
+        ],
     )
 
 
@@ -120,7 +140,7 @@ async def update_incoming(
 ) -> IncomingDocumentRead:
     doc = await service.update_document(
         document_id,
-        fields=payload.model_dump(exclude_none=True),
+        fields=payload.model_dump(exclude_unset=True),
         updated_by=user.user_id,
         allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
@@ -163,7 +183,7 @@ async def update_item(
     item = await service.update_item(
         document_id,
         item_id,
-        fields=payload.model_dump(exclude_none=True),
+        fields=payload.model_dump(exclude_unset=True),
         allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
     return IncomingItemRead.model_validate(item)

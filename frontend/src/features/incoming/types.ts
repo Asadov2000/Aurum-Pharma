@@ -18,6 +18,8 @@ export interface IncomingDocument {
   created_at: string;
   updated_at: string;
   accepted_at: string | null;
+  branch_name?: string | null;
+  supplier_name?: string | null;
 }
 
 export interface IncomingItem {
@@ -32,6 +34,10 @@ export interface IncomingItem {
   sale_price: string;
   currency: string;
   created_batch_id: string | null;
+  catalog_name?: string | null;
+  catalog_form?: string | null;
+  catalog_dosage?: string | null;
+  catalog_pack_size?: string | null;
 }
 
 export interface IncomingDocumentWithItems extends IncomingDocument {
