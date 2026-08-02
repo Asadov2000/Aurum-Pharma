@@ -111,7 +111,7 @@ class SuppliersService:
             )
 
         inv_repo = InventoryRepository(self.repo.session)
-        batch = await inv_repo.get_batch(batch_id)
+        batch = await inv_repo.get_batch(batch_id, tenant_id=tenant_id)
         if batch is None or batch.tenant_id != tenant_id:
             raise NotFoundError("Batch not found")
         if allowed_branch_ids is not None and batch.branch_id not in allowed_branch_ids:

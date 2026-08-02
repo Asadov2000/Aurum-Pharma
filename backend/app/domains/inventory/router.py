@@ -9,11 +9,13 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_db, require_permission
+from app.domains.inventory.expiry import ExpiryStatus
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.schemas import (
     BatchDetails,
     BatchList,
     BatchRead,
+    BatchSummary,
     BatchWithExpiry,
     MovementRead,
     WriteOffCreate,
@@ -32,53 +34,95 @@ async def _service(
 
 @router.get("", response_model=BatchList)
 async def list_batches(
-    # reports.view (owner/admin/dev): batch rows carry purchase_price (margins),
-    # which must not be visible to sellers. POS doesn't read /batches — FEFO
-    # picks batches server-side — so the cashier flow is unaffected.
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[CurrentUser, Depends(require_permission("batches.view"))],
     service: Annotated[InventoryService, Depends(_service)],
     catalog_id: Annotated[UUID | None, Query()] = None,
     branch_id: Annotated[UUID | None, Query()] = None,
-    expiry_status: Annotated[str | None, Query()] = None,
+    expiry_status: Annotated[ExpiryStatus | None, Query()] = None,
+    batch_number: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
+    is_blocked: Annotated[bool | None, Query()] = None,
     show_empty: Annotated[bool, Query()] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> BatchList:
-    branch_scope = user.branch_scope_for("reports.view")
+    branch_scope = user.branch_scope_for("batches.view")
     if branch_scope is not None and branch_id is not None and branch_id not in branch_scope:
-        return BatchList(items=[], total=0, page=page, page_size=page_size)
-    rows, total = await service.list_batches(
+        return BatchList(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            summary=BatchSummary(
+                total_qty=0,
+                purchase_value=0,
+                sale_value=0,
+                attention_count=0,
+                expired_count=0,
+                blocked_count=0,
+            ),
+        )
+    rows, summary = await service.list_batches(
         catalog_id=catalog_id,
         branch_id=branch_id,
         expiry_status=expiry_status,
+        batch_number=batch_number,
+        is_blocked=is_blocked,
         show_empty=show_empty,
         page=page,
         page_size=page_size,
+        tenant_id=user.tenant_id,
         branch_ids=branch_scope,
     )
     return BatchList(
-        items=[BatchWithExpiry(**row) for row in rows],
-        total=total,
+        items=[
+            BatchWithExpiry(
+                **BatchRead.model_validate(row.batch).model_dump(),
+                branch_name=row.branch_name,
+                catalog_name=row.catalog_name,
+                catalog_form=row.catalog_form,
+                catalog_dosage=row.catalog_dosage,
+                catalog_pack_size=row.catalog_pack_size,
+                expiry_status=row.expiry_status,
+                days_to_expiry=row.days_to_expiry,
+            )
+            for row in rows
+        ],
+        total=summary.total,
         page=page,
         page_size=page_size,
+        summary=BatchSummary(
+            total_qty=summary.total_qty,
+            purchase_value=summary.purchase_value,
+            sale_value=summary.sale_value,
+            attention_count=summary.attention_count,
+            expired_count=summary.expired_count,
+            blocked_count=summary.blocked_count,
+        ),
     )
 
 
 @router.get("/{batch_id}", response_model=BatchDetails)
 async def get_batch(
     batch_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[CurrentUser, Depends(require_permission("batches.view"))],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> BatchDetails:
-    branch_scope = user.branch_scope_for("reports.view")
-    batch = await service.get_batch(batch_id, allowed_branch_ids=branch_scope)
-    recent = await service.list_movements(
+    branch_scope = user.branch_scope_for("batches.view")
+    details, report_timezone, recent = await service.get_batch_details(
         batch_id,
-        limit=20,
+        tenant_id=user.tenant_id,
         allowed_branch_ids=branch_scope,
     )
     return BatchDetails(
-        **BatchRead.model_validate(batch).model_dump(),
+        **BatchRead.model_validate(details.batch).model_dump(),
+        branch_name=details.branch_name,
+        catalog_name=details.catalog_name,
+        catalog_form=details.catalog_form,
+        catalog_dosage=details.catalog_dosage,
+        catalog_pack_size=details.catalog_pack_size,
+        expiry_status=details.expiry_status,
+        days_to_expiry=details.days_to_expiry,
+        report_timezone=report_timezone,
         recent_movements=[MovementRead.model_validate(m) for m in recent],
     )
 
@@ -86,12 +130,15 @@ async def get_batch(
 @router.get("/{batch_id}/movements", response_model=list[MovementRead])
 async def list_movements(
     batch_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[CurrentUser, Depends(require_permission("batches.view"))],
     service: Annotated[InventoryService, Depends(_service)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> list[MovementRead]:
     movements = await service.list_movements(
         batch_id,
-        allowed_branch_ids=user.branch_scope_for("reports.view"),
+        tenant_id=user.tenant_id,
+        limit=limit,
+        allowed_branch_ids=user.branch_scope_for("batches.view"),
     )
     return [MovementRead.model_validate(m) for m in movements]
 
@@ -109,10 +156,12 @@ async def create_write_off(
 ) -> WriteOffRead:
     wo = await service.write_off(
         batch_id=batch_id,
+        operation_id=payload.operation_id,
         qty=payload.qty,
         reason=payload.reason,
         comment=payload.comment,
         actor_id=user.user_id,
+        tenant_id=user.tenant_id,
         allowed_branch_ids=user.branch_scope_for("batches.write_off"),
     )
     return WriteOffRead.model_validate(wo)

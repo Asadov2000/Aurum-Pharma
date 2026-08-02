@@ -260,6 +260,73 @@ async def test_accept_creates_batches_with_correct_qty(db_session: AsyncSession,
     assert batch.qty_initial == Decimal("25.000")
 
 
+async def test_accept_retry_does_not_duplicate_batches_or_movements(
+    db_session: AsyncSession, scaffold
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+    await service.add_item(
+        doc.id,
+        fields={
+            "catalog_id": item.id,
+            "expires_at": date.today() + timedelta(days=180),
+            "qty": Decimal("5"),
+            "purchase_price": Decimal("3"),
+            "sale_price": Decimal("6"),
+        },
+    )
+
+    first = await service.accept(doc.id)
+    retried = await service.accept(doc.id)
+    batches = (
+        (await db_session.execute(select(Batch).where(Batch.tenant_id == tenant.id)))
+        .scalars()
+        .all()
+    )
+    movements = await InventoryRepository(db_session).list_movements(batches[0].id)
+
+    assert first.id == retried.id
+    assert len(batches) == 1
+    assert len(movements) == 1
+    assert batches[0].qty_remaining == Decimal("5.000")
+
+
+async def test_item_manufacturing_date_cannot_exceed_expiry(
+    db_session: AsyncSession, scaffold
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+
+    with pytest.raises(BusinessRuleError, match="manufactured_at cannot be later"):
+        await service.add_item(
+            doc.id,
+            fields={
+                "catalog_id": item.id,
+                "manufactured_at": date.today() + timedelta(days=181),
+                "expires_at": date.today() + timedelta(days=180),
+                "qty": Decimal("5"),
+                "purchase_price": Decimal("3"),
+                "sale_price": Decimal("6"),
+            },
+        )
+
+
 async def test_cannot_edit_accepted_document(db_session: AsyncSession, scaffold) -> None:
     tenant, branch, item, supplier = await scaffold()
     service = IncomingService(IncomingRepository(db_session))

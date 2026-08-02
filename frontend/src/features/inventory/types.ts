@@ -28,8 +28,22 @@ export interface Batch {
 }
 
 export interface BatchWithExpiry extends Batch {
+  branch_name: string;
+  catalog_name: string;
+  catalog_form: string | null;
+  catalog_dosage: string | null;
+  catalog_pack_size: string | null;
   expiry_status: ExpiryStatus;
   days_to_expiry: number;
+}
+
+export interface BatchSummary {
+  total_qty: string;
+  purchase_value: string;
+  sale_value: string;
+  attention_count: number;
+  expired_count: number;
+  blocked_count: number;
 }
 
 export interface BatchList {
@@ -37,6 +51,7 @@ export interface BatchList {
   total: number;
   page: number;
   page_size: number;
+  summary: BatchSummary;
 }
 
 export interface Movement {
@@ -50,11 +65,13 @@ export interface Movement {
   created_at: string;
 }
 
-export interface BatchDetails extends Batch {
+export interface BatchDetails extends BatchWithExpiry {
+  report_timezone: string;
   recent_movements: Movement[];
 }
 
 export interface WriteOffCreatePayload {
+  operation_id: string;
   qty: string;
   reason: WriteOffReason;
   comment?: string | null;
@@ -75,6 +92,8 @@ export interface BatchSearchParams {
   catalog_id?: string;
   branch_id?: string;
   expiry_status?: ExpiryStatus;
+  batch_number?: string;
+  is_blocked?: boolean;
   show_empty?: boolean;
   page?: number;
   page_size?: number;

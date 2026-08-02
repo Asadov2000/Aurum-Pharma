@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Badge,
   Button,
   ConfigurableFilterBar,
+  Input,
   Label,
   Modal,
   PageHeader,
@@ -25,57 +26,132 @@ import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 
 import { BatchDetailModal } from "./BatchDetailModal";
+import {
+  expiryHint,
+  formatInventoryDate,
+  formatInventoryMoney,
+  formatInventoryQuantity,
+  productSubtitle,
+} from "./formatters";
 import { expiryLabel, expiryOptions, expiryTone } from "./labels";
 import { useBatchesQuery } from "./queries";
-import { type ExpiryStatus } from "./types";
+import { type BatchWithExpiry, type ExpiryStatus } from "./types";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
+
+type BlockedFilter = "" | "active" | "blocked";
 
 export function BatchesPage(): JSX.Element {
   const filterPreferenceKey = useFilterPreferenceKey("batches");
+  const [batchNumberInput, setBatchNumberInput] = useState("");
+  const [batchNumber, setBatchNumber] = useState("");
   const [branchId, setBranchId] = useState("");
   const [catalogId, setCatalogId] = useState("");
   const [expiry, setExpiry] = useState<ExpiryStatus | "">("");
+  const [blockedFilter, setBlockedFilter] = useState<BlockedFilter>("");
   const [showEmpty, setShowEmpty] = useState(false);
   const [page, setPage] = useState(1);
   const [openBatchId, setOpenBatchId] = useState<string | null>(null);
+  const isDesktopLayout = useMediaQuery("(min-width: 768px)");
 
   const branches = useBranchesQuery(true);
-  const { data, isLoading, error } = useBatchesQuery({
-    branch_id: branchId || undefined,
-    catalog_id: catalogId || undefined,
-    expiry_status: expiry || undefined,
-    show_empty: showEmpty,
-    page,
-    page_size: PAGE_SIZE,
-  });
 
-  const total = data?.total ?? 0;
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setBatchNumber(batchNumberInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [batchNumberInput]);
 
-  const branchNameById = (id: string): string =>
-    branches.data?.find((b) => b.id === id)?.name ?? id.slice(0, 8);
+  const params = useMemo(
+    () => ({
+      branch_id: branchId || undefined,
+      catalog_id: catalogId || undefined,
+      expiry_status: expiry || undefined,
+      batch_number: batchNumber || undefined,
+      is_blocked:
+        blockedFilter === "blocked" ? true : blockedFilter === "active" ? false : undefined,
+      show_empty: showEmpty,
+      page,
+      page_size: PAGE_SIZE,
+    }),
+    [batchNumber, blockedFilter, branchId, catalogId, expiry, page, showEmpty],
+  );
+  const { data, isLoading, isFetching, error, refetch } = useBatchesQuery(params);
+  const filtersActive = Boolean(
+    batchNumberInput || branchId || catalogId || expiry || blockedFilter || showEmpty,
+  );
+  const selectedBatch = data?.items.find((item) => item.id === openBatchId);
+
+  const resetFilters = () => {
+    setBatchNumberInput("");
+    setBatchNumber("");
+    setBranchId("");
+    setCatalogId("");
+    setExpiry("");
+    setBlockedFilter("");
+    setShowEmpty(false);
+    setPage(1);
+  };
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Партии" description="Создание партий — через приёмку поставщиков" />
+      <PageHeader
+        title="Партии"
+        description="Остатки, сроки годности и движения товара по аптечным точкам."
+        meta={
+          data ? (
+            <span aria-live="polite">
+              {data.total} партий{isFetching && !isLoading ? " · обновление" : ""}
+            </span>
+          ) : undefined
+        }
+      />
+
+      {data && <InventorySummary total={data.total} summary={data.summary} />}
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
         filters={[
           {
+            id: "batch_number",
+            label: "Номер партии",
+            content: (
+              <div>
+                <Label htmlFor="batch_number_filter">Номер партии</Label>
+                <Input
+                  id="batch_number_filter"
+                  value={batchNumberInput}
+                  onChange={(event) => setBatchNumberInput(event.target.value)}
+                  placeholder="Например, LOT-2408"
+                  autoComplete="off"
+                  className="w-full sm:w-48"
+                />
+              </div>
+            ),
+            active: Boolean(batchNumberInput),
+            onClear: () => {
+              setBatchNumberInput("");
+              setBatchNumber("");
+              setPage(1);
+            },
+            alwaysVisible: true,
+          },
+          {
             id: "product",
             label: "Товар",
             content: (
               <div className="w-full sm:w-72">
-                <Label htmlFor="catalog">Товар</Label>
+                <Label htmlFor="batch_catalog_filter">Товар</Label>
                 <CatalogPicker
-                  id="catalog"
+                  id="batch_catalog_filter"
                   value={catalogId}
                   onChange={(id) => {
                     setCatalogId(id);
                     setPage(1);
                   }}
-                  placeholder="Найти по названию…"
+                  placeholder="Найти товар…"
                   clearable
                 />
               </div>
@@ -85,27 +161,27 @@ export function BatchesPage(): JSX.Element {
               setCatalogId("");
               setPage(1);
             },
-            alwaysVisible: true,
+            defaultVisible: true,
           },
           {
             id: "branch",
             label: "Точка",
             content: (
               <div>
-                <Label htmlFor="branch">Точка</Label>
+                <Label htmlFor="batch_branch_filter">Точка</Label>
                 <Select
-                  id="branch"
+                  id="batch_branch_filter"
                   value={branchId}
-                  onChange={(e) => {
-                    setBranchId(e.target.value);
+                  onChange={(event) => {
+                    setBranchId(event.target.value);
                     setPage(1);
                   }}
-                  className="w-full sm:w-56"
+                  className="w-full sm:w-52"
                 >
                   <option value="">Все точки</option>
-                  {branches.data?.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
+                  {branches.data?.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
                     </option>
                   ))}
                 </Select>
@@ -123,20 +199,20 @@ export function BatchesPage(): JSX.Element {
             label: "Срок годности",
             content: (
               <div>
-                <Label htmlFor="expiry">Срок годности</Label>
+                <Label htmlFor="batch_expiry_filter">Срок годности</Label>
                 <Select
-                  id="expiry"
+                  id="batch_expiry_filter"
                   value={expiry}
-                  onChange={(e) => {
-                    setExpiry(e.target.value as ExpiryStatus | "");
+                  onChange={(event) => {
+                    setExpiry(event.target.value as ExpiryStatus | "");
                     setPage(1);
                   }}
-                  className="w-full sm:w-56"
+                  className="w-full sm:w-48"
                 >
-                  <option value="">Все</option>
-                  {expiryOptions.map((s) => (
-                    <option key={s} value={s}>
-                      {expiryLabel[s]}
+                  <option value="">Все зоны</option>
+                  {expiryOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {expiryLabel[status]}
                     </option>
                   ))}
                 </Select>
@@ -150,6 +226,33 @@ export function BatchesPage(): JSX.Element {
             defaultVisible: true,
           },
           {
+            id: "blocked",
+            label: "Доступность",
+            content: (
+              <div>
+                <Label htmlFor="batch_blocked_filter">Доступность</Label>
+                <Select
+                  id="batch_blocked_filter"
+                  value={blockedFilter}
+                  onChange={(event) => {
+                    setBlockedFilter(event.target.value as BlockedFilter);
+                    setPage(1);
+                  }}
+                  className="w-full sm:w-48"
+                >
+                  <option value="">Все</option>
+                  <option value="active">Доступные к продаже</option>
+                  <option value="blocked">Заблокированные</option>
+                </Select>
+              </div>
+            ),
+            active: Boolean(blockedFilter),
+            onClear: () => {
+              setBlockedFilter("");
+              setPage(1);
+            },
+          },
+          {
             id: "empty",
             label: "Пустые партии",
             content: (
@@ -157,8 +260,8 @@ export function BatchesPage(): JSX.Element {
                 <Switch
                   label="Показывать пустые партии"
                   checked={showEmpty}
-                  onChange={(e) => {
-                    setShowEmpty(e.target.checked);
+                  onChange={(event) => {
+                    setShowEmpty(event.target.checked);
                     setPage(1);
                   }}
                 />
@@ -171,91 +274,61 @@ export function BatchesPage(): JSX.Element {
             },
           },
         ]}
-        onResetValues={() => {
-          setBranchId("");
-          setCatalogId("");
-          setExpiry("");
-          setShowEmpty(false);
-          setPage(1);
-        }}
+        onResetValues={resetFilters}
       />
 
-      {error && (
-        <p className="text-sm text-danger">
-          {describeApiError(error, "Не удалось загрузить партии")}
-        </p>
-      )}
-
       {isLoading ? (
-        <SkeletonRows rows={6} />
+        <SkeletonRows rows={7} />
+      ) : error ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-4 text-sm text-danger-foreground"
+        >
+          <p>{describeApiError(error, "Не удалось загрузить партии")}</p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            isLoading={isFetching}
+            onClick={() => void refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
       ) : !data || data.items.length === 0 ? (
-        <TableEmpty>
-          {branchId || catalogId || expiry || showEmpty
-            ? "По текущим фильтрам ничего не найдено"
-            : "Партии появятся после приёмки от поставщика"}
+        <TableEmpty
+          title={filtersActive ? "Партии не найдены" : "На складе пока нет партий"}
+          action={
+            filtersActive ? (
+              <Button variant="secondary" size="sm" onClick={resetFilters}>
+                Сбросить фильтры
+              </Button>
+            ) : undefined
+          }
+        >
+          {filtersActive
+            ? "Измените условия поиска или верните стандартный набор фильтров."
+            : "Партии появятся после принятия первого прихода."}
         </TableEmpty>
       ) : (
         <>
-          <Table>
-            <THead>
-              <TR>
-                <TH>Партия</TH>
-                <TH>Точка</TH>
-                <TH>Срок</TH>
-                <TH>Остаток</TH>
-                <TH>Цена продажи</TH>
-                <TH>Статус</TH>
-                <TH className="text-right">Действия</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {data.items.map((b) => (
-                <TR key={b.id}>
-                  <TD className="font-mono text-xs" title={`id: ${b.id}`}>
-                    {b.batch_number ?? "—"}
-                  </TD>
-                  <TD>{branchNameById(b.branch_id)}</TD>
-                  <TD>
-                    <div>{new Date(b.expires_at).toLocaleDateString("ru-RU")}</div>
-                    <div className="text-xs text-foreground-muted">
-                      {b.days_to_expiry >= 0
-                        ? `через ${b.days_to_expiry} дн.`
-                        : `${-b.days_to_expiry} дн. назад`}
-                    </div>
-                  </TD>
-                  <TD className="font-mono">
-                    {b.qty_remaining}
-                    <span className="ml-1 text-xs text-foreground-muted">/ {b.qty_initial}</span>
-                  </TD>
-                  <TD>
-                    {Number(b.sale_price).toFixed(2)} {b.currency}
-                  </TD>
-                  <TD>
-                    <div className="flex flex-col gap-1">
-                      <Badge tone={expiryTone[b.expiry_status]}>
-                        {expiryLabel[b.expiry_status]}
-                      </Badge>
-                      {b.is_blocked && <Badge tone="danger">блок</Badge>}
-                    </div>
-                  </TD>
-                  <TD className="text-right">
-                    <Button variant="ghost" size="sm" onClick={() => setOpenBatchId(b.id)}>
-                      Подробнее
-                    </Button>
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+          {isDesktopLayout ? (
+            <BatchTable items={data.items} onOpen={setOpenBatchId} />
+          ) : (
+            <BatchCards items={data.items} onOpen={setOpenBatchId} />
+          )}
+          <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onPage={setPage} />
         </>
       )}
 
       <Modal
         open={openBatchId !== null}
         onClose={() => setOpenBatchId(null)}
-        title="Партия"
-        className="max-w-3xl"
+        title={
+          selectedBatch?.batch_number ? `Партия ${selectedBatch.batch_number}` : "Карточка партии"
+        }
+        className="max-w-5xl"
+        bodyClassName="p-0 sm:p-0"
       >
         {openBatchId && (
           <BatchDetailModal batchId={openBatchId} onClose={() => setOpenBatchId(null)} />
@@ -263,4 +336,282 @@ export function BatchesPage(): JSX.Element {
       </Modal>
     </div>
   );
+}
+
+function InventorySummary({
+  total,
+  summary,
+}: {
+  total: number;
+  summary: {
+    total_qty: string;
+    purchase_value: string;
+    sale_value: string;
+    attention_count: number;
+    expired_count: number;
+    blocked_count: number;
+  };
+}): JSX.Element {
+  return (
+    <section
+      aria-label="Сводка по партиям"
+      className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface md:grid-cols-4"
+    >
+      <SummaryMetric label="Найдено партий" value={total.toLocaleString("ru-RU")} />
+      <SummaryMetric label="Остаток" value={formatInventoryQuantity(summary.total_qty)} />
+      <SummaryMetric
+        label="Требуют внимания"
+        value={summary.attention_count.toLocaleString("ru-RU")}
+        detail={
+          summary.expired_count > 0
+            ? `просрочено: ${summary.expired_count}`
+            : summary.blocked_count > 0
+              ? `заблокировано: ${summary.blocked_count}`
+              : "критичных нет"
+        }
+        tone={summary.attention_count > 0 ? "danger" : "success"}
+      />
+      <SummaryMetric
+        label="Стоимость остатка"
+        value={formatInventoryMoney(summary.purchase_value)}
+        detail={`в рознице: ${formatInventoryMoney(summary.sale_value)}`}
+      />
+    </section>
+  );
+}
+
+function SummaryMetric({
+  label,
+  value,
+  detail,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  tone?: "default" | "success" | "danger";
+}): JSX.Element {
+  const valueTone =
+    tone === "danger"
+      ? "text-danger"
+      : tone === "success"
+        ? "text-success-foreground"
+        : "text-foreground";
+  return (
+    <div className="min-w-0 border-b border-r border-border px-4 py-3 last:border-r-0 md:border-b-0">
+      <p className="text-xs font-medium text-foreground-muted">{label}</p>
+      <p className={`mt-1 truncate font-mono text-lg font-semibold tabular-nums ${valueTone}`}>
+        {value}
+      </p>
+      {detail && <p className="mt-0.5 truncate text-xs text-foreground-muted">{detail}</p>}
+    </div>
+  );
+}
+
+function BatchTable({
+  items,
+  onOpen,
+}: {
+  items: BatchWithExpiry[];
+  onOpen: (id: string) => void;
+}): JSX.Element {
+  return (
+    <Table>
+      <THead>
+        <TR>
+          <TH>Товар</TH>
+          <TH>Партия</TH>
+          <TH>Точка</TH>
+          <TH>Срок годности</TH>
+          <TH className="text-right">Остаток</TH>
+          <TH className="text-right">Цены</TH>
+          <TH className="text-right">Действие</TH>
+        </TR>
+      </THead>
+      <TBody>
+        {items.map((batch) => (
+          <TR key={batch.id}>
+            <TD className="max-w-64">
+              <p className="truncate font-medium">{batch.catalog_name}</p>
+              {productSubtitle(batch) && (
+                <p className="truncate text-xs text-foreground-muted">{productSubtitle(batch)}</p>
+              )}
+            </TD>
+            <TD>
+              <p className="font-mono text-xs">{batch.batch_number ?? "Без номера"}</p>
+              {batch.is_blocked && (
+                <Badge tone="danger" className="mt-1">
+                  Заблокирована
+                </Badge>
+              )}
+            </TD>
+            <TD className="max-w-52 truncate">{batch.branch_name}</TD>
+            <TD className="whitespace-nowrap">
+              <div className="flex items-center gap-2">
+                <Badge tone={expiryTone[batch.expiry_status]}>
+                  {expiryLabel[batch.expiry_status]}
+                </Badge>
+                <span>{formatInventoryDate(batch.expires_at)}</span>
+              </div>
+              <p className="mt-1 text-xs text-foreground-muted">
+                {expiryHint(batch.days_to_expiry)}
+              </p>
+            </TD>
+            <TD className="min-w-32 text-right">
+              <p className="font-mono font-medium tabular-nums">
+                {formatInventoryQuantity(batch.qty_remaining)}
+              </p>
+              <StockBar batch={batch} />
+            </TD>
+            <TD className="whitespace-nowrap text-right text-xs">
+              <p className="font-mono">{formatInventoryMoney(batch.sale_price, batch.currency)}</p>
+              <p className="text-foreground-muted">
+                закупка {formatInventoryMoney(batch.purchase_price, batch.currency)}
+              </p>
+            </TD>
+            <TD className="text-right">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
+                onClick={() => onOpen(batch.id)}
+              >
+                Открыть
+              </Button>
+            </TD>
+          </TR>
+        ))}
+      </TBody>
+    </Table>
+  );
+}
+
+function BatchCards({
+  items,
+  onOpen,
+}: {
+  items: BatchWithExpiry[];
+  onOpen: (id: string) => void;
+}): JSX.Element {
+  return (
+    <div className="space-y-2">
+      {items.map((batch) => (
+        <article
+          key={batch.id}
+          aria-label={`${batch.catalog_name}, партия ${batch.batch_number ?? "без номера"}`}
+          className="rounded-lg border border-border bg-surface px-3 py-3"
+        >
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold text-foreground">
+                {batch.catalog_name}
+              </h2>
+              {productSubtitle(batch) && (
+                <p className="truncate text-xs text-foreground-muted">{productSubtitle(batch)}</p>
+              )}
+            </div>
+            <Badge tone={expiryTone[batch.expiry_status]} className="shrink-0">
+              {expiryLabel[batch.expiry_status]}
+            </Badge>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+            <CompactField label="Партия" value={batch.batch_number ?? "Без номера"} mono />
+            <CompactField label="Точка" value={batch.branch_name} />
+            <CompactField
+              label="Срок годности"
+              value={formatInventoryDate(batch.expires_at)}
+              detail={expiryHint(batch.days_to_expiry)}
+            />
+            <CompactField
+              label="Остаток"
+              value={formatInventoryQuantity(batch.qty_remaining)}
+              detail={`из ${formatInventoryQuantity(batch.qty_initial)}`}
+              mono
+            />
+          </div>
+
+          {batch.is_blocked && (
+            <div className="mt-3 rounded-md bg-danger-subtle px-3 py-2 text-xs text-danger-foreground">
+              Заблокирована{batch.block_reason ? `: ${batch.block_reason}` : ""}
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+            <div className="min-w-0">
+              <p className="text-xs text-foreground-muted">Цена продажи</p>
+              <p className="truncate font-mono text-sm font-semibold tabular-nums">
+                {formatInventoryMoney(batch.sale_price, batch.currency)}
+              </p>
+            </div>
+            <Button
+              className="min-h-11 shrink-0"
+              variant="secondary"
+              aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
+              onClick={() => onOpen(batch.id)}
+            >
+              Открыть
+            </Button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function StockBar({ batch }: { batch: BatchWithExpiry }): JSX.Element {
+  const initial = Number(batch.qty_initial);
+  const remaining = Number(batch.qty_remaining);
+  const percent = initial > 0 ? Math.max(0, Math.min(100, (remaining / initial) * 100)) : 0;
+  return (
+    <div
+      className="mt-1 ml-auto h-1.5 w-24 overflow-hidden rounded-full bg-foreground/10"
+      role="progressbar"
+      aria-label="Остаток партии"
+      aria-valuemin={0}
+      aria-valuemax={initial}
+      aria-valuenow={remaining}
+    >
+      <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
+    </div>
+  );
+}
+
+function CompactField({
+  label,
+  value,
+  detail,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  mono?: boolean;
+}): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-foreground-muted">{label}</p>
+      <p className={`truncate ${mono ? "font-mono tabular-nums" : ""}`}>{value}</p>
+      {detail && <p className="truncate text-xs text-foreground-muted">{detail}</p>}
+    </div>
+  );
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window === "undefined" || typeof window.matchMedia !== "function"
+      ? false
+      : window.matchMedia(query).matches,
+  );
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return undefined;
+    const media = window.matchMedia(query);
+    const onChange = () => setMatches(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [query]);
+
+  return matches;
 }

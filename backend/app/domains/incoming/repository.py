@@ -48,6 +48,15 @@ class IncomingRepository:
     async def get_document(self, document_id: UUID) -> IncomingDocument | None:
         return await self.session.get(IncomingDocument, document_id)
 
+    async def get_document_for_update(self, document_id: UUID) -> IncomingDocument | None:
+        stmt = (
+            select(IncomingDocument)
+            .where(IncomingDocument.id == document_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def get_document_details(self, document_id: UUID) -> IncomingDocumentDetails | None:
         stmt = (
             select(IncomingDocument, Branch.name, Supplier.name)

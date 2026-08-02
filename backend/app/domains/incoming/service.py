@@ -175,6 +175,10 @@ class IncomingService:
         doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
         self._assert_draft(doc)
         await self._assert_catalog_in_tenant(fields["catalog_id"], tenant_id=doc.tenant_id)
+        self._assert_item_dates(
+            manufactured_at=fields.get("manufactured_at"),
+            expires_at=fields["expires_at"],
+        )
         payload = {**fields, "document_id": doc.id, "tenant_id": doc.tenant_id}
         item = await self.repo.create_item(**payload)
         await self._recompute_total(doc)
@@ -195,6 +199,10 @@ class IncomingService:
         item = await self.repo.get_item(item_id)
         if item is None or item.document_id != document_id:
             raise NotFoundError("Item not found")
+        self._assert_item_dates(
+            manufactured_at=fields.get("manufactured_at", item.manufactured_at),
+            expires_at=fields.get("expires_at", item.expires_at),
+        )
         updated = await self.repo.update_item(item, **fields)
         await self._recompute_total(doc)
         return updated
@@ -222,7 +230,12 @@ class IncomingService:
         actor_id: UUID | None = None,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingDocument:
-        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
+        doc = await self.repo.get_document_for_update(document_id)
+        if doc is None:
+            raise NotFoundError("Incoming document not found")
+        self._assert_branch_allowed(doc.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if doc.status == "accepted":
+            return doc
         self._assert_draft(doc)
         items = await self.repo.list_items(document_id)
         if not items:
@@ -234,6 +247,10 @@ class IncomingService:
         except (ValueError, ZoneInfoNotFoundError) as exc:
             raise AurumError("Tenant report timezone is invalid") from exc
         for item in items:
+            self._assert_item_dates(
+                manufactured_at=item.manufactured_at,
+                expires_at=item.expires_at,
+            )
             if item.qty <= 0:
                 raise BusinessRuleError(
                     "Item qty must be positive",
@@ -267,6 +284,7 @@ class IncomingService:
                 qty_delta=item.qty,
                 source_table="incoming_item",
                 source_id=item.id,
+                operation_key=f"incoming:accept:{item.id}",
                 created_by=actor_id,
             )
             await self.repo.update_item(item, created_batch_id=batch.id)
@@ -312,6 +330,17 @@ class IncomingService:
     ) -> None:
         if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
             raise PermissionDeniedError("Branch access denied")
+
+    @staticmethod
+    def _assert_item_dates(*, manufactured_at: date | None, expires_at: date) -> None:
+        if manufactured_at is not None and manufactured_at > expires_at:
+            raise BusinessRuleError(
+                "Item manufactured_at cannot be later than expires_at",
+                details={
+                    "manufactured_at": manufactured_at.isoformat(),
+                    "expires_at": expires_at.isoformat(),
+                },
+            )
 
     async def _assert_document_refs_in_tenant(
         self,

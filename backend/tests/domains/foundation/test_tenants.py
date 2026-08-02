@@ -59,6 +59,21 @@ async def test_tenant_settings_thresholds_valid(
     assert body["expiry_thresholds"] == {"yellow": 9, "orange": 4, "red": 2}
 
 
+async def test_tenant_settings_reject_invalid_report_timezone(
+    auth_client: AsyncClient,
+    tenant_admin_token,
+) -> None:
+    token, _, _ = await tenant_admin_token()
+
+    response = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"report_timezone": "not/a-timezone"},
+    )
+
+    assert response.status_code == 422
+
+
 @pytest.mark.parametrize(
     "methods",
     [

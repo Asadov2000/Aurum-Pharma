@@ -2,13 +2,12 @@
 
 All queries are tenant-scoped explicitly (the app pool also enforces RLS,
 but passing :tid keeps the intent obvious and lets support-pool callers
-work the same way). The expiry CASE mirrors v_batch_with_expiry_status
-(1/3/6 month thresholds) so the colours match the /batches page exactly.
+work the same way).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -18,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import local_day_range
+from app.domains.inventory.expiry import ExpiryBoundaries
 
 
 class DashboardRepository:
@@ -69,27 +69,40 @@ class DashboardRepository:
         )
         return dict(row)
 
-    async def expiring_batches(self, tenant_id: UUID, *, limit: int = 5) -> list[dict[str, Any]]:
+    async def expiring_batches(
+        self,
+        tenant_id: UUID,
+        *,
+        boundaries: ExpiryBoundaries,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
         rows = (
             (
                 await self.session.execute(
                     text(
                         "SELECT id, batch_number, branch_id, expires_at, "
-                        "(expires_at - CURRENT_DATE) AS days_to_expiry, "
+                        "(expires_at - :today) AS days_to_expiry, "
                         "CASE "
-                        "WHEN expires_at <= CURRENT_DATE THEN 'expired' "
-                        "WHEN expires_at <= CURRENT_DATE + INTERVAL '1 month' THEN 'red' "
-                        "WHEN expires_at <= CURRENT_DATE + INTERVAL '3 months' THEN 'orange' "
-                        "WHEN expires_at <= CURRENT_DATE + INTERVAL '6 months' THEN 'yellow' "
+                        "WHEN expires_at <= :today THEN 'expired' "
+                        "WHEN expires_at <= :red_until THEN 'red' "
+                        "WHEN expires_at <= :orange_until THEN 'orange' "
+                        "WHEN expires_at <= :yellow_until THEN 'yellow' "
                         "ELSE 'normal' END AS expiry_status, "
                         "qty_remaining "
                         "FROM batch "
                         "WHERE tenant_id = :tid AND is_blocked = false "
                         "AND qty_remaining > 0 "
-                        "AND expires_at <= CURRENT_DATE + INTERVAL '6 months' "
+                        "AND expires_at <= :yellow_until "
                         "ORDER BY expires_at ASC LIMIT :lim"
                     ),
-                    {"tid": str(tenant_id), "lim": limit},
+                    {
+                        "tid": str(tenant_id),
+                        "today": boundaries.today,
+                        "red_until": boundaries.red_until,
+                        "orange_until": boundaries.orange_until,
+                        "yellow_until": boundaries.yellow_until,
+                        "lim": limit,
+                    },
                 )
             )
             .mappings()
@@ -98,21 +111,25 @@ class DashboardRepository:
         return [dict(r) for r in rows]
 
     async def expiring_licenses(
-        self, tenant_id: UUID, *, within_days: int = 30
+        self,
+        tenant_id: UUID,
+        *,
+        today: date,
+        within_days: int = 30,
     ) -> list[dict[str, Any]]:
         rows = (
             (
                 await self.session.execute(
                     text(
                         "SELECT id AS branch_id, name AS branch_name, license_expires_at, "
-                        "(license_expires_at - CURRENT_DATE) AS days_left "
+                        "(license_expires_at - :today) AS days_left "
                         "FROM branch "
                         "WHERE tenant_id = :tid AND is_active = true "
                         "AND license_expires_at IS NOT NULL "
-                        "AND license_expires_at <= CURRENT_DATE + make_interval(days => :wd) "
+                        "AND license_expires_at <= :today + make_interval(days => :wd) "
                         "ORDER BY license_expires_at ASC"
                     ),
-                    {"tid": str(tenant_id), "wd": within_days},
+                    {"tid": str(tenant_id), "today": today, "wd": within_days},
                 )
             )
             .mappings()

@@ -20,6 +20,7 @@ const OWNER_PERMS = [
   "roles.create",
   "suppliers.view",
   "incoming.view",
+  "batches.view",
   "settings.update",
 ] as const;
 
@@ -116,5 +117,11 @@ describe("buildNav — owner-only pages", () => {
     expect(labels(items)).toContain("Биллинг");
     expect(labels(items)).toContain("Отчёты");
     expect(labels(items)).toContain("Настройки");
+  });
+
+  it("shows parties to any tenant role that has batches.view", () => {
+    const items = buildNav(false, true, false, [...SELLER_PERMS, "batches.view"]);
+    expect(labels(items)).toContain("Партии");
+    expect(labels(items)).not.toContain("Биллинг");
   });
 });
