@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 import { BrandMark } from "./BrandMark";
 import { NavIcon } from "./icons";
+import { SIDEBAR_SECTIONS } from "./sidebarPreferences";
 
 export interface NavItem {
   to: string;
@@ -17,40 +18,29 @@ export interface NavItem {
 interface SidebarProps {
   items: NavItem[];
   mode?: "desktop" | "drawer";
+  expanded?: boolean;
+  favoriteRoutes?: readonly string[];
   onNavigate?: () => void;
-  onOpenDrawer?: (trigger: HTMLButtonElement) => void;
-  drawerOpen?: boolean;
+  onToggleExpanded?: () => void;
+  onOpenSettings?: () => void;
   closeButton?: ReactNode;
 }
-
-/** Visual grouping for the flat list buildNav returns. Order here defines the
- *  sidebar order; gating is unchanged — only items buildNav actually returns
- *  get rendered, and empty sections are skipped. */
-const SECTIONS: { caption?: string; routes: string[] }[] = [
-  { routes: ["/"] }, // «Главная» — standalone, no caption
-  { caption: "Запуск", routes: ["/onboarding"] },
-  { caption: "Продажи", routes: ["/pos", "/sales"] },
-  { caption: "Склад", routes: ["/catalog", "/batches", "/incoming", "/suppliers"] },
-  { caption: "Аналитика", routes: ["/reports", "/audit"] },
-  { caption: "Управление", routes: ["/users", "/roles", "/branches", "/registers"] },
-  {
-    caption: "Система",
-    routes: ["/billing", "/notifications", "/security", "/settings"],
-  },
-  { caption: "Администрирование", routes: ["/admin/tenants"] },
-];
 
 export function Sidebar({
   items,
   mode = "desktop",
+  expanded = true,
+  favoriteRoutes = [],
   onNavigate,
-  onOpenDrawer,
-  drawerOpen = false,
+  onToggleExpanded,
+  onOpenSettings,
   closeButton,
 }: SidebarProps): JSX.Element {
-  const location = useRouterState({ select: (s) => s.location });
-  const byRoute = new Map(items.map((i) => [i.to, i]));
-  const claimed = new Set(SECTIONS.flatMap((s) => s.routes));
+  const location = useRouterState({ select: (state) => state.location });
+  const showLabels = mode === "drawer" || expanded;
+  const claimed = new Set(SIDEBAR_SECTIONS.flatMap((section) => section.routes));
+  const favorites = new Set(favoriteRoutes);
+  const favoriteItems = items.filter((item) => favorites.has(item.to));
 
   const renderLink = (item: NavItem): JSX.Element => {
     const active =
@@ -62,34 +52,69 @@ export function Sidebar({
         to={item.to}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
-        title={mode === "desktop" ? item.label : undefined}
+        title={!showLabels ? item.label : undefined}
         className={cn(
-          "group flex min-w-0 items-center rounded-md text-sm font-medium transition-colors duration-fast",
-          mode === "desktop"
-            ? "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] justify-center p-0"
-            : "min-h-9 gap-2.5 px-3 py-2",
+          "group relative flex min-w-0 items-center rounded-md text-sm font-medium transition-colors duration-fast",
+          showLabels
+            ? "min-h-[var(--nav-target-size)] w-full gap-3 px-3 py-2"
+            : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] justify-center p-0",
           active
             ? "bg-primary text-primary-foreground shadow-sm"
             : "text-foreground-secondary hover:bg-foreground/5 hover:text-foreground",
         )}
       >
         <NavIcon to={item.to} />
-        <span className={cn("truncate", mode === "desktop" && "sr-only")}>{item.label}</span>
+        <span className={cn("truncate", !showLabels && "sr-only")}>{item.label}</span>
       </Link>
     );
   };
 
-  // Any item not assigned to a section (e.g. a future route) still shows up,
-  // appended after the known groups, so nothing silently vanishes.
-  const leftovers = items.filter((i) => !claimed.has(i.to));
+  const renderGroup = (
+    key: string,
+    caption: string | undefined,
+    groupItems: NavItem[],
+    first = false,
+  ): JSX.Element | null => {
+    if (groupItems.length === 0) return null;
+    return (
+      <div
+        key={key}
+        className={cn(
+          "flex flex-col gap-0.5",
+          !showLabels && !first && "border-t border-border pt-2",
+        )}
+      >
+        {showLabels && caption && (
+          <div className="px-3 pb-1 pt-2 text-[11px] font-semibold text-foreground-muted">
+            {caption}
+          </div>
+        )}
+        {groupItems.map(renderLink)}
+      </div>
+    );
+  };
+
+  let renderedGroups = 0;
+  const nextGroup = (
+    key: string,
+    caption: string | undefined,
+    groupItems: NavItem[],
+  ): JSX.Element | null => {
+    const rendered = renderGroup(key, caption, groupItems, renderedGroups === 0);
+    if (rendered !== null) renderedGroups += 1;
+    return rendered;
+  };
+
+  const leftovers = items.filter((item) => !claimed.has(item.to) && !favorites.has(item.to));
 
   return (
     <nav
       aria-label="Основная навигация"
+      data-sidebar-mode={mode === "drawer" ? "drawer" : expanded ? "expanded" : "compact"}
       className={cn(
         "flex flex-col border-r border-border bg-surface",
         mode === "desktop"
-          ? "sticky top-[var(--app-header-height)] h-[calc(100dvh-var(--app-header-height))] w-[var(--app-nav-rail-width)] px-2 py-2.5"
+          ? "sticky top-[var(--app-header-height)] h-[calc(100dvh-var(--app-header-height))] w-full px-2 py-2.5"
           : "h-full px-3 py-3.5 shadow-xl",
       )}
     >
@@ -101,66 +126,65 @@ export function Sidebar({
       )}
 
       <div
-        className={cn(
-          "flex flex-1 flex-col overflow-y-auto",
-          mode === "desktop" ? "gap-2" : "gap-3 pr-1",
-        )}
+        className={cn("flex flex-1 flex-col overflow-y-auto", showLabels ? "gap-2 pr-1" : "gap-2")}
       >
-        {SECTIONS.map((section, idx) => {
-          const present = section.routes
-            .map((to) => byRoute.get(to))
-            .filter((i): i is NavItem => i !== undefined);
-          if (present.length === 0) return null;
-          return (
-            <div
-              key={section.caption ?? `top-${idx}`}
-              className={cn(
-                "flex flex-col gap-0.5",
-                mode === "desktop" && "border-t border-border pt-2 first:border-t-0 first:pt-0",
-              )}
-            >
-              {mode === "drawer" && section.caption && (
-                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold text-foreground-muted">
-                  {section.caption}
-                </div>
-              )}
-              {present.map(renderLink)}
-            </div>
-          );
-        })}
-
-        {leftovers.length > 0 && (
-          <div
-            className={cn(
-              "flex flex-col gap-0.5",
-              mode === "desktop" && "border-t border-border pt-2",
-            )}
-          >
-            {leftovers.map(renderLink)}
-          </div>
+        {nextGroup("favorites", "Избранное", favoriteItems)}
+        {SIDEBAR_SECTIONS.map((section) =>
+          nextGroup(
+            section.id,
+            section.caption,
+            items.filter((item) => section.routes.includes(item.to) && !favorites.has(item.to)),
+          ),
         )}
+        {nextGroup("other", "Другое", leftovers)}
       </div>
 
-      {mode === "desktop" && onOpenDrawer && (
-        <div className="mt-2 shrink-0 border-t border-border pt-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0"
-            aria-label="Показать названия разделов"
-            aria-expanded={drawerOpen}
-            title="Показать названия разделов"
-            onClick={(event) => onOpenDrawer(event.currentTarget)}
-          >
-            <ExpandNavigationIcon />
-          </Button>
+      {(onOpenSettings || (mode === "desktop" && onToggleExpanded)) && (
+        <div className={cn("mt-2 shrink-0 border-t border-border pt-2", showLabels && "space-y-1")}>
+          {onOpenSettings && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                showLabels
+                  ? "min-h-[var(--nav-target-size)] w-full justify-start px-3 font-medium"
+                  : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0",
+              )}
+              aria-label="Настроить боковую панель"
+              title={!showLabels ? "Настроить боковую панель" : undefined}
+              onClick={onOpenSettings}
+            >
+              <NavigationSettingsIcon />
+              <span className={cn(!showLabels && "sr-only")}>Настроить меню</span>
+            </Button>
+          )}
+          {mode === "desktop" && onToggleExpanded && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                showLabels
+                  ? "min-h-[var(--nav-target-size)] w-full justify-start px-3 font-medium"
+                  : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0",
+              )}
+              aria-label={expanded ? "Свернуть боковую панель" : "Развернуть боковую панель"}
+              aria-expanded={expanded}
+              title={!showLabels ? "Развернуть боковую панель" : undefined}
+              onClick={onToggleExpanded}
+            >
+              <ExpandNavigationIcon expanded={expanded} />
+              <span className={cn(!showLabels && "sr-only")}>
+                {expanded ? "Свернуть" : "Развернуть"}
+              </span>
+            </Button>
+          )}
         </div>
       )}
     </nav>
   );
 }
 
-function ExpandNavigationIcon(): JSX.Element {
+function ExpandNavigationIcon({ expanded }: { expanded: boolean }): JSX.Element {
   return (
     <svg
       aria-hidden="true"
@@ -174,15 +198,29 @@ function ExpandNavigationIcon(): JSX.Element {
       strokeLinejoin="round"
     >
       <path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" />
-      <path d="m14 8 4 4-4 4" />
-      <path d="M18 12H9" />
+      <path d={expanded ? "m16 8-4 4 4 4" : "m14 8 4 4-4 4"} />
+      <path d={expanded ? "M12 12h7" : "M18 12H9"} />
     </svg>
   );
 }
 
-/** Small inline home glyph — kept for buildNav's compatibility (it tags the
- *  «Главная» item with an icon); the sidebar itself now resolves icons by
- *  route via <NavIcon />. */
+function NavigationSettingsIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    >
+      <path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" />
+    </svg>
+  );
+}
+
 export function HomeIcon(): JSX.Element {
   return (
     <svg
