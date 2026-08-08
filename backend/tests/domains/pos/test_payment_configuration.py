@@ -175,7 +175,7 @@ async def test_checkout_rejects_disabled_payment_before_creating_sale(
             cashier_user_id=scaffold["cashier"].id,
             operation_id=operation_id,
             items=[(scaffold["item"].id, Decimal("1"))],
-            payments=[("qr", Decimal("10"), None)],
+            payments=[("qr", Decimal("10"), {"external_confirmed": True})],
         )
 
     count = await db_session.scalar(
@@ -212,7 +212,7 @@ async def test_checkout_rejects_mixed_payment_when_disabled(
             items=[(scaffold["item"].id, Decimal("1"))],
             payments=[
                 ("cash", Decimal("5"), None),
-                ("card", Decimal("5"), None),
+                ("card", Decimal("5"), {"external_confirmed": True}),
             ],
         )
 
@@ -237,6 +237,7 @@ async def test_legacy_add_payment_rejects_disabled_method(
             payment_method="card",
             amount=Decimal("10"),
             operation_id=uuid4(),
+            metadata={"external_confirmed": True},
         )
 
 
@@ -266,6 +267,7 @@ async def test_legacy_add_payment_rejects_second_method_when_mixed_disabled(
             payment_method="card",
             amount=Decimal("5"),
             operation_id=uuid4(),
+            metadata={"external_confirmed": True},
         )
 
 

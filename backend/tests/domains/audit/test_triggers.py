@@ -215,7 +215,13 @@ async def test_scrub_hides_sensitive_fields() -> None:
             "purchase_price": "3.00",
             "doctor_license": "D-123",
             "prescription_number": "RX-SECRET",
+            "receipt_snapshot": {"receipt_number": "SECRET-1"},
             "notes": "sensitive patient note",
+            "metadata": {
+                "cashier_name": "Private cashier",
+                "comment": "sensitive nested comment",
+                "items": [{"comment": "another sensitive comment", "code": "SAFE"}],
+            },
         },
         changed_fields={"password_hash": "$2b$12$newhash"},
     )
@@ -229,7 +235,12 @@ async def test_scrub_hides_sensitive_fields() -> None:
     assert scrubbed["new_values"]["purchase_price"] == "***"
     assert scrubbed["new_values"]["doctor_license"] == "***"
     assert scrubbed["new_values"]["prescription_number"] == "***"
+    assert scrubbed["new_values"]["receipt_snapshot"] == "***"
     assert scrubbed["new_values"]["notes"] == "***"
+    assert scrubbed["new_values"]["metadata"]["cashier_name"] == "***"
+    assert scrubbed["new_values"]["metadata"]["comment"] == "***"
+    assert scrubbed["new_values"]["metadata"]["items"][0]["comment"] == "***"
+    assert scrubbed["new_values"]["metadata"]["items"][0]["code"] == "SAFE"
     assert scrubbed["old_values"]["profile"]["phone"] == "***"
     assert scrubbed["old_values"]["profile"]["contact_email"] == "***"
     assert scrubbed["changed_fields"]["password_hash"] == "***"

@@ -194,6 +194,7 @@ async def _seed_finalized_sale(engine: AsyncEngine) -> dict[str, UUID]:
             text(
                 "UPDATE public.sale SET "
                 "status = 'completed', completed_at = now(), "
+                "receipt_snapshot = '{}'::jsonb, "
                 "receipt_number = 'GUARD-000001', receipt_seq = 1 "
                 "WHERE id = :sale_id"
             ),
@@ -233,6 +234,7 @@ async def _cleanup(
     ids: dict[str, UUID],
 ) -> None:
     guarded_tables = (
+        ("batch_movement", "trg_guard_batch_movement_immutability"),
         ("prescription_log", "trg_guard_prescription_log_immutability"),
         ("sale_payment", "trg_guard_sale_payment_immutability"),
         ("sale_item", "trg_guard_sale_item_immutability"),
@@ -292,6 +294,10 @@ async def test_runtime_roles_cannot_mutate_finalized_sale_history(
         ),
         (
             "UPDATE public.sale SET receipt_number = 'CHANGED' WHERE id = :sale_id",
+            {"sale_id": ids["sale_id"]},
+        ),
+        (
+            "UPDATE public.sale SET receipt_snapshot = '{}'::jsonb WHERE id = :sale_id",
             {"sale_id": ids["sale_id"]},
         ),
         (
@@ -503,10 +509,26 @@ async def test_app_role_can_edit_draft_and_finalize_exactly_once(
                 ),
                 {"tenant_id": ids["tenant_id"], "sale_id": draft_id},
             )
+            missing_snapshot = await connection.begin_nested()
+            with pytest.raises(
+                DBAPIError,
+                match="Completed sale requires an immutable receipt snapshot",
+            ):
+                await connection.execute(
+                    text(
+                        "UPDATE public.sale SET "
+                        "status = 'completed', completed_at = now(), "
+                        "receipt_number = 'GUARD-000002', receipt_seq = 2 "
+                        "WHERE id = :id"
+                    ),
+                    {"id": draft_id},
+                )
+            await missing_snapshot.rollback()
             await connection.execute(
                 text(
                     "UPDATE public.sale SET "
                     "status = 'completed', completed_at = now(), "
+                    "receipt_snapshot = '{}'::jsonb, "
                     "receipt_number = 'GUARD-000002', receipt_seq = 2 "
                     "WHERE id = :id"
                 ),
@@ -593,6 +615,7 @@ async def test_draft_ownership_and_finalization_balances_are_enforced(
             ids["tenant_id"],
             "UPDATE public.sale SET "
             "status = 'completed', completed_at = now(), "
+            "receipt_snapshot = '{}'::jsonb, "
             "receipt_number = 'GUARD-000002', receipt_seq = 2 "
             "WHERE id = :id",
             {"id": draft_id},
@@ -664,6 +687,7 @@ async def test_database_rejects_return_quantity_above_original_sale(
             ids["tenant_id"],
             "UPDATE public.sale SET "
             "status = 'completed', completed_at = now(), "
+            "receipt_snapshot = '{}'::jsonb, "
             "receipt_number = 'GUARD-000002', receipt_seq = 2 "
             "WHERE id = :id",
             {"id": return_id},
@@ -761,6 +785,7 @@ async def test_late_component_insert_cannot_race_sale_finalization(
                 text(
                     "UPDATE public.sale SET "
                     "status = 'completed', completed_at = now(), "
+                    "receipt_snapshot = '{}'::jsonb, "
                     "receipt_number = 'GUARD-000002', receipt_seq = 2 "
                     "WHERE id = :sale_id"
                 ),

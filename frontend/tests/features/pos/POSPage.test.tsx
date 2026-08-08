@@ -1,15 +1,18 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentShift = vi.fn();
 const openShift = vi.fn();
+const closeShift = vi.fn();
+const getZReportXlsx = vi.fn();
 const listRegisters = vi.fn();
 
 vi.mock("@/features/pos/api", () => ({
   getCurrentShift: (...a: unknown[]) => getCurrentShift(...a),
   openShift: (...a: unknown[]) => openShift(...a),
-  closeShift: vi.fn(),
+  closeShift: (...a: unknown[]) => closeShift(...a),
+  getZReportXlsx: (...a: unknown[]) => getZReportXlsx(...a),
   getZReport: vi.fn(),
   createSale: vi.fn(),
   getSale: vi.fn(),
@@ -44,13 +47,19 @@ vi.mock("@/features/catalog/queries", () => ({
 import { POSPage } from "@/features/pos/POSPage";
 import { useAuthStore } from "@/stores/auth";
 
-function renderPage() {
+async function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <POSPage />
-    </QueryClientProvider>,
-  );
+  let view: ReturnType<typeof render> | undefined;
+  await act(async () => {
+    view = render(
+      <QueryClientProvider client={qc}>
+        <POSPage />
+      </QueryClientProvider>,
+    );
+    await Promise.resolve();
+  });
+  if (!view) throw new Error("POS page did not render");
+  return view;
 }
 
 const REGISTER = {
@@ -107,16 +116,19 @@ describe("POSPage", () => {
     useAuthStore.getState().setUser(POS_USER);
     getCurrentShift.mockReset();
     openShift.mockReset();
+    closeShift.mockReset();
+    getZReportXlsx.mockReset();
     listRegisters.mockReset();
+    getZReportXlsx.mockRejectedValue(new Error("download unavailable"));
   });
   afterEach(() => {
     vi.clearAllMocks();
-    useAuthStore.getState().clear();
+    act(() => useAuthStore.getState().clear());
   });
 
   it("hints to create a register when none exist", async () => {
     listRegisters.mockResolvedValueOnce([]);
-    renderPage();
+    await renderPage();
     expect(await screen.findByText("Нет активных касс")).toBeInTheDocument();
     expect(screen.getByText(/Создайте рабочую кассу/i)).toBeInTheDocument();
   });
@@ -124,7 +136,7 @@ describe("POSPage", () => {
   it("auto-selects the only register (no manual choice) and shows the open-shift form", async () => {
     listRegisters.mockResolvedValue([REGISTER]);
     getCurrentShift.mockResolvedValue(null);
-    renderPage();
+    await renderPage();
     expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Открыть смену/i })).toBeInTheDocument();
     // No dropdown to choose from — the single register is shown in a disabled field.
@@ -137,7 +149,7 @@ describe("POSPage", () => {
     const second = { ...REGISTER, id: "r-2", name: "Касса 2" };
     listRegisters.mockResolvedValue([REGISTER, second]);
     getCurrentShift.mockResolvedValue(null);
-    renderPage();
+    await renderPage();
     // Wait for the register options to load (placeholder + both registers).
     await screen.findByRole("option", { name: "Касса 2" });
     expect(screen.getByText("— выберите —")).toBeInTheDocument();
@@ -158,7 +170,7 @@ describe("POSPage", () => {
     listRegisters.mockResolvedValue([REGISTER]);
     getCurrentShift.mockResolvedValue(null);
 
-    renderPage();
+    await renderPage();
 
     expect(
       await screen.findByText("Открытие смены недоступно для этого аккаунта."),
@@ -171,7 +183,7 @@ describe("POSPage", () => {
     listRegisters.mockResolvedValue([REGISTER]);
     getCurrentShift.mockResolvedValue(null);
     openShift.mockResolvedValueOnce(OPEN_SHIFT);
-    renderPage();
+    await renderPage();
     const cashInput = await screen.findByLabelText(/Касса на начало смены/i);
     fireEvent.change(cashInput, { target: { value: "250" } });
     fireEvent.click(screen.getByRole("button", { name: /Открыть смену/i }));
@@ -187,7 +199,7 @@ describe("POSPage", () => {
     listRegisters.mockResolvedValue([REGISTER]);
     getCurrentShift.mockResolvedValueOnce(null).mockResolvedValue(OPEN_SHIFT);
     openShift.mockRejectedValueOnce(new Error("response lost"));
-    renderPage();
+    await renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: /Открыть смену/i }));
 
@@ -195,5 +207,55 @@ describe("POSPage", () => {
       expect(screen.getByText(/Смена открыта/i)).toBeInTheDocument();
     });
     expect(screen.queryByText(/Не удалось открыть смену/i)).not.toBeInTheDocument();
+  });
+
+  it("remains usable when browser storage is blocked", async () => {
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockResolvedValue(null);
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("storage blocked");
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("storage blocked");
+    });
+
+    try {
+      await renderPage();
+      expect(
+        await screen.findByLabelText(/Касса на начало смены/i),
+      ).toBeInTheDocument();
+      expect(screen.getByDisplayValue(REGISTER.name)).toBeInTheDocument();
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    }
+  });
+
+  it("does not report a successful shift close as failed when browser storage is blocked", async () => {
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockResolvedValue(OPEN_SHIFT);
+    closeShift.mockResolvedValue({ ...OPEN_SHIFT, status: "closed" });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("storage blocked");
+    });
+
+    try {
+      await renderPage();
+      fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
+      fireEvent.change(screen.getByLabelText("Фактическая касса"), {
+        target: { value: "100" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Подтвердить закрытие смены" }));
+
+      await waitFor(() =>
+        expect(closeShift).toHaveBeenCalledWith(OPEN_SHIFT.id, {
+          closing_cash_actual: "100",
+          notes: null,
+        }),
+      );
+      expect(screen.queryByText(/Не удалось закрыть смену/i)).not.toBeInTheDocument();
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });

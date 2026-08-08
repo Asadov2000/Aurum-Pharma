@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
 import structlog
@@ -78,6 +80,8 @@ from app.domains.sync.models import SyncOutboxEvent
 from app.domains.sync.repository import SyncOutboxRepository
 
 logger = structlog.get_logger("pos.service")
+_MONEY_TEXT_PATTERN = re.compile(r"^(?:0|[1-9]\d{0,11})\.\d{2}$")
+_PAYMENT_METADATA_MAX_BYTES = 4096
 
 
 class POSService:
@@ -230,6 +234,10 @@ class POSService:
             raise BusinessRuleError("Shift is already closed")
         if shift.status != "open":
             raise BusinessRuleError("Shift is not open", details={"status": shift.status})
+        if await self.repo.has_active_draft_sales(shift_id):
+            raise BusinessRuleError(
+                "Cannot close a shift while unfinished sales contain items or payments"
+            )
         totals = await self.repo.shift_totals(shift_id)
         cash_in = Decimal(totals.get("cash", "0"))
         expected = shift.opening_cash + cash_in
@@ -337,6 +345,7 @@ class POSService:
         items: list[tuple[UUID, Decimal]],
         payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
         prescription: Mapping[str, object] | None,
+        expired_sale_confirmed: bool,
     ) -> str:
         payload = {
             "kind": "sale_checkout_v1",
@@ -355,6 +364,7 @@ class POSService:
                 for payment_method, amount, metadata in payments
             ],
             "prescription": dict(prescription) if prescription is not None else None,
+            "expired_sale_confirmed": expired_sale_confirmed,
         }
         try:
             canonical = json.dumps(
@@ -510,9 +520,77 @@ class POSService:
     def _validate_checkout_payments(
         payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
     ) -> None:
-        for _payment_method, amount, _metadata in payments:
+        for payment_method, amount, metadata in payments:
             if amount <= 0:
                 raise BusinessRuleError("Payment amount must be positive")
+            POSService._validate_payment_metadata(
+                payment_method=payment_method,
+                amount=amount,
+                metadata=metadata,
+            )
+
+    @staticmethod
+    def _validate_payment_metadata(
+        *,
+        payment_method: str,
+        amount: Decimal,
+        metadata: Mapping[str, object] | None,
+    ) -> None:
+        if metadata is None:
+            if payment_method in {"card", "qr"}:
+                raise BusinessRuleError(
+                    "Card and QR payments must be confirmed in the external terminal"
+                )
+            return
+        try:
+            serialized = json.dumps(
+                dict(metadata),
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise BusinessRuleError("Payment metadata must be valid JSON") from exc
+        if len(serialized) > _PAYMENT_METADATA_MAX_BYTES:
+            raise BusinessRuleError("Payment metadata is too large")
+
+        raw_external_confirmed = metadata.get("external_confirmed")
+        if payment_method in {"card", "qr"}:
+            if raw_external_confirmed is not True:
+                raise BusinessRuleError(
+                    "Card and QR payments must be confirmed in the external terminal"
+                )
+        elif "external_confirmed" in metadata:
+            raise BusinessRuleError("external_confirmed is valid only for card and QR payments")
+
+        raw_cash_received = metadata.get("cash_received")
+        if raw_cash_received is None:
+            return
+        if payment_method != "cash":
+            raise BusinessRuleError("cash_received is valid only for cash payments")
+        if not isinstance(raw_cash_received, str) or not _MONEY_TEXT_PATTERN.fullmatch(
+            raw_cash_received
+        ):
+            raise BusinessRuleError("cash_received must be a valid money amount")
+        cash_received = Decimal(raw_cash_received)
+        if cash_received < amount:
+            raise BusinessRuleError(
+                "Cash received cannot be less than the allocated payment",
+                details={"received": str(cash_received), "allocated": str(amount)},
+            )
+
+    @staticmethod
+    def _payment_tendered_amount(payment: SalePayment) -> Decimal:
+        if payment.payment_method != "cash" or payment.metadata_json is None:
+            return payment.amount
+        raw_cash_received = payment.metadata_json.get("cash_received")
+        if not isinstance(raw_cash_received, str) or not _MONEY_TEXT_PATTERN.fullmatch(
+            raw_cash_received
+        ):
+            return payment.amount
+        cash_received = Decimal(raw_cash_received)
+        return cash_received if cash_received >= payment.amount else payment.amount
 
     async def _validate_pos_payment_configuration(
         self,
@@ -605,6 +683,7 @@ class POSService:
         items: list[tuple[UUID, Decimal]],
         payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
         prescription: Mapping[str, object] | None = None,
+        expired_sale_confirmed: bool = False,
         can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
@@ -623,6 +702,7 @@ class POSService:
             items=aggregated_items,
             payments=payments,
             prescription=prescription,
+            expired_sale_confirmed=expired_sale_confirmed,
         )
 
         await self.repo.lock_operation_id(operation_id)
@@ -662,6 +742,7 @@ class POSService:
                 can_manage_tenant=can_manage_tenant,
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_manage_branch_ids=allowed_manage_branch_ids,
+                expired_sale_confirmed=expired_sale_confirmed,
             )
 
         paid_total = sum((amount for _method, amount, _metadata in payments), Decimal("0"))
@@ -694,6 +775,7 @@ class POSService:
             can_manage_tenant=can_manage_tenant,
             allowed_branch_ids=allowed_branch_ids,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
+            expired_sale_confirmed=expired_sale_confirmed,
         )
         if (
             completed.receipt_number is None
@@ -799,6 +881,9 @@ class POSService:
             "voided_by_sale_id": lifecycle.voided_by_sale_id,
         }
 
+    async def get_refunded_quantities(self, parent_sale_id: UUID) -> dict[UUID, Decimal]:
+        return await self.repo.refunded_quantities(parent_sale_id)
+
     async def _lock_sale(self, sale_id: UUID) -> Sale:
         sale = await self.repo.lock_sale(sale_id)
         if sale is None:
@@ -891,6 +976,97 @@ class POSService:
 
     # ---- receipt (print / PDF) ----
 
+    async def _compose_receipt_data(
+        self,
+        *,
+        sale: Sale,
+        items: list[SaleItem],
+        payments: list[SalePayment],
+        status: str,
+        receipt_number: str | None,
+        receipt_datetime: datetime,
+        total_amount: Decimal,
+    ) -> ReceiptData:
+        tenant = await self.repo.session.get(Tenant, sale.tenant_id)
+        branch = await self.repo.session.get(Branch, sale.branch_id)
+        cashier_name = await self.repo.get_user_display_name(sale.cashier_user_id)
+        timezone_name = await self._report_tz(sale.tenant_id)
+        try:
+            local_receipt_datetime = receipt_datetime.astimezone(ZoneInfo(timezone_name))
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
+
+        original_return_names: dict[UUID, str] = {}
+        if sale.sale_type == "return" and sale.parent_sale_id is not None:
+            parent = await self.repo.get_sale(sale.parent_sale_id)
+            if parent is not None and parent.receipt_snapshot is not None:
+                try:
+                    parent_receipt = ReceiptData.model_validate(parent.receipt_snapshot)
+                except PydanticValidationError as exc:
+                    raise AurumError("Parent receipt snapshot is invalid") from exc
+                parent_items = await self.repo.list_items(parent.id)
+                name_by_position = {line.position: line.name for line in parent_receipt.items}
+                original_return_names = {
+                    item.id: name_by_position[item.position]
+                    for item in parent_items
+                    if item.position in name_by_position
+                }
+
+        lines: list[ReceiptLine] = []
+        for item in items:
+            original_name = (
+                original_return_names.get(item.parent_sale_item_id)
+                if item.parent_sale_item_id is not None
+                else None
+            )
+            catalog = (
+                None
+                if original_name is not None
+                else await self.repo.session.get(TenantCatalog, item.catalog_id)
+            )
+            lines.append(
+                ReceiptLine(
+                    position=item.position,
+                    name=(
+                        original_name
+                        or (catalog.brand_name if catalog is not None else str(item.catalog_id))
+                    ),
+                    qty=item.qty,
+                    unit_price=item.unit_price,
+                    discount_amount=item.discount_amount,
+                    total_price=item.total_price,
+                )
+            )
+
+        discount_total = sum((item.discount_amount for item in items), Decimal("0"))
+        paid_total = sum(
+            (self._payment_tendered_amount(payment) for payment in payments),
+            Decimal("0"),
+        )
+        change = max(Decimal("0"), paid_total - total_amount)
+        return ReceiptData(
+            sale_id=sale.id,
+            is_refund=sale.sale_type == "return",
+            status=status,
+            pharmacy_name=tenant.name if tenant is not None else "",
+            branch_name=branch.name if branch is not None else "",
+            branch_address=branch.address if branch is not None else None,
+            branch_license=branch.license_number if branch is not None else None,
+            receipt_number=receipt_number,
+            datetime=local_receipt_datetime,
+            cashier_name=cashier_name,
+            items=lines,
+            discount_total=discount_total,
+            total=total_amount,
+            currency=sale.currency,
+            payments=[
+                ReceiptPayment(method=payment.payment_method, amount=payment.amount)
+                for payment in payments
+            ],
+            paid_total=paid_total,
+            change=change,
+        )
+
     async def build_receipt(
         self,
         sale_id: UUID,
@@ -912,52 +1088,26 @@ class POSService:
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_view_branch_ids=allowed_view_branch_ids,
             )
+        if sale.receipt_snapshot is not None:
+            try:
+                snapshot = ReceiptData.model_validate(sale.receipt_snapshot)
+            except PydanticValidationError as exc:
+                raise AurumError("Receipt snapshot is invalid") from exc
+            if snapshot.sale_id != sale.id:
+                raise AurumError("Receipt snapshot does not match the sale")
+            return snapshot
+
         items = await self.repo.list_items(sale.id)
         payments = await self.repo.list_payments(sale.id)
         lifecycle = await self.repo.sale_lifecycle(sale)
-
-        tenant = await self.repo.session.get(Tenant, sale.tenant_id)
-        branch = await self.repo.session.get(Branch, sale.branch_id)
-        cashier_name = await self.repo.get_user_display_name(sale.cashier_user_id)
-
-        lines: list[ReceiptLine] = []
-        for it in items:
-            catalog = await self.repo.session.get(TenantCatalog, it.catalog_id)
-            lines.append(
-                ReceiptLine(
-                    position=it.position,
-                    name=catalog.brand_name if catalog is not None else str(it.catalog_id),
-                    qty=it.qty,
-                    unit_price=it.unit_price,
-                    discount_amount=it.discount_amount,
-                    total_price=it.total_price,
-                )
-            )
-
-        discount_total = sum((it.discount_amount for it in items), Decimal("0"))
-        paid_total = sum((p.amount for p in payments), Decimal("0"))
-        change = paid_total - sale.total_amount
-        if change < 0:
-            change = Decimal("0")
-
-        return ReceiptData(
-            sale_id=sale.id,
-            is_refund=sale.sale_type == "return",
+        return await self._compose_receipt_data(
+            sale=sale,
+            items=items,
+            payments=payments,
             status=lifecycle.status,
-            pharmacy_name=tenant.name if tenant is not None else "",
-            branch_name=branch.name if branch is not None else "",
-            branch_address=branch.address if branch is not None else None,
-            branch_license=branch.license_number if branch is not None else None,
             receipt_number=sale.receipt_number,
-            datetime=sale.completed_at or sale.created_at,
-            cashier_name=cashier_name,
-            items=lines,
-            discount_total=discount_total,
-            total=sale.total_amount,
-            currency=sale.currency,
-            payments=[ReceiptPayment(method=p.payment_method, amount=p.amount) for p in payments],
-            paid_total=paid_total,
-            change=change,
+            receipt_datetime=sale.completed_at or sale.created_at,
+            total_amount=sale.total_amount,
         )
 
     async def get_receipt_pdf(
@@ -1287,7 +1437,7 @@ class POSService:
         if allowed_manage_branch_ids is not None and shift.branch_id in allowed_manage_branch_ids:
             return
         if shift.opened_by_user_id != actor_id:
-            raise PermissionDeniedError("Cannot close another cashier's shift")
+            raise PermissionDeniedError("Cannot use another cashier's shift")
 
     @staticmethod
     def _assert_branch_allowed(
@@ -1311,6 +1461,7 @@ class POSService:
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
         today: date | None = None,
+        expired_sale_confirmed: bool = False,
     ) -> tuple[list[SaleItem], bool]:
         """Returns (created items, requires_prescription_log)."""
         sale = await self._lock_sale(sale_id)
@@ -1343,10 +1494,20 @@ class POSService:
                     "available": str(selection.total_picked),
                 },
             )
+        if selection.requires_warning and not expired_sale_confirmed:
+            raise BusinessRuleError(
+                "Expired stock requires cashier confirmation",
+                details={"reason": "expired_sale_confirmation_required"},
+            )
 
         created: list[SaleItem] = []
         for pick in selection.picks:
             unit_price = pick.batch.sale_price or catalog.base_price or Decimal("0")
+            if unit_price <= 0:
+                raise BusinessRuleError(
+                    "Catalog item has no valid sale price",
+                    details={"catalog_id": str(catalog_id)},
+                )
             total_price = (unit_price * pick.qty).quantize(Decimal("0.01"))
             position = await self.repo.next_item_position(sale.id)
             item = await self.repo.insert_item(
@@ -1488,6 +1649,13 @@ class POSService:
         allowed_manage_branch_ids: set[UUID] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SalePayment:
+        if amount <= 0:
+            raise BusinessRuleError("Payment amount must be positive")
+        self._validate_payment_metadata(
+            payment_method=payment_method,
+            amount=amount,
+            metadata=metadata,
+        )
         effective_operation_id = operation_id or uuid4()
         operation_hash = self._payment_operation_hash(
             sale_id=sale_id,
@@ -1517,8 +1685,6 @@ class POSService:
             requested_methods={payment_method},
             existing_methods=await self.repo.payment_methods(sale.id),
         )
-        if amount <= 0:
-            raise BusinessRuleError("Payment amount must be positive")
         self._assert_draft(sale)
         paid_total = await self.repo.payments_total(sale.id)
         if paid_total + amount > sale.total_amount:
@@ -1561,8 +1727,50 @@ class POSService:
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
+        allowed_fields = {
+            "sale_item_id",
+            "prescription_number",
+            "doctor_name",
+            "doctor_license",
+            "patient_name",
+            "notes",
+        }
+        if unknown_fields := set(fields) - allowed_fields:
+            raise BusinessRuleError(
+                "Unsupported prescription fields",
+                details={"fields": sorted(unknown_fields)},
+            )
+
+        clean_fields = dict(fields)
+        text_fields = allowed_fields - {"sale_item_id"}
+        for field_name in text_fields:
+            value = clean_fields.get(field_name)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise BusinessRuleError("Prescription details must be text")
+            clean_fields[field_name] = value.strip() or None
+        if not any(clean_fields.get(field_name) for field_name in text_fields):
+            raise BusinessRuleError("At least one prescription detail is required")
+
+        sale_items = await self.repo.list_items(sale.id)
+        item_by_id = {item.id: item for item in sale_items}
+        requested_item_id = clean_fields.get("sale_item_id")
+        if requested_item_id is not None and requested_item_id not in item_by_id:
+            raise NotFoundError("Sale item not found in this sale")
+
+        rx_item_ids: set[UUID] = set()
+        for item in sale_items:
+            catalog = await self.repo.session.get(TenantCatalog, item.catalog_id)
+            if catalog is not None and catalog.dispensing_type == "prescription":
+                rx_item_ids.add(item.id)
+        if not rx_item_ids:
+            raise BusinessRuleError("Prescription log is not applicable to this sale")
+        if requested_item_id is not None and requested_item_id not in rx_item_ids:
+            raise BusinessRuleError("Prescription log must reference a prescription item")
+
         payload = {
-            **fields,
+            **clean_fields,
             "tenant_id": sale.tenant_id,
             "sale_id": sale.id,
             "created_by": actor_id,
@@ -1573,6 +1781,90 @@ class POSService:
     # Complete — the critical path
     # =========================================================================
 
+    async def _consume_sale_batches(
+        self,
+        sale: Sale,
+        items: list[SaleItem],
+        *,
+        expired_sale_confirmed: bool,
+    ) -> None:
+        settings = await FoundationRepository(self.repo.session).get_settings_for_pos(
+            sale.tenant_id
+        )
+        if settings is None:
+            raise AurumError("POS settings are unavailable")
+        try:
+            local_today = self._now().astimezone(ZoneInfo(settings.report_timezone)).date()
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
+
+        # FEFO normally creates one line per batch, but quantity edits may
+        # leave multiple lines referencing the same batch.
+        per_batch: dict[UUID, Decimal] = {}
+        for item in items:
+            per_batch[item.batch_id] = per_batch.get(item.batch_id, Decimal("0")) + item.qty
+
+        inv_repo = InventoryRepository(self.repo.session)
+        for batch_id in sorted(per_batch, key=str):
+            qty = per_batch[batch_id]
+            locked = await self.repo.lock_batch(batch_id)
+            if locked is None:
+                raise NotFoundError("Batch disappeared mid-checkout")
+            if locked.is_blocked:
+                raise BusinessRuleError(
+                    "Batch is blocked at checkout",
+                    details={"batch_id": str(batch_id)},
+                )
+            if settings.expired_sale_mode == "strict" and locked.expires_at <= local_today:
+                raise BusinessRuleError(
+                    "Expired batch cannot be sold",
+                    details={"batch_id": str(batch_id), "expires_at": str(locked.expires_at)},
+                )
+            if (
+                settings.expired_sale_mode == "warning"
+                and locked.expires_at <= local_today
+                and not expired_sale_confirmed
+            ):
+                raise BusinessRuleError(
+                    "Expired stock requires cashier confirmation",
+                    details={
+                        "reason": "expired_sale_confirmation_required",
+                        "batch_id": str(batch_id),
+                        "expires_at": str(locked.expires_at),
+                    },
+                )
+            if locked.qty_remaining < qty:
+                raise BusinessRuleError(
+                    "Insufficient stock at checkout",
+                    details={
+                        "batch_id": str(batch_id),
+                        "available": str(locked.qty_remaining),
+                        "needed": str(qty),
+                    },
+                )
+            if sale.is_test:
+                continue
+            try:
+                await inv_repo.insert_movement(
+                    tenant_id=sale.tenant_id,
+                    batch_id=batch_id,
+                    movement_type="sale",
+                    qty_delta=-qty,
+                    source_table="sale",
+                    source_id=sale.id,
+                    operation_key=f"pos:sale:{sale.id}:sale:{batch_id}",
+                )
+            except (IntegrityError, InternalError) as exc:
+                # The trigger and CHECK remain the final barrier if stock
+                # changes after the explicit lock-time validation.
+                if "qty_remaining" in str(exc).lower():
+                    raise BusinessRuleError(
+                        "Insufficient stock at checkout",
+                        details={"batch_id": str(batch_id)},
+                    ) from exc
+                raise
+            await self.repo.session.refresh(locked)
+
     async def complete(
         self,
         *,
@@ -1581,6 +1873,7 @@ class POSService:
         can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
+        expired_sale_confirmed: bool = False,
     ) -> Sale:
         sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
@@ -1602,70 +1895,43 @@ class POSService:
         items = await self.repo.list_items(sale.id)
         if not items:
             raise BusinessRuleError("Cannot complete a sale with no items")
+        if sale.total_amount <= 0:
+            raise BusinessRuleError("Cannot complete a sale with a non-positive total")
 
         # Payment check
         paid = await self.repo.payments_total(sale.id)
-        if paid < sale.total_amount:
+        if paid != sale.total_amount:
             raise BusinessRuleError(
-                "Insufficient payment",
+                "Payment total does not match sale total",
                 details={"paid": str(paid), "total": str(sale.total_amount)},
             )
 
         # Prescription check
         await self._assert_prescriptions_present(sale, items)
-
-        # Real sales (not test): lock and write off each batch
-        if not sale.is_test:
-            inv_repo = InventoryRepository(self.repo.session)
-            # Aggregate qty per batch (one item per batch is the FEFO output,
-            # but PATCH-edits could create two rows on the same batch).
-            per_batch: dict[UUID, Decimal] = {}
-            for item in items:
-                per_batch[item.batch_id] = per_batch.get(item.batch_id, Decimal("0")) + item.qty
-
-            for batch_id in sorted(per_batch, key=str):
-                qty = per_batch[batch_id]
-                locked = await self.repo.lock_batch(batch_id)
-                if locked is None:
-                    raise NotFoundError("Batch disappeared mid-checkout")
-                if locked.qty_remaining < qty:
-                    raise BusinessRuleError(
-                        "Insufficient stock at checkout",
-                        details={
-                            "batch_id": str(batch_id),
-                            "available": str(locked.qty_remaining),
-                            "needed": str(qty),
-                        },
-                    )
-                try:
-                    await inv_repo.insert_movement(
-                        tenant_id=sale.tenant_id,
-                        batch_id=batch_id,
-                        movement_type="sale",
-                        qty_delta=-qty,
-                        source_table="sale",
-                        source_id=sale.id,
-                        operation_key=f"pos:sale:{sale.id}:sale:{batch_id}",
-                    )
-                except (IntegrityError, InternalError) as exc:
-                    # Belt-and-braces: trigger / CHECK will refuse a negative
-                    # qty even if the FOR UPDATE check above passed.
-                    msg = str(exc).lower()
-                    if "qty_remaining" in msg:
-                        raise BusinessRuleError(
-                            "Insufficient stock at checkout",
-                            details={"batch_id": str(batch_id)},
-                        ) from exc
-                    raise
-                await self.repo.session.refresh(locked)
+        await self._consume_sale_batches(
+            sale,
+            items,
+            expired_sale_confirmed=expired_sale_confirmed,
+        )
 
         receipt_seq, receipt = await self._allocate_receipt(sale.register_id)
+        completed_at = self._now()
+        receipt_snapshot = await self._compose_receipt_data(
+            sale=sale,
+            items=items,
+            payments=await self.repo.list_payments(sale.id),
+            status="completed",
+            receipt_number=receipt,
+            receipt_datetime=completed_at,
+            total_amount=sale.total_amount,
+        )
         completed = await self.repo.update_sale(
             sale,
             status="completed",
-            completed_at=self._now(),
+            completed_at=completed_at,
             receipt_number=receipt,
             receipt_seq=receipt_seq,
+            receipt_snapshot=receipt_snapshot.model_dump(mode="json"),
         )
         logger.info(
             "sale_completed",
@@ -1702,17 +1968,16 @@ class POSService:
         *,
         parent_sale_id: UUID,
         items: dict[UUID, Decimal],
-        reason: str | None,
-        comment: str | None,
+        external_refund_confirmed: bool,
     ) -> str:
         payload = {
+            "kind": "refund_financial_command_v2",
             "parent_sale_id": str(parent_sale_id),
             "items": [
                 [str(item_id), format(qty.normalize(), "f")]
                 for item_id, qty in sorted(items.items(), key=lambda pair: str(pair[0]))
             ],
-            "reason": reason,
-            "comment": comment,
+            "external_refund_confirmed": external_refund_confirmed,
         }
         canonical = json.dumps(
             payload,
@@ -1732,6 +1997,72 @@ class POSService:
         if not per_item:
             raise BusinessRuleError("Refund must contain at least one item")
         return per_item
+
+    @staticmethod
+    def _refund_payment_allocations(
+        *,
+        refund_total: Decimal,
+        original_payments: list[SalePayment],
+        already_refunded: Mapping[str, Decimal],
+    ) -> list[tuple[str, Decimal]]:
+        per_method: dict[str, Decimal] = {}
+        for payment in original_payments:
+            if payment.amount > 0:
+                per_method[payment.payment_method] = (
+                    per_method.get(payment.payment_method, Decimal("0")) + payment.amount
+                )
+        source_total = sum(per_method.values(), Decimal("0"))
+        if source_total <= 0:
+            raise BusinessRuleError("Original sale has no valid payment allocation")
+
+        quantum = Decimal("0.01")
+        methods = list(per_method)
+        remaining = {
+            method: max(
+                Decimal("0"),
+                per_method[method] - already_refunded.get(method, Decimal("0")),
+            )
+            for method in methods
+        }
+        remaining_total = sum(remaining.values(), Decimal("0"))
+        if refund_total > remaining_total:
+            raise BusinessRuleError("Refund exceeds the remaining original payment allocation")
+        if refund_total == remaining_total:
+            return [(method, remaining[method]) for method in methods if remaining[method] > 0]
+
+        exact = {method: refund_total * per_method[method] / source_total for method in methods}
+        allocated = {
+            method: min(
+                remaining[method],
+                exact[method].quantize(quantum, rounding=ROUND_DOWN),
+            )
+            for method in methods
+        }
+        missing_cents = int(
+            ((refund_total - sum(allocated.values(), Decimal("0"))) / quantum).to_integral_value()
+        )
+        remainder_order = sorted(
+            methods,
+            key=lambda method: (
+                exact[method] - allocated[method],
+                remaining[method] - allocated[method],
+            ),
+            reverse=True,
+        )
+        for _index in range(missing_cents):
+            method = next(
+                (
+                    candidate
+                    for candidate in remainder_order
+                    if allocated[candidate] + quantum <= remaining[candidate]
+                ),
+                None,
+            )
+            if method is None:
+                raise AurumError("Unable to allocate refund across original payment methods")
+            allocated[method] += quantum
+
+        return [(method, allocated[method]) for method in methods if allocated[method] > 0]
 
     async def _find_existing_refund(
         self,
@@ -1761,18 +2092,59 @@ class POSService:
             raise ConflictError("Operation ID was already used for another refund")
         return existing
 
+    async def get_refund_result(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+        allowed_branch_ids: set[UUID] | None = None,
+    ) -> Sale:
+        """Return a committed refund after a client lost the POST response."""
+        await self.repo.lock_operation_id(operation_id)
+        if (
+            await self.repo.get_payment_by_operation_id(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+        ):
+            raise NotFoundError("Refund operation not found")
+
+        sale = await self.repo.get_sale_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if sale is None or sale.sale_type != "return":
+            raise NotFoundError("Refund operation not found")
+        self._assert_branch_allowed(sale.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if (
+            sale.status != "completed"
+            or sale.parent_sale_id is None
+            or sale.receipt_number is None
+            or sale.completed_at is None
+        ):
+            raise AurumError("Refund sale aggregate is incomplete")
+        return sale
+
     async def _validate_refund_items(
         self,
         *,
         parent_sale_id: UUID,
         per_item: dict[UUID, Decimal],
-    ) -> tuple[dict[UUID, SaleItem], dict[UUID, Decimal]]:
+    ) -> tuple[
+        dict[UUID, SaleItem],
+        dict[UUID, tuple[Decimal, Decimal, Decimal]],
+    ]:
         parent_items = {i.id: i for i in await self.repo.list_items(parent_sale_id)}
-        already_refunded = await self._already_refunded(parent_sale_id)
+        already_refunded = await self.repo.refunded_line_totals(parent_sale_id)
         for item_id, qty in per_item.items():
             if item_id not in parent_items:
                 raise NotFoundError("Sale item not found in this sale")
-            available = parent_items[item_id].qty - already_refunded.get(item_id, Decimal("0"))
+            refunded_qty = already_refunded.get(
+                item_id,
+                (Decimal("0"), Decimal("0"), Decimal("0")),
+            )[0]
+            available = parent_items[item_id].qty - refunded_qty
             if qty > available:
                 raise BusinessRuleError(
                     "Refund quantity exceeds what's left on this line",
@@ -1784,6 +2156,44 @@ class POSService:
                 )
         return parent_items, already_refunded
 
+    @staticmethod
+    def _refund_line_amounts(
+        *,
+        parent_item: SaleItem,
+        qty: Decimal,
+        already_refunded: tuple[Decimal, Decimal, Decimal] | None,
+    ) -> tuple[Decimal, Decimal]:
+        refunded_qty, refunded_total, refunded_discount = already_refunded or (
+            Decimal("0"),
+            Decimal("0"),
+            Decimal("0"),
+        )
+        remaining_qty = parent_item.qty - refunded_qty
+        remaining_total = max(
+            Decimal("0"),
+            parent_item.total_price - refunded_total,
+        )
+        remaining_discount = max(
+            Decimal("0"),
+            parent_item.discount_amount - refunded_discount,
+        )
+        if qty == remaining_qty:
+            return remaining_total, remaining_discount
+
+        quantum = Decimal("0.01")
+        total = (parent_item.total_price * qty / parent_item.qty).quantize(
+            quantum,
+            rounding=ROUND_HALF_UP,
+        )
+        discount = (parent_item.discount_amount * qty / parent_item.qty).quantize(
+            quantum,
+            rounding=ROUND_HALF_UP,
+        )
+        return (
+            max(Decimal("0"), min(total, remaining_total)),
+            max(Decimal("0"), min(discount, remaining_discount)),
+        )
+
     async def _insert_refund_items_and_movements(
         self,
         *,
@@ -1791,6 +2201,7 @@ class POSService:
         return_sale: Sale,
         parent_items: dict[UUID, SaleItem],
         per_item: dict[UUID, Decimal],
+        already_refunded: dict[UUID, tuple[Decimal, Decimal, Decimal]],
     ) -> Decimal:
         total = Decimal("0")
         returned_by_batch: dict[UUID, Decimal] = {}
@@ -1800,7 +2211,11 @@ class POSService:
         )
         for item_id, qty in ordered_items:
             parent_item = parent_items[item_id]
-            total_price = (parent_item.unit_price * qty).quantize(Decimal("0.01"))
+            total_price, discount_amount = self._refund_line_amounts(
+                parent_item=parent_item,
+                qty=qty,
+                already_refunded=already_refunded.get(item_id),
+            )
             position = await self.repo.next_item_position(return_sale.id)
             await self.repo.insert_item(
                 tenant_id=parent.tenant_id,
@@ -1811,6 +2226,7 @@ class POSService:
                 qty=qty,
                 unit_price=parent_item.unit_price,
                 total_price=total_price,
+                discount_amount=discount_amount,
                 position=position,
             )
             total += total_price
@@ -1843,7 +2259,10 @@ class POSService:
         comment: str | None,
         cashier_user_id: UUID,
         operation_id: UUID | None = None,
+        external_refund_confirmed: bool = False,
+        can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> Sale:
         """Create a `sale_type='return'` document tied to `parent_sale_id`.
 
@@ -1855,12 +2274,15 @@ class POSService:
         derived from completed linked return documents.
         """
         per_item = self._aggregate_refund_items(items)
+        normalized_reason = reason.strip() if reason is not None else None
+        normalized_comment = comment.strip() if comment is not None else None
+        normalized_reason = normalized_reason or None
+        normalized_comment = normalized_comment or None
         effective_operation_id = operation_id or uuid4()
         operation_hash = self._refund_operation_hash(
             parent_sale_id=parent_sale_id,
             items=per_item,
-            reason=reason,
-            comment=comment,
+            external_refund_confirmed=external_refund_confirmed,
         )
         await self.repo.lock_operation_id(effective_operation_id)
 
@@ -1882,15 +2304,63 @@ class POSService:
         if parent.sale_type != "sale":
             raise BusinessRuleError("Only forward sales can be refunded")
 
+        settings = await FoundationRepository(self.repo.session).get_settings_for_pos(
+            parent.tenant_id
+        )
+        if settings is None:
+            raise AurumError("POS settings are unavailable")
+        if settings.refund_reason_mode == "off" and (
+            normalized_reason is not None or normalized_comment is not None
+        ):
+            raise BusinessRuleError("Refund reason fields are disabled")
+        if settings.refund_reason_mode in {"required", "required_with_text"} and (
+            normalized_reason is None
+        ):
+            raise BusinessRuleError("Refund reason is required")
+        if settings.refund_reason_mode == "required_with_text" and normalized_comment is None:
+            raise BusinessRuleError("Refund comment is required")
+
         parent_items, already_refunded = await self._validate_refund_items(
             parent_sale_id=parent_sale_id,
             per_item=per_item,
         )
+        original_payments = await self.repo.list_payments(parent.id)
+        refund_total = sum(
+            (
+                self._refund_line_amounts(
+                    parent_item=parent_items[item_id],
+                    qty=qty,
+                    already_refunded=already_refunded.get(item_id),
+                )[0]
+                for item_id, qty in per_item.items()
+            ),
+            Decimal("0"),
+        )
+        if refund_total <= 0:
+            raise BusinessRuleError("Refund total must be positive")
+        payment_allocations = self._refund_payment_allocations(
+            refund_total=refund_total,
+            original_payments=original_payments,
+            already_refunded=await self.repo.refunded_payment_totals(parent.id),
+        )
+        requires_external_refund = any(method != "cash" for method, _amount in payment_allocations)
+        if requires_external_refund and not external_refund_confirmed:
+            raise BusinessRuleError("Non-cash refund must be confirmed in the external terminal")
+        if not requires_external_refund and external_refund_confirmed:
+            raise BusinessRuleError(
+                "External terminal confirmation is valid only for non-cash refunds"
+            )
 
-        # Create the return-sale shell + item rows + +qty movements.
-        shift = await self._lock_open_shift(
-            parent.shift_id,
-            error_message="Refunds require an open shift on the original register",
+        # The original shift may be closed days ago. Book the refund in the
+        # currently open shift of the same register for correct accountability.
+        shift = await self.repo.lock_open_shift_for_register(parent.register_id)
+        if shift is None:
+            raise BusinessRuleError("Refunds require an open shift on the original register")
+        self._assert_shift_owned_or_managed(
+            shift,
+            actor_id=cashier_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         return_sale = await self.repo.create_sale(
             tenant_id=parent.tenant_id,
@@ -1911,25 +2381,42 @@ class POSService:
             return_sale=return_sale,
             parent_items=parent_items,
             per_item=per_item,
+            already_refunded=already_refunded,
         )
 
-        # Single refund payment (cash by default). Reason/comment go into
-        # the metadata blob — keeps the SQL surface small.
-        await self.repo.insert_payment(
-            tenant_id=parent.tenant_id,
-            sale_id=return_sale.id,
-            payment_method="cash",
-            amount=total,
-            metadata_json={"reason": reason, "comment": comment},
-        )
+        # Preserve the original tender mix. A card/QR sale must never silently
+        # become a cash refund in accounting.
+        for payment_method, amount in payment_allocations:
+            await self.repo.insert_payment(
+                tenant_id=parent.tenant_id,
+                sale_id=return_sale.id,
+                payment_method=payment_method,
+                amount=amount,
+                metadata_json={
+                    "reason": normalized_reason,
+                    "comment": normalized_comment,
+                    "external_refund_confirmed": external_refund_confirmed,
+                },
+            )
         receipt_seq, receipt = await self._allocate_receipt(parent.register_id)
+        completed_at = self._now()
+        receipt_snapshot = await self._compose_receipt_data(
+            sale=return_sale,
+            items=await self.repo.list_items(return_sale.id),
+            payments=await self.repo.list_payments(return_sale.id),
+            status="completed",
+            receipt_number=receipt,
+            receipt_datetime=completed_at,
+            total_amount=total,
+        )
         await self.repo.update_sale(
             return_sale,
             status="completed",
-            completed_at=self._now(),
+            completed_at=completed_at,
             receipt_number=receipt,
             receipt_seq=receipt_seq,
             total_amount=total,
+            receipt_snapshot=receipt_snapshot.model_dump(mode="json"),
         )
 
         # Keep the finalized parent row unchanged. The read model derives the
@@ -1944,17 +2431,18 @@ class POSService:
         )
         return return_sale
 
-    async def _already_refunded(self, parent_sale_id: UUID) -> dict[UUID, Decimal]:
-        return await self.repo.refunded_quantities(parent_sale_id)
-
     @staticmethod
     def _is_fully_refunded(
         parent_items: dict[UUID, SaleItem],
-        already_refunded: dict[UUID, Decimal],
+        already_refunded: dict[UUID, tuple[Decimal, Decimal, Decimal]],
         this_refund: dict[UUID, Decimal],
     ) -> bool:
         for pid, item in parent_items.items():
-            done = already_refunded.get(pid, Decimal("0")) + this_refund.get(pid, Decimal("0"))
+            refunded_qty = already_refunded.get(
+                pid,
+                (Decimal("0"), Decimal("0"), Decimal("0")),
+            )[0]
+            done = refunded_qty + this_refund.get(pid, Decimal("0"))
             if done < item.qty:
                 return False
         return True

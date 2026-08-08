@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DRAFT_TTL_MIN, draftKey, loadDraft } from "@/features/pos/draftStorage";
+import { DRAFT_TTL_MIN, draftKey, loadDraft, saveDraft } from "@/features/pos/draftStorage";
 
 const REG = "reg-1";
 
@@ -14,6 +14,7 @@ describe("loadDraft (POS draft TTL)", () => {
       nameById: {},
       expired: false,
       requiresRx: false,
+      stagedPayments: [],
     });
   });
 
@@ -27,6 +28,7 @@ describe("loadDraft (POS draft TTL)", () => {
       nameById: { c1: "Аспирин" },
       expired: false,
       requiresRx: false,
+      stagedPayments: [],
     });
   });
 
@@ -46,6 +48,7 @@ describe("loadDraft (POS draft TTL)", () => {
       nameById: {},
       expired: false,
       requiresRx: true,
+      stagedPayments: [],
     });
   });
 
@@ -103,6 +106,75 @@ describe("loadDraft (POS draft TTL)", () => {
       nameById: {},
       expired: false,
       requiresRx: false,
+      stagedPayments: [],
     });
+  });
+
+  it("restores a validated mixed-payment calculation including cash tender", () => {
+    expect(
+      saveDraft(REG, "s-pay", {}, "draft", false, [
+        {
+          payment_method: "cash",
+          amount: "20.00",
+          metadata: { cash_received: "50.00" },
+        },
+        {
+          payment_method: "card",
+          amount: "30.00",
+          metadata: { external_confirmed: true },
+        },
+      ]),
+    ).toBe(true);
+
+    expect(loadDraft(REG).stagedPayments).toEqual([
+      {
+        payment_method: "cash",
+        amount: "20.00",
+        metadata: { cash_received: "50.00" },
+      },
+      {
+        payment_method: "card",
+        amount: "30.00",
+        metadata: { external_confirmed: true },
+      },
+    ]);
+  });
+
+  it("restores an explicit expired-stock acknowledgement", () => {
+    expect(saveDraft(REG, "s-expired", {}, "draft", false, [], true)).toBe(true);
+
+    expect(loadDraft(REG).expiredSaleConfirmed).toBe(true);
+  });
+
+  it("drops an invalid staged calculation without dropping the cart", () => {
+    window.localStorage.setItem(
+      draftKey(REG),
+      JSON.stringify({
+        saleId: "s-pay",
+        nameById: {},
+        savedAt: Date.now(),
+        stagedPayments: [{ payment_method: "card", amount: "NaN" }],
+      }),
+    );
+
+    const restored = loadDraft(REG);
+    expect(restored.saleId).toBe("s-pay");
+    expect(restored.stagedPayments).toEqual([]);
+  });
+
+  it("drops an unconfirmed card calculation without dropping the cart", () => {
+    window.localStorage.setItem(
+      draftKey(REG),
+      JSON.stringify({
+        saleId: "s-pay",
+        nameById: {},
+        savedAt: Date.now(),
+        stagedPayments: [{ payment_method: "card", amount: "30.00" }],
+      }),
+    );
+
+    const restored = loadDraft(REG);
+    expect(restored.saleId).toBe("s-pay");
+    expect(restored.stagedPayments).toEqual([]);
   });
 });

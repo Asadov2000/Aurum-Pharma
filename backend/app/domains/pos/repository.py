@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, distinct, func, literal, select, text
+from sqlalchemy import and_, case, distinct, exists, func, literal, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import local_day_range
@@ -130,6 +130,21 @@ class POSRepository:
         await self.session.flush()
         await self.session.refresh(shift)
         return shift
+
+    async def has_active_draft_sales(self, shift_id: UUID) -> bool:
+        item_exists = exists().where(SaleItem.sale_id == Sale.id)
+        payment_exists = exists().where(SalePayment.sale_id == Sale.id)
+        prescription_exists = exists().where(PrescriptionLog.sale_id == Sale.id)
+        stmt = select(
+            exists().where(
+                and_(
+                    Sale.shift_id == shift_id,
+                    Sale.status == "draft",
+                    or_(item_exists, payment_exists, prescription_exists),
+                )
+            )
+        )
+        return bool(await self.session.scalar(stmt))
 
     async def list_shifts(
         self,
@@ -505,9 +520,17 @@ class POSRepository:
             return None
         return int(row.receipt_seq), str(row.receipt_number)
 
-    async def refunded_quantities(self, parent_sale_id: UUID) -> dict[UUID, Decimal]:
+    async def refunded_line_totals(
+        self,
+        parent_sale_id: UUID,
+    ) -> dict[UUID, tuple[Decimal, Decimal, Decimal]]:
         stmt = (
-            select(SaleItem.parent_sale_item_id, func.sum(SaleItem.qty))
+            select(
+                SaleItem.parent_sale_item_id,
+                func.sum(SaleItem.qty),
+                func.sum(SaleItem.total_price),
+                func.sum(SaleItem.discount_amount),
+            )
             .join(Sale, Sale.id == SaleItem.sale_id)
             .where(
                 Sale.parent_sale_id == parent_sale_id,
@@ -519,10 +542,37 @@ class POSRepository:
         )
         rows = (await self.session.execute(stmt)).all()
         return {
-            parent_item_id: Decimal(str(qty))
-            for parent_item_id, qty in rows
+            parent_item_id: (
+                Decimal(str(qty)),
+                Decimal(str(total_price)),
+                Decimal(str(discount_amount)),
+            )
+            for parent_item_id, qty, total_price, discount_amount in rows
             if parent_item_id is not None
         }
+
+    async def refunded_quantities(self, parent_sale_id: UUID) -> dict[UUID, Decimal]:
+        return {
+            item_id: values[0]
+            for item_id, values in (await self.refunded_line_totals(parent_sale_id)).items()
+        }
+
+    async def refunded_payment_totals(self, parent_sale_id: UUID) -> dict[str, Decimal]:
+        stmt = (
+            select(
+                SalePayment.payment_method,
+                func.sum(SalePayment.amount),
+            )
+            .join(Sale, Sale.id == SalePayment.sale_id)
+            .where(
+                Sale.parent_sale_id == parent_sale_id,
+                Sale.sale_type == "return",
+                Sale.status == "completed",
+            )
+            .group_by(SalePayment.payment_method)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {str(payment_method): Decimal(str(amount)) for payment_method, amount in rows}
 
     async def shift_totals(self, shift_id: UUID) -> dict[str, Any]:
         """Aggregates payments grouped by method for sales in this shift,

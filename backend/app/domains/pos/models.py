@@ -92,6 +92,7 @@ class Sale(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    receipt_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     fiscal_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     marking_codes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 

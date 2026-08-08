@@ -3,6 +3,8 @@ import { type Sale, type SaleDetails } from "@/features/pos/types";
 
 import { type RefundPayload, type SaleList, type SaleSearchParams } from "./types";
 
+const MONEY_OPERATION_TIMEOUT_MS = 15_000;
+
 export async function listSales(params: SaleSearchParams): Promise<SaleList> {
   const { data } = await api.get<SaleList>("/sales", {
     params: {
@@ -31,6 +33,15 @@ export async function refundSale(
   parentSaleId: string,
   payload: RefundPayload,
 ): Promise<Sale> {
-  const { data } = await api.post<Sale>(`/sales/${parentSaleId}/refund`, payload);
+  const { data } = await api.post<Sale>(`/sales/${parentSaleId}/refund`, payload, {
+    timeout: MONEY_OPERATION_TIMEOUT_MS,
+  });
+  return data;
+}
+
+export async function getRefundResult(operationId: string): Promise<Sale> {
+  const { data } = await api.get<Sale>(`/sales/refund-operations/${operationId}`, {
+    timeout: MONEY_OPERATION_TIMEOUT_MS,
+  });
   return data;
 }

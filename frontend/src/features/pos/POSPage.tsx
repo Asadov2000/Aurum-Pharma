@@ -15,6 +15,22 @@ import { usePosMode } from "./usePosMode";
 const STORAGE_KEY = "pos:lastRegisterId";
 const SOUND_KEY = "pos:beep";
 
+function readLocalPreference(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalPreference(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // POS remains usable when browser privacy settings block preferences.
+  }
+}
+
 export function POSPage(): JSX.Element {
   const { user } = useAuth();
   const { mode, pref, setPref } = usePosMode();
@@ -24,7 +40,7 @@ export function POSPage(): JSX.Element {
   const registers = useRegistersQuery(null, false);
   // POS draft TTL comes from tenant settings; fall back until they load (or if
   // the user can't read them).
-  const settings = useTenantSettingsQuery();
+  const settings = useTenantSettingsQuery(true, true);
   const draftTtlMin = settings.data?.draft_sale_lifetime_min ?? DRAFT_TTL_MIN;
   const configuredPaymentMethods = settings.data?.pos_payment_methods;
   const paymentMethods = useMemo(
@@ -36,19 +52,15 @@ export function POSPage(): JSX.Element {
   const paymentSettingsLoading = settings.isLoading && settings.data === undefined;
   const paymentSettingsUnavailable = !settings.isLoading && settings.data === undefined;
   const [registerId, setRegisterId] = useState<string>(() => {
-    return window.localStorage.getItem(STORAGE_KEY) ?? "";
+    return readLocalPreference(STORAGE_KEY) ?? "";
   });
   const [soundOn, setSoundOn] = useState<boolean>(() => {
-    return window.localStorage.getItem(SOUND_KEY) === "1";
+    return readLocalPreference(SOUND_KEY) === "1";
   });
 
   const toggleSound = (on: boolean) => {
     setSoundOn(on);
-    try {
-      window.localStorage.setItem(SOUND_KEY, on ? "1" : "0");
-    } catch {
-      // ignore
-    }
+    writeLocalPreference(SOUND_KEY, on ? "1" : "0");
   };
 
   // Register auto-selection:
@@ -68,7 +80,7 @@ export function POSPage(): JSX.Element {
   }, [registers.data, registerId]);
 
   useEffect(() => {
-    if (registerId) window.localStorage.setItem(STORAGE_KEY, registerId);
+    if (registerId) writeLocalPreference(STORAGE_KEY, registerId);
   }, [registerId]);
 
   const registerList = registers.data;

@@ -25,23 +25,36 @@ export default function NumPad({
   onClose: () => void;
 }): JSX.Element {
   const [buf, setBuf] = useState(initial);
+  const [pristine, setPristine] = useState(true);
 
   const press = (k: string) => {
     if (k === "⌫") {
       setBuf((b) => b.slice(0, -1));
+      setPristine(false);
       return;
     }
     if (k === ".") {
       if (!allowDecimal) return;
-      setBuf((b) => (b.includes(".") ? b : b === "" ? "0." : b + "."));
+      setBuf((b) => {
+        const current = pristine ? "" : b;
+        return current.includes(".") ? current : current === "" ? "0." : current + ".";
+      });
+      setPristine(false);
       return;
     }
-    setBuf((b) => (b === "0" ? k : b + k));
+    setBuf((b) => {
+      const current = pristine ? "" : b;
+      const next = current === "0" ? k : current + k;
+      const pattern = allowDecimal ? /^\d{0,12}(?:\.\d{0,2})?$/ : /^\d{0,9}$/;
+      return pattern.test(next) ? next : current;
+    });
+    setPristine(false);
   };
 
   const submit = () => {
     const v = buf.trim();
-    if (v === "" || v === ".") return;
+    const numeric = Number(v);
+    if (v === "" || v === "." || !Number.isFinite(numeric) || numeric <= 0) return;
     onSubmit(v);
   };
 

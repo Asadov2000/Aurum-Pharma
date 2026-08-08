@@ -9,8 +9,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, ConflictError
+from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.domains.audit.models import AuditLog
+from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
@@ -58,6 +59,24 @@ async def test_add_item_uses_fefo(db_session: AsyncSession, pos_scaffold) -> Non
     assert created[0].unit_price == Decimal("10.00")
     assert created[0].total_price == Decimal("20.00")
     assert requires_rx is False
+
+
+async def test_add_item_rejects_zero_sale_price(db_session: AsyncSession, pos_scaffold) -> None:
+    s = await pos_scaffold(sale_price=Decimal("0"))
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+
+    with pytest.raises(BusinessRuleError, match="no valid sale price"):
+        await service.add_item(
+            sale_id=sale.id,
+            catalog_id=s["item"].id,
+            qty=Decimal("1"),
+        )
 
 
 async def test_add_item_splits_across_batches(db_session: AsyncSession, pos_scaffold) -> None:
@@ -217,6 +236,56 @@ async def test_prescription_required_for_rx_items(db_session: AsyncSession, pos_
     assert completed.status == "completed"
 
 
+async def test_prescription_log_rejects_empty_and_unrelated_details(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    rx = await pos_scaffold(dispensing_type="prescription", sale_price=20)
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, rx)
+    sale = await service.create_sale(
+        tenant_id=rx["tenant"].id,
+        register_id=rx["register"].id,
+        cashier_user_id=rx["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=sale.id,
+        catalog_id=rx["item"].id,
+        qty=Decimal("1"),
+    )
+
+    with pytest.raises(BusinessRuleError, match="At least one prescription detail"):
+        await service.add_prescription(
+            sale_id=sale.id,
+            fields={"notes": "   "},
+            actor_id=rx["cashier"].id,
+        )
+    with pytest.raises(NotFoundError, match="not found in this sale"):
+        await service.add_prescription(
+            sale_id=sale.id,
+            fields={"sale_item_id": rx["item"].id, "prescription_number": "RX-1"},
+            actor_id=rx["cashier"].id,
+        )
+
+    otc = await pos_scaffold(dispensing_type="otc", sale_price=10)
+    await _open_shift(service, otc)
+    otc_sale = await service.create_sale(
+        tenant_id=otc["tenant"].id,
+        register_id=otc["register"].id,
+        cashier_user_id=otc["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=otc_sale.id,
+        catalog_id=otc["item"].id,
+        qty=Decimal("1"),
+    )
+    with pytest.raises(BusinessRuleError, match="not applicable"):
+        await service.add_prescription(
+            sale_id=otc_sale.id,
+            fields={"prescription_number": "RX-NOT-NEEDED"},
+            actor_id=otc["cashier"].id,
+        )
+
+
 async def test_test_sale_flag_for_setup_phase(db_session: AsyncSession, pos_scaffold) -> None:
     """Tenant in `setup` produces is_test sales; stock is NOT decreased."""
     s = await pos_scaffold(tenant_status="setup", sale_price=10, batch_qty=20)
@@ -268,3 +337,100 @@ async def test_complete_with_insufficient_stock_after_lock(
     # Now the batch has 3 left but the sale needs 4 — complete refuses.
     with pytest.raises(BusinessRuleError):
         await service.complete(sale_id=sale.id)
+
+
+async def test_complete_rechecks_batch_block_and_expiry(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    blocked = await pos_scaffold(sale_price=10, batch_qty=5)
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, blocked)
+    blocked_sale = await service.create_sale(
+        tenant_id=blocked["tenant"].id,
+        register_id=blocked["register"].id,
+        cashier_user_id=blocked["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=blocked_sale.id,
+        catalog_id=blocked["item"].id,
+        qty=Decimal("1"),
+    )
+    await service.add_payment(
+        sale_id=blocked_sale.id,
+        payment_method="cash",
+        amount=Decimal("10"),
+    )
+    blocked["batch"].is_blocked = True
+    await db_session.flush()
+    with pytest.raises(BusinessRuleError, match="blocked at checkout"):
+        await service.complete(sale_id=blocked_sale.id)
+
+    expired = await pos_scaffold(sale_price=10, batch_qty=5)
+    await _open_shift(service, expired)
+    expired_sale = await service.create_sale(
+        tenant_id=expired["tenant"].id,
+        register_id=expired["register"].id,
+        cashier_user_id=expired["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=expired_sale.id,
+        catalog_id=expired["item"].id,
+        qty=Decimal("1"),
+    )
+    await service.add_payment(
+        sale_id=expired_sale.id,
+        payment_method="cash",
+        amount=Decimal("10"),
+    )
+    expired["batch"].expires_at = date.today()
+    await db_session.flush()
+    with pytest.raises(BusinessRuleError, match="Expired batch"):
+        await service.complete(sale_id=expired_sale.id)
+
+
+async def test_warning_mode_requires_explicit_expired_sale_confirmation(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    s = await pos_scaffold(sale_price=10, batch_qty=5)
+    foundation = FoundationRepository(db_session)
+    settings = await foundation.get_settings(s["tenant"].id)
+    assert settings is not None
+    await foundation.update_settings(settings, expired_sale_mode="warning")
+    s["batch"].expires_at = date(2000, 1, 1)
+    await db_session.flush()
+
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+
+    with pytest.raises(BusinessRuleError, match="requires cashier confirmation"):
+        await service.add_item(
+            sale_id=sale.id,
+            catalog_id=s["item"].id,
+            qty=Decimal("1"),
+        )
+
+    await service.add_item(
+        sale_id=sale.id,
+        catalog_id=s["item"].id,
+        qty=Decimal("1"),
+        expired_sale_confirmed=True,
+    )
+    await service.add_payment(
+        sale_id=sale.id,
+        payment_method="cash",
+        amount=Decimal("10"),
+    )
+    with pytest.raises(BusinessRuleError, match="requires cashier confirmation"):
+        await service.complete(sale_id=sale.id)
+
+    completed = await service.complete(
+        sale_id=sale.id,
+        expired_sale_confirmed=True,
+    )
+    assert completed.status == "completed"

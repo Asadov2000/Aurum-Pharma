@@ -12,7 +12,6 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.dashboard.repository import DashboardRepository
@@ -117,11 +116,9 @@ async def test_stock_on_date_excludes_next_local_day(
             qty_delta=qty,
             source_table=None,
             source_id=None,
+            created_at=ts,
         )
-        await db_session.execute(
-            text("UPDATE batch_movement SET created_at = :ts WHERE id = :id"),
-            {"ts": ts, "id": mv.id},
-        )
+        assert mv.created_at == ts
     await db_session.flush()
 
     rows = await POSRepository(db_session).stock_on_date(

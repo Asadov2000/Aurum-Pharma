@@ -14,13 +14,15 @@ interface FormValues {
   notes: string;
 }
 
-const prescriptionSchema = z.object({
-  prescription_number: z.string().max(500),
-  doctor_name: z.string().max(500),
-  doctor_license: z.string().max(500),
-  patient_name: z.string().max(500),
-  notes: z.string().max(2000),
-});
+const prescriptionSchema = z
+  .object({
+    prescription_number: z.string().max(500),
+    doctor_name: z.string().max(500),
+    doctor_license: z.string().max(500),
+    patient_name: z.string().max(500),
+    notes: z.string().max(2000),
+  })
+  .refine((values) => Object.values(values).some((value) => value.trim().length > 0));
 
 export function PrescriptionModal({
   open,
@@ -46,7 +48,7 @@ export function PrescriptionModal({
     setTopError(null);
     const parsed = prescriptionSchema.safeParse(values);
     if (!parsed.success) {
-      setTopError("Проверьте длину заполненных полей рецепта.");
+      setTopError("Заполните хотя бы одно поле рецепта и проверьте длину данных.");
       return;
     }
     const trim = (v: string) => (v.trim() ? v.trim() : null);

@@ -35,4 +35,16 @@ describe("BarcodeListener", () => {
     expect(propagated).toBe(false);
     expect(onScan).toHaveBeenCalledWith("4600123456789");
   });
+
+  it("reserves Enter after a malformed short scanner burst without starting a payment", () => {
+    const onScan = vi.fn();
+    render(<BarcodeListener enabled onScan={onScan} />);
+
+    fireEvent.keyDown(window, { key: "1" });
+    fireEvent.keyDown(window, { key: "2" });
+    const propagated = fireEvent.keyDown(window, { key: "Enter" });
+
+    expect(propagated).toBe(false);
+    expect(onScan).not.toHaveBeenCalled();
+  });
 });

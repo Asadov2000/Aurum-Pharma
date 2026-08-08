@@ -57,6 +57,7 @@ import {
 } from "./paymentOperation";
 import {
   type Payment,
+  type PaymentMetadata,
   type PaymentMethod,
   type PaymentMethodRead,
   type PrescriptionLogPayload,
@@ -74,12 +75,33 @@ type NumPadState =
 
 type FlashTone = "success" | "danger";
 type CheckoutRecoveryOutcome = "resolved" | "not-found" | "unavailable" | "conflict";
-type StagedPayment = Omit<Payment, "payment_method"> & { payment_method: PaymentMethod };
+type StagedPayment = Omit<Payment, "payment_method"> & {
+  payment_method: PaymentMethod;
+  metadata?: PaymentMetadata;
+};
+type ExternalPaymentConfirmation = {
+  method: "card" | "qr";
+  amount: string;
+};
+type ExpiredItemConfirmation = {
+  catalogId: string;
+  name: string;
+  qty: number;
+  fromScanner: boolean;
+};
 
 function isDefiniteRejection(error: unknown): boolean {
   if (!isAxiosError(error) || error.response === undefined) return false;
   const status = error.response.status;
   return status >= 400 && status < 500 && status !== 408 && status !== 409;
+}
+
+function isExpiryConfirmationRequired(error: unknown): boolean {
+  if (!isAxiosError(error)) return false;
+  const data = error.response?.data as
+    | { error?: { details?: { reason?: unknown } } }
+    | undefined;
+  return data?.error?.details?.reason === "expired_sale_confirmation_required";
 }
 
 type PaymentReconciliation = "pending" | "matched" | "conflict" | "settled-elsewhere";
@@ -116,6 +138,14 @@ function checkoutItemsFrom(items: SaleDetails["items"]): { catalog_id: string; q
     catalog_id,
     qty: (thousandths / 1000).toFixed(3),
   }));
+}
+
+function normalizePositiveMoney(value: string): string | null {
+  const normalized = value.trim().replace(",", ".");
+  if (!/^\d{1,12}(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return amount.toFixed(2);
 }
 
 /**
@@ -238,13 +268,33 @@ function ActiveWorkspace({
   const [topError, setTopError] = useState<string | null>(null);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [requiresRx, setRequiresRx] = useState(init.requiresRx);
+  const [expiredSaleConfirmed, setExpiredSaleConfirmed] = useState(
+    init.expiredSaleConfirmed === true,
+  );
   const [prescription, setPrescription] = useState<PrescriptionLogPayload | null>(null);
-  const [stagedPayments, setStagedPayments] = useState<StagedPayment[]>([]);
+  const [stagedPayments, setStagedPayments] = useState<StagedPayment[]>(() =>
+    init.stagedPayments.map((payment, index) => ({
+      id: `staged-${index + 1}`,
+      sale_id: init.saleId ?? "",
+      operation_id: null,
+      payment_method: payment.payment_method,
+      amount: payment.amount,
+      currency: "TJS",
+      metadata: payment.metadata,
+    })),
+  );
   const [payingMethod, setPayingMethod] = useState<PaymentMethodRead | null>(null);
   const [numpad, setNumpad] = useState<NumPadState | null>(null);
   const [flash, setFlash] = useState<FlashTone | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const [paymentResetConfirmOpen, setPaymentResetConfirmOpen] = useState(false);
+  const [externalPaymentConfirmation, setExternalPaymentConfirmation] =
+    useState<ExternalPaymentConfirmation | null>(null);
+  const [expiredItemConfirmation, setExpiredItemConfirmation] =
+    useState<ExpiredItemConfirmation | null>(null);
+  const [checkoutExpiryConfirmationOpen, setCheckoutExpiryConfirmationOpen] =
+    useState(false);
   const [paymentPanelVisible, setPaymentPanelVisible] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentPanelRef = useRef<HTMLDivElement>(null);
@@ -252,11 +302,17 @@ function ActiveWorkspace({
   const completingRef = useRef(false);
   const checkoutRecoveryRef = useRef(false);
   const openedDrawerOperationRef = useRef<string | null>(null);
-  const stagedPaymentSequenceRef = useRef(0);
+  const stagedPaymentSequenceRef = useRef(init.stagedPayments.length);
+  const stagedPaymentsRef = useRef(stagedPayments);
+  const externalPaymentConfirmationRef = useRef<ExternalPaymentConfirmation | null>(null);
+  const expiredItemConfirmationRef = useRef<ExpiredItemConfirmation | null>(null);
+  const expiredSaleConfirmedRef = useRef(expiredSaleConfirmed);
   const saleIdRef = useRef<string | null>(saleId);
   const saleCreationRef = useRef<Promise<string> | null>(null);
   const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
   saleIdRef.current = saleId;
+  stagedPaymentsRef.current = stagedPayments;
+  expiredSaleConfirmedRef.current = expiredSaleConfirmed;
 
   const createSale = useCreateSale();
   const addItem = useAddSaleItem();
@@ -273,48 +329,64 @@ function ActiveWorkspace({
   const isDraft = !sale || sale.status === "draft";
   const items = sale?.items ?? [];
   const recordedPayments = sale?.payments ?? [];
-  const payments = isDraft ? [...recordedPayments, ...stagedPayments] : recordedPayments;
+  const payments =
+    sale?.status === "draft" ? [...recordedPayments, ...stagedPayments] : recordedPayments;
   const currency = sale?.currency ?? "TJS";
   const totalDue = sale ? Number(sale.total_amount) : 0;
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = totalDue - totalPaid;
+  const stagedTotal = stagedPayments.reduce(
+    (sum, payment) => sum + Number(payment.amount),
+    0,
+  );
+  const stagedPaymentConflict =
+    stagedPayments.length > 0 &&
+    sale?.status === "draft" &&
+    (recordedPayments.length > 0 ||
+      stagedTotal - totalDue > 0.001 ||
+      (!paymentSettingsLoading &&
+        !paymentSettingsUnavailable &&
+        (stagedPayments.some(
+          (payment) => !paymentMethods.includes(payment.payment_method),
+        ) ||
+          (!mixedPaymentEnabled &&
+            (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
+  const cartMutationPending =
+    createSale.isPending || addItem.isPending || updateItem.isPending || deleteItem.isPending;
+  const paymentStarted = stagedPayments.length > 0 || recordedPayments.length > 0;
   const saleEditingBlocked =
     completeSale.isPending ||
     checkoutSale.isPending ||
+    cartMutationPending ||
+    paymentStarted ||
     completionUncertain ||
     checkoutUncertain ||
     pendingCheckout !== null ||
     pendingPayment !== null ||
     (saleId !== null && sale === null);
-  const paymentMethodsKey = paymentMethods.join("|");
-
+  const shiftCloseBlocked =
+    completeSale.isPending ||
+    checkoutSale.isPending ||
+    checkoutReconciling ||
+    cartMutationPending ||
+    addPayment.isPending ||
+    addPrescription.isPending ||
+    completionUncertain ||
+    checkoutUncertain ||
+    pendingCheckout !== null ||
+    pendingPayment !== null ||
+    (saleId !== null && sale === null) ||
+    (sale?.status === "draft" &&
+      (items.length > 0 ||
+        recordedPayments.length > 0 ||
+        stagedPayments.length > 0 ||
+        prescription !== null));
   useEffect(() => {
-    if (stagedPayments.length === 0) return;
-
-    const hasUnavailableMethod = stagedPayments.some(
-      (payment) => !paymentMethods.includes(payment.payment_method),
-    );
-    const stagedTotal = stagedPayments.reduce(
-      (sum, payment) => sum + Number(payment.amount),
-      0,
-    );
-    const violatesSingleMethod =
-      !mixedPaymentEnabled &&
-      (new Set(stagedPayments.map((payment) => payment.payment_method)).size > 1 ||
-        stagedTotal + 0.001 < totalDue);
-
-    if (!hasUnavailableMethod && !violatesSingleMethod) return;
-    setStagedPayments([]);
+    if (!stagedPaymentConflict) return;
     setTopError(
-      "Настройки способов оплаты изменились. Выберите доступный способ оплаты заново.",
+      "Расчёт оплаты больше не соответствует чеку или настройкам. Проверьте внешний терминал и нажмите «Сбросить расчёт» перед новой оплатой.",
     );
-  }, [
-    mixedPaymentEnabled,
-    paymentMethods,
-    paymentMethodsKey,
-    stagedPayments,
-    totalDue,
-  ]);
+  }, [stagedPaymentConflict]);
 
   const clearDraft = useCallback(() => clearDraftStorage(registerId), [registerId]);
   const persistCompletedReceipt = useCallback(
@@ -377,9 +449,12 @@ function ActiveWorkspace({
         mergeCheckoutResult(current, result),
       );
       persistCompletedReceipt(result.sale_id);
+      stagedPaymentsRef.current = [];
       setStagedPayments([]);
       setPrescription(null);
       setRequiresRx(false);
+      expiredSaleConfirmedRef.current = false;
+      setExpiredSaleConfirmed(false);
       await refetchSale();
       return true;
     },
@@ -400,12 +475,11 @@ function ActiveWorkspace({
         return accepted ? "resolved" : "conflict";
       } catch (error) {
         if (isAxiosError(error) && error.response?.status === 404) {
-          clearPendingCheckoutOperation(operation.saleId, operation.operationId);
-          setPendingCheckout((current) =>
-            current?.operationId === operation.operationId ? null : current,
+          setPendingCheckout(operation);
+          setCheckoutUncertain(true);
+          setTopError(
+            "Операция пока не найдена на сервере Aurum. Проверьте внешний терминал и повторите завершение: запрос будет отправлен с тем же безопасным номером операции.",
           );
-          setCheckoutUncertain(false);
-          setTopError("Операция не была проведена. Проверьте соединение и повторите оплату.");
           return "not-found";
         }
 
@@ -426,9 +500,24 @@ function ActiveWorkspace({
   // The savedAt stamp refreshes on every change → the TTL is an idle timeout.
   useEffect(() => {
     if (sale?.status === "draft") {
-      saveDraft(registerId, sale.id, nameById, "draft", requiresRx);
+      saveDraft(
+        registerId,
+        sale.id,
+        nameById,
+        "draft",
+        requiresRx,
+        stagedPayments,
+        expiredSaleConfirmed,
+      );
     }
-  }, [sale, nameById, registerId, requiresRx]);
+  }, [
+    sale,
+    nameById,
+    registerId,
+    requiresRx,
+    stagedPayments,
+    expiredSaleConfirmed,
+  ]);
 
   // Keep the completed receipt addressable until the cashier explicitly starts
   // another sale. This makes printer/browser recovery deterministic.
@@ -553,14 +642,28 @@ function ActiveWorkspace({
     }
   }, [createSale, registerId]);
 
-  const onAdd = async (catalogId: string, name: string, qty: number): Promise<boolean> => {
+  const onAdd = async (
+    catalogId: string,
+    name: string,
+    qty: number,
+    expiredConfirmation = false,
+    fromScanner = false,
+  ): Promise<boolean> => {
     if (saleEditingBlocked) return false;
     setTopError(null);
     try {
       const id = await ensureSaleId();
       if (name) setNameById((m) => ({ ...m, [catalogId]: name }));
-      const res = await addItem.mutateAsync({ saleId: id, catalogId, qty: String(qty) });
-      setStagedPayments([]);
+      const res = await addItem.mutateAsync({
+        saleId: id,
+        catalogId,
+        qty: String(qty),
+        expiredSaleConfirmed: expiredConfirmation,
+      });
+      if (expiredConfirmation) {
+        expiredSaleConfirmedRef.current = true;
+        setExpiredSaleConfirmed(true);
+      }
       if (res.requires_prescription_log) {
         setRequiresRx(true);
         setPrescriptionOpen(true);
@@ -568,6 +671,13 @@ function ActiveWorkspace({
       searchRef.current?.focus();
       return true;
     } catch (err) {
+      if (isExpiryConfirmationRequired(err)) {
+        const confirmation = { catalogId, name, qty, fromScanner };
+        expiredItemConfirmationRef.current = confirmation;
+        setExpiredItemConfirmation(confirmation);
+        setTopError(null);
+        return true;
+      }
       setTopError(describeApiError(err, "Не удалось добавить позицию"));
       return false;
     }
@@ -577,7 +687,8 @@ function ActiveWorkspace({
     setTopError(null);
     try {
       const item = await findByBarcode(code);
-      const added = await onAdd(item.id, item.brand_name, 1);
+      const added = await onAdd(item.id, item.brand_name, 1, false, true);
+      if (expiredItemConfirmationRef.current !== null) return;
       if (!added) {
         doFlash("danger");
         return;
@@ -606,7 +717,6 @@ function ActiveWorkspace({
     setTopError(null);
     try {
       await updateItem.mutateAsync({ saleId, itemId, qty: String(qty) });
-      setStagedPayments([]);
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось изменить количество"));
     }
@@ -616,13 +726,16 @@ function ActiveWorkspace({
     if (!saleId || saleEditingBlocked) return;
     try {
       await deleteItem.mutateAsync({ saleId, itemId });
-      setStagedPayments([]);
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось удалить"));
     }
   };
 
-  const payLegacy = async (method: PaymentMethodRead, amount: string) => {
+  const payLegacy = async (
+    method: PaymentMethodRead,
+    amount: string,
+    metadata?: PaymentMetadata,
+  ) => {
     if (!saleId) return;
     const amt = Number(amount);
     if (!(amt > 0)) return;
@@ -667,7 +780,17 @@ function ActiveWorkspace({
       return;
     }
 
-    if (!saveDraft(registerId, saleId, nameById, "draft", requiresRx)) {
+    if (
+      !saveDraft(
+        registerId,
+        saleId,
+        nameById,
+        "draft",
+        requiresRx,
+        [],
+        expiredSaleConfirmedRef.current,
+      )
+    ) {
       setTopError(
         "Локальное хранилище кассы недоступно. Оплата не отправлена; освободите место или перезапустите приложение.",
       );
@@ -677,7 +800,7 @@ function ActiveWorkspace({
       storedOperation ??
       (method === "bank_transfer"
         ? null
-        : createPendingPaymentOperation(saleId, method, normalizedAmount));
+        : createPendingPaymentOperation(saleId, method, normalizedAmount, metadata));
     if (!operation) {
       setTopError(
         "Не удалось сохранить ключ безопасного повтора. Оплата не отправлена; перезапустите приложение.",
@@ -694,6 +817,7 @@ function ActiveWorkspace({
           operation_id: operation.operationId,
           payment_method: method,
           amount: normalizedAmount,
+          metadata: storedOperation?.metadata ?? metadata,
         },
       });
       clearPendingPaymentOperation(saleId, operation.operationId);
@@ -731,60 +855,229 @@ function ActiveWorkspace({
     }
   };
 
-  const stagePayment = (method: PaymentMethod, amount: string) => {
+  const stagePayment = (
+    method: PaymentMethod,
+    amount: string,
+    metadata?: PaymentMetadata,
+  ) => {
     if (!saleId || recordedPayments.length > 0) return;
     if (!paymentMethods.includes(method)) {
       setTopError("Этот способ оплаты отключён в настройках аптеки.");
       return;
     }
-    const numericAmount = Number(amount);
-    if (!(numericAmount > 0)) return;
+    const normalizedAmount = normalizePositiveMoney(amount);
+    if (!normalizedAmount) {
+      setTopError("Введите корректную сумму оплаты не более чем с двумя знаками после запятой.");
+      return;
+    }
+    const numericAmount = Number(normalizedAmount);
+    const currentPayments = stagedPaymentsRef.current;
+    const currentStagedTotal = currentPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount),
+      0,
+    );
+    const recordedTotal = recordedPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount),
+      0,
+    );
+    const currentRemaining = totalDue - recordedTotal - currentStagedTotal;
+    if (currentPayments.length >= 10) {
+      setTopError("В одном чеке допускается не более 10 частей смешанной оплаты.");
+      return;
+    }
     if (
       !mixedPaymentEnabled &&
-      (stagedPayments.length > 0 || numericAmount + 0.001 < remaining)
+      (currentPayments.length > 0 || numericAmount + 0.001 < currentRemaining)
     ) {
       setTopError("Смешанная оплата отключена. Внесите всю сумму одним способом.");
       return;
     }
-    if (numericAmount - remaining > 0.001) {
+    if (numericAmount - currentRemaining > 0.001) {
       setTopError(
-        `Сумма оплаты превышает остаток ${Math.max(0, remaining).toFixed(2)} ${currency}.`,
+        `Сумма оплаты превышает остаток ${Math.max(0, currentRemaining).toFixed(2)} ${currency}.`,
       );
       return;
     }
 
+    let safeMetadata: PaymentMetadata | undefined;
+    if (metadata?.cash_received !== undefined) {
+      const cashReceived = normalizePositiveMoney(metadata.cash_received);
+      if (
+        method !== "cash" ||
+        !cashReceived ||
+        Number(cashReceived) + 0.001 < numericAmount
+      ) {
+        setTopError("Полученная сумма наличными не может быть меньше суммы оплаты.");
+        return;
+      }
+      safeMetadata = { cash_received: cashReceived };
+    }
+    if (method === "card" || method === "qr") {
+      if (metadata?.external_confirmed !== true) {
+        setTopError("Подтвердите успешную оплату во внешнем терминале.");
+        return;
+      }
+      safeMetadata = { external_confirmed: true };
+    }
+
     stagedPaymentSequenceRef.current += 1;
-    setStagedPayments((current) => [
-      ...current,
+    const nextPayments: StagedPayment[] = [
+      ...currentPayments,
       {
         id: `staged-${stagedPaymentSequenceRef.current}`,
         sale_id: saleId,
         operation_id: null,
         payment_method: method,
-        amount: numericAmount.toFixed(2),
+        amount: normalizedAmount,
         currency,
+        metadata: safeMetadata,
       },
-    ]);
+    ];
+    if (
+      !saveDraft(
+        registerId,
+        saleId,
+        nameById,
+        "draft",
+        requiresRx,
+        nextPayments,
+        expiredSaleConfirmedRef.current,
+      )
+    ) {
+      setTopError(
+        "Локальное хранилище кассы недоступно. Расчёт оплаты не сохранён; освободите место или перезапустите приложение.",
+      );
+      return;
+    }
+    stagedPaymentsRef.current = nextPayments;
+    setStagedPayments(nextPayments);
     setTopError(null);
   };
 
-  const submitPayment = (method: PaymentMethod, amount: string) => {
+  const applyPayment = (
+    method: PaymentMethod,
+    amount: string,
+    metadata?: PaymentMetadata,
+  ) => {
     if (recordedPayments.length > 0 || pendingPayment !== null) {
-      void payLegacy(method, amount);
+      void payLegacy(method, amount, metadata);
       return;
     }
-    stagePayment(method, amount);
+    stagePayment(method, amount, metadata);
+  };
+
+  const submitPayment = (
+    method: PaymentMethod,
+    amount: string,
+    metadata?: PaymentMetadata,
+  ) => {
+    if (
+      (method === "card" || method === "qr") &&
+      metadata?.external_confirmed !== true &&
+      pendingPayment === null
+    ) {
+      if (externalPaymentConfirmationRef.current !== null) return;
+      const confirmation: ExternalPaymentConfirmation = { method, amount };
+      externalPaymentConfirmationRef.current = confirmation;
+      setExternalPaymentConfirmation(confirmation);
+      return;
+    }
+    applyPayment(method, amount, metadata);
+  };
+
+  const closeExternalPaymentConfirmation = () => {
+    externalPaymentConfirmationRef.current = null;
+    setExternalPaymentConfirmation(null);
+  };
+
+  const confirmExternalPayment = () => {
+    const confirmation = externalPaymentConfirmationRef.current;
+    if (!confirmation) return;
+    closeExternalPaymentConfirmation();
+    applyPayment(confirmation.method, confirmation.amount, {
+      external_confirmed: true,
+    });
+  };
+
+  const closeExpiredItemConfirmation = () => {
+    expiredItemConfirmationRef.current = null;
+    setExpiredItemConfirmation(null);
+    requestAnimationFrame(() => searchRef.current?.focus());
+  };
+
+  const confirmExpiredItem = async () => {
+    const confirmation = expiredItemConfirmationRef.current;
+    if (!confirmation) return;
+    expiredItemConfirmationRef.current = null;
+    setExpiredItemConfirmation(null);
+    const added = await onAdd(
+      confirmation.catalogId,
+      confirmation.name,
+      confirmation.qty,
+      true,
+      confirmation.fromScanner,
+    );
+    if (confirmation.fromScanner && expiredItemConfirmationRef.current === null) {
+      doFlash(added ? "success" : "danger");
+      if (added && soundOn) beep();
+    }
+  };
+
+  const clearStagedPaymentCalculation = () => {
+    if (!saleId || stagedPaymentsRef.current.length === 0) return;
+    if (checkoutSale.isPending || checkoutReconciling || pendingCheckout || checkoutUncertain) {
+      setTopError("Дождитесь проверки текущей денежной операции.");
+      return;
+    }
+    if (
+      !saveDraft(
+        registerId,
+        saleId,
+        nameById,
+        "draft",
+        requiresRx,
+        [],
+        expiredSaleConfirmedRef.current,
+      )
+    ) {
+      setTopError(
+        "Не удалось сохранить сброс расчёта оплаты. Освободите место или перезапустите приложение.",
+      );
+      return;
+    }
+    stagedPaymentsRef.current = [];
+    setStagedPayments([]);
+    setTopError(null);
+    setPaymentResetConfirmOpen(false);
+  };
+
+  const requestStagedPaymentReset = () => {
+    if (
+      stagedPaymentsRef.current.some(
+        (payment) => payment.payment_method === "card" || payment.payment_method === "qr",
+      )
+    ) {
+      setPaymentResetConfirmOpen(true);
+      return;
+    }
+    clearStagedPaymentCalculation();
   };
 
   // Touch: tapping a tile opens the keypad pre-filled with the remaining amount
   // (so partial payments are easy). Keyboard/desktop: one tap pays the rest.
-  const onPayTile = (method: PaymentMethod, requestedAmount?: string) => {
+  const onPayTile = (
+    method: PaymentMethod,
+    requestedAmount?: string,
+    metadata?: PaymentMetadata,
+  ) => {
     if (
       !saleId ||
       remaining <= 0.001 ||
+      cartMutationPending ||
       paymentSettingsLoading ||
       paymentSettingsUnavailable ||
-      !paymentMethods.includes(method)
+      !paymentMethods.includes(method) ||
+      stagedPaymentConflict
     ) {
       return;
     }
@@ -808,13 +1101,14 @@ function ActiveWorkspace({
       return;
     }
     if (requestedAmount !== undefined) {
-      const amount = Math.min(Number(requestedAmount), remaining);
+      const requested = Number(requestedAmount);
+      const amount = method === "cash" ? Math.min(requested, remaining) : requested;
       if (Number.isFinite(amount) && amount > 0) {
-        submitPayment(method, amount.toFixed(2));
+        submitPayment(method, amount.toFixed(2), metadata);
       }
       return;
     }
-    if (touch) {
+    if (touch || (mixedPaymentEnabled && paymentMethods.length > 1)) {
       setNumpad({ kind: "payment", method, initial: remaining.toFixed(2) });
       return;
     }
@@ -835,7 +1129,21 @@ function ActiveWorkspace({
       setTopError(`Осталось оплатить ${remaining.toFixed(2)} ${currency}`);
       return;
     }
-    if (!saveDraft(registerId, saleId, nameById, "draft", requiresRx)) {
+    if (remaining < -0.001) {
+      setTopError(`Оплата превышает сумму чека на ${Math.abs(remaining).toFixed(2)} ${currency}.`);
+      return;
+    }
+    if (
+      !saveDraft(
+        registerId,
+        saleId,
+        nameById,
+        "draft",
+        requiresRx,
+        [],
+        expiredSaleConfirmedRef.current,
+      )
+    ) {
       setTopError(
         "Локальное хранилище кассы недоступно. Завершение не отправлено; освободите место или перезапустите приложение.",
       );
@@ -855,7 +1163,10 @@ function ActiveWorkspace({
         setPrescription(null);
         setRequiresRx(false);
       }
-      await completeSale.mutateAsync(saleId);
+      await completeSale.mutateAsync({
+        saleId,
+        expiredSaleConfirmed: expiredSaleConfirmedRef.current,
+      });
       if (payments.some((payment) => payment.payment_method === "cash")) {
         requestDesktopCashDrawerOpen({
           reason: "sale-completed",
@@ -866,7 +1177,12 @@ function ActiveWorkspace({
       persistCompletedReceipt(saleId);
       completingRef.current = false;
     } catch (err) {
-      if (!isDefiniteRejection(err)) {
+      if (isExpiryConfirmationRequired(err)) {
+        clearPendingCompletion(saleId);
+        setCompletionUncertain(false);
+        setCheckoutExpiryConfirmationOpen(true);
+        setTopError(null);
+      } else if (!isDefiniteRejection(err)) {
         const refreshed = await saleQuery.refetch();
         if (refreshed.data?.status === "completed") {
           if (payments.some((payment) => payment.payment_method === "cash")) {
@@ -895,17 +1211,35 @@ function ActiveWorkspace({
 
   const onComplete = async () => {
     if (!saleId || !sale || completingRef.current) return;
+    if (cartMutationPending) {
+      setTopError("Дождитесь завершения изменения товаров в чеке.");
+      return;
+    }
     if (recordedPayments.length > 0 || pendingPayment || completionUncertain) {
       await completeLegacySale();
       return;
     }
     if (checkoutSale.isPending || checkoutReconciling) return;
+    if (paymentSettingsLoading || paymentSettingsUnavailable) {
+      setTopError("Дождитесь подтверждённых настроек способов оплаты.");
+      return;
+    }
+    if (stagedPaymentConflict) {
+      setTopError(
+        "Расчёт оплаты конфликтует с чеком или настройками. Проверьте внешний терминал и сбросьте расчёт.",
+      );
+      return;
+    }
     if (requiresRx && !prescription) {
       setPrescriptionOpen(true);
       return;
     }
     if (remaining > 0.001) {
       setTopError(`Осталось оплатить ${remaining.toFixed(2)} ${currency}`);
+      return;
+    }
+    if (remaining < -0.001) {
+      setTopError(`Оплата превышает сумму чека на ${Math.abs(remaining).toFixed(2)} ${currency}.`);
       return;
     }
     if (stagedPayments.length === 0) {
@@ -917,8 +1251,8 @@ function ActiveWorkspace({
     if (storedOperation) {
       setPendingCheckout(storedOperation);
       setCheckoutUncertain(true);
-      await recoverCheckout(storedOperation, true);
-      return;
+      const recovery = await recoverCheckout(storedOperation, true);
+      if (recovery !== "not-found") return;
     }
 
     let checkoutItems: { catalog_id: string; qty: string }[];
@@ -932,14 +1266,25 @@ function ActiveWorkspace({
       setTopError("Добавьте хотя бы один товар.");
       return;
     }
-    if (!saveDraft(registerId, saleId, nameById, "draft", requiresRx)) {
+    if (
+      !saveDraft(
+        registerId,
+        saleId,
+        nameById,
+        "draft",
+        requiresRx,
+        stagedPayments,
+        expiredSaleConfirmedRef.current,
+      )
+    ) {
       setTopError(
         "Локальное хранилище кассы недоступно. Продажа не отправлена; освободите место или перезапустите приложение.",
       );
       return;
     }
 
-    const operation = createPendingCheckoutOperation(saleId, registerId);
+    const operation =
+      storedOperation ?? createPendingCheckoutOperation(saleId, registerId);
     if (!operation) {
       setTopError(
         "Не удалось сохранить маркер восстановления. Продажа не отправлена; перезапустите приложение.",
@@ -960,6 +1305,7 @@ function ActiveWorkspace({
         payments: stagedPayments.map((payment) => ({
           payment_method: payment.payment_method,
           amount: payment.amount,
+          metadata: payment.metadata,
         })),
         prescription: prescription
           ? {
@@ -970,10 +1316,17 @@ function ActiveWorkspace({
               notes: prescription.notes,
             }
           : undefined,
+        expired_sale_confirmed: expiredSaleConfirmedRef.current,
       });
       await acceptCheckoutResult(result, operation, true);
     } catch (error) {
-      if (isDefiniteRejection(error)) {
+      if (isExpiryConfirmationRequired(error)) {
+        clearPendingCheckoutOperation(saleId, operation.operationId);
+        setPendingCheckout(null);
+        setCheckoutUncertain(false);
+        setCheckoutExpiryConfirmationOpen(true);
+        setTopError(null);
+      } else if (isDefiniteRejection(error)) {
         clearPendingCheckoutOperation(saleId, operation.operationId);
         setPendingCheckout(null);
         setCheckoutUncertain(false);
@@ -982,7 +1335,9 @@ function ActiveWorkspace({
         setCheckoutUncertain(true);
         const outcome = await recoverCheckout(operation, true);
         if (outcome === "not-found") {
-          setTopError(describeApiError(error, "Продажа не была оформлена. Повторите оплату."));
+          setTopError(
+            "Ответ сервера не получен, а операция пока не найдена. Проверьте внешний терминал и повторите завершение: Aurum использует тот же безопасный номер операции.",
+          );
         }
       }
     } finally {
@@ -1008,7 +1363,14 @@ function ActiveWorkspace({
     setNameById({});
     setRequiresRx(false);
     setPrescription(null);
+    expiredSaleConfirmedRef.current = false;
+    setExpiredSaleConfirmed(false);
+    expiredItemConfirmationRef.current = null;
+    setExpiredItemConfirmation(null);
+    setCheckoutExpiryConfirmationOpen(false);
+    stagedPaymentsRef.current = [];
     setStagedPayments([]);
+    closeExternalPaymentConfirmation();
     setPendingCheckout(null);
     setCheckoutUncertain(false);
     setTopError(null);
@@ -1031,6 +1393,14 @@ function ActiveWorkspace({
       setTopError("Сначала подтвердите результат текущей денежной операции.");
       return false;
     }
+    if (isDraft && recordedPayments.length > 0) {
+      setTopError("В чеке уже есть проведённая оплата. Завершите текущую продажу.");
+      return false;
+    }
+    if (isDraft && stagedPayments.length > 0) {
+      setTopError("Сначала нажмите «Сбросить расчёт», затем начните новую продажу.");
+      return false;
+    }
     if (isDraft && items.length > 0) {
       setDiscardConfirmOpen(true);
       return false;
@@ -1050,7 +1420,11 @@ function ActiveWorkspace({
       const q = Math.max(1, Math.round(Number(value)));
       if (Number.isFinite(q)) void onQtyChange(numpad.itemId, q);
     } else {
-      submitPayment(numpad.method, value);
+      submitPayment(
+        numpad.method,
+        value,
+        numpad.method === "cash" ? { cash_received: value } : undefined,
+      );
     }
     setNumpad(null);
   };
@@ -1066,9 +1440,15 @@ function ActiveWorkspace({
       !paymentSettingsUnavailable &&
       isDraft &&
       totalDue > 0 &&
-      remaining > 0.001
+      remaining > 0.001 &&
+      !cartMutationPending
     ) {
-      onPayTile(defaultMethod);
+      const amount = remaining.toFixed(2);
+      onPayTile(
+        defaultMethod,
+        amount,
+        defaultMethod === "cash" ? { cash_received: amount } : undefined,
+      );
     }
   };
 
@@ -1169,7 +1549,7 @@ function ActiveWorkspace({
             registerId={registerId}
             mode={mode}
             canClose={canCloseShift}
-            closeBlocked={saleEditingBlocked || (isDraft && items.length > 0)}
+            closeBlocked={shiftCloseBlocked}
           />
         </div>
 
@@ -1324,15 +1704,29 @@ function ActiveWorkspace({
                 mixedPaymentEnabled={mixedPaymentEnabled}
                 paymentSettingsLoading={paymentSettingsLoading}
                 paymentSettingsUnavailable={paymentSettingsUnavailable}
+                interactionBlocked={cartMutationPending}
+                completionBlocked={
+                  cartMutationPending ||
+                  stagedPaymentConflict ||
+                  (recordedPayments.length === 0 &&
+                    (paymentSettingsLoading ||
+                      paymentSettingsUnavailable ||
+                      stagedPayments.length === 0))
+                }
                 onPayTile={onPayTile}
                 onRetryPendingPayment={
                   pendingPayment
-                    ? () => void payLegacy(pendingPayment.paymentMethod, pendingPayment.amount)
+                    ? () =>
+                        void payLegacy(
+                          pendingPayment.paymentMethod,
+                          pendingPayment.amount,
+                          pendingPayment.metadata,
+                        )
                     : undefined
                 }
                 onClearPayments={
                   stagedPayments.length > 0 && recordedPayments.length === 0
-                    ? () => setStagedPayments([])
+                    ? requestStagedPaymentReset
                     : undefined
                 }
                 onComplete={() => void onComplete()}
@@ -1407,6 +1801,62 @@ function ActiveWorkspace({
           onClose={() => setPrintOpen(false)}
         />
       )}
+
+      <ConfirmDialog
+        open={expiredItemConfirmation !== null}
+        title="Просроченная партия"
+        message={
+          expiredItemConfirmation
+            ? `Срок годности партии товара «${expiredItemConfirmation.name || "Без названия"}» истёк. Продолжайте только если правила аптеки разрешают такую продажу и покупатель предупреждён.`
+            : ""
+        }
+        confirmLabel="Подтвердить и добавить"
+        variant="danger"
+        onConfirm={() => void confirmExpiredItem()}
+        onCancel={closeExpiredItemConfirmation}
+      />
+
+      <ConfirmDialog
+        open={checkoutExpiryConfirmationOpen}
+        title="Подтвердить просроченный товар"
+        message="На момент завершения в чеке обнаружена просроченная партия. Продолжайте только если продажа разрешена настройками аптеки и покупатель предупреждён."
+        confirmLabel="Подтвердить и продолжить"
+        variant="danger"
+        onConfirm={() => {
+          expiredSaleConfirmedRef.current = true;
+          setExpiredSaleConfirmed(true);
+          setCheckoutExpiryConfirmationOpen(false);
+          void onComplete();
+        }}
+        onCancel={() => setCheckoutExpiryConfirmationOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={externalPaymentConfirmation !== null}
+        title={
+          externalPaymentConfirmation?.method === "qr"
+            ? "Подтвердить оплату QR"
+            : "Подтвердить оплату картой"
+        }
+        message={
+          externalPaymentConfirmation
+            ? `Подтвердите, что внешний терминал показал успешную оплату ${Number(externalPaymentConfirmation.amount).toFixed(2)} ${currency}. Aurum не списывает деньги самостоятельно.`
+            : ""
+        }
+        confirmLabel="Оплата подтверждена"
+        onConfirm={confirmExternalPayment}
+        onCancel={closeExternalPaymentConfirmation}
+      />
+
+      <ConfirmDialog
+        open={paymentResetConfirmOpen}
+        title="Сбросить расчёт оплаты"
+        message="Карта или QR будут удалены только из расчёта текущего чека. Операция во внешнем терминале автоматически не отменится. Перед сбросом проверьте терминал."
+        confirmLabel="Сбросить расчёт"
+        variant="danger"
+        onConfirm={clearStagedPaymentCalculation}
+        onCancel={() => setPaymentResetConfirmOpen(false)}
+      />
 
       <ConfirmDialog
         open={discardConfirmOpen}

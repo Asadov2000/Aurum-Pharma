@@ -19,6 +19,8 @@ const baseProps = {
   mixedPaymentEnabled: true,
   paymentSettingsLoading: false,
   paymentSettingsUnavailable: false,
+  interactionBlocked: false,
+  completionBlocked: false,
   onPayTile: vi.fn(),
   onComplete: vi.fn(),
   completedReceiptNumber: null,
@@ -35,7 +37,9 @@ describe("PaymentPanel", () => {
     expect(screen.getByText("41.00")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Наличные" }));
 
-    expect(onPayTile).toHaveBeenCalledWith("cash", "59.00");
+    expect(onPayTile).toHaveBeenCalledWith("cash", "59.00", {
+      cash_received: "100.00",
+    });
   });
 
   it("allows a partial cash amount before paying the remainder by card", () => {
@@ -46,7 +50,9 @@ describe("PaymentPanel", () => {
       target: { value: "20" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Наличные" }));
-    expect(onPayTile).toHaveBeenLastCalledWith("cash", "20.00");
+    expect(onPayTile).toHaveBeenLastCalledWith("cash", "20.00", {
+      cash_received: "20.00",
+    });
 
     const cashPayment: Payment = {
       id: "staged-cash",
@@ -67,7 +73,7 @@ describe("PaymentPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Карта" }));
-    expect(onPayTile).toHaveBeenLastCalledWith("card", "39.00");
+    expect(onPayTile).toHaveBeenLastCalledWith("card");
   });
 
   it("does not apply the same received cash twice", () => {
@@ -187,5 +193,72 @@ describe("PaymentPanel", () => {
     );
     expect(screen.getByText(/Новые платежи заблокированы/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
+  });
+
+  it("restores cash received separately from the amount applied to the sale", () => {
+    const cashPayment: Payment & { metadata: { cash_received: string } } = {
+      id: "staged-cash",
+      sale_id: "sale-1",
+      operation_id: null,
+      payment_method: "cash",
+      amount: "59.00",
+      currency: "TJS",
+      metadata: { cash_received: "100.00" },
+    };
+
+    render(
+      <PaymentPanel
+        {...baseProps}
+        totalPaid={59}
+        remaining={0}
+        payments={[cashPayment]}
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Получено наличными" })).toHaveValue("100,00");
+    expect(screen.getByText("41.00")).toBeInTheDocument();
+  });
+
+  it("labels a local reset without implying a bank or terminal cancellation", () => {
+    const payment: Payment = {
+      id: "staged-card",
+      sale_id: "sale-1",
+      operation_id: null,
+      payment_method: "card",
+      amount: "20.00",
+      currency: "TJS",
+    };
+    render(
+      <PaymentPanel
+        {...baseProps}
+        totalPaid={20}
+        remaining={39}
+        payments={[payment]}
+        onClearPayments={vi.fn()}
+      />,
+    );
+
+    const reset = screen.getByRole("button", { name: "Сбросить расчёт" });
+    expect(reset).toHaveAttribute("title", expect.stringMatching(/внешнего терминала/i));
+    expect(screen.queryByRole("button", { name: "Очистить оплату" })).not.toBeInTheDocument();
+  });
+
+  it("blocks completion for an overpaid or unconfirmed calculation", () => {
+    const { rerender } = render(
+      <PaymentPanel {...baseProps} totalPaid={60} remaining={-1} />,
+    );
+
+    expect(screen.getByText("Переплата")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeDisabled();
+
+    rerender(
+      <PaymentPanel
+        {...baseProps}
+        totalPaid={59}
+        remaining={0}
+        completionBlocked
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeDisabled();
   });
 });

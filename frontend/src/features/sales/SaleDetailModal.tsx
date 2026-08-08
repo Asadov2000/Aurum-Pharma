@@ -37,6 +37,10 @@ export function SaleDetailModal({
   }, [row.id]);
 
   const isRefund = data ? data.sale_type === "return" : row.is_refund;
+  const hasRefundableItems =
+    data?.items.some(
+      (item) => Number(item.qty) - Number(item.refunded_qty ?? "0") > 0.0005,
+    ) ?? false;
 
   return (
     <Modal
@@ -135,11 +139,11 @@ export function SaleDetailModal({
             <Button variant="secondary" onClick={() => setPrintOpen(true)}>
               Печать чека
             </Button>
-            {/* Refund only from a completed forward sale that has none yet. */}
+            {/* Partial refunds remain available until every line is returned. */}
             {canRefund &&
               data.sale_type === "sale" &&
               data.status === "completed" &&
-              !(isOriginalRow && row.has_refund) && (
+              hasRefundableItems && (
                 <Button onClick={() => setRefundOpen(true)}>Оформить возврат</Button>
               )}
             <Button variant="ghost" onClick={onClose}>

@@ -68,10 +68,12 @@ export async function addSaleItem(
   saleId: string,
   catalogId: string,
   qty: string,
+  expiredSaleConfirmed = false,
 ): Promise<SaleItemAddedResponse> {
   const { data } = await api.post<SaleItemAddedResponse>(`/sales/${saleId}/items`, {
     catalog_id: catalogId,
     qty,
+    expired_sale_confirmed: expiredSaleConfirmed,
   });
   return data;
 }
@@ -96,10 +98,17 @@ export async function addPayment(saleId: string, payload: PaymentAddPayload): Pr
   return data;
 }
 
-export async function completeSale(saleId: string): Promise<Sale> {
-  const { data } = await api.post<Sale>(`/sales/${saleId}/complete`, undefined, {
-    timeout: POS_MONEY_WRITE_TIMEOUT_MS,
-  });
+export async function completeSale(
+  saleId: string,
+  expiredSaleConfirmed = false,
+): Promise<Sale> {
+  const { data } = await api.post<Sale>(
+    `/sales/${saleId}/complete`,
+    { expired_sale_confirmed: expiredSaleConfirmed },
+    {
+      timeout: POS_MONEY_WRITE_TIMEOUT_MS,
+    },
+  );
   return data;
 }
 

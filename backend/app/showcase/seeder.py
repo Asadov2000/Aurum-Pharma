@@ -40,6 +40,7 @@ from app.domains.notifications.models import (
 )
 from app.domains.onboarding.models import OnboardingChecklist, WizardState
 from app.domains.pos.models import PrescriptionLog, Sale, SaleItem, SalePayment, Shift
+from app.domains.pos.schemas import ReceiptData, ReceiptLine, ReceiptPayment
 from app.domains.roles.models import (
     Role,
     RolePermission,
@@ -301,6 +302,7 @@ _ROLE_DEFINITIONS = (
             "incoming.return",
             "incoming.view",
             "pos.handle_prescription",
+            "pos.manage_sales",
             "pos.refund",
             "pos.sell",
             "pos.shift_close",
@@ -353,6 +355,7 @@ _ROLE_DEFINITIONS = (
             "catalog.view",
             "incoming.view",
             "pos.handle_prescription",
+            "pos.manage_sales",
             "pos.refund",
             "pos.sell",
             "pos.shift_close",
@@ -1555,6 +1558,28 @@ async def seed_sales_and_shifts(  # noqa: PLR0915 - one immutable plan
     registers_by_id = {register.id: register for register in registers}
     counters = assign_receipts(all_sales, registers_by_id)
     shifts = build_shifts(all_sales)
+    tenant = (await session.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one()
+    branches_by_id = {
+        branch.id: branch
+        for branch in (await session.execute(select(Branch).where(Branch.tenant_id == tenant_id)))
+        .scalars()
+        .all()
+    }
+    catalog_by_id = {
+        item.id: item
+        for item in (
+            await session.execute(select(TenantCatalog).where(TenantCatalog.tenant_id == tenant_id))
+        )
+        .scalars()
+        .all()
+    }
+    cashier_ids = {sale.cashier_user_id for sale in all_sales}
+    cashiers_by_id = {
+        user.id: user
+        for user in (await session.execute(select(AppUser).where(AppUser.id.in_(cashier_ids))))
+        .scalars()
+        .all()
+    }
 
     totals_by_shift: dict[UUID, dict[str, Decimal | int]] = defaultdict(
         lambda: {
@@ -1634,6 +1659,44 @@ async def seed_sales_and_shifts(  # noqa: PLR0915 - one immutable plan
         local_date = sale.occurred_at.astimezone(LOCAL_TIMEZONE).date()
         shift_id = shifts[(sale.register_id, local_date)].id
         operation_id = _uuid(f"operation:sale:{sale.id}")
+        branch = branches_by_id[sale.branch_id]
+        cashier = cashiers_by_id[sale.cashier_user_id]
+        paid_total = sum((payment.amount for payment in sale.payments), Decimal("0"))
+        receipt_snapshot = ReceiptData(
+            sale_id=sale.id,
+            is_refund=sale.sale_type == "return",
+            status="completed",
+            pharmacy_name=tenant.name,
+            branch_name=branch.name,
+            branch_address=branch.address,
+            branch_license=branch.license_number,
+            receipt_number=sale.receipt_number,
+            datetime=sale.occurred_at,
+            cashier_name=cashier.full_name,
+            items=[
+                ReceiptLine(
+                    position=position,
+                    name=catalog_by_id[item.catalog_id].brand_name,
+                    qty=item.qty,
+                    unit_price=item.unit_price,
+                    discount_amount=item.discount_amount,
+                    total_price=item.total_price,
+                )
+                for position, item in enumerate(sale.items, start=1)
+            ],
+            discount_total=sum(
+                (item.discount_amount for item in sale.items),
+                Decimal("0"),
+            ),
+            total=sale.total_amount,
+            currency="TJS",
+            payments=[
+                ReceiptPayment(method=payment.method, amount=payment.amount)
+                for payment in sale.payments
+            ],
+            paid_total=paid_total,
+            change=max(Decimal("0"), paid_total - sale.total_amount),
+        )
         sale_rows.append(
             {
                 "id": sale.id,
@@ -1658,6 +1721,7 @@ async def seed_sales_and_shifts(  # noqa: PLR0915 - one immutable plan
                 "cashier_user_id": sale.cashier_user_id,
                 "created_at": sale.occurred_at - timedelta(minutes=rng.randint(1, 7)),
                 "completed_at": sale.occurred_at,
+                "receipt_snapshot": receipt_snapshot.model_dump(mode="json"),
                 "fiscal_data": {
                     "mode": "showcase",
                     "fiscalized": False,
@@ -1719,6 +1783,9 @@ async def seed_sales_and_shifts(  # noqa: PLR0915 - one immutable plan
                             f"DEMO-{registers_by_id[sale.register_id].code}"
                             if payment.method == "card"
                             else None
+                        ),
+                        **(
+                            {"external_confirmed": True} if payment.method in {"card", "qr"} else {}
                         ),
                     },
                     "created_at": sale.occurred_at,

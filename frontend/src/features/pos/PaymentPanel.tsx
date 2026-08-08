@@ -4,7 +4,12 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 import { paymentMethodLabel, paymentMethodOptions } from "./labels";
-import { type Payment, type PaymentMethod, type PaymentMethodRead } from "./types";
+import {
+  type Payment,
+  type PaymentMetadata,
+  type PaymentMethod,
+  type PaymentMethodRead,
+} from "./types";
 
 const cashKeys = [
   "7",
@@ -26,6 +31,7 @@ const cashKeys = [
 ] as const;
 
 type CashKey = (typeof cashKeys)[number];
+type PaymentDisplay = Payment & { metadata?: PaymentMetadata };
 
 /**
  * Right-column payment workspace. Payment recording stays in SaleArea; this
@@ -46,6 +52,8 @@ export function PaymentPanel({
   mixedPaymentEnabled,
   paymentSettingsLoading,
   paymentSettingsUnavailable,
+  interactionBlocked,
+  completionBlocked,
   onPayTile,
   onRetryPendingPayment,
   onClearPayments,
@@ -61,7 +69,7 @@ export function PaymentPanel({
   totalPaid: number;
   remaining: number;
   currency: string;
-  payments: Payment[];
+  payments: PaymentDisplay[];
   isDraft: boolean;
   completing: boolean;
   completionUncertain: boolean;
@@ -71,7 +79,13 @@ export function PaymentPanel({
   mixedPaymentEnabled: boolean;
   paymentSettingsLoading: boolean;
   paymentSettingsUnavailable: boolean;
-  onPayTile: (method: PaymentMethod, amount?: string) => void;
+  interactionBlocked: boolean;
+  completionBlocked: boolean;
+  onPayTile: (
+    method: PaymentMethod,
+    amount?: string,
+    metadata?: PaymentMetadata,
+  ) => void;
   onRetryPendingPayment?: () => void;
   onClearPayments?: () => void;
   onComplete: () => void;
@@ -86,6 +100,7 @@ export function PaymentPanel({
     () => paymentMethods[0] ?? "cash",
   );
   const [cashReceived, setCashReceived] = useState("");
+  const [cashInputPristine, setCashInputPristine] = useState(true);
   const paymentMethodsKey = paymentMethods.join("|");
   const paymentSettingsBlocked =
     paymentSettingsLoading || paymentSettingsUnavailable || paymentMethods.length === 0;
@@ -102,7 +117,8 @@ export function PaymentPanel({
     paymentMethods.includes(activeMethod) && (lockedMethod === null || activeMethod === lockedMethod)
       ? activeMethod
       : fallbackMethod;
-  const settled = remaining <= 0.001;
+  const settled = Math.abs(remaining) <= 0.001;
+  const overpaid = remaining < -0.001;
   const cashReceivedNumber = parseCash(cashReceived);
   const nonCashPaid = payments.reduce(
     (sum, payment) => (payment.payment_method === "cash" ? sum : sum + Number(payment.amount)),
@@ -112,13 +128,18 @@ export function PaymentPanel({
     (sum, payment) => (payment.payment_method === "cash" ? sum + Number(payment.amount) : sum),
     0,
   );
+  const cashTendered = payments.reduce(
+    (sum, payment) => sum + cashTenderedFor(payment),
+    0,
+  );
   const cashDue = Math.max(0, totalDue - nonCashPaid);
   const change = Math.max(0, cashReceivedNumber - cashDue);
+  const availableCash = Math.max(0, cashReceivedNumber - cashPaid);
   const cashTenderInsufficient =
     isDraft &&
     selectedMethod === "cash" &&
     remaining > 0.001 &&
-    cashReceivedNumber + 0.001 < remaining;
+    availableCash + 0.001 < remaining;
   const pendingMethodVisible =
     pendingPaymentMethod !== null &&
     isCurrentPaymentMethod(pendingPaymentMethod) &&
@@ -133,23 +154,46 @@ export function PaymentPanel({
   }, [fallbackMethod, lockedMethod, paymentMethods, paymentMethodsKey]);
 
   useEffect(() => {
-    if (!isDraft || totalDue <= 0 || payments.length > 0) return;
-    setCashReceived(totalDue.toFixed(2));
-  }, [isDraft, payments.length, totalDue]);
+    if (!isDraft || totalDue <= 0) return;
+    if (payments.length === 0) {
+      setCashReceived(formatCashInput(totalDue));
+      setCashInputPristine(true);
+      return;
+    }
+    if (cashTendered > 0) {
+      setCashReceived(formatCashInput(cashTendered));
+      setCashInputPristine(true);
+      return;
+    }
+    setCashReceived(formatCashInput(cashDue));
+    setCashInputPristine(true);
+  }, [cashDue, cashTendered, isDraft, payments.length, totalDue]);
 
   const chooseMethod = (method: PaymentMethod) => {
     setActiveMethod(method);
-    if (paymentSettingsBlocked) return;
-    const amount =
-      method === "cash"
-        ? Math.min(Math.max(0, cashReceivedNumber - cashPaid), remaining)
-        : Math.max(0, remaining);
+    if (paymentSettingsBlocked || interactionBlocked) return;
+    if (method !== "cash" && mixedPaymentEnabled && paymentMethods.length > 1) {
+      onPayTile(method);
+      return;
+    }
+
+    const tendered = availableCash;
+    const amount = method === "cash" ? Math.min(tendered, remaining) : Math.max(0, remaining);
     if (!mixedPaymentEnabled && method === "cash" && amount + 0.001 < remaining) return;
-    if (amount > 0) onPayTile(method, amount.toFixed(2));
+    if (amount > 0) {
+      onPayTile(
+        method,
+        amount.toFixed(2),
+        method === "cash" ? { cash_received: tendered.toFixed(2) } : undefined,
+      );
+    }
   };
 
   const pressCashKey = (key: CashKey) => {
-    setCashReceived((current) => applyCashKey(current, key));
+    setCashReceived((current) =>
+      applyCashKey(cashInputPristine && isDigitKey(key) ? "" : current, key),
+    );
+    setCashInputPristine(false);
   };
 
   return (
@@ -174,14 +218,16 @@ export function PaymentPanel({
                     {totalPaid.toFixed(2)}
                   </span>
                 </span>
-                <span
-                  className={cn(settled ? "text-success-foreground" : "text-warning-foreground")}
-                >
-                  Остаток{" "}
-                  <span className="font-mono font-semibold tabular-nums">
-                    {Math.max(0, remaining).toFixed(2)}
+                  <span
+                    className={cn(
+                      settled ? "text-success-foreground" : "text-warning-foreground",
+                    )}
+                  >
+                    {overpaid ? "Переплата" : "Остаток"}{" "}
+                    <span className="font-mono font-semibold tabular-nums">
+                      {Math.abs(remaining).toFixed(2)}
+                    </span>
                   </span>
-                </span>
               </div>
             ) : null}
           </div>
@@ -229,6 +275,7 @@ export function PaymentPanel({
                       settled ||
                       payingMethod !== null ||
                       totalDue <= 0 ||
+                      interactionBlocked ||
                       completing ||
                       completionUncertain ||
                       (lockedMethod !== null && lockedMethod !== method) ||
@@ -300,9 +347,13 @@ export function PaymentPanel({
                   inputMode="decimal"
                   value={cashReceived}
                   aria-label="Получено наличными"
+                  disabled={interactionBlocked || completing || completionUncertain}
                   onChange={(event) => {
                     const next = event.target.value.replace(".", ",");
-                    if (/^\d*(?:,\d{0,2})?$/.test(next)) setCashReceived(next);
+                    if (/^\d{0,12}(?:,\d{0,2})?$/.test(next)) {
+                      setCashReceived(next);
+                      setCashInputPristine(false);
+                    }
                   }}
                   className={cn(
                     "h-12 w-full rounded-md border border-input bg-surface px-3 text-right font-mono text-2xl tabular-nums text-foreground shadow-sm focus:border-ring",
@@ -317,8 +368,9 @@ export function PaymentPanel({
                       type="button"
                       aria-label={cashKeyLabel(key)}
                       onClick={() => pressCashKey(key)}
+                      disabled={interactionBlocked || completing || completionUncertain}
                       className={cn(
-                        "min-h-12 border-b border-r border-border bg-surface text-lg font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10",
+                        "min-h-12 border-b border-r border-border bg-surface text-lg font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
                         touch && "min-h-14 text-xl",
                         (key === "+50" || key === "+100") && "text-primary",
                         key === "clear" && "text-danger",
@@ -379,8 +431,14 @@ export function PaymentPanel({
                   ))}
                 </ul>
                 {onClearPayments ? (
-                  <Button type="button" size="sm" variant="ghost" onClick={onClearPayments}>
-                    Очистить оплату
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={onClearPayments}
+                    title="Удалить только расчёт оплаты до завершения продажи. Товары и операции внешнего терминала не изменятся."
+                  >
+                    Сбросить расчёт
                   </Button>
                 ) : null}
               </div>
@@ -394,7 +452,13 @@ export function PaymentPanel({
               className="w-full"
               onClick={onComplete}
               isLoading={completing}
-              disabled={!settled || pendingPaymentMethod !== null}
+              disabled={
+                !settled ||
+                overpaid ||
+                pendingPaymentMethod !== null ||
+                interactionBlocked ||
+                completionBlocked
+              }
               title={completeHint}
             >
               <CheckIcon />
@@ -430,11 +494,27 @@ function parseCash(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function formatCashInput(value: number): string {
+  return value.toFixed(2).replace(".", ",");
+}
+
+function cashTenderedFor(payment: PaymentDisplay): number {
+  if (payment.payment_method !== "cash") return 0;
+  const allocated = Number(payment.amount);
+  const received = Number(payment.metadata?.cash_received);
+  return Number.isFinite(received) && received >= allocated ? received : allocated;
+}
+
+function isDigitKey(key: CashKey): boolean {
+  return /^\d+$/.test(key);
+}
+
 function applyCashKey(current: string, key: CashKey): string {
   if (key === "clear") return "";
   if (key === "backspace") return current.slice(0, -1);
   if (key === "+50" || key === "+100") {
-    return (parseCash(current) + Number(key.slice(1))).toFixed(2).replace(".", ",");
+    const next = parseCash(current) + Number(key.slice(1));
+    return next <= 999_999_999_999.99 ? formatCashInput(next) : current;
   }
   if (key === ",") {
     if (current.includes(",")) return current;
@@ -443,8 +523,7 @@ function applyCashKey(current: string, key: CashKey): string {
 
   const next = `${current}${key}`;
   const normalized = next.replace(/^0+(?=\d)/, "");
-  const [, decimals = ""] = normalized.split(",");
-  return decimals.length <= 2 ? normalized : current;
+  return /^\d{0,12}(?:,\d{0,2})?$/.test(normalized) ? normalized : current;
 }
 
 function cashKeyLabel(key: CashKey): string {

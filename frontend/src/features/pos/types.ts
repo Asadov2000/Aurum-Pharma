@@ -9,6 +9,11 @@ export type PaymentMethod = PosPaymentMethod;
 export type LegacyPaymentMethod = "bank_transfer";
 export type PaymentMethodRead = PaymentMethod | LegacyPaymentMethod;
 
+export interface PaymentMetadata {
+  cash_received?: string;
+  external_confirmed?: true;
+}
+
 export interface Shift {
   id: string;
   tenant_id: string;
@@ -68,6 +73,7 @@ export interface SaleItem {
   batch_number?: string | null;
   expires_at?: string | null;
   days_to_expiry?: number | null;
+  refunded_qty?: string;
 }
 
 export interface Payment {
@@ -115,7 +121,7 @@ export interface PaymentAddPayload {
   // Legacy is accepted only when retrying an operation stored by an older client.
   payment_method: PaymentMethodRead;
   amount: string;
-  metadata?: Record<string, unknown> | null;
+  metadata?: PaymentMetadata | null;
 }
 
 export interface PrescriptionLogPayload {
@@ -141,7 +147,7 @@ export interface SaleCheckoutItemPayload {
 export interface SaleCheckoutPaymentPayload {
   payment_method: PaymentMethod;
   amount: string;
-  metadata?: Record<string, unknown> | null;
+  metadata?: PaymentMetadata | null;
 }
 
 export type SaleCheckoutPrescriptionPayload = Omit<PrescriptionLogPayload, "sale_item_id">;
@@ -153,6 +159,7 @@ export interface SaleCheckoutPayload {
   items: SaleCheckoutItemPayload[];
   payments: SaleCheckoutPaymentPayload[];
   prescription?: SaleCheckoutPrescriptionPayload | null;
+  expired_sale_confirmed?: boolean;
 }
 
 export interface SaleCheckoutItemResult {

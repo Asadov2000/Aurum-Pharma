@@ -172,7 +172,7 @@ async def _get_demo(session: AsyncSession) -> Tenant:
 
 
 async def _clean_demo(session: AsyncSession, tenant_id: UUID) -> None:
-    """Reset a pre-sale demo only; finalized financial history is immutable."""
+    """Reset a demo only while it has no immutable financial or stock history."""
     finalized_count = int(
         (
             await session.execute(
@@ -190,6 +190,20 @@ async def _clean_demo(session: AsyncSession, tenant_id: UUID) -> None:
             "database instead of deleting financial history"
         )
 
+    movement_count = int(
+        (
+            await session.execute(
+                text("SELECT count(*) FROM batch_movement WHERE tenant_id = :tenant_id"),
+                {"tenant_id": tenant_id},
+            )
+        ).scalar_one()
+    )
+    if movement_count:
+        raise RuntimeError(
+            "Demo tenant has immutable stock movements; recreate the disposable demo "
+            "database instead of deleting inventory history"
+        )
+
     for table in (
         "sale_payment",
         "sale_item",
@@ -200,7 +214,6 @@ async def _clean_demo(session: AsyncSession, tenant_id: UUID) -> None:
         "incoming_item",
         "supplier_return",
         "incoming_document",
-        "batch_movement",
         "batch",
         "barcode",
         "catalog_import_job",
@@ -428,7 +441,13 @@ async def _seed_sales(
             continue
         fresh = await pos.get_sale(sale.id)
         method = _RND.choice(["cash", "cash", "card", "qr"])
-        await pos.add_payment(sale_id=sale.id, payment_method=method, amount=fresh.total_amount)
+        metadata = {"external_confirmed": True} if method in {"card", "qr"} else None
+        await pos.add_payment(
+            sale_id=sale.id,
+            payment_method=method,
+            amount=fresh.total_amount,
+            metadata=metadata,
+        )
         timed_pos = POSService(POSRepository(session), now=_fixed_clock(completed_at))
         await timed_pos.complete(sale_id=sale.id)
         done += 1

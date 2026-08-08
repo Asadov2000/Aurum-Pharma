@@ -137,8 +137,12 @@ export function useReceiptQuery(saleId: string | null) {
 export function useAddSaleItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { saleId: string; catalogId: string; qty: string }) =>
-      addSaleItem(args.saleId, args.catalogId, args.qty),
+    mutationFn: (args: {
+      saleId: string;
+      catalogId: string;
+      qty: string;
+      expiredSaleConfirmed?: boolean;
+    }) => addSaleItem(args.saleId, args.catalogId, args.qty, args.expiredSaleConfirmed),
     onSuccess: (_data, vars) =>
       qc.invalidateQueries({ queryKey: posKeys.sale(vars.saleId), exact: true }),
   });
@@ -183,7 +187,8 @@ export function useAddPayment() {
 export function useCompleteSale() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (saleId: string) => completeSale(saleId),
+    mutationFn: (args: { saleId: string; expiredSaleConfirmed?: boolean }) =>
+      completeSale(args.saleId, args.expiredSaleConfirmed),
     onSuccess: (data) => {
       qc.setQueryData<SaleDetails>(posKeys.sale(data.id), (sale) =>
         sale ? { ...sale, ...data } : sale,

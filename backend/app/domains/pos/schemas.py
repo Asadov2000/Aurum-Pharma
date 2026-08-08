@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Self
 from uuid import UUID
 
-from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator
+from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PAYMENT_METHODS = frozenset({"cash", "card", "qr"})
 # Legacy clients can retry an operation created before QR became a distinct
@@ -20,13 +20,28 @@ PAYMENT_METHOD_INPUTS = PAYMENT_METHODS | {"bank_transfer"}
 
 
 class ShiftOpenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     register_id: UUID
-    opening_cash: Decimal = Field(default=Decimal("0"), ge=0)
+    opening_cash: Decimal = Field(
+        default=Decimal("0"),
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        allow_inf_nan=False,
+    )
 
 
 class ShiftCloseRequest(BaseModel):
-    closing_cash_actual: Decimal = Field(ge=0)
-    notes: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    closing_cash_actual: Decimal = Field(
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        allow_inf_nan=False,
+    )
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class ShiftRead(BaseModel):
@@ -98,22 +113,31 @@ class ZReport(BaseModel):
 
 
 class SaleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     register_id: UUID
 
 
 class SaleItemAdd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     catalog_id: UUID
-    qty: Decimal = Field(gt=0)
+    qty: Decimal = Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False)
+    expired_sale_confirmed: bool = False
 
 
 class SaleItemPatch(BaseModel):
-    qty: Decimal = Field(gt=0)
+    model_config = ConfigDict(extra="forbid")
+
+    qty: Decimal = Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False)
 
 
 class PaymentAdd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     operation_id: UUID4
     payment_method: str
-    amount: Decimal = Field(gt=0)
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2, allow_inf_nan=False)
     metadata: dict[str, Any] | None = None
 
     @field_validator("payment_method")
@@ -146,7 +170,7 @@ class SaleCheckoutPayment(BaseModel):
         return v
 
 
-class SaleCheckoutPrescription(BaseModel):
+class _PrescriptionFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prescription_number: str | None = Field(default=None, max_length=500)
@@ -154,6 +178,39 @@ class SaleCheckoutPrescription(BaseModel):
     doctor_license: str | None = Field(default=None, max_length=500)
     patient_name: str | None = Field(default=None, max_length=500)
     notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator(
+        "prescription_number",
+        "doctor_name",
+        "doctor_license",
+        "patient_name",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def _strip_optional_text(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @model_validator(mode="after")
+    def _require_meaningful_details(self) -> Self:
+        if not any(
+            (
+                self.prescription_number,
+                self.doctor_name,
+                self.doctor_license,
+                self.patient_name,
+                self.notes,
+            )
+        ):
+            raise ValueError("at least one prescription detail is required")
+        return self
+
+
+class SaleCheckoutPrescription(_PrescriptionFields):
+    pass
 
 
 class SaleCheckoutRequest(BaseModel):
@@ -165,8 +222,15 @@ class SaleCheckoutRequest(BaseModel):
     register_id: UUID
     draft_sale_id: UUID | None = None
     items: list[SaleCheckoutItem] = Field(min_length=1, max_length=200)
-    payments: list[SaleCheckoutPayment] = Field(default_factory=list, max_length=10)
+    payments: list[SaleCheckoutPayment] = Field(min_length=1, max_length=10)
     prescription: SaleCheckoutPrescription | None = None
+    expired_sale_confirmed: bool = False
+
+
+class SaleCompleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expired_sale_confirmed: bool = False
 
 
 class SaleCheckoutItemResult(BaseModel):
@@ -232,6 +296,7 @@ class SaleItemRead(BaseModel):
     batch_number: str | None = None
     expires_at: date | None = None
     days_to_expiry: int | None = None
+    refunded_qty: Decimal = Decimal("0")
 
 
 class SaleItemAdded(BaseModel):
@@ -282,13 +347,8 @@ class SaleDetails(SaleRead):
     payments: list[PaymentRead]
 
 
-class PrescriptionLogCreate(BaseModel):
+class PrescriptionLogCreate(_PrescriptionFields):
     sale_item_id: UUID | None = None
-    prescription_number: str | None = None
-    doctor_name: str | None = None
-    doctor_license: str | None = None
-    patient_name: str | None = None
-    notes: str | None = None
 
 
 class PrescriptionLogRead(BaseModel):
@@ -306,15 +366,20 @@ class PrescriptionLogRead(BaseModel):
 
 
 class RefundItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sale_item_id: UUID
-    qty: Decimal = Field(gt=0)
+    qty: Decimal = Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False)
 
 
 class RefundCreate(BaseModel):
-    operation_id: UUID
-    items: list[RefundItem] = Field(min_length=1)
-    reason: str | None = None
-    comment: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: UUID4
+    items: list[RefundItem] = Field(min_length=1, max_length=200)
+    reason: str | None = Field(default=None, max_length=500)
+    comment: str | None = Field(default=None, max_length=2000)
+    external_refund_confirmed: bool = False
 
 
 # ---- sales listing (receipt search) ----
