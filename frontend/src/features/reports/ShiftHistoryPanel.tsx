@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -95,11 +95,16 @@ export function ShiftHistoryPanel({
   const registers = useRegistersQuery(branchId || null, false);
   const history = useShiftHistoryQuery(toParams(filters, page));
   const lastClosedShiftId = useMemo(() => window.localStorage.getItem(LAST_CLOSED_KEY), []);
+  const didAutoOpenLastShift = useRef(false);
 
   useEffect(() => {
-    if (selectedShift || !lastClosedShiftId || !history.data) return;
+    if (didAutoOpenLastShift.current || selectedShift || !lastClosedShiftId || !history.data)
+      return;
     const recent = history.data.items.find((shift) => shift.id === lastClosedShiftId);
-    if (recent) onSelect(recent);
+    if (recent) {
+      didAutoOpenLastShift.current = true;
+      onSelect(recent);
+    }
   }, [history.data, lastClosedShiftId, onSelect, selectedShift]);
 
   const applyFilters = form.handleSubmit((values) => {

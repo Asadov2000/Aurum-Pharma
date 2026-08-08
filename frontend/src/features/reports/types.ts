@@ -37,3 +37,43 @@ export interface ShiftHistoryParams {
   page: number;
   page_size: number;
 }
+
+export interface ReportPaymentBreakdown {
+  cash: string;
+  card: string;
+  qr: string;
+  bank_transfer: string;
+  mixed: string;
+}
+
+export interface SalesSummaryDay {
+  day: string;
+  gross_sales: string;
+  total_discounts: string;
+  total_refunds: string;
+  net: string;
+  sales_count: number;
+  returns_count: number;
+}
+
+export interface SalesSummaryOverview {
+  date_from: string;
+  date_to: string;
+  branch_name: string | null;
+  currency: string;
+  gross_sales: string;
+  total_discounts: string;
+  total_refunds: string;
+  net: string;
+  sales_count: number;
+  returns_count: number;
+  average_sale: string;
+  payment_breakdown: ReportPaymentBreakdown;
+  daily: SalesSummaryDay[];
+}
+
+export interface SalesSummaryParams {
+  from: string;
+  to: string;
+  branch_id?: string;
+}

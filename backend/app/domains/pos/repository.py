@@ -948,6 +948,8 @@ class POSRepository:
         date_to: Any,
         branch_id: UUID | None,
         tz: str = "Asia/Dushanbe",
+        include_rows: bool = True,
+        include_daily: bool = False,
     ) -> dict[str, Any]:
         """Detail rows + period totals for the accountant summary over
         [date_from, date_to]. A forward sale counts toward gross/discounts/
@@ -981,35 +983,40 @@ class POSRepository:
         # requires it), so completed + voided-by-refund both count.
         fwd_done = f"{where} AND s.sale_type = 'sale'"
 
-        # --- detail rows: every receipt in range, any status/type ---
-        rows_sql = text(f"""
-            SELECT
-              s.completed_at, s.receipt_number,
-              CASE
-                WHEN s.status = 'voided'
-                  OR (s.status = 'completed' AND ({_FULL_REFUND_SQL}))
-                THEN 'voided'
-                ELSE s.status
-              END AS status,
-              s.sale_type,
-              s.total_amount AS gross, s.currency,
-              b.name AS branch_name,
-              u.full_name AS cashier_name,
-              COALESCE(
-                (SELECT SUM(si.discount_amount) FROM sale_item si WHERE si.sale_id = s.id), 0
-              ) AS discount,
-              (SELECT CASE
-                        WHEN COUNT(DISTINCT p.payment_method) = 0 THEN 'none'
-                        WHEN COUNT(DISTINCT p.payment_method) > 1 THEN 'mixed'
-                        ELSE MIN(p.payment_method) END
-                 FROM sale_payment p WHERE p.sale_id = s.id) AS payment_method
-            FROM sale s
-            LEFT JOIN branch b ON b.id = s.branch_id
-            LEFT JOIN app_user u ON u.id = s.cashier_user_id
-            WHERE {where}
-            ORDER BY s.completed_at ASC
-            """)
-        rows = [dict(r) for r in (await self.session.execute(rows_sql, params)).mappings().all()]
+        rows: list[dict[str, Any]] = []
+        if include_rows:
+            # Detail rows are needed by XLSX, but the screen overview deliberately
+            # skips them to stay fast over weak connections and long periods.
+            rows_sql = text(f"""
+                SELECT
+                  s.completed_at, s.receipt_number,
+                  CASE
+                    WHEN s.status = 'voided'
+                      OR (s.status = 'completed' AND ({_FULL_REFUND_SQL}))
+                    THEN 'voided'
+                    ELSE s.status
+                  END AS status,
+                  s.sale_type,
+                  s.total_amount AS gross, s.currency,
+                  b.name AS branch_name,
+                  u.full_name AS cashier_name,
+                  COALESCE(
+                    (SELECT SUM(si.discount_amount) FROM sale_item si WHERE si.sale_id = s.id), 0
+                  ) AS discount,
+                  (SELECT CASE
+                            WHEN COUNT(DISTINCT p.payment_method) = 0 THEN 'none'
+                            WHEN COUNT(DISTINCT p.payment_method) > 1 THEN 'mixed'
+                            ELSE MIN(p.payment_method) END
+                     FROM sale_payment p WHERE p.sale_id = s.id) AS payment_method
+                FROM sale s
+                LEFT JOIN branch b ON b.id = s.branch_id
+                LEFT JOIN app_user u ON u.id = s.cashier_user_id
+                WHERE {where}
+                ORDER BY s.completed_at ASC
+                """)
+            rows = [
+                dict(r) for r in (await self.session.execute(rows_sql, params)).mappings().all()
+            ]
 
         # --- headline totals ---
         totals_sql = text(f"""
@@ -1053,6 +1060,37 @@ class POSRepository:
             if method in breakdown:
                 breakdown[method] = Decimal(str(total))
 
+        daily: list[dict[str, Any]] = []
+        if include_daily:
+            daily_params = {**params, "report_tz": tz}
+            daily_sql = text(f"""
+                SELECT
+                  timezone(:report_tz, s.completed_at)::date AS day,
+                  COALESCE(SUM(s.total_amount) FILTER (
+                    WHERE s.sale_type = 'sale'), 0) AS gross_sales,
+                  COALESCE(SUM(s.total_amount) FILTER (
+                    WHERE s.sale_type = 'return'), 0) AS total_refunds,
+                  COALESCE(SUM(
+                    CASE WHEN s.sale_type = 'sale' THEN
+                      COALESCE((
+                        SELECT SUM(si.discount_amount)
+                        FROM sale_item si
+                        WHERE si.sale_id = s.id
+                      ), 0)
+                    ELSE 0 END
+                  ), 0) AS total_discounts,
+                  COUNT(*) FILTER (WHERE s.sale_type = 'sale') AS sales_count,
+                  COUNT(*) FILTER (WHERE s.sale_type = 'return') AS returns_count
+                FROM sale s
+                WHERE {where}
+                GROUP BY timezone(:report_tz, s.completed_at)::date
+                ORDER BY day
+                """)
+            daily = [
+                dict(r)
+                for r in (await self.session.execute(daily_sql, daily_params)).mappings().all()
+            ]
+
         return {
             "rows": rows,
             "gross_sales": Decimal(str(t["gross_sales"])),
@@ -1061,6 +1099,7 @@ class POSRepository:
             "sales_count": int(t["sales_count"]),
             "returns_count": int(t["returns_count"]),
             "payment_breakdown": breakdown,
+            "daily": daily,
         }
 
     async def stock_on_date(

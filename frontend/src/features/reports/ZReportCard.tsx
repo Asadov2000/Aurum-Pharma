@@ -122,13 +122,6 @@ export function ZReportCard({
           </div>
 
           <ByMethodTable totals={totals} />
-
-          <details className="rounded-md border border-border bg-foreground/[0.03] px-3 py-2 text-sm">
-            <summary className="cursor-pointer font-medium">Сырой JSON totals</summary>
-            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-xs">
-              {JSON.stringify(totals, null, 2)}
-            </pre>
-          </details>
         </CardContent>
       </Card>
     </div>

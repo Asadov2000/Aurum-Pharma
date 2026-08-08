@@ -26,9 +26,7 @@ test.describe("Reports export", () => {
     clearLoginRateLimit(OWNER.email);
   });
 
-  test("notifies the desktop host when downloading a sales-summary XLSX", async ({
-    page,
-  }) => {
+  test("notifies the desktop host when downloading a sales-summary XLSX", async ({ page }) => {
     await installDesktopFileExportBridge(page);
     await page.route("**/api/v1/reports/sales-summary.xlsx**", async (route) => {
       await route.fulfill({
@@ -40,18 +38,16 @@ test.describe("Reports export", () => {
 
     await loginInBrowser(page, OWNER);
     await page.goto("/reports");
-    await page.locator("#summary_from").fill("2026-05-01");
-    await page.locator("#summary_to").fill("2026-05-31");
+    const overview = page.getByRole("region", { name: "Продажи за период" });
+    await overview.getByLabel("С", { exact: true }).fill("2026-05-01");
+    await overview.getByLabel("По", { exact: true }).fill("2026-05-31");
 
     const summaryDownload = page.waitForEvent("download");
-    await page.getByRole("button", { name: /Скачать сводный отчёт/ }).click();
+    await overview.getByRole("button", { name: "Скачать XLSX" }).click();
     expect((await summaryDownload).suggestedFilename()).toBe(
       "sales-summary-2026-05-01_2026-05-31.xlsx",
     );
-    await expectDesktopFileExport(
-      page,
-      /^sales-summary-2026-05-01_2026-05-31\.xlsx$/,
-    );
+    await expectDesktopFileExport(page, /^sales-summary-2026-05-01_2026-05-31\.xlsx$/);
   });
 
   test("downloads receipt PDF, Z-report, sales-summary and stock XLSX", async ({ page }) => {
@@ -113,19 +109,24 @@ test.describe("Reports export", () => {
 
     // (3) + (4): the period and stock exports on /reports.
     await page.goto("/reports");
+    const zReportDialog = page.getByRole("dialog");
+    await expect(zReportDialog).toBeVisible();
+    await zReportDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    const overview = page.getByRole("region", { name: "Продажи за период" });
+    await expect(overview.getByText("Чистая выручка")).toBeVisible();
 
     const summaryDownload = page.waitForEvent("download");
-    await page.getByRole("button", { name: /Скачать сводный отчёт/ }).click();
+    await overview.getByRole("button", { name: "Скачать XLSX" }).click();
     expect((await summaryDownload).suggestedFilename()).toMatch(/\.xlsx$/);
 
+    const stockReport = page.getByRole("region", { name: "Остатки на дату" });
     const stockDownload = page.waitForEvent("download");
-    await page.getByRole("button", { name: /Скачать отчёт по остаткам/ }).click();
+    await stockReport.getByRole("button", { name: "Скачать остатки XLSX" }).click();
     expect((await stockDownload).suggestedFilename()).toMatch(/\.xlsx$/);
   });
 });
 
-const XLSX_MIME_TYPE =
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 type DesktopMessage = {
   readonly type?: string;
@@ -169,10 +170,7 @@ async function installDesktopFileExportBridge(page: Page): Promise<void> {
   });
 }
 
-async function expectDesktopFileExport(
-  page: Page,
-  expectedFileName: RegExp,
-): Promise<void> {
+async function expectDesktopFileExport(page: Page, expectedFileName: RegExp): Promise<void> {
   await expect
     .poll(() => getDesktopFileExportMessages(page))
     .toContainEqual(

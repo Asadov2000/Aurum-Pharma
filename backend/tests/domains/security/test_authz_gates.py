@@ -41,6 +41,7 @@ from app.main import app
 SENSITIVE_READ_PATHS = [
     ("/api/v1/batches", "batches.view"),
     ("/api/v1/billing/invoices", "reports.view"),
+    ("/api/v1/reports/sales-summary?from=2026-01-01&to=2026-01-31", "reports.view"),
 ]
 
 DOMAIN_READ_PATHS = [
@@ -119,6 +120,31 @@ async def _assert_reporting_is_forbidden(
     billing_resp = await client.get("/api/v1/billing/invoices", headers=headers)
     assert dashboard_resp.status_code == 403
     assert billing_resp.status_code == 403
+
+
+async def _assert_report_branch_scope(
+    client: AsyncClient,
+    *,
+    headers: dict[str, str],
+    visible_branch_name: str,
+    forbidden_branch_id: UUID,
+) -> None:
+    today = date.today().isoformat()
+    scoped_response = await client.get(
+        f"/api/v1/reports/sales-summary?from={today}&to={today}",
+        headers=headers,
+    )
+    assert scoped_response.status_code == 200
+    assert scoped_response.json()["branch_name"] == visible_branch_name
+
+    forbidden_response = await client.get(
+        (
+            f"/api/v1/reports/sales-summary?from={today}&to={today}"
+            f"&branch_id={forbidden_branch_id}"
+        ),
+        headers=headers,
+    )
+    assert forbidden_response.status_code == 403
 
 
 async def _seed_tenant_subjects(
@@ -516,6 +542,13 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
         assert other_registers_resp.json() == []
 
         await _assert_reporting_is_forbidden(client, headers=headers)
+
+        await _assert_report_branch_scope(
+            client,
+            headers=headers,
+            visible_branch_name="A",
+            forbidden_branch_id=branch_b.id,
+        )
 
         await _assert_batch_scope(
             client,
