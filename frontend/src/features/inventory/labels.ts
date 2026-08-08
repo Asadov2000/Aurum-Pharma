@@ -8,7 +8,10 @@ export const expiryLabel: Record<ExpiryStatus, string> = {
   normal: "Норма",
 };
 
-export const expiryTone: Record<ExpiryStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
+export const expiryTone: Record<
+  ExpiryStatus,
+  "neutral" | "success" | "warning" | "danger" | "info"
+> = {
   expired: "danger",
   red: "danger",
   orange: "warning",
@@ -52,11 +55,20 @@ export const writeOffReasonOptions: WriteOffReason[] = [
 // Movement-type labels — values come from the backend free-form
 // constants in app/domains/inventory/service.py.
 export const movementLabel: Record<string, string> = {
-  receipt: "Поступление",
+  incoming: "Поступление",
   sale: "Продажа",
-  return: "Возврат",
+  sale_return: "Возврат покупателя",
   write_off: "Списание",
-  reservation_hold: "Резерв",
-  reservation_release: "Снятие резерва",
-  adjustment: "Корректировка",
+  supplier_return: "Возврат поставщику",
+  correction: "Корректировка",
+  transfer_in: "Перемещение: приход",
+  transfer_out: "Перемещение: расход",
+};
+
+export const movementSourceLabel: Record<string, string> = {
+  incoming_document: "Приход",
+  incoming_item: "Приход",
+  sale: "Продажа",
+  write_off: "Акт списания",
+  supplier_return: "Возврат поставщику",
 };

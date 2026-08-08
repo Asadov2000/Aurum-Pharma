@@ -190,17 +190,21 @@ async def _clean_demo(session: AsyncSession, tenant_id: UUID) -> None:
             "database instead of deleting financial history"
         )
 
-    movement_count = int(
+    inventory_ledger_count = int(
         (
             await session.execute(
-                text("SELECT count(*) FROM batch_movement WHERE tenant_id = :tenant_id"),
+                text(
+                    "SELECT "
+                    "(SELECT count(*) FROM batch_movement WHERE tenant_id = :tenant_id) + "
+                    "(SELECT count(*) FROM write_off WHERE tenant_id = :tenant_id)"
+                ),
                 {"tenant_id": tenant_id},
             )
         ).scalar_one()
     )
-    if movement_count:
+    if inventory_ledger_count:
         raise RuntimeError(
-            "Demo tenant has immutable stock movements; recreate the disposable demo "
+            "Demo tenant has immutable inventory history; recreate the disposable demo "
             "database instead of deleting inventory history"
         )
 
@@ -209,7 +213,6 @@ async def _clean_demo(session: AsyncSession, tenant_id: UUID) -> None:
         "sale_item",
         "prescription_log",
         "sale",
-        "write_off",
         # incoming_item.created_batch_id → batch, so incoming rows go first.
         "incoming_item",
         "supplier_return",

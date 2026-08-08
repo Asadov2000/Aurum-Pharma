@@ -245,7 +245,7 @@ test.describe("POS sale (owner)", () => {
 
     // ---- Check that batches are drained: total qty_remaining = 10 - 7 = 3 ----
     await page.goto("/batches");
-    const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
+    const batchCatalogPicker = page.getByPlaceholder("Найти товар…");
     await expect(batchCatalogPicker).toBeVisible({ timeout: 30_000 });
     await batchCatalogPicker.fill(searchKey);
     const batchCatalogOption = page.getByRole("option", {

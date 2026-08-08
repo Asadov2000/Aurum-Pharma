@@ -38,7 +38,10 @@ from app.domains.suppliers.repository import SuppliersRepository
 from app.domains.suppliers.service import SuppliersService
 from app.main import app
 
-REPORT_READ_PATHS = ["/api/v1/batches", "/api/v1/billing/invoices"]
+SENSITIVE_READ_PATHS = [
+    ("/api/v1/batches", "batches.view"),
+    ("/api/v1/billing/invoices", "reports.view"),
+]
 
 DOMAIN_READ_PATHS = [
     ("/api/v1/catalog", 200),
@@ -57,6 +60,65 @@ async def _override_db(db_session: AsyncSession) -> None:
         yield db_session
 
     app.dependency_overrides[get_db] = _override
+
+
+async def _seed_scoped_batches(
+    db_session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    branch_a_id: UUID,
+    branch_b_id: UUID,
+    suffix: str,
+) -> tuple[UUID, UUID]:
+    catalog = CatalogService(CatalogRepository(db_session))
+    catalog_item = await catalog.create_item(
+        tenant_id=tenant_id,
+        fields={"brand_name": f"Scoped item {suffix}"},
+    )
+    inventory = InventoryRepository(db_session)
+    batch_ids: list[UUID] = []
+    for branch_id in (branch_a_id, branch_b_id):
+        batch = await inventory.create_batch(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            catalog_id=catalog_item.id,
+            expires_at=date.today() + timedelta(days=90),
+            purchase_price=Decimal("5"),
+            sale_price=Decimal("10"),
+            qty_initial=Decimal("5"),
+            qty_remaining=Decimal("5"),
+        )
+        batch_ids.append(batch.id)
+    return batch_ids[0], batch_ids[1]
+
+
+async def _assert_batch_scope(
+    client: AsyncClient,
+    *,
+    headers: dict[str, str],
+    visible_batch_id: UUID,
+    forbidden_batch_id: UUID,
+) -> None:
+    batches_resp = await client.get("/api/v1/batches", headers=headers)
+    assert batches_resp.status_code == 200
+    assert [item["id"] for item in batches_resp.json()["items"]] == [str(visible_batch_id)]
+
+    other_batch_resp = await client.get(
+        f"/api/v1/batches/{forbidden_batch_id}",
+        headers=headers,
+    )
+    assert other_batch_resp.status_code == 403
+
+
+async def _assert_reporting_is_forbidden(
+    client: AsyncClient,
+    *,
+    headers: dict[str, str],
+) -> None:
+    dashboard_resp = await client.get("/api/v1/dashboard/summary", headers=headers)
+    billing_resp = await client.get("/api/v1/billing/invoices", headers=headers)
+    assert dashboard_resp.status_code == 403
+    assert billing_resp.status_code == 403
 
 
 async def _seed_tenant_subjects(
@@ -342,9 +404,12 @@ async def _assert_current_shift_visibility(
     assert manager_response.json()["id"] == str(shift_id)
 
 
-@pytest.mark.parametrize("path", REPORT_READ_PATHS)
-async def test_sensitive_reads_require_reports_view(
-    db_session: AsyncSession, client: AsyncClient, path: str
+@pytest.mark.parametrize(("path", "permission_code"), SENSITIVE_READ_PATHS)
+async def test_sensitive_reads_require_domain_permission(
+    db_session: AsyncSession,
+    client: AsyncClient,
+    path: str,
+    permission_code: str,
 ) -> None:
     await _override_db(db_session)
     try:
@@ -353,7 +418,7 @@ async def test_sensitive_reads_require_reports_view(
             db_session,
             tenant_id=tenant.id,
             user_id=admin.id,
-            permission_codes={"reports.view"},
+            permission_codes={permission_code},
         )
         regular_token = _token(regular)
         admin_token = _token(admin)
@@ -382,6 +447,13 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
         await foundation.update_tenant(tenant.id, fields={"status": "active"})
         branch_a = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "A"})
         branch_b = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "B"})
+        batch_a_id, batch_b_id = await _seed_scoped_batches(
+            db_session,
+            tenant_id=tenant.id,
+            branch_a_id=branch_a.id,
+            branch_b_id=branch_b.id,
+            suffix=nick,
+        )
         register_a = await foundation.create_register(
             tenant_id=tenant.id,
             fields={"branch_id": branch_a.id, "name": "A-1"},
@@ -417,6 +489,7 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
                 "registers.view",
                 "pos.shift_open",
                 "pos.sell",
+                "batches.view",
                 "reports.view",
                 "sales.view.tenant",
             },
@@ -442,11 +515,14 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
         assert other_registers_resp.status_code == 200
         assert other_registers_resp.json() == []
 
-        dashboard_resp = await client.get("/api/v1/dashboard/summary", headers=headers)
-        assert dashboard_resp.status_code == 403
+        await _assert_reporting_is_forbidden(client, headers=headers)
 
-        billing_resp = await client.get("/api/v1/billing/invoices", headers=headers)
-        assert billing_resp.status_code == 403
+        await _assert_batch_scope(
+            client,
+            headers=headers,
+            visible_batch_id=batch_a_id,
+            forbidden_batch_id=batch_b_id,
+        )
 
         own_shift_resp = await client.post(
             "/api/v1/shifts/open",

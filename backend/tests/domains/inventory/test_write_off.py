@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ async def test_write_off_decreases_qty(
 
     wo = await service.write_off(
         batch_id=batch.id,
+        operation_id=uuid4(),
         qty=Decimal("3"),
         reason="damaged",
         comment=None,
@@ -49,6 +51,7 @@ async def test_write_off_more_than_available_blocked_by_trigger(
     with pytest.raises(BusinessRuleError):
         await service.write_off(
             batch_id=batch.id,
+            operation_id=uuid4(),
             qty=Decimal("99"),
             reason="other",
             comment=None,
@@ -72,8 +75,66 @@ async def test_write_off_blocked_batch_rejected(
     with pytest.raises(BusinessRuleError):
         await service.write_off(
             batch_id=batch.id,
+            operation_id=uuid4(),
             qty=Decimal("1"),
             reason="other",
+            comment=None,
+            actor_id=None,
+        )
+
+
+async def test_write_off_retry_is_idempotent(
+    db_session: AsyncSession, make_branch_and_item, make_batch
+) -> None:
+    tenant, branch, item = await make_branch_and_item()
+    batch = await make_batch(tenant_id=tenant.id, branch_id=branch.id, catalog_id=item.id, qty=10)
+    service = InventoryService(InventoryRepository(db_session))
+    operation_id = uuid4()
+
+    first = await service.write_off(
+        batch_id=batch.id,
+        operation_id=operation_id,
+        qty=Decimal("2.5"),
+        reason="damaged",
+        comment="Broken package",
+        actor_id=None,
+    )
+    retried = await service.write_off(
+        batch_id=batch.id,
+        operation_id=operation_id,
+        qty=Decimal("2.5"),
+        reason="damaged",
+        comment="Broken package",
+        actor_id=None,
+    )
+
+    assert retried.id == first.id == operation_id
+    assert (await service.get_batch(batch.id)).qty_remaining == Decimal("7.500")
+    assert len(await service.list_movements(batch.id)) == 1
+
+
+async def test_write_off_operation_id_cannot_be_reused_with_different_data(
+    db_session: AsyncSession, make_branch_and_item, make_batch
+) -> None:
+    tenant, branch, item = await make_branch_and_item()
+    batch = await make_batch(tenant_id=tenant.id, branch_id=branch.id, catalog_id=item.id, qty=10)
+    service = InventoryService(InventoryRepository(db_session))
+    operation_id = uuid4()
+    await service.write_off(
+        batch_id=batch.id,
+        operation_id=operation_id,
+        qty=Decimal("1"),
+        reason="damaged",
+        comment=None,
+        actor_id=None,
+    )
+
+    with pytest.raises(BusinessRuleError, match="reused with different data"):
+        await service.write_off(
+            batch_id=batch.id,
+            operation_id=operation_id,
+            qty=Decimal("2"),
+            reason="damaged",
             comment=None,
             actor_id=None,
         )

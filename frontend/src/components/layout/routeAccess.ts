@@ -124,7 +124,7 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
     return hasPermission(context, "catalog.view");
   }
   if (isPath(pathname, "/batches")) {
-    return hasPermission(context, "reports.view");
+    return hasPermission(context, "batches.view");
   }
   if (isPath(pathname, "/suppliers")) {
     return hasPermission(context, "suppliers.view");

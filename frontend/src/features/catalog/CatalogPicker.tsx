@@ -46,7 +46,19 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
   const [debounced, setDebounced] = useState("");
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const internalValueClearRef = useRef(false);
   const listId = useId();
+
+  useEffect(() => {
+    if (value) return;
+    if (internalValueClearRef.current) {
+      internalValueClearRef.current = false;
+      return;
+    }
+    setText("");
+    setDebounced("");
+    setOpen(false);
+  }, [value]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(text.trim()), 200);
@@ -102,7 +114,10 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
         value={text}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
-          if (value) onChange("", "");
+          if (value) {
+            internalValueClearRef.current = true;
+            onChange("", "");
+          }
           setText(e.target.value);
           setOpen(true);
         }}

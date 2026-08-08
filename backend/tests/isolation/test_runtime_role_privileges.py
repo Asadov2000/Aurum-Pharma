@@ -43,11 +43,11 @@ CRUD_TABLES = {
     "tenant_settings",
     "tenant_subscription",
     "wizard_state",
-    "write_off",
 }
 
 APPEND_ONLY_TABLES = {
     "batch_movement",
+    "write_off",
 }
 
 READ_ONLY_TABLES = {
@@ -219,6 +219,7 @@ CUSTOM_FUNCTIONS = {
     "trg_capture_bootstrap_platform_access",
     "trg_guard_app_user_platform_flags",
     "trg_guard_batch_movement_immutability",
+    "trg_guard_write_off_immutability",
     "trg_revoke_support_access_on_tenant_archive",
     "trg_guard_branch_writer",
     "trg_guard_platform_account_tenant_scope",

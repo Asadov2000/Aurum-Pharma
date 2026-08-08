@@ -60,6 +60,10 @@ class Batch(Base):
         CheckConstraint("sale_price >= 0", name="ck_batch_sale_price"),
         CheckConstraint("qty_initial > 0", name="ck_batch_qty_initial"),
         CheckConstraint("qty_remaining >= 0", name="ck_batch_qty_remaining"),
+        CheckConstraint(
+            "manufactured_at IS NULL OR manufactured_at <= expires_at",
+            name="ck_batch_manufactured_before_expiry",
+        ),
     )
 
 
@@ -124,4 +128,5 @@ class WriteOff(Base):
             "reason IN ('expired','damaged','spoiled','theft','other')",
             name="ck_wo_reason",
         ),
+        CheckConstraint("amount >= 0", name="ck_wo_amount"),
     )

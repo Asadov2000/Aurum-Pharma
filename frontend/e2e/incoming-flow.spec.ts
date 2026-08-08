@@ -124,7 +124,7 @@ test.describe("Incoming flow (owner)", () => {
     // freshly-made batch. Branch options are loaded separately and can lag
     // under full-suite load; the catalog picker searches the exact seeded item.
     await page.goto("/batches");
-    const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
+    const batchCatalogPicker = page.getByRole("combobox", { name: "Товар" });
     await batchCatalogPicker.fill(searchKey);
     const batchCatalogOption = page.getByRole("option", {
       name: new RegExp(item.brand_name),
@@ -132,13 +132,40 @@ test.describe("Incoming flow (owner)", () => {
     await expect(batchCatalogOption).toBeVisible({ timeout: 15_000 });
     await batchCatalogOption.click();
 
-    // The brand_name is not on the batch row directly (UI shows batch_number),
-    // so assert the visible table row for the created branch and its 10 / 10 stock.
-    const batchRow = page
-      .getByRole("row")
-      .filter({ hasText: branch.name })
-      .filter({ hasText: /10(?:\.0+)?\s*\/\s*10(?:\.0+)?/ });
-    await expect(batchRow.first()).toBeVisible({ timeout: 15_000 });
+    const batchCard = page.getByRole("article", {
+      name: new RegExp(`${item.brand_name}, партия без номера`),
+    });
+    await expect(batchCard).toBeVisible({ timeout: 15_000 });
+    await expect(batchCard).toContainText(branch.name);
+    await expect(batchCard).toContainText("10");
+
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
+    const openBatchButton = batchCard.getByRole("button", {
+      name: new RegExp(`Открыть партию без номера товара ${item.brand_name}`),
+    });
+    const openBatchBounds = await openBatchButton.boundingBox();
+    expect(openBatchBounds).not.toBeNull();
+    expect(openBatchBounds!.height).toBeGreaterThanOrEqual(44);
+    await openBatchButton.click();
+
+    const batchDialog = page.getByRole("dialog", { name: "Карточка партии" });
+    await expect(batchDialog.getByRole("heading", { name: item.brand_name })).toBeVisible();
+    await batchDialog.getByRole("button", { name: "Списать" }).click();
+    const writeOffDialog = page.getByRole("dialog", { name: "Списание партии" });
+    await writeOffDialog.getByLabel("Количество").fill("1");
+    await writeOffDialog.getByLabel("Причина").selectOption("damaged");
+    await writeOffDialog.getByLabel("Комментарий").fill("E2E: повреждена упаковка");
+    await writeOffDialog.getByRole("button", { name: "Подтвердить списание" }).click();
+
+    await expect(writeOffDialog).toBeHidden({ timeout: 15_000 });
+    const writeOffMovement = batchDialog.getByRole("article").filter({ hasText: "Акт списания" });
+    await expect(writeOffMovement).toContainText("Списание", { timeout: 15_000 });
+    await expect(writeOffMovement).toContainText("-1");
+    await expect(batchDialog.getByText("9", { exact: true }).first()).toBeVisible();
   });
 });
 

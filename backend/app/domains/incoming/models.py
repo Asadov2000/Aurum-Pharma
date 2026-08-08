@@ -96,4 +96,8 @@ class IncomingItem(Base):
         CheckConstraint("qty > 0", name="ck_ii_qty"),
         CheckConstraint("purchase_price >= 0", name="ck_ii_purchase_price"),
         CheckConstraint("sale_price >= 0", name="ck_ii_sale_price"),
+        CheckConstraint(
+            "manufactured_at IS NULL OR manufactured_at <= expires_at",
+            name="ck_ii_manufactured_before_expiry",
+        ),
     )

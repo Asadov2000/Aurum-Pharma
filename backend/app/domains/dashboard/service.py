@@ -8,10 +8,12 @@ small aggregate queries and writes the JSON back with a 60s TTL.
 from __future__ import annotations
 
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 from redis.asyncio import Redis
 
+from app.core.errors import AurumError
 from app.core.time import utc_now
 from app.domains.dashboard.repository import DashboardRepository, as_decimal
 from app.domains.dashboard.schemas import (
@@ -24,6 +26,7 @@ from app.domains.dashboard.schemas import (
     TodaySection,
 )
 from app.domains.foundation.repository import FoundationRepository
+from app.domains.inventory.expiry import build_expiry_boundaries
 
 logger = structlog.get_logger("dashboard.service")
 
@@ -58,17 +61,21 @@ class DashboardService:
             )
         return summary
 
-    async def _report_tz(self, tenant_id: UUID) -> str:
-        """Tenant's report timezone — the local day boundary for 'today' tiles.
-        Falls back to Asia/Dushanbe if settings are somehow missing."""
-        settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
-        return settings.report_timezone if settings is not None else "Asia/Dushanbe"
-
     async def _compute(self, tenant_id: UUID) -> DashboardSummary:
-        sales = await self.repo.today_sales(tenant_id, tz=await self._report_tz(tenant_id))
+        settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
+        timezone_name = settings.report_timezone if settings is not None else "Asia/Dushanbe"
+        try:
+            today = utc_now().astimezone(ZoneInfo(timezone_name)).date()
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
+        boundaries = build_expiry_boundaries(
+            today,
+            settings.expiry_thresholds if settings is not None else None,
+        )
+        sales = await self.repo.today_sales(tenant_id, tz=timezone_name)
         shifts = await self.repo.active_shifts(tenant_id)
-        batches = await self.repo.expiring_batches(tenant_id)
-        licenses = await self.repo.expiring_licenses(tenant_id)
+        batches = await self.repo.expiring_batches(tenant_id, boundaries=boundaries)
+        licenses = await self.repo.expiring_licenses(tenant_id, today=today)
         sub = await self.repo.current_subscription(tenant_id)
         invoices = await self.repo.open_invoices(tenant_id)
         draft_incoming = await self.repo.draft_incoming_count(tenant_id)

@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-WRITE_OFF_REASONS = {"expired", "damaged", "spoiled", "theft", "other"}
-EXPIRY_STATUSES = {"expired", "red", "orange", "yellow", "normal"}
+from app.domains.inventory.expiry import ExpiryStatus
+
+WriteOffReason = Literal["expired", "damaged", "spoiled", "theft", "other"]
+
+
+WriteOffQuantity = Annotated[
+    Decimal,
+    Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False),
+]
 
 
 class BatchRead(BaseModel):
@@ -35,8 +43,22 @@ class BatchRead(BaseModel):
 
 
 class BatchWithExpiry(BatchRead):
-    expiry_status: str
+    branch_name: str
+    catalog_name: str
+    catalog_form: str | None
+    catalog_dosage: str | None
+    catalog_pack_size: str | None
+    expiry_status: ExpiryStatus
     days_to_expiry: int
+
+
+class BatchSummary(BaseModel):
+    total_qty: Decimal
+    purchase_value: Decimal
+    sale_value: Decimal
+    attention_count: int
+    expired_count: int
+    blocked_count: int
 
 
 class BatchList(BaseModel):
@@ -44,6 +66,7 @@ class BatchList(BaseModel):
     total: int
     page: int
     page_size: int
+    summary: BatchSummary
 
 
 class MovementRead(BaseModel):
@@ -59,21 +82,16 @@ class MovementRead(BaseModel):
     created_at: datetime
 
 
-class BatchDetails(BatchRead):
+class BatchDetails(BatchWithExpiry):
+    report_timezone: str
     recent_movements: list[MovementRead]
 
 
 class WriteOffCreate(BaseModel):
-    qty: Decimal = Field(gt=0)
-    reason: str
-    comment: str | None = None
-
-    @field_validator("reason")
-    @classmethod
-    def _check_reason(cls, v: str) -> str:
-        if v not in WRITE_OFF_REASONS:
-            raise ValueError(f"reason must be one of {sorted(WRITE_OFF_REASONS)}")
-        return v
+    operation_id: UUID
+    qty: WriteOffQuantity
+    reason: WriteOffReason
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 class WriteOffRead(BaseModel):
@@ -82,7 +100,7 @@ class WriteOffRead(BaseModel):
     id: UUID
     batch_id: UUID
     qty: Decimal
-    reason: str
+    reason: WriteOffReason
     comment: str | None
     amount: Decimal
     currency: str

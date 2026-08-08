@@ -59,4 +59,16 @@ describe("CatalogPicker — keyboard selection", () => {
     expect(input.value).toBe("Аспирин 500");
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("clears the visible label when its controlled value is reset externally", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <CatalogPicker value="c1" initialLabel="Аспирин" onChange={onChange} placeholder="Поиск" />,
+    );
+    expect(screen.getByPlaceholderText("Поиск")).toHaveValue("Аспирин");
+
+    rerender(<CatalogPicker value="" onChange={onChange} placeholder="Поиск" />);
+
+    expect(screen.getByPlaceholderText("Поиск")).toHaveValue("");
+  });
 });

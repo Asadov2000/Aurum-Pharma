@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -160,6 +161,17 @@ class TenantSettingsUpdate(BaseModel):
         if v is not None and v not in allowed:
             raise ValueError(f"refund_reason_mode must be one of {sorted(allowed)}")
         return v
+
+    @field_validator("report_timezone")
+    @classmethod
+    def _check_report_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            ZoneInfo(value)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError("report_timezone must be a valid IANA timezone") from exc
+        return value
 
     @field_validator("pos_payment_methods")
     @classmethod
