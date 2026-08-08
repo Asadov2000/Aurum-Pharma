@@ -75,7 +75,9 @@ export function EmployeeDirectory({
         <DirectoryColumnHeader>Доступ</DirectoryColumnHeader>
         <DirectoryColumnHeader>Последний вход</DirectoryColumnHeader>
         {showActions ? (
-          <DirectoryColumnHeader className="text-right">Действия</DirectoryColumnHeader>
+          <DirectoryColumnHeader className="text-right">
+            <span className="sr-only">Действия</span>
+          </DirectoryColumnHeader>
         ) : null}
       </div>
       <ul role="rowgroup" className="min-w-0 max-w-full divide-y divide-border overflow-hidden">
