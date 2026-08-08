@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentSubscription = vi.fn();
@@ -60,11 +60,22 @@ const INV = {
   notes: null,
 };
 
+const PAID_INV = {
+  ...INV,
+  id: "inv-2",
+  invoice_number: "INV-2025-002",
+  issued_at: "2025-12-01T00:00:00Z",
+  due_at: "2025-12-08T00:00:00Z",
+  status: "paid" as const,
+  paid_at: "2025-12-03T08:30:00Z",
+};
+
 describe("BillingPage", () => {
   beforeEach(() => {
     getCurrentSubscription.mockReset();
     listInvoices.mockReset();
     getInvoice.mockReset();
+    window.localStorage.clear();
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -74,9 +85,8 @@ describe("BillingPage", () => {
     getCurrentSubscription.mockResolvedValueOnce(null);
     listInvoices.mockResolvedValueOnce([]);
     renderPage();
-    expect(
-      await screen.findByText(/Подписки пока нет\. Свяжитесь с поддержкой/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Подписка не подключена")).toBeInTheDocument();
+    expect(screen.getByText(/Свяжитесь с поддержкой Aurum Pharma/i)).toBeInTheDocument();
     expect(await screen.findByText(/Счетов пока нет/i)).toBeInTheDocument();
   });
 
@@ -93,14 +103,72 @@ describe("BillingPage", () => {
   it("opens the invoice detail modal on row click", async () => {
     getCurrentSubscription.mockResolvedValueOnce(SUB);
     listInvoices.mockResolvedValueOnce([INV]);
-    getInvoice.mockResolvedValueOnce({ ...INV, payments: [] });
+    getInvoice.mockResolvedValueOnce({
+      ...INV,
+      payments: [
+        {
+          id: "payment-1",
+          invoice_id: INV.id,
+          amount: "1100.00",
+          currency: "TJS",
+          method: "bank_transfer",
+          reference: "RBKTJ-2026-001",
+          paid_at: "2026-05-20T08:30:00Z",
+          notes: null,
+          created_at: "2026-05-20T08:30:00Z",
+        },
+      ],
+    });
     renderPage();
     const invoiceButtons = await screen.findAllByRole("button", {
       name: "Открыть счёт INV-2026-001",
     });
     fireEvent.click(invoiceButtons[0]!);
     expect(await screen.findByText(/Счёт № INV-2026-001/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Банковский перевод")).not.toHaveLength(0);
+    expect(screen.getAllByText(/1[\s\u00a0]100,00 TJS/)).not.toHaveLength(0);
     expect(getInvoice).toHaveBeenCalledWith(INV.id);
+  });
+
+  it("filters invoice history by status, year, and invoice number", async () => {
+    getCurrentSubscription.mockResolvedValueOnce(SUB);
+    listInvoices.mockResolvedValueOnce([INV, PAID_INV]);
+    renderPage();
+
+    const history = await screen.findByRole("region", { name: "История счетов" });
+    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "paid" } });
+
+    await waitFor(() => {
+      expect(within(history).queryAllByText(INV.invoice_number)).toHaveLength(0);
+    });
+    expect(within(history).getAllByText(PAID_INV.invoice_number).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Год"), { target: { value: "2026" } });
+    fireEvent.change(screen.getByLabelText("Номер счёта"), { target: { value: "not-found" } });
+
+    expect(await within(history).findByText("Счета не найдены")).toBeInTheDocument();
+    expect(listInvoices).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders long invoice histories in small pages", async () => {
+    const manyInvoices = Array.from({ length: 11 }, (_, index) => ({
+      ...PAID_INV,
+      id: `inv-${index + 1}`,
+      invoice_number: `INV-2025-${String(index + 1).padStart(3, "0")}`,
+    }));
+    getCurrentSubscription.mockResolvedValueOnce(SUB);
+    listInvoices.mockResolvedValueOnce(manyInvoices);
+    renderPage();
+
+    const history = await screen.findByRole("region", { name: "История счетов" });
+    await within(history).findAllByText("INV-2025-001");
+    expect(within(history).queryAllByText("INV-2025-011")).toHaveLength(0);
+
+    fireEvent.click(within(history).getByRole("button", { name: /Вперёд/i }));
+
+    expect(await within(history).findAllByText("INV-2025-011")).not.toHaveLength(0);
+    expect(within(history).getByText("2 из 2")).toBeInTheDocument();
   });
 
   it("lets the user retry a failed subscription request", async () => {
