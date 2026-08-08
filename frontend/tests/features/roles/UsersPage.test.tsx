@@ -10,6 +10,7 @@ const offboardUser = vi.fn();
 const revokeUserSessions = vi.fn();
 const createAssignment = vi.fn();
 const listBranches = vi.fn();
+const LAZY_PANEL_WAIT = { timeout: 5_000 };
 
 vi.mock("@/features/roles/api", () => ({
   listUsers: (...args: unknown[]) => listUsers(...args),
@@ -210,7 +211,7 @@ describe("UsersPage", () => {
 
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Профиль" }));
-    fireEvent.change(await screen.findByLabelText("ФИО"), {
+    fireEvent.change(await screen.findByLabelText("ФИО", undefined, LAZY_PANEL_WAIT), {
       target: { value: "Иван Обновлённый" },
     });
     fireEvent.change(screen.getByLabelText("Телефон"), {
@@ -256,7 +257,7 @@ describe("UsersPage", () => {
 
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
     expect(screen.queryByRole("option", { name: "Aurum Administrator" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
@@ -283,7 +284,7 @@ describe("UsersPage", () => {
 
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
@@ -422,7 +423,7 @@ describe("UsersPage", () => {
 
     const actionTrigger = await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Профиль" }));
-    fireEvent.change(await screen.findByLabelText("ФИО"), {
+    fireEvent.change(await screen.findByLabelText("ФИО", undefined, LAZY_PANEL_WAIT), {
       target: { value: "Иван Несохранённый" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));

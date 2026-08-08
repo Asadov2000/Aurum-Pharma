@@ -145,9 +145,9 @@ async def test_assignment_gate_rejects_inactive_permission(
             roles = await connection.execute(
                 text(
                     "INSERT INTO public.role "
-                    "(tenant_id, name, level, is_system) VALUES "
-                    "(:tenant_id, :actor_role, 3, false), "
-                    "(:tenant_id, :target_role, 4, false) RETURNING id"
+                    "(tenant_id, name, level, is_system, is_protected, protected_kind) VALUES "
+                    "(:tenant_id, :actor_role, 3, false, true, 'tenant_owner'), "
+                    "(:tenant_id, :target_role, 4, false, false, NULL) RETURNING id"
                 ),
                 {
                     "tenant_id": tenant_id,
@@ -159,7 +159,11 @@ async def test_assignment_gate_rejects_inactive_permission(
             await connection.execute(
                 text(
                     "INSERT INTO public.role_permission (role_id, permission_code) "
-                    "VALUES (:role_id, 'roles.assign')"
+                    "SELECT :role_id, template_permission.permission_code "
+                    "FROM public.role_template AS template "
+                    "JOIN public.role_template_permission AS template_permission "
+                    "ON template_permission.template_id = template.id "
+                    "WHERE template.slug = 'owner' AND template.is_active"
                 ),
                 {"role_id": role_ids[0]},
             )

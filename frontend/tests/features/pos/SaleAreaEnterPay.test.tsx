@@ -10,6 +10,7 @@ const checkoutSale = vi.fn();
 const getCheckoutResult = vi.fn();
 const findByBarcode = vi.fn();
 const requestDesktopCashDrawerOpen = vi.fn();
+const LAZY_NUMPAD_WAIT = { timeout: 5_000 };
 
 vi.mock("@/features/pos/api", () => ({
   getCurrentShift: (...args: unknown[]) => getCurrentShift(...args),
@@ -336,9 +337,7 @@ describe("SaleArea atomic checkout", () => {
 
     renderArea();
 
-    expect(
-      await screen.findByRole("button", { name: /Сбросить расчёт/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Сбросить расчёт/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/Получено наличными/i)).toHaveValue("100,00");
     expect(screen.queryByRole("button", { name: /Удалить Парацетамол/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
@@ -367,7 +366,7 @@ describe("SaleArea atomic checkout", () => {
     renderArea();
     await screen.findByText(/Остаток/);
     fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
-    const cardPad = await screen.findByRole("dialog", { name: "Сумма оплаты" });
+    const cardPad = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
     fireEvent.click(within(cardPad).getByRole("button", { name: "2" }));
     fireEvent.click(within(cardPad).getByRole("button", { name: "0" }));
     fireEvent.click(within(cardPad).getByRole("button", { name: "ОК" }));
@@ -377,26 +376,24 @@ describe("SaleArea atomic checkout", () => {
     expect(
       within(cardConfirmation).getByText(/Aurum не списывает деньги самостоятельно/i),
     ).toBeInTheDocument();
-    fireEvent.click(
-      within(cardConfirmation).getByRole("button", { name: "Оплата подтверждена" }),
-    );
+    fireEvent.click(within(cardConfirmation).getByRole("button", { name: "Оплата подтверждена" }));
 
     fireEvent.click(screen.getByRole("button", { name: /Сбросить расчёт/i }));
     const resetDialog = await screen.findByRole("dialog", {
       name: "Сбросить расчёт оплаты",
     });
-    expect(within(resetDialog).getByText(/внешнем терминале автоматически не отменится/i)).toBeInTheDocument();
+    expect(
+      within(resetDialog).getByText(/внешнем терминале автоматически не отменится/i),
+    ).toBeInTheDocument();
     fireEvent.click(within(resetDialog).getByRole("button", { name: "Отмена" }));
 
     fireEvent.click(screen.getByRole("button", { name: /QR/i }));
-    const qrPad = await screen.findByRole("dialog", { name: "Сумма оплаты" });
+    const qrPad = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
     fireEvent.click(within(qrPad).getByRole("button", { name: "ОК" }));
     const qrConfirmation = await screen.findByRole("dialog", {
       name: "Подтвердить оплату QR",
     });
-    fireEvent.click(
-      within(qrConfirmation).getByRole("button", { name: "Оплата подтверждена" }),
-    );
+    fireEvent.click(within(qrConfirmation).getByRole("button", { name: "Оплата подтверждена" }));
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
@@ -422,9 +419,9 @@ describe("SaleArea atomic checkout", () => {
     await screen.findByText(/Остаток/);
     fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
     fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "Сумма оплаты" })).getByRole("button", {
-        name: "ОК",
-      }),
+      within(
+        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
+      ).getByRole("button", { name: "ОК" }),
     );
 
     const confirmation = await screen.findByRole("dialog", {
@@ -503,9 +500,7 @@ describe("SaleArea atomic checkout", () => {
       name: "Подтвердить просроченный товар",
     });
     expect(checkoutSale).toHaveBeenCalledTimes(1);
-    expect((checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).expired_sale_confirmed).toBe(
-      false,
-    );
+    expect((checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).expired_sale_confirmed).toBe(false);
     fireEvent.click(
       within(confirmation).getByRole("button", {
         name: "Подтвердить и продолжить",
@@ -513,9 +508,7 @@ describe("SaleArea atomic checkout", () => {
     );
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(2));
-    expect((checkoutSale.mock.calls[1]?.[0] as CheckoutPayload).expired_sale_confirmed).toBe(
-      true,
-    );
+    expect((checkoutSale.mock.calls[1]?.[0] as CheckoutPayload).expired_sale_confirmed).toBe(true);
   });
 
   it("requires confirmation before F2 clears a non-empty draft", async () => {
@@ -561,14 +554,15 @@ describe("SaleArea atomic checkout", () => {
     await screen.findByText(/Остаток/);
     fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
     fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "Сумма оплаты" })).getByRole("button", {
-        name: "ОК",
-      }),
+      within(
+        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
+      ).getByRole("button", { name: "ОК" }),
     );
     fireEvent.click(
-      within(
-        await screen.findByRole("dialog", { name: "Подтвердить оплату картой" }),
-      ).getByRole("button", { name: "Оплата подтверждена" }),
+      within(await screen.findByRole("dialog", { name: "Подтвердить оплату картой" })).getByRole(
+        "button",
+        { name: "Оплата подтверждена" },
+      ),
     );
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
@@ -723,9 +717,7 @@ describe("SaleArea atomic checkout", () => {
     let completedOperationId = "";
     seedDraftSale(SALE.id);
     getSale.mockImplementation(() =>
-      Promise.resolve(
-        completedOperationId ? completedSale(completedOperationId) : SALE,
-      ),
+      Promise.resolve(completedOperationId ? completedSale(completedOperationId) : SALE),
     );
     checkoutSale
       .mockRejectedValueOnce(new Error("response lost"))
@@ -741,9 +733,7 @@ describe("SaleArea atomic checkout", () => {
 
     await waitFor(() => expect(getCheckoutResult).toHaveBeenCalledTimes(1));
     const firstPayload = checkoutSale.mock.calls[0]?.[0] as CheckoutPayload;
-    expect(loadPendingCheckoutOperation(SALE.id, REG)?.operationId).toBe(
-      firstPayload.operation_id,
-    );
+    expect(loadPendingCheckoutOperation(SALE.id, REG)?.operationId).toBe(firstPayload.operation_id);
 
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 

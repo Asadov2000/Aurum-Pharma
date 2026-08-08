@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
@@ -389,6 +390,168 @@ async def test_owner_cannot_assign_role_to_self(
             branch_id=None,
             password_required=False,
         )
+
+
+async def test_support_cannot_assign_regular_role_to_active_owner(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    target_owner = await make_user(
+        email="protected-assignment-owner@aurum.tj",
+        home_tenant_id=tenant.id,
+        is_owner=True,
+    )
+    developer = await make_user(is_developer=True)
+
+    with pytest.raises(PermissionDeniedError, match="protected ownership workflow"):
+        await service.assign_role(
+            actor_id=developer.id,
+            actor_permissions=set(),
+            actor_permission_scopes={},
+            actor_is_developer=True,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=target_owner.id,
+            role_id=role.id,
+            branch_id=None,
+            password_required=False,
+        )
+
+    with pytest.raises(DBAPIError, match="protected ownership workflow"):
+        async with db_session.begin_nested():
+            await service.repo.insert_assignment(
+                user_id=target_owner.id,
+                tenant_id=tenant.id,
+                branch_id=None,
+                role_id=role.id,
+                password_required=False,
+            )
+
+    assignments = await service.repo.list_assignments_for_user(
+        target_owner.id,
+        tenant_id=tenant.id,
+    )
+    assert assignments == []
+
+
+async def test_support_cannot_revoke_existing_assignment_from_active_owner(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    _owner, owner_role, _owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    target = await make_user(
+        email="protected-revocation-owner@aurum.tj",
+        home_tenant_id=tenant.id,
+        is_owner=True,
+    )
+    assignment = await service.repo.insert_assignment(
+        user_id=target.id,
+        tenant_id=tenant.id,
+        branch_id=None,
+        role_id=owner_role.id,
+        password_required=False,
+    )
+    developer = await make_user(is_developer=True)
+
+    with pytest.raises(PermissionDeniedError, match="protected ownership workflow"):
+        await service.revoke_assignment(
+            actor_id=developer.id,
+            actor_permissions=set(),
+            actor_permission_scopes={},
+            actor_is_developer=True,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=target.id,
+            assignment_id=assignment.id,
+        )
+
+    with pytest.raises(DBAPIError, match="protected ownership workflow"):
+        async with db_session.begin_nested():
+            await service.repo.deactivate_assignment(
+                assignment.id,
+                tenant_id=tenant.id,
+            )
+
+    await db_session.refresh(assignment)
+    assert assignment.is_active is True
+
+
+async def test_database_rejects_ownership_activation_with_regular_assignments(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    target = await make_user(
+        email="ownership-with-regular-role@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
+    await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=target.id,
+        role_id=role.id,
+        branch_id=None,
+        password_required=False,
+    )
+    membership = await service.repo.get_membership_for_user(
+        tenant_id=tenant.id,
+        user_id=target.id,
+    )
+    assert membership is not None
+
+    with pytest.raises(DBAPIError, match="protected owner assignments only"):
+        async with db_session.begin_nested():
+            await service.repo.insert_ownership(
+                tenant_id=tenant.id,
+                membership_id=membership.id,
+                is_active=True,
+            )
+
+    assert (
+        await service.repo.has_active_ownership(
+            tenant_id=tenant.id,
+            user_id=target.id,
+        )
+        is False
+    )
 
 
 async def test_membership_lookup_never_links_same_email_from_another_tenant(
