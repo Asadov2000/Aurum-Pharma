@@ -104,7 +104,9 @@ test.describe("Interface layout", () => {
     await loginInBrowser(page, OWNER);
     await page.goto("/roles");
 
-    const createRoleButton = page.getByRole("button", { name: "+ Создать роль" });
+    const createRoleButton = page
+      .locator("header")
+      .getByRole("button", { name: "Создать роль" });
     await createRoleButton.click();
     const dialog = page.getByRole("dialog", { name: "Создать роль" });
     await expect(dialog).toBeVisible();
@@ -117,6 +119,7 @@ test.describe("Interface layout", () => {
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(568);
     await expect(dialog.getByLabel("Название", { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: /Права доступа/ }).click();
     const groupSelect = dialog.getByLabel("Раздел функций");
     await expect(groupSelect).toBeVisible();
     expect(
@@ -128,7 +131,15 @@ test.describe("Interface layout", () => {
     expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height);
     await expectNoHorizontalOverflow(page, "/roles constructor touch @ 320x568");
 
-    await dialog.getByLabel("Название", { exact: true }).fill("Новая роль");
+    await dialog.getByRole("button", { name: "Создать роль" }).click();
+    await expect(dialog.getByRole("button", { name: "О роли", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const roleName = dialog.getByLabel("Название", { exact: true });
+    await expect(roleName).toBeFocused();
+    await expect(dialog.getByText("Введите название роли")).toBeVisible();
+    await roleName.fill("Новая роль");
     await page.keyboard.press("Escape");
     const discardDialog = page.getByRole("dialog", { name: "Отменить изменения?" });
     await expect(discardDialog).toBeVisible();

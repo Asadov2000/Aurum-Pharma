@@ -145,7 +145,9 @@ class RolesService:
         permissions = [
             permission
             for permission in await self.repo.list_permissions()
-            if permission.is_active and permission.target_role_type == "tenant"
+            if permission.is_active
+            and permission.target_role_type == "tenant"
+            and permission.scope_type != "PLATFORM"
         ]
         if actor_is_developer:
             return [permission for permission in permissions if permission.developer_delegable]
