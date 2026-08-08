@@ -19,7 +19,7 @@ test("keeps optional authentication code out of an authenticated startup", async
 
   await page.goto("/login", { waitUntil: "domcontentloaded" });
   await expect(
-    page.getByRole("heading", { level: 2, name: "Вход в систему", exact: true }),
+    page.getByRole("heading", { level: 1, name: "Вход в систему", exact: true }),
   ).toBeVisible();
 
   expect(loadedScripts.some((path) => path.includes("/assets/LoginPage-"))).toBe(true);

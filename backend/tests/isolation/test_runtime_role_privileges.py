@@ -50,6 +50,10 @@ APPEND_ONLY_TABLES = {
     "write_off",
 }
 
+APPEND_ONLY_TABLES = {
+    "batch_movement",
+}
+
 READ_ONLY_TABLES = {
     "authorization_policy_revision",
     "authorization_subject_revision",
