@@ -8,14 +8,17 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, distinct, exists, func, literal, or_, select, text
+from sqlalchemy import and_, case, delete, distinct, exists, func, literal, or_, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import local_day_range
 from app.domains.auth.models import AppUser
+from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Register
 from app.domains.inventory.models import Batch
 from app.domains.pos.models import (
+    POSFavorite,
     PrescriptionLog,
     Sale,
     SaleItem,
@@ -29,6 +32,13 @@ class SaleLifecycle:
     status: str
     voided_at: datetime | None
     voided_by_sale_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class FavoriteCatalogRow:
+    favorite: POSFavorite
+    catalog: TenantCatalog
+    stock_available: Decimal
 
 
 _FULL_REFUND_SQL = """
@@ -66,6 +76,114 @@ class POSRepository:
     async def get_user_display_name(self, user_id: UUID) -> str | None:
         result = await self.session.execute(select(AppUser.full_name).where(AppUser.id == user_id))
         return result.scalar_one_or_none()
+
+    # -------- personal POS favorites --------
+
+    async def list_favorites(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        branch_id: UUID,
+    ) -> list[FavoriteCatalogRow]:
+        stock = (
+            select(
+                Batch.catalog_id.label("catalog_id"),
+                func.coalesce(func.sum(Batch.qty_remaining), 0).label("stock_available"),
+            )
+            .where(
+                Batch.branch_id == branch_id,
+                Batch.is_blocked.is_(False),
+            )
+            .group_by(Batch.catalog_id)
+            .subquery()
+        )
+        stmt = (
+            select(
+                POSFavorite,
+                TenantCatalog,
+                func.coalesce(stock.c.stock_available, 0),
+            )
+            .join(
+                TenantCatalog,
+                and_(
+                    TenantCatalog.id == POSFavorite.catalog_id,
+                    TenantCatalog.tenant_id == POSFavorite.tenant_id,
+                ),
+            )
+            .outerjoin(stock, stock.c.catalog_id == POSFavorite.catalog_id)
+            .where(
+                POSFavorite.tenant_id == tenant_id,
+                POSFavorite.user_id == user_id,
+                TenantCatalog.deleted_at.is_(None),
+            )
+            .order_by(POSFavorite.created_at.desc(), POSFavorite.id.desc())
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            FavoriteCatalogRow(
+                favorite=favorite,
+                catalog=catalog,
+                stock_available=Decimal(str(stock_available)),
+            )
+            for favorite, catalog, stock_available in rows
+        ]
+
+    async def add_favorite(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        catalog_id: UUID,
+    ) -> POSFavorite:
+        stmt = (
+            pg_insert(POSFavorite)
+            .values(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                catalog_id=catalog_id,
+                created_by=user_id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    POSFavorite.tenant_id,
+                    POSFavorite.user_id,
+                    POSFavorite.catalog_id,
+                ]
+            )
+            .returning(POSFavorite.id)
+        )
+        favorite_id = (await self.session.execute(stmt)).scalar_one_or_none()
+        if favorite_id is not None:
+            favorite = await self.session.get(POSFavorite, favorite_id)
+        else:
+            favorite = (
+                await self.session.execute(
+                    select(POSFavorite).where(
+                        POSFavorite.tenant_id == tenant_id,
+                        POSFavorite.user_id == user_id,
+                        POSFavorite.catalog_id == catalog_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        if favorite is None:
+            raise RuntimeError("Favorite upsert did not return a row")
+        return favorite
+
+    async def remove_favorite(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        catalog_id: UUID,
+    ) -> None:
+        await self.session.execute(
+            delete(POSFavorite).where(
+                POSFavorite.tenant_id == tenant_id,
+                POSFavorite.user_id == user_id,
+                POSFavorite.catalog_id == catalog_id,
+            )
+        )
 
     # -------- shift --------
 
