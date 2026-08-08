@@ -179,7 +179,7 @@ class SalePayment(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "payment_method IN ('cash','card','bank_transfer')",
+            "payment_method IN ('cash','card','qr','bank_transfer')",
             name="ck_sp_method",
         ),
         CheckConstraint("amount > 0", name="ck_sp_amount"),

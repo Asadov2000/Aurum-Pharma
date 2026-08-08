@@ -51,6 +51,8 @@ def _foundation(now: datetime) -> SyncActivationFoundationSnapshot:
                 "session_admin_minutes": 480,
                 "session_pos_minutes": 480,
                 "pin_mode_enabled": False,
+                "pos_payment_methods": ["cash", "qr"],
+                "pos_mixed_payment_enabled": False,
                 "draft_sale_lifetime_min": 30,
                 "report_timezone": "Asia/Dushanbe",
                 "prescription_warning_text": "Требуется рецепт",
@@ -130,6 +132,8 @@ def test_activation_bootstrap_round_trip() -> None:
     assert manifest.readiness_eligible is False
     assert manifest.register_id == signed.foundation.register_snapshot.id
     assert manifest.expires_at == now + timedelta(minutes=10)
+    assert signed.foundation.settings.pos_payment_methods == ["cash", "qr"]
+    assert signed.foundation.settings.pos_mixed_payment_enabled is False
 
 
 def test_activation_bootstrap_rejects_tampered_foundation() -> None:

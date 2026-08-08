@@ -83,7 +83,7 @@ const Z_REPORT = {
   totals: {
     sales_total: 1200,
     returns_total: 50,
-    by_method: { cash: 800, card: 400 },
+    by_method: { cash: 700, card: 400, qr: 75, bank_transfer: 25 },
   },
   sales_count: 12,
   returns_count: 1,
@@ -127,6 +127,8 @@ describe("ReportsPage", () => {
     expect(await screen.findByText("На начало")).toBeInTheDocument();
     expect(screen.getAllByText("Аптека Рудаки").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Малика Саидова").length).toBeGreaterThan(0);
+    expect(screen.getByText("QR-код")).toBeInTheDocument();
+    expect(screen.getByText("Банковский перевод")).toBeInTheDocument();
   });
 
   it("loads the last closed shift automatically when it is in recent history", async () => {

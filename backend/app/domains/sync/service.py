@@ -135,6 +135,8 @@ def _foundation_snapshot(
                 "session_admin_minutes": settings.session_admin_minutes,
                 "session_pos_minutes": settings.session_pos_minutes,
                 "pin_mode_enabled": settings.pin_mode_enabled,
+                "pos_payment_methods": settings.pos_payment_methods,
+                "pos_mixed_payment_enabled": settings.pos_mixed_payment_enabled,
                 "draft_sale_lifetime_min": settings.draft_sale_lifetime_min,
                 "report_timezone": settings.report_timezone,
                 "prescription_warning_text": settings.prescription_warning_text,

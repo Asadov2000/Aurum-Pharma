@@ -1,12 +1,18 @@
-import { type PaymentMethod, type SaleStatus, type ShiftStatus } from "./types";
+import {
+  type PaymentMethod,
+  type PaymentMethodRead,
+  type SaleStatus,
+  type ShiftStatus,
+} from "./types";
 
-export const paymentMethodLabel: Record<PaymentMethod, string> = {
+export const paymentMethodLabel: Record<PaymentMethodRead, string> = {
   cash: "Наличные",
   card: "Карта",
-  bank_transfer: "QR-код",
+  qr: "QR-код",
+  bank_transfer: "Банковский перевод",
 };
 
-export const paymentMethodOptions: PaymentMethod[] = ["cash", "card", "bank_transfer"];
+export const paymentMethodOptions: PaymentMethod[] = ["cash", "card", "qr"];
 
 export const saleStatusLabel: Record<SaleStatus, string> = {
   draft: "Черновик",

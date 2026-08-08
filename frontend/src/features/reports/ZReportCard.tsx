@@ -16,6 +16,7 @@ import { type ZReport } from "@/features/pos/types";
 const METHOD_LABELS = {
   cash: "Наличные",
   card: "Карта",
+  qr: "QR-код",
   bank_transfer: "Банковский перевод",
   mixed: "Смешанная оплата",
 } as const;

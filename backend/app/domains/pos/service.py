@@ -510,11 +510,35 @@ class POSService:
     def _validate_checkout_payments(
         payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
     ) -> None:
-        for payment_method, amount, _metadata in payments:
-            if payment_method not in PAYMENT_METHODS:
-                raise BusinessRuleError("Unsupported payment method")
+        for _payment_method, amount, _metadata in payments:
             if amount <= 0:
                 raise BusinessRuleError("Payment amount must be positive")
+
+    async def _validate_pos_payment_configuration(
+        self,
+        *,
+        tenant_id: UUID,
+        requested_methods: set[str],
+        existing_methods: set[str] | None = None,
+    ) -> None:
+        unsupported = requested_methods - PAYMENT_METHODS
+        if unsupported:
+            raise BusinessRuleError(
+                "Unsupported POS payment method",
+                details={"methods": sorted(unsupported)},
+            )
+        settings = await FoundationRepository(self.repo.session).get_settings_for_pos(tenant_id)
+        if settings is None:
+            raise AurumError("POS payment settings are unavailable")
+        disabled = requested_methods - set(settings.pos_payment_methods)
+        if disabled:
+            raise BusinessRuleError(
+                "POS payment method is disabled",
+                details={"methods": sorted(disabled)},
+            )
+        combined_methods = requested_methods | (existing_methods or set())
+        if not settings.pos_mixed_payment_enabled and len(combined_methods) > 1:
+            raise BusinessRuleError("Mixed POS payments are disabled")
 
     async def _prepare_checkout_sale(
         self,
@@ -614,6 +638,10 @@ class POSService:
         if existing is not None:
             return existing
 
+        await self._validate_pos_payment_configuration(
+            tenant_id=tenant_id,
+            requested_methods={method for method, _amount, _metadata in payments},
+        )
         sale = await self._prepare_checkout_sale(
             tenant_id=tenant_id,
             register_id=register_id,
@@ -995,6 +1023,7 @@ class POSService:
             payment_breakdown=ZReportPaymentBreakdown(
                 cash=bd["cash"],
                 card=bd["card"],
+                qr=bd["qr"],
                 bank_transfer=bd["bank_transfer"],
                 mixed=bd["mixed"],
             ),
@@ -1098,6 +1127,7 @@ class POSService:
             payment_breakdown=ZReportPaymentBreakdown(
                 cash=bd["cash"],
                 card=bd["card"],
+                qr=bd["qr"],
                 bank_transfer=bd["bank_transfer"],
                 mixed=bd["mixed"],
             ),
@@ -1482,6 +1512,13 @@ class POSService:
         )
         if existing is not None:
             return existing
+        await self._validate_pos_payment_configuration(
+            tenant_id=sale.tenant_id,
+            requested_methods={payment_method},
+            existing_methods=await self.repo.payment_methods(sale.id),
+        )
+        if amount <= 0:
+            raise BusinessRuleError("Payment amount must be positive")
         self._assert_draft(sale)
         paid_total = await self.repo.payments_total(sale.id)
         if paid_total + amount > sale.total_amount:

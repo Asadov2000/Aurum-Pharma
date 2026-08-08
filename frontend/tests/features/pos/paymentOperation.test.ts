@@ -59,4 +59,27 @@ describe("pending POS payment operation", () => {
       requiresRx: false,
     });
   });
+
+  it("stores qr as the method for new idempotent operations", () => {
+    const operation = createPendingPaymentOperation("sale-qr", "qr", "15.00");
+
+    expect(operation?.paymentMethod).toBe("qr");
+    expect(window.localStorage.getItem("pos:pendingPayment:sale-qr")).toContain(
+      '"paymentMethod":"qr"',
+    );
+  });
+
+  it("loads a legacy bank transfer so an older unresolved operation can recover", () => {
+    window.localStorage.setItem(
+      "pos:pendingPayment:sale-legacy",
+      JSON.stringify({
+        operationId: "10000000-0000-4000-8000-000000000001",
+        saleId: "sale-legacy",
+        paymentMethod: "bank_transfer",
+        amount: "25.00",
+      }),
+    );
+
+    expect(loadPendingPaymentOperation("sale-legacy")?.paymentMethod).toBe("bank_transfer");
+  });
 });

@@ -50,6 +50,29 @@ async def _complete_sale(  # type: ignore[no-untyped-def]
     return sale, created
 
 
+async def _complete_historical_bank_transfer(
+    service: POSService,
+    s,
+):  # type: ignore[no-untyped-def]
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=sale.id,
+        catalog_id=s["item"].id,
+        qty=Decimal("1"),
+    )
+    await service.repo.insert_payment(
+        tenant_id=s["tenant"].id,
+        sale_id=sale.id,
+        payment_method="bank_transfer",
+        amount=Decimal("10"),
+    )
+    await service.complete(sale_id=sale.id)
+
+
 async def test_sales_summary_aggregates_and_breakdown(
     db_session: AsyncSession, pos_scaffold
 ) -> None:
@@ -66,9 +89,11 @@ async def test_sales_summary_aggregates_and_breakdown(
         service, s, qty=Decimal("2"), payments=[("cash", Decimal("20"))]
     )
     await _complete_sale(service, s, qty=Decimal("1"), payments=[("card", Decimal("10"))])
+    await _complete_sale(service, s, qty=Decimal("1"), payments=[("qr", Decimal("10"))])
     await _complete_sale(
         service, s, qty=Decimal("1"), payments=[("cash", Decimal("5")), ("card", Decimal("5"))]
     )
+    await _complete_historical_bank_transfer(service, s)
     await service.refund(
         parent_sale_id=sale_a.id,
         items=[(created_a[0].id, Decimal("1"))],
@@ -82,22 +107,23 @@ async def test_sales_summary_aggregates_and_breakdown(
         tenant_id=s["tenant"].id, date_from=today, date_to=today, branch_id=None
     )
 
-    assert data.gross_sales == Decimal("40.00")
+    assert data.gross_sales == Decimal("60.00")
     assert data.total_discounts == Decimal("0")
     assert data.total_refunds == Decimal("10.00")
-    assert data.net == Decimal("30.00")  # 40 - 0 - 10
-    assert data.sales_count == 3
+    assert data.net == Decimal("50.00")
+    assert data.sales_count == 5
     assert data.returns_count == 1
 
     assert data.payment_breakdown.cash == Decimal("20.00")
     assert data.payment_breakdown.card == Decimal("10.00")
+    assert data.payment_breakdown.qr == Decimal("10.00")
     assert data.payment_breakdown.mixed == Decimal("10.00")
-    assert data.payment_breakdown.bank_transfer == Decimal("0")
+    assert data.payment_breakdown.bank_transfer == Decimal("10.00")
 
-    # 3 sales + 1 return row, returns shown separately (not folded into sales).
-    assert len(data.rows) == 4
+    # Five sales + one return row, returns shown separately (not folded into sales).
+    assert len(data.rows) == 6
     kinds = sorted(r.kind for r in data.rows)
-    assert kinds == ["return", "sale", "sale", "sale"]
+    assert kinds == ["return", "sale", "sale", "sale", "sale", "sale"]
 
 
 async def test_sales_summary_range_excludes_sales_outside_period(

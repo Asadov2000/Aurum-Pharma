@@ -100,6 +100,14 @@ class TenantSettings(Base):
     pin_mode_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    pos_payment_methods: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text('\'["cash", "card", "qr"]\'::jsonb'),
+    )
+    pos_mixed_payment_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     # Minutes a POS draft sale survives idle in the cashier's browser before it
     # is dropped on restore instead of silently reopened. Bounded 5..240.
     draft_sale_lifetime_min: Mapped[int] = mapped_column(
@@ -120,6 +128,22 @@ class TenantSettings(Base):
     # FK to app_user.id is defined in the database (migration); not declared
     # here because app_user lives in another domain's metadata.
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            """
+            jsonb_typeof(pos_payment_methods) = 'array'
+            AND jsonb_array_length(pos_payment_methods) BETWEEN 1 AND 3
+            AND pos_payment_methods <@ '["cash","card","qr"]'::jsonb
+            AND jsonb_array_length(pos_payment_methods) = (
+                CASE WHEN pos_payment_methods ? 'cash' THEN 1 ELSE 0 END
+                + CASE WHEN pos_payment_methods ? 'card' THEN 1 ELSE 0 END
+                + CASE WHEN pos_payment_methods ? 'qr' THEN 1 ELSE 0 END
+            )
+            """,
+            name="ck_tenant_settings_pos_payment_methods",
+        ),
+    )
 
 
 class Branch(Base):

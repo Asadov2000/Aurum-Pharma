@@ -82,6 +82,13 @@ async def committed_handover_scaffold(
                     "contact_email": f"handover-{uuid4().hex[:8]}@aurum.tj",
                 }
             )
+            await foundation.update_settings(
+                tenant.id,
+                fields={
+                    "pos_payment_methods": ["cash", "qr"],
+                    "pos_mixed_payment_enabled": False,
+                },
+            )
             tenant_id = tenant.id
             branch = await foundation.create_branch(
                 tenant_id=tenant.id,
@@ -1011,6 +1018,8 @@ async def test_runtime_role_reads_signed_foundation_but_cannot_report_readiness(
                 assert "contact_email" not in foundation_payload["tenant"]
                 assert "contact_phone" not in foundation_payload["tenant"]
                 assert "printer_config" not in foundation_payload["register"]
+                assert foundation_payload["settings"]["pos_payment_methods"] == ["cash", "qr"]
+                assert foundation_payload["settings"]["pos_mixed_payment_enabled"] is False
 
                 with pytest.raises(BusinessRuleError, match="readiness is disabled"):
                     await service.record_writer_readiness(

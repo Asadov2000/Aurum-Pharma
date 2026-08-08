@@ -129,10 +129,25 @@ class SyncActivationTenantSettingsSnapshot(BaseModel):
     session_admin_minutes: int = Field(ge=30, le=1440)
     session_pos_minutes: int = Field(ge=30, le=1440)
     pin_mode_enabled: bool
+    pos_payment_methods: list[Literal["cash", "card", "qr"]] = Field(
+        min_length=1,
+        max_length=3,
+    )
+    pos_mixed_payment_enabled: bool
     draft_sale_lifetime_min: int = Field(ge=5, le=240)
     report_timezone: str = Field(min_length=1, max_length=100)
     prescription_warning_text: str
     updated_at: datetime
+
+    @field_validator("pos_payment_methods")
+    @classmethod
+    def _check_unique_pos_payment_methods(
+        cls,
+        value: list[Literal["cash", "card", "qr"]],
+    ) -> list[Literal["cash", "card", "qr"]]:
+        if len(value) != len(set(value)):
+            raise ValueError("pos_payment_methods must contain unique values")
+        return value
 
 
 class SyncActivationBranchSnapshot(BaseModel):

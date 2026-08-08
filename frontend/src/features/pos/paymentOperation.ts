@@ -1,4 +1,4 @@
-import { type PaymentMethod } from "./types";
+import { type PaymentMethod, type PaymentMethodRead } from "./types";
 
 const STORAGE_PREFIX = "pos:pendingPayment:";
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -7,7 +7,7 @@ const AMOUNT_PATTERN = /^\d+\.\d{2}$/;
 export interface PendingPaymentOperation {
   operationId: string;
   saleId: string;
-  paymentMethod: PaymentMethod;
+  paymentMethod: PaymentMethodRead;
   amount: string;
 }
 
@@ -47,8 +47,8 @@ function generateUuidV4(): string {
   ].join("-");
 }
 
-function isPaymentMethod(value: unknown): value is PaymentMethod {
-  return value === "cash" || value === "card" || value === "bank_transfer";
+function isPaymentMethod(value: unknown): value is PaymentMethodRead {
+  return value === "cash" || value === "card" || value === "qr" || value === "bank_transfer";
 }
 
 function isPendingPaymentOperation(

@@ -55,6 +55,8 @@ class FoundationRepository:
             session_admin_minutes=480,
             session_pos_minutes=480,
             pin_mode_enabled=False,
+            pos_payment_methods=["cash", "card", "qr"],
+            pos_mixed_payment_enabled=True,
             prescription_warning_text=(
                 "Отпуск рецептурных препаратов осуществляется в соответствии "
                 "с действующим законодательством РТ"
@@ -67,6 +69,15 @@ class FoundationRepository:
 
     async def get_settings(self, tenant_id: UUID) -> TenantSettings | None:
         return await self.session.get(TenantSettings, tenant_id)
+
+    async def get_settings_for_pos(self, tenant_id: UUID) -> TenantSettings | None:
+        stmt = (
+            select(TenantSettings)
+            .where(TenantSettings.tenant_id == tenant_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def update_settings(self, settings: TenantSettings, **fields: Any) -> TenantSettings:
         for key, value in fields.items():

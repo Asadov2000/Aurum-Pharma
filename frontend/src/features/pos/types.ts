@@ -1,9 +1,13 @@
+import { type PosPaymentMethod } from "@/features/foundation/paymentSettings";
+
 // Mirrors backend Pydantic schemas in app/domains/pos/schemas.py.
 
 export type ShiftStatus = "open" | "closed";
 export type SaleStatus = "draft" | "completed" | "voided";
 export type SaleType = "sale" | "return";
-export type PaymentMethod = "cash" | "card" | "bank_transfer";
+export type PaymentMethod = PosPaymentMethod;
+export type LegacyPaymentMethod = "bank_transfer";
+export type PaymentMethodRead = PaymentMethod | LegacyPaymentMethod;
 
 export interface Shift {
   id: string;
@@ -70,7 +74,7 @@ export interface Payment {
   id: string;
   sale_id: string;
   operation_id: string | null;
-  payment_method: PaymentMethod;
+  payment_method: PaymentMethodRead;
   amount: string;
   currency: string;
 }
@@ -108,7 +112,8 @@ export interface SaleItemAddedResponse {
 
 export interface PaymentAddPayload {
   operation_id: string;
-  payment_method: PaymentMethod;
+  // Legacy is accepted only when retrying an operation stored by an older client.
+  payment_method: PaymentMethodRead;
   amount: string;
   metadata?: Record<string, unknown> | null;
 }
@@ -164,7 +169,7 @@ export interface SaleCheckoutItemResult {
 
 export interface SaleCheckoutPaymentResult {
   id: string;
-  payment_method: PaymentMethod;
+  payment_method: PaymentMethodRead;
   amount: string;
   currency: string;
 }
@@ -201,7 +206,7 @@ export interface ReceiptLine {
 }
 
 export interface ReceiptPayment {
-  method: PaymentMethod;
+  method: PaymentMethodRead;
   amount: string;
 }
 

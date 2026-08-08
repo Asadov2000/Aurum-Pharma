@@ -111,6 +111,7 @@ def _method_label(method: str) -> str:
     return {
         "cash": "Наличные",
         "card": "Карта",
+        "qr": "QR",
         "bank_transfer": "Перевод",
     }.get(method, method)
 

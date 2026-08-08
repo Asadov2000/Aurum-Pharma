@@ -89,6 +89,7 @@ def render_z_report_xlsx(data: ZReportData) -> bytes:
     for label, amount in (
         ("Наличные", bd.cash),
         ("Карта", bd.card),
+        ("QR", bd.qr),
         ("Перевод", bd.bank_transfer),
         ("Смешанная", bd.mixed),
     ):

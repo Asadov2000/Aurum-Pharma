@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { PaymentPanel } from "@/features/pos/PaymentPanel";
-import { type Payment } from "@/features/pos/types";
+import { type Payment, type PaymentMethod } from "@/features/pos/types";
 
 const baseProps = {
   totalDue: 59,
@@ -15,6 +15,10 @@ const baseProps = {
   completionUncertain: false,
   payingMethod: null,
   pendingPaymentMethod: null,
+  paymentMethods: ["cash", "card", "qr"] as PaymentMethod[],
+  mixedPaymentEnabled: true,
+  paymentSettingsLoading: false,
+  paymentSettingsUnavailable: false,
   onPayTile: vi.fn(),
   onComplete: vi.fn(),
   completedReceiptNumber: null,
@@ -100,5 +104,88 @@ describe("PaymentPanel", () => {
 
     rerender(<PaymentPanel {...baseProps} totalPaid={59} remaining={0} />);
     expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeEnabled();
+  });
+
+  it("shows only configured methods and selects the first available method", () => {
+    render(
+      <PaymentPanel
+        {...baseProps}
+        paymentMethods={["qr"]}
+        mixedPaymentEnabled={false}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Карта" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "QR-код" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("does not stage a partial amount when mixed payment is disabled", () => {
+    const onPayTile = vi.fn();
+    render(
+      <PaymentPanel
+        {...baseProps}
+        mixedPaymentEnabled={false}
+        onPayTile={onPayTile}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Получено наличными" }), {
+      target: { value: "20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Наличные" }));
+
+    expect(onPayTile).not.toHaveBeenCalled();
+    expect(screen.getByText(/Весь чек оплачивается одним способом/i)).toBeInTheDocument();
+  });
+
+  it("keeps legacy bank transfers readable in a restored receipt", () => {
+    const legacyPayment: Payment = {
+      id: "legacy-payment",
+      sale_id: "sale-1",
+      operation_id: null,
+      payment_method: "bank_transfer",
+      amount: "59.00",
+      currency: "TJS",
+    };
+
+    render(
+      <PaymentPanel
+        {...baseProps}
+        totalPaid={59}
+        remaining={0}
+        payments={[legacyPayment]}
+        paymentMethods={["qr"]}
+      />,
+    );
+
+    expect(screen.getByText("Банковский перевод")).toBeInTheDocument();
+  });
+
+  it("disables payment choices until server settings finish loading", () => {
+    render(<PaymentPanel {...baseProps} paymentSettingsLoading />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Загрузка способов оплаты");
+    expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Получено наличными" })).not.toBeInTheDocument();
+  });
+
+  it("fails closed when server payment settings are unavailable", () => {
+    render(
+      <PaymentPanel
+        {...baseProps}
+        paymentMethods={[]}
+        paymentSettingsUnavailable
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Способы оплаты временно недоступны",
+    );
+    expect(screen.getByText(/Новые платежи заблокированы/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
   });
 });
