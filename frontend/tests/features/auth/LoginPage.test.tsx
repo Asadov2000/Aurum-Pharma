@@ -86,6 +86,22 @@ describe("LoginPage", () => {
     expect(screen.getByText(/Dev-режим/i)).toBeInTheDocument();
   });
 
+  it("lets the user reveal and hide the optional password", async () => {
+    requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: null });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@aurum.tj" } });
+    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
+
+    const passwordInput = (await screen.findByLabelText(/Пароль/i)) as HTMLInputElement;
+    expect(passwordInput.type).toBe("password");
+
+    fireEvent.click(screen.getByRole("button", { name: "Показать" }));
+    expect(passwordInput.type).toBe("text");
+
+    fireEvent.click(screen.getByRole("button", { name: "Скрыть" }));
+    expect(passwordInput.type).toBe("password");
+  });
+
   it("logs in and navigates home on valid code", async () => {
     requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: null });
     verifyLoginCode.mockResolvedValueOnce({
