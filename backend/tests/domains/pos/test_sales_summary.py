@@ -130,6 +130,24 @@ async def test_sales_summary_aggregates_and_breakdown(
     kinds = sorted(r.kind for r in data.rows)
     assert kinds == ["return", "sale", "sale", "sale", "sale", "sale"]
 
+    overview = await service.get_sales_summary_overview(
+        tenant_id=s["tenant"].id,
+        date_from=today,
+        date_to=today,
+        branch_id=None,
+    )
+    assert overview.gross_sales == Decimal("60.00")
+    assert overview.net == Decimal("50.00")
+    assert overview.average_sale == Decimal("12.00")
+    assert overview.payment_breakdown.mixed == Decimal("10.00")
+    assert len(overview.daily) == 1
+    assert overview.daily[0].day == today
+    assert overview.daily[0].gross_sales == Decimal("60.00")
+    assert overview.daily[0].total_refunds == Decimal("10.00")
+    assert overview.daily[0].net == Decimal("50.00")
+    assert overview.daily[0].sales_count == 5
+    assert overview.daily[0].returns_count == 1
+
 
 async def test_sales_summary_range_excludes_sales_outside_period(
     db_session: AsyncSession, pos_scaffold
@@ -217,6 +235,20 @@ async def test_sales_summary_rejects_inverted_range(db_session: AsyncSession, po
             date_to=today - timedelta(days=1),
             branch_id=None,
         )
+    with pytest.raises(BusinessRuleError):
+        await service.get_sales_summary_overview(
+            tenant_id=s["tenant"].id,
+            date_from=today,
+            date_to=today - timedelta(days=1),
+            branch_id=None,
+        )
+    with pytest.raises(BusinessRuleError):
+        await service.get_sales_summary_overview(
+            tenant_id=s["tenant"].id,
+            date_from=today - timedelta(days=366),
+            date_to=today,
+            branch_id=None,
+        )
 
 
 async def test_sales_summary_empty_period_is_valid_zero_file(
@@ -232,6 +264,16 @@ async def test_sales_summary_empty_period_is_valid_zero_file(
     assert data.gross_sales == Decimal("0")
     assert data.sales_count == 0
     assert data.rows == []
+
+    overview = await service.get_sales_summary_overview(
+        tenant_id=s["tenant"].id,
+        date_from=today,
+        date_to=today,
+        branch_id=None,
+    )
+    assert overview.net == Decimal("0")
+    assert overview.average_sale == Decimal("0.00")
+    assert overview.daily == []
 
     xlsx = await service.get_sales_summary_xlsx(
         tenant_id=s["tenant"].id, date_from=today, date_to=today, branch_id=None
@@ -270,6 +312,14 @@ async def test_sales_summary_dates_use_tenant_timezone(
     )
     assert local_day.gross_sales == Decimal("10.00")
     assert local_day.sales_count == 1
+
+    local_overview = await service.get_sales_summary_overview(
+        tenant_id=s["tenant"].id,
+        date_from=date(2026, 6, 15),
+        date_to=date(2026, 6, 15),
+        branch_id=None,
+    )
+    assert [item.day for item in local_overview.daily] == [date(2026, 6, 15)]
 
     prev_utc_day = await service.build_sales_summary(
         tenant_id=s["tenant"].id,

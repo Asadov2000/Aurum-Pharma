@@ -43,6 +43,7 @@ from app.domains.pos.schemas import (
     SaleList,
     SaleListItem,
     SaleRead,
+    SalesSummaryOverview,
     ShiftCloseRequest,
     ShiftHistoryItem,
     ShiftHistoryList,
@@ -283,6 +284,23 @@ async def sales_summary_xlsx(
                 f'attachment; filename="sales-summary-{date_from}_{date_to}.xlsx"'
             )
         },
+    )
+
+
+@router.get("/reports/sales-summary", response_model=SalesSummaryOverview)
+async def sales_summary_overview(
+    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    service: Annotated[POSService, Depends(_service)],
+    date_from: Annotated[date, Query(alias="from")],
+    date_to: Annotated[date, Query(alias="to")],
+    branch_id: Annotated[UUID | None, Query()] = None,
+) -> SalesSummaryOverview:
+    effective_branch_id = _effective_report_branch_id(user, branch_id)
+    return await service.get_sales_summary_overview(
+        tenant_id=_current_tenant_or_400(user),
+        date_from=date_from,
+        date_to=date_to,
+        branch_id=effective_branch_id,
     )
 
 

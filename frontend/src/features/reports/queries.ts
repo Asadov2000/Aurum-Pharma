@@ -1,11 +1,12 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import { getZReport, listShiftHistory } from "./api";
-import { type ShiftHistoryParams } from "./types";
+import { getSalesSummary, getZReport, listShiftHistory } from "./api";
+import { type SalesSummaryParams, type ShiftHistoryParams } from "./types";
 
 export const reportsKeys = {
   zReport: (shiftId: string) => ["reports", "z", shiftId] as const,
   shifts: (params: ShiftHistoryParams) => ["reports", "shifts", params] as const,
+  salesSummary: (params: SalesSummaryParams) => ["reports", "sales-summary", params] as const,
 };
 
 export function useZReportQuery(shiftId: string | null) {
@@ -20,6 +21,14 @@ export function useShiftHistoryQuery(params: ShiftHistoryParams) {
   return useQuery({
     queryKey: reportsKeys.shifts(params),
     queryFn: () => listShiftHistory(params),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSalesSummaryQuery(params: SalesSummaryParams) {
+  return useQuery({
+    queryKey: reportsKeys.salesSummary(params),
+    queryFn: () => getSalesSummary(params),
     placeholderData: keepPreviousData,
   });
 }

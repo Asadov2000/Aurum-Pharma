@@ -18,7 +18,7 @@ import hashlib
 import json
 import re
 from collections.abc import Callable, Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -62,6 +62,8 @@ from app.domains.pos.schemas import (
     SaleCheckoutPaymentResult,
     SaleCheckoutResult,
     SalesSummaryData,
+    SalesSummaryDay,
+    SalesSummaryOverview,
     SalesSummaryRow,
     StockOnDateData,
     StockRow,
@@ -82,6 +84,7 @@ from app.domains.sync.repository import SyncOutboxRepository
 logger = structlog.get_logger("pos.service")
 _MONEY_TEXT_PATTERN = re.compile(r"^(?:0|[1-9]\d{0,11})\.\d{2}$")
 _PAYMENT_METADATA_MAX_BYTES = 4096
+_MAX_SALES_OVERVIEW_DAYS = 366
 
 
 class POSService:
@@ -1303,6 +1306,93 @@ class POSService:
             tenant_id=tenant_id, date_from=date_from, date_to=date_to, branch_id=branch_id
         )
         return await anyio.to_thread.run_sync(render_sales_summary_xlsx, data)
+
+    async def get_sales_summary_overview(
+        self,
+        *,
+        tenant_id: UUID,
+        date_from: date,
+        date_to: date,
+        branch_id: UUID | None,
+    ) -> SalesSummaryOverview:
+        if date_from > date_to:
+            raise BusinessRuleError(
+                "date_from must not be after date_to",
+                details={"from": date_from.isoformat(), "to": date_to.isoformat()},
+            )
+        if date_to - date_from >= timedelta(days=_MAX_SALES_OVERVIEW_DAYS):
+            raise BusinessRuleError(
+                "sales overview period must not exceed 366 days",
+                details={"max_days": _MAX_SALES_OVERVIEW_DAYS},
+            )
+
+        agg = await self.repo.sales_summary(
+            tenant_id=tenant_id,
+            date_from=date_from,
+            date_to=date_to,
+            branch_id=branch_id,
+            tz=await self._report_tz(tenant_id),
+            include_rows=False,
+            include_daily=True,
+        )
+        foundation = FoundationRepository(self.repo.session)
+        branch_name: str | None = None
+        if branch_id is not None:
+            branch = await foundation.get_branch(branch_id)
+            branch_name = branch.name if branch is not None else None
+
+        currency = "TJS"
+        money_quantum = Decimal("0.01")
+        gross_sales = Decimal(str(agg["gross_sales"])).quantize(money_quantum)
+        total_discounts = Decimal(str(agg["total_discounts"])).quantize(money_quantum)
+        total_refunds = Decimal(str(agg["total_refunds"])).quantize(money_quantum)
+        sales_count = int(agg["sales_count"])
+        average_sale = (
+            ((gross_sales - total_discounts) / sales_count).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            if sales_count
+            else Decimal("0.00")
+        )
+        breakdown = agg["payment_breakdown"]
+        daily: list[SalesSummaryDay] = []
+        for item in agg["daily"]:
+            day_gross = Decimal(str(item["gross_sales"])).quantize(money_quantum)
+            day_discounts = Decimal(str(item["total_discounts"])).quantize(money_quantum)
+            day_refunds = Decimal(str(item["total_refunds"])).quantize(money_quantum)
+            daily.append(
+                SalesSummaryDay(
+                    day=item["day"],
+                    gross_sales=day_gross,
+                    total_discounts=day_discounts,
+                    total_refunds=day_refunds,
+                    net=day_gross - day_discounts - day_refunds,
+                    sales_count=int(item["sales_count"]),
+                    returns_count=int(item["returns_count"]),
+                )
+            )
+
+        return SalesSummaryOverview(
+            date_from=date_from,
+            date_to=date_to,
+            branch_name=branch_name,
+            currency=currency,
+            gross_sales=gross_sales,
+            total_discounts=total_discounts,
+            total_refunds=total_refunds,
+            net=gross_sales - total_discounts - total_refunds,
+            sales_count=sales_count,
+            returns_count=int(agg["returns_count"]),
+            average_sale=average_sale,
+            payment_breakdown=ZReportPaymentBreakdown(
+                cash=breakdown["cash"],
+                card=breakdown["card"],
+                qr=breakdown["qr"],
+                bank_transfer=breakdown["bank_transfer"],
+                mixed=breakdown["mixed"],
+            ),
+            daily=daily,
+        )
 
     # ---- stock on date (accountant XLSX) ----
 

@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getZReport = vi.fn();
 const listShiftHistory = vi.fn();
+const getSalesSummary = vi.fn();
 const getSalesSummaryXlsx = vi.fn();
 const getStockOnDateXlsx = vi.fn();
 const getZReportXlsx = vi.fn();
@@ -14,6 +15,7 @@ const getTenantSettings = vi.fn();
 vi.mock("@/features/reports/api", () => ({
   getZReport: (...args: unknown[]) => getZReport(...args),
   listShiftHistory: (...args: unknown[]) => listShiftHistory(...args),
+  getSalesSummary: (...args: unknown[]) => getSalesSummary(...args),
   getSalesSummaryXlsx: (...args: unknown[]) => getSalesSummaryXlsx(...args),
   getStockOnDateXlsx: (...args: unknown[]) => getStockOnDateXlsx(...args),
 }));
@@ -89,11 +91,44 @@ const Z_REPORT = {
   returns_count: 1,
 };
 
+const SALES_SUMMARY = {
+  date_from: "2026-05-01",
+  date_to: "2026-05-23",
+  branch_name: null,
+  currency: "TJS",
+  gross_sales: "1200.00",
+  total_discounts: "50.00",
+  total_refunds: "100.00",
+  net: "1050.00",
+  sales_count: 12,
+  returns_count: 1,
+  average_sale: "95.83",
+  payment_breakdown: {
+    cash: "700.00",
+    card: "400.00",
+    qr: "75.00",
+    bank_transfer: "25.00",
+    mixed: "0.00",
+  },
+  daily: [
+    {
+      day: "2026-05-23",
+      gross_sales: "1200.00",
+      total_discounts: "50.00",
+      total_refunds: "100.00",
+      net: "1050.00",
+      sales_count: 12,
+      returns_count: 1,
+    },
+  ],
+};
+
 describe("ReportsPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
     getZReport.mockReset();
     listShiftHistory.mockReset();
+    getSalesSummary.mockReset();
     getSalesSummaryXlsx.mockReset();
     getStockOnDateXlsx.mockReset();
     getZReportXlsx.mockReset();
@@ -104,6 +139,7 @@ describe("ReportsPage", () => {
     listRegisters.mockResolvedValue([]);
     getTenantSettings.mockResolvedValue({ report_timezone: "Asia/Dushanbe" });
     listShiftHistory.mockResolvedValue(SHIFT_LIST);
+    getSalesSummary.mockResolvedValue(SALES_SUMMARY);
   });
 
   afterEach(() => {
@@ -127,8 +163,34 @@ describe("ReportsPage", () => {
     expect(await screen.findByText("На начало")).toBeInTheDocument();
     expect(screen.getAllByText("Аптека Рудаки").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Малика Саидова").length).toBeGreaterThan(0);
-    expect(screen.getByText("QR-код")).toBeInTheDocument();
-    expect(screen.getByText("Банковский перевод")).toBeInTheDocument();
+    expect(screen.getAllByText("QR-код").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Банковский перевод").length).toBeGreaterThan(0);
+  });
+
+  it("shows the screen sales summary with payment and daily breakdowns", async () => {
+    renderPage();
+
+    expect(await screen.findByText("Чистая выручка")).toBeInTheDocument();
+    expect(screen.getAllByText("1 050,00 TJS").length).toBeGreaterThan(0);
+    expect(screen.getByText("Способы оплаты")).toBeInTheDocument();
+    expect(screen.getByText("Динамика по дням")).toBeInTheDocument();
+    expect(getSalesSummary).toHaveBeenCalledWith(expect.objectContaining({ branch_id: undefined }));
+  });
+
+  it("blocks an oversized screen summary before sending a request", async () => {
+    renderPage();
+    await screen.findByText("Чистая выручка");
+    expect(getSalesSummary).toHaveBeenCalledTimes(1);
+
+    const overview = within(screen.getByRole("region", { name: "Продажи за период" }));
+    fireEvent.change(overview.getByLabelText("С"), { target: { value: "2020-01-01" } });
+    fireEvent.change(overview.getByLabelText("По"), { target: { value: "2026-05-23" } });
+    fireEvent.click(overview.getByRole("button", { name: "Обновить сводку" }));
+
+    expect(
+      await screen.findByText("Для экранной сводки выберите не более 366 дней"),
+    ).toBeInTheDocument();
+    expect(getSalesSummary).toHaveBeenCalledTimes(1);
   });
 
   it("loads the last closed shift automatically when it is in recent history", async () => {
@@ -142,6 +204,12 @@ describe("ReportsPage", () => {
     });
     expect(await screen.findByText(/сходится/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыт" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть", exact: true }));
+    await waitFor(() => {
+      expect(screen.queryByText("На начало")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Открыть" })).toBeInTheDocument();
   });
 
   it("applies cashier search only after submitting filters", async () => {

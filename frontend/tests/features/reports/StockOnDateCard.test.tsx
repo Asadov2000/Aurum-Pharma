@@ -7,6 +7,7 @@ const downloadBlob = vi.fn();
 vi.mock("@/features/reports/api", () => ({
   getZReport: vi.fn(),
   listShiftHistory: vi.fn(),
+  getSalesSummary: vi.fn(),
   getSalesSummaryXlsx: vi.fn(),
   getStockOnDateXlsx: (...a: unknown[]) => getStockOnDateXlsx(...a),
 }));
@@ -36,7 +37,7 @@ describe("StockOnDateCard", () => {
     const dateInput = screen.getByLabelText("Дата") as HTMLInputElement;
     fireEvent.change(dateInput, { target: { value: "2026-05-31" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /Скачать отчёт по остаткам/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Скачать остатки XLSX/i }));
 
     await waitFor(() => {
       expect(getStockOnDateXlsx).toHaveBeenCalledWith("2026-05-31", undefined);
@@ -46,6 +47,6 @@ describe("StockOnDateCard", () => {
 
   it("hides the branch select when no branches are available", () => {
     render(<StockOnDateCard />);
-    expect(screen.queryByLabelText("Филиал")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Точка")).not.toBeInTheDocument();
   });
 });

@@ -546,6 +546,36 @@ class SalesSummaryData(BaseModel):
     payment_breakdown: ZReportPaymentBreakdown
 
 
+class SalesSummaryDay(BaseModel):
+    """Screen-friendly sales totals for one tenant-local calendar day."""
+
+    day: date
+    gross_sales: Decimal
+    total_discounts: Decimal
+    total_refunds: Decimal
+    net: Decimal
+    sales_count: int
+    returns_count: int
+
+
+class SalesSummaryOverview(BaseModel):
+    """Compact report overview without receipt-level rows."""
+
+    date_from: date
+    date_to: date
+    branch_name: str | None
+    currency: str
+    gross_sales: Decimal
+    total_discounts: Decimal
+    total_refunds: Decimal
+    net: Decimal
+    sales_count: int
+    returns_count: int
+    average_sale: Decimal
+    payment_breakdown: ZReportPaymentBreakdown
+    daily: list[SalesSummaryDay]
+
+
 # ---- stock on date (accountant XLSX) ----
 
 
