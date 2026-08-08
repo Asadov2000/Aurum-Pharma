@@ -50,4 +50,36 @@ describe("SearchBar — keyboard focus flow", () => {
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
     expect(input).toHaveValue("Аспирин");
   });
+
+  it("rejects an invalid quantity before calling the API", async () => {
+    const onAdd = vi.fn();
+    render(<SearchBar onAdd={onAdd} />);
+    const input = screen.getByRole("combobox", { name: "Товар" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Асп" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Аспирин/ }));
+
+    const qty = screen.getByLabelText("Количество");
+    fireEvent.change(qty, { target: { value: "не число" } });
+    fireEvent.keyDown(qty, { key: "Enter" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Введите количество больше нуля");
+    expect(qty).toHaveAttribute("aria-invalid", "true");
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it("accepts a decimal quantity entered with a comma", async () => {
+    const onAdd = vi.fn().mockResolvedValue(true);
+    render(<SearchBar onAdd={onAdd} />);
+    const input = screen.getByRole("combobox", { name: "Товар" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Асп" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Аспирин/ }));
+
+    const qty = screen.getByLabelText("Количество");
+    fireEvent.change(qty, { target: { value: "1,25" } });
+    fireEvent.keyDown(qty, { key: "Enter" });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith("c1", "Аспирин", 1.25));
+  });
 });

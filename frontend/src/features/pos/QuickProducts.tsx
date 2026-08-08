@@ -1,9 +1,11 @@
 import { useState } from "react";
 
 import { Button, Skeleton } from "@/components/ui";
-import { useCatalogQuery } from "@/features/catalog/queries";
 import { type CatalogItem } from "@/features/catalog/types";
+import { describeApiError } from "@/lib/errorMessages";
 import { cn } from "@/lib/utils";
+
+import { usePosFavoritesQuery, useRemovePosFavorite } from "./queries";
 
 type QuickView = "grid" | "list";
 
@@ -39,11 +41,10 @@ export function QuickProducts({
 }): JSX.Element {
   const [view, setView] = useState<QuickView>("grid");
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const catalog = useCatalogQuery({
-    page: 1,
-    page_size: 4,
-    branch_id: branchId,
-  });
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
+  const favorites = usePosFavoritesQuery(branchId);
+  const removeFavorite = useRemovePosFavorite();
+  const products = favorites.data?.map((favorite) => favorite.catalog) ?? [];
 
   const addProduct = async (item: CatalogItem) => {
     if (pendingId !== null || busy) return;
@@ -52,6 +53,16 @@ export function QuickProducts({
       await onAdd(item.id, item.brand_name, 1);
     } finally {
       setPendingId(null);
+    }
+  };
+
+  const removeProduct = async (item: CatalogItem) => {
+    if (removeFavorite.isPending) return;
+    setFavoriteError(null);
+    try {
+      await removeFavorite.mutateAsync(item.id);
+    } catch (error) {
+      setFavoriteError(describeApiError(error, "Не удалось убрать товар из избранного"));
     }
   };
 
@@ -68,7 +79,7 @@ export function QuickProducts({
           >
             Быстрый выбор
           </h2>
-          <p className="text-xs text-foreground-muted">Товары для продажи в одно нажатие</p>
+          <p className="text-xs text-foreground-muted">Личное избранное</p>
         </div>
         <div className="flex shrink-0 items-center rounded-md border border-border bg-background p-0.5">
           <button
@@ -101,43 +112,53 @@ export function QuickProducts({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
-        {catalog.isLoading ? (
+        {favorites.isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2.5">
             {Array.from({ length: 4 }, (_, index) => (
               <Skeleton key={index} className="h-56 rounded-md" />
             ))}
           </div>
-        ) : catalog.error ? (
+        ) : favorites.error ? (
           <div
             role="alert"
             className="flex min-h-48 items-center justify-center px-6 text-center text-sm text-danger"
           >
             Не удалось загрузить быстрый выбор.
           </div>
-        ) : catalog.data?.items.length ? (
+        ) : products.length ? (
           <div
             className={cn(
               "grid gap-2.5",
               view === "grid" ? "grid-cols-[repeat(auto-fit,minmax(12rem,1fr))]" : "grid-cols-1",
             )}
           >
-            {catalog.data.items.map((item, index) => {
+            {products.map((item, index) => {
               const accent = productAccents[index % productAccents.length] ?? productAccents[0];
               const stock = item.stock_available == null ? null : Number(item.stock_available);
-              const unavailable = stock !== null && stock <= 0;
+              const unavailable = !item.is_active || (stock !== null && stock <= 0);
               const adding = pendingId === item.id;
 
               return (
                 <article
                   key={item.id}
                   className={cn(
-                    "grid min-w-0 overflow-hidden rounded-md border border-border bg-surface-raised",
+                    "relative grid min-w-0 overflow-hidden rounded-md border border-border bg-surface-raised",
                     view === "grid"
                       ? "grid-rows-[minmax(8.5rem,1fr)_auto]"
                       : "grid-cols-[minmax(0,1fr)_9rem]",
                   )}
                 >
-                  <div className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] gap-3 p-3">
+                  <button
+                    type="button"
+                    aria-label={`Убрать ${item.brand_name} из избранного`}
+                    title="Убрать из избранного"
+                    disabled={removeFavorite.isPending}
+                    onClick={() => void removeProduct(item)}
+                    className="absolute right-1.5 top-1.5 z-10 grid h-9 w-9 place-items-center rounded-md text-warning hover:bg-warning-subtle disabled:opacity-50"
+                  >
+                    <StarIcon />
+                  </button>
+                  <div className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] gap-3 p-3 pr-11">
                     <div
                       aria-hidden="true"
                       className={cn(
@@ -166,11 +187,13 @@ export function QuickProducts({
                           unavailable ? "text-danger" : "text-success-foreground",
                         )}
                       >
-                        {stock === null
-                          ? "В наличии"
-                          : unavailable
-                            ? "Нет в наличии"
-                            : `В наличии: ${formatStock(stock)} шт.`}
+                        {!item.is_active
+                          ? "Снят с продажи"
+                          : stock === null
+                            ? "В наличии"
+                            : unavailable
+                              ? "Нет в наличии"
+                              : `В наличии: ${formatStock(stock)} шт.`}
                       </p>
                       <div className="mt-auto pt-2">
                         <p className="text-[10px] font-medium text-foreground-muted">
@@ -207,9 +230,14 @@ export function QuickProducts({
           </div>
         ) : (
           <div className="flex min-h-48 items-center justify-center px-6 text-center text-sm text-foreground-muted">
-            В каталоге пока нет доступных товаров.
+            Избранных товаров пока нет.
           </div>
         )}
+        {favoriteError ? (
+          <p className="mt-2 text-center text-xs text-danger" role="alert">
+            {favoriteError}
+          </p>
+        ) : null}
       </div>
     </section>
   );
@@ -267,6 +295,14 @@ function CartIcon(): JSX.Element {
       <path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L20.5 8H6" />
       <circle cx="10" cy="20" r="1" />
       <circle cx="18" cy="20" r="1" />
+    </svg>
+  );
+}
+
+function StarIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+      <path d="m12 2.8 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.4 6.3-.9z" />
     </svg>
   );
 }

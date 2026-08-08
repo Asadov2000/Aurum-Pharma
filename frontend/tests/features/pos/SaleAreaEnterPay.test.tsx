@@ -9,6 +9,8 @@ const completeSale = vi.fn();
 const checkoutSale = vi.fn();
 const getCheckoutResult = vi.fn();
 const findByBarcode = vi.fn();
+const addSaleItem = vi.fn();
+const getPosFavorites = vi.fn();
 const requestDesktopCashDrawerOpen = vi.fn();
 const LAZY_NUMPAD_WAIT = { timeout: 5_000 };
 
@@ -24,12 +26,15 @@ vi.mock("@/features/pos/api", () => ({
   getZReport: vi.fn(),
   getZReportXlsx: vi.fn(),
   createSale: vi.fn(),
-  addSaleItem: vi.fn(),
+  addSaleItem: (...args: unknown[]) => addSaleItem(...args),
   updateSaleItem: vi.fn(),
   deleteSaleItem: vi.fn(),
   addPrescription: vi.fn(),
   getReceipt: vi.fn(),
   getReceiptPdf: vi.fn(),
+  getPosFavorites: (...args: unknown[]) => getPosFavorites(...args),
+  addPosFavorite: vi.fn(),
+  removePosFavorite: vi.fn(),
 }));
 
 vi.mock("@/features/catalog/queries", () => ({
@@ -241,8 +246,11 @@ describe("SaleArea atomic checkout", () => {
     checkoutSale.mockReset();
     getCheckoutResult.mockReset();
     findByBarcode.mockReset();
+    addSaleItem.mockReset();
+    getPosFavorites.mockReset();
     requestDesktopCashDrawerOpen.mockReset();
     getCurrentShift.mockResolvedValue(SHIFT);
+    getPosFavorites.mockResolvedValue([]);
     findByBarcode.mockRejectedValue({
       isAxiosError: true,
       response: { status: 404, data: { detail: "not found" } },
@@ -603,6 +611,47 @@ describe("SaleArea atomic checkout", () => {
     await screen.findByText(/Штрихкод 1234567890123 не найден/i);
     expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
     expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
+  });
+
+  it("queues rapid scans instead of dropping the second barcode", async () => {
+    let resolveFirstAdd: (value: unknown) => void = () => undefined;
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    findByBarcode.mockImplementation((code: string) =>
+      Promise.resolve({ id: `catalog-${code}`, brand_name: `Товар ${code}` }),
+    );
+    addSaleItem
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstAdd = resolve;
+          }),
+      )
+      .mockResolvedValue({ requires_prescription_log: false });
+    renderArea();
+    await screen.findByText(/Остаток/);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("aurum-desktop-barcode-scanned", { detail: { code: "4600000000001" } }),
+      );
+    });
+    await waitFor(() => expect(addSaleItem).toHaveBeenCalledTimes(1));
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("aurum-desktop-barcode-scanned", { detail: { code: "4600000000002" } }),
+      );
+    });
+
+    expect(await screen.findByText("Добавляется: 2")).toBeInTheDocument();
+    expect(addSaleItem).toHaveBeenCalledTimes(1);
+    act(() => resolveFirstAdd({ requires_prescription_log: false }));
+
+    await waitFor(() => expect(addSaleItem).toHaveBeenCalledTimes(2));
+    expect(addSaleItem.mock.calls.map((call) => call[1])).toEqual([
+      "catalog-4600000000001",
+      "catalog-4600000000002",
+    ]);
   });
 
   it("hides the mobile payment shortcut when the payment panel is visible", async () => {

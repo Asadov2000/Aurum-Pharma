@@ -71,4 +71,27 @@ describe("CatalogPicker — keyboard selection", () => {
 
     expect(screen.getByPlaceholderText("Поиск")).toHaveValue("");
   });
+
+  it("toggles a favorite without selecting the product", async () => {
+    const onChange = vi.fn();
+    const onFavoriteToggle = vi.fn();
+    render(
+      <CatalogPicker
+        value=""
+        onChange={onChange}
+        onFavoriteToggle={onFavoriteToggle}
+        favoriteCatalogIds={new Set(["c1"])}
+        placeholder="Поиск"
+      />,
+    );
+    const input = screen.getByPlaceholderText("Поиск");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "ас" } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Убрать Аспирин из избранного" }));
+
+    expect(onFavoriteToggle).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue("ас");
+  });
 });

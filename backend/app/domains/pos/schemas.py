@@ -9,11 +9,34 @@ from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domains.catalog.schemas import CatalogItemRead
+
 PAYMENT_METHODS = frozenset({"cash", "card", "qr"})
 # Legacy clients can retry an operation created before QR became a distinct
 # method. POSService still rejects a new bank_transfer after its idempotency
 # lookup, so this wider parsing boundary does not re-enable it for new sales.
 PAYMENT_METHOD_INPUTS = PAYMENT_METHODS | {"bank_transfer"}
+
+
+# ---- personal POS favorites ----
+
+
+class POSFavoriteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    catalog_id: UUID4
+
+
+class POSFavoriteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    catalog_id: UUID
+    created_at: datetime
+
+
+class POSFavoriteCatalogRead(POSFavoriteRead):
+    catalog: CatalogItemRead
 
 
 # ---- shift ----

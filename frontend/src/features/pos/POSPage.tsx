@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Input, Label, PageHeader, Select, Skeleton, Switch, TableEmpty } from "@/components/ui";
+import {
+  Button,
+  Input,
+  Label,
+  Modal,
+  PageHeader,
+  Select,
+  Skeleton,
+  Switch,
+  TableEmpty,
+} from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { normalizePosPaymentMethods } from "@/features/foundation/paymentSettings";
@@ -9,7 +19,7 @@ import { cn } from "@/lib/utils";
 
 import { DRAFT_TTL_MIN } from "./draftStorage";
 import { ModeToggle } from "./ModeToggle";
-import { SaleArea } from "./SaleArea";
+import { type RegisterSwitchState, SaleArea } from "./SaleArea";
 import { usePosMode } from "./usePosMode";
 
 const STORAGE_KEY = "pos:lastRegisterId";
@@ -44,8 +54,7 @@ export function POSPage(): JSX.Element {
   const draftTtlMin = settings.data?.draft_sale_lifetime_min ?? DRAFT_TTL_MIN;
   const configuredPaymentMethods = settings.data?.pos_payment_methods;
   const paymentMethods = useMemo(
-    () =>
-      settings.data === undefined ? [] : normalizePosPaymentMethods(configuredPaymentMethods),
+    () => (settings.data === undefined ? [] : normalizePosPaymentMethods(configuredPaymentMethods)),
     [configuredPaymentMethods, settings.data],
   );
   const mixedPaymentEnabled = settings.data?.pos_mixed_payment_enabled ?? false;
@@ -57,6 +66,30 @@ export function POSPage(): JSX.Element {
   const [soundOn, setSoundOn] = useState<boolean>(() => {
     return readLocalPreference(SOUND_KEY) === "1";
   });
+  const [registerSwitchState, setRegisterSwitchState] = useState<RegisterSwitchState>({
+    blocked: false,
+    hasDraft: false,
+  });
+  const [pendingRegisterId, setPendingRegisterId] = useState<string | null>(null);
+
+  const updateRegisterSwitchState = useCallback((state: RegisterSwitchState) => {
+    setRegisterSwitchState(state);
+  }, []);
+
+  const requestRegisterChange = (nextRegisterId: string) => {
+    if (nextRegisterId === registerId || registerSwitchState.blocked) return;
+    if (registerSwitchState.hasDraft) {
+      setPendingRegisterId(nextRegisterId);
+      return;
+    }
+    setRegisterId(nextRegisterId);
+  };
+
+  const confirmRegisterChange = () => {
+    if (pendingRegisterId === null) return;
+    setRegisterId(pendingRegisterId);
+    setPendingRegisterId(null);
+  };
 
   const toggleSound = (on: boolean) => {
     setSoundOn(on);
@@ -109,7 +142,11 @@ export function POSPage(): JSX.Element {
             <Select
               id="register"
               value={registerId}
-              onChange={(event) => setRegisterId(event.target.value)}
+              onChange={(event) => requestRegisterChange(event.target.value)}
+              disabled={registerSwitchState.blocked}
+              title={
+                registerSwitchState.blocked ? "Дождитесь завершения текущей операции" : undefined
+              }
               className={cn(
                 "min-w-0 flex-1 sm:w-44 sm:flex-none",
                 mode === "touch" ? "h-12" : "h-9",
@@ -176,8 +213,26 @@ export function POSPage(): JSX.Element {
           canCloseShift={canCloseShift}
           canSell={canSell}
           workstationControls={workstationControls}
+          onRegisterSwitchStateChange={updateRegisterSwitchState}
         />
       )}
+
+      <Modal
+        open={pendingRegisterId !== null}
+        onClose={() => setPendingRegisterId(null)}
+        title="Перейти на другую кассу?"
+      >
+        <p className="text-sm text-foreground-secondary">
+          Текущий чек останется сохранённым на этой кассе. При возвращении вы сможете продолжить
+          работу с ним.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setPendingRegisterId(null)}>
+            Остаться
+          </Button>
+          <Button onClick={confirmRegisterChange}>Сохранить чек и перейти</Button>
+        </div>
+      </Modal>
     </div>
   );
 }

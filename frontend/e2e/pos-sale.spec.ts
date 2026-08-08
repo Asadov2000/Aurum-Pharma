@@ -97,6 +97,20 @@ test.describe("POS sale (owner)", () => {
       ),
     ).toBe(true);
 
+    const productSearch = page.getByRole("combobox", { name: "Товар" });
+    await productSearch.fill(item.brand_name);
+    await page.getByRole("button", { name: `Добавить ${item.brand_name} в избранное` }).click();
+    await expect(quickProducts.getByText(item.brand_name)).toBeVisible();
+
+    await page.reload();
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    const restoredQuickProducts = page.getByRole("region", { name: "Быстрый выбор" });
+    await expect(restoredQuickProducts.getByText(item.brand_name)).toBeVisible();
+    await restoredQuickProducts
+      .getByRole("button", { name: `Убрать ${item.brand_name} из избранного` })
+      .click();
+    await expect(restoredQuickProducts.getByText(item.brand_name)).toHaveCount(0);
+
     const barcodeLookup = page.waitForResponse(
       (response) =>
         response.url().includes(`/api/v1/catalog/by-barcode/${barcode}`) && response.ok(),

@@ -7,6 +7,8 @@ const openShift = vi.fn();
 const closeShift = vi.fn();
 const getZReportXlsx = vi.fn();
 const listRegisters = vi.fn();
+const getPosFavorites = vi.fn();
+const getSale = vi.fn();
 
 vi.mock("@/features/pos/api", () => ({
   getCurrentShift: (...a: unknown[]) => getCurrentShift(...a),
@@ -15,13 +17,16 @@ vi.mock("@/features/pos/api", () => ({
   getZReportXlsx: (...a: unknown[]) => getZReportXlsx(...a),
   getZReport: vi.fn(),
   createSale: vi.fn(),
-  getSale: vi.fn(),
+  getSale: (...a: unknown[]) => getSale(...a),
   addSaleItem: vi.fn(),
   updateSaleItem: vi.fn(),
   deleteSaleItem: vi.fn(),
   addPayment: vi.fn(),
   completeSale: vi.fn(),
   addPrescription: vi.fn(),
+  getPosFavorites: (...args: unknown[]) => getPosFavorites(...args),
+  addPosFavorite: vi.fn(),
+  removePosFavorite: vi.fn(),
 }));
 
 vi.mock("@/features/foundation/api", () => ({
@@ -45,6 +50,7 @@ vi.mock("@/features/catalog/queries", () => ({
 }));
 
 import { POSPage } from "@/features/pos/POSPage";
+import { draftKey } from "@/features/pos/draftStorage";
 import { useAuthStore } from "@/stores/auth";
 
 async function renderPage() {
@@ -119,6 +125,9 @@ describe("POSPage", () => {
     closeShift.mockReset();
     getZReportXlsx.mockReset();
     listRegisters.mockReset();
+    getPosFavorites.mockReset();
+    getPosFavorites.mockResolvedValue([]);
+    getSale.mockReset();
     getZReportXlsx.mockRejectedValue(new Error("download unavailable"));
   });
   afterEach(() => {
@@ -160,6 +169,66 @@ describe("POSPage", () => {
     fireEvent.change(screen.getByLabelText("Касса"), { target: { value: second.id } });
     expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
     expect(window.localStorage.getItem("pos:lastRegisterId")).toBe(second.id);
+  });
+
+  it("preserves a non-empty draft before switching to another register", async () => {
+    const second = { ...REGISTER, id: "r-2", name: "Касса 2" };
+    listRegisters.mockResolvedValue([REGISTER, second]);
+    window.localStorage.setItem("pos:lastRegisterId", REGISTER.id);
+    window.localStorage.setItem(
+      draftKey(REGISTER.id),
+      JSON.stringify({ saleId: "sale-1", nameById: {}, savedAt: Date.now() }),
+    );
+    getCurrentShift.mockImplementation((registerId: string) =>
+      Promise.resolve({ ...OPEN_SHIFT, register_id: registerId }),
+    );
+    getSale.mockResolvedValue({
+      id: "sale-1",
+      tenant_id: "t-1",
+      branch_id: "b-1",
+      register_id: REGISTER.id,
+      shift_id: OPEN_SHIFT.id,
+      sale_type: "sale",
+      parent_sale_id: null,
+      status: "draft",
+      receipt_number: null,
+      operation_id: null,
+      is_test: false,
+      total_amount: "10.00",
+      currency: "TJS",
+      voided_at: null,
+      voided_by_sale_id: null,
+      cashier_user_id: POS_USER.id,
+      created_at: OPEN_SHIFT.opened_at,
+      completed_at: null,
+      items: [
+        {
+          id: "item-1",
+          sale_id: "sale-1",
+          catalog_id: "catalog-1",
+          batch_id: "batch-1",
+          qty: "1",
+          unit_price: "10.00",
+          total_price: "10.00",
+          currency: "TJS",
+          discount_amount: "0.00",
+          position: 1,
+        },
+      ],
+      payments: [],
+    });
+
+    await renderPage();
+    const registerSelect = await screen.findByLabelText("Касса");
+    await screen.findByText("Текущий чек");
+    fireEvent.change(registerSelect, { target: { value: second.id } });
+
+    expect(registerSelect).toHaveValue(REGISTER.id);
+    expect(screen.getByRole("dialog", { name: "Перейти на другую кассу?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить чек и перейти" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Касса")).toHaveValue(second.id));
+    expect(window.localStorage.getItem(draftKey(REGISTER.id))).not.toBeNull();
   });
 
   it("hides shift and sale actions that are outside the account permissions", async () => {
@@ -221,9 +290,7 @@ describe("POSPage", () => {
 
     try {
       await renderPage();
-      expect(
-        await screen.findByLabelText(/Касса на начало смены/i),
-      ).toBeInTheDocument();
+      expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
       expect(screen.getByDisplayValue(REGISTER.name)).toBeInTheDocument();
     } finally {
       getItem.mockRestore();

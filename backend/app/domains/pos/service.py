@@ -44,6 +44,7 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
 from app.domains.pos.models import (
+    POSFavorite,
     PrescriptionLog,
     Sale,
     SaleItem,
@@ -51,7 +52,7 @@ from app.domains.pos.models import (
     Shift,
 )
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
-from app.domains.pos.repository import POSRepository
+from app.domains.pos.repository import FavoriteCatalogRow, POSRepository
 from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.schemas import (
     PAYMENT_METHODS,
@@ -96,6 +97,68 @@ class POSService:
     ) -> None:
         self.repo = repo
         self._now = now
+
+    # =========================================================================
+    # Personal POS favorites
+    # =========================================================================
+
+    async def list_favorites(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        branch_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> list[FavoriteCatalogRow]:
+        branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
+        if branch is None or branch.tenant_id != tenant_id:
+            raise NotFoundError("Branch not found")
+        self._assert_branch_allowed(branch.id, allowed_branch_ids=allowed_branch_ids)
+        if not branch.is_active:
+            raise BusinessRuleError("Branch is inactive")
+        return await self.repo.list_favorites(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            branch_id=branch_id,
+        )
+
+    async def add_favorite(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        catalog_id: UUID,
+    ) -> POSFavorite:
+        item = (
+            await self.repo.session.execute(
+                select(TenantCatalog).where(
+                    TenantCatalog.id == catalog_id,
+                    TenantCatalog.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if item is None or item.deleted_at is not None:
+            raise NotFoundError("Catalog item not found")
+        if not item.is_active:
+            raise BusinessRuleError("Inactive catalog item cannot be added to POS favorites")
+        return await self.repo.add_favorite(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            catalog_id=catalog_id,
+        )
+
+    async def remove_favorite(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        catalog_id: UUID,
+    ) -> None:
+        await self.repo.remove_favorite(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            catalog_id=catalog_id,
+        )
 
     # =========================================================================
     # Shifts

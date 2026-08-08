@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   addPayment,
+  addPosFavorite,
   addPrescription,
   addSaleItem,
   checkoutSale,
@@ -10,9 +11,11 @@ import {
   createSale,
   deleteSaleItem,
   getCurrentShift,
+  getPosFavorites,
   getReceipt,
   getSale,
   openShift,
+  removePosFavorite,
   updateSaleItem,
 } from "./api";
 import {
@@ -26,10 +29,36 @@ import {
 } from "./types";
 
 export const posKeys = {
+  favoritesRoot: ["pos", "favorites"] as const,
+  favorites: (branchId?: string) => ["pos", "favorites", branchId ?? "all"] as const,
   shift: (registerId: string) => ["pos", "shift", registerId] as const,
   sale: (saleId: string) => ["pos", "sale", saleId] as const,
   receipt: (saleId: string) => ["pos", "receipt", saleId] as const,
 };
+
+export function usePosFavoritesQuery(branchId?: string) {
+  return useQuery({
+    queryKey: posKeys.favorites(branchId),
+    queryFn: () => getPosFavorites(branchId as string),
+    enabled: Boolean(branchId),
+  });
+}
+
+export function useAddPosFavorite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (catalogId: string) => addPosFavorite(catalogId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: posKeys.favoritesRoot }),
+  });
+}
+
+export function useRemovePosFavorite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (catalogId: string) => removePosFavorite(catalogId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: posKeys.favoritesRoot }),
+  });
+}
 
 export function mergeCheckoutResult(
   sale: SaleDetails | undefined,

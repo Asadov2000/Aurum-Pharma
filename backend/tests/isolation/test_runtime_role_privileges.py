@@ -28,6 +28,7 @@ CRUD_TABLES = {
     "notification_subscription",
     "onboarding_checklist",
     "payment",
+    "pos_favorite",
     "prescription_log",
     "register",
     "role",

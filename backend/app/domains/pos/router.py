@@ -23,10 +23,14 @@ from app.core.deps import (
     require_writable_tenant,
 )
 from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.domains.catalog.schemas import CatalogItemRead
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import (
     PaymentAdd,
     PaymentRead,
+    POSFavoriteCatalogRead,
+    POSFavoriteCreate,
+    POSFavoriteRead,
     PrescriptionLogCreate,
     PrescriptionLogRead,
     ReceiptData,
@@ -103,6 +107,80 @@ def _effective_report_branch_id(user: CurrentUser, branch_id: UUID | None) -> UU
     if len(branch_scope) == 1:
         return next(iter(branch_scope))
     raise BusinessRuleError("branch_id is required for branch-scoped reports")
+
+
+# =============================================================================
+# Personal POS favorites
+# =============================================================================
+
+
+@router.get(
+    "/pos/favorites",
+    response_model=list[POSFavoriteCatalogRead],
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def list_pos_favorites(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+    branch_id: Annotated[UUID, Query()],
+) -> list[POSFavoriteCatalogRead]:
+    rows = await service.list_favorites(
+        tenant_id=_current_tenant_or_400(user),
+        user_id=user.user_id,
+        branch_id=branch_id,
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    return [
+        POSFavoriteCatalogRead(
+            id=row.favorite.id,
+            catalog_id=row.favorite.catalog_id,
+            created_at=row.favorite.created_at,
+            catalog=CatalogItemRead.model_validate(row.catalog).model_copy(
+                update={"stock_available": row.stock_available}
+            ),
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/pos/favorites",
+    response_model=POSFavoriteRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def add_pos_favorite(
+    payload: POSFavoriteCreate,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSFavoriteRead:
+    favorite = await service.add_favorite(
+        tenant_id=_current_tenant_or_400(user),
+        user_id=user.user_id,
+        catalog_id=payload.catalog_id,
+    )
+    return POSFavoriteRead.model_validate(favorite)
+
+
+@router.delete(
+    "/pos/favorites/{catalog_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def remove_pos_favorite(
+    catalog_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> Response:
+    await service.remove_favorite(
+        tenant_id=_current_tenant_or_400(user),
+        user_id=user.user_id,
+        catalog_id=catalog_id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # =============================================================================
