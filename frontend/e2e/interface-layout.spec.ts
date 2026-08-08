@@ -104,7 +104,9 @@ test.describe("Interface layout", () => {
     await loginInBrowser(page, OWNER);
     await page.goto("/roles");
 
-    const createRoleButton = page.getByRole("button", { name: "Создать роль" });
+    const createRoleButton = page
+      .locator("header")
+      .getByRole("button", { name: "Создать роль" });
     await createRoleButton.click();
     const dialog = page.getByRole("dialog", { name: "Создать роль" });
     await expect(dialog).toBeVisible();
