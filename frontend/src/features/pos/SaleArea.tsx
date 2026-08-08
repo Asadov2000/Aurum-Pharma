@@ -1,9 +1,19 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { Button, ConfirmDialog } from "@/components/ui";
 import { findByBarcode } from "@/features/catalog/api";
+import { type CatalogItem } from "@/features/catalog/types";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
 import { cn } from "@/lib/utils";
@@ -39,6 +49,7 @@ import {
   mergeCheckoutResult,
   posKeys,
   useAddPayment,
+  useAddPosFavorite,
   useAddSaleItem,
   useAddPrescription,
   useCheckoutSale,
@@ -46,6 +57,8 @@ import {
   useCreateSale,
   useCurrentShiftQuery,
   useDeleteSaleItem,
+  usePosFavoritesQuery,
+  useRemovePosFavorite,
   useSaleQuery,
   useUpdateSaleItem,
 } from "./queries";
@@ -98,9 +111,7 @@ function isDefiniteRejection(error: unknown): boolean {
 
 function isExpiryConfirmationRequired(error: unknown): boolean {
   if (!isAxiosError(error)) return false;
-  const data = error.response?.data as
-    | { error?: { details?: { reason?: unknown } } }
-    | undefined;
+  const data = error.response?.data as { error?: { details?: { reason?: unknown } } } | undefined;
   return data?.error?.details?.reason === "expired_sale_confirmation_required";
 }
 
@@ -167,6 +178,7 @@ export function SaleArea({
   canCloseShift = true,
   canSell = true,
   workstationControls,
+  onRegisterSwitchStateChange,
 }: {
   registerId: string;
   mode: PosMode;
@@ -180,6 +192,7 @@ export function SaleArea({
   canCloseShift?: boolean;
   canSell?: boolean;
   workstationControls?: ReactNode;
+  onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
@@ -201,6 +214,7 @@ export function SaleArea({
           paymentSettingsUnavailable={paymentSettingsUnavailable}
           canCloseShift={canCloseShift}
           workstationControls={workstationControls}
+          onRegisterSwitchStateChange={onRegisterSwitchStateChange}
         />
       ) : (
         <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
@@ -221,6 +235,11 @@ export function SaleArea({
   );
 }
 
+export interface RegisterSwitchState {
+  blocked: boolean;
+  hasDraft: boolean;
+}
+
 function ActiveWorkspace({
   registerId,
   branchId,
@@ -233,6 +252,7 @@ function ActiveWorkspace({
   paymentSettingsUnavailable,
   canCloseShift,
   workstationControls,
+  onRegisterSwitchStateChange,
 }: {
   registerId: string;
   branchId: string | null;
@@ -245,6 +265,7 @@ function ActiveWorkspace({
   paymentSettingsUnavailable: boolean;
   canCloseShift: boolean;
   workstationControls?: ReactNode;
+  onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
@@ -293,9 +314,10 @@ function ActiveWorkspace({
     useState<ExternalPaymentConfirmation | null>(null);
   const [expiredItemConfirmation, setExpiredItemConfirmation] =
     useState<ExpiredItemConfirmation | null>(null);
-  const [checkoutExpiryConfirmationOpen, setCheckoutExpiryConfirmationOpen] =
-    useState(false);
+  const [checkoutExpiryConfirmationOpen, setCheckoutExpiryConfirmationOpen] = useState(false);
   const [paymentPanelVisible, setPaymentPanelVisible] = useState(false);
+  const [queuedScans, setQueuedScans] = useState(0);
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentPanelRef = useRef<HTMLDivElement>(null);
   const flashTimer = useRef<number | undefined>(undefined);
@@ -323,7 +345,33 @@ function ActiveWorkspace({
   const completeSale = useCompleteSale();
   const checkoutSale = useCheckoutSale();
   const saleQuery = useSaleQuery(saleId);
+  const favorites = usePosFavoritesQuery(branchId ?? undefined);
+  const addFavorite = useAddPosFavorite();
+  const removeFavorite = useRemovePosFavorite();
   const refetchSale = saleQuery.refetch;
+  const favoriteCatalogIds = useMemo(
+    () => new Set(favorites.data?.map((favorite) => favorite.catalog_id) ?? []),
+    [favorites.data],
+  );
+  const favoritePendingId = addFavorite.isPending
+    ? addFavorite.variables
+    : removeFavorite.isPending
+      ? removeFavorite.variables
+      : null;
+
+  const toggleFavorite = async (item: CatalogItem) => {
+    if (favoritePendingId !== null) return;
+    setFavoriteError(null);
+    try {
+      if (favoriteCatalogIds.has(item.id)) {
+        await removeFavorite.mutateAsync(item.id);
+      } else {
+        await addFavorite.mutateAsync(item.id);
+      }
+    } catch (error) {
+      setFavoriteError(describeApiError(error, "Не удалось изменить избранное"));
+    }
+  };
 
   const sale: SaleDetails | null = saleQuery.data ?? null;
   const isDraft = !sale || sale.status === "draft";
@@ -335,10 +383,7 @@ function ActiveWorkspace({
   const totalDue = sale ? Number(sale.total_amount) : 0;
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = totalDue - totalPaid;
-  const stagedTotal = stagedPayments.reduce(
-    (sum, payment) => sum + Number(payment.amount),
-    0,
-  );
+  const stagedTotal = stagedPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
   const stagedPaymentConflict =
     stagedPayments.length > 0 &&
     sale?.status === "draft" &&
@@ -346,9 +391,7 @@ function ActiveWorkspace({
       stagedTotal - totalDue > 0.001 ||
       (!paymentSettingsLoading &&
         !paymentSettingsUnavailable &&
-        (stagedPayments.some(
-          (payment) => !paymentMethods.includes(payment.payment_method),
-        ) ||
+        (stagedPayments.some((payment) => !paymentMethods.includes(payment.payment_method)) ||
           (!mixedPaymentEnabled &&
             (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
   const cartMutationPending =
@@ -364,6 +407,16 @@ function ActiveWorkspace({
     pendingCheckout !== null ||
     pendingPayment !== null ||
     (saleId !== null && sale === null);
+  const scanInputBlocked =
+    completeSale.isPending ||
+    checkoutSale.isPending ||
+    updateItem.isPending ||
+    deleteItem.isPending ||
+    paymentStarted ||
+    completionUncertain ||
+    checkoutUncertain ||
+    pendingCheckout !== null ||
+    pendingPayment !== null;
   const shiftCloseBlocked =
     completeSale.isPending ||
     checkoutSale.isPending ||
@@ -381,6 +434,36 @@ function ActiveWorkspace({
         recordedPayments.length > 0 ||
         stagedPayments.length > 0 ||
         prescription !== null));
+  const registerSwitchBlocked =
+    completeSale.isPending ||
+    checkoutSale.isPending ||
+    checkoutReconciling ||
+    cartMutationPending ||
+    addPayment.isPending ||
+    addPrescription.isPending ||
+    completionUncertain ||
+    checkoutUncertain ||
+    pendingCheckout !== null ||
+    pendingPayment !== null ||
+    queuedScans > 0 ||
+    (saleId !== null && sale === null);
+  const hasDraftToPreserve =
+    sale?.status === "draft" &&
+    (items.length > 0 ||
+      recordedPayments.length > 0 ||
+      stagedPayments.length > 0 ||
+      prescription !== null);
+  useEffect(() => {
+    onRegisterSwitchStateChange?.({
+      blocked: registerSwitchBlocked,
+      hasDraft: hasDraftToPreserve,
+    });
+  }, [hasDraftToPreserve, onRegisterSwitchStateChange, registerSwitchBlocked]);
+
+  useEffect(
+    () => () => onRegisterSwitchStateChange?.({ blocked: false, hasDraft: false }),
+    [onRegisterSwitchStateChange],
+  );
   useEffect(() => {
     if (!stagedPaymentConflict) return;
     setTopError(
@@ -510,14 +593,7 @@ function ActiveWorkspace({
         expiredSaleConfirmed,
       );
     }
-  }, [
-    sale,
-    nameById,
-    registerId,
-    requiresRx,
-    stagedPayments,
-    expiredSaleConfirmed,
-  ]);
+  }, [sale, nameById, registerId, requiresRx, stagedPayments, expiredSaleConfirmed]);
 
   // Keep the completed receipt addressable until the cashier explicitly starts
   // another sale. This makes printer/browser recovery deterministic.
@@ -649,7 +725,7 @@ function ActiveWorkspace({
     expiredConfirmation = false,
     fromScanner = false,
   ): Promise<boolean> => {
-    if (saleEditingBlocked) return false;
+    if (fromScanner ? scanInputBlocked : saleEditingBlocked) return false;
     setTopError(null);
     try {
       const id = await ensureSaleId();
@@ -706,10 +782,13 @@ function ActiveWorkspace({
   };
 
   const enqueueScan = (code: string) => {
-    scanQueueRef.current = scanQueueRef.current.then(
-      () => onScan(code),
-      () => onScan(code),
-    );
+    setQueuedScans((count) => count + 1);
+    scanQueueRef.current = scanQueueRef.current
+      .then(
+        () => onScan(code),
+        () => onScan(code),
+      )
+      .finally(() => setQueuedScans((count) => Math.max(0, count - 1)));
   };
 
   const onQtyChange = async (itemId: string, qty: number) => {
@@ -742,19 +821,12 @@ function ActiveWorkspace({
     const normalizedAmount = amt.toFixed(2);
     const storedOperation =
       pendingPayment?.saleId === saleId ? pendingPayment : loadPendingPaymentOperation(saleId);
-    if (
-      !storedOperation &&
-      (method === "bank_transfer" || !paymentMethods.includes(method))
-    ) {
+    if (!storedOperation && (method === "bank_transfer" || !paymentMethods.includes(method))) {
       setTopError("Этот способ оплаты больше не доступен для новых операций.");
       return;
     }
     const recordedMethod = recordedPayments[0]?.payment_method;
-    if (
-      !mixedPaymentEnabled &&
-      recordedMethod !== undefined &&
-      recordedMethod !== method
-    ) {
+    if (!mixedPaymentEnabled && recordedMethod !== undefined && recordedMethod !== method) {
       setTopError("Смешанная оплата отключена. Продолжите оплату тем же способом.");
       return;
     }
@@ -855,11 +927,7 @@ function ActiveWorkspace({
     }
   };
 
-  const stagePayment = (
-    method: PaymentMethod,
-    amount: string,
-    metadata?: PaymentMetadata,
-  ) => {
+  const stagePayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
     if (!saleId || recordedPayments.length > 0) return;
     if (!paymentMethods.includes(method)) {
       setTopError("Этот способ оплаты отключён в настройках аптеки.");
@@ -902,11 +970,7 @@ function ActiveWorkspace({
     let safeMetadata: PaymentMetadata | undefined;
     if (metadata?.cash_received !== undefined) {
       const cashReceived = normalizePositiveMoney(metadata.cash_received);
-      if (
-        method !== "cash" ||
-        !cashReceived ||
-        Number(cashReceived) + 0.001 < numericAmount
-      ) {
+      if (method !== "cash" || !cashReceived || Number(cashReceived) + 0.001 < numericAmount) {
         setTopError("Полученная сумма наличными не может быть меньше суммы оплаты.");
         return;
       }
@@ -954,11 +1018,7 @@ function ActiveWorkspace({
     setTopError(null);
   };
 
-  const applyPayment = (
-    method: PaymentMethod,
-    amount: string,
-    metadata?: PaymentMetadata,
-  ) => {
+  const applyPayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
     if (recordedPayments.length > 0 || pendingPayment !== null) {
       void payLegacy(method, amount, metadata);
       return;
@@ -966,11 +1026,7 @@ function ActiveWorkspace({
     stagePayment(method, amount, metadata);
   };
 
-  const submitPayment = (
-    method: PaymentMethod,
-    amount: string,
-    metadata?: PaymentMetadata,
-  ) => {
+  const submitPayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
     if (
       (method === "card" || method === "qr") &&
       metadata?.external_confirmed !== true &&
@@ -1283,8 +1339,7 @@ function ActiveWorkspace({
       return;
     }
 
-    const operation =
-      storedOperation ?? createPendingCheckoutOperation(saleId, registerId);
+    const operation = storedOperation ?? createPendingCheckoutOperation(saleId, registerId);
     if (!operation) {
       setTopError(
         "Не удалось сохранить маркер восстановления. Продажа не отправлена; перезапустите приложение.",
@@ -1524,7 +1579,7 @@ function ActiveWorkspace({
   return (
     <>
       {/* Global barcode capture — only while editing a draft. */}
-      <BarcodeListener enabled={isDraft && !saleEditingBlocked} onScan={enqueueScan} />
+      <BarcodeListener enabled={isDraft && !scanInputBlocked} onScan={enqueueScan} />
 
       {/* Scan feedback: green/red edge flash (collapses to a static border under
           reduced-motion). */}
@@ -1565,8 +1620,14 @@ function ActiveWorkspace({
               ref={searchRef}
               onAdd={onAdd}
               busy={createSale.isPending || addItem.isPending}
+              scanner={scanInputBlocked ? "off" : queuedScans > 0 ? "scanning" : "ready"}
+              queuedScans={queuedScans}
               touch={touch}
               branchId={branchId ?? undefined}
+              favoriteCatalogIds={favoriteCatalogIds}
+              favoritePendingId={favoritePendingId}
+              favoriteError={favoriteError}
+              onFavoriteToggle={(item) => void toggleFavorite(item)}
             />
           </fieldset>
         )}

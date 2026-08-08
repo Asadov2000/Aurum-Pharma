@@ -4,6 +4,7 @@ import { Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 import { useCatalogQuery } from "./queries";
+import { type CatalogItem } from "./types";
 
 interface Props {
   id?: string;
@@ -18,6 +19,9 @@ interface Props {
   inputClassName?: string;
   /** When set (POS register's branch), each result shows its available stock. */
   branchId?: string;
+  favoriteCatalogIds?: ReadonlySet<string>;
+  favoritePendingId?: string | null;
+  onFavoriteToggle?: (item: CatalogItem) => void;
 }
 
 // Lightweight typeahead over /api/v1/catalog. Defers fetching until the
@@ -38,6 +42,9 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     invalid = false,
     inputClassName,
     branchId,
+    favoriteCatalogIds,
+    favoritePendingId,
+    onFavoriteToggle,
   },
   ref,
 ): JSX.Element {
@@ -188,40 +195,64 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
             <p className="px-3 py-2 text-sm italic text-foreground-muted">Ничего не найдено</p>
           ) : (
             items.map((it, idx) => (
-              <button
+              <div
                 key={it.id}
-                id={`${listId}-${it.id}`}
-                type="button"
-                role="option"
-                aria-selected={idx === highlight}
-                tabIndex={-1}
-                data-active={idx === highlight ? "true" : undefined}
-                onMouseDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setHighlight(idx)}
-                onClick={() => choose(it)}
                 className={
-                  "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm " +
+                  "flex w-full items-stretch " +
                   (idx === highlight ? "bg-foreground/[0.06]" : "hover:bg-foreground/[0.03]")
                 }
               >
-                <span className="min-w-0 truncate">
-                  <span className="font-medium">{it.brand_name}</span>
-                  {it.dosage && <span className="ml-2 text-foreground-muted">{it.dosage}</span>}
-                  {it.manufacturer && (
-                    <span className="ml-2 text-xs text-foreground-muted">· {it.manufacturer}</span>
-                  )}
-                </span>
-                {branchId && it.stock_available != null && (
-                  <span
-                    className={
-                      "shrink-0 font-mono tabular-nums text-xs " +
-                      (Number(it.stock_available) <= 0 ? "text-danger" : "text-foreground-muted")
-                    }
-                  >
-                    {Number(it.stock_available) <= 0 ? "нет" : `${Number(it.stock_available)} шт`}
+                <button
+                  id={`${listId}-${it.id}`}
+                  type="button"
+                  role="option"
+                  aria-selected={idx === highlight}
+                  tabIndex={-1}
+                  data-active={idx === highlight ? "true" : undefined}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(it)}
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-left text-sm"
+                >
+                  <span className="min-w-0 truncate">
+                    <span className="font-medium">{it.brand_name}</span>
+                    {it.dosage && <span className="ml-2 text-foreground-muted">{it.dosage}</span>}
+                    {it.manufacturer && (
+                      <span className="ml-2 text-xs text-foreground-muted">
+                        · {it.manufacturer}
+                      </span>
+                    )}
                   </span>
-                )}
-              </button>
+                  {branchId && it.stock_available != null && (
+                    <span
+                      className={
+                        "shrink-0 font-mono tabular-nums text-xs " +
+                        (Number(it.stock_available) <= 0 ? "text-danger" : "text-foreground-muted")
+                      }
+                    >
+                      {Number(it.stock_available) <= 0 ? "нет" : `${Number(it.stock_available)} шт`}
+                    </span>
+                  )}
+                </button>
+                {onFavoriteToggle ? (
+                  <button
+                    type="button"
+                    aria-label={
+                      favoriteCatalogIds?.has(it.id)
+                        ? `Убрать ${it.brand_name} из избранного`
+                        : `Добавить ${it.brand_name} в избранное`
+                    }
+                    aria-pressed={favoriteCatalogIds?.has(it.id) ?? false}
+                    title={favoriteCatalogIds?.has(it.id) ? "Убрать из избранного" : "В избранное"}
+                    disabled={favoritePendingId === it.id}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => onFavoriteToggle(it)}
+                    className="grid min-h-11 w-11 shrink-0 place-items-center border-l border-border text-foreground-muted hover:text-warning disabled:opacity-50"
+                  >
+                    <StarIcon filled={favoriteCatalogIds?.has(it.id) ?? false} />
+                  </button>
+                ) : null}
+              </div>
             ))
           )}
         </div>
@@ -229,3 +260,20 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     </div>
   );
 });
+
+function StarIcon({ filled }: { filled: boolean }): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+    >
+      <path d="m12 2.8 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.4 6.3-.9z" />
+    </svg>
+  );
+}

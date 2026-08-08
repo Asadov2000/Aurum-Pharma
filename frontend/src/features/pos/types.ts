@@ -1,3 +1,4 @@
+import { type CatalogItem } from "@/features/catalog/types";
 import { type PosPaymentMethod } from "@/features/foundation/paymentSettings";
 
 // Mirrors backend Pydantic schemas in app/domains/pos/schemas.py.
@@ -200,6 +201,17 @@ export interface SaleCheckoutResult {
   items: SaleCheckoutItemResult[];
   payments: SaleCheckoutPaymentResult[];
 }
+
+// ---- cashier favorites ----
+
+export interface PosFavorite {
+  id: string;
+  catalog_id: string;
+  created_at: string;
+  catalog: CatalogItem;
+}
+
+export type PosFavoriteRecord = Omit<PosFavorite, "catalog">;
 
 // ---- receipt (print / PDF) ----
 

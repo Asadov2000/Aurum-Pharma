@@ -3,6 +3,8 @@ import { api } from "@/lib/api";
 import {
   type PaymentAddPayload,
   type Payment,
+  type PosFavorite,
+  type PosFavoriteRecord,
   type PrescriptionLog,
   type PrescriptionLogPayload,
   type ReceiptData,
@@ -19,6 +21,26 @@ import {
 } from "./types";
 
 const POS_MONEY_WRITE_TIMEOUT_MS = 15_000;
+
+// ---- cashier favorites ----
+
+export async function getPosFavorites(branchId: string): Promise<PosFavorite[]> {
+  const { data } = await api.get<PosFavorite[]>("/pos/favorites", {
+    params: { branch_id: branchId },
+  });
+  return data;
+}
+
+export async function addPosFavorite(catalogId: string): Promise<PosFavoriteRecord> {
+  const { data } = await api.post<PosFavoriteRecord>("/pos/favorites", {
+    catalog_id: catalogId,
+  });
+  return data;
+}
+
+export async function removePosFavorite(catalogId: string): Promise<void> {
+  await api.delete(`/pos/favorites/${catalogId}`);
+}
 
 // ---- Shifts ----
 
@@ -98,10 +120,7 @@ export async function addPayment(saleId: string, payload: PaymentAddPayload): Pr
   return data;
 }
 
-export async function completeSale(
-  saleId: string,
-  expiredSaleConfirmed = false,
-): Promise<Sale> {
+export async function completeSale(saleId: string, expiredSaleConfirmed = false): Promise<Sale> {
   const { data } = await api.post<Sale>(
     `/sales/${saleId}/complete`,
     { expired_sale_confirmed: expiredSaleConfirmed },

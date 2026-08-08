@@ -1,12 +1,18 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useCatalogQuery } from "@/features/catalog/queries";
 import { type CatalogItem } from "@/features/catalog/types";
 import { QuickProducts } from "@/features/pos/QuickProducts";
 
-vi.mock("@/features/catalog/queries", () => ({
-  useCatalogQuery: vi.fn(),
+const usePosFavoritesQuery = vi.fn();
+const removeFavorite = vi.fn();
+
+vi.mock("@/features/pos/queries", () => ({
+  usePosFavoritesQuery: (...args: unknown[]) => usePosFavoritesQuery(...args),
+  useRemovePosFavorite: () => ({
+    isPending: false,
+    mutateAsync: (...args: unknown[]) => removeFavorite(...args),
+  }),
 }));
 
 const products: CatalogItem[] = [
@@ -54,16 +60,18 @@ const products: CatalogItem[] = [
 
 describe("QuickProducts", () => {
   beforeEach(() => {
-    vi.mocked(useCatalogQuery).mockReturnValue({
-      data: {
-        items: products,
-        total: products.length,
-        page: 1,
-        page_size: 4,
-      },
+    removeFavorite.mockReset();
+    removeFavorite.mockResolvedValue(undefined);
+    usePosFavoritesQuery.mockReturnValue({
+      data: products.map((catalog, index) => ({
+        id: `favorite-${index + 1}`,
+        catalog_id: catalog.id,
+        created_at: "2026-01-01T00:00:00Z",
+        catalog,
+      })),
       error: null,
       isLoading: false,
-    } as ReturnType<typeof useCatalogQuery>);
+    });
   });
 
   it("adds an available product and blocks an unavailable one", async () => {
@@ -86,5 +94,15 @@ describe("QuickProducts", () => {
     fireEvent.click(list);
     expect(list).toHaveAttribute("aria-pressed", "true");
     expect(grid).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("removes only the selected personal favorite", async () => {
+    render(<QuickProducts branchId="branch-1" onAdd={vi.fn()} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Убрать Парацетамол 500 мг из избранного" }),
+    );
+
+    await waitFor(() => expect(removeFavorite).toHaveBeenCalledWith("product-1"));
   });
 });
