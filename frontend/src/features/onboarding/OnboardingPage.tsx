@@ -8,17 +8,13 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  PageHeader,
 } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
 
 import { taskLabel, wizardSteps } from "./labels";
-import {
-  useChecklistQuery,
-  useStartTrial,
-  useSubmitStep,
-  useWizardQuery,
-} from "./queries";
+import { useChecklistQuery, useStartTrial, useSubmitStep, useWizardQuery } from "./queries";
 
 const TRIAL_MIN_CATALOG = 100;
 
@@ -47,7 +43,7 @@ export function OnboardingPage(): JSX.Element {
     try {
       const r = await startTrial.mutateAsync();
       setTrialBanner(
-        `🎉 Пробный период активирован до ${new Date(r.trial_ends_at).toLocaleDateString("ru-RU")}`,
+        `Пробный период активирован до ${new Date(r.trial_ends_at).toLocaleDateString("ru-RU")}`,
       );
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось активировать пробный период"));
@@ -55,12 +51,17 @@ export function OnboardingPage(): JSX.Element {
   };
 
   if (wizard.isLoading || checklist.isLoading) {
-    return <p className="text-sm text-foreground-muted">Загрузка…</p>;
+    return (
+      <div className="space-y-2">
+        <PageHeader title="Старт" />
+        <p className="text-sm text-foreground-muted">Загрузка…</p>
+      </div>
+    );
   }
   if (wizard.error || !wizard.data) {
     return (
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-foreground">Старт</h1>
+        <PageHeader title="Старт" />
         <p className="text-sm text-danger">
           {describeApiError(wizard.error, "Не удалось загрузить визард")}
         </p>
@@ -78,16 +79,18 @@ export function OnboardingPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Старт</h1>
-        {w.is_completed ? (
-          <Badge tone="success">Визард завершён</Badge>
-        ) : (
-          <span className="text-sm text-foreground-muted">
-            {w.steps_completed.length} из {wizardSteps.length}
-          </span>
-        )}
-      </div>
+      <PageHeader
+        title="Старт"
+        meta={
+          w.is_completed ? (
+            <Badge tone="success">Визард завершён</Badge>
+          ) : (
+            <>
+              {w.steps_completed.length} из {wizardSteps.length}
+            </>
+          )
+        }
+      />
 
       {trialBanner && (
         <p className="rounded-md border border-success/40 bg-success-subtle px-3 py-2 text-sm text-success-foreground">
@@ -103,7 +106,7 @@ export function OnboardingPage(): JSX.Element {
         <CardContent className="space-y-2">
           <div className="h-2 w-full overflow-hidden rounded-full bg-foreground/10">
             <div
-              className="h-full bg-success transition-all"
+              className="h-full bg-success transition-[width]"
               style={{ width: `${progressPct}%` }}
             />
           </div>
@@ -123,14 +126,14 @@ export function OnboardingPage(): JSX.Element {
                         : "border-border bg-surface",
                   )}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span
                           className={cn(
                             "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
                             done
-                              ? "bg-success text-white"
+                              ? "bg-success text-success-contrast"
                               : "bg-foreground/10 text-foreground-secondary",
                           )}
                         >
@@ -151,6 +154,7 @@ export function OnboardingPage(): JSX.Element {
                     </div>
                     {!done && !w.is_completed && (
                       <Button
+                        className="w-full sm:w-auto"
                         variant="secondary"
                         size="sm"
                         onClick={() => void onComplete(s.step)}
@@ -183,10 +187,8 @@ export function OnboardingPage(): JSX.Element {
               <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-foreground/10">
                 <div
                   className={cn(
-                    "h-full transition-all",
-                    c.catalog_items_count >= TRIAL_MIN_CATALOG
-                      ? "bg-success"
-                      : "bg-warning",
+                    "h-full transition-[width]",
+                    c.catalog_items_count >= TRIAL_MIN_CATALOG ? "bg-success" : "bg-warning",
                   )}
                   style={{ width: `${catalogPct}%` }}
                 />
@@ -210,7 +212,7 @@ export function OnboardingPage(): JSX.Element {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
                 <p className="text-xs text-foreground-muted">Право на trial</p>
                 {c.trial_eligible ? (
@@ -224,7 +226,7 @@ export function OnboardingPage(): JSX.Element {
                 <p>{new Date(c.setup_ends_at).toLocaleDateString("ru-RU")}</p>
               </div>
               {c.trial_started_at && (
-                <div className="col-span-2">
+                <div className="sm:col-span-2">
                   <p className="text-xs text-foreground-muted">Trial начат</p>
                   <p>{new Date(c.trial_started_at).toLocaleString("ru-RU")}</p>
                 </div>

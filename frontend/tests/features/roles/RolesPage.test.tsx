@@ -1,16 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listRoles = vi.fn();
 const listPermissions = vi.fn();
+const listTemplates = vi.fn();
+const createRole = vi.fn();
+const updateRole = vi.fn();
 
 vi.mock("@/features/roles/api", () => ({
   listRoles: (...args: unknown[]) => listRoles(...args),
   listPermissions: (...args: unknown[]) => listPermissions(...args),
-  listTemplates: vi.fn(),
-  createRole: vi.fn(),
-  updateRole: vi.fn(),
+  listTemplates: (...args: unknown[]) => listTemplates(...args),
+  createRole: (...args: unknown[]) => createRole(...args),
+  updateRole: (...args: unknown[]) => updateRole(...args),
   listUsers: vi.fn(),
   updateUser: vi.fn(),
   suspendUser: vi.fn(),
@@ -86,7 +89,11 @@ describe("RolesPage", () => {
     };
     listRoles.mockReset();
     listPermissions.mockReset();
+    listTemplates.mockReset();
+    createRole.mockReset();
+    updateRole.mockReset();
     listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE, PROTECTED_ROLE, FOREIGN_ROLE]);
+    listTemplates.mockResolvedValue([]);
     listPermissions.mockResolvedValue([
       {
         code: "pos.sell",
@@ -175,5 +182,48 @@ describe("RolesPage", () => {
 
     expect(await screen.findByText(/Не удалось загрузить список/i)).toBeInTheDocument();
     expect(screen.queryByText(/Управляемых ролей пока нет/i)).not.toBeInTheDocument();
+  });
+
+  it("filters the visible tenant roles without exposing protected roles", async () => {
+    listRoles.mockResolvedValue([
+      MANAGED_ROLE,
+      { ...MANAGED_ROLE, id: "role-2", name: "Фармацевт" },
+      SYSTEM_ROLE,
+    ]);
+    renderPage();
+
+    await screen.findByText("Старший кассир");
+    fireEvent.change(screen.getByLabelText("Поиск"), {
+      target: { value: "фарма" },
+    });
+
+    expect(screen.getByText("Фармацевт")).toBeInTheDocument();
+    expect(screen.queryByText("Старший кассир")).not.toBeInTheDocument();
+    expect(screen.queryByText("Aurum Administrator")).not.toBeInTheDocument();
+  });
+
+  it("asks before closing a role draft with unsaved changes", async () => {
+    mockUser = {
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["roles.create", "roles.update"],
+    };
+    renderPage();
+
+    await screen.findByText("Старший кассир");
+    fireEvent.click(screen.getByRole("button", { name: "+ Создать роль" }));
+    fireEvent.change(await screen.findByLabelText("Название"), {
+      target: { value: "Новая роль" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+
+    expect(await screen.findByRole("dialog", { name: "Отменить изменения?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить редактирование" }));
+    expect(screen.getByRole("dialog", { name: "Создать роль" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    fireEvent.click(screen.getByRole("button", { name: "Выйти без сохранения" }));
+    expect(screen.queryByRole("dialog", { name: "Создать роль" })).not.toBeInTheDocument();
+    expect(createRole).not.toHaveBeenCalled();
   });
 });

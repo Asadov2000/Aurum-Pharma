@@ -43,6 +43,7 @@ export default {
           DEFAULT: withAlpha("--success"),
           subtle: withAlpha("--success-subtle"),
           foreground: withAlpha("--success-foreground"),
+          contrast: withAlpha("--success-contrast"),
         },
         warning: {
           DEFAULT: withAlpha("--warning"),
@@ -53,6 +54,7 @@ export default {
           DEFAULT: withAlpha("--danger"),
           subtle: withAlpha("--danger-subtle"),
           foreground: withAlpha("--danger-foreground"),
+          contrast: withAlpha("--danger-contrast"),
         },
         info: {
           DEFAULT: withAlpha("--info"),
@@ -61,45 +63,48 @@ export default {
         },
       },
       fontFamily: {
-        // Local system fonts keep the app fast and deterministic offline.
+        // Local variable system fonts keep the app fast and deterministic offline.
         sans: [
+          "Segoe UI Variable Text",
           "Segoe UI",
-          "system-ui",
           "-apple-system",
+          "BlinkMacSystemFont",
+          "system-ui",
           "Roboto",
           "Helvetica Neue",
           "Arial",
           "sans-serif",
         ],
-        // Headings use the same metrics to avoid layout shifts after startup.
+        // Headings use the same local family so startup never causes layout shifts.
         display: [
+          "Segoe UI Variable Display",
           "Segoe UI",
-          "system-ui",
           "-apple-system",
+          "BlinkMacSystemFont",
+          "system-ui",
           "Roboto",
           "Helvetica Neue",
           "Arial",
           "sans-serif",
         ],
       },
-      // Soft, low-contrast elevation — never harsh. Tinted with the cool slate
-      // ink so shadows read as depth, not grey smudge.
+      // Hairline elevation stays cheap to paint on low-end Windows hardware.
       boxShadow: {
-        sm: "0 1px 2px 0 hsl(202 45% 11% / 0.05), 0 1px 3px 0 hsl(202 45% 11% / 0.06)",
-        md: "0 2px 4px -1px hsl(202 45% 11% / 0.06), 0 4px 10px -2px hsl(202 45% 11% / 0.08)",
-        lg: "0 6px 12px -3px hsl(202 45% 11% / 0.08), 0 16px 28px -6px hsl(202 45% 11% / 0.12)",
-        xl: "0 10px 20px -5px hsl(202 45% 11% / 0.12), 0 28px 52px -10px hsl(202 45% 11% / 0.16)",
+        sm: "0 1px 2px hsl(215 30% 12% / 0.05)",
+        md: "0 3px 8px hsl(215 30% 12% / 0.08)",
+        lg: "0 8px 20px hsl(215 30% 12% / 0.12)",
+        xl: "0 14px 36px hsl(215 30% 12% / 0.16)",
       },
       borderRadius: {
         sm: "0.375rem",
         md: "0.5rem",
-        lg: "0.75rem",
-        xl: "1rem",
+        lg: "0.5rem",
+        xl: "0.5rem",
       },
       transitionDuration: {
-        fast: "150ms",
-        base: "200ms",
-        slow: "300ms",
+        fast: "120ms",
+        base: "160ms",
+        slow: "200ms",
       },
       zIndex: {
         dropdown: "1000",

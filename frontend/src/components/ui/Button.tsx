@@ -2,7 +2,7 @@ import { forwardRef, type ButtonHTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "success" | "danger";
 type Size = "sm" | "md" | "lg" | "xl";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -12,19 +12,23 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<Variant, string> = {
-  primary: "bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50",
+  primary:
+    "border border-transparent bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50",
   secondary:
-    "bg-surface text-foreground border border-input hover:bg-foreground/5 disabled:opacity-50",
-  ghost: "bg-transparent text-foreground-secondary hover:bg-foreground/5 disabled:opacity-50",
-  danger: "bg-danger text-white hover:bg-danger/90 disabled:opacity-50",
+    "border border-input bg-surface text-foreground shadow-sm hover:border-foreground/25 hover:bg-foreground/[0.025] active:bg-foreground/5 disabled:opacity-50",
+  ghost:
+    "border border-transparent bg-transparent text-foreground-secondary hover:bg-foreground/5 hover:text-foreground active:bg-foreground/10 disabled:opacity-50",
+  success:
+    "border border-transparent bg-success text-success-contrast shadow-sm hover:bg-success/90 active:bg-success/80 disabled:opacity-50",
+  danger:
+    "border border-transparent bg-danger text-danger-contrast shadow-sm hover:bg-danger/90 active:bg-danger/80 disabled:opacity-50",
 };
 
 const sizeClasses: Record<Size, string> = {
-  sm: "h-8 px-3 text-sm",
-  md: "h-10 px-4 text-sm",
-  lg: "h-12 px-6 text-base",
-  // xl — large touch target for the upcoming POS redesign.
-  xl: "h-14 px-8 text-lg",
+  sm: "h-[var(--control-height-sm)] px-[var(--control-padding-sm)] text-sm",
+  md: "h-[var(--control-height-md)] px-[var(--control-padding-md)] text-sm",
+  lg: "h-[var(--control-height-lg)] px-[var(--control-padding-lg)] text-base",
+  xl: "h-[var(--control-height-xl)] px-[var(--control-padding-xl)] text-base",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -42,9 +46,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   const textLabel =
-    typeof children === "string" || typeof children === "number"
-      ? String(children)
-      : undefined;
+    typeof children === "string" || typeof children === "number" ? String(children) : undefined;
   const loadingLabel = ariaLabel ?? textLabel;
   const mirrorLabelInCss = isLoading && textLabel !== undefined;
 
@@ -57,8 +59,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-label={isLoading ? loadingLabel : ariaLabel}
       // Focus ring is provided globally by :focus-visible (see index.css).
       className={cn(
-        "relative inline-flex items-center justify-center gap-2 rounded-md font-semibold transition-colors duration-fast",
-        "disabled:cursor-not-allowed",
+        "relative inline-flex shrink-0 items-center justify-center gap-2 rounded-md font-semibold transition-colors duration-fast",
+        "disabled:cursor-not-allowed disabled:shadow-none",
         variantClasses[variant],
         sizeClasses[size],
         className,

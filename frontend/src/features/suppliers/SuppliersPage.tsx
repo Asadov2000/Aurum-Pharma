@@ -7,6 +7,7 @@ import {
   Input,
   Label,
   Modal,
+  PageHeader,
   Pagination,
   Select,
   SkeletonRows,
@@ -62,10 +63,14 @@ export function SuppliersPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Поставщики</h1>
-        {canCreate && <Button onClick={() => setCreating(true)}>+ Новый поставщик</Button>}
-      </div>
+      <PageHeader
+        title="Поставщики"
+        actions={
+          canCreate ? (
+            <Button onClick={() => setCreating(true)}>+ Новый поставщик</Button>
+          ) : undefined
+        }
+      />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -130,9 +135,12 @@ export function SuppliersPage(): JSX.Element {
       />
 
       {error && (
-        <p className="text-sm text-danger">
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
           {describeApiError(error, "Не удалось загрузить список")}
-        </p>
+        </div>
       )}
       {isLoading ? (
         <SkeletonRows rows={6} />

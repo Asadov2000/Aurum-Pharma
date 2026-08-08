@@ -27,8 +27,11 @@ test.describe("POS sale (owner)", () => {
     clearLoginRateLimit(OWNER.email);
   });
 
-  test("adds an item to the cart from a desktop barcode scanner event", async ({ page }) => {
+  test("adds items from desktop and physical scanners without starting payment", async ({
+    page,
+  }) => {
     test.setTimeout(90_000);
+    await page.setViewportSize({ width: 1600, height: 900 });
 
     const apiAnon = await request.newContext();
     const tokens = await apiLogin(apiAnon, OWNER);
@@ -68,6 +71,32 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByText("Смена открыта")).toBeVisible();
     await expect(page.locator('[data-barcode-sink="true"]')).toBeAttached();
 
+    const quickProducts = page.getByRole("region", { name: "Быстрый выбор" });
+    const currentReceipt = page.getByRole("region", { name: "Текущий чек" });
+    const paymentPanel = page.getByRole("region", { name: "К оплате" });
+    await expect(quickProducts).toBeVisible();
+    await expect(currentReceipt).toBeVisible();
+    await expect(paymentPanel).toBeVisible();
+    await expect(paymentPanel.getByRole("button", { name: "Завершить продажу" })).toBeVisible();
+
+    const [quickBox, receiptBox, paymentBox] = await Promise.all([
+      quickProducts.boundingBox(),
+      currentReceipt.boundingBox(),
+      paymentPanel.boundingBox(),
+    ]);
+    expect(quickBox).not.toBeNull();
+    expect(receiptBox).not.toBeNull();
+    expect(paymentBox).not.toBeNull();
+    expect(quickBox!.x + quickBox!.width).toBeLessThanOrEqual(receiptBox!.x);
+    expect(receiptBox!.x + receiptBox!.width).toBeLessThanOrEqual(paymentBox!.x);
+    expect(Math.abs(quickBox!.y - receiptBox!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(receiptBox!.y - paymentBox!.y)).toBeLessThanOrEqual(1);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
+
     const barcodeLookup = page.waitForResponse(
       (response) =>
         response.url().includes(`/api/v1/catalog/by-barcode/${barcode}`) && response.ok(),
@@ -84,6 +113,25 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
     await expect(page.getByTestId("cart-item").getByText(item.brand_name)).toBeVisible();
     await expect(page.getByText("18.00", { exact: false }).first()).toBeVisible();
+
+    const physicalBarcodeLookup = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/catalog/by-barcode/${barcode}`) && response.ok(),
+    );
+    const physicalItemAdd = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        /\/api\/v1\/sales\/[^/]+\/items$/.test(response.url()) &&
+        response.ok(),
+    );
+    await page.locator('[data-barcode-sink="true"]').focus();
+    await page.keyboard.type(barcode, { delay: 5 });
+    await page.keyboard.press("Enter");
+
+    await physicalBarcodeLookup;
+    await physicalItemAdd;
+    await expect(page.getByText("Оплачено 0.00", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Очистить оплату/i })).toHaveCount(0);
   });
 
   test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({ page }) => {
@@ -200,7 +248,7 @@ test.describe("POS sale (owner)", () => {
     const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
     await expect(batchCatalogPicker).toBeVisible({ timeout: 30_000 });
     await batchCatalogPicker.fill(searchKey);
-    const batchCatalogOption = page.getByRole("button", {
+    const batchCatalogOption = page.getByRole("option", {
       name: new RegExp(item.brand_name),
     });
     await expect(batchCatalogOption).toBeVisible({ timeout: 30_000 });

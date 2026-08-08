@@ -20,7 +20,13 @@ const expiryTextClass: Record<ExpiryStatus, string> = {
 
 /** Batch number + expiry date + a coloured days-to-expiry hint for a cart line.
  *  Also disambiguates two lines of the same product (FEFO split). */
-function BatchExpiry({ item, fallback }: { item: SaleItem; fallback?: string }): JSX.Element | null {
+function BatchExpiry({
+  item,
+  fallback,
+}: {
+  item: SaleItem;
+  fallback?: string;
+}): JSX.Element | null {
   const status = expiryStatusFromDays(item.days_to_expiry);
   const date = item.expires_at ? new Date(item.expires_at).toLocaleDateString("ru-RU") : null;
   const label = item.batch_number ?? fallback ?? null;
@@ -57,6 +63,7 @@ export function CartList({
   onQtyTap,
   touch,
   busy,
+  embedded = false,
 }: {
   items: SaleItem[];
   nameById: Record<string, string>;
@@ -67,12 +74,29 @@ export function CartList({
   onQtyTap?: (itemId: string) => void;
   touch?: boolean;
   busy?: boolean;
+  embedded?: boolean;
 }): JSX.Element {
   if (items.length === 0) {
+    if (embedded) {
+      return (
+        <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+          <span
+            aria-hidden="true"
+            className="grid h-12 w-12 place-items-center rounded-full bg-primary/10 text-primary"
+          >
+            <ReceiptIcon />
+          </span>
+          <div>
+            <p className="font-medium text-foreground">Чек пуст</p>
+            <p className="mt-1 max-w-72 text-sm text-foreground-muted">
+              Отсканируйте штрихкод, найдите товар или добавьте его из быстрого выбора.
+            </p>
+          </div>
+        </div>
+      );
+    }
     return (
-      <TableEmpty icon="🧾" title="Чек пуст">
-        Отсканируйте штрихкод или найдите товар в поиске.
-      </TableEmpty>
+      <TableEmpty title="Чек пуст">Отсканируйте штрихкод или найдите товар в поиске.</TableEmpty>
     );
   }
 
@@ -99,22 +123,27 @@ export function CartList({
   // The qty stepper / line total / delete cluster — identical for a standalone
   // row and a grouped batch sub-row.
   const lineControls = (it: SaleItem, name: string): ReactNode => (
-    <>
-      {editable ? (
-        <QtyStepper
-          value={Number(it.qty)}
-          onChange={(q) => onQtyChange(it.id, q)}
-          onValueTap={onQtyTap ? () => onQtyTap(it.id) : undefined}
-          disabled={busy}
-          size={touch ? "lg" : "md"}
-        />
-      ) : (
-        <span className="font-mono tabular-nums text-foreground">×{Number(it.qty)}</span>
-      )}
+    <div
+      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:justify-end sm:gap-1"
+      data-testid="cart-line-controls"
+    >
+      <div className="col-span-2 flex min-w-0 justify-start sm:contents">
+        {editable ? (
+          <QtyStepper
+            value={Number(it.qty)}
+            onChange={(q) => onQtyChange(it.id, q)}
+            onValueTap={onQtyTap ? () => onQtyTap(it.id) : undefined}
+            disabled={busy}
+            size={touch ? "lg" : "md"}
+          />
+        ) : (
+          <span className="font-mono tabular-nums text-foreground">×{Number(it.qty)}</span>
+        )}
+      </div>
 
       <div
         className={cn(
-          "w-24 text-right font-mono font-semibold tabular-nums text-foreground",
+          "min-w-0 text-left font-mono font-semibold tabular-nums text-foreground sm:w-24 sm:text-right",
           touch && "text-lg",
         )}
       >
@@ -129,17 +158,24 @@ export function CartList({
           aria-label={`Удалить ${name}`}
           className={cn(
             "rounded-md p-0 text-foreground-muted hover:text-danger",
-            touch ? "h-14 w-14 text-xl" : "h-10 w-10 text-lg",
+            touch ? "h-14 w-14" : "h-10 w-10",
           )}
         >
-          ✕
+          <TrashIcon />
         </Button>
       )}
-    </>
+    </div>
   );
 
   return (
-    <ul className="space-y-2">
+    <ul
+      className={cn(
+        "divide-y divide-border bg-surface",
+        embedded
+          ? "min-h-0 flex-1 overflow-y-auto"
+          : "overflow-hidden rounded-lg border border-border",
+      )}
+    >
       {groups.map((g) => {
         const first = g.items[0];
         if (!first) return null;
@@ -151,7 +187,7 @@ export function CartList({
               key={g.catalogId}
               data-testid="cart-item"
               className={cn(
-                "flex items-center gap-3 rounded-xl border border-border bg-surface px-4 shadow-sm",
+                "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
                 touch ? "py-4" : "py-3",
                 windowed && "pos-cv",
               )}
@@ -174,13 +210,7 @@ export function CartList({
         const groupQty = g.items.reduce((s, it) => s + Number(it.qty), 0);
         const groupTotal = g.items.reduce((s, it) => s + Number(it.total_price), 0);
         return (
-          <li
-            key={g.catalogId}
-            className={cn(
-              "overflow-hidden rounded-xl border border-border bg-surface shadow-sm",
-              windowed && "pos-cv",
-            )}
-          >
+          <li key={g.catalogId} className={cn("overflow-hidden bg-surface", windowed && "pos-cv")}>
             <div className="flex items-center justify-between gap-3 border-b border-border bg-foreground/[0.02] px-4 py-2">
               <p className={cn("truncate font-medium text-foreground", touch && "text-lg")}>
                 {g.name}
@@ -197,7 +227,10 @@ export function CartList({
                 <div
                   key={it.id}
                   data-testid="cart-item"
-                  className={cn("flex items-center gap-3 px-4", touch ? "py-3" : "py-2.5")}
+                  className={cn(
+                    "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
+                    touch ? "py-3" : "py-2.5",
+                  )}
                 >
                   <div className="min-w-0 flex-1">
                     <BatchExpiry item={it} fallback={`Партия ${idx + 1}`} />
@@ -213,5 +246,45 @@ export function CartList({
         );
       })}
     </ul>
+  );
+}
+
+function TrashIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h16" />
+      <path d="M9 7V4h6v3" />
+      <path d="m6 7 1 13h10l1-13" />
+      <path d="M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
+function ReceiptIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z" />
+      <path d="M9 8h6M9 12h6" />
+    </svg>
   );
 }

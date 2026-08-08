@@ -20,12 +20,9 @@ const strategyLabel: Record<DuplicateStrategy, string> = {
 
 const strategyOptions: DuplicateStrategy[] = ["skip", "update", "create_copy"];
 
-const statusBadgeTone = (s: ImportJob["status"]):
-  | "neutral"
-  | "info"
-  | "success"
-  | "warning"
-  | "danger" => {
+const statusBadgeTone = (
+  s: ImportJob["status"],
+): "neutral" | "info" | "success" | "warning" | "danger" => {
   switch (s) {
     case "pending":
     case "validating":
@@ -56,10 +53,7 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
   const rollback = useRollbackImport();
 
   // Poll while the job is running, otherwise stop.
-  const jobQuery = useImportJobQuery(
-    jobId,
-    jobId ? 2000 : undefined,
-  );
+  const jobQuery = useImportJobQuery(jobId, jobId ? 2000 : undefined);
   const job = jobQuery.data ?? null;
   const isPolling = job?.status === "importing";
 
@@ -117,13 +111,12 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
     return (
       <div className="space-y-4">
         <p className="text-sm text-foreground-secondary">
-          Загрузите файл с позициями каталога — CSV (UTF-8 или Windows-1251)
-          или Excel (.xlsx). Файл уйдёт в MinIO; на следующем шаге сервер
-          построит превью.
+          Загрузите файл с позициями каталога — CSV (UTF-8 или Windows-1251) или Excel (.xlsx). Файл
+          уйдёт в MinIO; на следующем шаге сервер построит превью.
         </p>
         <p className="text-xs text-foreground-muted">
-          Обязательна только колонка «brand_name». Старый формат .xls не
-          поддерживается — пересохраните как .xlsx.
+          Обязательна только колонка «brand_name». Старый формат .xls не поддерживается —
+          пересохраните как .xlsx.
         </p>
         <input
           ref={fileRef}
@@ -146,52 +139,49 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
   return (
     <>
       <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm">
-          <p className="font-medium text-foreground">{job.source_filename}</p>
-          <p className="text-xs text-foreground-muted">id: {job.id.slice(0, 8)}</p>
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0 text-sm">
+            <p className="truncate font-medium text-foreground">{job.source_filename}</p>
+            <p className="text-xs text-foreground-muted">id: {job.id.slice(0, 8)}</p>
+          </div>
+          <Badge tone={statusBadgeTone(job.status)}>{job.status}</Badge>
         </div>
-        <Badge tone={statusBadgeTone(job.status)}>{job.status}</Badge>
-      </div>
 
-      {(job.total_rows ?? 0) > 0 && (
-        <div className="grid grid-cols-3 gap-3 text-sm">
-          <Stat label="Всего" value={job.total_rows ?? 0} />
-          <Stat label="Корректных" value={job.valid_rows ?? 0} tone="success" />
-          <Stat label="С ошибками" value={job.error_rows ?? 0} tone="danger" />
-        </div>
-      )}
+        {(job.total_rows ?? 0) > 0 && (
+          <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+            <Stat label="Всего" value={job.total_rows ?? 0} />
+            <Stat label="Корректных" value={job.valid_rows ?? 0} tone="success" />
+            <Stat label="С ошибками" value={job.error_rows ?? 0} tone="danger" />
+          </div>
+        )}
 
-      {job.preview_data && job.preview_data.length > 0 && (
-        <div className="rounded-md border border-border bg-surface p-3 max-h-64 overflow-auto">
-          <p className="mb-2 text-xs uppercase tracking-wide text-foreground-muted">
-            Первые строки превью
+        {job.preview_data && job.preview_data.length > 0 && (
+          <div className="max-h-64 overflow-auto rounded-md border border-border bg-surface p-3">
+            <p className="mb-2 text-xs font-medium text-foreground-muted">Первые строки превью</p>
+            <pre className="text-xs leading-tight">
+              {JSON.stringify(job.preview_data.slice(0, 5), null, 2)}
+            </pre>
+          </div>
+        )}
+
+        {job.errors && job.errors.length > 0 && (
+          <div className="max-h-48 overflow-auto rounded-md border border-danger/30 bg-danger-subtle p-3">
+            <p className="mb-2 text-xs font-medium text-danger">Ошибки ({job.errors.length})</p>
+            <pre className="text-xs leading-tight text-danger">
+              {JSON.stringify(job.errors.slice(0, 10), null, 2)}
+            </pre>
+          </div>
+        )}
+
+        {isPolling && (
+          <p className="text-sm text-foreground-muted">
+            Импорт выполняется… (обновление каждые 2 сек)
           </p>
-          <pre className="text-xs leading-tight">
-            {JSON.stringify(job.preview_data.slice(0, 5), null, 2)}
-          </pre>
-        </div>
-      )}
+        )}
 
-      {job.errors && job.errors.length > 0 && (
-        <div className="rounded-md border border-danger/30 bg-danger-subtle p-3 max-h-48 overflow-auto">
-          <p className="mb-2 text-xs uppercase tracking-wide text-danger">
-            Ошибки ({job.errors.length})
-          </p>
-          <pre className="text-xs leading-tight text-danger">
-            {JSON.stringify(job.errors.slice(0, 10), null, 2)}
-          </pre>
-        </div>
-      )}
+        {topError && <p className="text-sm text-danger">{topError}</p>}
 
-      {isPolling && (
-        <p className="text-sm text-foreground-muted">Импорт выполняется… (обновление каждые 2 сек)</p>
-      )}
-
-      {topError && <p className="text-sm text-danger">{topError}</p>}
-
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex items-end gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <Label htmlFor="strategy">Дубликаты</Label>
             <Select
@@ -199,7 +189,7 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
               value={strategy}
               onChange={(e) => setStrategy(e.target.value as DuplicateStrategy)}
               disabled={job.status === "importing" || job.status === "success"}
-              className="w-44"
+              className="w-full sm:w-44"
             >
               {strategyOptions.map((s) => (
                 <option key={s} value={s}>
@@ -208,32 +198,31 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
               ))}
             </Select>
           </div>
+          <div className="flex flex-wrap gap-2">
+            {job.status === "pending" && (
+              <Button onClick={() => void onPreview()} isLoading={preview.isPending}>
+                Подготовить превью
+              </Button>
+            )}
+            {job.status === "validating" && (
+              <Button onClick={() => void onConfirm()} isLoading={confirm.isPending}>
+                Запустить импорт
+              </Button>
+            )}
+            {job.status === "success" && !job.rolled_back_at && (
+              <Button
+                variant="secondary"
+                onClick={() => setRollbackOpen(true)}
+                isLoading={rollback.isPending}
+              >
+                Откатить
+              </Button>
+            )}
+            <Button variant="ghost" onClick={onClose}>
+              Закрыть
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {job.status === "pending" && (
-            <Button onClick={() => void onPreview()} isLoading={preview.isPending}>
-              Подготовить превью
-            </Button>
-          )}
-          {job.status === "validating" && (
-            <Button onClick={() => void onConfirm()} isLoading={confirm.isPending}>
-              Запустить импорт
-            </Button>
-          )}
-          {job.status === "success" && !job.rolled_back_at && (
-            <Button
-              variant="secondary"
-              onClick={() => setRollbackOpen(true)}
-              isLoading={rollback.isPending}
-            >
-              Откатить
-            </Button>
-          )}
-          <Button variant="ghost" onClick={onClose}>
-            Закрыть
-          </Button>
-        </div>
-      </div>
       </div>
       <ConfirmDialog
         open={rollbackOpen}

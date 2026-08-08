@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 
 import { type AppRoutePath } from "@/components/layout/routeAccess";
-import { Card, CardContent } from "@/components/ui";
+import { Card, CardContent, PageHeader } from "@/components/ui";
 
 /** Friendly "this section isn't for your role" panel. Shared by the dashboard
  *  and protected screens so the wording and layout stay identical. */
@@ -18,7 +18,7 @@ export function AccessDeniedCard({
 }): JSX.Element {
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
+      <PageHeader title={title} />
       <Card>
         <CardContent className="space-y-2 py-6 text-sm text-foreground-secondary">
           <p>{message}</p>

@@ -5,6 +5,7 @@ import {
   ConfigurableFilterBar,
   Input,
   Label,
+  PageHeader,
   Pagination,
   Select,
   Table,
@@ -67,10 +68,7 @@ export function AuditPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Журнал аудита</h1>
-        <span className="text-sm text-foreground-muted">всего: {total}</span>
-      </div>
+      <PageHeader title="Журнал аудита" meta={<>всего: {total}</>} />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -91,7 +89,7 @@ export function AuditPage(): JSX.Element {
                     if (nextScope !== "global") setTenantId("");
                     setPage(1);
                   }}
-                  className="w-52"
+                  className="w-full sm:w-52"
                 >
                   <option value="my">{scopeLabel.my}</option>
                   <option value="tenant">{scopeLabel.tenant}</option>
@@ -122,7 +120,7 @@ export function AuditPage(): JSX.Element {
                     setAction(e.target.value);
                     setPage(1);
                   }}
-                  className="w-44"
+                  className="w-full sm:w-44"
                 />
               </div>
             ),
@@ -147,7 +145,7 @@ export function AuditPage(): JSX.Element {
                     setTableName(e.target.value);
                     setPage(1);
                   }}
-                  className="w-44"
+                  className="w-full sm:w-44"
                 />
               </div>
             ),
@@ -171,7 +169,7 @@ export function AuditPage(): JSX.Element {
                     setUserId(e.target.value);
                     setPage(1);
                   }}
-                  className="w-44"
+                  className="w-full sm:w-44"
                 />
               </div>
             ),
@@ -196,7 +194,7 @@ export function AuditPage(): JSX.Element {
                     setTenantId(e.target.value);
                     setPage(1);
                   }}
-                  className="w-44"
+                  className="w-full sm:w-44"
                 />
               </div>
             ),
@@ -211,7 +209,7 @@ export function AuditPage(): JSX.Element {
             id: "period",
             label: "Период",
             content: (
-              <div className="grid w-64 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+              <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
                 <div>
                   <Label htmlFor="date_from">От</Label>
                   <Input

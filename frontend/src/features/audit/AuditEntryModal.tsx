@@ -28,32 +28,33 @@ export function AuditEntryModal({
     <Modal
       open={entry !== null}
       onClose={onClose}
-      title={entry ? `${tableLabel[entry.table_name] ?? entry.table_name} · ${actionLabel[entry.action] ?? entry.action}` : "Запись"}
+      title={
+        entry
+          ? `${tableLabel[entry.table_name] ?? entry.table_name} · ${actionLabel[entry.action] ?? entry.action}`
+          : "Запись"
+      }
       className="max-w-3xl"
     >
       {entry && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <Field
               label="Действие"
-              value={<Badge tone={actionTone(entry.action)}>{actionLabel[entry.action] ?? entry.action}</Badge>}
+              value={
+                <Badge tone={actionTone(entry.action)}>
+                  {actionLabel[entry.action] ?? entry.action}
+                </Badge>
+              }
             />
             <Field label="Таблица" value={tableLabel[entry.table_name] ?? entry.table_name} mono />
-            <Field
-              label="Когда"
-              value={new Date(entry.created_at).toLocaleString("ru-RU")}
-            />
+            <Field label="Когда" value={new Date(entry.created_at).toLocaleString("ru-RU")} />
             <Field
               label="Запись"
               value={entry.record_id ? entry.record_id.slice(0, 8) : "—"}
               mono
             />
-            {entry.user_id && (
-              <Field label="Пользователь" value={entry.user_id.slice(0, 8)} mono />
-            )}
-            {entry.ip_address && (
-              <Field label="IP" value={entry.ip_address} mono />
-            )}
+            {entry.user_id && <Field label="Пользователь" value={entry.user_id.slice(0, 8)} mono />}
+            {entry.ip_address && <Field label="IP" value={entry.ip_address} mono />}
           </div>
 
           <DiffTable entry={entry} />
@@ -90,17 +91,15 @@ function DiffTable({ entry }: { entry: AuditEntry }): JSX.Element {
   );
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="min-w-[36rem] w-full text-sm">
         <thead className="bg-foreground/[0.03] text-left">
           <tr>
-            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-secondary">
-              Поле
-            </th>
-            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-secondary">
+            <th className="px-3 py-2 text-xs font-medium text-foreground-secondary">Поле</th>
+            <th className="px-3 py-2 text-xs font-medium text-foreground-secondary">
               {isUpdate ? "Было" : entry.action === "delete" ? "Значение" : ""}
             </th>
-            <th className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-secondary">
+            <th className="px-3 py-2 text-xs font-medium text-foreground-secondary">
               {entry.action === "delete" ? "" : "Стало"}
             </th>
           </tr>

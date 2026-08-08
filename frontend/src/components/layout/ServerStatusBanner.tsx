@@ -77,12 +77,12 @@ export function ServerStatusBanner({
   return (
     <div
       aria-live="polite"
-      className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm font-semibold text-destructive sm:px-6"
+      className="border-b border-danger/30 bg-danger-subtle px-4 py-2 text-sm font-semibold text-danger-foreground sm:px-6"
       data-testid="server-status-banner"
       role="status"
     >
-      Сервер недоступен. Интернет есть, но API не отвечает; кассовые операции
-      временно заблокированы.
+      Сервер недоступен. Интернет есть, но API не отвечает; кассовые операции временно
+      заблокированы.
     </div>
   );
 }

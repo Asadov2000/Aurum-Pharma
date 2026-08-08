@@ -7,6 +7,7 @@ import {
   DEV,
   expect,
   loginInBrowser,
+  selectActionMenuItem,
   uniqueName,
 } from "./helpers";
 
@@ -33,8 +34,8 @@ test.describe("Tenant setup (dev)", () => {
     await expect(page.getByText(/Аптека и владелец созданы/)).toBeVisible();
     await page.getByRole("button", { name: /^Готово$/ }).click();
 
-    await expect(page.getByRole("cell", { name })).toBeVisible();
-    await expect(page.getByRole("cell", { name: email })).toBeVisible();
+    await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();
+    await expect(page.getByRole("cell", { name: email, exact: true })).toBeVisible();
   });
 
   test("edits a tenant status and the table reflects it", async ({ page }) => {
@@ -58,7 +59,8 @@ test.describe("Tenant setup (dev)", () => {
       await loginInBrowser(page, DEV);
       await page.goto("/admin/tenants");
       const row = page.getByRole("row", { name: new RegExp(name) });
-      await row.getByRole("button", { name: /Изменить/ }).click();
+      await expect(row).toBeVisible();
+      await selectActionMenuItem(page, `Действия для ${name}`, "Изменить");
       await page.getByLabel("Статус").selectOption("trial");
       await page.getByRole("button", { name: /^Сохранить$/ }).click();
 
@@ -91,7 +93,8 @@ test.describe("Tenant setup (dev)", () => {
       await loginInBrowser(page, DEV);
       await page.goto("/admin/tenants");
       const row = page.getByRole("row", { name: new RegExp(name) });
-      await row.getByRole("button", { name: /Биллинг/ }).click();
+      await expect(row).toBeVisible();
+      await selectActionMenuItem(page, `Действия для ${name}`, "Биллинг");
 
       const dialog = page.locator('div[role="dialog"]');
       await expect(dialog.getByText(`Биллинг: ${name}`)).toBeVisible();

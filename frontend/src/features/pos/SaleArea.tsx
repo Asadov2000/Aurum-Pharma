@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { Button } from "@/components/ui";
+import { Button, ConfirmDialog } from "@/components/ui";
 import { findByBarcode } from "@/features/catalog/api";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
@@ -12,6 +12,7 @@ import { BarcodeListener } from "./BarcodeListener";
 import { CartList } from "./CartList";
 import { PaymentPanel } from "./PaymentPanel";
 import { PrescriptionModal } from "./PrescriptionModal";
+import { QuickProducts } from "./QuickProducts";
 import { ReceiptPrintModal } from "./ReceiptPrintModal";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
@@ -117,26 +118,35 @@ function checkoutItemsFrom(items: SaleDetails["items"]): { catalog_id: string; q
 
 /**
  * The POS workspace. Owns the shift gate and the active sale, and lays the UI
- * out responsively: two columns on ≥lg (cart left, payment right) and a single
- * stack below lg. `mode` decides touch- vs keyboard-optimised behaviour.
+ * out responsively: primary search across the workspace, cart and payment
+ * columns on wide screens, and a single stack below that. `mode` decides
+ * touch- vs keyboard-optimised behaviour.
  */
 export function SaleArea({
   registerId,
   mode,
   soundOn,
   draftTtlMin,
+  canOpenShift = true,
+  canCloseShift = true,
+  canSell = true,
+  workstationControls,
 }: {
   registerId: string;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
+  canOpenShift?: boolean;
+  canCloseShift?: boolean;
+  canSell?: boolean;
+  workstationControls?: ReactNode;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-      {hasShift ? (
+    <div className="min-w-0">
+      {hasShift && canSell ? (
         // Key by register so switching registers restores that one's draft.
         <ActiveWorkspace
           key={registerId}
@@ -145,18 +155,23 @@ export function SaleArea({
           mode={mode}
           soundOn={soundOn}
           draftTtlMin={draftTtlMin}
+          canCloseShift={canCloseShift}
+          workstationControls={workstationControls}
         />
       ) : (
-        <>
-          <div className="lg:col-span-7">
-            <div className="flex h-full min-h-[200px] items-center justify-center rounded-xl border border-dashed border-border bg-surface p-8 text-center text-foreground-muted">
-              Откройте смену, чтобы начать продажу →
+        <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
+          {workstationControls ? (
+            <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
+              {workstationControls}
             </div>
-          </div>
-          <div className="lg:col-span-5">
-            <ShiftBar registerId={registerId} mode={mode} />
-          </div>
-        </>
+          ) : null}
+          <ShiftBar
+            registerId={registerId}
+            mode={mode}
+            canOpen={canOpenShift}
+            canClose={canCloseShift}
+          />
+        </div>
       )}
     </div>
   );
@@ -168,12 +183,16 @@ function ActiveWorkspace({
   mode,
   soundOn,
   draftTtlMin,
+  canCloseShift,
+  workstationControls,
 }: {
   registerId: string;
   branchId: string | null;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
+  canCloseShift: boolean;
+  workstationControls?: ReactNode;
 }): JSX.Element {
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
@@ -203,12 +222,19 @@ function ActiveWorkspace({
   const [numpad, setNumpad] = useState<NumPadState | null>(null);
   const [flash, setFlash] = useState<FlashTone | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const [paymentPanelVisible, setPaymentPanelVisible] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const paymentPanelRef = useRef<HTMLDivElement>(null);
   const flashTimer = useRef<number | undefined>(undefined);
   const completingRef = useRef(false);
   const checkoutRecoveryRef = useRef(false);
   const openedDrawerOperationRef = useRef<string | null>(null);
   const stagedPaymentSequenceRef = useRef(0);
+  const saleIdRef = useRef<string | null>(saleId);
+  const saleCreationRef = useRef<Promise<string> | null>(null);
+  const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
+  saleIdRef.current = saleId;
 
   const createSale = useCreateSale();
   const addItem = useAddSaleItem();
@@ -438,6 +464,19 @@ function ActiveWorkspace({
 
   useEffect(() => () => window.clearTimeout(flashTimer.current), []);
 
+  useEffect(() => {
+    const panel = paymentPanelRef.current;
+    if (!panel || typeof IntersectionObserver === "undefined") return undefined;
+
+    const observer = new IntersectionObserver(
+      ([entry]) =>
+        setPaymentPanelVisible(entry?.isIntersecting === true && entry.intersectionRatio >= 0.35),
+      { threshold: 0.35 },
+    );
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, []);
+
   const doFlash = (tone: FlashTone) => {
     setFlash(tone);
     window.clearTimeout(flashTimer.current);
@@ -446,15 +485,25 @@ function ActiveWorkspace({
 
   // Lazily create a draft on the first add so we never leave empty drafts.
   const ensureSaleId = useCallback(async (): Promise<string> => {
-    if (saleId) return saleId;
-    const created = await createSale.mutateAsync(registerId);
-    setSaleId(created.id);
-    setStaleNotice(false);
-    return created.id;
-  }, [saleId, createSale, registerId]);
+    if (saleIdRef.current) return saleIdRef.current;
+    if (saleCreationRef.current) return saleCreationRef.current;
 
-  const onAdd = async (catalogId: string, name: string, qty: number) => {
-    if (saleEditingBlocked) return;
+    const creation = createSale.mutateAsync(registerId).then((created) => {
+      saleIdRef.current = created.id;
+      setSaleId(created.id);
+      setStaleNotice(false);
+      return created.id;
+    });
+    saleCreationRef.current = creation;
+    try {
+      return await creation;
+    } finally {
+      if (saleCreationRef.current === creation) saleCreationRef.current = null;
+    }
+  }, [createSale, registerId]);
+
+  const onAdd = async (catalogId: string, name: string, qty: number): Promise<boolean> => {
+    if (saleEditingBlocked) return false;
     setTopError(null);
     try {
       const id = await ensureSaleId();
@@ -466,8 +515,10 @@ function ActiveWorkspace({
         setPrescriptionOpen(true);
       }
       searchRef.current?.focus();
+      return true;
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось добавить позицию"));
+      return false;
     }
   };
 
@@ -475,7 +526,11 @@ function ActiveWorkspace({
     setTopError(null);
     try {
       const item = await findByBarcode(code);
-      await onAdd(item.id, item.brand_name, 1);
+      const added = await onAdd(item.id, item.brand_name, 1);
+      if (!added) {
+        doFlash("danger");
+        return;
+      }
       doFlash("success");
       if (soundOn) beep();
     } catch (err) {
@@ -486,6 +541,13 @@ function ActiveWorkspace({
         setTopError(describeApiError(err, `Штрихкод ${code} не найден`));
       }
     }
+  };
+
+  const enqueueScan = (code: string) => {
+    scanQueueRef.current = scanQueueRef.current.then(
+      () => onScan(code),
+      () => onScan(code),
+    );
   };
 
   const onQtyChange = async (itemId: string, qty: number) => {
@@ -626,7 +688,7 @@ function ActiveWorkspace({
 
   // Touch: tapping a tile opens the keypad pre-filled with the remaining amount
   // (so partial payments are easy). Keyboard/desktop: one tap pays the rest.
-  const onPayTile = (method: PaymentMethod) => {
+  const onPayTile = (method: PaymentMethod, requestedAmount?: string) => {
     if (!saleId || remaining <= 0.001) return;
     if (
       completionUncertain ||
@@ -645,6 +707,13 @@ function ActiveWorkspace({
         return;
       }
       void payLegacy(method, pendingPayment.amount);
+      return;
+    }
+    if (requestedAmount !== undefined) {
+      const amount = Math.min(Number(requestedAmount), remaining);
+      if (Number.isFinite(amount) && amount > 0) {
+        submitPayment(method, amount.toFixed(2));
+      }
       return;
     }
     if (touch) {
@@ -823,7 +892,33 @@ function ActiveWorkspace({
     }
   };
 
-  const onNewSale = () => {
+  const startNewSale = (): boolean => {
+    if (!clearDraft()) {
+      setTopError(
+        "Не удалось очистить локальное состояние кассы. Новая продажа не начата; перезапустите приложение.",
+      );
+      return false;
+    }
+    completingRef.current = false;
+    if (saleId) {
+      clearPendingPaymentOperation(saleId);
+      clearPendingCompletion(saleId);
+      clearPendingCheckoutOperation(saleId);
+    }
+    saleIdRef.current = null;
+    setSaleId(null);
+    setNameById({});
+    setRequiresRx(false);
+    setPrescription(null);
+    setStagedPayments([]);
+    setPendingCheckout(null);
+    setCheckoutUncertain(false);
+    setTopError(null);
+    setStaleNotice(false);
+    return true;
+  };
+
+  const onNewSale = (): boolean => {
     if (
       completingRef.current ||
       completeSale.isPending ||
@@ -836,29 +931,13 @@ function ActiveWorkspace({
       checkoutUncertain
     ) {
       setTopError("Сначала подтвердите результат текущей денежной операции.");
-      return;
+      return false;
     }
-    if (!clearDraft()) {
-      setTopError(
-        "Не удалось очистить локальное состояние кассы. Новая продажа не начата; перезапустите приложение.",
-      );
-      return;
+    if (isDraft && items.length > 0) {
+      setDiscardConfirmOpen(true);
+      return false;
     }
-    completingRef.current = false;
-    if (saleId) {
-      clearPendingPaymentOperation(saleId);
-      clearPendingCompletion(saleId);
-      clearPendingCheckoutOperation(saleId);
-    }
-    setSaleId(null);
-    setNameById({});
-    setRequiresRx(false);
-    setPrescription(null);
-    setStagedPayments([]);
-    setPendingCheckout(null);
-    setCheckoutUncertain(false);
-    setTopError(null);
-    setStaleNotice(false);
+    return startNewSale();
   };
 
   const onQtyTap = (itemId: string) => {
@@ -886,15 +965,25 @@ function ActiveWorkspace({
     if (isDraft && totalDue > 0 && remaining > 0.001) onPayTile("cash");
   };
 
-  // Keyboard shortcuts. Ref holds the latest handlers so we bind the listener
-  // once. F-keys are ignored while any modal/keypad (role="dialog") is open so
-  // they don't fire actions hidden behind it.
-  const actionsRef = useRef({ onNewSale, onComplete, onEnterPayCash });
-  actionsRef.current = { onNewSale, onComplete, onEnterPayCash };
+  // Physical keyboard shortcuts stay available on touch-capable laptops.
+  // Ref holds the latest handlers so we bind the listener once. F-keys are
+  // ignored while any modal/keypad (role="dialog") is open.
+  const actionsRef = useRef({
+    onNewSale,
+    onComplete,
+    onEnterPayCash,
+    canDismissError: !saleEditingBlocked,
+  });
+  actionsRef.current = {
+    onNewSale,
+    onComplete,
+    onEnterPayCash,
+    canDismissError: !saleEditingBlocked,
+  };
 
   useEffect(() => {
-    if (!keyboard) return;
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       const dialogOpen = document.querySelector('[role="dialog"]') !== null;
       const el = document.activeElement as HTMLElement | null;
       const typing =
@@ -905,12 +994,16 @@ function ActiveWorkspace({
         !!el &&
         (el.tagName === "INPUT" || el.tagName === "TEXTAREA") &&
         ((el as HTMLInputElement).value ?? "").trim() !== "";
+      const interactive =
+        !!el &&
+        el.closest(
+          "button, a[href], select, [role='button'], [role='menuitem'], [role='option']",
+        ) !== null;
       switch (e.key) {
         case "F2":
           if (dialogOpen) return;
           e.preventDefault();
-          actionsRef.current.onNewSale();
-          searchRef.current?.focus();
+          if (actionsRef.current.onNewSale()) searchRef.current?.focus();
           break;
         case "F3":
           if (dialogOpen) return;
@@ -928,26 +1021,23 @@ function ActiveWorkspace({
           searchRef.current?.focus();
           break;
         case "Enter":
-          if (dialogOpen || fieldHasContent) return;
+          if (dialogOpen || fieldHasContent || interactive) return;
           e.preventDefault();
           actionsRef.current.onEnterPayCash();
           break;
         case "Escape":
-          if (!dialogOpen) setTopError(null);
+          if (!dialogOpen && actionsRef.current.canDismissError) setTopError(null);
           break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [keyboard]);
+  }, []);
 
   return (
     <>
       {/* Global barcode capture — only while editing a draft. */}
-      <BarcodeListener
-        enabled={isDraft && !saleEditingBlocked}
-        onScan={(code) => void onScan(code)}
-      />
+      <BarcodeListener enabled={isDraft && !saleEditingBlocked} onScan={enqueueScan} />
 
       {/* Scan feedback: green/red edge flash (collapses to a static border under
           reduced-motion). */}
@@ -961,28 +1051,19 @@ function ActiveWorkspace({
         />
       )}
 
-      {/* Shift status strip — full width on top, so the selling columns get
-          the space (it lived in the right column before). */}
-      <div className="lg:col-span-12">
-        <ShiftBar registerId={registerId} mode={mode} />
-      </div>
-
-      {/* LEFT — search + cart */}
-      <div className="space-y-3 lg:col-span-7">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-foreground">
-            Чек{" "}
-            {sale?.receipt_number && (
-              <span className="font-mono text-sm text-foreground-muted">
-                № {sale.receipt_number}
-              </span>
-            )}
-          </h2>
-          {requiresRx && !prescription && (
-            <span className="rounded-full bg-warning-subtle px-2.5 py-0.5 text-xs font-medium text-warning-foreground ring-1 ring-inset ring-warning/30">
-              требуется рецепт
-            </span>
-          )}
+      <div className="space-y-3">
+        <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
+          {workstationControls ? (
+            <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
+              {workstationControls}
+            </div>
+          ) : null}
+          <ShiftBar
+            registerId={registerId}
+            mode={mode}
+            canClose={canCloseShift}
+            closeBlocked={saleEditingBlocked || (isDraft && items.length > 0)}
+          />
         </div>
 
         {staleNotice && (
@@ -996,79 +1077,189 @@ function ActiveWorkspace({
             <SearchBar
               ref={searchRef}
               onAdd={onAdd}
-              busy={addItem.isPending}
+              busy={createSale.isPending || addItem.isPending}
               touch={touch}
               branchId={branchId ?? undefined}
             />
           </fieldset>
         )}
 
-        <CartList
-          items={items}
-          nameById={nameById}
-          currency={currency}
-          editable={isDraft && !saleEditingBlocked}
-          onQtyChange={(id, q) => void onQtyChange(id, q)}
-          onDelete={(id) => void onDelete(id)}
-          onQtyTap={touch ? onQtyTap : undefined}
-          touch={touch}
-          busy={updateItem.isPending || deleteItem.isPending}
-        />
+        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:grid-cols-[minmax(18rem,1.15fr)_minmax(22rem,1fr)_minmax(18rem,0.78fr)]">
+          <div className="min-w-0 lg:col-span-5 xl:col-auto">
+            <QuickProducts
+              branchId={branchId ?? undefined}
+              onAdd={onAdd}
+              busy={!isDraft || saleEditingBlocked || createSale.isPending || addItem.isPending}
+              touch={touch}
+            />
+          </div>
 
-        {topError && (
-          <div className="flex flex-wrap items-center gap-2 text-sm text-danger">
-            <p>{topError}</p>
-            {(pendingPayment || completionUncertain || pendingCheckout || checkoutUncertain) && (
+          <section
+            aria-labelledby="current-receipt-title"
+            className={cn(
+              "flex min-h-[30rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface lg:col-span-7 xl:col-auto",
+              "xl:h-[36rem]",
+              isDraft && totalDue > 0 && "mb-20 xl:mb-0",
+            )}
+          >
+            <header className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4">
+              <div className="min-w-0">
+                <h2
+                  id="current-receipt-title"
+                  className="truncate text-base font-semibold text-foreground"
+                >
+                  Текущий чек
+                  {sale?.receipt_number ? (
+                    <span className="ml-2 font-mono text-xs font-normal text-foreground-muted">
+                      № {sale.receipt_number}
+                    </span>
+                  ) : null}
+                </h2>
+                <p className="text-xs text-foreground-muted">
+                  {items.length === 0
+                    ? "Нет товаров"
+                    : `${items.length} ${productCountLabel(items.length)}`}
+                </p>
+              </div>
+              {requiresRx && !prescription ? (
+                <span className="rounded-full bg-warning-subtle px-2.5 py-0.5 text-xs font-medium text-warning-foreground ring-1 ring-inset ring-warning/30">
+                  требуется рецепт
+                </span>
+              ) : null}
+            </header>
+
+            <div className="hidden grid-cols-[minmax(0,1fr)_8.5rem_5.5rem_2.5rem] gap-2 border-b border-border bg-background px-4 py-2 text-xs font-medium text-foreground-muted sm:grid">
+              <span>Товар</span>
+              <span className="text-center">Количество</span>
+              <span className="text-right">Сумма</span>
+              <span aria-hidden="true" />
+            </div>
+
+            <CartList
+              items={items}
+              nameById={nameById}
+              currency={currency}
+              editable={isDraft && !saleEditingBlocked}
+              onQtyChange={(id, q) => void onQtyChange(id, q)}
+              onDelete={(id) => void onDelete(id)}
+              onQtyTap={touch ? onQtyTap : undefined}
+              touch={touch}
+              busy={updateItem.isPending || deleteItem.isPending}
+              embedded
+            />
+
+            {topError ? (
+              <div className="flex flex-wrap items-center gap-2 border-t border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
+                <p>{topError}</p>
+                {pendingPayment || completionUncertain || pendingCheckout || checkoutUncertain ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    isLoading={saleQuery.isFetching || checkoutReconciling}
+                    onClick={() => {
+                      if (pendingCheckout) {
+                        void recoverCheckout(pendingCheckout, false);
+                      } else {
+                        void saleQuery.refetch();
+                      }
+                    }}
+                  >
+                    Сверить с сервером
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+
+            <footer className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-t border-border bg-background px-3 py-2">
               <Button
                 type="button"
                 size="sm"
-                variant="secondary"
-                isLoading={saleQuery.isFetching || checkoutReconciling}
-                onClick={() => {
-                  if (pendingCheckout) {
-                    void recoverCheckout(pendingCheckout, false);
-                  } else {
-                    void saleQuery.refetch();
-                  }
-                }}
+                variant="ghost"
+                className="text-danger hover:text-danger"
+                disabled={!isDraft || items.length === 0 || saleEditingBlocked}
+                onClick={onNewSale}
               >
-                Сверить с сервером
+                <ClearReceiptIcon />
+                Очистить чек
               </Button>
-            )}
-          </div>
-        )}
-      </div>
+              <div className="ml-auto flex items-baseline gap-4">
+                <span className="text-xs text-foreground-muted">
+                  {items.length} {productCountLabel(items.length)}
+                </span>
+                <strong className="font-mono text-xl tabular-nums text-foreground">
+                  {totalDue.toFixed(2)}{" "}
+                  <span className="font-sans text-xs font-semibold text-foreground-secondary">
+                    {currency}
+                  </span>
+                </strong>
+              </div>
+            </footer>
+          </section>
 
-      {/* RIGHT — payment, sticky so it's always in view */}
-      <div className="lg:col-span-5">
-        <div className="space-y-4 lg:sticky lg:top-4">
-          <PaymentPanel
-            totalDue={totalDue}
-            totalPaid={totalPaid}
-            remaining={remaining}
-            currency={currency}
-            payments={payments}
-            isDraft={isDraft}
-            completing={completeSale.isPending || checkoutSale.isPending || checkoutReconciling}
-            completionUncertain={completionUncertain || checkoutUncertain}
-            payingMethod={payingMethod}
-            pendingPaymentMethod={pendingPayment?.paymentMethod ?? null}
-            onPayTile={onPayTile}
-            onClearPayments={
-              stagedPayments.length > 0 && recordedPayments.length === 0
-                ? () => setStagedPayments([])
-                : undefined
-            }
-            onComplete={() => void onComplete()}
-            completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
-            onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
-            onNewSale={onNewSale}
-            newSaleHint={keyboard ? "Новая продажа (F2)" : undefined}
-            touch={touch}
-            completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
-          />
+          <div
+            ref={paymentPanelRef}
+            className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto"
+          >
+            <div className="xl:sticky xl:top-[calc(var(--app-header-height)+0.75rem)]">
+              <PaymentPanel
+                totalDue={totalDue}
+                totalPaid={totalPaid}
+                remaining={remaining}
+                currency={currency}
+                payments={payments}
+                isDraft={isDraft}
+                completing={completeSale.isPending || checkoutSale.isPending || checkoutReconciling}
+                completionUncertain={completionUncertain || checkoutUncertain}
+                payingMethod={payingMethod}
+                pendingPaymentMethod={pendingPayment?.paymentMethod ?? null}
+                onPayTile={onPayTile}
+                onClearPayments={
+                  stagedPayments.length > 0 && recordedPayments.length === 0
+                    ? () => setStagedPayments([])
+                    : undefined
+                }
+                onComplete={() => void onComplete()}
+                completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
+                onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
+                onNewSale={onNewSale}
+                newSaleHint={keyboard ? "Новая продажа (F2)" : undefined}
+                touch={touch}
+                completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
+              />
+            </div>
+          </div>
         </div>
       </div>
+
+      {isDraft && totalDue > 0 && !paymentPanelVisible && (
+        <div
+          className="fixed inset-x-3 bottom-3 z-sticky mx-auto flex max-w-md items-center justify-between gap-3 rounded-lg border border-border bg-surface-raised p-2 shadow-lg xl:hidden"
+          role="region"
+          aria-label="Краткая сумма чека"
+        >
+          <div className="min-w-0 px-2">
+            <p className="text-xs text-foreground-muted">К оплате</p>
+            <p
+              className="truncate font-mono text-lg font-semibold tabular-nums text-foreground"
+              aria-live="polite"
+            >
+              {Math.max(0, remaining).toFixed(2)} {currency}
+            </p>
+          </div>
+          <Button
+            size="lg"
+            onClick={() => {
+              paymentPanelRef.current?.scrollIntoView({ block: "start" });
+              paymentPanelRef.current
+                ?.querySelector<HTMLElement>(".pos-tile:not(:disabled)")
+                ?.focus();
+            }}
+          >
+            Перейти к оплате
+          </Button>
+        </div>
+      )}
 
       {saleId && (
         <PrescriptionModal
@@ -1100,6 +1291,47 @@ function ActiveWorkspace({
           onClose={() => setPrintOpen(false)}
         />
       )}
+
+      <ConfirmDialog
+        open={discardConfirmOpen}
+        title="Начать новую продажу"
+        message="Текущий незавершённый чек будет очищен. Это действие нельзя отменить."
+        confirmLabel="Очистить чек"
+        variant="danger"
+        onConfirm={() => {
+          if (!startNewSale()) return;
+          setDiscardConfirmOpen(false);
+          requestAnimationFrame(() => searchRef.current?.focus());
+        }}
+        onCancel={() => setDiscardConfirmOpen(false)}
+      />
     </>
+  );
+}
+
+function productCountLabel(count: number): string {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "товаров";
+  if (mod10 === 1) return "товар";
+  if (mod10 >= 2 && mod10 <= 4) return "товара";
+  return "товаров";
+}
+
+function ClearReceiptIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
+    </svg>
   );
 }

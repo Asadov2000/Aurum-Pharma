@@ -75,11 +75,9 @@ test.describe("Shift close → Z-report", () => {
     await page.getByRole("button", { name: "Закрыть смену" }).click();
     const dialog = page.locator('div[role="dialog"]');
     await dialog.getByLabel("Фактическая касса").fill("140");
-    // The header has a "✕" with aria-label="Закрыть" too — match the primary
-    // submit button by its size class to disambiguate. (Closing also auto-
-    // downloads the Z-report XLSX; that download is asserted in
+    // Closing also auto-downloads the Z-report XLSX; that download is asserted in
     // reports-export.spec.ts — here we only check the close + /reports badge.)
-    await dialog.locator("button.h-10", { hasText: "Закрыть" }).click();
+    await dialog.getByRole("button", { name: "Подтвердить закрытие смены" }).click();
 
     // Shift returns to the open-form state — wait for it to settle.
     await expect(page.getByLabel("Касса на начало смены")).toBeVisible({ timeout: 15_000 });
@@ -93,9 +91,9 @@ test.describe("Shift close → Z-report", () => {
 
     // Three cards rendered — assert via heading roles so we don't collide
     // with sidebar links or field labels named "Касса".
-    await expect(page.getByRole("heading", { name: "Смена" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Касса" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Обороты" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Смена", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Касса", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Обороты", exact: true })).toBeVisible();
 
     // Difference badge surfaces as "недостача" because actual < expected.
     await expect(page.getByText(/недостача/i)).toBeVisible();

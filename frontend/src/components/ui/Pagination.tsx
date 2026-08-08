@@ -23,7 +23,7 @@ export function Pagination({
   const isLast = totalPages !== undefined ? page >= totalPages : !hasMore;
 
   return (
-    <div className="flex items-center justify-between text-sm text-foreground-secondary">
+    <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-foreground-secondary">
       <span>
         {total !== undefined ? (
           <>
@@ -31,23 +31,22 @@ export function Pagination({
           </>
         ) : null}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-2">
         <Button
           variant="secondary"
           size="sm"
           disabled={page <= 1}
           onClick={() => onPage(Math.max(1, page - 1))}
         >
-          ← Назад
+          <span aria-hidden="true">←</span>
+          <span className="hidden sm:inline">Назад</span>
         </Button>
-        <span>{totalPages !== undefined ? `Стр. ${page} / ${totalPages}` : `Стр. ${page}`}</span>
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={isLast}
-          onClick={() => onPage(page + 1)}
-        >
-          Вперёд →
+        <span className="min-w-20 text-center text-xs">
+          {totalPages !== undefined ? `${page} из ${totalPages}` : `Стр. ${page}`}
+        </span>
+        <Button variant="secondary" size="sm" disabled={isLast} onClick={() => onPage(page + 1)}>
+          <span className="hidden sm:inline">Вперёд</span>
+          <span aria-hidden="true">→</span>
         </Button>
       </div>
     </div>

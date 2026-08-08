@@ -70,7 +70,10 @@ describe("LoginPage", () => {
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@aurum.tj" } });
     fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
     expect(await screen.findByLabelText(/Код из письма/i)).toBeInTheDocument();
-    expect(requestLoginCode).toHaveBeenCalledWith({ email: "owner@aurum.tj" });
+    expect(requestLoginCode).toHaveBeenCalledWith(
+      { email: "owner@aurum.tj" },
+      expect.any(AbortSignal),
+    );
   });
 
   it("auto-fills code input from dev_code in the response", async () => {
@@ -97,11 +100,14 @@ describe("LoginPage", () => {
     fireEvent.change(codeInput, { target: { value: "123456" } });
     fireEvent.submit(codeInput.closest("form")!);
     await waitFor(() => {
-      expect(verifyLoginCode).toHaveBeenCalledWith({
-        email: "owner@aurum.tj",
-        code: "123456",
-        password: undefined,
-      });
+      expect(verifyLoginCode).toHaveBeenCalledWith(
+        {
+          email: "owner@aurum.tj",
+          code: "123456",
+          password: undefined,
+        },
+        expect.any(AbortSignal),
+      );
       expect(navigate).toHaveBeenCalledWith({ to: "/" });
       expect(useAuthStore.getState().accessToken).toBe("A");
     });
@@ -134,15 +140,21 @@ describe("LoginPage", () => {
     fireEvent.submit(mfaInput.closest("form")!);
 
     await waitFor(() => {
-      expect(verifyLoginCode).toHaveBeenCalledWith({
-        email: "support@aurum.tj",
-        code: "123456",
-        password: "strong-password",
-      });
-      expect(verifyMfa).toHaveBeenCalledWith({
-        challenge_token: "challenge-1",
-        code: "654321",
-      });
+      expect(verifyLoginCode).toHaveBeenCalledWith(
+        {
+          email: "support@aurum.tj",
+          code: "123456",
+          password: "strong-password",
+        },
+        expect.any(AbortSignal),
+      );
+      expect(verifyMfa).toHaveBeenCalledWith(
+        {
+          challenge_token: "challenge-1",
+          code: "654321",
+        },
+        expect.any(AbortSignal),
+      );
       expect(useAuthStore.getState().accessToken).toBe("support-access");
       expect(navigate).toHaveBeenCalledWith({ to: "/" });
     });
@@ -159,10 +171,7 @@ describe("LoginPage", () => {
       status: "mfa_enrollment_ready",
       secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
       provisioning_uri: "otpauth://totp/Aurum%20Pharma",
-      recovery_codes: [
-        "AAAAA-BBBBB-CCCCC-22222",
-        "AAAAA-BBBBB-CCCCC-33333",
-      ],
+      recovery_codes: ["AAAAA-BBBBB-CCCCC-22222", "AAAAA-BBBBB-CCCCC-33333"],
       expires_in: 300,
     });
     completeMfaEnrollment.mockResolvedValueOnce({
@@ -194,13 +203,19 @@ describe("LoginPage", () => {
     fireEvent.submit(screen.getByLabelText("Код из приложения").closest("form")!);
 
     await waitFor(() => {
-      expect(startMfaEnrollment).toHaveBeenCalledWith({
-        challenge_token: "challenge-enroll",
-      });
-      expect(completeMfaEnrollment).toHaveBeenCalledWith({
-        challenge_token: "challenge-enroll",
-        code: "654321",
-      });
+      expect(startMfaEnrollment).toHaveBeenCalledWith(
+        {
+          challenge_token: "challenge-enroll",
+        },
+        expect.any(AbortSignal),
+      );
+      expect(completeMfaEnrollment).toHaveBeenCalledWith(
+        {
+          challenge_token: "challenge-enroll",
+          code: "654321",
+        },
+        expect.any(AbortSignal),
+      );
       expect(useAuthStore.getState().accessToken).toBe("enrolled-access");
     });
   });
@@ -241,12 +256,98 @@ describe("LoginPage", () => {
     fireEvent.submit(recoveryInput.closest("form")!);
 
     expect(await screen.findByText("KRUGS4ZANFZSAYJAMNXW2L3ON5XCA5DF")).toBeInTheDocument();
-    expect(recoverMfa).toHaveBeenCalledWith({
-      challenge_token: "challenge-recover",
-      recovery_code: "AAAAA-BBBBB-CCCCC-22222",
+    expect(recoverMfa).toHaveBeenCalledWith(
+      {
+        challenge_token: "challenge-recover",
+        recovery_code: "AAAAA-BBBBB-CCCCC-22222",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(startMfaEnrollment).toHaveBeenCalledWith(
+      {
+        challenge_token: "challenge-recover",
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("blocks account switching during verification and clears credentials afterwards", async () => {
+    let rejectVerification: (reason?: unknown) => void = () => undefined;
+    requestLoginCode
+      .mockResolvedValueOnce({ status: "ok", dev_code: "123456" })
+      .mockResolvedValueOnce({ status: "ok", dev_code: null });
+    verifyLoginCode.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectVerification = reject;
+        }),
+    );
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "first@aurum.tj" },
     });
-    expect(startMfaEnrollment).toHaveBeenCalledWith({
-      challenge_token: "challenge-recover",
+    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
+    const passwordInput = await screen.findByLabelText(/Пароль/i);
+    fireEvent.change(passwordInput, { target: { value: "old-password" } });
+    fireEvent.submit(passwordInput.closest("form")!);
+    await waitFor(() => expect(verifyLoginCode).toHaveBeenCalledTimes(1));
+
+    const changeEmailButton = screen.getByRole("button", { name: "Изменить email" });
+    expect(changeEmailButton).toBeDisabled();
+
+    rejectVerification(new Error("network timeout"));
+    await waitFor(() => expect(changeEmailButton).toBeEnabled());
+    fireEvent.click(changeEmailButton);
+    expect(await screen.findByRole("button", { name: /Получить код/i })).toBeInTheDocument();
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "second@aurum.tj" },
     });
+    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
+
+    expect(await screen.findByLabelText(/Код из письма/i)).toHaveValue("");
+    expect(screen.getByLabelText(/Пароль/i)).toHaveValue("");
+  });
+
+  it("keeps the recovery transition disabled while MFA verification is pending", async () => {
+    let resolveMfa: (value: unknown) => void = () => undefined;
+    requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: "123456" });
+    verifyLoginCode.mockResolvedValueOnce({
+      status: "mfa_required",
+      challenge_token: "challenge-1",
+      expires_in: 300,
+    });
+    verifyMfa.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMfa = resolve;
+        }),
+    );
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "support@aurum.tj" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
+    const codeInput = await screen.findByLabelText(/Код из письма/i);
+    fireEvent.submit(codeInput.closest("form")!);
+
+    const mfaInput = await screen.findByLabelText("Код подтверждения");
+    fireEvent.change(mfaInput, { target: { value: "654321" } });
+    fireEvent.submit(mfaInput.closest("form")!);
+    await waitFor(() => expect(verifyMfa).toHaveBeenCalledTimes(1));
+
+    const recoveryButton = screen.getByRole("button", { name: /резервный код/i });
+    expect(recoveryButton).toBeDisabled();
+
+    resolveMfa({
+      access_token: "support-access",
+      token_type: "bearer",
+      expires_in: 900,
+    });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/" }));
   });
 });

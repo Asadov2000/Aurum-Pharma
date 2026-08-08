@@ -25,7 +25,7 @@ export function buildNav(
     { to: "/onboarding", label: "Старт" },
     { to: "/branches", label: "Точки" },
     { to: "/registers", label: "Кассы" },
-    { to: "/users", label: "Пользователи" },
+    { to: "/users", label: "Пользователи", pageTitle: "Сотрудники" },
     { to: "/roles", label: "Роли" },
     { to: "/catalog", label: "Каталог" },
     { to: "/suppliers", label: "Поставщики" },

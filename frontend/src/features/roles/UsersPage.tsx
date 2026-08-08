@@ -10,6 +10,7 @@ import {
   Input,
   Label,
   Modal,
+  PageHeader,
   Pagination,
   Select,
   SkeletonRows,
@@ -187,7 +188,7 @@ export function UsersPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-foreground">Сотрудники</h1>
+      <PageHeader title="Сотрудники" />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -320,17 +321,30 @@ export function UsersPage(): JSX.Element {
         }}
       />
 
-      {actionError && pending === null && <p className="text-sm text-danger">{actionError}</p>}
+      {actionError && pending === null && (
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
+          {actionError}
+        </div>
+      )}
       {actionNotice && (
-        <p className="text-sm text-success-foreground" role="status">
+        <div
+          role="status"
+          className="rounded-lg border border-success/30 bg-success-subtle px-3 py-2 text-sm leading-5 text-success-foreground"
+        >
           {actionNotice}
-        </p>
+        </div>
       )}
 
       {users.error ? (
-        <p className="text-sm text-danger">
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
           {describeApiError(users.error, "Не удалось загрузить сотрудников")}
-        </p>
+        </div>
       ) : users.isLoading ? (
         <SkeletonRows rows={6} />
       ) : rows.length === 0 ? (
@@ -524,7 +538,14 @@ export function UsersPage(): JSX.Element {
             ) : (
               <>Уволить «{pending?.user.full_name}»? Действие необратимо.</>
             )}
-            {actionError && <span className="mt-2 block text-danger">{actionError}</span>}
+            {actionError && (
+              <span
+                role="alert"
+                className="mt-2 block rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-danger-foreground"
+              >
+                {actionError}
+              </span>
+            )}
           </>
         }
         confirmLabel={

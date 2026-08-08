@@ -6,6 +6,7 @@ import {
   ConfigurableFilterBar,
   Label,
   Modal,
+  PageHeader,
   Pagination,
   Select,
   SkeletonRows,
@@ -56,12 +57,7 @@ export function BatchesPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Партии</h1>
-        <span className="text-sm text-foreground-muted">
-          Создание партий — через приёмку поставщиков
-        </span>
-      </div>
+      <PageHeader title="Партии" description="Создание партий — через приёмку поставщиков" />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -70,9 +66,10 @@ export function BatchesPage(): JSX.Element {
             id: "product",
             label: "Товар",
             content: (
-              <div className="w-64 sm:w-72">
+              <div className="w-full sm:w-72">
                 <Label htmlFor="catalog">Товар</Label>
                 <CatalogPicker
+                  id="catalog"
                   value={catalogId}
                   onChange={(id) => {
                     setCatalogId(id);
@@ -103,7 +100,7 @@ export function BatchesPage(): JSX.Element {
                     setBranchId(e.target.value);
                     setPage(1);
                   }}
-                  className="w-56"
+                  className="w-full sm:w-56"
                 >
                   <option value="">Все точки</option>
                   {branches.data?.map((b) => (
@@ -134,7 +131,7 @@ export function BatchesPage(): JSX.Element {
                     setExpiry(e.target.value as ExpiryStatus | "");
                     setPage(1);
                   }}
-                  className="w-56"
+                  className="w-full sm:w-56"
                 >
                   <option value="">Все</option>
                   {expiryOptions.map((s) => (

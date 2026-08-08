@@ -190,7 +190,7 @@ test.describe("Auth", () => {
     await page.getByLabel(/Пароль/).fill(DEV.password);
     await page.getByRole("button", { name: /^Войти$/ }).click();
 
-    await expect(page.locator(".text-danger").first()).toBeVisible();
+    await expect(page.getByRole("alert").first()).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
   });
 

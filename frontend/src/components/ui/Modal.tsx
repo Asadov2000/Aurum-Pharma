@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -10,7 +10,6 @@ const focusableSelector = [
   "select:not([disabled])",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
-
 function getFocusableElements(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(focusableSelector)).filter(
     (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true",
@@ -33,6 +32,7 @@ export function Modal({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const titleId = useId();
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -44,7 +44,11 @@ export function Modal({
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     const onKey = (e: KeyboardEvent) => {
+      const openDialogs = document.querySelectorAll<HTMLElement>("[data-aurum-modal]");
+      if (openDialogs[openDialogs.length - 1] !== dialogRef.current) return;
       if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         onCloseRef.current();
         return;
       }
@@ -83,18 +87,20 @@ export function Modal({
       }
     };
 
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKey);
     const dialog = dialogRef.current;
     const firstFocusable = dialog ? getFocusableElements(dialog)[0] : undefined;
     if (
       dialog &&
-      (!(document.activeElement instanceof HTMLElement) ||
-        !dialog.contains(document.activeElement))
+      (!(document.activeElement instanceof HTMLElement) || !dialog.contains(document.activeElement))
     ) {
       (firstFocusable ?? dialog).focus();
     }
 
     return () => {
+      document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKey);
       if (previousActiveElement.current && document.contains(previousActiveElement.current)) {
         previousActiveElement.current.focus();
@@ -106,7 +112,7 @@ export function Modal({
 
   return (
     <div
-      className="bg-overlay fixed inset-0 z-modal flex items-center justify-center px-4"
+      className="bg-overlay fixed inset-0 z-modal flex items-end justify-center sm:items-center sm:p-4"
       onClick={onClose}
       role="presentation"
     >
@@ -115,28 +121,31 @@ export function Modal({
           // max-h + flex-column lets the body scroll on tall content
           // (e.g. AdminBillingDrawer's 3 stacked forms) while keeping
           // the header pinned to the top.
-          "flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl border border-border bg-surface-raised shadow-xl",
+          "flex max-h-[calc(100dvh-1rem)] w-full max-w-lg flex-col rounded-t-lg border border-border bg-surface-raised shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-lg",
           className,
         )}
         onClick={(e) => e.stopPropagation()}
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
+        data-aurum-modal
         tabIndex={-1}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3.5 sm:px-5">
+          <h2 id={titleId} className="min-w-0 truncate text-base font-semibold text-foreground">
+            {title}
+          </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="rounded-md p-1 text-foreground-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-lg text-foreground-muted transition-colors duration-fast hover:bg-foreground/5 hover:text-foreground"
           >
             ✕
           </button>
         </div>
-        <div className="overflow-y-auto px-6 py-4">{children}</div>
+        <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">{children}</div>
       </div>
     </div>
   );

@@ -20,7 +20,7 @@ describe("CatalogPicker — keyboard selection", () => {
     const input = screen.getByPlaceholderText("Поиск");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "ас" } });
-    await screen.findByRole("button", { name: /Аспирин/ });
+    await screen.findByRole("option", { name: /Аспирин/ });
 
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith("c1", "Аспирин");
@@ -32,7 +32,7 @@ describe("CatalogPicker — keyboard selection", () => {
     const input = screen.getByPlaceholderText("Поиск");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "ас" } });
-    await screen.findByRole("button", { name: /Аспирин/ });
+    await screen.findByRole("option", { name: /Аспирин/ });
 
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -45,7 +45,7 @@ describe("CatalogPicker — keyboard selection", () => {
     const input = screen.getByPlaceholderText("Поиск");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "ас" } });
-    await screen.findByRole("button", { name: /Аспирин/ });
+    await screen.findByRole("option", { name: /Аспирин/ });
 
     fireEvent.keyDown(input, { key: "5" });
     expect(onChange).not.toHaveBeenCalled();

@@ -75,7 +75,7 @@ export function ReceiptPrintModal({
       <style>{printCss(width)}</style>
 
       <div
-        className="receipt-no-print mb-3 flex w-full max-w-md flex-wrap items-center gap-2 rounded-xl border border-border bg-surface-raised p-3 shadow-lg"
+        className="receipt-no-print mb-3 flex w-full max-w-md flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-raised p-3 shadow-lg"
         role="dialog"
         aria-modal="true"
         aria-label="Печать чека"
@@ -96,7 +96,12 @@ export function ReceiptPrintModal({
         <Button onClick={() => window.print()} disabled={!data}>
           Печать чека
         </Button>
-        <Button variant="secondary" onClick={() => void onDownload()} isLoading={downloading} disabled={!data}>
+        <Button
+          variant="secondary"
+          onClick={() => void onDownload()}
+          isLoading={downloading}
+          disabled={!data}
+        >
           Скачать PDF
         </Button>
         <Button variant="ghost" onClick={onClose}>

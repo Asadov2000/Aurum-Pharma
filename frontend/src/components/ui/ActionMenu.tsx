@@ -57,10 +57,17 @@ export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps)
   useEffect(() => {
     if (!open) return undefined;
 
-    requestAnimationFrame(() => {
+    let armScrollFrame = 0;
+    const focusFrame = requestAnimationFrame(() => {
       menuRef.current
         ?.querySelector<HTMLButtonElement>('[role="menuitem"]')
         ?.focus({ preventScroll: true });
+      // Browser automation and keyboard focus may finish a pending scroll
+      // immediately after the menu opens. Arm scroll dismissal after layout
+      // settles so that event cannot close the menu before it is usable.
+      armScrollFrame = requestAnimationFrame(() => {
+        window.addEventListener("scroll", handleViewportChange, true);
+      });
     });
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -79,8 +86,9 @@ export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps)
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", handleViewportChange);
-    window.addEventListener("scroll", handleViewportChange, true);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.cancelAnimationFrame(armScrollFrame);
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", handleViewportChange);
@@ -115,7 +123,7 @@ export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps)
         ref={triggerRef}
         variant="ghost"
         size="sm"
-        className="w-8 px-0 text-xl leading-none"
+        className="h-9 w-9 px-0 text-lg leading-none"
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -135,7 +143,7 @@ export function ActionMenu({ label, items, isLoading = false }: ActionMenuProps)
             role="menu"
             aria-label={label}
             aria-orientation="vertical"
-            className="fixed z-[100] w-56 rounded-md border border-border bg-surface p-1 shadow-lg"
+            className="fixed z-popover w-56 rounded-md border border-border bg-surface-raised p-1 shadow-lg"
             style={position}
             onKeyDown={moveMenuFocus}
           >

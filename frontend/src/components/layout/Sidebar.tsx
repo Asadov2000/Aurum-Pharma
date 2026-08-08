@@ -1,20 +1,25 @@
 import { type ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 
+import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
+import { BrandMark } from "./BrandMark";
 import { NavIcon } from "./icons";
 
 export interface NavItem {
   to: string;
   label: string;
   icon?: ReactNode;
+  pageTitle?: string;
 }
 
 interface SidebarProps {
   items: NavItem[];
   mode?: "desktop" | "drawer";
   onNavigate?: () => void;
+  onOpenDrawer?: (trigger: HTMLButtonElement) => void;
+  drawerOpen?: boolean;
   closeButton?: ReactNode;
 }
 
@@ -39,6 +44,8 @@ export function Sidebar({
   items,
   mode = "desktop",
   onNavigate,
+  onOpenDrawer,
+  drawerOpen = false,
   closeButton,
 }: SidebarProps): JSX.Element {
   const location = useRouterState({ select: (s) => s.location });
@@ -53,18 +60,21 @@ export function Sidebar({
       <Link
         key={item.to}
         to={item.to}
-        title={item.label}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
+        title={mode === "desktop" ? item.label : undefined}
         className={cn(
-          "group flex min-h-9 min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
+          "group flex min-w-0 items-center rounded-md text-sm font-medium transition-colors duration-fast",
+          mode === "desktop"
+            ? "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] justify-center p-0"
+            : "min-h-9 gap-2.5 px-3 py-2",
           active
             ? "bg-primary text-primary-foreground shadow-sm"
             : "text-foreground-secondary hover:bg-foreground/5 hover:text-foreground",
         )}
       >
         <NavIcon to={item.to} />
-        <span className="truncate">{item.label}</span>
+        <span className={cn("truncate", mode === "desktop" && "sr-only")}>{item.label}</span>
       </Link>
     );
   };
@@ -77,43 +87,40 @@ export function Sidebar({
     <nav
       aria-label="Основная навигация"
       className={cn(
-        "flex flex-col border-r border-border bg-surface px-3 py-4",
-        mode === "desktop" ? "sticky top-0 h-screen" : "h-full shadow-xl",
+        "flex flex-col border-r border-border bg-surface",
+        mode === "desktop"
+          ? "sticky top-[var(--app-header-height)] h-[calc(100dvh-var(--app-header-height))] w-[var(--app-nav-rail-width)] px-2 py-2.5"
+          : "h-full px-3 py-3.5 shadow-xl",
       )}
     >
-      <div className="flex shrink-0 items-center justify-between gap-3 px-2 pb-4">
-        <span className="flex min-w-0 items-center gap-2.5">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </span>
-          <span className="truncate font-display text-lg font-semibold text-foreground">
-            Aurum Pharma
-          </span>
-        </span>
-        {closeButton}
-      </div>
+      {mode === "drawer" && (
+        <div className="flex shrink-0 items-center justify-between gap-3 px-2 pb-3.5">
+          <BrandMark showName />
+          {closeButton}
+        </div>
+      )}
 
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-1">
+      <div
+        className={cn(
+          "flex flex-1 flex-col overflow-y-auto",
+          mode === "desktop" ? "gap-2" : "gap-3 pr-1",
+        )}
+      >
         {SECTIONS.map((section, idx) => {
           const present = section.routes
             .map((to) => byRoute.get(to))
             .filter((i): i is NavItem => i !== undefined);
           if (present.length === 0) return null;
           return (
-            <div key={section.caption ?? `top-${idx}`} className="flex flex-col gap-0.5">
-              {section.caption && (
-                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase text-foreground-muted">
+            <div
+              key={section.caption ?? `top-${idx}`}
+              className={cn(
+                "flex flex-col gap-0.5",
+                mode === "desktop" && "border-t border-border pt-2 first:border-t-0 first:pt-0",
+              )}
+            >
+              {mode === "drawer" && section.caption && (
+                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold text-foreground-muted">
                   {section.caption}
                 </div>
               )}
@@ -123,10 +130,53 @@ export function Sidebar({
         })}
 
         {leftovers.length > 0 && (
-          <div className="flex flex-col gap-0.5">{leftovers.map(renderLink)}</div>
+          <div
+            className={cn(
+              "flex flex-col gap-0.5",
+              mode === "desktop" && "border-t border-border pt-2",
+            )}
+          >
+            {leftovers.map(renderLink)}
+          </div>
         )}
       </div>
+
+      {mode === "desktop" && onOpenDrawer && (
+        <div className="mt-2 shrink-0 border-t border-border pt-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0"
+            aria-label="Показать названия разделов"
+            aria-expanded={drawerOpen}
+            title="Показать названия разделов"
+            onClick={(event) => onOpenDrawer(event.currentTarget)}
+          >
+            <ExpandNavigationIcon />
+          </Button>
+        </div>
+      )}
     </nav>
+  );
+}
+
+function ExpandNavigationIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" />
+      <path d="m14 8 4 4-4 4" />
+      <path d="M18 12H9" />
+    </svg>
   );
 }
 

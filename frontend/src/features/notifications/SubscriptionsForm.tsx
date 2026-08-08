@@ -155,7 +155,14 @@ export function SubscriptionsForm(): JSX.Element {
       </div>
 
       {topError && <p className="text-sm text-danger">{topError}</p>}
-      {savedBanner && <p className="text-sm text-success-foreground">✅ Подписки сохранены.</p>}
+      {savedBanner && (
+        <p
+          className="rounded-lg border border-success/30 bg-success-subtle px-3 py-2 text-sm text-success-foreground"
+          role="status"
+        >
+          Подписки сохранены.
+        </p>
+      )}
 
       <Button onClick={() => void onSave()} isLoading={patch.isPending}>
         Сохранить

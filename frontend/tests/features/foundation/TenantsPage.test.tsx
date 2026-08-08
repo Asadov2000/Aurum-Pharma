@@ -104,7 +104,8 @@ describe("TenantsPage", () => {
     listTenants.mockResolvedValueOnce([SAMPLE]);
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Открыть доступ" }));
+    fireEvent.click(await screen.findByRole("button", { name: `Действия для ${SAMPLE.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Открыть защищённый доступ" }));
     fireEvent.click(screen.getByRole("button", { name: "Начать защищённый запрос" }));
     fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
 
@@ -190,7 +191,8 @@ describe("TenantsPage", () => {
     createTenantMember.mockResolvedValue(undefined);
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Добавить сотрудника" }));
+    fireEvent.click(await screen.findByRole("button", { name: `Действия для ${SAMPLE.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Добавить сотрудника" }));
     fireEvent.change(await screen.findByLabelText("ФИО"), {
       target: { value: "Новый Сотрудник" },
     });

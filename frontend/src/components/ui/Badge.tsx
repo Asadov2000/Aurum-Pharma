@@ -7,7 +7,7 @@ type Tone = "neutral" | "success" | "warning" | "danger" | "info";
 // subtle background + readable foreground + a faint tonal inset ring for crisp
 // edges; all three flip with the theme.
 const toneClasses: Record<Tone, string> = {
-  neutral: "bg-foreground/8 text-foreground-secondary ring-foreground/15",
+  neutral: "bg-foreground/[0.08] text-foreground-secondary ring-foreground/15",
   success: "bg-success-subtle text-success-foreground ring-success/30",
   warning: "bg-warning-subtle text-warning-foreground ring-warning/30",
   danger: "bg-danger-subtle text-danger-foreground ring-danger/30",
@@ -22,7 +22,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+        "inline-flex min-h-5 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
         toneClasses[tone],
         className,
       )}

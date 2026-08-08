@@ -251,6 +251,17 @@ export function catalogSearchKey(brandName: string): string {
   return parts.length >= 2 ? parts.slice(-2).join("-") : brandName;
 }
 
+export async function selectActionMenuItem(
+  page: Page,
+  triggerLabel: string,
+  itemLabel: string,
+): Promise<void> {
+  await page.getByRole("button", { name: triggerLabel, exact: true }).click();
+  const menu = page.getByRole("menu", { name: triggerLabel, exact: true });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: itemLabel, exact: true }).click();
+}
+
 export async function addPosItemToCart(
   page: Page,
   args: {
@@ -260,15 +271,15 @@ export async function addPosItemToCart(
     searchKey?: string;
   },
 ): Promise<void> {
-  const picker = page.getByPlaceholder(/Поиск товара/);
+  const picker = page.getByRole("combobox", { name: "Товар" });
   await picker.fill(args.searchKey ?? catalogSearchKey(args.brandName));
-  const option = page.getByRole("button", {
+  const option = page.getByRole("option", {
     name: new RegExp(escapeRegex(args.brandName)),
   });
   await expect(option).toBeVisible({ timeout: 15_000 });
   await option.click();
   await page.getByRole("textbox", { name: "Количество" }).fill(args.qty);
-  await page.getByRole("button", { name: "Добавить" }).click();
+  await page.getByRole("button", { name: "Добавить", exact: true }).click();
   await expect(page.getByTestId("cart-item")).toHaveCount(args.expectedCartItems, {
     timeout: 30_000,
   });

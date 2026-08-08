@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentSubscription = vi.fn();
@@ -85,9 +85,9 @@ describe("BillingPage", () => {
     listInvoices.mockResolvedValueOnce([INV]);
     renderPage();
     expect(await screen.findByText("Aurum Pharma")).toBeInTheDocument();
-    expect(screen.getByText("INV-2026-001")).toBeInTheDocument();
+    expect(screen.getAllByText("INV-2026-001")).not.toHaveLength(0);
     expect(screen.getByText(/Активна/i)).toBeInTheDocument();
-    expect(screen.getByText(/Открыт/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Открыт/i)).not.toHaveLength(0);
   });
 
   it("opens the invoice detail modal on row click", async () => {
@@ -95,10 +95,23 @@ describe("BillingPage", () => {
     listInvoices.mockResolvedValueOnce([INV]);
     getInvoice.mockResolvedValueOnce({ ...INV, payments: [] });
     renderPage();
-    fireEvent.click(await screen.findByText("INV-2026-001"));
-    expect(
-      await screen.findByText(/Счёт № INV-2026-001/i),
-    ).toBeInTheDocument();
+    const invoiceButtons = await screen.findAllByRole("button", {
+      name: "Открыть счёт INV-2026-001",
+    });
+    fireEvent.click(invoiceButtons[0]!);
+    expect(await screen.findByText(/Счёт № INV-2026-001/i)).toBeInTheDocument();
     expect(getInvoice).toHaveBeenCalledWith(INV.id);
+  });
+
+  it("lets the user retry a failed subscription request", async () => {
+    getCurrentSubscription.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(SUB);
+    listInvoices.mockResolvedValueOnce([]);
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить подписку");
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+
+    await waitFor(() => expect(getCurrentSubscription).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Aurum Pharma")).toBeInTheDocument();
   });
 });

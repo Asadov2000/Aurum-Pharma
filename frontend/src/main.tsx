@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 
 import { bootstrapAuth } from "@/features/auth/bootstrap";
+import { applyDensity, getDensityPreference } from "@/lib/density";
 import { notifyDesktopReady } from "@/lib/desktopBridge";
 import { registerPwaServiceWorker } from "@/lib/pwa";
 import { queryClient } from "@/lib/query";
@@ -18,6 +19,7 @@ bootstrapAuth();
 // from the stored preference and keep "system" in sync with the OS.
 applyTheme(getThemePreference());
 watchSystemTheme();
+applyDensity(getDensityPreference());
 applyRuntimeSurfaceAttribute();
 registerPwaServiceWorker();
 

@@ -43,17 +43,12 @@ export function AdminBillingDrawer({
   const [lastInvoiceId, setLastInvoiceId] = useState<string | null>(null);
 
   return (
-    <Modal
-      open={true}
-      onClose={onClose}
-      title={`Биллинг: ${tenantName}`}
-      className="max-w-3xl"
-    >
+    <Modal open={true} onClose={onClose} title={`Биллинг: ${tenantName}`} className="max-w-3xl">
       <div className="space-y-4">
         <p className="rounded-md bg-foreground/[0.03] px-3 py-2 text-xs text-foreground-secondary">
-          Поля только для записи. Прочитать созданное через эту панель нельзя —
-          в Этапе 1 нет admin-эндпоинтов чтения. Тенант увидит изменения на
-          своей странице «Биллинг». ID результатов появляются ниже каждой формы.
+          Поля только для записи. Прочитать созданное через эту панель нельзя — в Этапе 1 нет
+          admin-эндпоинтов чтения. Тенант увидит изменения на своей странице «Биллинг». ID
+          результатов появляются ниже каждой формы.
         </p>
 
         <SubscriptionForm
@@ -69,10 +64,7 @@ export function AdminBillingDrawer({
           lastId={lastInvoiceId}
         />
 
-        <PaymentForm
-          tenantId={tenantId}
-          defaultInvoiceId={lastInvoiceId ?? ""}
-        />
+        <PaymentForm tenantId={tenantId} defaultInvoiceId={lastInvoiceId ?? ""} />
 
         <div className="flex justify-end">
           <Button variant="ghost" onClick={onClose}>
@@ -135,7 +127,7 @@ function SubscriptionForm({
         <CardTitle>1. Подписка</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} noValidate className="grid grid-cols-3 gap-3">
+        <form onSubmit={onSubmit} noValidate className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <Label htmlFor="plan_id">План</Label>
             <Select
@@ -170,18 +162,14 @@ function SubscriptionForm({
               {...form.register("branches_count", { valueAsNumber: true })}
             />
           </div>
-          {topError && (
-            <p className="col-span-3 text-sm text-danger">{topError}</p>
-          )}
+          {topError && <p className="sm:col-span-3 text-sm text-danger">{topError}</p>}
           {lastId && (
-            <p className="col-span-3 text-xs text-success-foreground">
-              ✅ Подписка создана:{" "}
-              <code className="rounded bg-success-subtle px-1.5 py-0.5 font-mono">
-                {lastId}
-              </code>
+            <p className="sm:col-span-3 text-xs text-success-foreground">
+              Подписка создана:{" "}
+              <code className="rounded bg-success-subtle px-1.5 py-0.5 font-mono">{lastId}</code>
             </p>
           )}
-          <div className="col-span-3 flex justify-end">
+          <div className="flex justify-end sm:col-span-3">
             <Button type="submit" size="sm" isLoading={create.isPending}>
               Создать подписку
             </Button>
@@ -271,8 +259,8 @@ function InvoiceForm({
         <CardTitle>2. Счёт</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} noValidate className="grid grid-cols-3 gap-3">
-          <div className="col-span-3">
+        <form onSubmit={onSubmit} noValidate className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="sm:col-span-3">
             <Label htmlFor="subscription_id">ID подписки</Label>
             <Input
               id="subscription_id"
@@ -312,7 +300,7 @@ function InvoiceForm({
               {...form.register("discount_amount")}
             />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Label htmlFor="discount_reason">Причина скидки</Label>
             <Input id="discount_reason" {...form.register("discount_reason")} />
           </div>
@@ -320,18 +308,14 @@ function InvoiceForm({
             <Label htmlFor="notes">Заметки</Label>
             <Textarea id="notes" rows={1} {...form.register("notes")} />
           </div>
-          {topError && (
-            <p className="col-span-3 text-sm text-danger">{topError}</p>
-          )}
+          {topError && <p className="sm:col-span-3 text-sm text-danger">{topError}</p>}
           {lastId && (
-            <p className="col-span-3 text-xs text-success-foreground">
-              ✅ Счёт создан:{" "}
-              <code className="rounded bg-success-subtle px-1.5 py-0.5 font-mono">
-                {lastId}
-              </code>
+            <p className="sm:col-span-3 text-xs text-success-foreground">
+              Счёт создан:{" "}
+              <code className="rounded bg-success-subtle px-1.5 py-0.5 font-mono">{lastId}</code>
             </p>
           )}
-          <div className="col-span-3 flex justify-end">
+          <div className="flex justify-end sm:col-span-3">
             <Button type="submit" size="sm" isLoading={create.isPending}>
               Создать счёт
             </Button>
@@ -420,8 +404,8 @@ function PaymentForm({
         <CardTitle>3. Платёж</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} noValidate className="grid grid-cols-3 gap-3">
-          <div className="col-span-3">
+        <form onSubmit={onSubmit} noValidate className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="sm:col-span-3">
             <Label htmlFor="invoice_id">ID счёта</Label>
             <Input
               id="invoice_id"
@@ -456,7 +440,7 @@ function PaymentForm({
               ))}
             </Select>
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Label htmlFor="reference">Референс</Label>
             <Input id="reference" {...form.register("reference")} />
           </div>
@@ -464,15 +448,13 @@ function PaymentForm({
             <Label htmlFor="pay_notes">Заметки</Label>
             <Textarea id="pay_notes" rows={1} {...form.register("notes")} />
           </div>
-          {topError && (
-            <p className="col-span-3 text-sm text-danger">{topError}</p>
-          )}
+          {topError && <p className="sm:col-span-3 text-sm text-danger">{topError}</p>}
           {recordedAmount && (
-            <p className="col-span-3 text-xs text-success-foreground">
-              ✅ Платёж записан на {recordedAmount}. Статус счёта обновлён автоматически.
+            <p className="sm:col-span-3 text-xs text-success-foreground">
+              Платёж записан на {recordedAmount}. Статус счёта обновлён автоматически.
             </p>
           )}
-          <div className="col-span-3 flex justify-end">
+          <div className="flex justify-end sm:col-span-3">
             <Button type="submit" size="sm" isLoading={record.isPending}>
               Записать платёж
             </Button>

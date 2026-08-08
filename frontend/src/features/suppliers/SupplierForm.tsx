@@ -2,14 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import {
-  Button,
-  FormError,
-  Input,
-  Label,
-  Switch,
-  Textarea,
-} from "@/components/ui";
+import { Button, FormError, Input, Label, Switch, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { useCreateSupplier, useUpdateSupplier } from "./queries";
@@ -21,10 +14,10 @@ const schema = z.object({
   inn_or_tin: z.string().optional(),
   contact_person: z.string().optional(),
   phone: z.string().optional(),
-  email: z.string().optional().refine(
-    (v) => !v || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v),
-    "Некорректный email",
-  ),
+  email: z
+    .string()
+    .optional()
+    .refine((v) => !v || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), "Некорректный email"),
   address: z.string().optional(),
   notes: z.string().optional(),
   is_active: z.boolean(),
@@ -122,10 +115,14 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
           <Label htmlFor="name">Название</Label>
-          <Input id="name" invalid={Boolean(form.formState.errors.name)} {...form.register("name")} />
+          <Input
+            id="name"
+            invalid={Boolean(form.formState.errors.name)}
+            {...form.register("name")}
+          />
           <FormError>{form.formState.errors.name?.message}</FormError>
         </div>
         <div>
@@ -144,7 +141,7 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
           <Label htmlFor="phone">Телефон</Label>
           <Input id="phone" {...form.register("phone")} />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <Label htmlFor="email">Email</Label>
           <Input
             id="email"
@@ -154,22 +151,29 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
           />
           <FormError>{form.formState.errors.email?.message}</FormError>
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <Label htmlFor="address">Адрес</Label>
           <Textarea id="address" {...form.register("address")} />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <Label htmlFor="notes">Заметки</Label>
           <Textarea id="notes" {...form.register("notes")} />
         </div>
         {isEdit && (
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Switch label="Активен" {...form.register("is_active")} />
           </div>
         )}
       </div>
-      {topError && <p className="text-sm text-danger">{topError}</p>}
-      <div className="flex justify-end gap-2">
+      {topError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+        >
+          {topError}
+        </div>
+      )}
+      <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onClose}>
           Отмена
         </Button>

@@ -1,6 +1,14 @@
 import { request, test } from "@playwright/test";
 
-import { apiContext, apiLogin, clearLoginRateLimit, DEV, expect, loginInBrowser } from "./helpers";
+import {
+  apiContext,
+  apiLogin,
+  clearLoginRateLimit,
+  DEV,
+  expect,
+  loginInBrowser,
+  selectActionMenuItem,
+} from "./helpers";
 
 test.describe("Scoped tenant support access", () => {
   test.beforeEach(() => {
@@ -25,7 +33,11 @@ test.describe("Scoped tenant support access", () => {
     await page.getByLabel("Поиск (название или email)").fill(tenant.name);
     const row = page.getByRole("row").filter({ hasText: tenant.name });
     await expect(row).toBeVisible();
-    await row.getByRole("button", { name: "Открыть доступ" }).click();
+    await selectActionMenuItem(
+      page,
+      `Действия для ${tenant.name}`,
+      "Открыть защищённый доступ",
+    );
 
     const dialog = page.getByRole("dialog", { name: "Защищённый доступ" });
     await dialog.getByLabel("Роли и назначения").check();

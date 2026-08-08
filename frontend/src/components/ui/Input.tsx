@@ -14,12 +14,15 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
     <input
       ref={ref}
       className={cn(
-        "h-10 w-full rounded-md border bg-surface px-3 text-sm text-foreground",
-        "placeholder:text-foreground-muted transition-colors",
+        "h-[var(--control-height-md)] w-full rounded-md border bg-surface px-[var(--field-padding-x)] text-sm text-foreground shadow-sm",
+        "placeholder:text-foreground-muted transition-colors duration-fast",
         "disabled:cursor-not-allowed disabled:opacity-60",
-        invalid ? "border-danger" : "border-input hover:border-foreground/25 focus:border-ring",
+        invalid
+          ? "border-danger"
+          : "border-input hover:border-foreground/30 focus:border-ring focus:bg-surface-raised",
         className,
       )}
+      aria-invalid={invalid || undefined}
       {...rest}
     />
   );

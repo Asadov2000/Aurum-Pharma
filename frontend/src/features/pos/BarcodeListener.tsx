@@ -66,11 +66,13 @@ export function BarcodeListener({
       sinkRef.current?.focus();
     };
 
-    window.addEventListener("keydown", onKey);
+    // Capture first so a completed scanner burst can reserve its Enter before
+    // POS payment shortcuts observe the same keyboard event.
+    window.addEventListener("keydown", onKey, { capture: true });
     window.addEventListener("click", onClick);
     window.addEventListener(DESKTOP_BARCODE_SCANNED_EVENT, onDesktopBarcode);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, { capture: true });
       window.removeEventListener("click", onClick);
       window.removeEventListener(DESKTOP_BARCODE_SCANNED_EVENT, onDesktopBarcode);
     };

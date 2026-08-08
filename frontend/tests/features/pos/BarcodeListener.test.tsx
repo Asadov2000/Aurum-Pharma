@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { dispatchDesktopBarcodeScan } from "@/lib/desktopBridge";
@@ -21,5 +21,18 @@ describe("BarcodeListener", () => {
     expect(dispatchDesktopBarcodeScan("4600123456789")).toBe(true);
 
     expect(onScan).not.toHaveBeenCalled();
+  });
+
+  it("reserves the Enter key that terminates a physical scanner burst", () => {
+    const onScan = vi.fn();
+    render(<BarcodeListener enabled onScan={onScan} />);
+
+    for (const key of "4600123456789") {
+      fireEvent.keyDown(window, { key });
+    }
+    const propagated = fireEvent.keyDown(window, { key: "Enter" });
+
+    expect(propagated).toBe(false);
+    expect(onScan).toHaveBeenCalledWith("4600123456789");
   });
 });

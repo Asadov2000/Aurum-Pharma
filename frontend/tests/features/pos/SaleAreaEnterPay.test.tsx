@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentShift = vi.fn();
@@ -228,7 +228,10 @@ describe("SaleArea atomic checkout", () => {
     getCurrentShift.mockResolvedValue(SHIFT);
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it("stages payment in memory and sends one atomic sale command", async () => {
     let operationId = "";
@@ -296,6 +299,34 @@ describe("SaleArea atomic checkout", () => {
     expect(checkoutSale).toHaveBeenCalledTimes(1);
   });
 
+  it("requires confirmation before F2 clears a non-empty draft", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+
+    renderArea();
+    await screen.findByText(/Остаток/);
+
+    const closeShift = screen.getByRole("button", { name: /Закрыть смену/i });
+    expect(closeShift).toBeDisabled();
+
+    fireEvent.keyDown(window, { key: "F2" });
+    expect(screen.getByRole("dialog", { name: "Начать новую продажу" })).toBeInTheDocument();
+    expect(window.localStorage.getItem(draftKey(REG))).not.toBeNull();
+
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Начать новую продажу" })).getByRole("button", {
+        name: "Очистить чек",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Начать новую продажу" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem(draftKey(REG))).toBeNull();
+  });
+
   it("does not open the cash drawer for a card checkout", async () => {
     let operationId = "";
     seedDraftSale(SALE.id);
@@ -314,6 +345,85 @@ describe("SaleArea atomic checkout", () => {
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
     expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
+  });
+
+  it("does not replace a focused payment button action with the cash shortcut", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    const cardButton = await screen.findByRole("button", { name: /Карта/i });
+    expect(screen.getByRole("region", { name: "Краткая сумма чека" })).toHaveTextContent(
+      "50.00 TJS",
+    );
+    cardButton.focus();
+    fireEvent.keyDown(cardButton, { key: "Enter" });
+
+    expect(screen.queryByRole("button", { name: /Очистить оплату/i })).not.toBeInTheDocument();
+  });
+
+  it("does not treat the barcode scanner terminator as a cash-payment shortcut", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    const scannerSink = document.querySelector<HTMLInputElement>('[data-barcode-sink="true"]');
+    expect(scannerSink).not.toBeNull();
+    scannerSink?.focus();
+    for (const key of "1234567890123") {
+      fireEvent.keyDown(window, { key });
+    }
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    await screen.findByText(/Штрихкод 1234567890123 не найден/i);
+    expect(screen.queryByRole("button", { name: /Очистить оплату/i })).not.toBeInTheDocument();
+    expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
+  });
+
+  it("hides the mobile payment shortcut when the payment panel is visible", async () => {
+    let observerCallback: IntersectionObserverCallback = () => undefined;
+    class TestIntersectionObserver implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = "0px";
+      readonly thresholds = [0.35];
+
+      constructor(callback: IntersectionObserverCallback) {
+        observerCallback = callback;
+      }
+
+      disconnect(): void {}
+      observe(): void {}
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+      unobserve(): void {}
+    }
+    vi.stubGlobal("IntersectionObserver", TestIntersectionObserver);
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    renderArea();
+
+    await screen.findByText(/Остаток/);
+    expect(screen.getByRole("region", { name: "Краткая сумма чека" })).toBeInTheDocument();
+
+    act(() => {
+      observerCallback(
+        [{ isIntersecting: true, intersectionRatio: 0.1 } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      );
+    });
+    expect(screen.getByRole("region", { name: "Краткая сумма чека" })).toBeInTheDocument();
+
+    act(() => {
+      observerCallback(
+        [{ isIntersecting: true, intersectionRatio: 0.5 } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      );
+    });
+
+    expect(screen.queryByRole("region", { name: "Краткая сумма чека" })).not.toBeInTheDocument();
   });
 
   it("recovers a lost checkout response by the same operation id", async () => {

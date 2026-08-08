@@ -8,6 +8,7 @@ import {
   Input,
   Label,
   Modal,
+  PageHeader,
   Pagination,
   Select,
   SkeletonRows,
@@ -93,10 +94,10 @@ export function IncomingPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Приходы</h1>
-        {canCreate && <Button onClick={() => setCreating(true)}>+ Новый приход</Button>}
-      </div>
+      <PageHeader
+        title="Приходы"
+        actions={canCreate && <Button onClick={() => setCreating(true)}>+ Новый приход</Button>}
+      />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -114,7 +115,7 @@ export function IncomingPage(): JSX.Element {
                     setDocumentNumberInput(e.target.value);
                   }}
                   placeholder="Например, ПР-2401"
-                  className="w-44"
+                  className="w-full sm:w-44"
                 />
               </div>
             ),
@@ -139,7 +140,7 @@ export function IncomingPage(): JSX.Element {
                     setBranchFilter(e.target.value);
                     setPage(1);
                   }}
-                  className="w-44"
+                  className="w-full sm:w-44"
                 >
                   <option value="">Все</option>
                   {branches.data?.map((b) => (
@@ -171,7 +172,7 @@ export function IncomingPage(): JSX.Element {
                     setSupplierFilter(e.target.value);
                     setPage(1);
                   }}
-                  className="w-44"
+                  className="w-full sm:w-44"
                 >
                   <option value="">Все</option>
                   {suppliers.data?.map((s) => (
@@ -224,7 +225,7 @@ export function IncomingPage(): JSX.Element {
             id: "period",
             label: "Период",
             content: (
-              <div className="grid w-64 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+              <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
                 <div>
                   <Label htmlFor="date_from_filter">С даты</Label>
                   <Input

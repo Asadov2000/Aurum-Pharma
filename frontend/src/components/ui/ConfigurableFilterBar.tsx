@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 import { Button } from "./Button";
+import { Checkbox } from "./Checkbox";
 import { FilterBar } from "./FilterBar";
 
 const STORAGE_PREFIX = "aurum:filter-layout:v1:";
@@ -184,15 +185,24 @@ function ConfigurableFilterBarState({
   };
 
   return (
-    <FilterBar className={cn("relative", className)}>
+    <FilterBar className={cn("relative grid grid-cols-1 sm:grid-cols-2 xl:flex", className)}>
       {visibleFilters.map((filter) => (
-        <div key={filter.id} className="flex min-w-0 items-end gap-1" data-filter-id={filter.id}>
+        <div
+          key={filter.id}
+          className={cn(
+            "group flex min-w-0 items-end gap-1 [&>div]:min-w-0 [&>div]:flex-1 [&>div>div]:w-full",
+            filter.alwaysVisible
+              ? "sm:col-span-2 xl:flex-1 xl:basis-64"
+              : "w-full xl:w-auto xl:[&>div]:flex-none",
+          )}
+          data-filter-id={filter.id}
+        >
           <div className="min-w-0">{filter.content}</div>
           {!filter.alwaysVisible && (
             <Button
               variant="ghost"
               size="sm"
-              className="w-8 shrink-0 px-0 text-lg"
+              className="h-9 w-9 shrink-0 px-0 text-lg text-foreground-muted"
               aria-label={`Убрать фильтр «${filter.label}»`}
               title={`Убрать фильтр «${filter.label}»`}
               onClick={() => {
@@ -206,7 +216,7 @@ function ConfigurableFilterBarState({
         </div>
       ))}
 
-      <div className="flex shrink-0 items-end gap-2">
+      <div className="flex w-full shrink-0 items-end justify-end gap-2 border-t border-border pt-3 sm:col-span-2 xl:ml-auto xl:w-auto xl:border-0 xl:pt-0">
         {actions}
         {optionalFilters.length > 0 && (
           <div className="relative">
@@ -219,7 +229,12 @@ function ConfigurableFilterBarState({
               aria-controls={menuOpen ? menuId : undefined}
               onClick={() => setMenuOpen((open) => !open)}
             >
-              Фильтры{activeCount > 0 ? ` · ${activeCount}` : ""}
+              Фильтры
+              {activeCount > 0 && (
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/10 px-1 text-xs text-primary">
+                  {activeCount}
+                </span>
+              )}
             </Button>
             {menuOpen && (
               <div
@@ -227,10 +242,22 @@ function ConfigurableFilterBarState({
                 id={menuId}
                 role="dialog"
                 aria-label="Настройка фильтров"
-                className="fixed inset-x-4 bottom-4 z-popover rounded-md border border-border bg-surface-raised p-2 shadow-lg sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-2 sm:w-72"
+                className="fixed inset-x-3 bottom-3 z-popover rounded-lg border border-border bg-surface-raised p-2 shadow-lg sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80"
               >
-                <div className="px-2 pb-2 text-sm font-semibold text-foreground">
-                  Показывать фильтры
+                <div className="flex items-center justify-between gap-3 px-2 pb-2">
+                  <span className="text-sm font-semibold text-foreground">Показывать фильтры</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 px-0 text-lg"
+                    aria-label="Закрыть настройку фильтров"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      triggerRef.current?.focus();
+                    }}
+                  >
+                    <span aria-hidden="true">×</span>
+                  </Button>
                 </div>
                 <div className="max-h-72 overflow-y-auto">
                   {optionalFilters.map((filter) => {
@@ -240,8 +267,7 @@ function ConfigurableFilterBarState({
                         key={filter.id}
                         className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm text-foreground hover:bg-foreground/5"
                       >
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={checked}
                           onChange={(event) => setVisible(filter, event.target.checked)}
                         />

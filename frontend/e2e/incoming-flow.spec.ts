@@ -54,7 +54,7 @@ test.describe("Incoming flow (owner)", () => {
     // debounces at 200ms, then fires the trigram search.
     const searchKey = catalogSearchKey(item.brand_name);
     await pickerInput.fill(searchKey);
-    const option = page.getByRole("button", { name: new RegExp(item.brand_name) });
+    const option = page.getByRole("option", { name: new RegExp(item.brand_name) });
     await expect(option).toBeVisible({ timeout: 15_000 });
     await option.click();
 
@@ -78,8 +78,9 @@ test.describe("Incoming flow (owner)", () => {
     await expect(acceptDialog).toBeVisible();
     await acceptDialog.getByRole("button", { name: /^Принять$/ }).click();
 
-    // Status badge flips to "Принят" (or similar accepted-label).
-    await expect(page.getByText(/Принят/)).toBeVisible({ timeout: 15_000 });
+    // Wait for the exact accepted status. A partial match also finds the
+    // "Принять" action before its request has completed.
+    await expect(page.getByText("Принят", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     // Hop over to /batches and filter by the unique catalog item → see the
     // freshly-made batch. Branch options are loaded separately and can lag
@@ -87,7 +88,7 @@ test.describe("Incoming flow (owner)", () => {
     await page.goto("/batches");
     const batchCatalogPicker = page.getByPlaceholder("Найти по названию…");
     await batchCatalogPicker.fill(searchKey);
-    const batchCatalogOption = page.getByRole("button", {
+    const batchCatalogOption = page.getByRole("option", {
       name: new RegExp(item.brand_name),
     });
     await expect(batchCatalogOption).toBeVisible({ timeout: 15_000 });

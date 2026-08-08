@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ConfirmDialog } from "@/components/ui";
+import { ConfirmDialog, Modal } from "@/components/ui";
 
 describe("ConfirmDialog", () => {
   it("renders nothing while closed", () => {
@@ -114,5 +114,31 @@ describe("ConfirmDialog", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(opener).toHaveFocus();
+  });
+
+  it("closes only the top dialog when dialogs are nested", () => {
+    function Harness(): JSX.Element {
+      const [confirmOpen, setConfirmOpen] = useState(true);
+      return (
+        <Modal open onClose={vi.fn()} title="Назначения">
+          <ConfirmDialog
+            open={confirmOpen}
+            title="Отозвать роль"
+            message="Роль перестанет действовать."
+            onConfirm={vi.fn()}
+            onCancel={() => setConfirmOpen(false)}
+          />
+        </Modal>
+      );
+    }
+
+    render(<Harness />);
+    expect(screen.getByRole("dialog", { name: "Назначения" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Отозвать роль" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Отозвать роль" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Назначения" })).toBeInTheDocument();
   });
 });

@@ -1,0 +1,90 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { useCatalogQuery } from "@/features/catalog/queries";
+import { type CatalogItem } from "@/features/catalog/types";
+import { QuickProducts } from "@/features/pos/QuickProducts";
+
+vi.mock("@/features/catalog/queries", () => ({
+  useCatalogQuery: vi.fn(),
+}));
+
+const products: CatalogItem[] = [
+  {
+    id: "product-1",
+    tenant_id: "tenant-1",
+    brand_name: "Парацетамол 500 мг",
+    inn: "Парацетамол",
+    manufacturer: "Aurum",
+    form: "таблетки",
+    dosage: "500 мг",
+    pack_size: "20 таблеток",
+    atx_code: null,
+    dispensing_type: "otc",
+    storage_type: "normal",
+    category: "Обезболивающие",
+    base_price: "6.50",
+    currency: "TJS",
+    is_active: true,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    stock_available: "148",
+  },
+  {
+    id: "product-2",
+    tenant_id: "tenant-1",
+    brand_name: "Амоксициллин 250 мг",
+    inn: "Амоксициллин",
+    manufacturer: "Aurum",
+    form: "капсулы",
+    dosage: "250 мг",
+    pack_size: "20 капсул",
+    atx_code: null,
+    dispensing_type: "prescription",
+    storage_type: "normal",
+    category: "Антибиотики",
+    base_price: "12.80",
+    currency: "TJS",
+    is_active: true,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    stock_available: "0",
+  },
+];
+
+describe("QuickProducts", () => {
+  beforeEach(() => {
+    vi.mocked(useCatalogQuery).mockReturnValue({
+      data: {
+        items: products,
+        total: products.length,
+        page: 1,
+        page_size: 4,
+      },
+      error: null,
+      isLoading: false,
+    } as ReturnType<typeof useCatalogQuery>);
+  });
+
+  it("adds an available product and blocks an unavailable one", async () => {
+    const onAdd = vi.fn().mockResolvedValue(true);
+    render(<QuickProducts branchId="branch-1" onAdd={onAdd} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Добавить Парацетамол 500 мг" }));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith("product-1", "Парацетамол 500 мг", 1));
+
+    expect(screen.getByRole("button", { name: "Добавить Амоксициллин 250 мг" })).toBeDisabled();
+  });
+
+  it("switches between the grid and list presentations", () => {
+    render(<QuickProducts branchId="branch-1" onAdd={vi.fn()} />);
+
+    const grid = screen.getByRole("button", { name: "Показать товары плиткой" });
+    const list = screen.getByRole("button", { name: "Показать товары списком" });
+    expect(grid).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(list);
+    expect(list).toHaveAttribute("aria-pressed", "true");
+    expect(grid).toHaveAttribute("aria-pressed", "false");
+  });
+});

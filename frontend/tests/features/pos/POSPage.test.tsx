@@ -42,6 +42,7 @@ vi.mock("@/features/catalog/queries", () => ({
 }));
 
 import { POSPage } from "@/features/pos/POSPage";
+import { useAuthStore } from "@/stores/auth";
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -83,23 +84,41 @@ const OPEN_SHIFT = {
   notes: null,
 };
 
+const POS_USER = {
+  id: "u-1",
+  email: "cashier@aurum.tj",
+  full_name: "Кассир",
+  is_developer: false,
+  is_administrator: false,
+  home_tenant_id: "t-1",
+  active_tenant_id: "t-1",
+  status: "active",
+  last_login_at: null,
+  level: 1,
+  is_tenant_owner: false,
+  branch_assignments: {},
+  permissions: ["pos.shift_open", "pos.shift_close", "pos.sell"],
+  support_access: null,
+};
+
 describe("POSPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    useAuthStore.getState().setUser(POS_USER);
     getCurrentShift.mockReset();
     openShift.mockReset();
     listRegisters.mockReset();
   });
   afterEach(() => {
     vi.clearAllMocks();
+    useAuthStore.getState().clear();
   });
 
   it("hints to create a register when none exist", async () => {
     listRegisters.mockResolvedValueOnce([]);
     renderPage();
-    expect(
-      await screen.findByText(/Нет активных касс\. Создайте кассу/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Нет активных касс")).toBeInTheDocument();
+    expect(screen.getByText(/Создайте рабочую кассу/i)).toBeInTheDocument();
   });
 
   it("auto-selects the only register (no manual choice) and shows the open-shift form", async () => {
@@ -131,6 +150,23 @@ describe("POSPage", () => {
     expect(window.localStorage.getItem("pos:lastRegisterId")).toBe(second.id);
   });
 
+  it("hides shift and sale actions that are outside the account permissions", async () => {
+    useAuthStore.getState().setUser({
+      ...POS_USER,
+      permissions: ["pos.shift_close"],
+    });
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockResolvedValue(null);
+
+    renderPage();
+
+    expect(
+      await screen.findByText("Открытие смены недоступно для этого аккаунта."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Открыть смену/i })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Поиск товара/i)).not.toBeInTheDocument();
+  });
+
   it("opens the shift with the entered opening cash", async () => {
     listRegisters.mockResolvedValue([REGISTER]);
     getCurrentShift.mockResolvedValue(null);
@@ -153,9 +189,7 @@ describe("POSPage", () => {
     openShift.mockRejectedValueOnce(new Error("response lost"));
     renderPage();
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Открыть смену/i }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: /Открыть смену/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/Смена открыта/i)).toBeInTheDocument();
