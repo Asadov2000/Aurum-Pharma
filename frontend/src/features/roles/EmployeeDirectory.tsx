@@ -60,7 +60,7 @@ export function EmployeeDirectory({
     <div
       role="table"
       aria-label="Сотрудники аптеки"
-      className="min-w-0 overflow-hidden rounded-lg border border-border bg-surface"
+      className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-surface"
     >
       <div
         role="row"
@@ -78,7 +78,7 @@ export function EmployeeDirectory({
           <DirectoryColumnHeader className="text-right">Действия</DirectoryColumnHeader>
         ) : null}
       </div>
-      <ul role="rowgroup" className="divide-y divide-border">
+      <ul role="rowgroup" className="min-w-0 max-w-full divide-y divide-border overflow-hidden">
         {rows.map((member) => (
           <EmployeeDirectoryRow
             key={member.id}
@@ -186,7 +186,7 @@ function EmployeeDirectoryRow({
     <li
       role="row"
       className={cn(
-        "relative grid min-w-0 grid-cols-1 gap-x-5 gap-y-3 overflow-hidden p-4 transition-colors duration-fast hover:bg-foreground/[0.02] sm:grid-cols-2 xl:items-center xl:gap-3 xl:overflow-visible xl:px-4 xl:py-3",
+        "relative grid w-full min-w-0 max-w-full grid-cols-1 gap-x-5 gap-y-3 overflow-hidden p-4 transition-colors duration-fast hover:bg-foreground/[0.02] sm:grid-cols-2 xl:items-center xl:gap-3 xl:overflow-visible xl:px-4 xl:py-3",
         columns,
       )}
     >
