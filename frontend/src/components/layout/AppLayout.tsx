@@ -1,10 +1,10 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, type ReactNode, useEffect, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
 import { AppearanceMenu } from "@/components/AppearanceMenu";
 import { useAuth } from "@/features/auth/hooks";
-import { MfaStepUpDialog } from "@/features/auth/MfaStepUpDialog";
+import { useMfaStepUpRequested } from "@/features/auth/stepUpCoordinator";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
 
@@ -18,9 +18,15 @@ import { ServerStatusBanner } from "./ServerStatusBanner";
 import { Sidebar } from "./Sidebar";
 import { buildNav } from "./nav";
 
+const MfaStepUpDialog = lazy(async () => {
+  const module = await import("@/features/auth/MfaStepUpDialog");
+  return { default: module.MfaStepUpDialog };
+});
+
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const mfaStepUpRequested = useMfaStepUpRequested();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const navigationDrawerRef = useRef<HTMLDivElement>(null);
@@ -259,7 +265,35 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         </main>
       </div>
 
-      <MfaStepUpDialog />
+      {mfaStepUpRequested ? (
+        <Suspense fallback={<MfaStepUpLoading />}>
+          <MfaStepUpDialog />
+        </Suspense>
+      ) : null}
+    </div>
+  );
+}
+
+function MfaStepUpLoading(): JSX.Element {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  return (
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Загрузка подтверждения действия"
+      aria-busy="true"
+      tabIndex={-1}
+      className="fixed inset-0 z-modal flex items-center justify-center bg-overlay p-4 outline-none"
+    >
+      <div className="rounded-lg border border-border bg-surface-raised px-5 py-4 text-sm text-foreground-muted shadow-xl">
+        Загрузка защиты…
+      </div>
     </div>
   );
 }

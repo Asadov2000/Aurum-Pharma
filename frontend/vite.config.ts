@@ -3,6 +3,45 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const coreRuntimePackages = new Set([
+  "@tanstack/history",
+  "@tanstack/query-core",
+  "@tanstack/react-query",
+  "@tanstack/react-router",
+  "@tanstack/react-store",
+  "@tanstack/router-core",
+  "@tanstack/store",
+  "axios",
+  "clsx",
+  "react",
+  "react-dom",
+  "scheduler",
+  "tailwind-merge",
+  "use-sync-external-store",
+  "zustand",
+]);
+const formPackages = new Set(["react-hook-form", "zod"]);
+
+function packageNameFromModuleId(id: string): string | undefined {
+  const normalizedId = id.replaceAll("\\", "/");
+  const packagePath = normalizedId.split("/node_modules/").at(-1);
+  if (!packagePath) return undefined;
+
+  const [firstSegment, secondSegment] = packagePath.split("/");
+  if (!firstSegment) return undefined;
+  return firstSegment.startsWith("@") && secondSegment
+    ? `${firstSegment}/${secondSegment}`
+    : firstSegment;
+}
+
+function splitRuntimeDependencies(id: string): string | undefined {
+  const packageName = packageNameFromModuleId(id);
+  if (!packageName) return undefined;
+  if (formPackages.has(packageName)) return "vendor-forms";
+  if (coreRuntimePackages.has(packageName)) return "vendor-core";
+  return undefined;
+}
+
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
   resolve: {
@@ -46,6 +85,14 @@ export default defineConfig(({ mode }) => ({
         "./src/features/auth/LoginPage.tsx",
         "./src/features/**/*Page.tsx",
       ],
+    },
+  },
+  build: {
+    manifest: true,
+    rollupOptions: {
+      output: {
+        manualChunks: splitRuntimeDependencies,
+      },
     },
   },
   test: {

@@ -525,7 +525,7 @@ jobs:
 
       - name: Production build
         # TypeScript was checked above; avoid running tsc twice in the same job.
-        run: pnpm exec vite build
+        run: pnpm build:assets
 
   dependency-audit:
     name: Dependency security audit

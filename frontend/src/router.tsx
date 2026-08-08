@@ -4,15 +4,14 @@ import {
   createRouter,
   lazyRouteComponent,
 } from "@tanstack/react-router";
-import { z } from "zod";
 
 import { RootLayout } from "@/components/layout/RootLayout";
-import { LoginPage } from "@/features/auth/LoginPage";
 
 const DashboardPage = lazyRouteComponent(
   () => import("@/features/dashboard/DashboardPage"),
   "DashboardPage",
 );
+const LoginPage = lazyRouteComponent(() => import("@/features/auth/LoginPage"), "LoginPage");
 const TenantsPage = lazyRouteComponent(
   () => import("@/features/foundation/TenantsPage"),
   "TenantsPage",
@@ -199,15 +198,15 @@ const reportsRoute = createRoute({
   component: ReportsPage,
 });
 
-const loginSearchSchema = z.object({
-  from: z.string().optional(),
-});
+function parseLoginSearch(raw: Record<string, unknown>): { from?: string } {
+  return typeof raw.from === "string" ? { from: raw.from } : {};
+}
 
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
   component: LoginPage,
-  validateSearch: (raw) => loginSearchSchema.parse(raw),
+  validateSearch: parseLoginSearch,
 });
 
 const routeTree = rootRoute.addChildren([
