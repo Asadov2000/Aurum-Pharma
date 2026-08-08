@@ -186,7 +186,7 @@ function EmployeeDirectoryRow({
     <li
       role="row"
       className={cn(
-        "relative grid min-w-0 grid-cols-1 gap-x-5 gap-y-3 p-4 transition-colors duration-fast hover:bg-foreground/[0.02] sm:grid-cols-2 xl:items-center xl:gap-3 xl:px-4 xl:py-3",
+        "relative grid min-w-0 grid-cols-1 gap-x-5 gap-y-3 overflow-hidden p-4 transition-colors duration-fast hover:bg-foreground/[0.02] sm:grid-cols-2 xl:items-center xl:gap-3 xl:overflow-visible xl:px-4 xl:py-3",
         columns,
       )}
     >
