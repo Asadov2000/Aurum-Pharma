@@ -48,6 +48,11 @@ const SidebarSettingsModal = lazy(async () => {
   return { default: module.SidebarSettingsModal };
 });
 
+const MfaStepUpDialog = lazy(async () => {
+  const module = await import("@/features/auth/MfaStepUpDialog");
+  return { default: module.MfaStepUpDialog };
+});
+
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
