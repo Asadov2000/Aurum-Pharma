@@ -82,7 +82,7 @@ export function IncomingPage(): JSX.Element {
     }),
     [branchFilter, supplierFilter, statusFilter, documentNumber, dateFrom, dateTo, page],
   );
-  const { data, isLoading, error } = useIncomingListQuery(params);
+  const { data, isLoading, isFetching, error, refetch } = useIncomingListQuery(params);
   const filtersActive = Boolean(
     branchFilter || supplierFilter || statusFilter || documentNumberInput || dateFrom || dateTo,
   );
@@ -96,6 +96,7 @@ export function IncomingPage(): JSX.Element {
     <div className="space-y-4">
       <PageHeader
         title="Приходы"
+        description="Черновики поставок, принятые документы и история движения товара на склад."
         actions={canCreate && <Button onClick={() => setCreating(true)}>+ Новый приход</Button>}
       />
 
@@ -276,13 +277,24 @@ export function IncomingPage(): JSX.Element {
         }}
       />
 
-      {error && (
-        <p className="text-sm text-danger">
-          {describeApiError(error, "Не удалось загрузить приходы")}
-        </p>
-      )}
       {isLoading ? (
         <SkeletonRows rows={6} />
+      ) : error ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-4 text-sm text-danger-foreground"
+        >
+          <p>{describeApiError(error, "Не удалось загрузить приходы")}</p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            isLoading={isFetching}
+            onClick={() => void refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
       ) : !data || data.items.length === 0 ? (
         <TableEmpty>
           {filtersActive ? "По текущим фильтрам ничего не найдено" : "Приходов пока нет"}

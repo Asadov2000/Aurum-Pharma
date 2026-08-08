@@ -33,6 +33,10 @@ test.describe("Incoming flow (owner)", () => {
     await api.dispose();
 
     // ---- UI: create a draft incoming document ----
+    await page.addInitScript(() => {
+      window.localStorage.setItem("ui:density", "touch");
+    });
+    await page.setViewportSize({ width: 320, height: 568 });
     await loginInBrowser(page, OWNER);
     await page.goto("/incoming");
     await page.getByRole("button", { name: /\+ Новый приход/ }).click();
@@ -47,8 +51,16 @@ test.describe("Incoming flow (owner)", () => {
     // We land on the detail page after creation.
     await expect(page).toHaveURL(/\/incoming\/[0-9a-f-]+$/);
 
+    // Editing also runs in the touch layout. Explicitly clearing an optional
+    // value must persist as null instead of silently restoring the old value.
+    await page.getByRole("button", { name: "Изменить реквизиты" }).click();
+    const documentDialog = page.getByRole("dialog", { name: "Реквизиты прихода" });
+    await documentDialog.getByLabel("Номер", { exact: true }).clear();
+    await documentDialog.getByRole("button", { name: "Сохранить" }).click();
+    await expect(page.getByRole("heading", { name: "Приход без номера" })).toBeVisible();
+
     // ---- UI: open the add-item form, then pick a catalog row ----
-    await page.getByRole("button", { name: /\+ Добавить позицию/ }).click();
+    await page.getByRole("button", { name: "Добавить позицию" }).click();
     const pickerInput = page.getByPlaceholder(/Начните вводить название/);
     // Use a search string with enough characters to be unique. CatalogPicker
     // debounces at 200ms, then fires the trigram search.
@@ -59,6 +71,8 @@ test.describe("Incoming flow (owner)", () => {
     await option.click();
 
     const expiresAt = isoDateInDays(180);
+    await page.getByLabel("Номер партии").fill("E2E-BATCH");
+    await page.getByLabel("Произведена").fill(isoDateInDays(-30));
     await page.getByLabel("Срок годности").fill(expiresAt);
     await page.getByLabel("Количество").fill("10");
     // Disambiguate between "Цена закупки" and "Цена продажи" — both are
@@ -69,14 +83,38 @@ test.describe("Incoming flow (owner)", () => {
     // «+ Добавить позицию», so we anchor to the exact label here.
     await page.getByRole("button", { name: "Добавить", exact: true }).click();
 
-    // The new row appears in the items table.
-    await expect(page.getByText("10", { exact: false }).first()).toBeVisible();
+    // The enriched response shows the product in one responsive DOM tree.
+    const createdItemCard = page.getByRole("article", { name: item.brand_name });
+    await expect(createdItemCard).toBeVisible();
+    await expect(createdItemCard).toContainText("10");
+
+    // Exercise item editing and clearing nullable fields on the touch form.
+    await createdItemCard.getByRole("button", { name: "Изменить" }).click();
+    const itemDialog = page.getByRole("dialog", { name: "Изменить позицию" });
+    await itemDialog.getByLabel("Номер партии").clear();
+    await itemDialog.getByLabel("Произведена").clear();
+    await itemDialog.getByLabel("Цена продажи").fill("6.00");
+    await itemDialog.getByRole("button", { name: "Сохранить" }).click();
+    await expect(createdItemCard).toContainText("Без номера");
+    await expect(createdItemCard).toContainText("6,00 TJS");
+
+    // The touch layout keeps the document usable without page-level overflow.
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
+    const addPositionBounds = await page
+      .getByRole("button", { name: "Добавить позицию" })
+      .boundingBox();
+    expect(addPositionBounds).not.toBeNull();
+    expect(addPositionBounds!.height).toBeGreaterThanOrEqual(44);
 
     // ---- UI: accept → batch lands on /batches ----
-    await page.getByRole("button", { name: /Принять/ }).click();
+    await page.getByRole("button", { name: "Принять приход" }).click();
     const acceptDialog = page.getByRole("dialog").filter({ hasText: /Принять приход/ });
     await expect(acceptDialog).toBeVisible();
-    await acceptDialog.getByRole("button", { name: /^Принять$/ }).click();
+    await acceptDialog.getByRole("button", { name: "Принять приход" }).click();
 
     // Wait for the exact accepted status. A partial match also finds the
     // "Принять" action before its request has completed.

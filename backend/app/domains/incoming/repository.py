@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -9,7 +10,26 @@ from uuid import UUID
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.catalog.models import TenantCatalog
+from app.domains.foundation.models import Branch
 from app.domains.incoming.models import IncomingDocument, IncomingItem
+from app.domains.suppliers.models import Supplier
+
+
+@dataclass(frozen=True, slots=True)
+class IncomingDocumentDetails:
+    document: IncomingDocument
+    branch_name: str
+    supplier_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class IncomingItemDetails:
+    item: IncomingItem
+    catalog_name: str
+    catalog_form: str | None
+    catalog_dosage: str | None
+    catalog_pack_size: str | None
 
 
 class IncomingRepository:
@@ -27,6 +47,35 @@ class IncomingRepository:
 
     async def get_document(self, document_id: UUID) -> IncomingDocument | None:
         return await self.session.get(IncomingDocument, document_id)
+
+    async def get_document_details(self, document_id: UUID) -> IncomingDocumentDetails | None:
+        stmt = (
+            select(IncomingDocument, Branch.name, Supplier.name)
+            .join(
+                Branch,
+                and_(
+                    Branch.id == IncomingDocument.branch_id,
+                    Branch.tenant_id == IncomingDocument.tenant_id,
+                ),
+            )
+            .join(
+                Supplier,
+                and_(
+                    Supplier.id == IncomingDocument.supplier_id,
+                    Supplier.tenant_id == IncomingDocument.tenant_id,
+                ),
+            )
+            .where(IncomingDocument.id == document_id)
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+        document, branch_name, supplier_name = row
+        return IncomingDocumentDetails(
+            document=document,
+            branch_name=branch_name,
+            supplier_name=supplier_name,
+        )
 
     async def list_documents(
         self,
@@ -111,6 +160,37 @@ class IncomingRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_item_details(self, document_id: UUID) -> list[IncomingItemDetails]:
+        stmt = (
+            select(
+                IncomingItem,
+                TenantCatalog.brand_name,
+                TenantCatalog.form,
+                TenantCatalog.dosage,
+                TenantCatalog.pack_size,
+            )
+            .join(
+                TenantCatalog,
+                and_(
+                    TenantCatalog.id == IncomingItem.catalog_id,
+                    TenantCatalog.tenant_id == IncomingItem.tenant_id,
+                ),
+            )
+            .where(IncomingItem.document_id == document_id)
+            .order_by(IncomingItem.created_at.asc(), IncomingItem.id.asc())
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            IncomingItemDetails(
+                item=item,
+                catalog_name=catalog_name,
+                catalog_form=catalog_form,
+                catalog_dosage=catalog_dosage,
+                catalog_pack_size=catalog_pack_size,
+            )
+            for item, catalog_name, catalog_form, catalog_dosage, catalog_pack_size in rows
+        ]
 
     async def update_item(self, item: IncomingItem, **fields: Any) -> IncomingItem:
         for k, v in fields.items():

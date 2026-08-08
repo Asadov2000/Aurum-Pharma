@@ -136,6 +136,22 @@ describe("IncomingPage", () => {
     expect(await screen.findByText(/Приходов пока нет/i)).toBeInTheDocument();
   });
 
+  it("shows a retryable error without a misleading empty state", async () => {
+    listIncoming
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
+    listBranches.mockResolvedValue([BRANCH]);
+    listSuppliers.mockResolvedValue([SUPPLIER]);
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить приходы");
+    expect(screen.queryByText(/Приходов пока нет/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByText(/Приходов пока нет/i)).toBeInTheDocument();
+    expect(listIncoming).toHaveBeenCalledTimes(2);
+  });
+
   it("resolves branch and supplier ids to names from the lookups", async () => {
     listIncoming.mockResolvedValueOnce({ items: [DOC], total: 1, page: 1, page_size: 25 });
     listBranches.mockResolvedValueOnce([BRANCH]);

@@ -8,7 +8,9 @@ import { useBranchesQuery } from "@/features/foundation/queries";
 import { describeApiError } from "@/features/foundation/errors";
 import { useSuppliersQuery } from "@/features/suppliers/queries";
 
-import { useCreateIncoming } from "./queries";
+import { pharmacyCalendarDate } from "./calendar";
+import { useCreateIncoming, useUpdateIncoming } from "./queries";
+import { type IncomingDocument } from "./types";
 
 const schema = z.object({
   branch_id: z.string().min(1, "Выберите точку"),
@@ -20,20 +22,28 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-export function NewIncomingForm({ onClose }: { onClose: () => void }): JSX.Element {
+export function NewIncomingForm({
+  onClose,
+  document,
+}: {
+  onClose: () => void;
+  document?: IncomingDocument;
+}): JSX.Element {
   const branches = useBranchesQuery(false);
   const suppliers = useSuppliersQuery(false);
   const create = useCreateIncoming();
+  const update = useUpdateIncoming();
   const navigate = useNavigate();
   const [topError, setTopError] = useState<string | null>(null);
+  const isEditing = document !== undefined;
 
   const form = useForm<FormValues>({
     defaultValues: {
-      branch_id: "",
-      supplier_id: "",
-      document_date: new Date().toISOString().slice(0, 10),
-      document_number: "",
-      notes: "",
+      branch_id: document?.branch_id ?? "",
+      supplier_id: document?.supplier_id ?? "",
+      document_date: document?.document_date ?? pharmacyCalendarDate(),
+      document_number: document?.document_number ?? "",
+      notes: document?.notes ?? "",
     },
   });
 
@@ -52,23 +62,58 @@ export function NewIncomingForm({ onClose }: { onClose: () => void }): JSX.Eleme
     setTopError(null);
     const d = parsed.data;
     try {
-      const doc = await create.mutateAsync({
+      const payload = {
         branch_id: d.branch_id,
         supplier_id: d.supplier_id,
         document_date: d.document_date,
         document_number: d.document_number?.trim() || null,
         notes: d.notes?.trim() || null,
-      });
+      };
+      const saved = document
+        ? await update.mutateAsync({ id: document.id, payload })
+        : await create.mutateAsync(payload);
       onClose();
-      navigate({ to: "/incoming/$id", params: { id: doc.id } });
+      if (!document) navigate({ to: "/incoming/$id", params: { id: saved.id } });
     } catch (err) {
-      setTopError(describeApiError(err, "Не удалось создать приход"));
+      setTopError(
+        describeApiError(
+          err,
+          isEditing ? "Не удалось сохранить реквизиты" : "Не удалось создать приход",
+        ),
+      );
     }
   });
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      {(branches.error || suppliers.error) && (
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-3 text-sm text-danger-foreground"
+        >
+          <p>
+            {branches.error && suppliers.error
+              ? "Не удалось загрузить точки и поставщиков."
+              : branches.error
+                ? "Не удалось загрузить точки."
+                : "Не удалось загрузить поставщиков."}
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="mt-2"
+            onClick={() => {
+              if (branches.error) void branches.refetch();
+              if (suppliers.error) void suppliers.refetch();
+            }}
+          >
+            Повторить
+          </Button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <Label htmlFor="branch_id">Точка</Label>
           <Select
@@ -76,7 +121,7 @@ export function NewIncomingForm({ onClose }: { onClose: () => void }): JSX.Eleme
             invalid={Boolean(form.formState.errors.branch_id)}
             {...form.register("branch_id")}
           >
-            <option value="">— выберите —</option>
+            <option value="">{branches.isLoading ? "Загрузка точек…" : "— выберите —"}</option>
             {branches.data?.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name}
@@ -92,7 +137,9 @@ export function NewIncomingForm({ onClose }: { onClose: () => void }): JSX.Eleme
             invalid={Boolean(form.formState.errors.supplier_id)}
             {...form.register("supplier_id")}
           >
-            <option value="">— выберите —</option>
+            <option value="">
+              {suppliers.isLoading ? "Загрузка поставщиков…" : "— выберите —"}
+            </option>
             {suppliers.data?.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -115,7 +162,7 @@ export function NewIncomingForm({ onClose }: { onClose: () => void }): JSX.Eleme
           <Label htmlFor="document_number">Номер</Label>
           <Input id="document_number" {...form.register("document_number")} />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <Label htmlFor="notes">Комментарий</Label>
           <Textarea id="notes" {...form.register("notes")} />
         </div>
@@ -125,8 +172,12 @@ export function NewIncomingForm({ onClose }: { onClose: () => void }): JSX.Eleme
         <Button type="button" variant="secondary" onClick={onClose}>
           Отмена
         </Button>
-        <Button type="submit" isLoading={form.formState.isSubmitting}>
-          Создать черновик
+        <Button
+          type="submit"
+          disabled={Boolean(branches.error || suppliers.error)}
+          isLoading={form.formState.isSubmitting}
+        >
+          {isEditing ? "Сохранить" : "Создать черновик"}
         </Button>
       </div>
     </form>

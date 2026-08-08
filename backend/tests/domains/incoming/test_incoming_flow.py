@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import BusinessRuleError, NotFoundError
 from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Branch, Tenant
+from app.domains.incoming import service as incoming_service_module
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.service import IncomingService
 from app.domains.inventory.models import Batch
@@ -146,6 +147,39 @@ async def test_add_items_recomputes_total(db_session: AsyncSession, scaffold) ->
     fresh = await service.get_document(doc.id)
     # 10 * 5.00 + 3 * 4.50 = 50.00 + 13.50 = 63.50
     assert fresh.total_amount == Decimal("63.50")
+
+
+async def test_incoming_details_include_reference_names_without_extra_api_queries(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, catalog_item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+    created = await service.add_item(
+        doc.id,
+        fields={
+            "catalog_id": catalog_item.id,
+            "expires_at": date.today() + timedelta(days=180),
+            "qty": Decimal("2"),
+            "purchase_price": Decimal("5.00"),
+            "sale_price": Decimal("8.00"),
+        },
+    )
+
+    document_details = await service.get_document_details(doc.id)
+    item_details = await service.list_item_details(doc.id)
+
+    assert document_details.branch_name == branch.name
+    assert document_details.supplier_name == supplier.name
+    assert item_details[0].item.id == created.id
+    assert item_details[0].catalog_name == catalog_item.brand_name
 
 
 async def test_incoming_item_catalog_must_match_document_tenant(
@@ -288,6 +322,39 @@ async def test_accept_with_past_expiry_blocked(db_session: AsyncSession, scaffol
         },
     )
     with pytest.raises(BusinessRuleError):
+        await service.accept(doc.id)
+
+
+async def test_accept_uses_pharmacy_calendar_day(
+    db_session: AsyncSession,
+    scaffold,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    instant = datetime(2026, 8, 1, 20, 0, tzinfo=UTC)
+    monkeypatch.setattr(incoming_service_module, "utc_now", lambda: instant)
+
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date(2026, 8, 2),
+        },
+    )
+    await service.add_item(
+        doc.id,
+        fields={
+            "catalog_id": item.id,
+            "expires_at": date(2026, 8, 2),
+            "qty": Decimal("1"),
+            "purchase_price": Decimal("1"),
+            "sale_price": Decimal("1"),
+        },
+    )
+
+    with pytest.raises(BusinessRuleError, match="expires_at must be in the future"):
         await service.accept(doc.id)
 
 
