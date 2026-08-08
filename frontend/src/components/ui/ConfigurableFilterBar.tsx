@@ -202,7 +202,7 @@ function ConfigurableFilterBarState({
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 w-9 shrink-0 px-0 text-lg text-foreground-muted"
+              className="h-[var(--control-height-sm)] w-[var(--control-height-sm)] shrink-0 px-0 text-lg text-foreground-muted"
               aria-label={`Убрать фильтр «${filter.label}»`}
               title={`Убрать фильтр «${filter.label}»`}
               onClick={() => {
@@ -249,7 +249,7 @@ function ConfigurableFilterBarState({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 w-8 px-0 text-lg"
+                    className="h-[var(--control-height-sm)] w-[var(--control-height-sm)] px-0 text-lg"
                     aria-label="Закрыть настройку фильтров"
                     onClick={() => {
                       setMenuOpen(false);
@@ -265,7 +265,7 @@ function ConfigurableFilterBarState({
                     return (
                       <label
                         key={filter.id}
-                        className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm text-foreground hover:bg-foreground/5"
+                        className="flex min-h-[var(--control-height-sm)] cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm text-foreground hover:bg-foreground/5"
                       >
                         <Checkbox
                           checked={checked}

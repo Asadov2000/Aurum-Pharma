@@ -142,7 +142,7 @@ export function Modal({
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-lg text-foreground-muted transition-colors duration-fast hover:bg-foreground/5 hover:text-foreground"
+            className="grid h-[var(--control-height-sm)] w-[var(--control-height-sm)] shrink-0 place-items-center rounded-md text-lg text-foreground-muted transition-colors duration-fast hover:bg-foreground/5 hover:text-foreground"
           >
             ✕
           </button>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -7,6 +7,7 @@ import { describeApiError } from "@/features/foundation/errors";
 
 import { useUpdateUser } from "./queries";
 import { type UserWithAssignments } from "./types";
+import { employeeInitials } from "./userPresentation";
 
 const schema = z.object({
   full_name: z.string().trim().min(1, "Введите ФИО").max(200, "Не более 200 символов"),
@@ -17,10 +18,12 @@ type FormValues = z.infer<typeof schema>;
 
 interface Props {
   user: UserWithAssignments;
-  onClose: () => void;
+  onSaved: () => void;
+  onCancel: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
-export function UserProfileForm({ user, onClose }: Props): JSX.Element {
+export function UserProfileForm({ user, onSaved, onCancel, onDirtyChange }: Props): JSX.Element {
   const updateUser = useUpdateUser();
   const [topError, setTopError] = useState<string | null>(null);
   const form = useForm<FormValues>({
@@ -29,6 +32,11 @@ export function UserProfileForm({ user, onClose }: Props): JSX.Element {
       phone: user.phone ?? "",
     },
   });
+  const isDirty = form.formState.isDirty;
+
+  useEffect(() => {
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
@@ -52,7 +60,8 @@ export function UserProfileForm({ user, onClose }: Props): JSX.Element {
           phone: parsed.data.phone.trim() || null,
         },
       });
-      onClose();
+      onDirtyChange(false);
+      onSaved();
     } catch (error) {
       setTopError(describeApiError(error, "Не удалось обновить профиль"));
     }
@@ -60,14 +69,32 @@ export function UserProfileForm({ user, onClose }: Props): JSX.Element {
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4">
+      <div className="flex min-w-0 items-center gap-3 border-b border-border pb-4">
+        <span
+          aria-hidden="true"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-primary/10 text-sm font-semibold text-primary"
+        >
+          {employeeInitials(user.full_name)}
+        </span>
+        <div className="min-w-0">
+          <p className="break-words font-semibold text-foreground">{user.full_name}</p>
+          <p className="break-all text-sm text-foreground-muted">{user.email}</p>
+        </div>
+      </div>
+
       <div>
         <Label htmlFor="member-full-name">ФИО</Label>
         <Input
           id="member-full-name"
+          autoFocus
+          autoComplete="name"
           invalid={Boolean(form.formState.errors.full_name)}
+          aria-describedby={form.formState.errors.full_name ? "member-full-name-error" : undefined}
           {...form.register("full_name")}
         />
-        <FormError>{form.formState.errors.full_name?.message}</FormError>
+        <FormError id="member-full-name-error">
+          {form.formState.errors.full_name?.message}
+        </FormError>
       </div>
 
       <div>
@@ -75,19 +102,30 @@ export function UserProfileForm({ user, onClose }: Props): JSX.Element {
         <Input
           id="member-phone"
           type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          placeholder="+992 00 000 00 00"
           invalid={Boolean(form.formState.errors.phone)}
+          aria-describedby={form.formState.errors.phone ? "member-phone-error" : undefined}
           {...form.register("phone")}
         />
-        <FormError>{form.formState.errors.phone?.message}</FormError>
+        <FormError id="member-phone-error">{form.formState.errors.phone?.message}</FormError>
       </div>
 
-      {topError && <p className="text-sm text-danger">{topError}</p>}
+      {topError ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+        >
+          {topError}
+        </p>
+      ) : null}
 
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose}>
+      <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+        <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
-        <Button type="submit" isLoading={form.formState.isSubmitting}>
+        <Button type="submit" isLoading={form.formState.isSubmitting} disabled={!isDirty}>
           Сохранить
         </Button>
       </div>

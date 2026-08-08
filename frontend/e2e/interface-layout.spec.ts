@@ -148,6 +148,48 @@ test.describe("Interface layout", () => {
     await expect(createRoleButton).toBeFocused();
   });
 
+  test("keeps the employee directory and profile actions usable with touch", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.addInitScript(() => {
+      window.localStorage.setItem("ui:density", "touch");
+    });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/users");
+
+    const directory = page.getByRole("table", { name: "Сотрудники аптеки" });
+    await expect(directory).toBeVisible();
+    expect(
+      await directory.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+
+    const ownerRow = directory.getByRole("row", { name: /Demo Owner/ });
+    const actionButton = ownerRow.getByRole("button", { name: "Действия для Demo Owner" });
+    const actionBounds = await actionButton.boundingBox();
+    expect(actionBounds).not.toBeNull();
+    expect(actionBounds!.width).toBeGreaterThanOrEqual(44);
+    expect(actionBounds!.height).toBeGreaterThanOrEqual(44);
+
+    await actionButton.click();
+    await page.getByRole("menuitem", { name: "Профиль" }).click();
+    const profileDialog = page.getByRole("dialog", { name: "Профиль: Demo Owner" });
+    await expect(profileDialog).toBeVisible();
+    const dialogBounds = await profileDialog.boundingBox();
+    expect(dialogBounds).not.toBeNull();
+    expect(dialogBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(320);
+    await page.keyboard.press("Escape");
+    await expect(profileDialog).toBeHidden();
+    await expect(actionButton).toBeFocused();
+    await expectNoHorizontalOverflow(page, "/users touch @ 320x568");
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(directory.getByRole("columnheader", { name: "Сотрудник" })).toBeVisible();
+    await expect(directory.getByRole("columnheader", { name: "Доступ" })).toBeVisible();
+    expect(
+      await directory.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+  });
+
   test("keeps the login form usable at the narrow Windows app width", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/login");
