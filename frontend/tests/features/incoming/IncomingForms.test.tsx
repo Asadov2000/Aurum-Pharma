@@ -6,7 +6,7 @@ const addIncomingItem = vi.fn();
 const updateIncomingItem = vi.fn();
 const updateIncoming = vi.fn();
 const listBranches = vi.fn();
-const listSuppliers = vi.fn();
+const searchSupplierOptions = vi.fn();
 const navigate = vi.fn();
 
 vi.mock("@/features/incoming/api", () => ({
@@ -38,10 +38,13 @@ vi.mock("@/features/foundation/api", () => ({
 }));
 
 vi.mock("@/features/suppliers/api", () => ({
-  listSuppliers: (...args: unknown[]) => listSuppliers(...args),
+  listSuppliers: vi.fn(),
+  searchSuppliers: vi.fn(),
+  searchSupplierOptions: (...args: unknown[]) => searchSupplierOptions(...args),
   createSupplier: vi.fn(),
   updateSupplier: vi.fn(),
-  listSupplierReturns: vi.fn(),
+  searchSupplierReturns: vi.fn(),
+  searchSupplierReturnCandidates: vi.fn(),
   createSupplierReturn: vi.fn(),
 }));
 
@@ -242,10 +245,12 @@ describe("NewIncomingForm", () => {
   beforeEach(() => {
     updateIncoming.mockReset();
     listBranches.mockReset();
-    listSuppliers.mockReset();
+    searchSupplierOptions.mockReset();
     navigate.mockReset();
     listBranches.mockResolvedValue([BRANCH]);
-    listSuppliers.mockResolvedValue([SUPPLIER]);
+    searchSupplierOptions.mockResolvedValue({
+      items: [{ id: SUPPLIER.id, name: SUPPLIER.name, is_active: true }],
+    });
     updateIncoming.mockResolvedValue({ id: "doc-1" });
   });
 

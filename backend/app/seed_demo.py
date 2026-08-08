@@ -215,7 +215,8 @@ async def _clean_demo(session: AsyncSession, tenant_id: UUID) -> None:
         "sale",
         # incoming_item.created_batch_id → batch, so incoming rows go first.
         "incoming_item",
-        "supplier_return",
+        # supplier_return is append-only. If rows exist, their immutable stock
+        # movements make the guard above fail before cleanup reaches this loop.
         "incoming_document",
         "batch",
         "barcode",

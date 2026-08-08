@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listIncoming = vi.fn();
 const listBranches = vi.fn();
-const listSuppliers = vi.fn();
+const searchSupplierOptions = vi.fn();
 
 vi.mock("@/features/incoming/api", () => ({
   listIncoming: (...a: unknown[]) => listIncoming(...a),
@@ -35,10 +35,13 @@ vi.mock("@/features/foundation/api", () => ({
 }));
 
 vi.mock("@/features/suppliers/api", () => ({
-  listSuppliers: (...a: unknown[]) => listSuppliers(...a),
+  listSuppliers: vi.fn(),
+  searchSuppliers: vi.fn(),
+  searchSupplierOptions: (...a: unknown[]) => searchSupplierOptions(...a),
   createSupplier: vi.fn(),
   updateSupplier: vi.fn(),
-  listSupplierReturns: vi.fn(),
+  searchSupplierReturns: vi.fn(),
+  searchSupplierReturnCandidates: vi.fn(),
   createSupplierReturn: vi.fn(),
 }));
 
@@ -106,6 +109,7 @@ const DOC = {
   tenant_id: "t-1",
   branch_id: BRANCH.id,
   supplier_id: SUPPLIER.id,
+  supplier_name: SUPPLIER.name,
   document_number: "INV-001",
   document_date: "2026-05-22",
   status: "draft" as const,
@@ -122,7 +126,10 @@ describe("IncomingPage", () => {
   beforeEach(() => {
     listIncoming.mockReset();
     listBranches.mockReset();
-    listSuppliers.mockReset();
+    searchSupplierOptions.mockReset();
+    searchSupplierOptions.mockResolvedValue({
+      items: [{ id: SUPPLIER.id, name: SUPPLIER.name, is_active: true }],
+    });
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -131,7 +138,6 @@ describe("IncomingPage", () => {
   it("renders an empty-state hint when there are no documents", async () => {
     listIncoming.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
     listBranches.mockResolvedValueOnce([BRANCH]);
-    listSuppliers.mockResolvedValueOnce([SUPPLIER]);
     renderPage();
     expect(await screen.findByText(/Приходов пока нет/i)).toBeInTheDocument();
   });
@@ -141,7 +147,6 @@ describe("IncomingPage", () => {
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
     listBranches.mockResolvedValue([BRANCH]);
-    listSuppliers.mockResolvedValue([SUPPLIER]);
     renderPage();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить приходы");
@@ -155,7 +160,6 @@ describe("IncomingPage", () => {
   it("resolves branch and supplier ids to names from the lookups", async () => {
     listIncoming.mockResolvedValueOnce({ items: [DOC], total: 1, page: 1, page_size: 25 });
     listBranches.mockResolvedValueOnce([BRANCH]);
-    listSuppliers.mockResolvedValueOnce([SUPPLIER]);
     renderPage();
     // Branch and supplier names appear both in filter dropdowns (as <option>)
     // and in the table row — scope to the table to avoid duplicate matches.
@@ -169,7 +173,6 @@ describe("IncomingPage", () => {
   it("requests only the selected page and resets pagination after filtering", async () => {
     listIncoming.mockResolvedValue({ items: [DOC], total: 26, page: 1, page_size: 25 });
     listBranches.mockResolvedValue([BRANCH]);
-    listSuppliers.mockResolvedValue([SUPPLIER]);
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: /Вперёд/ }));

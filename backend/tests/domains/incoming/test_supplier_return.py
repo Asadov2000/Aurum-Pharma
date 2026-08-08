@@ -1,23 +1,35 @@
-"""supplier_return: decreases batch qty and surfaces a warning on
-cross-supplier returns."""
+"""Supplier returns preserve stock and source-document invariants."""
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
 from decimal import Decimal
+from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, NotFoundError
+from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.domains.catalog.models import TenantCatalog
+from app.domains.foundation.models import Branch, Tenant
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.service import IncomingService
+from app.domains.inventory.models import BatchMovement
 from app.domains.inventory.repository import InventoryRepository
+from app.domains.suppliers.models import Supplier, SupplierReturn
 from app.domains.suppliers.repository import SuppliersRepository
 from app.domains.suppliers.service import SuppliersService
 
+Scaffold = Callable[[], Awaitable[tuple[Tenant, Branch, TenantCatalog, Supplier]]]
 
-async def _accept_doc_with_batch(db_session, scaffold, qty: int = 10):
+
+async def _accept_doc_with_batch(
+    db_session: AsyncSession,
+    scaffold: Scaffold,
+    qty: int = 10,
+) -> tuple[Tenant, Supplier, UUID]:
     tenant, branch, item, supplier = await scaffold()
     incoming = IncomingService(IncomingRepository(db_session))
     doc = await incoming.create_document(
@@ -41,56 +53,63 @@ async def _accept_doc_with_batch(db_session, scaffold, qty: int = 10):
     await incoming.accept(doc.id)
     items = await incoming.list_items(doc.id)
     batch_id = items[0].created_batch_id
+    assert batch_id is not None
     return tenant, supplier, batch_id
 
 
-async def test_supplier_return_decreases_batch_qty(db_session: AsyncSession, scaffold) -> None:
+async def test_supplier_return_decreases_batch_qty(
+    db_session: AsyncSession,
+    scaffold: Scaffold,
+) -> None:
     tenant, supplier, batch_id = await _accept_doc_with_batch(db_session, scaffold, qty=10)
     service = SuppliersService(SuppliersRepository(db_session))
 
-    sr, warning = await service.create_return(
+    sr = await service.create_return(
+        operation_id=uuid4(),
         tenant_id=tenant.id,
         supplier_id=supplier.id,
         batch_id=batch_id,
         qty=Decimal("3"),
-        reason="defective",
+        reason="quality_issue",
         comment=None,
         source_document_id=None,
         actor_id=None,
     )
     assert sr.qty == Decimal("3")
     assert sr.amount == Decimal("12.00")  # 3 * 4.00
-    assert warning is None
 
     batch = await InventoryRepository(db_session).get_batch(batch_id)
     assert batch is not None
     assert batch.qty_remaining == Decimal("7.000")
 
 
-async def test_supplier_return_warns_on_wrong_supplier(db_session: AsyncSession, scaffold) -> None:
-    """Return the batch to a *different* supplier than the one who delivered
-    it. The service still records the return but flags a warning."""
+async def test_supplier_return_blocks_wrong_supplier(
+    db_session: AsyncSession,
+    scaffold: Scaffold,
+) -> None:
     tenant, _supplier, batch_id = await _accept_doc_with_batch(db_session, scaffold, qty=5)
     suppliers_repo = SuppliersRepository(db_session)
     other_supplier = await suppliers_repo.create_supplier(tenant_id=tenant.id, name="Other")
     service = SuppliersService(suppliers_repo)
 
-    sr, warning = await service.create_return(
-        tenant_id=tenant.id,
-        supplier_id=other_supplier.id,
-        batch_id=batch_id,
-        qty=Decimal("1"),
-        reason="other",
-        comment=None,
-        source_document_id=None,
-        actor_id=None,
-    )
-    assert sr.supplier_id == other_supplier.id
-    assert warning is not None
-    assert "different supplier" in warning.lower()
+    with pytest.raises(BusinessRuleError, match="different supplier"):
+        await service.create_return(
+            operation_id=uuid4(),
+            tenant_id=tenant.id,
+            supplier_id=other_supplier.id,
+            batch_id=batch_id,
+            qty=Decimal("1"),
+            reason="other",
+            comment=None,
+            source_document_id=None,
+            actor_id=None,
+        )
 
 
-async def test_supplier_return_refs_must_match_tenant(db_session: AsyncSession, scaffold) -> None:
+async def test_supplier_return_refs_must_match_tenant(
+    db_session: AsyncSession,
+    scaffold: Scaffold,
+) -> None:
     tenant, supplier, batch_id = await _accept_doc_with_batch(db_session, scaffold, qty=5)
     other_tenant, other_branch, other_item, other_supplier = await scaffold()
     incoming = IncomingService(IncomingRepository(db_session))
@@ -117,41 +136,186 @@ async def test_supplier_return_refs_must_match_tenant(db_session: AsyncSession, 
 
     with pytest.raises(NotFoundError, match="Supplier not found"):
         await service.create_return(
+            operation_id=uuid4(),
             tenant_id=tenant.id,
             supplier_id=other_supplier.id,
             batch_id=batch_id,
             qty=Decimal("1"),
-            reason="wrong tenant supplier",
+            reason="other",
             comment=None,
             source_document_id=None,
             actor_id=None,
         )
 
-    with pytest.raises(NotFoundError, match="Incoming document not found"):
+    with pytest.raises(
+        BusinessRuleError,
+        match="Source document does not match the selected batch",
+    ):
         await service.create_return(
+            operation_id=uuid4(),
             tenant_id=tenant.id,
             supplier_id=supplier.id,
             batch_id=batch_id,
             qty=Decimal("1"),
-            reason="wrong tenant source",
+            reason="other",
             comment=None,
             source_document_id=other_doc.id,
             actor_id=None,
         )
 
 
-async def test_supplier_return_overdraw_blocked(db_session: AsyncSession, scaffold) -> None:
+async def test_supplier_return_overdraw_blocked(
+    db_session: AsyncSession,
+    scaffold: Scaffold,
+) -> None:
     tenant, supplier, batch_id = await _accept_doc_with_batch(db_session, scaffold, qty=2)
     service = SuppliersService(SuppliersRepository(db_session))
 
     with pytest.raises(BusinessRuleError):
         await service.create_return(
+            operation_id=uuid4(),
             tenant_id=tenant.id,
             supplier_id=supplier.id,
             batch_id=batch_id,
             qty=Decimal("99"),
-            reason="defective",
+            reason="quality_issue",
             comment=None,
             source_document_id=None,
             actor_id=None,
         )
+
+
+async def test_supplier_return_retry_is_idempotent(
+    db_session: AsyncSession,
+    scaffold: Scaffold,
+) -> None:
+    tenant, supplier, batch_id = await _accept_doc_with_batch(db_session, scaffold, qty=5)
+    service = SuppliersService(SuppliersRepository(db_session))
+    operation_id = uuid4()
+
+    first = await service.create_return(
+        operation_id=operation_id,
+        tenant_id=tenant.id,
+        supplier_id=supplier.id,
+        batch_id=batch_id,
+        qty=Decimal("2"),
+        reason="damaged",
+        comment="Повреждена упаковка",
+        source_document_id=None,
+        actor_id=None,
+    )
+    repeated = await service.create_return(
+        operation_id=operation_id,
+        tenant_id=tenant.id,
+        supplier_id=supplier.id,
+        batch_id=batch_id,
+        qty=Decimal("2"),
+        reason="damaged",
+        comment="Повреждена упаковка",
+        source_document_id=None,
+        actor_id=None,
+    )
+
+    assert repeated.id == first.id == operation_id
+    batch = await InventoryRepository(db_session).get_batch(batch_id, tenant_id=tenant.id)
+    assert batch is not None
+    assert batch.qty_remaining == Decimal("3.000")
+    return_count = int(
+        (
+            await db_session.execute(
+                select(func.count())
+                .select_from(SupplierReturn)
+                .where(SupplierReturn.id == operation_id)
+            )
+        ).scalar_one()
+    )
+    movement_count = int(
+        (
+            await db_session.execute(
+                select(func.count())
+                .select_from(BatchMovement)
+                .where(BatchMovement.operation_key == f"suppliers:return:{operation_id}")
+            )
+        ).scalar_one()
+    )
+    assert return_count == 1
+    assert movement_count == 1
+
+    with pytest.raises(BusinessRuleError, match="reused with different data"):
+        await service.create_return(
+            operation_id=operation_id,
+            tenant_id=tenant.id,
+            supplier_id=supplier.id,
+            batch_id=batch_id,
+            qty=Decimal("1"),
+            reason="damaged",
+            comment="Повреждена упаковка",
+            source_document_id=None,
+            actor_id=None,
+        )
+
+
+async def test_supplier_return_candidates_history_and_branch_scope(
+    db_session: AsyncSession,
+    scaffold: Scaffold,
+) -> None:
+    tenant, supplier, batch_id = await _accept_doc_with_batch(db_session, scaffold, qty=6)
+    service = SuppliersService(SuppliersRepository(db_session))
+    batch = await InventoryRepository(db_session).get_batch(batch_id, tenant_id=tenant.id)
+    assert batch is not None
+
+    candidates, candidate_total = await service.search_return_candidates(
+        tenant_id=tenant.id,
+        supplier_id=supplier.id,
+        branch_id=batch.branch_id,
+        branch_ids={batch.branch_id},
+        q="Aspirin",
+        page=1,
+        page_size=20,
+    )
+    assert candidate_total == 1
+    assert candidates[0].batch.id == batch_id
+
+    with pytest.raises(PermissionDeniedError, match="Branch access denied"):
+        await service.create_return(
+            operation_id=uuid4(),
+            tenant_id=tenant.id,
+            supplier_id=supplier.id,
+            batch_id=batch_id,
+            qty=Decimal("1"),
+            reason="other",
+            comment=None,
+            source_document_id=candidates[0].source_document_id,
+            actor_id=None,
+            allowed_branch_ids={uuid4()},
+        )
+
+    await service.create_return(
+        operation_id=uuid4(),
+        tenant_id=tenant.id,
+        supplier_id=supplier.id,
+        batch_id=batch_id,
+        qty=Decimal("1.5"),
+        reason="incorrect_delivery",
+        comment="Лишняя позиция",
+        source_document_id=candidates[0].source_document_id,
+        actor_id=None,
+        allowed_branch_ids={batch.branch_id},
+    )
+    rows, summary, timezone_name = await service.search_returns(
+        tenant_id=tenant.id,
+        supplier_id=supplier.id,
+        branch_id=batch.branch_id,
+        branch_ids={batch.branch_id},
+        reason="incorrect_delivery",
+        date_from=None,
+        date_to=None,
+        page=1,
+        page_size=10,
+    )
+    assert timezone_name == "Asia/Dushanbe"
+    assert summary.total == 1
+    assert summary.total_qty == Decimal("1.500")
+    assert summary.total_amount == Decimal("6.00")
+    assert rows[0].branch_id == batch.branch_id
+    assert rows[0].catalog_name == "Aspirin"

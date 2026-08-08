@@ -72,4 +72,11 @@ class SupplierReturn(Base):
     )
     created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
-    __table_args__ = (CheckConstraint("qty > 0", name="ck_sr_qty"),)
+    __table_args__ = (
+        CheckConstraint("qty > 0", name="ck_sr_qty"),
+        CheckConstraint("amount >= 0", name="ck_sr_amount"),
+        CheckConstraint(
+            "reason IN ('damaged','expired','incorrect_delivery','quality_issue','other')",
+            name="ck_sr_reason",
+        ),
+    )

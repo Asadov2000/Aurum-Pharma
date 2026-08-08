@@ -282,6 +282,7 @@ jobs:
           poetry run python -m app.migrate downgrade 0055 --allow-test-downgrade
           run_role_bootstrap
           poetry run python -m app.migrate upgrade head
+          run_role_bootstrap
 
       - name: Verify revision bootstrap fails closed
         env:

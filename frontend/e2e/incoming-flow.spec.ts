@@ -43,7 +43,11 @@ test.describe("Incoming flow (owner)", () => {
 
     const dialog = page.locator('div[role="dialog"]');
     await dialog.getByLabel("Точка").selectOption({ label: branch.name });
-    await dialog.getByLabel("Поставщик").selectOption({ label: supplier.name });
+    const supplierPicker = dialog.getByRole("combobox", { name: "Поставщик" });
+    await supplierPicker.fill(supplier.name);
+    const supplierOption = dialog.getByRole("option", { name: supplier.name });
+    await expect(supplierOption).toBeVisible({ timeout: 15_000 });
+    await supplierOption.click();
     const docNumber = `E2E-${Date.now()}`;
     await dialog.getByLabel("Номер", { exact: true }).fill(docNumber);
     await dialog.getByRole("button", { name: /Создать черновик/ }).click();
@@ -166,6 +170,46 @@ test.describe("Incoming flow (owner)", () => {
     await expect(writeOffMovement).toContainText("Списание", { timeout: 15_000 });
     await expect(writeOffMovement).toContainText("-1");
     await expect(batchDialog.getByText("9", { exact: true }).first()).toBeVisible();
+
+    // ---- UI: supplier card → source-bound return → stock decreases again ----
+    await page.goto("/suppliers");
+    await page.getByLabel("Поиск").fill(supplier.name);
+    const supplierCard = page.getByRole("article").filter({ hasText: supplier.name });
+    await expect(supplierCard).toBeVisible({ timeout: 15_000 });
+    await supplierCard.getByRole("button", { name: "Открыть карточку" }).click();
+
+    const supplierDialog = page.getByRole("dialog", { name: supplier.name });
+    await supplierDialog.getByRole("button", { name: "Оформить возврат" }).click();
+    const returnDialog = page.getByRole("dialog", {
+      name: new RegExp(`Возврат: ${supplier.name}`),
+    });
+    const returnCandidate = returnDialog.getByRole("option", {
+      name: new RegExp(item.brand_name),
+    });
+    await expect(returnCandidate).toBeVisible({ timeout: 15_000 });
+    await returnCandidate.click();
+    await returnDialog.getByLabel("Количество").fill("1");
+    await returnDialog.getByLabel("Причина").selectOption("incorrect_delivery");
+    await returnDialog.getByLabel("Комментарий").fill("E2E: ошибка поставки");
+    await returnDialog.getByRole("button", { name: "Оформить возврат" }).click();
+
+    await expect(returnDialog).toBeHidden({ timeout: 15_000 });
+    const returnEntry = supplierDialog.getByRole("article").filter({ hasText: item.brand_name });
+    await expect(returnEntry).toContainText("Ошибка поставки", { timeout: 15_000 });
+    await expect(returnEntry).toContainText("4,00 TJS");
+
+    await page.goto("/batches");
+    const refreshedBatchPicker = page.getByRole("combobox", { name: "Товар" });
+    await refreshedBatchPicker.fill(searchKey);
+    const refreshedItemOption = page.getByRole("option", {
+      name: new RegExp(item.brand_name),
+    });
+    await expect(refreshedItemOption).toBeVisible({ timeout: 15_000 });
+    await refreshedItemOption.click();
+    const refreshedBatchCard = page.getByRole("article", {
+      name: new RegExp(`${item.brand_name}, партия без номера`),
+    });
+    await expect(refreshedBatchCard).toContainText("8", { timeout: 15_000 });
   });
 });
 

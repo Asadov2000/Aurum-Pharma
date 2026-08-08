@@ -4,9 +4,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { Button, FormError, Input, Label, Select, Textarea } from "@/components/ui";
-import { useBranchesQuery } from "@/features/foundation/queries";
 import { describeApiError } from "@/features/foundation/errors";
-import { useSuppliersQuery } from "@/features/suppliers/queries";
+import { useBranchesQuery } from "@/features/foundation/queries";
+import { SupplierPicker } from "@/features/suppliers/SupplierPicker";
 
 import { pharmacyCalendarDate } from "./calendar";
 import { useCreateIncoming, useUpdateIncoming } from "./queries";
@@ -30,7 +30,6 @@ export function NewIncomingForm({
   document?: IncomingDocument;
 }): JSX.Element {
   const branches = useBranchesQuery(false);
-  const suppliers = useSuppliersQuery(false);
   const create = useCreateIncoming();
   const update = useUpdateIncoming();
   const navigate = useNavigate();
@@ -86,27 +85,18 @@ export function NewIncomingForm({
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4">
-      {(branches.error || suppliers.error) && (
+      {branches.error && (
         <div
           role="alert"
           className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-3 text-sm text-danger-foreground"
         >
-          <p>
-            {branches.error && suppliers.error
-              ? "Не удалось загрузить точки и поставщиков."
-              : branches.error
-                ? "Не удалось загрузить точки."
-                : "Не удалось загрузить поставщиков."}
-          </p>
+          <p>Не удалось загрузить точки.</p>
           <Button
             type="button"
             variant="secondary"
             size="sm"
             className="mt-2"
-            onClick={() => {
-              if (branches.error) void branches.refetch();
-              if (suppliers.error) void suppliers.refetch();
-            }}
+            onClick={() => void branches.refetch()}
           >
             Повторить
           </Button>
@@ -132,20 +122,18 @@ export function NewIncomingForm({
         </div>
         <div>
           <Label htmlFor="supplier_id">Поставщик</Label>
-          <Select
+          <SupplierPicker
             id="supplier_id"
+            value={form.watch("supplier_id")}
+            onChange={(supplierId) => {
+              form.setValue("supplier_id", supplierId, {
+                shouldDirty: true,
+                shouldValidate: true,
+              });
+            }}
             invalid={Boolean(form.formState.errors.supplier_id)}
-            {...form.register("supplier_id")}
-          >
-            <option value="">
-              {suppliers.isLoading ? "Загрузка поставщиков…" : "— выберите —"}
-            </option>
-            {suppliers.data?.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
+            placeholder="Название поставщика"
+          />
           <FormError>{form.formState.errors.supplier_id?.message}</FormError>
         </div>
         <div>
@@ -174,7 +162,7 @@ export function NewIncomingForm({
         </Button>
         <Button
           type="submit"
-          disabled={Boolean(branches.error || suppliers.error)}
+          disabled={Boolean(branches.error)}
           isLoading={form.formState.isSubmitting}
         >
           {isEditing ? "Сохранить" : "Создать черновик"}

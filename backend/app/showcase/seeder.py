@@ -1972,9 +1972,9 @@ async def seed_inventory_adjustments(
                 "currency": "TJS",
                 "reason": rng.choice(
                     (
-                        "Повреждение упаковки при приёмке",
-                        "Несоответствие согласованному ассортименту",
-                        "Возврат по договорённости с поставщиком",
+                        "damaged",
+                        "incorrect_delivery",
+                        "quality_issue",
                     )
                 ),
                 "comment": "Демонстрационная операция возврата поставщику",
