@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.domains.dashboard.service as dashboard_service_module
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
 from app.domains.dashboard.repository import DashboardRepository
@@ -46,7 +48,13 @@ async def test_summary_empty_tenant_zeroed(db_session: AsyncSession) -> None:
     assert summary.checklist.latest_closed_shift_id is None
 
 
-async def test_summary_surfaces_expiring_batch_and_license(db_session: AsyncSession) -> None:
+async def test_summary_surfaces_expiring_batch_and_license(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixed_now = datetime(2026, 8, 8, 12, tzinfo=UTC)
+    monkeypatch.setattr(dashboard_service_module, "utc_now", lambda: fixed_now)
+    today = fixed_now.date()
     tenant, branch = await _seed_tenant_with_branch(db_session)
     catalog = CatalogService(CatalogRepository(db_session))
     inv = InventoryRepository(db_session)
@@ -57,7 +65,7 @@ async def test_summary_surfaces_expiring_batch_and_license(db_session: AsyncSess
         tenant_id=tenant.id,
         branch_id=branch.id,
         catalog_id=item.id,
-        expires_at=date.today() + timedelta(days=20),
+        expires_at=today + timedelta(days=20),
         purchase_price=Decimal("3.00"),
         sale_price=Decimal("10.00"),
         qty_initial=Decimal("10"),
@@ -75,7 +83,7 @@ async def test_summary_surfaces_expiring_batch_and_license(db_session: AsyncSess
     await db_session.execute(
         Branch.__table__.update()
         .where(Branch.id == branch.id)
-        .values(license_expires_at=date.today() + timedelta(days=15))
+        .values(license_expires_at=today + timedelta(days=15))
     )
 
     service = DashboardService(DashboardRepository(db_session), redis=None)
