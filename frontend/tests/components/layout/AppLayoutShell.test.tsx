@@ -1,14 +1,16 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const authMock = vi.hoisted(() => ({
   logout: vi.fn(),
   user: {
+    id: "user-1",
     email: "owner@aurum.tj",
     full_name: "Owner",
     home_tenant_id: "tenant-1",
     is_administrator: false,
     is_developer: false,
+    is_tenant_owner: false,
     permissions: ["catalog.view", "pos.sell"],
   },
 }));
@@ -43,6 +45,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 
 describe("AppLayout shell", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     setOnlineStatus(true);
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -61,6 +64,7 @@ describe("AppLayout shell", () => {
 
   afterEach(() => {
     setOnlineStatus(true);
+    window.localStorage.clear();
   });
 
   it("renders the runtime badge in the header instead of page content", () => {
@@ -100,6 +104,36 @@ describe("AppLayout shell", () => {
     expect(within(notices as HTMLElement).getByTestId("offline-status-banner")).toBe(banner);
     expect(within(header).getByText("Нет сети")).toBeInTheDocument();
     expect(within(main).queryByTestId("offline-status-banner")).not.toBeInTheDocument();
+  });
+
+  it("persists personalization without exposing routes outside permissions", async () => {
+    render(
+      <AppLayout>
+        <section>Page content</section>
+      </AppLayout>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Развернуть боковую панель" }));
+    expect(
+      JSON.parse(window.localStorage.getItem("aurum:sidebar:v1:user-1%3Atenant-1") ?? "{}"),
+    ).toMatchObject({ desktopMode: "expanded" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Настроить боковую панель" }));
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Настроить меню" },
+      { timeout: 5_000 },
+    );
+    expect(within(dialog).getByText("Каталог")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Роли")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("checkbox", { name: "Скрыть раздел «Касса»" })).toBeDisabled();
+
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Скрыть раздел «Каталог»" }));
+    expect(screen.queryByRole("link", { name: "Каталог" })).not.toBeInTheDocument();
+    expect(
+      JSON.parse(window.localStorage.getItem("aurum:sidebar:v1:user-1%3Atenant-1") ?? "{}")
+        .hiddenRoutes,
+    ).toEqual(["/catalog"]);
   });
 });
 

@@ -83,7 +83,7 @@
 
   :root {
     --app-header-height: 3.5rem;
-    --app-nav-rail-width: 4.5rem;
+    --app-sidebar-width: 15rem;
   }
 
   :root,

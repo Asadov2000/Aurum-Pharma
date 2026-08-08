@@ -1,4 +1,14 @@
-import { lazy, Suspense, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  type CSSProperties,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
@@ -7,6 +17,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { useMfaStepUpRequested } from "@/features/auth/stepUpCoordinator";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
+import { cn } from "@/lib/utils";
 
 import { BrandMark } from "./BrandMark";
 import { ConnectivityIndicator } from "./ConnectivityIndicator";
@@ -17,10 +28,24 @@ import { RuntimeSurfaceBadge } from "./RuntimeSurfaceBadge";
 import { ServerStatusBanner } from "./ServerStatusBanner";
 import { Sidebar } from "./Sidebar";
 import { buildNav } from "./nav";
+import {
+  loadSidebarPreferences,
+  orderSidebarItems,
+  parseSidebarPreferences,
+  saveSidebarPreferences,
+  sidebarStorageKey,
+  type SidebarPreferences,
+  visibleSidebarItems,
+} from "./sidebarPreferences";
 
 const MfaStepUpDialog = lazy(async () => {
   const module = await import("@/features/auth/MfaStepUpDialog");
   return { default: module.MfaStepUpDialog };
+});
+
+const SidebarSettingsModal = lazy(async () => {
+  const module = await import("./SidebarSettingsModal");
+  return { default: module.SidebarSettingsModal };
 });
 
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
@@ -28,21 +53,48 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const mfaStepUpRequested = useMfaStepUpRequested();
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const navigationDrawerRef = useRef<HTMLDivElement>(null);
   const navigationCloseButtonRef = useRef<HTMLButtonElement>(null);
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
-  const hasTenant = Boolean(activeTenantId(user));
+  const tenantId = activeTenantId(user);
+  const hasTenant = Boolean(tenantId);
   const isTenantOwner = Boolean(user?.is_tenant_owner);
-  const perms = user?.permissions ?? [];
-  const items = buildNav(
-    isSupport,
-    hasTenant,
-    isTenantOwner,
-    perms,
-    user?.is_developer === true,
-    user?.support_access !== null && user?.support_access !== undefined,
+  const perms = user?.permissions;
+  const items = useMemo(
+    () =>
+      buildNav(
+        isSupport,
+        hasTenant,
+        isTenantOwner,
+        perms ?? [],
+        user?.is_developer === true,
+        user?.support_access !== null && user?.support_access !== undefined,
+      ),
+    [hasTenant, isSupport, isTenantOwner, perms, user?.is_developer, user?.support_access],
   );
+  const sidebarScope = `${user?.id ?? "anonymous"}:${tenantId ?? "global"}`;
+  const [sidebarPreferences, setSidebarPreferences] = useState<SidebarPreferences>(() =>
+    loadSidebarPreferences(sidebarScope),
+  );
+  const [wideDesktop, setWideDesktop] = useState(
+    () => window.matchMedia("(min-width: 80rem)").matches,
+  );
+  const orderedItems = useMemo(
+    () => orderSidebarItems(items, sidebarPreferences),
+    [items, sidebarPreferences],
+  );
+  const sidebarItems = useMemo(
+    () => visibleSidebarItems(items, sidebarPreferences),
+    [items, sidebarPreferences],
+  );
+  const sidebarExpanded =
+    sidebarPreferences.desktopMode === "expanded" ||
+    (sidebarPreferences.desktopMode === "auto" && wideDesktop);
+  const shellStyle = {
+    "--app-sidebar-width": sidebarExpanded ? "15rem" : "4.5rem",
+  } as CSSProperties;
   const activeItem = items.find(
     (item) => pathname === item.to || (item.to !== "/" && pathname.startsWith(`${item.to}/`)),
   );
@@ -61,10 +113,59 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         : null;
   const initial = name.charAt(0).toUpperCase();
 
+  const updateSidebarPreferences = useCallback(
+    (next: SidebarPreferences) => {
+      const parsed = parseSidebarPreferences(next);
+      setSidebarPreferences(parsed);
+      saveSidebarPreferences(sidebarScope, parsed);
+    },
+    [sidebarScope],
+  );
+
   const openNavigation = (trigger: HTMLButtonElement) => {
     navigationTriggerRef.current = trigger;
     setNavigationOpen(true);
   };
+
+  const openSidebarSettings = () => {
+    setNavigationOpen(false);
+    setSidebarSettingsOpen(true);
+  };
+
+  useEffect(() => {
+    setSidebarPreferences(loadSidebarPreferences(sidebarScope));
+
+    const key = sidebarStorageKey(sidebarScope);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== key) return;
+      try {
+        setSidebarPreferences(
+          event.newValue === null
+            ? loadSidebarPreferences(sidebarScope)
+            : parseSidebarPreferences(JSON.parse(event.newValue)),
+        );
+      } catch {
+        setSidebarPreferences(loadSidebarPreferences(sidebarScope));
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [sidebarScope]);
+
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 64rem)");
+    const wide = window.matchMedia("(min-width: 80rem)");
+    const closeDrawerOnDesktop = (event: MediaQueryListEvent) => {
+      if (event.matches) setNavigationOpen(false);
+    };
+    const updateWideDesktop = (event: MediaQueryListEvent) => setWideDesktop(event.matches);
+    desktop.addEventListener("change", closeDrawerOnDesktop);
+    wide.addEventListener("change", updateWideDesktop);
+    return () => {
+      desktop.removeEventListener("change", closeDrawerOnDesktop);
+      wide.removeEventListener("change", updateWideDesktop);
+    };
+  }, []);
 
   useEffect(() => {
     if (!navigationOpen) return undefined;
@@ -135,7 +236,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   }, [navigationOpen]);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" style={shellStyle}>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
@@ -158,9 +259,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             className="relative z-modal h-full w-[min(17rem,calc(100vw-1rem))]"
           >
             <Sidebar
-              items={items}
+              items={sidebarItems}
               mode="drawer"
+              favoriteRoutes={sidebarPreferences.favoriteRoutes}
               onNavigate={() => setNavigationOpen(false)}
+              onOpenSettings={openSidebarSettings}
               closeButton={
                 <Button
                   ref={navigationCloseButtonRef}
@@ -183,9 +286,14 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         className="sticky top-0 z-sticky border-b border-border bg-surface"
       >
         <div className="flex min-h-[var(--app-header-height)] items-stretch">
-          <div className="hidden w-[var(--app-nav-rail-width)] shrink-0 items-center border-r border-border px-4 lg:flex xl:w-60">
+          <div className="hidden w-[var(--app-sidebar-width)] shrink-0 items-center border-r border-border px-4 lg:flex">
             <BrandMark />
-            <span className="ml-3 hidden truncate font-display text-lg font-semibold text-foreground xl:block">
+            <span
+              className={cn(
+                "ml-3 truncate font-display text-lg font-semibold text-foreground",
+                !sidebarExpanded && "sr-only",
+              )}
+            >
               Aurum Pharma
             </span>
           </div>
@@ -252,9 +360,20 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         <PwaUpdateBanner />
       </div>
 
-      <div className="min-w-0 lg:grid lg:grid-cols-[var(--app-nav-rail-width)_minmax(0,1fr)]">
+      <div className="min-w-0 lg:grid lg:grid-cols-[var(--app-sidebar-width)_minmax(0,1fr)]">
         <div className="hidden lg:block">
-          <Sidebar items={items} drawerOpen={navigationOpen} onOpenDrawer={openNavigation} />
+          <Sidebar
+            items={sidebarItems}
+            expanded={sidebarExpanded}
+            favoriteRoutes={sidebarPreferences.favoriteRoutes}
+            onToggleExpanded={() =>
+              updateSidebarPreferences({
+                ...sidebarPreferences,
+                desktopMode: sidebarExpanded ? "compact" : "expanded",
+              })
+            }
+            onOpenSettings={openSidebarSettings}
+          />
         </div>
         <main
           id="main-content"
@@ -264,6 +383,19 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
           {children}
         </main>
       </div>
+
+      {sidebarSettingsOpen ? (
+        <Suspense fallback={null}>
+          <SidebarSettingsModal
+            open
+            items={orderedItems}
+            preferences={sidebarPreferences}
+            activeRoute={activeItem?.to}
+            onChange={updateSidebarPreferences}
+            onClose={() => setSidebarSettingsOpen(false)}
+          />
+        </Suspense>
+      ) : null}
 
       {mfaStepUpRequested ? (
         <Suspense fallback={<MfaStepUpLoading />}>

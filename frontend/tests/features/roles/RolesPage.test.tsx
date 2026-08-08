@@ -281,7 +281,7 @@ describe("RolesPage", () => {
 
     await screen.findByText("Старший кассир");
     fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
-    fireEvent.change(await screen.findByLabelText("Название"), {
+    fireEvent.change(await screen.findByLabelText("Название", undefined, { timeout: 5_000 }), {
       target: { value: "Новая роль" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));

@@ -49,7 +49,7 @@ test.describe("Interface layout", () => {
     }
   });
 
-  test("uses a compact desktop rail and a contained mobile drawer", async ({ page }) => {
+  test("uses a customizable desktop sidebar and a contained mobile drawer", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/pos");
@@ -57,20 +57,45 @@ test.describe("Interface layout", () => {
     const desktopNavigation = page.getByRole("navigation", { name: "Основная навигация" });
     const navigationBounds = await desktopNavigation.boundingBox();
     expect(navigationBounds).not.toBeNull();
-    expect(navigationBounds!.width).toBeGreaterThanOrEqual(68);
-    expect(navigationBounds!.width).toBeLessThanOrEqual(76);
+    expect(navigationBounds!.width).toBeGreaterThanOrEqual(236);
+    expect(navigationBounds!.width).toBeLessThanOrEqual(244);
+    await expect(desktopNavigation.getByRole("link", { name: "Касса" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 1, name: "Касса", exact: true })).toBeVisible();
 
-    const expandNavigation = page.getByRole("button", {
-      name: "Показать названия разделов",
-    });
-    await expandNavigation.click();
-    const desktopDrawer = page.getByRole("dialog", { name: "Меню приложения" });
-    await expect(desktopDrawer).toBeVisible();
-    await expect(desktopDrawer.getByText("Aurum Pharma")).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(desktopDrawer).toBeHidden();
-    await expect(expandNavigation).toBeFocused();
+    await page.getByRole("button", { name: "Свернуть боковую панель" }).click();
+    await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "compact");
+    const compactBounds = await desktopNavigation.boundingBox();
+    expect(compactBounds).not.toBeNull();
+    expect(compactBounds!.width).toBeGreaterThanOrEqual(68);
+    expect(compactBounds!.width).toBeLessThanOrEqual(76);
+
+    await page.getByRole("button", { name: "Развернуть боковую панель" }).click();
+    await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "expanded");
+
+    await page.getByRole("button", { name: "Настроить боковую панель" }).click();
+    const settingsDialog = page.getByRole("dialog", { name: "Настроить меню" });
+    await expect(settingsDialog).toBeVisible();
+    await expect(
+      settingsDialog.getByRole("checkbox", { name: "Скрыть раздел «Касса»" }),
+    ).toBeDisabled();
+    await settingsDialog.getByRole("button", { name: "Добавить «Каталог» в избранное" }).click();
+    await settingsDialog.getByRole("button", { name: "Готово" }).click();
+    await expect(settingsDialog).toBeHidden();
+    await expect(desktopNavigation.getByText("Избранное")).toBeVisible();
+
+    await page.getByRole("button", { name: "Настроить боковую панель" }).click();
+    await page
+      .getByRole("dialog", { name: "Настроить меню" })
+      .getByRole("button", { name: "Авто" })
+      .click();
+    await page
+      .getByRole("dialog", { name: "Настроить меню" })
+      .getByRole("button", { name: "Готово" })
+      .click();
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "compact");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "expanded");
 
     await page.setViewportSize({ width: 320, height: 568 });
     const shellHeader = page.getByTestId("app-shell-header");
@@ -88,9 +113,22 @@ test.describe("Interface layout", () => {
     expect(drawerBounds!.x + drawerBounds!.width).toBeLessThanOrEqual(320);
     expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
 
-    await mobileDrawer.getByRole("link", { name: "Роли" }).click();
+    await mobileDrawer.getByRole("button", { name: "Настроить боковую панель" }).click();
+    const mobileSettings = page.getByRole("dialog", { name: "Настроить меню" });
+    await expect(mobileSettings).toBeVisible();
+    const readyBounds = await mobileSettings.getByRole("button", { name: "Готово" }).boundingBox();
+    expect(readyBounds).not.toBeNull();
+    expect(readyBounds!.y + readyBounds!.height).toBeLessThanOrEqual(568);
+    await expectNoHorizontalOverflow(page, "sidebar settings @ 320x568");
+    await mobileSettings.getByRole("button", { name: "Готово" }).click();
+
+    await page.getByRole("button", { name: "Открыть меню" }).click();
+    const reopenedMobileDrawer = page.getByRole("dialog", { name: "Меню приложения" });
+    await expect(reopenedMobileDrawer).toBeVisible();
+
+    await reopenedMobileDrawer.getByRole("link", { name: "Роли" }).click();
     await expect(page).toHaveURL(/\/roles$/);
-    await expect(mobileDrawer).toBeHidden();
+    await expect(reopenedMobileDrawer).toBeHidden();
     await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
     await expect(page.getByRole("heading", { level: 1, name: "Роли", exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page, "/roles shell @ 320x568");

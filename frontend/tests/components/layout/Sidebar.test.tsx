@@ -28,23 +28,62 @@ const ITEMS: NavItem[] = [
 ];
 
 describe("Sidebar", () => {
-  it("renders only supplied routes and marks the current route", () => {
-    const onOpenDrawer = vi.fn();
-    render(<Sidebar items={ITEMS} onOpenDrawer={onOpenDrawer} />);
+  it("renders only supplied routes, marks the current route and toggles its width", () => {
+    const onToggleExpanded = vi.fn();
+    const onOpenSettings = vi.fn();
+    render(
+      <Sidebar items={ITEMS} onToggleExpanded={onToggleExpanded} onOpenSettings={onOpenSettings} />,
+    );
 
-    expect(screen.getByRole("navigation", { name: "Основная навигация" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Основная навигация" })).toHaveAttribute(
+      "data-sidebar-mode",
+      "expanded",
+    );
     expect(screen.getByRole("link", { name: "Главная" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Касса" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Роли" })).not.toHaveAttribute("aria-current");
     expect(screen.queryByRole("link", { name: "Биллинг" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Показать названия разделов" }));
-    expect(onOpenDrawer).toHaveBeenCalledWith(expect.any(HTMLButtonElement));
+    fireEvent.click(screen.getByRole("button", { name: "Настроить боковую панель" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Свернуть боковую панель" }));
+    expect(onToggleExpanded).toHaveBeenCalledOnce();
+  });
+
+  it("puts favorites first without duplicating links", () => {
+    render(<Sidebar items={ITEMS} favoriteRoutes={["/roles"]} />);
+
+    expect(screen.getByText("Избранное")).toBeInTheDocument();
+    expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "/roles",
+      "/",
+      "/pos",
+    ]);
+    expect(screen.getAllByRole("link", { name: "Роли" })).toHaveLength(1);
+  });
+
+  it("keeps accessible names and native hints in compact mode", () => {
+    render(<Sidebar items={ITEMS} expanded={false} />);
+
+    expect(screen.getByRole("navigation", { name: "Основная навигация" })).toHaveAttribute(
+      "data-sidebar-mode",
+      "compact",
+    );
+    expect(screen.getByRole("link", { name: "Касса" })).toHaveAttribute("title", "Касса");
+    expect(screen.queryByText("Продажи")).not.toBeInTheDocument();
   });
 
   it("shows section names and closes after drawer navigation", () => {
     const onNavigate = vi.fn();
-    render(<Sidebar items={ITEMS} mode="drawer" onNavigate={onNavigate} />);
+    const onOpenSettings = vi.fn();
+    render(
+      <Sidebar
+        items={ITEMS}
+        mode="drawer"
+        onNavigate={onNavigate}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
 
     expect(screen.getByText("Aurum Pharma")).toBeInTheDocument();
     expect(screen.getByText("Продажи")).toBeInTheDocument();
@@ -52,5 +91,7 @@ describe("Sidebar", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Роли" }));
     expect(onNavigate).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Настроить боковую панель" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 });
