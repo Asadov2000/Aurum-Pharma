@@ -107,6 +107,7 @@ class VerifiedOfflinePrincipalV0:
     user_id: UUID
     command: OfflinePosCommand
     expires_at: datetime
+    scope: OfflineAuthScopeV0
 
 
 class CloudSignatureVerifier(Protocol):
@@ -251,6 +252,7 @@ class OfflineAuthDecisionPipeline:
             user_id=claims.scope.user_id,
             command=validated_command,
             expires_at=claims.expires_at,
+            scope=claims.scope,
         )
 
 

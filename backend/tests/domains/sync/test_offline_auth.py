@@ -389,6 +389,7 @@ async def test_offline_auth_pipeline_allows_only_after_every_check() -> None:
     assert principal.user_id == claims.scope.user_id
     assert principal.command == "sale.cash.complete"
     assert principal.expires_at == claims.expires_at
+    assert principal.scope == claims.scope
     assert harness.signature.calls == 1
     assert harness.signature.signing_bytes == offline_auth_claims_bytes(claims)
     assert harness.device_binding.calls == 1
