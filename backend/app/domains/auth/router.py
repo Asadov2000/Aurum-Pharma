@@ -427,6 +427,7 @@ async def me(
     me_data.is_tenant_owner = user.is_tenant_owner
     me_data.branch_assignments = user.branch_assignments
     me_data.permissions = sorted(user.permissions)
+    me_data.platform_capabilities = sorted(user.platform_capabilities)
     if (
         user.support_access_session_id is not None
         and user.tenant_id is not None

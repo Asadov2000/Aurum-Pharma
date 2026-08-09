@@ -13,6 +13,20 @@ from app.domains.roles.models import (
     RoleTemplatePermission,
 )
 
+GRANT_SCOPED_PLATFORM_CODES = {
+    "platform.tenants.view",
+    "platform.tenants.manage",
+    "platform.memberships.manage",
+    "platform.ownership.provision",
+    "platform.billing.manage",
+    "platform.support.use",
+    "platform.sync.view",
+    "platform.sync.manage",
+    "platform.audit.global.view",
+    "platform.access.view",
+    "platform.access.manage",
+}
+
 
 async def _template_codes(db_session: AsyncSession, template_name: str) -> list[str]:
     stmt = (
@@ -26,12 +40,12 @@ async def _template_codes(db_session: AsyncSession, template_name: str) -> list[
 async def test_seed_permissions_count(db_session: AsyncSession) -> None:
     """The migrated permission catalogue remains complete and duplicate-free."""
     count = (await db_session.execute(select(func.count()).select_from(Permission))).scalar_one()
-    assert count == 48
+    assert count == 59
 
     groups = (
         await db_session.execute(select(func.count(func.distinct(Permission.group_code))))
     ).scalar_one()
-    assert groups == 14  # +'sales' group from migration 0014
+    assert groups == 21
 
 
 async def test_every_permission_has_a_description(db_session: AsyncSession) -> None:
@@ -100,4 +114,8 @@ async def test_developer_has_everything(db_session: AsyncSession, system_roles) 
         .all()
     )
     all_codes = set((await db_session.execute(select(Permission.code))).scalars().all())
-    assert dev_codes == all_codes
+    # Platform capabilities are attached to immutable access grants, never to
+    # tenant/system roles. The legacy global-audit permission remains on the
+    # developer role until its separate compatibility migration is removed.
+    assert dev_codes == all_codes - GRANT_SCOPED_PLATFORM_CODES
+    assert dev_codes.isdisjoint(GRANT_SCOPED_PLATFORM_CODES)

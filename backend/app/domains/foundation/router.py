@@ -20,11 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import (
     CurrentUser,
     current_user,
+    ensure_platform_capability,
     get_db,
     require_any_permission,
     require_permission,
-    require_recent_support_mfa,
-    require_support,
+    require_platform_capability,
+    require_recent_platform_capability,
 )
 from app.core.errors import AuthenticationError, BusinessRuleError, PermissionDeniedError
 from app.domains.foundation.repository import FoundationRepository
@@ -108,7 +109,7 @@ admin_router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
     "/tenants",
     response_model=TenantRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_recent_support_mfa)],
+    dependencies=[Depends(require_recent_platform_capability("platform.tenants.manage"))],
 )
 async def create_tenant(
     payload: TenantCreate,
@@ -121,7 +122,7 @@ async def create_tenant(
 @admin_router.get(
     "/tenants",
     response_model=list[TenantRead],
-    dependencies=[Depends(require_support)],
+    dependencies=[Depends(require_platform_capability("platform.tenants.view"))],
 )
 async def list_tenants(
     service: Annotated[FoundationService, Depends(_service)],
@@ -135,7 +136,7 @@ async def list_tenants(
 @admin_router.get(
     "/tenants/{tenant_id}",
     response_model=TenantRead,
-    dependencies=[Depends(require_support)],
+    dependencies=[Depends(require_platform_capability("platform.tenants.view"))],
 )
 async def get_tenant(
     tenant_id: UUID,
@@ -148,13 +149,18 @@ async def get_tenant(
 @admin_router.patch(
     "/tenants/{tenant_id}",
     response_model=TenantRead,
-    dependencies=[Depends(require_recent_support_mfa)],
 )
 async def update_tenant(
     tenant_id: UUID,
     payload: TenantUpdate,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.tenants.manage")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> TenantRead:
+    if payload.status is not None:
+        ensure_platform_capability(user, "platform.billing.manage")
     tenant = await service.update_tenant(tenant_id, fields=payload.model_dump(exclude_none=True))
     return TenantRead.model_validate(tenant)
 
@@ -167,7 +173,10 @@ async def update_tenant(
 async def create_tenant_membership(
     tenant_id: UUID,
     payload: TenantAccountCreate,
-    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.memberships.manage")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> TenantMembershipRead:
@@ -205,7 +214,10 @@ async def create_tenant_membership(
 async def create_tenant_owner(
     tenant_id: UUID,
     payload: OwnerCreate,
-    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.ownership.provision")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> OwnerProvisionRead:

@@ -314,6 +314,7 @@ class CurrentUser:
     is_administrator: bool
     session_id: UUID | None = None
     mfa_verified_at: datetime | None = None
+    platform_capabilities: frozenset[str] = field(default_factory=frozenset)
     permissions: set[str] = field(default_factory=set)
     permission_scopes: dict[str, frozenset[UUID] | None] = field(default_factory=dict)
     branch_assignments: dict[str, str] = field(default_factory=dict)
@@ -558,6 +559,17 @@ async def current_user(
     ):
         raise AuthenticationError("Tenant membership is inactive")
 
+    platform_capabilities: frozenset[str] = frozenset()
+    if (is_dev or is_admin) and support_access_session_id is None:
+        if session_id is None:
+            raise AuthenticationError("Support session is inactive")
+        platform_capabilities = await auth_repo.get_active_platform_capabilities(
+            user_id,
+            session_id,
+        )
+        if not platform_capabilities:
+            raise AuthenticationError("Platform access grant is inactive")
+
     authz = await _load_authorization_context(
         request=request,
         db=db,
@@ -574,6 +586,7 @@ async def current_user(
         is_administrator=is_admin,
         session_id=session_id,
         mfa_verified_at=mfa_verified_at,
+        platform_capabilities=platform_capabilities,
         permissions=authz.permissions,
         permission_scopes=authz.permission_scopes,
         branch_assignments=authz.branch_assignments,
@@ -631,6 +644,43 @@ async def require_recent_developer_mfa(
     if user.tenant_id is not None or user.support_access_session_id is not None:
         raise PermissionDeniedError("Global Developer context required")
     return user
+
+
+def ensure_platform_capability(user: CurrentUser, code: str) -> None:
+    """Enforce a global platform capability outside tenant support context."""
+
+    if user.tenant_id is not None or user.support_access_session_id is not None:
+        raise PermissionDeniedError("Global platform context required")
+    if code not in user.platform_capabilities:
+        raise PermissionDeniedError(f"Missing platform capability: {code}")
+
+
+def require_platform_capability(code: str):  # type: ignore[no-untyped-def]
+    """Require a DB-backed platform capability in the global context."""
+
+    async def _checker(
+        user: Annotated[CurrentUser, Depends(current_user)],
+    ) -> CurrentUser:
+        ensure_platform_capability(user, code)
+        return user
+
+    # Route-inventory tests inspect this marker so a new admin route cannot
+    # accidentally rely only on the privileged database pool.
+    _checker.platform_capability_code = code  # type: ignore[attr-defined]
+    return _checker
+
+
+def require_recent_platform_capability(code: str):  # type: ignore[no-untyped-def]
+    """Require a platform capability plus a recent MFA step-up."""
+
+    async def _checker(
+        user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
+    ) -> CurrentUser:
+        ensure_platform_capability(user, code)
+        return user
+
+    _checker.platform_capability_code = code  # type: ignore[attr-defined]
+    return _checker
 
 
 async def require_support(

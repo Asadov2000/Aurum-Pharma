@@ -8,7 +8,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, require_recent_support_mfa, require_support
+from app.core.deps import (
+    CurrentUser,
+    get_db,
+    require_platform_capability,
+    require_recent_platform_capability,
+)
 from app.core.errors import AuthenticationError
 from app.domains.support_access.repository import (
     SupportAccessRepository,
@@ -55,7 +60,10 @@ def _auth_session_id(user: CurrentUser) -> UUID:
 
 @router.get("/capabilities", response_model=list[SupportCapabilityRead])
 async def list_support_capabilities(
-    user: Annotated[CurrentUser, Depends(require_support)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_platform_capability("platform.support.use")),
+    ],
     service: Annotated[SupportAccessService, Depends(_service)],
 ) -> list[SupportCapabilityRead]:
     capabilities = await service.list_capabilities(
@@ -67,7 +75,10 @@ async def list_support_capabilities(
 
 @router.get("/sessions", response_model=SupportAccessSessionList)
 async def list_support_sessions(
-    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.support.use")),
+    ],
     service: Annotated[SupportAccessService, Depends(_service)],
 ) -> SupportAccessSessionList:
     sessions = await service.list_active_sessions(
@@ -84,7 +95,10 @@ async def list_support_sessions(
 )
 async def start_support_session(
     payload: SupportAccessSessionCreate,
-    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.support.use")),
+    ],
     service: Annotated[SupportAccessService, Depends(_service)],
 ) -> SupportAccessSessionRead:
     session = await service.start_session(
@@ -106,7 +120,10 @@ async def start_support_session(
 )
 async def revoke_support_session(
     session_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_support)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_platform_capability("platform.support.use")),
+    ],
     service: Annotated[SupportAccessService, Depends(_service)],
 ) -> SupportAccessSessionRevoke:
     await service.revoke_session(

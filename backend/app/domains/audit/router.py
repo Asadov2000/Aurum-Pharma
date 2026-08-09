@@ -14,9 +14,9 @@ from app.core.deps import (
     CurrentUser,
     get_db,
     require_permission,
-    require_recent_support_mfa,
+    require_recent_platform_capability,
 )
-from app.core.errors import BusinessRuleError, PermissionDeniedError
+from app.core.errors import BusinessRuleError
 from app.domains.audit.models import AuditLog
 from app.domains.audit.repository import AuditRepository
 from app.domains.audit.schemas import AuditEntry, AuditPage
@@ -47,14 +47,6 @@ async def _report_timezone(
     if date_from is None and date_to is None:
         return DEFAULT_REPORT_TIMEZONE
     return await service.get_report_timezone(tenant_id)
-
-
-async def require_developer(
-    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
-) -> CurrentUser:
-    if not user.is_developer:
-        raise PermissionDeniedError("Developer privileges required")
-    return user
 
 
 def _to_page(
@@ -135,7 +127,10 @@ async def tenant_audit(
 
 @admin_router.get("/global", response_model=AuditPage)
 async def global_audit(
-    _user: Annotated[CurrentUser, Depends(require_developer)],
+    _user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.audit.global.view")),
+    ],
     service: Annotated[AuditService, Depends(_service)],
     tenant_id: Annotated[UUID | None, Query()] = None,
     user_id: Annotated[UUID | None, Query()] = None,

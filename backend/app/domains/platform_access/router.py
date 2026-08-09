@@ -8,7 +8,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, require_recent_developer_mfa
+from app.core.deps import (
+    CurrentUser,
+    get_db,
+    require_recent_platform_capability,
+)
 from app.core.errors import AuthenticationError
 from app.domains.platform_access.repository import (
     PlatformAccessGrantRecord,
@@ -18,9 +22,11 @@ from app.domains.platform_access.schemas import (
     PlatformAccessApproval,
     PlatformAccessGrantList,
     PlatformAccessGrantRead,
+    PlatformAccessKind,
     PlatformAccessRequest,
     PlatformAccessRevocation,
     PlatformAccessStatus,
+    PlatformCapabilityRead,
 )
 from app.domains.platform_access.service import PlatformAccessService
 
@@ -43,9 +49,30 @@ def _read(record: PlatformAccessGrantRecord) -> PlatformAccessGrantRead:
     return PlatformAccessGrantRead(**record.__dict__)
 
 
+@router.get("/capabilities", response_model=list[PlatformCapabilityRead])
+async def list_platform_capabilities(
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.access.view")),
+    ],
+    service: Annotated[PlatformAccessService, Depends(_service)],
+    access_kind: Annotated[PlatformAccessKind, Query()],
+) -> list[PlatformCapabilityRead]:
+    capabilities = await service.list_capabilities(
+        actor_user_id=user.user_id,
+        actor_session_id=_auth_session_id(user),
+        actor_is_developer=user.is_developer,
+        access_kind=access_kind.value,
+    )
+    return [PlatformCapabilityRead(**capability.__dict__) for capability in capabilities]
+
+
 @router.get("/grants", response_model=PlatformAccessGrantList)
 async def list_platform_access_grants(
-    user: Annotated[CurrentUser, Depends(require_recent_developer_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.access.view")),
+    ],
     service: Annotated[PlatformAccessService, Depends(_service)],
     grant_status: Annotated[PlatformAccessStatus | None, Query(alias="status")] = None,
     user_id: UUID | None = None,
@@ -69,7 +96,10 @@ async def list_platform_access_grants(
 )
 async def request_platform_access(
     payload: PlatformAccessRequest,
-    user: Annotated[CurrentUser, Depends(require_recent_developer_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.access.manage")),
+    ],
     service: Annotated[PlatformAccessService, Depends(_service)],
 ) -> PlatformAccessGrantRead:
     grant = await service.request_grant(
@@ -80,6 +110,7 @@ async def request_platform_access(
         access_kind=payload.access_kind.value,
         reason_code=payload.reason_code.value,
         reason=payload.reason,
+        capabilities=tuple(capability.value for capability in payload.capabilities),
     )
     return _read(grant)
 
@@ -91,7 +122,10 @@ async def request_platform_access(
 async def approve_platform_access(
     grant_id: UUID,
     payload: PlatformAccessApproval,
-    user: Annotated[CurrentUser, Depends(require_recent_developer_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.access.manage")),
+    ],
     service: Annotated[PlatformAccessService, Depends(_service)],
 ) -> PlatformAccessGrantRead:
     grant = await service.approve_grant(
@@ -113,7 +147,10 @@ async def approve_platform_access(
 async def revoke_platform_access(
     grant_id: UUID,
     payload: PlatformAccessRevocation,
-    user: Annotated[CurrentUser, Depends(require_recent_developer_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.access.manage")),
+    ],
     service: Annotated[PlatformAccessService, Depends(_service)],
 ) -> PlatformAccessGrantRead:
     grant = await service.revoke_grant(

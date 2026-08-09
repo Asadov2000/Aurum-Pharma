@@ -29,6 +29,10 @@ from tests.platform_access_helpers import (
 
 REQUEST_PAYLOAD = {
     "access_kind": "administrator",
+    "capabilities": [
+        "platform.tenants.view",
+        "platform.support.use",
+    ],
     "reason_code": "platform_staff_onboarding",
     "reason": "Approved platform support onboarding request",
 }
@@ -90,6 +94,7 @@ async def test_grant_activation_revokes_target_sessions_and_redacts_audit_reason
     body = response.json()
     assert body["status"] == "active"
     assert body["requires_approval"] is False
+    assert body["capabilities"] == sorted(REQUEST_PAYLOAD["capabilities"])
     assert body["request_reason_code"] == "platform_staff_onboarding"
     await db_session.refresh(target)
     await db_session.refresh(target_session)
@@ -112,6 +117,63 @@ async def test_grant_activation_revokes_target_sessions_and_redacts_audit_reason
     assert "request_reason" not in audit.metadata_json
     assert "approval_reason" not in audit.metadata_json
     assert "revoke_reason" not in audit.metadata_json
+
+
+async def test_capability_catalog_and_database_exclude_developer_only_admin_access(
+    db_session: AsyncSession,
+    platform_client: AsyncClient,
+) -> None:
+    developer = await create_test_platform_user(
+        db_session,
+        access_kind="developer",
+    )
+    administrator = await create_test_platform_user(
+        db_session,
+        access_kind="administrator",
+    )
+    token = await create_support_access_token(db_session, developer)
+
+    catalog_response = await platform_client.get(
+        "/api/v1/admin/platform-access/capabilities",
+        params={"access_kind": "administrator"},
+        headers=_headers(token),
+    )
+    assert catalog_response.status_code == 200, catalog_response.text
+    codes = {item["code"] for item in catalog_response.json()}
+    assert "platform.sync.view" in codes
+    assert "platform.sync.manage" not in codes
+    assert "platform.access.manage" not in codes
+    assert "platform.audit.global.view" not in codes
+
+    grant_id = await db_session.scalar(
+        select(PlatformAccessGrant.id).where(
+            PlatformAccessGrant.user_id == administrator.id,
+            PlatformAccessGrant.status == "active",
+        )
+    )
+    assert grant_id is not None
+    await db_session.execute(text("SELECT set_config('app.support_session', 'true', true)"))
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(developer.id)},
+    )
+    with pytest.raises(DBAPIError) as invalid_capability:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("""
+                    INSERT INTO public.platform_access_grant_permission (
+                      grant_id,
+                      permission_code,
+                      created_by
+                    ) VALUES (
+                      :grant_id,
+                      'platform.sync.manage',
+                      :developer_id
+                    )
+                    """),
+                {"grant_id": grant_id, "developer_id": developer.id},
+            )
+    assert getattr(invalid_capability.value.orig, "sqlstate", None) == "42501"
 
 
 async def test_second_developer_must_independently_approve(
@@ -257,6 +319,83 @@ async def test_administrator_and_stale_mfa_cannot_read_grants(
     assert administrator_response.status_code == 403
     assert stale_response.status_code == 403
     assert stale_response.json()["error"]["details"]["reason"] == "mfa_step_up_required"
+
+
+async def test_administrator_can_view_but_cannot_manage_edge_sync(
+    db_session: AsyncSession,
+    platform_client: AsyncClient,
+) -> None:
+    administrator = await create_test_platform_user(
+        db_session,
+        access_kind="administrator",
+    )
+    token = await create_support_access_token(db_session, administrator)
+
+    view_response = await platform_client.get(
+        "/api/v1/admin/sync/nodes",
+        headers=_headers(token),
+    )
+    manage_response = await platform_client.post(
+        "/api/v1/admin/sync/nodes",
+        json={
+            "tenant_id": str(uuid4()),
+            "branch_id": str(uuid4()),
+            "display_name": "Forbidden administrator node",
+        },
+        headers=_headers(token),
+    )
+
+    assert view_response.status_code == 200, view_response.text
+    assert manage_response.status_code == 403
+    assert "platform.sync.manage" in manage_response.json()["error"]["message"]
+
+
+async def test_tenant_status_change_requires_billing_capability(
+    db_session: AsyncSession,
+    platform_client: AsyncClient,
+) -> None:
+    developer = await create_test_platform_user(
+        db_session,
+        access_kind="developer",
+    )
+    await make_test_developer_sole(db_session, developer)
+    target = await _target(db_session)
+    developer_token = await create_support_access_token(db_session, developer)
+    grant_response = await platform_client.post(
+        "/api/v1/admin/platform-access/grants",
+        json={
+            "user_id": str(target.id),
+            "access_kind": "administrator",
+            "capabilities": ["platform.tenants.manage"],
+            "reason_code": "platform_staff_onboarding",
+            "reason": "Restricted tenant lifecycle administrator",
+        },
+        headers=_headers(developer_token),
+    )
+    assert grant_response.status_code == 201, grant_response.text
+    await db_session.refresh(target)
+    administrator_token = await create_support_access_token(db_session, target)
+    tenant = Tenant(
+        name=f"Restricted tenant {uuid4().hex}",
+        contact_email=f"restricted-{uuid4().hex}@example.invalid",
+    )
+    db_session.add(tenant)
+    await db_session.flush()
+
+    ordinary_update = await platform_client.patch(
+        f"/api/v1/admin/tenants/{tenant.id}",
+        json={"name": "Restricted tenant renamed"},
+        headers=_headers(administrator_token),
+    )
+    status_update = await platform_client.patch(
+        f"/api/v1/admin/tenants/{tenant.id}",
+        json={"status": "readonly"},
+        headers=_headers(administrator_token),
+    )
+
+    assert ordinary_update.status_code == 200, ordinary_update.text
+    assert status_update.status_code == 403
+    assert "platform.billing.manage" in status_update.json()["error"]["message"]
 
 
 async def test_revocation_is_versioned_and_immediately_invalidates_access(

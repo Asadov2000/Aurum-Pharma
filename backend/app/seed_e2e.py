@@ -91,7 +91,7 @@ async def main() -> None:
                 text("SELECT set_config('app.user_id', :user_id, true)"),
                 {"user_id": str(developer.id)},
             )
-            await session.execute(
+            administrator_grant_id = await session.scalar(
                 text("""
                     INSERT INTO public.platform_access_grant (
                       user_id,
@@ -110,9 +110,31 @@ async def main() -> None:
                       'Disposable development seed account',
                       false
                     )
+                    RETURNING id
                     """),
                 {
                     "administrator_id": administrator.id,
+                    "developer_id": developer.id,
+                },
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO public.platform_access_grant_permission (
+                      grant_id,
+                      permission_code,
+                      created_by
+                    )
+                    SELECT :grant_id, permission.code, :developer_id
+                    FROM public.permission AS permission
+                    WHERE permission.is_active
+                      AND permission.target_role_type = 'platform'
+                      AND permission.scope_type = 'PLATFORM'
+                      AND permission.developer_delegable
+                      AND permission.administrator_grantable
+                    ORDER BY permission.code
+                    """),
+                {
+                    "grant_id": administrator_grant_id,
                     "developer_id": developer.id,
                 },
             )

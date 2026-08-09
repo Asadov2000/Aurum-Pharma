@@ -8,7 +8,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db, require_recent_support_mfa
+from app.core.deps import (
+    get_db,
+    require_recent_platform_capability,
+)
 from app.domains.sync.auth import EdgeRequestContext, get_edge_context
 from app.domains.sync.bootstrap import BootstrapScope
 from app.domains.sync.repository import SyncCloudRepository
@@ -35,7 +38,6 @@ from app.domains.sync.service import SyncAdminService, SyncCloudService
 admin_router = APIRouter(
     prefix="/api/v1/admin/sync",
     tags=["admin-sync"],
-    dependencies=[Depends(require_recent_support_mfa)],
 )
 router = APIRouter(prefix="/api/v1/sync", tags=["edge-sync"])
 
@@ -75,6 +77,7 @@ def _bootstrap_scope(context: EdgeRequestContext) -> BootstrapScope:
     "/nodes",
     response_model=SyncNodeCredentialRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
 )
 async def create_node(
     payload: SyncNodeCreate,
@@ -85,7 +88,11 @@ async def create_node(
     return await service.create_node(payload)
 
 
-@admin_router.get("/nodes", response_model=list[SyncNodeRead])
+@admin_router.get(
+    "/nodes",
+    response_model=list[SyncNodeRead],
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.view"))],
+)
 async def list_nodes(
     service: Annotated[SyncAdminService, Depends(_admin_service)],
     tenant_id: Annotated[UUID | None, Query()] = None,
@@ -93,7 +100,11 @@ async def list_nodes(
     return await service.list_nodes(tenant_id=tenant_id)
 
 
-@admin_router.post("/nodes/{node_id}/credential", response_model=SyncNodeCredentialRead)
+@admin_router.post(
+    "/nodes/{node_id}/credential",
+    response_model=SyncNodeCredentialRead,
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
+)
 async def rotate_node_credential(
     node_id: UUID,
     payload: SyncCredentialRotate,
@@ -107,7 +118,11 @@ async def rotate_node_credential(
     )
 
 
-@admin_router.delete("/nodes/{node_id}", response_model=SyncNodeRead)
+@admin_router.delete(
+    "/nodes/{node_id}",
+    response_model=SyncNodeRead,
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
+)
 async def revoke_node(
     node_id: UUID,
     service: Annotated[SyncAdminService, Depends(_admin_service)],
@@ -119,6 +134,7 @@ async def revoke_node(
     "/handover/prepare",
     response_model=SyncWriterActivationRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
 )
 async def prepare_writer_handover(
     payload: SyncWriterPrepareRequest,
@@ -130,6 +146,7 @@ async def prepare_writer_handover(
 @admin_router.post(
     "/handover/{activation_id}/activate",
     response_model=SyncWriterEpochRead,
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
 )
 async def activate_writer_handover(
     activation_id: UUID,
@@ -142,6 +159,7 @@ async def activate_writer_handover(
 @admin_router.post(
     "/handover/{activation_id}/cancel",
     response_model=SyncWriterActivationRead,
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
 )
 async def cancel_writer_handover(
     activation_id: UUID,
