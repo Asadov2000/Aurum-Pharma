@@ -60,6 +60,8 @@ async def test_database_roles_have_exact_attributes_and_memberships(
                     FROM pg_catalog.pg_roles
                     WHERE rolname IN (
                       'aurum_app',
+                      'aurum_edge_cash_executor',
+                      'aurum_edge_cash_owner',
                       'aurum_support',
                       'aurum_migrator',
                       'aurum_schema_owner'
@@ -79,6 +81,7 @@ async def test_database_roles_have_exact_attributes_and_memberships(
                     JOIN pg_catalog.pg_roles AS member
                       ON member.oid = membership.member
                     WHERE granted.rolname IN (
+                      'aurum_edge_cash_owner',
                       'aurum_schema_owner',
                       'aurum_support'
                     )
@@ -90,6 +93,26 @@ async def test_database_roles_have_exact_attributes_and_memberships(
         "aurum_app": {
             "rolname": "aurum_app",
             "rolcanlogin": True,
+            "rolinherit": True,
+            "rolsuper": False,
+            "rolcreatedb": False,
+            "rolcreaterole": False,
+            "rolreplication": False,
+            "rolbypassrls": False,
+        },
+        "aurum_edge_cash_executor": {
+            "rolname": "aurum_edge_cash_executor",
+            "rolcanlogin": False,
+            "rolinherit": True,
+            "rolsuper": False,
+            "rolcreatedb": False,
+            "rolcreaterole": False,
+            "rolreplication": False,
+            "rolbypassrls": False,
+        },
+        "aurum_edge_cash_owner": {
+            "rolname": "aurum_edge_cash_owner",
+            "rolcanlogin": False,
             "rolinherit": True,
             "rolsuper": False,
             "rolcreatedb": False,
@@ -130,6 +153,13 @@ async def test_database_roles_have_exact_attributes_and_memberships(
     }
     assert [dict(row) for row in memberships] == [
         {
+            "granted_role": "aurum_edge_cash_owner",
+            "member_role": "aurum_migrator",
+            "admin_option": False,
+            "inherit_option": False,
+            "set_option": True,
+        },
+        {
             "granted_role": "aurum_schema_owner",
             "member_role": "aurum_migrator",
             "admin_option": False,
@@ -161,7 +191,12 @@ async def test_runtime_roles_have_no_transitive_elevated_membership(
                       ) AS is_member
                     FROM pg_catalog.pg_roles AS runtime
                     CROSS JOIN pg_catalog.pg_roles AS elevated
-                    WHERE runtime.rolname IN ('aurum_app', 'aurum_support')
+                    WHERE runtime.rolname IN (
+                      'aurum_app',
+                      'aurum_edge_cash_executor',
+                      'aurum_edge_cash_owner',
+                      'aurum_support'
+                    )
                       AND elevated.rolname IN (
                         'aurum_migrator',
                         'aurum_schema_owner'
@@ -177,6 +212,26 @@ async def test_runtime_roles_have_no_transitive_elevated_membership(
         },
         {
             "runtime_role": "aurum_app",
+            "elevated_role": "aurum_schema_owner",
+            "is_member": False,
+        },
+        {
+            "runtime_role": "aurum_edge_cash_executor",
+            "elevated_role": "aurum_migrator",
+            "is_member": False,
+        },
+        {
+            "runtime_role": "aurum_edge_cash_executor",
+            "elevated_role": "aurum_schema_owner",
+            "is_member": False,
+        },
+        {
+            "runtime_role": "aurum_edge_cash_owner",
+            "elevated_role": "aurum_migrator",
+            "is_member": False,
+        },
+        {
+            "runtime_role": "aurum_edge_cash_owner",
             "elevated_role": "aurum_schema_owner",
             "is_member": False,
         },
@@ -217,7 +272,12 @@ async def test_runtime_roles_own_no_application_objects(
                         JOIN pg_catalog.pg_roles AS roles
                           ON roles.oid = relations.relowner
                         WHERE schemas.nspname = 'public'
-                          AND roles.rolname IN ('aurum_app', 'aurum_support')
+                          AND roles.rolname IN (
+                            'aurum_app',
+                            'aurum_edge_cash_executor',
+                            'aurum_edge_cash_owner',
+                            'aurum_support'
+                          )
                       ) AS runtime_owned_relations,
                       (
                         SELECT count(*)
@@ -227,7 +287,12 @@ async def test_runtime_roles_own_no_application_objects(
                         JOIN pg_catalog.pg_roles AS roles
                           ON roles.oid = routines.proowner
                         WHERE schemas.nspname = 'public'
-                          AND roles.rolname IN ('aurum_app', 'aurum_support')
+                          AND roles.rolname IN (
+                            'aurum_app',
+                            'aurum_edge_cash_executor',
+                            'aurum_edge_cash_owner',
+                            'aurum_support'
+                          )
                       ) AS runtime_owned_functions
                 """))).mappings().one()
 
@@ -237,6 +302,126 @@ async def test_runtime_roles_own_no_application_objects(
         "runtime_owned_relations": 0,
         "runtime_owned_functions": 0,
     }
+
+
+async def test_edge_cash_roles_have_no_runtime_surface(
+    migration_role_engine: AsyncEngine,
+) -> None:
+    async with migration_role_engine.connect() as connection:
+        rows = (await connection.execute(text("""
+                    SELECT
+                      roles.rolname,
+                      pg_catalog.has_database_privilege(
+                        roles.rolname, current_database(), 'CONNECT'
+                      ) AS can_connect,
+                      pg_catalog.has_database_privilege(
+                        roles.rolname, current_database(), 'CREATE'
+                      ) AS can_create_database_object,
+                      pg_catalog.has_database_privilege(
+                        roles.rolname, current_database(), 'TEMP'
+                      ) AS can_create_temp,
+                      EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_namespace AS schemas
+                        WHERE schemas.nspname <> 'information_schema'
+                          AND schemas.nspname !~ '^pg_'
+                          AND pg_catalog.has_schema_privilege(
+                            roles.rolname, schemas.oid, 'USAGE'
+                          )
+                      ) AS can_use_application_schema,
+                      EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_namespace AS schemas
+                        WHERE schemas.nspname <> 'information_schema'
+                          AND schemas.nspname !~ '^pg_'
+                          AND pg_catalog.has_schema_privilege(
+                            roles.rolname, schemas.oid, 'CREATE'
+                          )
+                      ) AS can_create_in_application_schema,
+                      EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_class AS relations
+                        JOIN pg_catalog.pg_namespace AS schemas
+                          ON schemas.oid = relations.relnamespace
+                        CROSS JOIN (VALUES
+                          ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
+                          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+                        ) AS checks(privilege)
+                        WHERE schemas.nspname <> 'information_schema'
+                          AND schemas.nspname !~ '^pg_'
+                          AND relations.relkind IN ('r', 'p', 'v', 'm', 'f')
+                          AND pg_catalog.has_table_privilege(
+                            roles.rolname, relations.oid, checks.privilege
+                          )
+                      ) AS has_table_privilege,
+                      EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_class AS sequences
+                        JOIN pg_catalog.pg_namespace AS schemas
+                          ON schemas.oid = sequences.relnamespace
+                        CROSS JOIN (VALUES
+                          ('USAGE'), ('SELECT'), ('UPDATE')
+                        ) AS checks(privilege)
+                        WHERE schemas.nspname <> 'information_schema'
+                          AND schemas.nspname !~ '^pg_'
+                          AND sequences.relkind = 'S'
+                          AND pg_catalog.has_sequence_privilege(
+                            roles.rolname, sequences.oid, checks.privilege
+                          )
+                      ) AS has_sequence_privilege,
+                      EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_proc AS routines
+                        JOIN pg_catalog.pg_namespace AS schemas
+                          ON schemas.oid = routines.pronamespace
+                        WHERE schemas.nspname <> 'information_schema'
+                          AND schemas.nspname !~ '^pg_'
+                          AND pg_catalog.has_function_privilege(
+                            roles.rolname, routines.oid, 'EXECUTE'
+                          )
+                      ) AS has_function_privilege,
+                      EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_default_acl AS defaults
+                        CROSS JOIN LATERAL pg_catalog.aclexplode(
+                          defaults.defaclacl
+                        ) AS acl
+                        WHERE acl.grantee = roles.oid
+                      ) AS has_default_privilege
+                    FROM pg_catalog.pg_roles AS roles
+                    WHERE roles.rolname IN (
+                      'aurum_edge_cash_executor',
+                      'aurum_edge_cash_owner'
+                    )
+                    ORDER BY roles.rolname
+                """))).mappings()
+
+    assert [dict(row) for row in rows] == [
+        {
+            "rolname": "aurum_edge_cash_executor",
+            "can_connect": False,
+            "can_create_database_object": False,
+            "can_create_temp": False,
+            "can_use_application_schema": False,
+            "can_create_in_application_schema": False,
+            "has_table_privilege": False,
+            "has_sequence_privilege": False,
+            "has_function_privilege": False,
+            "has_default_privilege": False,
+        },
+        {
+            "rolname": "aurum_edge_cash_owner",
+            "can_connect": False,
+            "can_create_database_object": False,
+            "can_create_temp": False,
+            "can_use_application_schema": False,
+            "can_create_in_application_schema": False,
+            "has_table_privilege": False,
+            "has_sequence_privilege": False,
+            "has_function_privilege": False,
+            "has_default_privilege": False,
+        },
+    ]
 
 
 @pytest.mark.parametrize(

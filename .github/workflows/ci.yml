@@ -209,6 +209,136 @@ jobs:
               '
           }
 
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          GRANT aurum_support TO aurum_edge_cash_executor;
+          CREATE SCHEMA edge_acl_probe;
+          CREATE TABLE edge_acl_probe.probe (id INTEGER);
+          CREATE PROCEDURE edge_acl_probe.probe_procedure()
+          LANGUAGE SQL AS $$ SELECT 1 $$;
+          GRANT USAGE ON SCHEMA edge_acl_probe TO aurum_edge_cash_executor;
+          GRANT SELECT ON TABLE edge_acl_probe.probe TO aurum_edge_cash_executor;
+          GRANT EXECUTE ON PROCEDURE edge_acl_probe.probe_procedure()
+            TO aurum_edge_cash_executor;
+          SQL
+          run_role_bootstrap
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT pg_has_role('aurum_edge_cash_executor', 'aurum_support', 'MEMBER')"
+          )" = "f"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT has_schema_privilege('aurum_edge_cash_executor', 'edge_acl_probe', 'USAGE')"
+          )" = "f"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT has_table_privilege('aurum_edge_cash_executor', 'edge_acl_probe.probe', 'SELECT')"
+          )" = "f"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT has_function_privilege('aurum_edge_cash_executor', routines.oid, 'EXECUTE') FROM pg_proc AS routines JOIN pg_namespace AS schemas ON schemas.oid = routines.pronamespace WHERE schemas.nspname = 'edge_acl_probe' AND routines.proname = 'probe_procedure'"
+          )" = "f"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT bool_and(rolpassword IS NULL) FROM pg_authid WHERE rolname IN ('aurum_edge_cash_executor', 'aurum_edge_cash_owner')"
+          )" = "t"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "DROP SCHEMA edge_acl_probe CASCADE"
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "CREATE SCHEMA edge_owner_probe AUTHORIZATION aurum_edge_cash_owner"
+          if run_role_bootstrap; then
+            echo "role bootstrap accepted an Edge-owned sentinel schema"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'edge_owner_probe'"
+          )" = "aurum_edge_cash_owner"
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          ALTER SCHEMA edge_owner_probe OWNER TO postgres;
+          DROP SCHEMA edge_owner_probe;
+          SQL
+
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          CREATE TYPE public.edge_owner_probe AS ENUM ('probe');
+          ALTER TYPE public.edge_owner_probe OWNER TO aurum_edge_cash_owner;
+          SQL
+          if run_role_bootstrap; then
+            echo "role bootstrap accepted an Edge-owned sentinel type"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT pg_get_userbyid(types.typowner) FROM pg_type AS types JOIN pg_namespace AS schemas ON schemas.oid = types.typnamespace WHERE schemas.nspname = 'public' AND types.typname = 'edge_owner_probe'"
+          )" = "aurum_edge_cash_owner"
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          ALTER TYPE public.edge_owner_probe OWNER TO postgres;
+          DROP TYPE public.edge_owner_probe;
+          SQL
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO aurum_edge_cash_executor"
+          if run_role_bootstrap; then
+            echo "role bootstrap accepted an Edge default privilege"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT count(*) FROM pg_default_acl AS defaults CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl JOIN pg_roles AS grantees ON grantees.oid = acl.grantee WHERE grantees.rolname = 'aurum_edge_cash_executor'"
+          )" = "1"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE SELECT ON TABLES FROM aurum_edge_cash_executor"
+
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE DATABASE aurum_edge_sentinel_test OWNER aurum_edge_cash_owner"
+          if run_role_bootstrap; then
+            echo "role bootstrap accepted an Edge-owned sentinel database"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d postgres -Atc \
+              "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'aurum_edge_sentinel_test'"
+          )" = "aurum_edge_cash_owner"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "DROP DATABASE aurum_edge_sentinel_test"
+
+          docker exec -u postgres "$POSTGRES_SERVICE_ID" \
+            mkdir -p /tmp/aurum-edge-tablespace
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE TABLESPACE aurum_edge_sentinel OWNER aurum_edge_cash_owner LOCATION '/tmp/aurum-edge-tablespace'"
+          if run_role_bootstrap; then
+            echo "role bootstrap accepted an Edge-owned sentinel tablespace"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d postgres -Atc \
+              "SELECT pg_get_userbyid(spcowner) FROM pg_tablespace WHERE spcname = 'aurum_edge_sentinel'"
+          )" = "aurum_edge_cash_owner"
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "DROP TABLESPACE aurum_edge_sentinel"
+
           docker exec "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
             -c "CREATE DATABASE aurum_sentinel_test OWNER aurum_support"
@@ -325,6 +455,8 @@ jobs:
                   FROM pg_catalog.pg_authid
                   WHERE rolname IN (
                     'aurum_app',
+                    'aurum_edge_cash_executor',
+                    'aurum_edge_cash_owner',
                     'aurum_support',
                     'aurum_migrator',
                     'aurum_schema_owner'
