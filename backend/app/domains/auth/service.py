@@ -127,9 +127,28 @@ def _mfa_challenge_status(
 
 
 class AuthService:
-    def __init__(self, repo: AuthRepository, redis: Redis | None = None) -> None:
+    def __init__(
+        self,
+        repo: AuthRepository,
+        redis: Redis | None = None,
+        *,
+        login_guard_enabled: bool | None = None,
+    ) -> None:
         self.repo = repo
         self.redis = redis
+        self.login_guard_enabled = (
+            settings.auth_login_guard_enabled
+            if login_guard_enabled is None
+            else login_guard_enabled
+        )
+
+    async def _login_is_blocked(self, *, email_lower: str, ip_address: str) -> bool:
+        if not self.login_guard_enabled:
+            return False
+        return await self.repo.enforce_login_guard(
+            email_lower=email_lower,
+            ip_address=ip_address,
+        )
 
     def _mfa_attempt_key(self, user_id: UUID) -> str:
         return f"auth:mfa-attempts:{user_id}"
@@ -241,7 +260,7 @@ class AuthService:
         email_lower = email.strip().lower()
         now = utc_now()
 
-        if await self.repo.enforce_login_guard(email_lower=email_lower, ip_address=ip_address):
+        if await self._login_is_blocked(email_lower=email_lower, ip_address=ip_address):
             raise RateLimitError(
                 "Account temporarily locked. Try again later.",
                 details={"retry_after_minutes": int(LOGIN_BLOCK_DURATION.total_seconds() // 60)},
@@ -397,7 +416,7 @@ class AuthService:
         )
         if challenge is None:
             raise AuthenticationError("Invalid or expired MFA challenge")
-        if await self.repo.enforce_login_guard(
+        if await self._login_is_blocked(
             email_lower=challenge.email.lower(),
             ip_address=ip_address,
         ):
@@ -646,7 +665,7 @@ class AuthService:
         )
         if record is None:
             raise AuthenticationError("Support MFA is unavailable")
-        if await self.repo.enforce_login_guard(
+        if await self._login_is_blocked(
             email_lower=record.email.lower(),
             ip_address=ip_address,
         ):

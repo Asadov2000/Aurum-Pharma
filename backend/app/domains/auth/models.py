@@ -342,7 +342,7 @@ class LoginAttempt(Base):
     __table_args__ = (
         CheckConstraint(
             "outcome IN ('code_requested','code_failed','code_expired',"
-            "'password_failed','totp_failed','success','blocked')",
+            "'password_failed','totp_failed','success','rate_limited','blocked')",
             name="ck_login_attempt_outcome",
         ),
     )
