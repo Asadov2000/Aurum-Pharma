@@ -11,6 +11,9 @@ const getCheckoutResult = vi.fn();
 const findByBarcode = vi.fn();
 const addSaleItem = vi.fn();
 const getPosFavorites = vi.fn();
+const createPaymentAttempt = vi.fn();
+const confirmPaymentAttempt = vi.fn();
+const voidPaymentAttempt = vi.fn();
 const requestDesktopCashDrawerOpen = vi.fn();
 const LAZY_NUMPAD_WAIT = { timeout: 5_000 };
 
@@ -35,6 +38,9 @@ vi.mock("@/features/pos/api", () => ({
   getPosFavorites: (...args: unknown[]) => getPosFavorites(...args),
   addPosFavorite: vi.fn(),
   removePosFavorite: vi.fn(),
+  createPaymentAttempt: (...args: unknown[]) => createPaymentAttempt(...args),
+  confirmPaymentAttempt: (...args: unknown[]) => confirmPaymentAttempt(...args),
+  voidPaymentAttempt: (...args: unknown[]) => voidPaymentAttempt(...args),
 }));
 
 vi.mock("@/features/catalog/queries", () => ({
@@ -70,6 +76,7 @@ interface CheckoutPayload {
   payments: {
     payment_method: "cash" | "card" | "qr";
     amount: string;
+    payment_attempt_id?: string;
     metadata?: { cash_received?: string; external_confirmed?: true };
   }[];
   prescription?: { patient_name?: string | null };
@@ -231,9 +238,9 @@ function localStorageContents(): string {
 }
 
 async function stageCashPayment(): Promise<void> {
-  await screen.findByText(/Остаток/);
+  await screen.findByText(/Остаток/, undefined, { timeout: 5_000 });
   fireEvent.keyDown(window, { key: "Enter" });
-  await screen.findByRole("button", { name: /Сбросить расчёт/i });
+  await screen.findByRole("button", { name: /Сбросить расчёт/i }, { timeout: 5_000 });
 }
 
 describe("SaleArea atomic checkout", () => {
@@ -248,9 +255,66 @@ describe("SaleArea atomic checkout", () => {
     findByBarcode.mockReset();
     addSaleItem.mockReset();
     getPosFavorites.mockReset();
+    createPaymentAttempt.mockReset();
+    confirmPaymentAttempt.mockReset();
+    voidPaymentAttempt.mockReset();
     requestDesktopCashDrawerOpen.mockReset();
     getCurrentShift.mockResolvedValue(SHIFT);
     getPosFavorites.mockResolvedValue([]);
+    let attemptSequence = 0;
+    const attemptOperations = new Map<string, string>();
+    createPaymentAttempt.mockImplementation(
+      (payload: {
+        operation_id: string;
+        sale_id: string;
+        payment_method: "card" | "qr";
+        amount: string;
+      }) => {
+        attemptSequence += 1;
+        const attemptId = `30000000-0000-4000-8000-${String(attemptSequence).padStart(12, "0")}`;
+        attemptOperations.set(attemptId, payload.operation_id);
+        return Promise.resolve({
+          id: attemptId,
+          tenant_id: SALE.tenant_id,
+          sale_id: payload.sale_id,
+          cashier_user_id: SALE.cashier_user_id,
+          operation_id: payload.operation_id,
+          payment_method: payload.payment_method,
+          amount: payload.amount,
+          currency: "TJS",
+          status: "pending",
+          external_reference: null,
+          created_at: SALE.created_at,
+          confirmed_at: null,
+          consumed_at: null,
+          voided_at: null,
+        });
+      },
+    );
+    confirmPaymentAttempt.mockImplementation((attemptId: string) =>
+      Promise.resolve({
+        id: attemptId,
+        tenant_id: SALE.tenant_id,
+        sale_id: SALE.id,
+        cashier_user_id: SALE.cashier_user_id,
+        operation_id: attemptOperations.get(attemptId) ?? "40000000-0000-4000-8000-000000000001",
+        payment_method: attemptId.endsWith("1") ? "card" : "qr",
+        amount: attemptId.endsWith("1") ? "20.00" : "30.00",
+        currency: "TJS",
+        status: "confirmed",
+        external_reference: null,
+        created_at: SALE.created_at,
+        confirmed_at: SALE.created_at,
+        consumed_at: null,
+        voided_at: null,
+      }),
+    );
+    voidPaymentAttempt.mockImplementation((attemptId: string) =>
+      Promise.resolve({
+        id: attemptId,
+        status: "voided",
+      }),
+    );
     findByBarcode.mockRejectedValue({
       isAxiosError: true,
       response: { status: 404, data: { detail: "not found" } },
@@ -386,12 +450,12 @@ describe("SaleArea atomic checkout", () => {
     ).toBeInTheDocument();
     fireEvent.click(within(cardConfirmation).getByRole("button", { name: "Оплата подтверждена" }));
 
-    fireEvent.click(screen.getByRole("button", { name: /Сбросить расчёт/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Сбросить расчёт/i }));
     const resetDialog = await screen.findByRole("dialog", {
       name: "Сбросить расчёт оплаты",
     });
     expect(
-      within(resetDialog).getByText(/внешнем терминале автоматически не отменится/i),
+      within(resetDialog).getByText(/Aurum не отменяет банковскую операцию/i),
     ).toBeInTheDocument();
     fireEvent.click(within(resetDialog).getByRole("button", { name: "Отмена" }));
 
@@ -402,6 +466,7 @@ describe("SaleArea atomic checkout", () => {
       name: "Подтвердить оплату QR",
     });
     fireEvent.click(within(qrConfirmation).getByRole("button", { name: "Оплата подтверждена" }));
+    await screen.findByRole("button", { name: /Сбросить расчёт/i });
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
@@ -409,12 +474,12 @@ describe("SaleArea atomic checkout", () => {
       {
         payment_method: "card",
         amount: "20.00",
-        metadata: { external_confirmed: true },
+        payment_attempt_id: "30000000-0000-4000-8000-000000000001",
       },
       {
         payment_method: "qr",
         amount: "30.00",
-        metadata: { external_confirmed: true },
+        payment_attempt_id: "30000000-0000-4000-8000-000000000002",
       },
     ]);
   });
@@ -438,9 +503,15 @@ describe("SaleArea atomic checkout", () => {
     expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
     fireEvent.click(within(confirmation).getByRole("button", { name: "Отмена" }));
 
-    expect(
-      screen.queryByRole("dialog", { name: "Подтвердить оплату картой" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Подтвердить оплату картой" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(createPaymentAttempt).toHaveBeenCalledTimes(1);
+    expect(voidPaymentAttempt).toHaveBeenCalledWith("30000000-0000-4000-8000-000000000001", {
+      reason: "cashier_cancelled",
+    });
     expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
     expect(checkoutSale).not.toHaveBeenCalled();
   });
@@ -566,12 +637,13 @@ describe("SaleArea atomic checkout", () => {
         await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
       ).getByRole("button", { name: "ОК" }),
     );
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "Подтвердить оплату картой" })).getByRole(
-        "button",
-        { name: "Оплата подтверждена" },
-      ),
-    );
+    const confirmationButton = within(
+      await screen.findByRole("dialog", { name: "Подтвердить оплату картой" }),
+    ).getByRole("button", { name: "Оплата подтверждена" });
+    fireEvent.click(confirmationButton);
+    fireEvent.click(confirmationButton);
+    await screen.findByRole("button", { name: /Сбросить расчёт/i });
+    expect(confirmPaymentAttempt).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
@@ -806,6 +878,58 @@ describe("SaleArea atomic checkout", () => {
     expect(getCheckoutResult).not.toHaveBeenCalled();
     expect(loadPendingCheckoutOperation(SALE.id, REG)).toBeNull();
     expect(screen.getByRole("button", { name: /Сбросить расчёт/i })).toBeInTheDocument();
+  });
+
+  it("locks a confirmed external payment for terminal review after checkout rejection", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    checkoutSale.mockRejectedValue(apiError(422, "Недостаточно товара"));
+
+    renderArea();
+    await screen.findByText(/Остаток/);
+    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    fireEvent.click(
+      within(
+        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
+      ).getByRole("button", { name: "ОК" }),
+    );
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Подтвердить оплату картой",
+    });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Оплата подтверждена" }));
+    await screen.findByRole("button", { name: /Сбросить расчёт/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+
+    expect(
+      await screen.findByText(/Сервер отклонил продажу после подтверждения карты/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Завершить продажу/i })).toBeDisabled();
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+      externalPaymentReviewRequired: true,
+      stagedPayments: [
+        {
+          payment_method: "card",
+          payment_attempt_id: "30000000-0000-4000-8000-000000000001",
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Сбросить расчёт/i }));
+    const resetDialog = await screen.findByRole("dialog", {
+      name: "Сбросить расчёт оплаты",
+    });
+    expect(within(resetDialog).getByText(/деньги не останутся списанными без чека/i)).toBeVisible();
+    fireEvent.click(
+      within(resetDialog).getByRole("button", { name: "Терминал проверен, сбросить" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument(),
+    );
+    expect(voidPaymentAttempt).toHaveBeenCalledWith("30000000-0000-4000-8000-000000000001", {
+      reason: "checkout_failed",
+    });
   });
 
   it("does not send checkout when its recovery marker cannot be persisted", async () => {

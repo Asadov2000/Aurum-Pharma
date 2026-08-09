@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DRAFT_TTL_MIN, draftKey, loadDraft, saveDraft } from "@/features/pos/draftStorage";
 
 const REG = "reg-1";
+const ATTEMPT_ID = "30000000-0000-4000-8000-000000000001";
 
 describe("loadDraft (POS draft TTL)", () => {
   beforeEach(() => window.localStorage.clear());
@@ -15,6 +16,7 @@ describe("loadDraft (POS draft TTL)", () => {
       expired: false,
       requiresRx: false,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
   });
 
@@ -29,6 +31,7 @@ describe("loadDraft (POS draft TTL)", () => {
       expired: false,
       requiresRx: false,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
   });
 
@@ -49,6 +52,7 @@ describe("loadDraft (POS draft TTL)", () => {
       expired: false,
       requiresRx: true,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
   });
 
@@ -107,6 +111,7 @@ describe("loadDraft (POS draft TTL)", () => {
       expired: false,
       requiresRx: false,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
   });
 
@@ -121,7 +126,7 @@ describe("loadDraft (POS draft TTL)", () => {
         {
           payment_method: "card",
           amount: "30.00",
-          metadata: { external_confirmed: true },
+          payment_attempt_id: ATTEMPT_ID,
         },
       ]),
     ).toBe(true);
@@ -135,9 +140,57 @@ describe("loadDraft (POS draft TTL)", () => {
       {
         payment_method: "card",
         amount: "30.00",
-        metadata: { external_confirmed: true },
+        payment_attempt_id: ATTEMPT_ID,
       },
     ]);
+  });
+
+  it("restores the external-payment review lock", () => {
+    expect(saveDraft(REG, "s-review", {}, "draft", false, [], false, true)).toBe(true);
+    expect(loadDraft(REG).externalPaymentReviewRequired).toBe(true);
+  });
+
+  it("never expires a draft with a confirmed electronic payment", () => {
+    window.localStorage.setItem(
+      draftKey(REG),
+      JSON.stringify({
+        saleId: "s-confirmed",
+        nameById: {},
+        savedAt: 0,
+        stagedPayments: [
+          {
+            payment_method: "card",
+            amount: "30.00",
+            payment_attempt_id: ATTEMPT_ID,
+          },
+        ],
+      }),
+    );
+
+    expect(loadDraft(REG, 1)).toMatchObject({
+      saleId: "s-confirmed",
+      expired: false,
+      stagedPayments: [{ payment_attempt_id: ATTEMPT_ID }],
+    });
+    expect(window.localStorage.getItem(draftKey(REG))).not.toBeNull();
+  });
+
+  it("never expires a draft locked for external-payment review", () => {
+    window.localStorage.setItem(
+      draftKey(REG),
+      JSON.stringify({
+        saleId: "s-review",
+        nameById: {},
+        savedAt: 0,
+        externalPaymentReviewRequired: true,
+      }),
+    );
+
+    expect(loadDraft(REG, 1)).toMatchObject({
+      saleId: "s-review",
+      expired: false,
+      externalPaymentReviewRequired: true,
+    });
   });
 
   it("restores an explicit expired-stock acknowledgement", () => {

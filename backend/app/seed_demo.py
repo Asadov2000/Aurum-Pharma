@@ -37,7 +37,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -445,15 +445,36 @@ async def _seed_sales(
             continue
         fresh = await pos.get_sale(sale.id)
         method = _RND.choice(["cash", "cash", "card", "qr"])
-        metadata = {"external_confirmed": True} if method in {"card", "qr"} else None
-        await pos.add_payment(
-            sale_id=sale.id,
-            payment_method=method,
-            amount=fresh.total_amount,
-            metadata=metadata,
-        )
+        sale_items = await pos.repo.list_items(sale.id)
+        checkout_items = [(item.catalog_id, item.qty) for item in sale_items]
         timed_pos = POSService(POSRepository(session), now=_fixed_clock(completed_at))
-        await timed_pos.complete(sale_id=sale.id)
+        payment_attempt_id = None
+        if method in {"card", "qr"}:
+            attempt = await timed_pos.create_payment_attempt(
+                tenant_id=tenant.id,
+                sale_id=sale.id,
+                actor_id=cashier_id,
+                operation_id=uuid4(),
+                payment_method=method,
+                amount=fresh.total_amount,
+                currency=fresh.currency,
+            )
+            attempt = await timed_pos.confirm_payment_attempt(
+                tenant_id=tenant.id,
+                attempt_id=attempt.id,
+                actor_id=cashier_id,
+                external_reference=None,
+            )
+            payment_attempt_id = attempt.id
+        await timed_pos.checkout(
+            tenant_id=tenant.id,
+            register_id=register_id,
+            cashier_user_id=cashier_id,
+            operation_id=uuid4(),
+            draft_sale_id=sale.id,
+            items=checkout_items,
+            payments=[(method, fresh.total_amount, None, payment_attempt_id)],
+        )
         done += 1
     print(f"sale: +{done} продаж (смена открыта)")
     return done

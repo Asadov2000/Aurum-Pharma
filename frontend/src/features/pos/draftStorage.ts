@@ -7,6 +7,7 @@
 import { hasPendingCompletion } from "./completionOperation";
 import { hasPendingCheckoutOperation } from "./checkoutOperation";
 import { hasPendingPaymentOperation } from "./paymentOperation";
+import { hasPaymentAttemptOperation } from "./paymentAttemptOperation";
 
 export const draftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
 
@@ -14,6 +15,7 @@ export const draftKey = (registerId: string): string => `pos:currentSale:${regis
 // limit comes from tenant_settings.draft_sale_lifetime_min, passed into
 // loadDraft. The savedAt stamp refreshes on every cart change → idle timeout.
 export const DRAFT_TTL_MIN = 30;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface SavedDraft {
   saleId: string;
@@ -23,14 +25,15 @@ export interface SavedDraft {
   requiresRx?: boolean;
   stagedPayments?: SavedStagedPayment[];
   expiredSaleConfirmed?: boolean;
+  externalPaymentReviewRequired?: boolean;
 }
 
 export interface SavedStagedPayment {
   payment_method: "cash" | "card" | "qr";
   amount: string;
+  payment_attempt_id?: string;
   metadata?: {
     cash_received?: string;
-    external_confirmed?: true;
   };
 }
 
@@ -41,6 +44,7 @@ export interface DraftInit {
   requiresRx: boolean;
   stagedPayments: SavedStagedPayment[];
   expiredSaleConfirmed?: boolean;
+  externalPaymentReviewRequired: boolean;
 }
 
 export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): DraftInit {
@@ -51,9 +55,16 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
       if (parsed && typeof parsed.saleId === "string") {
         const savedAt = typeof parsed.savedAt === "number" ? parsed.savedAt : 0;
         const ageMin = (Date.now() - savedAt) / 60_000;
+        const stagedPayments = parseStagedPayments(parsed.stagedPayments);
+        const hasElectronicPayment = stagedPayments.some(
+          (payment) => payment.payment_method === "card" || payment.payment_method === "qr",
+        );
         if (
           ageMin > ttlMin &&
           parsed.status !== "completed" &&
+          !hasElectronicPayment &&
+          parsed.externalPaymentReviewRequired !== true &&
+          !hasPaymentAttemptOperation(parsed.saleId) &&
           !hasPendingPaymentOperation(parsed.saleId) &&
           !hasPendingCompletion(parsed.saleId) &&
           !hasPendingCheckoutOperation(parsed.saleId)
@@ -66,6 +77,7 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
             expired: true,
             requiresRx: false,
             stagedPayments: [],
+            externalPaymentReviewRequired: false,
           };
         }
         return {
@@ -73,10 +85,9 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
           nameById: parsed.nameById ?? {},
           expired: false,
           requiresRx: parsed.requiresRx === true,
-          stagedPayments: parseStagedPayments(parsed.stagedPayments),
-          ...(parsed.expiredSaleConfirmed === true
-            ? { expiredSaleConfirmed: true }
-            : {}),
+          stagedPayments,
+          externalPaymentReviewRequired: parsed.externalPaymentReviewRequired === true,
+          ...(parsed.expiredSaleConfirmed === true ? { expiredSaleConfirmed: true } : {}),
         };
       }
     }
@@ -89,6 +100,7 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
     expired: false,
     requiresRx: false,
     stagedPayments: [],
+    externalPaymentReviewRequired: false,
   };
 }
 
@@ -100,6 +112,7 @@ export function saveDraft(
   requiresRx: boolean = false,
   stagedPayments: readonly SavedStagedPayment[] = [],
   expiredSaleConfirmed: boolean = false,
+  externalPaymentReviewRequired: boolean = false,
 ): boolean {
   const safePayments = parseStagedPayments(stagedPayments);
   if (safePayments.length !== stagedPayments.length) return false;
@@ -111,6 +124,7 @@ export function saveDraft(
     requiresRx,
     stagedPayments: safePayments,
     expiredSaleConfirmed,
+    externalPaymentReviewRequired,
   });
   try {
     window.localStorage.setItem(draftKey(registerId), serialized);
@@ -145,18 +159,24 @@ function parseStagedPayments(value: unknown): SavedStagedPayment[] {
       return [];
     }
 
-    const payment: SavedStagedPayment = { payment_method: method, amount };
+    const paymentAttemptId = entry.payment_attempt_id;
+    if (
+      (method === "card" || method === "qr") &&
+      (typeof paymentAttemptId !== "string" || !UUID_V4_PATTERN.test(paymentAttemptId))
+    ) {
+      return [];
+    }
+    if (method === "cash" && paymentAttemptId !== undefined) return [];
+
+    const payment: SavedStagedPayment = {
+      payment_method: method,
+      amount,
+      ...(typeof paymentAttemptId === "string" ? { payment_attempt_id: paymentAttemptId } : {}),
+    };
     if (entry.metadata !== undefined) {
       if (!isRecord(entry.metadata)) return [];
       const cashReceived = entry.metadata.cash_received;
-      const externalConfirmed = entry.metadata.external_confirmed;
-      if (
-        Object.keys(entry.metadata).some(
-          (key) => key !== "cash_received" && key !== "external_confirmed",
-        )
-      ) {
-        return [];
-      }
+      if (Object.keys(entry.metadata).some((key) => key !== "cash_received")) return [];
       if (
         cashReceived !== undefined &&
         (method !== "cash" ||
@@ -169,18 +189,6 @@ function parseStagedPayments(value: unknown): SavedStagedPayment[] {
       if (typeof cashReceived === "string") {
         payment.metadata = { cash_received: cashReceived };
       }
-      if (
-        externalConfirmed !== undefined &&
-        ((method !== "card" && method !== "qr") || externalConfirmed !== true)
-      ) {
-        return [];
-      }
-      if (externalConfirmed === true) {
-        payment.metadata = { external_confirmed: true };
-      }
-    }
-    if ((method === "card" || method === "qr") && payment.metadata?.external_confirmed !== true) {
-      return [];
     }
     parsed.push(payment);
   }

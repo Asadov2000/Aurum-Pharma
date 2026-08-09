@@ -31,6 +31,10 @@ from app.domains.pos.schemas import (
     POSFavoriteCatalogRead,
     POSFavoriteCreate,
     POSFavoriteRead,
+    POSPaymentAttemptConfirm,
+    POSPaymentAttemptCreate,
+    POSPaymentAttemptRead,
+    POSPaymentAttemptVoid,
     PrescriptionLogCreate,
     PrescriptionLogRead,
     ReceiptData,
@@ -181,6 +185,104 @@ async def remove_pos_favorite(
         catalog_id=catalog_id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# =============================================================================
+# Server-trusted payment attempts
+# =============================================================================
+
+
+@router.post(
+    "/pos/payment-attempts",
+    response_model=POSPaymentAttemptRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def create_pos_payment_attempt(
+    payload: POSPaymentAttemptCreate,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSPaymentAttemptRead:
+    attempt = await service.create_payment_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        sale_id=payload.sale_id,
+        actor_id=user.user_id,
+        operation_id=payload.operation_id,
+        payment_method=payload.payment_method,
+        amount=payload.amount,
+        currency=payload.currency,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+    return POSPaymentAttemptRead.model_validate(attempt)
+
+
+@router.get(
+    "/pos/payment-attempts/{attempt_id}",
+    response_model=POSPaymentAttemptRead,
+)
+async def get_pos_payment_attempt(
+    attempt_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSPaymentAttemptRead:
+    attempt = await service.get_payment_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        attempt_id=attempt_id,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+    return POSPaymentAttemptRead.model_validate(attempt)
+
+
+@router.post(
+    "/pos/payment-attempts/{attempt_id}/confirm",
+    response_model=POSPaymentAttemptRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def confirm_pos_payment_attempt(
+    attempt_id: UUID,
+    payload: POSPaymentAttemptConfirm,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSPaymentAttemptRead:
+    attempt = await service.confirm_payment_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        attempt_id=attempt_id,
+        actor_id=user.user_id,
+        external_reference=payload.external_reference,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+    return POSPaymentAttemptRead.model_validate(attempt)
+
+
+@router.post(
+    "/pos/payment-attempts/{attempt_id}/void",
+    response_model=POSPaymentAttemptRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def void_pos_payment_attempt(
+    attempt_id: UUID,
+    payload: POSPaymentAttemptVoid,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSPaymentAttemptRead:
+    attempt = await service.void_payment_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        attempt_id=attempt_id,
+        actor_id=user.user_id,
+        reason=payload.reason,
+        operator_note=payload.operator_note,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+    return POSPaymentAttemptRead.model_validate(attempt)
 
 
 # =============================================================================
@@ -470,7 +572,12 @@ async def checkout_sale(
         draft_sale_id=payload.draft_sale_id,
         items=[(item.catalog_id, item.qty) for item in payload.items],
         payments=[
-            (payment.payment_method, payment.amount, payment.metadata)
+            (
+                payment.payment_method,
+                payment.amount,
+                payment.metadata,
+                payment.payment_attempt_id,
+            )
             for payment in payload.payments
         ],
         prescription=(

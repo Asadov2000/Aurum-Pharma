@@ -45,6 +45,7 @@ from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
 from app.domains.pos.models import (
     POSFavorite,
+    POSPaymentAttempt,
     PrescriptionLog,
     Sale,
     SaleItem,
@@ -86,6 +87,12 @@ logger = structlog.get_logger("pos.service")
 _MONEY_TEXT_PATTERN = re.compile(r"^(?:0|[1-9]\d{0,11})\.\d{2}$")
 _PAYMENT_METADATA_MAX_BYTES = 4096
 _MAX_SALES_OVERVIEW_DAYS = 366
+
+CheckoutPaymentInput = (
+    tuple[str, Decimal, Mapping[str, object] | None]
+    | tuple[str, Decimal, Mapping[str, object] | None, UUID | None]
+)
+NormalizedCheckoutPayment = tuple[str, Decimal, Mapping[str, object] | None, UUID | None]
 
 
 class POSService:
@@ -158,6 +165,256 @@ class POSService:
             tenant_id=tenant_id,
             user_id=user_id,
             catalog_id=catalog_id,
+        )
+
+    # =========================================================================
+    # Server-trusted payment attempts
+    # =========================================================================
+
+    @staticmethod
+    def _payment_attempt_operation_hash(
+        *,
+        sale_id: UUID,
+        payment_method: str,
+        amount: Decimal,
+        currency: str,
+    ) -> str:
+        return canonical_json_hash(
+            {
+                "kind": "pos_payment_attempt_v1",
+                "sale_id": str(sale_id),
+                "payment_method": payment_method,
+                "amount": format(amount.normalize(), "f"),
+                "currency": currency,
+            }
+        )
+
+    async def _assert_payment_attempt_access(
+        self,
+        attempt: POSPaymentAttempt,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
+        can_manage_tenant: bool,
+        allowed_branch_ids: set[UUID] | None,
+        allowed_manage_branch_ids: set[UUID] | None,
+    ) -> Sale:
+        if attempt.tenant_id != tenant_id:
+            raise NotFoundError("Payment attempt not found")
+        sale = await self.repo.get_sale(attempt.sale_id)
+        if sale is None or sale.tenant_id != tenant_id:
+            raise NotFoundError("Payment attempt not found")
+        self._assert_sale_owned_or_managed(
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        return sale
+
+    async def create_payment_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+        actor_id: UUID,
+        operation_id: UUID,
+        payment_method: str,
+        amount: Decimal,
+        currency: str,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> POSPaymentAttempt:
+        if payment_method not in {"card", "qr"}:
+            raise BusinessRuleError("Payment attempts support only card and QR")
+        if amount <= 0:
+            raise BusinessRuleError("Payment amount must be positive")
+        if currency != "TJS":
+            raise BusinessRuleError("POS payment currency must be TJS")
+        operation_hash = self._payment_attempt_operation_hash(
+            sale_id=sale_id,
+            payment_method=payment_method,
+            amount=amount,
+            currency=currency,
+        )
+        await self.repo.lock_operation_id(operation_id)
+        existing = await self.repo.get_payment_attempt_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is not None:
+            await self._assert_payment_attempt_access(
+                existing,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                can_manage_tenant=can_manage_tenant,
+                allowed_branch_ids=allowed_branch_ids,
+                allowed_manage_branch_ids=allowed_manage_branch_ids,
+            )
+            if existing.operation_hash != operation_hash:
+                raise ConflictError("Operation ID was already used for another payment attempt")
+            return existing
+        if (
+            await self.repo.get_sale_by_operation_id(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+            or await self.repo.get_payment_by_operation_id(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+        ):
+            raise ConflictError("Operation ID was already used for another POS operation")
+
+        sale = await self._lock_sale(sale_id)
+        if sale.tenant_id != tenant_id or sale.sale_type != "sale":
+            raise NotFoundError("Sale not found")
+        self._assert_sale_owned_or_managed(
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        self._assert_draft(sale)
+        if await self.repo.list_payments(sale.id):
+            raise BusinessRuleError(
+                "Payment attempts cannot be added to a sale with legacy payments"
+            )
+        if sale.currency != currency:
+            raise BusinessRuleError("Payment currency does not match sale currency")
+        if amount > sale.total_amount:
+            raise BusinessRuleError("Payment attempt exceeds sale total")
+        await self._validate_pos_payment_configuration(
+            tenant_id=tenant_id,
+            requested_methods={payment_method},
+        )
+        return await self.repo.insert_payment_attempt(
+            tenant_id=tenant_id,
+            sale_id=sale.id,
+            cashier_user_id=sale.cashier_user_id,
+            operation_id=operation_id,
+            operation_hash=operation_hash,
+            payment_method=payment_method,
+            amount=amount,
+            currency=currency,
+            status="pending",
+            created_by=actor_id,
+        )
+
+    async def get_payment_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_id: UUID,
+        actor_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> POSPaymentAttempt:
+        attempt = await self.repo.get_payment_attempt(attempt_id)
+        if attempt is None:
+            raise NotFoundError("Payment attempt not found")
+        await self._assert_payment_attempt_access(
+            attempt,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        return attempt
+
+    async def confirm_payment_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_id: UUID,
+        actor_id: UUID,
+        external_reference: str | None,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> POSPaymentAttempt:
+        visible_attempt = await self.repo.get_payment_attempt(attempt_id)
+        if visible_attempt is None:
+            raise NotFoundError("Payment attempt not found")
+        await self._assert_payment_attempt_access(
+            visible_attempt,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        sale = await self._lock_sale(visible_attempt.sale_id)
+        self._assert_sale_owned_or_managed(
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        self._assert_draft(sale)
+        attempt = await self.repo.lock_payment_attempt(attempt_id)
+        if attempt is None or attempt.tenant_id != tenant_id or attempt.sale_id != sale.id:
+            raise NotFoundError("Payment attempt not found")
+        if attempt.amount > sale.total_amount:
+            raise BusinessRuleError("Payment attempt exceeds the current sale total")
+        if attempt.status in {"confirmed", "consumed"}:
+            if attempt.external_reference != external_reference:
+                raise ConflictError("Payment attempt was confirmed with another reference")
+            return attempt
+        if attempt.status != "pending":
+            raise BusinessRuleError("Only a pending payment attempt can be confirmed")
+        return await self.repo.update_payment_attempt(
+            attempt,
+            status="confirmed",
+            external_reference=external_reference,
+            confirmed_at=self._now(),
+            updated_by=actor_id,
+        )
+
+    async def void_payment_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_id: UUID,
+        actor_id: UUID,
+        reason: str,
+        operator_note: str | None,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> POSPaymentAttempt:
+        attempt = await self.repo.lock_payment_attempt(attempt_id)
+        if attempt is None:
+            raise NotFoundError("Payment attempt not found")
+        await self._assert_payment_attempt_access(
+            attempt,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if attempt.status == "voided":
+            if attempt.void_reason != reason or attempt.void_note != operator_note:
+                raise ConflictError("Payment attempt was voided with other details")
+            return attempt
+        if attempt.status == "consumed":
+            raise BusinessRuleError("A consumed payment attempt requires a refund")
+        return await self.repo.update_payment_attempt(
+            attempt,
+            status="voided",
+            void_reason=reason,
+            void_note=operator_note,
+            voided_at=self._now(),
+            updated_by=actor_id,
         )
 
     # =========================================================================
@@ -404,12 +661,28 @@ class POSService:
         return list(per_catalog.items())
 
     @staticmethod
+    def _normalize_checkout_payments(
+        payments: list[CheckoutPaymentInput],
+    ) -> list[NormalizedCheckoutPayment]:
+        normalized: list[NormalizedCheckoutPayment] = []
+        for payment in payments:
+            if len(payment) == 3:
+                payment_method, amount, metadata = payment
+                payment_attempt_id = None
+            else:
+                payment_method, amount, metadata, payment_attempt_id = payment
+            if amount <= 0:
+                raise BusinessRuleError("Payment amount must be positive")
+            normalized.append((payment_method, amount, metadata, payment_attempt_id))
+        return normalized
+
+    @staticmethod
     def _checkout_operation_hash(
         *,
         register_id: UUID,
         draft_sale_id: UUID | None,
         items: list[tuple[UUID, Decimal]],
-        payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
+        payments: list[NormalizedCheckoutPayment],
         prescription: Mapping[str, object] | None,
         expired_sale_confirmed: bool,
     ) -> str:
@@ -426,8 +699,13 @@ class POSService:
                     "payment_method": payment_method,
                     "amount": format(amount.normalize(), "f"),
                     "metadata": dict(metadata) if metadata is not None else None,
+                    **(
+                        {"payment_attempt_id": str(payment_attempt_id)}
+                        if payment_attempt_id is not None
+                        else {}
+                    ),
                 }
-                for payment_method, amount, metadata in payments
+                for payment_method, amount, metadata, payment_attempt_id in payments
             ],
             "prescription": dict(prescription) if prescription is not None else None,
             "expired_sale_confirmed": expired_sale_confirmed,
@@ -462,6 +740,12 @@ class POSService:
         allowed_branch_ids: set[UUID] | None,
         allowed_manage_branch_ids: set[UUID] | None,
     ) -> SaleCheckoutResult | None:
+        existing_attempt = await self.repo.get_payment_attempt_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing_attempt is not None:
+            raise ConflictError("Operation ID was already used for another POS operation")
         existing_payment = await self.repo.get_payment_by_operation_id(
             tenant_id=tenant_id,
             operation_id=operation_id,
@@ -584,16 +868,75 @@ class POSService:
 
     @staticmethod
     def _validate_checkout_payments(
-        payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
+        payments: list[NormalizedCheckoutPayment],
     ) -> None:
-        for payment_method, amount, metadata in payments:
-            if amount <= 0:
-                raise BusinessRuleError("Payment amount must be positive")
-            POSService._validate_payment_metadata(
-                payment_method=payment_method,
-                amount=amount,
-                metadata=metadata,
+        seen_attempt_ids: set[UUID] = set()
+        for payment_method, amount, metadata, payment_attempt_id in payments:
+            if payment_method == "cash":
+                if payment_attempt_id is not None:
+                    raise BusinessRuleError("Cash payment cannot use a payment attempt")
+                POSService._validate_payment_metadata(
+                    payment_method=payment_method,
+                    amount=amount,
+                    metadata=metadata,
+                )
+                continue
+            if payment_method not in {"card", "qr"}:
+                raise BusinessRuleError("Unsupported POS payment method")
+            if payment_attempt_id is None:
+                raise BusinessRuleError("Card and QR checkout requires a confirmed payment attempt")
+            if payment_attempt_id in seen_attempt_ids:
+                raise BusinessRuleError("Payment attempt is duplicated in checkout")
+            seen_attempt_ids.add(payment_attempt_id)
+            if metadata is not None:
+                raise BusinessRuleError(
+                    "Card and QR checkout metadata is not accepted; use a payment attempt"
+                )
+
+    async def _lock_checkout_payment_attempts(
+        self,
+        *,
+        sale: Sale,
+        payments: list[NormalizedCheckoutPayment],
+    ) -> dict[UUID, POSPaymentAttempt]:
+        active_attempts = await self.repo.lock_active_payment_attempts_for_sale(sale.id)
+        attempts = {attempt.id: attempt for attempt in active_attempts}
+        provided_ids = {
+            payment_attempt_id
+            for _method, _amount, _metadata, payment_attempt_id in payments
+            if payment_attempt_id is not None
+        }
+        if any(attempt.status == "pending" for attempt in active_attempts):
+            raise BusinessRuleError(
+                "Sale has a pending card or QR payment attempt that must be resolved"
             )
+        for payment_method, amount, _metadata, payment_attempt_id in payments:
+            if payment_attempt_id is None:
+                continue
+            attempt = attempts.get(payment_attempt_id)
+            if attempt is None:
+                attempt = await self.repo.get_payment_attempt(payment_attempt_id)
+                if attempt is None or attempt.tenant_id != sale.tenant_id:
+                    raise NotFoundError("Payment attempt not found")
+            if (
+                attempt.sale_id != sale.id
+                or attempt.cashier_user_id != sale.cashier_user_id
+                or attempt.payment_method != payment_method
+                or attempt.amount != amount
+                or attempt.currency != sale.currency
+            ):
+                raise BusinessRuleError("Payment attempt does not match checkout")
+            if attempt.status != "confirmed":
+                raise BusinessRuleError(
+                    "Payment attempt is not confirmed",
+                    details={"status": attempt.status},
+                )
+        confirmed_ids = {attempt.id for attempt in active_attempts if attempt.status == "confirmed"}
+        if confirmed_ids != provided_ids:
+            raise BusinessRuleError(
+                "Every confirmed card or QR payment attempt must be included in checkout"
+            )
+        return attempts
 
     @staticmethod
     def _validate_payment_metadata(
@@ -747,7 +1090,7 @@ class POSService:
         operation_id: UUID,
         draft_sale_id: UUID | None = None,
         items: list[tuple[UUID, Decimal]],
-        payments: list[tuple[str, Decimal, Mapping[str, object] | None]],
+        payments: list[CheckoutPaymentInput],
         prescription: Mapping[str, object] | None = None,
         expired_sale_confirmed: bool = False,
         can_manage_tenant: bool = False,
@@ -761,12 +1104,12 @@ class POSService:
         payments, prescription, stock movements, and receipt allocation.
         """
         aggregated_items = self._aggregate_checkout_items(items)
-        self._validate_checkout_payments(payments)
+        normalized_payments = self._normalize_checkout_payments(payments)
         operation_hash = self._checkout_operation_hash(
             register_id=register_id,
             draft_sale_id=draft_sale_id,
             items=aggregated_items,
-            payments=payments,
+            payments=normalized_payments,
             prescription=prescription,
             expired_sale_confirmed=expired_sale_confirmed,
         )
@@ -786,8 +1129,11 @@ class POSService:
 
         await self._validate_pos_payment_configuration(
             tenant_id=tenant_id,
-            requested_methods={method for method, _amount, _metadata in payments},
+            requested_methods={
+                method for method, _amount, _metadata, _attempt_id in normalized_payments
+            },
         )
+        self._validate_checkout_payments(normalized_payments)
         sale = await self._prepare_checkout_sale(
             tenant_id=tenant_id,
             register_id=register_id,
@@ -811,19 +1157,27 @@ class POSService:
                 expired_sale_confirmed=expired_sale_confirmed,
             )
 
-        paid_total = sum((amount for _method, amount, _metadata in payments), Decimal("0"))
+        paid_total = sum(
+            (amount for _method, amount, _metadata, _attempt_id in normalized_payments),
+            Decimal("0"),
+        )
         if paid_total != sale.total_amount:
             raise BusinessRuleError(
                 "Payment total does not match sale total",
                 details={"paid": str(paid_total), "total": str(sale.total_amount)},
             )
-        for payment_method, amount, metadata in payments:
+        payment_attempts = await self._lock_checkout_payment_attempts(
+            sale=sale,
+            payments=normalized_payments,
+        )
+        for payment_method, amount, metadata, payment_attempt_id in normalized_payments:
             await self.repo.insert_payment(
                 tenant_id=tenant_id,
                 sale_id=sale.id,
                 payment_method=payment_method,
                 amount=amount,
                 metadata_json=dict(metadata) if metadata is not None else None,
+                payment_attempt_id=payment_attempt_id,
             )
 
         if prescription is not None:
@@ -835,6 +1189,14 @@ class POSService:
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_manage_branch_ids=allowed_manage_branch_ids,
             )
+        for attempt in payment_attempts.values():
+            await self.repo.update_payment_attempt(
+                attempt,
+                status="consumed",
+                consumed_at=self._now(),
+                updated_by=cashier_user_id,
+            )
+
         completed = await self.complete(
             sale_id=sale.id,
             actor_id=cashier_user_id,
@@ -871,7 +1233,14 @@ class POSService:
             is_test=completed.is_test,
             items=[SaleCheckoutItemResult.model_validate(item) for item in sale_items],
             payments=[
-                SaleCheckoutPaymentResult.model_validate(payment) for payment in sale_payments
+                SaleCheckoutPaymentResult.model_validate(payment).model_copy(
+                    update={
+                        "payment_attempt_status": (
+                            "consumed" if payment.payment_attempt_id is not None else None
+                        )
+                    }
+                )
+                for payment in sale_payments
             ],
         )
         event_payload = result.model_dump(mode="json")
@@ -1772,6 +2141,12 @@ class POSService:
         operation_id: UUID,
         operation_hash: str,
     ) -> SalePayment | None:
+        existing_attempt = await self.repo.get_payment_attempt_by_operation_id(
+            tenant_id=sale.tenant_id,
+            operation_id=operation_id,
+        )
+        if existing_attempt is not None:
+            raise ConflictError("Operation ID was already used for another POS operation")
         existing_sale = await self.repo.get_sale_by_operation_id(
             tenant_id=sale.tenant_id,
             operation_id=operation_id,
@@ -1804,11 +2179,6 @@ class POSService:
     ) -> SalePayment:
         if amount <= 0:
             raise BusinessRuleError("Payment amount must be positive")
-        self._validate_payment_metadata(
-            payment_method=payment_method,
-            amount=amount,
-            metadata=metadata,
-        )
         effective_operation_id = operation_id or uuid4()
         operation_hash = self._payment_operation_hash(
             sale_id=sale_id,
@@ -1838,7 +2208,20 @@ class POSService:
             requested_methods={payment_method},
             existing_methods=await self.repo.payment_methods(sale.id),
         )
+        if payment_method in {"card", "qr"}:
+            raise BusinessRuleError(
+                "New card and QR payments require atomic checkout with a payment attempt"
+            )
+        self._validate_payment_metadata(
+            payment_method=payment_method,
+            amount=amount,
+            metadata=metadata,
+        )
         self._assert_draft(sale)
+        if await self.repo.lock_active_payment_attempts_for_sale(sale.id):
+            raise BusinessRuleError(
+                "Resolve the sale's card or QR payment attempts before adding a legacy payment"
+            )
         paid_total = await self.repo.payments_total(sale.id)
         if paid_total + amount > sale.total_amount:
             raise BusinessRuleError(
@@ -2039,6 +2422,10 @@ class POSService:
         if sale.status in {"completed", "voided"} and sale.receipt_number is not None:
             return sale
         self._assert_draft(sale)
+        if await self.repo.lock_active_payment_attempts_for_sale(sale.id):
+            raise BusinessRuleError(
+                "Resolve the sale's card or QR payment attempts before completing it"
+            )
 
         await self._lock_open_shift(
             sale.shift_id,

@@ -8,6 +8,8 @@ import {
   checkoutSale,
   closeShift,
   completeSale,
+  confirmPaymentAttempt,
+  createPaymentAttempt,
   createSale,
   deleteSaleItem,
   getCurrentShift,
@@ -17,8 +19,12 @@ import {
   openShift,
   removePosFavorite,
   updateSaleItem,
+  voidPaymentAttempt,
 } from "./api";
 import {
+  type PaymentAttemptConfirmPayload,
+  type PaymentAttemptCreatePayload,
+  type PaymentAttemptVoidPayload,
   type PaymentAddPayload,
   type PrescriptionLogPayload,
   type SaleCheckoutPayload,
@@ -57,6 +63,26 @@ export function useRemovePosFavorite() {
   return useMutation({
     mutationFn: (catalogId: string) => removePosFavorite(catalogId),
     onSuccess: () => qc.invalidateQueries({ queryKey: posKeys.favoritesRoot }),
+  });
+}
+
+export function useCreatePaymentAttempt() {
+  return useMutation({
+    mutationFn: (payload: PaymentAttemptCreatePayload) => createPaymentAttempt(payload),
+  });
+}
+
+export function useConfirmPaymentAttempt() {
+  return useMutation({
+    mutationFn: (args: { attemptId: string; payload?: PaymentAttemptConfirmPayload }) =>
+      confirmPaymentAttempt(args.attemptId, args.payload),
+  });
+}
+
+export function useVoidPaymentAttempt() {
+  return useMutation({
+    mutationFn: (args: { attemptId: string; payload: PaymentAttemptVoidPayload }) =>
+      voidPaymentAttempt(args.attemptId, args.payload),
   });
 }
 

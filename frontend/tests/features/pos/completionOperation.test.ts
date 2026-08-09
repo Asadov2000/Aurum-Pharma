@@ -40,6 +40,7 @@ describe("pending POS completion", () => {
       expired: false,
       requiresRx: false,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
 
     clearPendingCompletion("sale-1");
@@ -49,6 +50,7 @@ describe("pending POS completion", () => {
       expired: true,
       requiresRx: false,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
   });
 
@@ -69,6 +71,7 @@ describe("pending POS completion", () => {
       expired: false,
       requiresRx: false,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
   });
 });

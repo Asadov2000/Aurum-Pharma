@@ -45,6 +45,10 @@ CRUD_TABLES = {
     "wizard_state",
 }
 
+NO_DELETE_TABLES = {
+    "pos_payment_attempt",
+}
+
 APPEND_ONLY_TABLES = {
     "batch_movement",
     "supplier_return",
@@ -228,6 +232,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_platform_access_grant",
     "trg_guard_platform_account_status",
     "trg_guard_platform_membership_scope",
+    "trg_guard_pos_payment_attempt_transition",
     "trg_guard_role_permission_mutation",
     "trg_guard_sale_child_immutability",
     "trg_guard_sale_immutability",
@@ -660,6 +665,7 @@ async def test_runtime_role_has_only_row_level_table_privileges(
 
     expected_relations = {
         **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
+        **{table: {"SELECT", "INSERT", "UPDATE"} for table in NO_DELETE_TABLES},
         **{table: {"SELECT", "INSERT"} for table in APPEND_ONLY_TABLES},
         **{table: {"SELECT"} for table in READ_ONLY_TABLES | RUNTIME_VIEWS},
         **{table: set() for table in NO_ACCESS_TABLES},

@@ -38,12 +38,21 @@ async def _open_shift_and_sell(  # type: ignore[no-untyped-def]
     )
     items, _ = await service.add_item(sale_id=sale.id, catalog_id=s["item"].id, qty=Decimal(qty))
     for payment_method, amount in payments or [("cash", Decimal(qty * 10))]:
-        await service.add_payment(
-            sale_id=sale.id,
-            payment_method=payment_method,
-            amount=amount,
-            metadata=({"external_confirmed": True} if payment_method in {"card", "qr"} else None),
-        )
+        if payment_method == "cash":
+            await service.add_payment(
+                sale_id=sale.id,
+                payment_method=payment_method,
+                amount=amount,
+            )
+        else:
+            # Refund tests also cover historical electronic sales created
+            # before payment attempts became mandatory.
+            await service.repo.insert_payment(
+                tenant_id=s["tenant"].id,
+                sale_id=sale.id,
+                payment_method=payment_method,
+                amount=amount,
+            )
     completed = await service.complete(sale_id=sale.id)
     return service, s, completed, items[0]
 
@@ -484,11 +493,11 @@ async def test_repeated_mixed_refunds_reconcile_to_original_tender_totals(
         payment_method="cash",
         amount=Decimal("1.00"),
     )
-    await service.add_payment(
+    await repo.insert_payment(
+        tenant_id=s["tenant"].id,
         sale_id=sale.id,
         payment_method="card",
         amount=Decimal("2.00"),
-        metadata={"external_confirmed": True},
     )
     parent = await service.complete(sale_id=sale.id)
 

@@ -61,6 +61,7 @@ describe("pending POS checkout operation", () => {
       expired: false,
       requiresRx: false,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
 
     clearPendingCheckoutOperation("sale-1", operation.operationId);
@@ -70,6 +71,7 @@ describe("pending POS checkout operation", () => {
       expired: true,
       requiresRx: false,
       stagedPayments: [],
+      externalPaymentReviewRequired: false,
     });
   });
 });
