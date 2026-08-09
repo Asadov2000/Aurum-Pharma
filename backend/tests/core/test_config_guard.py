@@ -74,6 +74,13 @@ def test_production_accepts_strong_secrets() -> None:
     s = _build(ENVIRONMENT="production")
     assert s.ENVIRONMENT == "production"
     assert s.refresh_cookie_secure is True
+    assert s.auth_login_guard_enabled is True
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_non_development_rejects_local_auth_testing_mode(environment: str) -> None:
+    with pytest.raises(ValidationError, match="AUTH_LOCAL_TESTING_MODE"):
+        _build(ENVIRONMENT=environment, AUTH_LOCAL_TESTING_MODE=True)
 
 
 def test_production_rejects_development_edge_transport() -> None:
@@ -234,6 +241,23 @@ def test_development_allows_defaults() -> None:
     )
     assert s.ENVIRONMENT == "development"
     assert s.refresh_cookie_secure is False
+    assert s.AUTH_LOCAL_TESTING_MODE is False
+    assert s.auth_login_guard_enabled is True
+
+
+def test_development_can_explicitly_enable_local_auth_testing_mode() -> None:
+    settings = _build(
+        ENVIRONMENT="development",
+        AUTH_LOCAL_TESTING_MODE=True,
+        JWT_SECRET="change-me-to-a-long-random-string-min-32-bytes",
+        MINIO_ACCESS_KEY="minioadmin",
+        MINIO_SECRET_KEY="minioadmin",
+        DATABASE_URL_APP=_DEV_DB_APP,
+        DATABASE_URL_SUPPORT=_DEV_DB_SUPPORT,
+        REFRESH_COOKIE_SECURE=False,
+    )
+
+    assert settings.auth_login_guard_enabled is False
 
 
 def test_settings_read_secrets_from_files(

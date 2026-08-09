@@ -7,6 +7,7 @@ x-backend-environment: &backend-environment
   ENVIRONMENT: development
   DEPLOYMENT_PROFILE: cloud
   AURUM_SHOWCASE_SEED: "1"
+  AUTH_LOCAL_TESTING_MODE: "true"
   DATABASE_URL_APP: "postgresql+asyncpg://aurum_app:${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}@postgres:5432/aurum_demo"
   DATABASE_URL_SUPPORT: "postgresql+asyncpg://aurum_support:${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}@postgres:5432/aurum_demo"
   REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"

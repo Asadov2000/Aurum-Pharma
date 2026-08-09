@@ -68,6 +68,9 @@ _require_disposable_test_database(
 os.environ["DATABASE_URL_APP"] = _test_database_url_app
 os.environ["DATABASE_URL_SUPPORT"] = _test_database_url_support
 os.environ["DATABASE_URL_MIGRATION"] = _test_database_url_migration
+# Unit and integration tests exercise the production-grade lockout policy even
+# though the rest of the test stack uses ENVIRONMENT=development.
+os.environ["AUTH_LOCAL_TESTING_MODE"] = "false"
 
 
 @pytest_asyncio.fixture

@@ -24,7 +24,7 @@ export function clearLoginRateLimit(email: string): void {
   const emailLiteral = sqlLiteral(email);
   const sql =
     `DELETE FROM email_code WHERE email_lower=${emailLiteral}; ` +
-    `DELETE FROM login_attempt WHERE email_lower=${emailLiteral} AND outcome IN ('blocked','code_requested'); ` +
+    `DELETE FROM login_attempt WHERE email_lower=${emailLiteral} AND outcome IN ('blocked','code_requested','rate_limited'); ` +
     "UPDATE support_mfa SET last_used_counter=NULL " +
     `WHERE user_id=(SELECT id FROM app_user WHERE lower(email)=${emailLiteral});`;
   dockerExec(E2E_POSTGRES_CONTAINER, ["psql", "-U", "postgres", "-d", E2E_POSTGRES_DB, "-c", sql]);

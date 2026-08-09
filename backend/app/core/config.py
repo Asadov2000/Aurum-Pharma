@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 7
     MFA_STEP_UP_MINUTES: int = Field(default=10, ge=1, le=15)
+    # Local account switching must not create long lockouts while developing.
+    # Staging and production refuse to start with this flag enabled, so a
+    # copied development configuration cannot weaken authentication.
+    AUTH_LOCAL_TESTING_MODE: bool = False
     REFRESH_COOKIE_NAME: str = "aurum_refresh_token"
     REFRESH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     # None means "secure in production, HTTP-friendly in local development".
@@ -214,6 +218,10 @@ class Settings(BaseSettings):
             else self.ENVIRONMENT == "production"
         )
 
+    @property
+    def auth_login_guard_enabled(self) -> bool:
+        return self.ENVIRONMENT != "development" or not self.AUTH_LOCAL_TESTING_MODE
+
     @model_validator(mode="after")
     def _guard_non_development_metrics(self) -> Settings:
         if self.ENVIRONMENT != "development" and (
@@ -255,6 +263,8 @@ class Settings(BaseSettings):
             return self
 
         problems: list[str] = []
+        if self.AUTH_LOCAL_TESTING_MODE:
+            problems.append("AUTH_LOCAL_TESTING_MODE is allowed only in development")
         if len(self.JWT_SECRET) < 32 or "change-me" in self.JWT_SECRET.lower():
             problems.append("JWT_SECRET must be a strong secret (>=32 chars, not the placeholder)")
         problems.extend(_minio_security_problems(self.MINIO_ACCESS_KEY, self.MINIO_SECRET_KEY))

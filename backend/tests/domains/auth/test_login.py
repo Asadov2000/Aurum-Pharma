@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import importlib
+from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.errors import (
@@ -103,6 +104,41 @@ async def test_request_login_code_rate_limit_per_minute(
     await service.request_login_code(email="rl@aurum.tj", ip_address="127.0.0.1")
     with pytest.raises(RateLimitError):
         await service.request_login_code(email="rl@aurum.tj", ip_address="127.0.0.1")
+
+
+async def test_request_throttle_does_not_block_valid_code(
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="throttled-valid@aurum.tj")
+    service = AuthService(AuthRepository(db_session), login_guard_enabled=True)
+    code = await service.request_login_code(email=user.email, ip_address="127.0.0.1")
+
+    with pytest.raises(RateLimitError):
+        await service.request_login_code(email=user.email, ip_address="127.0.0.1")
+
+    assert not await service.repo.enforce_login_guard(
+        email_lower=user.email,
+        ip_address="127.0.0.1",
+    )
+    tokens = await service.verify_login_code(
+        email=user.email,
+        code=code,
+        password=None,
+        ip_address="127.0.0.1",
+    )
+    assert tokens.access_token
+
+    result = await db_session.execute(
+        select(LoginAttempt.outcome, LoginAttempt.metadata_json).where(
+            LoginAttempt.email_lower == user.email,
+            LoginAttempt.outcome == "rate_limited",
+        )
+    )
+    assert result.one() == (
+        "rate_limited",
+        {"reason": "code_rate_limit_minute"},
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -224,6 +260,94 @@ async def test_verify_five_failures_then_blocked(db_session: AsyncSession, make_
     result = await db_session.execute(stmt)
     blocked_rows = result.scalars().all()
     assert len(blocked_rows) >= 1
+
+
+async def test_success_resets_consecutive_login_failures(
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="reset-failures@aurum.tj")
+    repo = AuthRepository(db_session)
+    attempt = {
+        "email_lower": user.email,
+        "user_id": user.id,
+        "ip_address": "127.0.0.1",
+        "user_agent": "pytest",
+    }
+
+    for _ in range(4):
+        await repo.insert_login_attempt(**attempt, outcome="code_failed")
+    assert not await repo.enforce_login_guard(
+        email_lower=user.email,
+        ip_address="127.0.0.1",
+    )
+
+    # Production attempts arrive in separate request transactions. The test
+    # intentionally shares one outer transaction, where PostgreSQL now() is
+    # stable, so make the event order explicit before testing the reset fence.
+    await db_session.execute(
+        update(LoginAttempt)
+        .where(
+            LoginAttempt.email_lower == user.email,
+            LoginAttempt.outcome == "code_failed",
+        )
+        .values(created_at=func.now() - timedelta(seconds=2))
+    )
+    await repo.insert_login_attempt(**attempt, outcome="success")
+    await db_session.execute(
+        update(LoginAttempt)
+        .where(
+            LoginAttempt.email_lower == user.email,
+            LoginAttempt.outcome == "success",
+        )
+        .values(created_at=func.now() - timedelta(seconds=1))
+    )
+    for _ in range(4):
+        await repo.insert_login_attempt(**attempt, outcome="password_failed")
+    assert not await repo.enforce_login_guard(
+        email_lower=user.email,
+        ip_address="127.0.0.1",
+    )
+
+    await repo.insert_login_attempt(**attempt, outcome="totp_failed")
+    assert await repo.enforce_login_guard(
+        email_lower=user.email,
+        ip_address="127.0.0.1",
+    )
+
+
+async def test_local_testing_mode_skips_only_long_login_lockout(
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="local-switching@aurum.tj")
+    repo = AuthRepository(db_session)
+    for _ in range(5):
+        await repo.insert_login_attempt(
+            email_lower=user.email,
+            user_id=user.id,
+            ip_address="127.0.0.1",
+            user_agent="pytest",
+            outcome="code_failed",
+        )
+
+    await _seed_code(db_session, user.email, code="123456")
+    service = AuthService(repo, login_guard_enabled=False)
+    with pytest.raises(AuthenticationError):
+        await service.verify_login_code(
+            email=user.email,
+            code="000000",
+            password=None,
+            ip_address="127.0.0.1",
+        )
+
+    tokens = await service.verify_login_code(
+        email=user.email,
+        code="123456",
+        password=None,
+        ip_address="127.0.0.1",
+    )
+    assert tokens.access_token
 
 
 async def test_verify_password_required_and_correct(db_session: AsyncSession, make_user) -> None:
