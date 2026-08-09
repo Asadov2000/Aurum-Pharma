@@ -148,7 +148,7 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByRole("button", { name: /Сбросить расчёт/i })).toHaveCount(0);
   });
 
-  test("confirms one card attempt and consumes it atomically with checkout", async ({ page }) => {
+  test("binds card sale and refund to confirmed terminal attempts", async ({ page }) => {
     test.setTimeout(120_000);
 
     const apiAnon = await request.newContext();
@@ -218,7 +218,17 @@ test.describe("POS sale (owner)", () => {
         (request) =>
           request.method() === "POST" && request.url().endsWith("/api/v1/sales/checkout"),
       );
+      const checkoutResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().endsWith("/api/v1/sales/checkout") &&
+          response.ok(),
+      );
       await completePosSale(page);
+      const completedSale = (await (await checkoutResponse).json()) as {
+        sale_id: string;
+        receipt_number: string;
+      };
       const checkoutPayload = (await checkoutRequest).postDataJSON() as {
         payments: { payment_method: string; payment_attempt_id?: string }[];
       };
@@ -233,6 +243,83 @@ test.describe("POS sale (owner)", () => {
       const storedAttempt = await api.get(`pos/payment-attempts/${createdAttempt.id}`);
       expect(storedAttempt.ok()).toBe(true);
       expect(((await storedAttempt.json()) as { status: string }).status).toBe("consumed");
+
+      await page.goto("/sales");
+      const filteredSalesResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET" &&
+          url.pathname.endsWith("/api/v1/sales") &&
+          url.searchParams.get("receipt_number") === completedSale.receipt_number
+        );
+      });
+      await page.getByLabel("№ чека").fill(completedSale.receipt_number);
+      const filteredSales = (await (await filteredSalesResponse).json()) as {
+        items: { id: string }[];
+      };
+      const saleRowIndex = filteredSales.items.findIndex(
+        (sale) => sale.id === completedSale.sale_id,
+      );
+      expect(saleRowIndex).toBeGreaterThanOrEqual(0);
+      const saleRow = page.locator("tbody").getByRole("row").nth(saleRowIndex);
+      await expect(
+        saleRow.getByRole("cell", {
+          name: completedSale.receipt_number,
+          exact: true,
+        }),
+      ).toBeVisible();
+      await saleRow.click();
+      const saleDialog = page.getByRole("dialog", {
+        name: `Чек № ${completedSale.receipt_number}`,
+      });
+      await saleDialog.getByRole("button", { name: "Оформить возврат" }).click();
+
+      const refundDialog = page.getByRole("dialog", {
+        name: `Возврат по чеку № ${completedSale.receipt_number}`,
+      });
+      const createRefundAttemptResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().endsWith(`/api/v1/sales/${completedSale.sale_id}/refund-attempts`) &&
+          response.status() === 201,
+      );
+      await refundDialog.getByRole("button", { name: "Рассчитать возврат" }).click();
+      const refundAttempt = (await (await createRefundAttemptResponse).json()) as {
+        id: string;
+        status: string;
+      };
+      expect(refundAttempt.status).toBe("pending");
+
+      const refundDocument = `E2E-REFUND-${Date.now()}`;
+      await refundDialog.getByLabel("Терминал").fill("E2E-TERM-01");
+      await refundDialog.getByLabel("Номер документа").fill(refundDocument);
+      const confirmRefundAttemptResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().endsWith(`/api/v1/pos/refund-attempts/${refundAttempt.id}/confirm`) &&
+          response.ok(),
+      );
+      const refundResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().endsWith(`/api/v1/sales/${completedSale.sale_id}/refund`) &&
+          response.ok(),
+      );
+      await refundDialog.getByRole("button", { name: "Подтвердить и оформить" }).click();
+      expect(
+        ((await (await confirmRefundAttemptResponse).json()) as { status: string }).status,
+      ).toBe("confirmed");
+      const returnedSale = (await (await refundResponse).json()) as {
+        id: string;
+        refund_attempt_id: string | null;
+        sale_type: string;
+      };
+      expect(returnedSale.sale_type).toBe("return");
+      expect(returnedSale.refund_attempt_id).toBe(refundAttempt.id);
+
+      const storedRefundAttempt = await api.get(`pos/refund-attempts/${refundAttempt.id}`);
+      expect(storedRefundAttempt.ok()).toBe(true);
+      expect(((await storedRefundAttempt.json()) as { status: string }).status).toBe("consumed");
     } finally {
       await apiAnon.dispose();
       await api.dispose();

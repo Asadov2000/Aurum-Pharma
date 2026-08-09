@@ -20,6 +20,8 @@ from app.domains.inventory.models import Batch
 from app.domains.pos.models import (
     POSFavorite,
     POSPaymentAttempt,
+    POSRefundAttempt,
+    POSRefundReference,
     PrescriptionLog,
     Sale,
     SaleItem,
@@ -611,6 +613,92 @@ class POSRepository:
         await self.session.flush()
         await self.session.refresh(attempt)
         return attempt
+
+    # -------- server-controlled electronic refund attempts --------
+
+    async def get_refund_attempt(self, attempt_id: UUID) -> POSRefundAttempt | None:
+        return await self.session.get(POSRefundAttempt, attempt_id)
+
+    async def lock_refund_attempt(self, attempt_id: UUID) -> POSRefundAttempt | None:
+        stmt = (
+            select(POSRefundAttempt)
+            .where(POSRefundAttempt.id == attempt_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def lock_active_refund_attempt_for_sale(
+        self,
+        parent_sale_id: UUID,
+    ) -> POSRefundAttempt | None:
+        stmt = (
+            select(POSRefundAttempt)
+            .where(
+                POSRefundAttempt.parent_sale_id == parent_sale_id,
+                POSRefundAttempt.status.in_(("pending", "confirmed")),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_refund_attempt_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> POSRefundAttempt | None:
+        stmt = select(POSRefundAttempt).where(
+            POSRefundAttempt.tenant_id == tenant_id,
+            POSRefundAttempt.operation_id == operation_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def insert_refund_attempt(self, **fields: Any) -> POSRefundAttempt:
+        attempt = POSRefundAttempt(**fields)
+        self.session.add(attempt)
+        await self.session.flush()
+        await self.session.refresh(attempt)
+        return attempt
+
+    async def update_refund_attempt(
+        self,
+        attempt: POSRefundAttempt,
+        **fields: Any,
+    ) -> POSRefundAttempt:
+        for key, value in fields.items():
+            setattr(attempt, key, value)
+        await self.session.flush()
+        await self.session.refresh(attempt)
+        return attempt
+
+    async def list_refund_references(
+        self,
+        attempt_id: UUID,
+    ) -> list[POSRefundReference]:
+        stmt = (
+            select(POSRefundReference)
+            .where(POSRefundReference.refund_attempt_id == attempt_id)
+            .order_by(POSRefundReference.payment_method)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def insert_refund_reference(self, **fields: Any) -> POSRefundReference:
+        reference = POSRefundReference(**fields)
+        self.session.add(reference)
+        await self.session.flush()
+        await self.session.refresh(reference)
+        return reference
+
+    async def has_active_refund_attempts_for_register(self, register_id: UUID) -> bool:
+        stmt = select(
+            exists().where(
+                POSRefundAttempt.register_id == register_id,
+                POSRefundAttempt.status.in_(("pending", "confirmed")),
+            )
+        )
+        return bool(await self.session.scalar(stmt))
 
     # -------- payments --------
 

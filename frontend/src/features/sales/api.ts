@@ -1,7 +1,14 @@
 import { api } from "@/lib/api";
 import { type Sale, type SaleDetails } from "@/features/pos/types";
 
-import { type RefundPayload, type SaleList, type SaleSearchParams } from "./types";
+import {
+  type RefundAttempt,
+  type RefundAttemptConfirmation,
+  type RefundLine,
+  type RefundPayload,
+  type SaleList,
+  type SaleSearchParams,
+} from "./types";
 
 const MONEY_OPERATION_TIMEOUT_MS = 15_000;
 
@@ -29,10 +36,7 @@ export async function getSaleDetails(saleId: string): Promise<SaleDetails> {
   return data;
 }
 
-export async function refundSale(
-  parentSaleId: string,
-  payload: RefundPayload,
-): Promise<Sale> {
+export async function refundSale(parentSaleId: string, payload: RefundPayload): Promise<Sale> {
   const { data } = await api.post<Sale>(`/sales/${parentSaleId}/refund`, payload, {
     timeout: MONEY_OPERATION_TIMEOUT_MS,
   });
@@ -43,5 +47,46 @@ export async function getRefundResult(operationId: string): Promise<Sale> {
   const { data } = await api.get<Sale>(`/sales/refund-operations/${operationId}`, {
     timeout: MONEY_OPERATION_TIMEOUT_MS,
   });
+  return data;
+}
+
+export async function createRefundAttempt(
+  parentSaleId: string,
+  operationId: string,
+  items: RefundLine[],
+): Promise<RefundAttempt> {
+  const { data } = await api.post<RefundAttempt>(
+    `/sales/${parentSaleId}/refund-attempts`,
+    { operation_id: operationId, items },
+    { timeout: MONEY_OPERATION_TIMEOUT_MS },
+  );
+  return data;
+}
+
+export async function getRefundAttempt(attemptId: string): Promise<RefundAttempt> {
+  const { data } = await api.get<RefundAttempt>(`/pos/refund-attempts/${attemptId}`, {
+    timeout: MONEY_OPERATION_TIMEOUT_MS,
+  });
+  return data;
+}
+
+export async function confirmRefundAttempt(
+  attemptId: string,
+  confirmations: RefundAttemptConfirmation[],
+): Promise<RefundAttempt> {
+  const { data } = await api.post<RefundAttempt>(
+    `/pos/refund-attempts/${attemptId}/confirm`,
+    { confirmations },
+    { timeout: MONEY_OPERATION_TIMEOUT_MS },
+  );
+  return data;
+}
+
+export async function voidRefundAttempt(attemptId: string): Promise<RefundAttempt> {
+  const { data } = await api.post<RefundAttempt>(
+    `/pos/refund-attempts/${attemptId}/void`,
+    { reason: "cashier_cancelled", operator_note: null },
+    { timeout: MONEY_OPERATION_TIMEOUT_MS },
+  );
   return data;
 }

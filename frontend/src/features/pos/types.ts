@@ -132,6 +132,7 @@ export interface Sale {
   shift_id: string;
   sale_type: SaleType;
   parent_sale_id: string | null;
+  refund_attempt_id?: string | null;
   status: SaleStatus;
   receipt_number: string | null;
   operation_id?: string | null;

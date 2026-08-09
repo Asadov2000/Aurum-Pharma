@@ -35,6 +35,10 @@ from app.domains.pos.schemas import (
     POSPaymentAttemptCreate,
     POSPaymentAttemptRead,
     POSPaymentAttemptVoid,
+    POSRefundAttemptConfirm,
+    POSRefundAttemptCreate,
+    POSRefundAttemptRead,
+    POSRefundAttemptVoid,
     PrescriptionLogCreate,
     PrescriptionLogRead,
     ReceiptData,
@@ -98,6 +102,18 @@ def _sale_manage_branch_scope(user: CurrentUser) -> set[UUID] | None:
 
 def _shift_manage_branch_scope(user: CurrentUser) -> set[UUID] | None:
     return user.branch_scope_for("pos.manage_shifts")
+
+
+def _refund_attempt_branch_scope(user: CurrentUser) -> set[UUID] | None:
+    scopes: list[set[UUID]] = []
+    for permission in ("pos.refund", "pos.refund_external_confirm"):
+        if permission not in user.permissions:
+            continue
+        scope = user.branch_scope_for(permission)
+        if scope is None:
+            return None
+        scopes.append(scope)
+    return set().union(*scopes) if scopes else None
 
 
 def _effective_report_branch_id(user: CurrentUser, branch_id: UUID | None) -> UUID | None:
@@ -283,6 +299,109 @@ async def void_pos_payment_attempt(
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return POSPaymentAttemptRead.model_validate(attempt)
+
+
+# =============================================================================
+# Server-controlled electronic refund attempts
+# =============================================================================
+
+
+@router.post(
+    "/sales/{parent_id}/refund-attempts",
+    response_model=POSRefundAttemptRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def create_pos_refund_attempt(
+    parent_id: UUID,
+    payload: POSRefundAttemptCreate,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.refund"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSRefundAttemptRead:
+    return await service.create_refund_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        parent_sale_id=parent_id,
+        items=[(item.sale_item_id, item.qty) for item in payload.items],
+        actor_id=user.user_id,
+        operation_id=payload.operation_id,
+        can_manage_tenant=_can_manage_tenant_shifts(user),
+        allowed_branch_ids=user.branch_scope_for("pos.refund"),
+        allowed_manage_branch_ids=_shift_manage_branch_scope(user),
+    )
+
+
+@router.get(
+    "/pos/refund-attempts/{attempt_id}",
+    response_model=POSRefundAttemptRead,
+)
+async def get_pos_refund_attempt(
+    attempt_id: UUID,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission("pos.refund", "pos.refund_external_confirm")),
+    ],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSRefundAttemptRead:
+    return await service.get_refund_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        attempt_id=attempt_id,
+        allowed_branch_ids=_refund_attempt_branch_scope(user),
+    )
+
+
+@router.post(
+    "/pos/refund-attempts/{attempt_id}/confirm",
+    response_model=POSRefundAttemptRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def confirm_pos_refund_attempt(
+    attempt_id: UUID,
+    payload: POSRefundAttemptConfirm,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_permission("pos.refund_external_confirm")),
+    ],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSRefundAttemptRead:
+    return await service.confirm_refund_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        attempt_id=attempt_id,
+        actor_id=user.user_id,
+        confirmations=[
+            (
+                confirmation.payment_method,
+                confirmation.terminal_id,
+                confirmation.document_number,
+            )
+            for confirmation in payload.confirmations
+        ],
+        allowed_branch_ids=user.branch_scope_for("pos.refund_external_confirm"),
+    )
+
+
+@router.post(
+    "/pos/refund-attempts/{attempt_id}/void",
+    response_model=POSRefundAttemptRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def void_pos_refund_attempt(
+    attempt_id: UUID,
+    payload: POSRefundAttemptVoid,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission("pos.refund", "pos.refund_external_confirm")),
+    ],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSRefundAttemptRead:
+    return await service.void_refund_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        attempt_id=attempt_id,
+        actor_id=user.user_id,
+        reason=payload.reason,
+        operator_note=payload.operator_note,
+        can_manage="pos.refund_external_confirm" in user.permissions,
+        allowed_branch_ids=_refund_attempt_branch_scope(user),
+    )
 
 
 # =============================================================================
@@ -941,7 +1060,7 @@ async def refund_sale(
         comment=payload.comment,
         cashier_user_id=user.user_id,
         operation_id=payload.operation_id,
-        external_refund_confirmed=payload.external_refund_confirmed,
+        refund_attempt_id=payload.refund_attempt_id,
         can_manage_tenant=_can_manage_tenant_shifts(user),
         allowed_branch_ids=user.branch_scope_for("pos.refund"),
         allowed_manage_branch_ids=_shift_manage_branch_scope(user),

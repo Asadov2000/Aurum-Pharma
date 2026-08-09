@@ -50,5 +50,45 @@ export interface RefundPayload {
   items: RefundLine[];
   reason?: string | null;
   comment?: string | null;
-  external_refund_confirmed?: boolean;
+  refund_attempt_id?: string | null;
+}
+
+export type RefundAttemptStatus = "pending" | "confirmed" | "consumed" | "voided";
+export type ElectronicRefundMethod = "card" | "qr" | "bank_transfer";
+
+export interface RefundAttemptPayment {
+  payment_method: ElectronicRefundMethod;
+  amount: string;
+  terminal_id: string | null;
+  document_number: string | null;
+  confirmed_by_user_id: string | null;
+  confirmed_at: string | null;
+}
+
+export interface RefundAttempt {
+  id: string;
+  tenant_id: string;
+  parent_sale_id: string;
+  register_id: string;
+  requested_by_user_id: string;
+  confirmed_by_user_id: string | null;
+  operation_id: string;
+  items: RefundLine[];
+  payments: RefundAttemptPayment[];
+  total_amount: string;
+  external_amount: string;
+  currency: "TJS";
+  status: RefundAttemptStatus;
+  void_reason: string | null;
+  void_note: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  consumed_at: string | null;
+  voided_at: string | null;
+}
+
+export interface RefundAttemptConfirmation {
+  payment_method: ElectronicRefundMethod;
+  terminal_id: string;
+  document_number: string;
 }

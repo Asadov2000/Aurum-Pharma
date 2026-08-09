@@ -46,6 +46,7 @@ from app.domains.inventory.service import InventoryService
 from app.domains.pos.models import (
     POSFavorite,
     POSPaymentAttempt,
+    POSRefundAttempt,
     PrescriptionLog,
     Sale,
     SaleItem,
@@ -57,9 +58,12 @@ from app.domains.pos.repository import FavoriteCatalogRow, POSRepository
 from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.schemas import (
     PAYMENT_METHODS,
+    POSRefundAttemptPaymentRead,
+    POSRefundAttemptRead,
     ReceiptData,
     ReceiptLine,
     ReceiptPayment,
+    RefundItem,
     SaleCheckoutItemResult,
     SaleCheckoutPaymentResult,
     SaleCheckoutResult,
@@ -418,6 +422,417 @@ class POSService:
         )
 
     # =========================================================================
+    # Server-controlled electronic refund attempts
+    # =========================================================================
+
+    @staticmethod
+    def _refund_attempt_operation_hash(
+        *,
+        parent_sale_id: UUID,
+        items: dict[UUID, Decimal],
+    ) -> str:
+        return canonical_json_hash(
+            {
+                "kind": "pos_refund_attempt_v1",
+                "parent_sale_id": str(parent_sale_id),
+                "items": [
+                    [str(item_id), format(qty.normalize(), "f")]
+                    for item_id, qty in sorted(items.items(), key=lambda pair: str(pair[0]))
+                ],
+            }
+        )
+
+    @staticmethod
+    def _refund_attempt_items_json(
+        items: Mapping[UUID, Decimal],
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "sale_item_id": str(item_id),
+                "qty": format(qty.normalize(), "f"),
+            }
+            for item_id, qty in sorted(items.items(), key=lambda pair: str(pair[0]))
+        ]
+
+    @staticmethod
+    def _refund_attempt_allocations_json(
+        allocations: list[tuple[str, Decimal]],
+    ) -> list[dict[str, str]]:
+        return [
+            {"payment_method": method, "amount": format(amount, ".2f")}
+            for method, amount in sorted(allocations)
+            if method != "cash"
+        ]
+
+    @staticmethod
+    def _stored_refund_items(attempt: POSRefundAttempt) -> dict[UUID, Decimal]:
+        try:
+            return {
+                UUID(str(item["sale_item_id"])): Decimal(str(item["qty"]))
+                for item in attempt.items_json
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AurumError("Stored refund attempt items are invalid") from exc
+
+    @staticmethod
+    def _stored_refund_allocations(attempt: POSRefundAttempt) -> dict[str, Decimal]:
+        try:
+            return {
+                str(item["payment_method"]): Decimal(str(item["amount"]))
+                for item in attempt.external_allocations_json
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AurumError("Stored refund attempt allocations are invalid") from exc
+
+    async def _assert_refund_attempt_access(
+        self,
+        attempt: POSRefundAttempt,
+        *,
+        tenant_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> Sale:
+        if attempt.tenant_id != tenant_id:
+            raise NotFoundError("Refund attempt not found")
+        parent = await self.repo.get_sale(attempt.parent_sale_id)
+        if parent is None or parent.tenant_id != tenant_id:
+            raise NotFoundError("Refund attempt not found")
+        self._assert_branch_allowed(parent.branch_id, allowed_branch_ids=allowed_branch_ids)
+        return parent
+
+    async def _calculate_refund_financials(
+        self,
+        *,
+        parent: Sale,
+        per_item: dict[UUID, Decimal],
+    ) -> tuple[
+        dict[UUID, SaleItem],
+        dict[UUID, tuple[Decimal, Decimal, Decimal]],
+        Decimal,
+        list[tuple[str, Decimal]],
+    ]:
+        parent_items, already_refunded = await self._validate_refund_items(
+            parent_sale_id=parent.id,
+            per_item=per_item,
+        )
+        refund_total = sum(
+            (
+                self._refund_line_amounts(
+                    parent_item=parent_items[item_id],
+                    qty=qty,
+                    already_refunded=already_refunded.get(item_id),
+                )[0]
+                for item_id, qty in per_item.items()
+            ),
+            Decimal("0"),
+        )
+        if refund_total <= 0:
+            raise BusinessRuleError("Refund total must be positive")
+        allocations = self._refund_payment_allocations(
+            refund_total=refund_total,
+            original_payments=await self.repo.list_payments(parent.id),
+            already_refunded=await self.repo.refunded_payment_totals(parent.id),
+        )
+        return parent_items, already_refunded, refund_total, allocations
+
+    async def _assert_refund_attempt_current(
+        self,
+        *,
+        attempt: POSRefundAttempt,
+        parent: Sale,
+    ) -> tuple[
+        dict[UUID, SaleItem],
+        dict[UUID, tuple[Decimal, Decimal, Decimal]],
+        Decimal,
+        list[tuple[str, Decimal]],
+    ]:
+        financials = await self._calculate_refund_financials(
+            parent=parent,
+            per_item=self._stored_refund_items(attempt),
+        )
+        _parent_items, _already_refunded, refund_total, allocations = financials
+        external_allocations = {
+            method: amount for method, amount in allocations if method != "cash"
+        }
+        if (
+            refund_total != attempt.total_amount
+            or sum(external_allocations.values(), Decimal("0")) != attempt.external_amount
+            or external_allocations != self._stored_refund_allocations(attempt)
+        ):
+            raise ConflictError("Refund attempt no longer matches the refundable balance")
+        return financials
+
+    async def _refund_attempt_read(self, attempt: POSRefundAttempt) -> POSRefundAttemptRead:
+        references = {
+            reference.payment_method: reference
+            for reference in await self.repo.list_refund_references(attempt.id)
+        }
+        payments: list[POSRefundAttemptPaymentRead] = []
+        for allocation in attempt.external_allocations_json:
+            method = str(allocation["payment_method"])
+            reference = references.get(method)
+            payments.append(
+                POSRefundAttemptPaymentRead(
+                    payment_method=method,
+                    amount=Decimal(str(allocation["amount"])),
+                    terminal_id=reference.terminal_id if reference is not None else None,
+                    document_number=(reference.document_number if reference is not None else None),
+                    confirmed_by_user_id=(
+                        reference.confirmed_by_user_id if reference is not None else None
+                    ),
+                    confirmed_at=reference.confirmed_at if reference is not None else None,
+                )
+            )
+        return POSRefundAttemptRead(
+            id=attempt.id,
+            tenant_id=attempt.tenant_id,
+            parent_sale_id=attempt.parent_sale_id,
+            register_id=attempt.register_id,
+            requested_by_user_id=attempt.requested_by_user_id,
+            confirmed_by_user_id=attempt.confirmed_by_user_id,
+            operation_id=attempt.operation_id,
+            items=[RefundItem.model_validate(item) for item in attempt.items_json],
+            payments=payments,
+            total_amount=attempt.total_amount,
+            external_amount=attempt.external_amount,
+            currency="TJS",
+            status=attempt.status,
+            void_reason=attempt.void_reason,
+            void_note=attempt.void_note,
+            created_at=attempt.created_at,
+            confirmed_at=attempt.confirmed_at,
+            consumed_at=attempt.consumed_at,
+            voided_at=attempt.voided_at,
+        )
+
+    async def create_refund_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        parent_sale_id: UUID,
+        items: list[tuple[UUID, Decimal]],
+        actor_id: UUID,
+        operation_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> POSRefundAttemptRead:
+        per_item = self._aggregate_refund_items(items)
+        operation_hash = self._refund_attempt_operation_hash(
+            parent_sale_id=parent_sale_id,
+            items=per_item,
+        )
+        await self.repo.lock_operation_id(operation_id)
+        existing = await self.repo.get_refund_attempt_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is not None:
+            await self._assert_refund_attempt_access(
+                existing,
+                tenant_id=tenant_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
+            if existing.operation_hash != operation_hash:
+                raise ConflictError("Operation ID was already used for another refund attempt")
+            return await self._refund_attempt_read(existing)
+        if (
+            await self.repo.get_sale_by_operation_id(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+            or await self.repo.get_payment_by_operation_id(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+            or await self.repo.get_payment_attempt_by_operation_id(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+        ):
+            raise ConflictError("Operation ID was already used for another POS operation")
+
+        parent = await self._lock_sale(parent_sale_id)
+        if parent.tenant_id != tenant_id:
+            raise NotFoundError("Sale not found")
+        self._assert_branch_allowed(parent.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if parent.status != "completed" or parent.sale_type != "sale":
+            raise BusinessRuleError("Only a completed forward sale can be refunded")
+        shift = await self.repo.lock_open_shift_for_register(parent.register_id)
+        if shift is None:
+            raise BusinessRuleError("Refunds require an open shift on the original register")
+        self._assert_shift_owned_or_managed(
+            shift,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if await self.repo.lock_active_refund_attempt_for_sale(parent.id) is not None:
+            raise ConflictError("Sale already has an unresolved electronic refund attempt")
+        _parent_items, _already_refunded, refund_total, allocations = (
+            await self._calculate_refund_financials(parent=parent, per_item=per_item)
+        )
+        external_allocations = self._refund_attempt_allocations_json(allocations)
+        if not external_allocations:
+            raise BusinessRuleError("Cash-only refunds do not require a refund attempt")
+        attempt = await self.repo.insert_refund_attempt(
+            tenant_id=tenant_id,
+            parent_sale_id=parent.id,
+            register_id=parent.register_id,
+            requested_by_user_id=actor_id,
+            operation_id=operation_id,
+            operation_hash=operation_hash,
+            items_json=self._refund_attempt_items_json(per_item),
+            external_allocations_json=external_allocations,
+            total_amount=refund_total,
+            external_amount=sum(
+                (Decimal(item["amount"]) for item in external_allocations),
+                Decimal("0"),
+            ),
+            currency="TJS",
+            status="pending",
+            created_by=actor_id,
+        )
+        return await self._refund_attempt_read(attempt)
+
+    async def get_refund_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> POSRefundAttemptRead:
+        attempt = await self.repo.get_refund_attempt(attempt_id)
+        if attempt is None:
+            raise NotFoundError("Refund attempt not found")
+        await self._assert_refund_attempt_access(
+            attempt,
+            tenant_id=tenant_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        return await self._refund_attempt_read(attempt)
+
+    async def confirm_refund_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_id: UUID,
+        actor_id: UUID,
+        confirmations: list[tuple[str, str, str]],
+        allowed_branch_ids: set[UUID] | None,
+    ) -> POSRefundAttemptRead:
+        visible = await self.repo.get_refund_attempt(attempt_id)
+        if visible is None:
+            raise NotFoundError("Refund attempt not found")
+        parent = await self._assert_refund_attempt_access(
+            visible,
+            tenant_id=tenant_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        parent = await self._lock_sale(parent.id)
+        attempt = await self.repo.lock_refund_attempt(attempt_id)
+        if attempt is None or attempt.tenant_id != tenant_id:
+            raise NotFoundError("Refund attempt not found")
+        provided = {
+            method: (terminal_id, document_number)
+            for method, terminal_id, document_number in confirmations
+        }
+        if len(provided) != len(confirmations):
+            raise BusinessRuleError("Each electronic refund method can be confirmed only once")
+        expected = self._stored_refund_allocations(attempt)
+        if set(provided) != set(expected):
+            raise BusinessRuleError("Every electronic refund method requires a terminal document")
+        existing_references = await self.repo.list_refund_references(attempt.id)
+        if attempt.status in {"confirmed", "consumed"}:
+            existing = {
+                reference.payment_method: (
+                    reference.terminal_id,
+                    reference.document_number,
+                )
+                for reference in existing_references
+            }
+            if existing != provided:
+                raise ConflictError("Refund attempt was confirmed with other terminal documents")
+            return await self._refund_attempt_read(attempt)
+        if attempt.status != "pending":
+            raise BusinessRuleError("Only a pending refund attempt can be confirmed")
+        if existing_references:
+            raise AurumError("Pending refund attempt already contains terminal documents")
+        await self._assert_refund_attempt_current(attempt=attempt, parent=parent)
+        now = self._now()
+        try:
+            for method in sorted(expected):
+                terminal_id, document_number = provided[method]
+                await self.repo.insert_refund_reference(
+                    tenant_id=tenant_id,
+                    refund_attempt_id=attempt.id,
+                    payment_method=method,
+                    amount=expected[method],
+                    terminal_id=terminal_id,
+                    document_number=document_number,
+                    confirmed_by_user_id=actor_id,
+                    confirmed_at=now,
+                    created_by=actor_id,
+                )
+        except IntegrityError as exc:
+            raise ConflictError("Terminal refund document was already used") from exc
+        attempt = await self.repo.update_refund_attempt(
+            attempt,
+            status="confirmed",
+            confirmed_by_user_id=actor_id,
+            confirmed_at=now,
+            updated_by=actor_id,
+        )
+        return await self._refund_attempt_read(attempt)
+
+    async def void_refund_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_id: UUID,
+        actor_id: UUID,
+        reason: str,
+        operator_note: str | None,
+        can_manage: bool,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> POSRefundAttemptRead:
+        visible = await self.repo.get_refund_attempt(attempt_id)
+        if visible is None:
+            raise NotFoundError("Refund attempt not found")
+        parent = await self._assert_refund_attempt_access(
+            visible,
+            tenant_id=tenant_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        await self._lock_sale(parent.id)
+        attempt = await self.repo.lock_refund_attempt(attempt_id)
+        if attempt is None or attempt.tenant_id != tenant_id:
+            raise NotFoundError("Refund attempt not found")
+        if attempt.requested_by_user_id != actor_id and not can_manage:
+            raise PermissionDeniedError(
+                "Refund attempt can be voided only by its requester or manager"
+            )
+        if attempt.status == "voided":
+            if attempt.void_reason != reason or attempt.void_note != operator_note:
+                raise ConflictError("Refund attempt was voided with other details")
+            return await self._refund_attempt_read(attempt)
+        if attempt.status == "consumed":
+            raise BusinessRuleError("A consumed refund attempt is immutable")
+        if attempt.status == "confirmed":
+            raise BusinessRuleError("A confirmed refund attempt must be completed")
+        attempt = await self.repo.update_refund_attempt(
+            attempt,
+            status="voided",
+            void_reason=reason,
+            void_note=operator_note,
+            voided_at=self._now(),
+            updated_by=actor_id,
+        )
+        return await self._refund_attempt_read(attempt)
+
+    # =========================================================================
     # Shifts
     # =========================================================================
 
@@ -560,6 +975,10 @@ class POSService:
         if await self.repo.has_active_draft_sales(shift_id):
             raise BusinessRuleError(
                 "Cannot close a shift while unfinished sales contain items or payments"
+            )
+        if await self.repo.has_active_refund_attempts_for_register(shift.register_id):
+            raise BusinessRuleError(
+                "Cannot close a shift while an electronic refund attempt is unresolved"
             )
         totals = await self.repo.shift_totals(shift_id)
         cash_in = Decimal(totals.get("cash", "0"))
@@ -2508,16 +2927,18 @@ class POSService:
         *,
         parent_sale_id: UUID,
         items: dict[UUID, Decimal],
-        external_refund_confirmed: bool,
+        refund_attempt_id: UUID | None,
     ) -> str:
         payload = {
-            "kind": "refund_financial_command_v2",
+            "kind": "refund_financial_command_v3",
             "parent_sale_id": str(parent_sale_id),
             "items": [
                 [str(item_id), format(qty.normalize(), "f")]
                 for item_id, qty in sorted(items.items(), key=lambda pair: str(pair[0]))
             ],
-            "external_refund_confirmed": external_refund_confirmed,
+            "refund_attempt_id": (
+                str(refund_attempt_id) if refund_attempt_id is not None else None
+            ),
         }
         canonical = json.dumps(
             payload,
@@ -2790,6 +3211,49 @@ class POSService:
             )
         return total
 
+    async def _prepare_refund_financial_command(
+        self,
+        *,
+        parent: Sale,
+        per_item: dict[UUID, Decimal],
+        refund_attempt_id: UUID | None,
+    ) -> tuple[
+        dict[UUID, SaleItem],
+        dict[UUID, tuple[Decimal, Decimal, Decimal]],
+        Decimal,
+        list[tuple[str, Decimal]],
+        POSRefundAttempt | None,
+    ]:
+        attempt = await self.repo.lock_active_refund_attempt_for_sale(parent.id)
+        if attempt is not None and attempt.tenant_id != parent.tenant_id:
+            raise NotFoundError("Refund attempt not found")
+
+        if refund_attempt_id is None:
+            financials = await self._calculate_refund_financials(
+                parent=parent,
+                per_item=per_item,
+            )
+        else:
+            if attempt is None or attempt.id != refund_attempt_id:
+                raise NotFoundError("Refund attempt not found")
+            if attempt.status != "confirmed":
+                raise BusinessRuleError("Electronic refund attempt is not confirmed")
+            if self._stored_refund_items(attempt) != per_item:
+                raise ConflictError("Refund attempt does not match the selected items")
+            financials = await self._assert_refund_attempt_current(
+                attempt=attempt,
+                parent=parent,
+            )
+
+        requires_external = any(method != "cash" for method, _amount in financials[3])
+        if requires_external and refund_attempt_id is None:
+            raise BusinessRuleError("Non-cash refund requires a confirmed refund attempt")
+        if not requires_external and refund_attempt_id is not None:
+            raise BusinessRuleError("Cash-only refund cannot use an electronic refund attempt")
+        if not requires_external and attempt is not None:
+            raise BusinessRuleError("Resolve the electronic refund attempt before a cash refund")
+        return (*financials, attempt)
+
     async def refund(
         self,
         *,
@@ -2799,7 +3263,7 @@ class POSService:
         comment: str | None,
         cashier_user_id: UUID,
         operation_id: UUID | None = None,
-        external_refund_confirmed: bool = False,
+        refund_attempt_id: UUID | None = None,
         can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
@@ -2822,7 +3286,7 @@ class POSService:
         operation_hash = self._refund_operation_hash(
             parent_sale_id=parent_sale_id,
             items=per_item,
-            external_refund_confirmed=external_refund_confirmed,
+            refund_attempt_id=refund_attempt_id,
         )
         await self.repo.lock_operation_id(effective_operation_id)
 
@@ -2860,36 +3324,17 @@ class POSService:
         if settings.refund_reason_mode == "required_with_text" and normalized_comment is None:
             raise BusinessRuleError("Refund comment is required")
 
-        parent_items, already_refunded = await self._validate_refund_items(
-            parent_sale_id=parent_sale_id,
+        (
+            parent_items,
+            already_refunded,
+            refund_total,
+            payment_allocations,
+            active_refund_attempt,
+        ) = await self._prepare_refund_financial_command(
+            parent=parent,
             per_item=per_item,
+            refund_attempt_id=refund_attempt_id,
         )
-        original_payments = await self.repo.list_payments(parent.id)
-        refund_total = sum(
-            (
-                self._refund_line_amounts(
-                    parent_item=parent_items[item_id],
-                    qty=qty,
-                    already_refunded=already_refunded.get(item_id),
-                )[0]
-                for item_id, qty in per_item.items()
-            ),
-            Decimal("0"),
-        )
-        if refund_total <= 0:
-            raise BusinessRuleError("Refund total must be positive")
-        payment_allocations = self._refund_payment_allocations(
-            refund_total=refund_total,
-            original_payments=original_payments,
-            already_refunded=await self.repo.refunded_payment_totals(parent.id),
-        )
-        requires_external_refund = any(method != "cash" for method, _amount in payment_allocations)
-        if requires_external_refund and not external_refund_confirmed:
-            raise BusinessRuleError("Non-cash refund must be confirmed in the external terminal")
-        if not requires_external_refund and external_refund_confirmed:
-            raise BusinessRuleError(
-                "External terminal confirmation is valid only for non-cash refunds"
-            )
 
         # The original shift may be closed days ago. Book the refund in the
         # currently open shift of the same register for correct accountability.
@@ -2914,6 +3359,7 @@ class POSService:
             is_test=parent.is_test,
             operation_id=effective_operation_id,
             operation_hash=operation_hash,
+            refund_attempt_id=refund_attempt_id,
         )
 
         total = await self._insert_refund_items_and_movements(
@@ -2935,7 +3381,9 @@ class POSService:
                 metadata_json={
                     "reason": normalized_reason,
                     "comment": normalized_comment,
-                    "external_refund_confirmed": external_refund_confirmed,
+                    "refund_attempt_id": (
+                        str(refund_attempt_id) if refund_attempt_id is not None else None
+                    ),
                 },
             )
         receipt_seq, receipt = await self._allocate_receipt(parent.register_id)
@@ -2958,6 +3406,13 @@ class POSService:
             total_amount=total,
             receipt_snapshot=receipt_snapshot.model_dump(mode="json"),
         )
+        if active_refund_attempt is not None:
+            await self.repo.update_refund_attempt(
+                active_refund_attempt,
+                status="consumed",
+                consumed_at=completed_at,
+                updated_by=cashier_user_id,
+            )
 
         # Keep the finalized parent row unchanged. The read model derives the
         # "voided" state once completed returns cover every original line.

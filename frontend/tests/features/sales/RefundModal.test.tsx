@@ -3,10 +3,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mutateAsync = vi.fn();
 const getRefundResult = vi.fn();
+const createRefundAttempt = vi.fn();
+const getRefundAttempt = vi.fn();
+const confirmRefundAttempt = vi.fn();
+const voidRefundAttempt = vi.fn();
+const authResult = {
+  user: {
+    is_developer: false,
+    permissions: ["pos.refund", "pos.refund_external_confirm"],
+  },
+};
 const settingsResult = {
   data: { refund_reason_mode: "optional" },
   isLoading: false,
 };
+
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => authResult,
+}));
 
 vi.mock("@/features/sales/queries", () => ({
   useRefundSale: () => ({
@@ -17,18 +31,24 @@ vi.mock("@/features/sales/queries", () => ({
 
 vi.mock("@/features/sales/api", () => ({
   getRefundResult: (...args: unknown[]) => getRefundResult(...args),
+  createRefundAttempt: (...args: unknown[]) => createRefundAttempt(...args),
+  getRefundAttempt: (...args: unknown[]) => getRefundAttempt(...args),
+  confirmRefundAttempt: (...args: unknown[]) => confirmRefundAttempt(...args),
+  voidRefundAttempt: (...args: unknown[]) => voidRefundAttempt(...args),
 }));
 
 vi.mock("@/features/foundation/queries", () => ({
   useTenantSettingsQuery: () => settingsResult,
 }));
 
-import { RefundModal } from "@/features/sales/RefundModal";
 import { type SaleDetails } from "@/features/pos/types";
+import { RefundModal } from "@/features/sales/RefundModal";
 import {
   createPendingRefundOperation,
   loadPendingRefundOperation,
+  savePendingRefundAttemptId,
 } from "@/features/sales/refundOperation";
+import { type RefundAttempt } from "@/features/sales/types";
 
 const SALE: SaleDetails = {
   id: "sale-1",
@@ -38,6 +58,7 @@ const SALE: SaleDetails = {
   shift_id: "shift-1",
   sale_type: "sale",
   parent_sale_id: null,
+  refund_attempt_id: null,
   status: "completed",
   receipt_number: "000001",
   operation_id: null,
@@ -76,38 +97,97 @@ const SALE: SaleDetails = {
   ],
 };
 
+const PENDING_ATTEMPT: RefundAttempt = {
+  id: "attempt-1",
+  tenant_id: "tenant-1",
+  parent_sale_id: "sale-1",
+  register_id: "register-1",
+  requested_by_user_id: "user-1",
+  confirmed_by_user_id: null,
+  operation_id: "11111111-1111-4111-8111-111111111111",
+  items: [{ sale_item_id: "item-1", qty: "1" }],
+  payments: [
+    {
+      payment_method: "card",
+      amount: "10.00",
+      terminal_id: null,
+      document_number: null,
+      confirmed_by_user_id: null,
+      confirmed_at: null,
+    },
+  ],
+  total_amount: "10.00",
+  external_amount: "10.00",
+  currency: "TJS",
+  status: "pending",
+  void_reason: null,
+  void_note: null,
+  created_at: "2026-08-09T10:00:00Z",
+  confirmed_at: null,
+  consumed_at: null,
+  voided_at: null,
+};
+
+const CONFIRMED_ATTEMPT: RefundAttempt = {
+  ...PENDING_ATTEMPT,
+  confirmed_by_user_id: "manager-1",
+  status: "confirmed",
+  confirmed_at: "2026-08-09T10:01:00Z",
+  payments: [
+    {
+      ...PENDING_ATTEMPT.payments[0]!,
+      terminal_id: "TERM-01",
+      document_number: "REFUND-001",
+      confirmed_by_user_id: "manager-1",
+      confirmed_at: "2026-08-09T10:01:00Z",
+    },
+  ],
+};
+
 describe("RefundModal", () => {
   beforeEach(() => {
     window.localStorage.clear();
     mutateAsync.mockReset();
     mutateAsync.mockResolvedValue({ id: "return-1" });
     getRefundResult.mockReset();
+    createRefundAttempt.mockReset();
+    createRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
+    getRefundAttempt.mockReset();
+    getRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
+    confirmRefundAttempt.mockReset();
+    confirmRefundAttempt.mockResolvedValue(CONFIRMED_ATTEMPT);
+    voidRefundAttempt.mockReset();
+    voidRefundAttempt.mockResolvedValue({ ...PENDING_ATTEMPT, status: "voided" });
+    authResult.user.permissions = ["pos.refund", "pos.refund_external_confirm"];
     settingsResult.data.refund_reason_mode = "optional";
   });
 
-  it("requires external confirmation for a card refund and sends the remaining quantity", async () => {
+  it("binds a card refund to terminal document details before posting the return", async () => {
     const onRefunded = vi.fn();
-    render(
-      <RefundModal
-        sale={SALE}
-        onClose={() => undefined}
-        onRefunded={onRefunded}
-      />,
-    );
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Оформить возврат/i }));
-    expect(
-      await screen.findByText(/Подтвердите возврат денег во внешнем/i),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
+    await waitFor(() => expect(createRefundAttempt).toHaveBeenCalledTimes(1));
     expect(mutateAsync).not.toHaveBeenCalled();
+    expect(await screen.findByText("Карта")).toBeInTheDocument();
+    expect(screen.getAllByText("10.00 TJS")).toHaveLength(2);
 
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /Подтверждаю, что деньги по карте возвращены/i,
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /Оформить возврат/i }));
+    fireEvent.change(screen.getByLabelText("Терминал"), {
+      target: { value: " TERM-01 " },
+    });
+    fireEvent.change(screen.getByLabelText("Номер документа"), {
+      target: { value: " REFUND-001 " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить и оформить" }));
 
+    await waitFor(() => expect(confirmRefundAttempt).toHaveBeenCalledTimes(1));
+    expect(confirmRefundAttempt).toHaveBeenCalledWith("attempt-1", [
+      {
+        payment_method: "card",
+        terminal_id: "TERM-01",
+        document_number: "REFUND-001",
+      },
+    ]);
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(mutateAsync).toHaveBeenCalledWith({
       parentSaleId: SALE.id,
@@ -116,13 +196,26 @@ describe("RefundModal", () => {
         items: [{ sale_item_id: "item-1", qty: "1" }],
         reason: null,
         comment: null,
-        external_refund_confirmed: true,
+        refund_attempt_id: "attempt-1",
       },
     });
     expect(onRefunded).toHaveBeenCalledWith("return-1");
+    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
   });
 
-  it("does not ask for terminal confirmation for a cash refund", async () => {
+  it("lets a cashier create a request but hides confirmation controls without permission", async () => {
+    authResult.user.permissions = ["pos.refund"];
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
+
+    expect(await screen.findByText(/Для подтверждения пригласите сотрудника/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Терминал")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Ожидает подтверждения" })).toBeDisabled();
+    expect(confirmRefundAttempt).not.toHaveBeenCalled();
+  });
+
+  it("posts a cash refund directly without an external attempt", async () => {
     render(
       <RefundModal
         sale={{
@@ -134,138 +227,89 @@ describe("RefundModal", () => {
       />,
     );
 
-    expect(
-      screen.queryByRole("checkbox", { name: /Подтверждаю, что деньги/i }),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Оформить возврат/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    expect(createRefundAttempt).not.toHaveBeenCalled();
     expect(mutateAsync.mock.calls[0]?.[0]).toMatchObject({
-      payload: { external_refund_confirmed: false },
+      payload: { refund_attempt_id: null },
     });
   });
 
-  it("recovers a committed refund when the POST response is lost", async () => {
-    const onRefunded = vi.fn();
-    mutateAsync.mockRejectedValue(new Error("response lost"));
-    getRefundResult.mockResolvedValue({ id: "return-recovered" });
-    render(
-      <RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />,
-    );
-
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /Подтверждаю, что деньги по карте возвращены/i,
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /Оформить возврат/i }));
-
-    await waitFor(() => expect(getRefundResult).toHaveBeenCalledTimes(1));
-    expect(onRefunded).toHaveBeenCalledWith("return-recovered");
-    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
-    expect(mutateAsync).toHaveBeenCalledTimes(1);
-  });
-
-  it("restores and reconciles an unfinished refund after reopening the modal", async () => {
-    const onRefunded = vi.fn();
+  it("restores a confirmed attempt and retries the same financial operation", async () => {
     const operation = createPendingRefundOperation(
       SALE.id,
       [{ sale_item_id: "item-1", qty: "1" }],
       true,
     );
     if (!operation) throw new Error("refund operation was not persisted");
-    getRefundResult.mockResolvedValue({ id: "return-restored" });
-
-    render(
-      <RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />,
-    );
-
-    await waitFor(() =>
-      expect(getRefundResult).toHaveBeenCalledWith(operation.operationId),
-    );
-    expect(onRefunded).toHaveBeenCalledWith("return-restored");
-    expect(mutateAsync).not.toHaveBeenCalled();
-    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
-  });
-
-  it("retries a temporary 404 with the exact persisted financial payload", async () => {
-    const operation = createPendingRefundOperation(
-      SALE.id,
-      [{ sale_item_id: "item-1", qty: "0.5" }],
-      true,
-    );
-    if (!operation) throw new Error("refund operation was not persisted");
+    const updated = savePendingRefundAttemptId(operation, PENDING_ATTEMPT.id);
+    if (!updated) throw new Error("refund attempt was not persisted");
     getRefundResult.mockRejectedValue({
       isAxiosError: true,
       response: { status: 404, data: { detail: "not found" } },
     });
-    render(
-      <RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />,
-    );
+    getRefundAttempt.mockResolvedValue(CONFIRMED_ATTEMPT);
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
 
-    expect(
-      await screen.findByText(/Предыдущий возврат не найден на сервере/i),
-    ).toBeInTheDocument();
-    expect(screen.getByDisplayValue("0.5")).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /Оформить возврат/i }));
+    expect(await screen.findByText(/Подтверждение восстановлено/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
-    expect(mutateAsync).toHaveBeenCalledWith({
-      parentSaleId: SALE.id,
+    expect(mutateAsync.mock.calls[0]?.[0]).toMatchObject({
       payload: {
         operation_id: operation.operationId,
-        items: [{ sale_item_id: "item-1", qty: "0.5" }],
-        reason: null,
-        comment: null,
-        external_refund_confirmed: true,
+        refund_attempt_id: PENDING_ATTEMPT.id,
       },
     });
   });
 
-  it("blocks a refund when its recovery marker cannot be persisted", async () => {
+  it("recovers a committed refund when the final POST response is lost", async () => {
+    const onRefunded = vi.fn();
+    mutateAsync.mockRejectedValue(new Error("response lost"));
+    getRefundResult.mockResolvedValue({ id: "return-recovered" });
+    render(
+      <RefundModal
+        sale={{
+          ...SALE,
+          payments: [{ ...SALE.payments[0]!, payment_method: "cash" }],
+        }}
+        onClose={() => undefined}
+        onRefunded={onRefunded}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+
+    await waitFor(() => expect(getRefundResult).toHaveBeenCalledTimes(1));
+    expect(onRefunded).toHaveBeenCalledWith("return-recovered");
+    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+  });
+
+  it("cancels a pending request without posting a return", async () => {
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
+    await screen.findByRole("button", { name: "Отменить заявку" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Отменить заявку" }));
+
+    await waitFor(() => expect(voidRefundAttempt).toHaveBeenCalledWith("attempt-1"));
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+  });
+
+  it("blocks submission when the recovery marker cannot be persisted", async () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("storage unavailable");
     });
-    render(
-      <RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />,
-    );
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
 
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /Подтверждаю, что деньги по карте возвращены/i,
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /Оформить возврат/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
 
     expect(
       await screen.findByText(/Локальное хранилище недоступно.*Возврат не отправлен/i),
     ).toBeInTheDocument();
-    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(createRefundAttempt).not.toHaveBeenCalled();
     setItem.mockRestore();
-  });
-
-  it("blocks duplicate submission while an earlier refund result is unknown", async () => {
-    const operation = createPendingRefundOperation(
-      SALE.id,
-      [{ sale_item_id: "item-1", qty: "1" }],
-      true,
-    );
-    if (!operation) throw new Error("refund operation was not persisted");
-    getRefundResult.mockRejectedValue(new Error("offline"));
-    render(
-      <RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />,
-    );
-
-    expect(
-      await screen.findByText(/Не удалось проверить результат возврата.*Не повторяйте/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Оформить возврат/i }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: /Проверить результат/i }),
-    ).toBeInTheDocument();
-    expect(loadPendingRefundOperation(SALE.id)).toEqual(operation);
-    expect(mutateAsync).not.toHaveBeenCalled();
   });
 });
