@@ -38,12 +38,19 @@ async def _complete_sale(  # type: ignore[no-untyped-def]
     )
     created, _ = await service.add_item(sale_id=sale.id, catalog_id=s["item"].id, qty=qty)
     for method, amount in payments:
-        await service.add_payment(
-            sale_id=sale.id,
-            payment_method=method,
-            amount=amount,
-            metadata={"external_confirmed": True} if method in {"card", "qr"} else None,
-        )
+        if method == "cash":
+            await service.add_payment(
+                sale_id=sale.id,
+                payment_method=method,
+                amount=amount,
+            )
+        else:
+            await service.repo.insert_payment(
+                tenant_id=s["tenant"].id,
+                sale_id=sale.id,
+                payment_method=method,
+                amount=amount,
+            )
     if is_test:
         await service.repo.update_sale(sale, is_test=True)
     completion_service = (

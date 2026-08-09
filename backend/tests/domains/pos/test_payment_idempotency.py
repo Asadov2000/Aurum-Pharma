@@ -155,11 +155,10 @@ async def test_payment_audit_redacts_nested_comments_at_rest(
     )
     payment = await service.add_payment(
         sale_id=sale.id,
-        payment_method="card",
+        payment_method="cash",
         amount=Decimal("10.00"),
         operation_id=uuid4(),
         metadata={
-            "external_confirmed": True,
             "comment": "customer details",
             "terminal": {"id": "T-1", "comment": "operator note"},
         },
@@ -177,7 +176,6 @@ async def test_payment_audit_redacts_nested_comments_at_rest(
 
     assert audit_entry.new_values is not None
     metadata = audit_entry.new_values["metadata"]
-    assert metadata["external_confirmed"] is True
     assert metadata["comment"] == "***"
     assert metadata["terminal"]["comment"] == "***"
     assert metadata["terminal"]["id"] == "T-1"
@@ -350,19 +348,17 @@ async def test_different_operation_ids_cannot_exceed_sale_total(
     with pytest.raises(BusinessRuleError):
         await service.add_payment(
             sale_id=sale.id,
-            payment_method="card",
+            payment_method="cash",
             amount=Decimal("5"),
             operation_id=uuid4(),
-            metadata={"external_confirmed": True},
         )
 
     assert await repo.payments_total(sale.id) == Decimal("6.00")
     await service.add_payment(
         sale_id=sale.id,
-        payment_method="card",
+        payment_method="cash",
         amount=Decimal("4"),
         operation_id=uuid4(),
-        metadata={"external_confirmed": True},
     )
     assert await repo.payments_total(sale.id) == sale.total_amount
 

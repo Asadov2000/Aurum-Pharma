@@ -3,6 +3,10 @@ import { api } from "@/lib/api";
 import {
   type PaymentAddPayload,
   type Payment,
+  type PaymentAttempt,
+  type PaymentAttemptConfirmPayload,
+  type PaymentAttemptCreatePayload,
+  type PaymentAttemptVoidPayload,
   type PosFavorite,
   type PosFavoriteRecord,
   type PrescriptionLog,
@@ -21,6 +25,41 @@ import {
 } from "./types";
 
 const POS_MONEY_WRITE_TIMEOUT_MS = 15_000;
+
+// ---- electronic payment attempts ----
+
+export async function createPaymentAttempt(
+  payload: PaymentAttemptCreatePayload,
+): Promise<PaymentAttempt> {
+  const { data } = await api.post<PaymentAttempt>("/pos/payment-attempts", payload, {
+    timeout: POS_MONEY_WRITE_TIMEOUT_MS,
+  });
+  return data;
+}
+
+export async function confirmPaymentAttempt(
+  attemptId: string,
+  payload: PaymentAttemptConfirmPayload = {},
+): Promise<PaymentAttempt> {
+  const { data } = await api.post<PaymentAttempt>(
+    `/pos/payment-attempts/${attemptId}/confirm`,
+    payload,
+    { timeout: POS_MONEY_WRITE_TIMEOUT_MS },
+  );
+  return data;
+}
+
+export async function voidPaymentAttempt(
+  attemptId: string,
+  payload: PaymentAttemptVoidPayload,
+): Promise<PaymentAttempt> {
+  const { data } = await api.post<PaymentAttempt>(
+    `/pos/payment-attempts/${attemptId}/void`,
+    payload,
+    { timeout: POS_MONEY_WRITE_TIMEOUT_MS },
+  );
+  return data;
+}
 
 // ---- cashier favorites ----
 

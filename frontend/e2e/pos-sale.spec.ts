@@ -148,6 +148,97 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByRole("button", { name: /Сбросить расчёт/i })).toHaveCount(0);
   });
 
+  test("confirms one card attempt and consumes it atomically with checkout", async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+
+    const branch = await seedBranch(api, uniqueName("CARD-Branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("CARD-Cash"));
+    const supplier = await seedSupplier(api, uniqueName("CARD-Supp"));
+    const item = await seedCatalogItem(api, uniqueName("CARD-Med"), "24.00");
+    await seedAcceptedBatch(api, {
+      branchId: branch.id,
+      supplierId: supplier.id,
+      catalogId: item.id,
+      qty: "2",
+      purchasePrice: "18.00",
+      salePrice: "24.00",
+      expiresAt: isoDateInDays(120),
+      batchNumber: "CARD-A",
+    });
+
+    try {
+      await loginInBrowser(page, OWNER);
+      await page.goto("/pos");
+      await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+      await page.getByLabel("Касса на начало смены").fill("100");
+      await page.getByRole("button", { name: "Открыть смену" }).click();
+      await expect(page.getByText("Смена открыта")).toBeVisible();
+
+      await addPosItemToCart(page, {
+        brandName: item.brand_name,
+        qty: "1",
+        expectedCartItems: 1,
+        searchKey: catalogSearchKey(item.brand_name),
+      });
+
+      const createAttemptResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          /\/api\/v1\/pos\/payment-attempts$/.test(response.url()) &&
+          response.status() === 201,
+      );
+      await page.getByRole("button", { name: "Карта", exact: true }).click();
+      const amountDialog = page.getByRole("dialog", { name: "Сумма оплаты" });
+      await expect(amountDialog).toBeVisible();
+      await amountDialog.getByRole("button", { name: "ОК" }).click();
+      const createdAttempt = (await (await createAttemptResponse).json()) as {
+        id: string;
+        status: string;
+      };
+      expect(createdAttempt.status).toBe("pending");
+
+      const confirmAttemptResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().includes(`/api/v1/pos/payment-attempts/${createdAttempt.id}/confirm`) &&
+          response.ok(),
+      );
+      const confirmation = page.getByRole("dialog", { name: "Подтвердить оплату картой" });
+      await confirmation.getByRole("button", { name: "Оплата подтверждена" }).click();
+      expect(((await (await confirmAttemptResponse).json()) as { status: string }).status).toBe(
+        "confirmed",
+      );
+      await expect(page.getByText("Оплачено 24.00", { exact: false })).toBeVisible();
+
+      const checkoutRequest = page.waitForRequest(
+        (request) =>
+          request.method() === "POST" && request.url().endsWith("/api/v1/sales/checkout"),
+      );
+      await completePosSale(page);
+      const checkoutPayload = (await checkoutRequest).postDataJSON() as {
+        payments: { payment_method: string; payment_attempt_id?: string }[];
+      };
+      expect(checkoutPayload.payments).toEqual([
+        {
+          payment_method: "card",
+          amount: "24.00",
+          payment_attempt_id: createdAttempt.id,
+        },
+      ]);
+
+      const storedAttempt = await api.get(`pos/payment-attempts/${createdAttempt.id}`);
+      expect(storedAttempt.ok()).toBe(true);
+      expect(((await storedAttempt.json()) as { status: string }).status).toBe("consumed");
+    } finally {
+      await apiAnon.dispose();
+      await api.dispose();
+    }
+  });
+
   test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({ page }) => {
     // Heaviest spec: seeds two accepted batches (~16 API calls) then drives
     // the whole sale UI. 60s is tight when the entire suite is hammering the

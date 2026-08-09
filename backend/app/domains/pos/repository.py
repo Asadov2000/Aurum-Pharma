@@ -19,6 +19,7 @@ from app.domains.foundation.models import Register
 from app.domains.inventory.models import Batch
 from app.domains.pos.models import (
     POSFavorite,
+    POSPaymentAttempt,
     PrescriptionLog,
     Sale,
     SaleItem,
@@ -550,6 +551,66 @@ class POSRepository:
         )
         result = await self.session.execute(stmt)
         return int(result.scalar_one()) + 1
+
+    # -------- server-trusted payment attempts --------
+
+    async def get_payment_attempt(self, attempt_id: UUID) -> POSPaymentAttempt | None:
+        return await self.session.get(POSPaymentAttempt, attempt_id)
+
+    async def lock_payment_attempt(self, attempt_id: UUID) -> POSPaymentAttempt | None:
+        stmt = (
+            select(POSPaymentAttempt)
+            .where(POSPaymentAttempt.id == attempt_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def lock_active_payment_attempts_for_sale(
+        self,
+        sale_id: UUID,
+    ) -> list[POSPaymentAttempt]:
+        stmt = (
+            select(POSPaymentAttempt)
+            .where(
+                POSPaymentAttempt.sale_id == sale_id,
+                POSPaymentAttempt.status.in_(("pending", "confirmed")),
+            )
+            .order_by(POSPaymentAttempt.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def get_payment_attempt_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> POSPaymentAttempt | None:
+        stmt = select(POSPaymentAttempt).where(
+            POSPaymentAttempt.tenant_id == tenant_id,
+            POSPaymentAttempt.operation_id == operation_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def insert_payment_attempt(self, **fields: Any) -> POSPaymentAttempt:
+        attempt = POSPaymentAttempt(**fields)
+        self.session.add(attempt)
+        await self.session.flush()
+        await self.session.refresh(attempt)
+        return attempt
+
+    async def update_payment_attempt(
+        self,
+        attempt: POSPaymentAttempt,
+        **fields: Any,
+    ) -> POSPaymentAttempt:
+        for key, value in fields.items():
+            setattr(attempt, key, value)
+        await self.session.flush()
+        await self.session.refresh(attempt)
+        return attempt
 
     # -------- payments --------
 

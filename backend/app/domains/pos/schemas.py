@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Self
+from typing import Any, Literal, Self
 from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -16,6 +16,18 @@ PAYMENT_METHODS = frozenset({"cash", "card", "qr"})
 # method. POSService still rejects a new bank_transfer after its idempotency
 # lookup, so this wider parsing boundary does not re-enable it for new sales.
 PAYMENT_METHOD_INPUTS = PAYMENT_METHODS | {"bank_transfer"}
+PAYMENT_ATTEMPT_METHODS = frozenset({"card", "qr"})
+PAYMENT_ATTEMPT_VOID_REASONS = frozenset(
+    {
+        "cashier_cancelled",
+        "customer_cancelled",
+        "terminal_declined",
+        "timeout",
+        "duplicate",
+        "checkout_failed",
+        "manager_override",
+    }
+)
 
 
 # ---- personal POS favorites ----
@@ -37,6 +49,90 @@ class POSFavoriteRead(BaseModel):
 
 class POSFavoriteCatalogRead(POSFavoriteRead):
     catalog: CatalogItemRead
+
+
+# ---- server-trusted payment attempts ----
+
+
+class POSPaymentAttemptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: UUID4
+    sale_id: UUID4
+    payment_method: Literal["card", "qr"]
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2, allow_inf_nan=False)
+    currency: Literal["TJS"] = "TJS"
+
+
+class POSPaymentAttemptConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    external_reference: str | None = Field(default=None, max_length=128)
+
+    @field_validator("external_reference", mode="before")
+    @classmethod
+    def _strip_reference(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if any(ord(char) < 32 for char in stripped):
+                raise ValueError("external_reference contains control characters")
+            return stripped or None
+        return value
+
+
+class POSPaymentAttemptVoid(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Literal[
+        "cashier_cancelled",
+        "customer_cancelled",
+        "terminal_declined",
+        "timeout",
+        "duplicate",
+        "checkout_failed",
+        "manager_override",
+    ]
+    operator_note: str | None = Field(default=None, max_length=160)
+
+    @field_validator("operator_note", mode="before")
+    @classmethod
+    def _strip_non_pii_note(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        lowered = stripped.lower()
+        if (
+            "@" in stripped
+            or "://" in lowered
+            or "www." in lowered
+            or any(ord(char) < 32 for char in stripped)
+        ):
+            raise ValueError("operator_note must not contain contact or link data")
+        digits = "".join(char if char.isdigit() else " " for char in stripped)
+        if any(len(group) >= 6 for group in digits.split()):
+            raise ValueError("operator_note must not contain long numeric identifiers")
+        return stripped or None
+
+
+class POSPaymentAttemptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    sale_id: UUID
+    cashier_user_id: UUID
+    operation_id: UUID
+    payment_method: Literal["card", "qr"]
+    amount: Decimal
+    currency: Literal["TJS"]
+    status: Literal["pending", "confirmed", "consumed", "voided"]
+    external_reference: str | None
+    void_reason: str | None
+    void_note: str | None
+    created_at: datetime
+    confirmed_at: datetime | None
+    consumed_at: datetime | None
+    voided_at: datetime | None
 
 
 # ---- shift ----
@@ -184,6 +280,7 @@ class SaleCheckoutPayment(BaseModel):
     payment_method: str
     amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2, allow_inf_nan=False)
     metadata: dict[str, Any] | None = None
+    payment_attempt_id: UUID4 | None = None
 
     @field_validator("payment_method")
     @classmethod
@@ -277,6 +374,8 @@ class SaleCheckoutPaymentResult(BaseModel):
     payment_method: str
     amount: Decimal
     currency: str
+    payment_attempt_id: UUID | None = None
+    payment_attempt_status: Literal["consumed"] | None = None
 
 
 class SaleCheckoutResult(BaseModel):

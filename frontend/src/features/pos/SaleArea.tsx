@@ -54,6 +54,8 @@ import {
   useAddPrescription,
   useCheckoutSale,
   useCompleteSale,
+  useConfirmPaymentAttempt,
+  useCreatePaymentAttempt,
   useCreateSale,
   useCurrentShiftQuery,
   useDeleteSaleItem,
@@ -61,7 +63,13 @@ import {
   useRemovePosFavorite,
   useSaleQuery,
   useUpdateSaleItem,
+  useVoidPaymentAttempt,
 } from "./queries";
+import {
+  clearPaymentAttemptOperation,
+  createPaymentAttemptOperation,
+  loadPaymentAttemptOperation,
+} from "./paymentAttemptOperation";
 import {
   clearPendingPaymentOperation,
   createPendingPaymentOperation,
@@ -70,6 +78,7 @@ import {
 } from "./paymentOperation";
 import {
   type Payment,
+  type PaymentAttempt,
   type PaymentMetadata,
   type PaymentMethod,
   type PaymentMethodRead,
@@ -88,13 +97,15 @@ type NumPadState =
 
 type FlashTone = "success" | "danger";
 type CheckoutRecoveryOutcome = "resolved" | "not-found" | "unavailable" | "conflict";
-type StagedPayment = Omit<Payment, "payment_method"> & {
+type StagedPayment = Omit<Payment, "payment_method" | "payment_attempt_id"> & {
   payment_method: PaymentMethod;
+  payment_attempt_id?: string;
   metadata?: PaymentMetadata;
 };
 type ExternalPaymentConfirmation = {
   method: "card" | "qr";
   amount: string;
+  attempt: PaymentAttempt;
 };
 type ExpiredItemConfirmation = {
   catalogId: string;
@@ -301,6 +312,7 @@ function ActiveWorkspace({
       payment_method: payment.payment_method,
       amount: payment.amount,
       currency: "TJS",
+      payment_attempt_id: payment.payment_attempt_id,
       metadata: payment.metadata,
     })),
   );
@@ -310,6 +322,9 @@ function ActiveWorkspace({
   const [printOpen, setPrintOpen] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [paymentResetConfirmOpen, setPaymentResetConfirmOpen] = useState(false);
+  const [externalPaymentReviewRequired, setExternalPaymentReviewRequired] = useState(
+    init.externalPaymentReviewRequired,
+  );
   const [externalPaymentConfirmation, setExternalPaymentConfirmation] =
     useState<ExternalPaymentConfirmation | null>(null);
   const [expiredItemConfirmation, setExpiredItemConfirmation] =
@@ -327,6 +342,8 @@ function ActiveWorkspace({
   const stagedPaymentSequenceRef = useRef(init.stagedPayments.length);
   const stagedPaymentsRef = useRef(stagedPayments);
   const externalPaymentConfirmationRef = useRef<ExternalPaymentConfirmation | null>(null);
+  const externalPaymentMutationRef = useRef(false);
+  const externalPaymentReviewRef = useRef(externalPaymentReviewRequired);
   const expiredItemConfirmationRef = useRef<ExpiredItemConfirmation | null>(null);
   const expiredSaleConfirmedRef = useRef(expiredSaleConfirmed);
   const saleIdRef = useRef<string | null>(saleId);
@@ -335,6 +352,7 @@ function ActiveWorkspace({
   saleIdRef.current = saleId;
   stagedPaymentsRef.current = stagedPayments;
   expiredSaleConfirmedRef.current = expiredSaleConfirmed;
+  externalPaymentReviewRef.current = externalPaymentReviewRequired;
 
   const createSale = useCreateSale();
   const addItem = useAddSaleItem();
@@ -344,6 +362,9 @@ function ActiveWorkspace({
   const addPrescription = useAddPrescription();
   const completeSale = useCompleteSale();
   const checkoutSale = useCheckoutSale();
+  const createPaymentAttempt = useCreatePaymentAttempt();
+  const confirmPaymentAttempt = useConfirmPaymentAttempt();
+  const voidPaymentAttempt = useVoidPaymentAttempt();
   const saleQuery = useSaleQuery(saleId);
   const favorites = usePosFavoritesQuery(branchId ?? undefined);
   const addFavorite = useAddPosFavorite();
@@ -397,6 +418,9 @@ function ActiveWorkspace({
   const cartMutationPending =
     createSale.isPending || addItem.isPending || updateItem.isPending || deleteItem.isPending;
   const paymentStarted = stagedPayments.length > 0 || recordedPayments.length > 0;
+  const electronicPaymentPendingResolution = stagedPayments.some(
+    (payment) => payment.payment_method === "card" || payment.payment_method === "qr",
+  );
   const saleEditingBlocked =
     completeSale.isPending ||
     checkoutSale.isPending ||
@@ -423,6 +447,9 @@ function ActiveWorkspace({
     checkoutReconciling ||
     cartMutationPending ||
     addPayment.isPending ||
+    createPaymentAttempt.isPending ||
+    confirmPaymentAttempt.isPending ||
+    voidPaymentAttempt.isPending ||
     addPrescription.isPending ||
     completionUncertain ||
     checkoutUncertain ||
@@ -440,12 +467,17 @@ function ActiveWorkspace({
     checkoutReconciling ||
     cartMutationPending ||
     addPayment.isPending ||
+    createPaymentAttempt.isPending ||
+    confirmPaymentAttempt.isPending ||
+    voidPaymentAttempt.isPending ||
     addPrescription.isPending ||
     completionUncertain ||
     checkoutUncertain ||
     pendingCheckout !== null ||
     pendingPayment !== null ||
     queuedScans > 0 ||
+    electronicPaymentPendingResolution ||
+    externalPaymentReviewRequired ||
     (saleId !== null && sale === null);
   const hasDraftToPreserve =
     sale?.status === "draft" &&
@@ -466,10 +498,13 @@ function ActiveWorkspace({
   );
   useEffect(() => {
     if (!stagedPaymentConflict) return;
+    if (electronicPaymentPendingResolution) {
+      setExternalPaymentReviewRequired(true);
+    }
     setTopError(
       "Расчёт оплаты больше не соответствует чеку или настройкам. Проверьте внешний терминал и нажмите «Сбросить расчёт» перед новой оплатой.",
     );
-  }, [stagedPaymentConflict]);
+  }, [electronicPaymentPendingResolution, stagedPaymentConflict]);
 
   const clearDraft = useCallback(() => clearDraftStorage(registerId), [registerId]);
   const persistCompletedReceipt = useCallback(
@@ -591,9 +626,18 @@ function ActiveWorkspace({
         requiresRx,
         stagedPayments,
         expiredSaleConfirmed,
+        externalPaymentReviewRequired,
       );
     }
-  }, [sale, nameById, registerId, requiresRx, stagedPayments, expiredSaleConfirmed]);
+  }, [
+    sale,
+    nameById,
+    registerId,
+    requiresRx,
+    stagedPayments,
+    expiredSaleConfirmed,
+    externalPaymentReviewRequired,
+  ]);
 
   // Keep the completed receipt addressable until the cashier explicitly starts
   // another sale. This makes printer/browser recovery deterministic.
@@ -861,6 +905,7 @@ function ActiveWorkspace({
         requiresRx,
         [],
         expiredSaleConfirmedRef.current,
+        false,
       )
     ) {
       setTopError(
@@ -927,16 +972,21 @@ function ActiveWorkspace({
     }
   };
 
-  const stagePayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
-    if (!saleId || recordedPayments.length > 0) return;
+  const stagePayment = (
+    method: PaymentMethod,
+    amount: string,
+    metadata?: PaymentMetadata,
+    paymentAttemptId?: string,
+  ): boolean => {
+    if (!saleId || recordedPayments.length > 0) return false;
     if (!paymentMethods.includes(method)) {
       setTopError("Этот способ оплаты отключён в настройках аптеки.");
-      return;
+      return false;
     }
     const normalizedAmount = normalizePositiveMoney(amount);
     if (!normalizedAmount) {
       setTopError("Введите корректную сумму оплаты не более чем с двумя знаками после запятой.");
-      return;
+      return false;
     }
     const numericAmount = Number(normalizedAmount);
     const currentPayments = stagedPaymentsRef.current;
@@ -951,20 +1001,20 @@ function ActiveWorkspace({
     const currentRemaining = totalDue - recordedTotal - currentStagedTotal;
     if (currentPayments.length >= 10) {
       setTopError("В одном чеке допускается не более 10 частей смешанной оплаты.");
-      return;
+      return false;
     }
     if (
       !mixedPaymentEnabled &&
       (currentPayments.length > 0 || numericAmount + 0.001 < currentRemaining)
     ) {
       setTopError("Смешанная оплата отключена. Внесите всю сумму одним способом.");
-      return;
+      return false;
     }
     if (numericAmount - currentRemaining > 0.001) {
       setTopError(
         `Сумма оплаты превышает остаток ${Math.max(0, currentRemaining).toFixed(2)} ${currency}.`,
       );
-      return;
+      return false;
     }
 
     let safeMetadata: PaymentMetadata | undefined;
@@ -972,16 +1022,19 @@ function ActiveWorkspace({
       const cashReceived = normalizePositiveMoney(metadata.cash_received);
       if (method !== "cash" || !cashReceived || Number(cashReceived) + 0.001 < numericAmount) {
         setTopError("Полученная сумма наличными не может быть меньше суммы оплаты.");
-        return;
+        return false;
       }
       safeMetadata = { cash_received: cashReceived };
     }
     if (method === "card" || method === "qr") {
-      if (metadata?.external_confirmed !== true) {
-        setTopError("Подтвердите успешную оплату во внешнем терминале.");
-        return;
+      if (!paymentAttemptId) {
+        setTopError("Электронная оплата не привязана к подтверждённой операции.");
+        return false;
       }
-      safeMetadata = { external_confirmed: true };
+      safeMetadata = undefined;
+    } else if (paymentAttemptId) {
+      setTopError("Платёжная попытка недопустима для наличной оплаты.");
+      return false;
     }
 
     stagedPaymentSequenceRef.current += 1;
@@ -994,6 +1047,7 @@ function ActiveWorkspace({
         payment_method: method,
         amount: normalizedAmount,
         currency,
+        payment_attempt_id: paymentAttemptId,
         metadata: safeMetadata,
       },
     ];
@@ -1006,16 +1060,18 @@ function ActiveWorkspace({
         requiresRx,
         nextPayments,
         expiredSaleConfirmedRef.current,
+        externalPaymentReviewRef.current,
       )
     ) {
       setTopError(
         "Локальное хранилище кассы недоступно. Расчёт оплаты не сохранён; освободите место или перезапустите приложение.",
       );
-      return;
+      return false;
     }
     stagedPaymentsRef.current = nextPayments;
     setStagedPayments(nextPayments);
     setTopError(null);
+    return true;
   };
 
   const applyPayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
@@ -1027,18 +1083,70 @@ function ActiveWorkspace({
   };
 
   const submitPayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
-    if (
-      (method === "card" || method === "qr") &&
-      metadata?.external_confirmed !== true &&
-      pendingPayment === null
-    ) {
-      if (externalPaymentConfirmationRef.current !== null) return;
-      const confirmation: ExternalPaymentConfirmation = { method, amount };
-      externalPaymentConfirmationRef.current = confirmation;
-      setExternalPaymentConfirmation(confirmation);
+    if (method === "card" || method === "qr") {
+      if (recordedPayments.length > 0 || pendingPayment !== null) {
+        setTopError(
+          "Электронную оплату нельзя добавлять через устаревший режим чека. Завершите или отмените предыдущую операцию.",
+        );
+        return;
+      }
+      void prepareExternalPayment(method, amount);
       return;
     }
     applyPayment(method, amount, metadata);
+  };
+
+  const prepareExternalPayment = async (method: "card" | "qr", amount: string) => {
+    if (!saleId || externalPaymentConfirmationRef.current !== null) return;
+    const normalizedAmount = normalizePositiveMoney(amount);
+    if (!normalizedAmount) {
+      setTopError("Введите корректную сумму электронной оплаты.");
+      return;
+    }
+    const operation = createPaymentAttemptOperation(saleId, method, normalizedAmount);
+    if (!operation) {
+      setTopError(
+        "Не удалось сохранить безопасный номер электронной оплаты. Терминал не используйте; освободите место или перезапустите приложение.",
+      );
+      return;
+    }
+    setPayingMethod(method);
+    setTopError(null);
+    try {
+      const attempt = await createPaymentAttempt.mutateAsync({
+        operation_id: operation.operationId,
+        sale_id: saleId,
+        payment_method: method,
+        amount: normalizedAmount,
+      });
+      if (attempt.status === "confirmed") {
+        if (stagePayment(method, normalizedAmount, undefined, attempt.id)) {
+          clearPaymentAttemptOperation(saleId, operation.operationId);
+        }
+        return;
+      }
+      if (attempt.status !== "pending") {
+        clearPaymentAttemptOperation(saleId, operation.operationId);
+        setTopError("Эта электронная операция уже закрыта. Создайте новую оплату.");
+        return;
+      }
+      const confirmation: ExternalPaymentConfirmation = {
+        method,
+        amount: normalizedAmount,
+        attempt,
+      };
+      externalPaymentConfirmationRef.current = confirmation;
+      setExternalPaymentConfirmation(confirmation);
+    } catch (error) {
+      setTopError(
+        describeApiError(
+          error,
+          "Не удалось подготовить электронную оплату. Терминал не используйте; после восстановления связи повторите тот же способ оплаты.",
+        ),
+      );
+    } finally {
+      setPayingMethod(null);
+    }
   };
 
   const closeExternalPaymentConfirmation = () => {
@@ -1046,13 +1154,61 @@ function ActiveWorkspace({
     setExternalPaymentConfirmation(null);
   };
 
-  const confirmExternalPayment = () => {
+  const cancelExternalPayment = async () => {
+    if (
+      externalPaymentMutationRef.current ||
+      voidPaymentAttempt.isPending ||
+      confirmPaymentAttempt.isPending
+    )
+      return;
     const confirmation = externalPaymentConfirmationRef.current;
     if (!confirmation) return;
-    closeExternalPaymentConfirmation();
-    applyPayment(confirmation.method, confirmation.amount, {
-      external_confirmed: true,
-    });
+    externalPaymentMutationRef.current = true;
+    try {
+      await voidPaymentAttempt.mutateAsync({
+        attemptId: confirmation.attempt.id,
+        payload: { reason: "cashier_cancelled" },
+      });
+      clearPaymentAttemptOperation(confirmation.attempt.sale_id, confirmation.attempt.operation_id);
+      closeExternalPaymentConfirmation();
+    } catch (error) {
+      setTopError(describeApiError(error, "Не удалось отменить подготовленную оплату"));
+    } finally {
+      externalPaymentMutationRef.current = false;
+    }
+  };
+
+  const confirmExternalPayment = async () => {
+    if (
+      externalPaymentMutationRef.current ||
+      confirmPaymentAttempt.isPending ||
+      voidPaymentAttempt.isPending
+    )
+      return;
+    const confirmation = externalPaymentConfirmationRef.current;
+    if (!confirmation) return;
+    externalPaymentMutationRef.current = true;
+    try {
+      const attempt = await confirmPaymentAttempt.mutateAsync({
+        attemptId: confirmation.attempt.id,
+      });
+      if (attempt.status !== "confirmed") {
+        setTopError("Сервер не подтвердил электронную оплату. Не завершайте чек.");
+        return;
+      }
+      if (!stagePayment(confirmation.method, confirmation.amount, undefined, attempt.id)) return;
+      clearPaymentAttemptOperation(attempt.sale_id, attempt.operation_id);
+      closeExternalPaymentConfirmation();
+    } catch (error) {
+      setTopError(
+        describeApiError(
+          error,
+          "Не удалось сохранить подтверждение. Не повторяйте оплату на терминале; повторите подтверждение в Aurum.",
+        ),
+      );
+    } finally {
+      externalPaymentMutationRef.current = false;
+    }
   };
 
   const closeExpiredItemConfirmation = () => {
@@ -1079,10 +1235,33 @@ function ActiveWorkspace({
     }
   };
 
-  const clearStagedPaymentCalculation = () => {
+  const clearStagedPaymentCalculation = async () => {
     if (!saleId || stagedPaymentsRef.current.length === 0) return;
     if (checkoutSale.isPending || checkoutReconciling || pendingCheckout || checkoutUncertain) {
       setTopError("Дождитесь проверки текущей денежной операции.");
+      return;
+    }
+    const electronicAttempts = stagedPaymentsRef.current.filter(
+      (payment) =>
+        (payment.payment_method === "card" || payment.payment_method === "qr") &&
+        Boolean(payment.payment_attempt_id),
+    );
+    try {
+      for (const payment of electronicAttempts) {
+        await voidPaymentAttempt.mutateAsync({
+          attemptId: payment.payment_attempt_id as string,
+          payload: {
+            reason: externalPaymentReviewRef.current ? "checkout_failed" : "cashier_cancelled",
+          },
+        });
+      }
+    } catch (error) {
+      setTopError(
+        describeApiError(
+          error,
+          "Не удалось зафиксировать отмену электронной оплаты. Расчёт сохранён; не повторяйте платёж.",
+        ),
+      );
       return;
     }
     if (
@@ -1094,6 +1273,7 @@ function ActiveWorkspace({
         requiresRx,
         [],
         expiredSaleConfirmedRef.current,
+        false,
       )
     ) {
       setTopError(
@@ -1103,6 +1283,8 @@ function ActiveWorkspace({
     }
     stagedPaymentsRef.current = [];
     setStagedPayments([]);
+    externalPaymentReviewRef.current = false;
+    setExternalPaymentReviewRequired(false);
     setTopError(null);
     setPaymentResetConfirmOpen(false);
   };
@@ -1116,7 +1298,7 @@ function ActiveWorkspace({
       setPaymentResetConfirmOpen(true);
       return;
     }
-    clearStagedPaymentCalculation();
+    void clearStagedPaymentCalculation();
   };
 
   // Touch: tapping a tile opens the keypad pre-filled with the remaining amount
@@ -1198,6 +1380,7 @@ function ActiveWorkspace({
         requiresRx,
         [],
         expiredSaleConfirmedRef.current,
+        false,
       )
     ) {
       setTopError(
@@ -1276,6 +1459,12 @@ function ActiveWorkspace({
       return;
     }
     if (checkoutSale.isPending || checkoutReconciling) return;
+    if (externalPaymentReviewRequired) {
+      setTopError(
+        "Продажа отклонена после подтверждения карты или QR. Не повторяйте оплату: сначала сверьте терминал и отмените подтверждённую операцию.",
+      );
+      return;
+    }
     if (paymentSettingsLoading || paymentSettingsUnavailable) {
       setTopError("Дождитесь подтверждённых настроек способов оплаты.");
       return;
@@ -1331,6 +1520,7 @@ function ActiveWorkspace({
         requiresRx,
         stagedPayments,
         expiredSaleConfirmedRef.current,
+        externalPaymentReviewRef.current,
       )
     ) {
       setTopError(
@@ -1360,6 +1550,7 @@ function ActiveWorkspace({
         payments: stagedPayments.map((payment) => ({
           payment_method: payment.payment_method,
           amount: payment.amount,
+          payment_attempt_id: payment.payment_attempt_id,
           metadata: payment.metadata,
         })),
         prescription: prescription
@@ -1385,7 +1576,14 @@ function ActiveWorkspace({
         clearPendingCheckoutOperation(saleId, operation.operationId);
         setPendingCheckout(null);
         setCheckoutUncertain(false);
-        setTopError(describeApiError(error, "Не удалось оформить продажу"));
+        if (electronicPaymentPendingResolution) {
+          setExternalPaymentReviewRequired(true);
+          setTopError(
+            "Сервер отклонил продажу после подтверждения карты или QR. Не повторяйте оплату. Сверьте терминал; если операция отменена или возвращена, используйте «Сбросить расчёт».",
+          );
+        } else {
+          setTopError(describeApiError(error, "Не удалось оформить продажу"));
+        }
       } else {
         setCheckoutUncertain(true);
         const outcome = await recoverCheckout(operation, true);
@@ -1401,6 +1599,20 @@ function ActiveWorkspace({
   };
 
   const startNewSale = (): boolean => {
+    if (
+      sale?.status === "draft" &&
+      saleId &&
+      (stagedPaymentsRef.current.some(
+        (payment) => payment.payment_method === "card" || payment.payment_method === "qr",
+      ) ||
+        externalPaymentReviewRef.current ||
+        loadPaymentAttemptOperation(saleId) !== null)
+    ) {
+      setTopError(
+        "Сначала завершите сверку карты или QR и используйте «Сбросить расчёт». Новый чек не начат.",
+      );
+      return false;
+    }
     if (!clearDraft()) {
       setTopError(
         "Не удалось очистить локальное состояние кассы. Новая продажа не начата; перезапустите приложение.",
@@ -1412,6 +1624,7 @@ function ActiveWorkspace({
       clearPendingPaymentOperation(saleId);
       clearPendingCompletion(saleId);
       clearPendingCheckoutOperation(saleId);
+      clearPaymentAttemptOperation(saleId);
     }
     saleIdRef.current = null;
     setSaleId(null);
@@ -1428,6 +1641,8 @@ function ActiveWorkspace({
     closeExternalPaymentConfirmation();
     setPendingCheckout(null);
     setCheckoutUncertain(false);
+    externalPaymentReviewRef.current = false;
+    setExternalPaymentReviewRequired(false);
     setTopError(null);
     setStaleNotice(false);
     return true;
@@ -1765,10 +1980,17 @@ function ActiveWorkspace({
                 mixedPaymentEnabled={mixedPaymentEnabled}
                 paymentSettingsLoading={paymentSettingsLoading}
                 paymentSettingsUnavailable={paymentSettingsUnavailable}
-                interactionBlocked={cartMutationPending}
+                interactionBlocked={
+                  cartMutationPending ||
+                  createPaymentAttempt.isPending ||
+                  confirmPaymentAttempt.isPending ||
+                  voidPaymentAttempt.isPending ||
+                  externalPaymentReviewRequired
+                }
                 completionBlocked={
                   cartMutationPending ||
                   stagedPaymentConflict ||
+                  externalPaymentReviewRequired ||
                   (recordedPayments.length === 0 &&
                     (paymentSettingsLoading ||
                       paymentSettingsUnavailable ||
@@ -1905,17 +2127,23 @@ function ActiveWorkspace({
             : ""
         }
         confirmLabel="Оплата подтверждена"
-        onConfirm={confirmExternalPayment}
-        onCancel={closeExternalPaymentConfirmation}
+        isLoading={confirmPaymentAttempt.isPending || voidPaymentAttempt.isPending}
+        onConfirm={() => void confirmExternalPayment()}
+        onCancel={() => void cancelExternalPayment()}
       />
 
       <ConfirmDialog
         open={paymentResetConfirmOpen}
         title="Сбросить расчёт оплаты"
-        message="Карта или QR будут удалены только из расчёта текущего чека. Операция во внешнем терминале автоматически не отменится. Перед сбросом проверьте терминал."
-        confirmLabel="Сбросить расчёт"
+        message={
+          externalPaymentReviewRequired
+            ? "Сначала отмените или верните операцию во внешнем терминале. Нажимая подтверждение, вы фиксируете, что терминал проверен и деньги не останутся списанными без чека."
+            : "Карта или QR будут удалены из расчёта только после вашей проверки внешнего терминала. Aurum не отменяет банковскую операцию самостоятельно."
+        }
+        confirmLabel="Терминал проверен, сбросить"
         variant="danger"
-        onConfirm={clearStagedPaymentCalculation}
+        isLoading={voidPaymentAttempt.isPending}
+        onConfirm={() => void clearStagedPaymentCalculation()}
         onCancel={() => setPaymentResetConfirmOpen(false)}
       />
 

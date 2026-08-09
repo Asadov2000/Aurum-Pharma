@@ -9,10 +9,47 @@ export type SaleType = "sale" | "return";
 export type PaymentMethod = PosPaymentMethod;
 export type LegacyPaymentMethod = "bank_transfer";
 export type PaymentMethodRead = PaymentMethod | LegacyPaymentMethod;
+export type PaymentAttemptStatus = "pending" | "confirmed" | "consumed" | "voided";
 
 export interface PaymentMetadata {
   cash_received?: string;
+  // Legacy recovery only. New card/QR checkout uses payment_attempt_id.
   external_confirmed?: true;
+}
+
+export interface PaymentAttempt {
+  id: string;
+  tenant_id: string;
+  sale_id: string;
+  cashier_user_id: string;
+  operation_id: string;
+  payment_method: "card" | "qr";
+  amount: string;
+  currency: string;
+  status: PaymentAttemptStatus;
+  external_reference: string | null;
+  void_reason: string | null;
+  void_note: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  consumed_at: string | null;
+  voided_at: string | null;
+}
+
+export interface PaymentAttemptCreatePayload {
+  operation_id: string;
+  sale_id: string;
+  payment_method: "card" | "qr";
+  amount: string;
+}
+
+export interface PaymentAttemptConfirmPayload {
+  external_reference?: string | null;
+}
+
+export interface PaymentAttemptVoidPayload {
+  reason: "cashier_cancelled" | "checkout_failed";
+  operator_note?: string | null;
 }
 
 export interface Shift {
@@ -84,6 +121,7 @@ export interface Payment {
   payment_method: PaymentMethodRead;
   amount: string;
   currency: string;
+  payment_attempt_id?: string | null;
 }
 
 export interface Sale {
@@ -148,6 +186,7 @@ export interface SaleCheckoutItemPayload {
 export interface SaleCheckoutPaymentPayload {
   payment_method: PaymentMethod;
   amount: string;
+  payment_attempt_id?: string | null;
   metadata?: PaymentMetadata | null;
 }
 

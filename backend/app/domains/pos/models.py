@@ -13,6 +13,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -128,6 +129,7 @@ class Sale(Base):
     marking_codes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_sale_tenant_id_id"),
         CheckConstraint("sale_type IN ('sale','return')", name="ck_sale_type"),
         CheckConstraint("status IN ('draft','completed','voided')", name="ck_sale_status"),
         CheckConstraint("receipt_seq IS NULL OR receipt_seq > 0", name="ck_sale_receipt_seq"),
@@ -205,6 +207,7 @@ class SalePayment(Base):
     operation_hash: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+    payment_attempt_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -229,6 +232,85 @@ class SalePayment(Base):
             "operation_id",
             unique=True,
             postgresql_where=text("operation_id IS NOT NULL"),
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "payment_attempt_id"],
+            ["pos_payment_attempt.tenant_id", "pos_payment_attempt.id"],
+            name="fk_sale_payment_tenant_payment_attempt",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "uq_sale_payment_tenant_attempt",
+            "tenant_id",
+            "payment_attempt_id",
+            unique=True,
+            postgresql_where=text("payment_attempt_id IS NOT NULL"),
+        ),
+    )
+
+
+class POSPaymentAttempt(Base):
+    __tablename__ = "pos_payment_attempt"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    sale_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    cashier_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    payment_method: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    external_reference: Mapped[str | None] = mapped_column(Text)
+    void_reason: Mapped[str | None] = mapped_column(Text)
+    void_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "operation_id",
+            name="uq_pos_payment_attempt_tenant_operation",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "id",
+            name="uq_pos_payment_attempt_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "sale_id"],
+            ["sale.tenant_id", "sale.id"],
+            name="fk_pos_payment_attempt_tenant_sale",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "operation_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_pos_payment_attempt_operation_hash",
+        ),
+        CheckConstraint(
+            "payment_method IN ('card','qr')",
+            name="ck_pos_payment_attempt_method",
+        ),
+        CheckConstraint("amount > 0", name="ck_pos_payment_attempt_amount"),
+        CheckConstraint("currency = 'TJS'", name="ck_pos_payment_attempt_currency"),
+        CheckConstraint(
+            "status IN ('pending','confirmed','consumed','voided')",
+            name="ck_pos_payment_attempt_status",
         ),
     )
 
