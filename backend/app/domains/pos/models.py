@@ -112,6 +112,7 @@ class Sale(Base):
     receipt_seq: Mapped[int | None] = mapped_column(BigInteger)
     operation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     operation_hash: Mapped[str | None] = mapped_column(Text)
+    refund_attempt_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, server_default=text("0")
@@ -140,6 +141,23 @@ class Sale(Base):
         CheckConstraint(
             "operation_hash IS NULL OR operation_hash ~ '^[0-9a-f]{64}$'",
             name="ck_sale_operation_hash",
+        ),
+        CheckConstraint(
+            "refund_attempt_id IS NULL OR sale_type = 'return'",
+            name="ck_sale_refund_attempt_return_only",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "refund_attempt_id"],
+            ["pos_refund_attempt.tenant_id", "pos_refund_attempt.id"],
+            name="fk_sale_tenant_refund_attempt",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "uq_sale_tenant_refund_attempt",
+            "tenant_id",
+            "refund_attempt_id",
+            unique=True,
+            postgresql_where=text("refund_attempt_id IS NOT NULL"),
         ),
     )
 
@@ -312,6 +330,124 @@ class POSPaymentAttempt(Base):
             "status IN ('pending','confirmed','consumed','voided')",
             name="ck_pos_payment_attempt_status",
         ),
+    )
+
+
+class POSRefundAttempt(Base):
+    __tablename__ = "pos_refund_attempt"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    parent_sale_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    requested_by_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    confirmed_by_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    items_json: Mapped[list[dict[str, str]]] = mapped_column(JSONB, nullable=False)
+    external_allocations_json: Mapped[list[dict[str, str]]] = mapped_column(JSONB, nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    external_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    void_reason: Mapped[str | None] = mapped_column(Text)
+    void_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "operation_id", name="uq_pos_refund_attempt_tenant_operation"
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_pos_refund_attempt_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "parent_sale_id"],
+            ["sale.tenant_id", "sale.id"],
+            name="fk_pos_refund_attempt_tenant_sale",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "operation_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_pos_refund_attempt_operation_hash",
+        ),
+        CheckConstraint("total_amount > 0", name="ck_pos_refund_attempt_total"),
+        CheckConstraint("external_amount > 0", name="ck_pos_refund_attempt_external_total"),
+        CheckConstraint("external_amount <= total_amount", name="ck_pos_refund_attempt_amounts"),
+        CheckConstraint("currency = 'TJS'", name="ck_pos_refund_attempt_currency"),
+        CheckConstraint(
+            "status IN ('pending','confirmed','consumed','voided')",
+            name="ck_pos_refund_attempt_status",
+        ),
+        Index(
+            "uq_pos_refund_attempt_active_sale",
+            "tenant_id",
+            "parent_sale_id",
+            unique=True,
+            postgresql_where=text("status IN ('pending','confirmed')"),
+        ),
+    )
+
+
+class POSRefundReference(Base):
+    __tablename__ = "pos_refund_reference"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    refund_attempt_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    payment_method: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    terminal_id: Mapped[str] = mapped_column(Text, nullable=False)
+    document_number: Mapped[str] = mapped_column(Text, nullable=False)
+    confirmed_by_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "refund_attempt_id"],
+            ["pos_refund_attempt.tenant_id", "pos_refund_attempt.id"],
+            name="fk_pos_refund_reference_tenant_attempt",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "refund_attempt_id",
+            "payment_method",
+            name="uq_pos_refund_reference_attempt_method",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "terminal_id",
+            "document_number",
+            name="uq_pos_refund_reference_terminal_document",
+        ),
+        CheckConstraint(
+            "payment_method IN ('card','qr','bank_transfer')",
+            name="ck_pos_refund_reference_method",
+        ),
+        CheckConstraint("amount > 0", name="ck_pos_refund_reference_amount"),
     )
 
 

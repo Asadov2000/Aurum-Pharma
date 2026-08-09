@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +55,37 @@ async def _open_shift_and_sell(  # type: ignore[no-untyped-def]
             )
     completed = await service.complete(sale_id=sale.id)
     return service, s, completed, items[0]
+
+
+async def _confirmed_refund_attempt(  # type: ignore[no-untyped-def]
+    service: POSService,
+    scaffold,
+    parent,
+    items: list[tuple[UUID, Decimal]],
+    *,
+    suffix: str,
+):
+    attempt = await service.create_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        parent_sale_id=parent.id,
+        items=items,
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+    )
+    return await service.confirm_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+        confirmations=[
+            (
+                payment.payment_method,
+                f"terminal-{payment.payment_method}",
+                f"refund-{suffix}-{payment.payment_method}",
+            )
+            for payment in attempt.payments
+        ],
+        allowed_branch_ids=None,
+    )
 
 
 async def test_partial_refund_does_not_void_parent(db_session: AsyncSession, pos_scaffold) -> None:
@@ -392,7 +423,7 @@ async def test_non_cash_refund_requires_external_terminal_confirmation(
         payments=[("card", Decimal("20"))],
     )
 
-    with pytest.raises(BusinessRuleError, match="external terminal"):
+    with pytest.raises(BusinessRuleError, match="confirmed refund attempt"):
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
@@ -401,13 +432,20 @@ async def test_non_cash_refund_requires_external_terminal_confirmation(
             cashier_user_id=s["cashier"].id,
         )
 
+    attempt = await _confirmed_refund_attempt(
+        service,
+        s,
+        parent,
+        [(item.id, Decimal("1"))],
+        suffix="card",
+    )
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
         reason="customer return",
         comment=None,
         cashier_user_id=s["cashier"].id,
-        external_refund_confirmed=True,
+        refund_attempt_id=attempt.id,
     )
     payments = await service.repo.list_payments(returned.id)
     assert [(payment.payment_method, payment.amount) for payment in payments] == [
@@ -416,11 +454,18 @@ async def test_non_cash_refund_requires_external_terminal_confirmation(
     assert payments[0].metadata_json == {
         "reason": "customer return",
         "comment": None,
-        "external_refund_confirmed": True,
+        "refund_attempt_id": str(attempt.id),
     }
+    assert returned.refund_attempt_id == attempt.id
+    consumed = await service.get_refund_attempt(
+        tenant_id=s["tenant"].id,
+        attempt_id=attempt.id,
+        allowed_branch_ids=None,
+    )
+    assert consumed.status == "consumed"
 
 
-async def test_cash_refund_rejects_false_external_terminal_attestation(
+async def test_cash_refund_rejects_electronic_refund_attempt(
     db_session: AsyncSession, pos_scaffold
 ) -> None:
     service, s, parent, item = await _open_shift_and_sell(
@@ -429,15 +474,224 @@ async def test_cash_refund_rejects_false_external_terminal_attestation(
         qty=1,
     )
 
-    with pytest.raises(BusinessRuleError, match="only for non-cash"):
-        await service.refund(
+    with pytest.raises(BusinessRuleError, match="Cash-only refunds"):
+        await service.create_refund_attempt(
+            tenant_id=s["tenant"].id,
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="cash return",
-            comment=None,
-            cashier_user_id=s["cashier"].id,
-            external_refund_confirmed=True,
+            actor_id=s["cashier"].id,
+            operation_id=uuid4(),
         )
+
+
+async def test_refund_attempt_create_is_idempotent_and_payload_bound(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, s, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20"))],
+    )
+    operation_id = uuid4()
+
+    first = await service.create_refund_attempt(
+        tenant_id=s["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        actor_id=s["cashier"].id,
+        operation_id=operation_id,
+    )
+    retried = await service.create_refund_attempt(
+        tenant_id=s["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1.000"))],
+        actor_id=s["cashier"].id,
+        operation_id=operation_id,
+    )
+
+    assert retried.id == first.id
+    assert retried.status == "pending"
+    with pytest.raises(ConflictError, match="another refund attempt"):
+        await service.create_refund_attempt(
+            tenant_id=s["tenant"].id,
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("2"))],
+            actor_id=s["cashier"].id,
+            operation_id=operation_id,
+        )
+
+
+async def test_refund_confirmation_requires_all_methods_and_is_idempotent(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, s, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("10")), ("qr", Decimal("10"))],
+    )
+    attempt = await service.create_refund_attempt(
+        tenant_id=s["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        actor_id=s["cashier"].id,
+        operation_id=uuid4(),
+    )
+    confirmations = [
+        ("card", "TERM-CARD", "CARD-REFUND-001"),
+        ("qr", "TERM-QR", "QR-REFUND-001"),
+    ]
+
+    with pytest.raises(BusinessRuleError, match="Every electronic refund method"):
+        await service.confirm_refund_attempt(
+            tenant_id=s["tenant"].id,
+            attempt_id=attempt.id,
+            actor_id=s["cashier"].id,
+            confirmations=confirmations[:1],
+            allowed_branch_ids=None,
+        )
+
+    confirmed = await service.confirm_refund_attempt(
+        tenant_id=s["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=s["cashier"].id,
+        confirmations=confirmations,
+        allowed_branch_ids=None,
+    )
+    retried = await service.confirm_refund_attempt(
+        tenant_id=s["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=s["cashier"].id,
+        confirmations=list(reversed(confirmations)),
+        allowed_branch_ids=None,
+    )
+
+    assert retried.id == confirmed.id
+    assert retried.status == "confirmed"
+    assert {payment.payment_method for payment in retried.payments} == {"card", "qr"}
+    with pytest.raises(ConflictError, match="other terminal documents"):
+        await service.confirm_refund_attempt(
+            tenant_id=s["tenant"].id,
+            attempt_id=attempt.id,
+            actor_id=s["cashier"].id,
+            confirmations=[
+                ("card", "TERM-CARD", "CARD-REFUND-CHANGED"),
+                ("qr", "TERM-QR", "QR-REFUND-001"),
+            ],
+            allowed_branch_ids=None,
+        )
+
+
+async def test_terminal_refund_document_cannot_be_reused_for_another_sale(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, s, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20"))],
+    )
+    first = await service.create_refund_attempt(
+        tenant_id=s["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        actor_id=s["cashier"].id,
+        operation_id=uuid4(),
+    )
+    await service.confirm_refund_attempt(
+        tenant_id=s["tenant"].id,
+        attempt_id=first.id,
+        actor_id=s["cashier"].id,
+        confirmations=[("card", "TERM-01", "REFUND-DOC-01")],
+        allowed_branch_ids=None,
+    )
+    second_sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    second_items, _ = await service.add_item(
+        sale_id=second_sale.id,
+        catalog_id=s["item"].id,
+        qty=Decimal("1"),
+    )
+    await service.repo.insert_payment(
+        tenant_id=s["tenant"].id,
+        sale_id=second_sale.id,
+        payment_method="card",
+        amount=Decimal("10"),
+    )
+    second_parent = await service.complete(sale_id=second_sale.id)
+    second = await service.create_refund_attempt(
+        tenant_id=s["tenant"].id,
+        parent_sale_id=second_parent.id,
+        items=[(second_items[0].id, Decimal("1"))],
+        actor_id=s["cashier"].id,
+        operation_id=uuid4(),
+    )
+
+    with pytest.raises(ConflictError, match="already used"):
+        async with db_session.begin_nested():
+            await service.confirm_refund_attempt(
+                tenant_id=s["tenant"].id,
+                attempt_id=second.id,
+                actor_id=s["cashier"].id,
+                confirmations=[("card", "TERM-01", "REFUND-DOC-01")],
+                allowed_branch_ids=None,
+            )
+
+    with pytest.raises(BusinessRuleError, match="must be completed"):
+        await service.void_refund_attempt(
+            tenant_id=s["tenant"].id,
+            attempt_id=first.id,
+            actor_id=s["cashier"].id,
+            reason="refund_failed",
+            operator_note=None,
+            can_manage=True,
+            allowed_branch_ids=None,
+        )
+
+
+async def test_shift_close_waits_until_refund_attempt_is_resolved(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, s, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=1,
+        payments=[("card", Decimal("10"))],
+    )
+    attempt = await service.create_refund_attempt(
+        tenant_id=s["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        actor_id=s["cashier"].id,
+        operation_id=uuid4(),
+    )
+
+    with pytest.raises(BusinessRuleError, match="refund attempt is unresolved"):
+        await service.close_shift(
+            shift_id=parent.shift_id,
+            closing_cash_actual=Decimal("0"),
+            closed_by_user_id=s["cashier"].id,
+        )
+
+    await service.void_refund_attempt(
+        tenant_id=s["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=s["cashier"].id,
+        reason="customer_cancelled",
+        operator_note=None,
+        can_manage=False,
+        allowed_branch_ids=None,
+    )
+    closed = await service.close_shift(
+        shift_id=parent.shift_id,
+        closing_cash_actual=Decimal("0"),
+        closed_by_user_id=s["cashier"].id,
+    )
+    assert closed.status == "closed"
 
 
 async def test_partial_refund_preserves_original_mixed_tender_ratio(
@@ -450,13 +704,20 @@ async def test_partial_refund_preserves_original_mixed_tender_ratio(
         payments=[("cash", Decimal("30")), ("card", Decimal("70"))],
     )
 
+    attempt = await _confirmed_refund_attempt(
+        service,
+        s,
+        parent,
+        [(item.id, Decimal("3"))],
+        suffix="mixed",
+    )
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("3"))],
         reason="partial",
         comment=None,
         cashier_user_id=s["cashier"].id,
-        external_refund_confirmed=True,
+        refund_attempt_id=attempt.id,
     )
     payments = await service.repo.list_payments(returned.id)
 
@@ -502,13 +763,20 @@ async def test_repeated_mixed_refunds_reconcile_to_original_tender_totals(
     parent = await service.complete(sale_id=sale.id)
 
     for index in range(3):
+        attempt = await _confirmed_refund_attempt(
+            service,
+            s,
+            parent,
+            [(items[0].id, Decimal("1"))],
+            suffix=f"repeat-{index}",
+        )
         await service.refund(
             parent_sale_id=parent.id,
             items=[(items[0].id, Decimal("1"))],
             reason=f"partial {index + 1}",
             comment=None,
             cashier_user_id=s["cashier"].id,
-            external_refund_confirmed=True,
+            refund_attempt_id=attempt.id,
         )
 
     assert await repo.refunded_payment_totals(parent.id) == {

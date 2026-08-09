@@ -21,12 +21,12 @@ describe("pending refund operation", () => {
     expect(operation?.operationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
+    expect(operation?.refundAttemptOperationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(operation?.refundAttemptId).toBeNull();
     expect(
-      createPendingRefundOperation(
-        "sale-1",
-        [{ sale_item_id: "different", qty: "99" }],
-        false,
-      ),
+      createPendingRefundOperation("sale-1", [{ sale_item_id: "different", qty: "99" }], false),
     ).toEqual(operation);
     expect(loadPendingRefundOperation("sale-1")).toEqual(operation);
     expect(
@@ -67,7 +67,8 @@ describe("pending refund operation", () => {
           { sale_item_id: "item-1", qty: "1" },
           { sale_item_id: "item-1", qty: "2" },
         ],
-        externalRefundConfirmed: false,
+        refundAttemptOperationId: null,
+        refundAttemptId: null,
       }),
     );
     expect(loadPendingRefundOperation("sale-1")).toBeNull();
@@ -76,11 +77,7 @@ describe("pending refund operation", () => {
       throw new DOMException("storage unavailable");
     });
     expect(
-      createPendingRefundOperation(
-        "sale-2",
-        [{ sale_item_id: "item-2", qty: "1" }],
-        false,
-      ),
+      createPendingRefundOperation("sale-2", [{ sale_item_id: "item-2", qty: "1" }], false),
     ).toBeNull();
     setItem.mockRestore();
   });

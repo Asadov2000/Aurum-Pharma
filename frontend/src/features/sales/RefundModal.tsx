@@ -1,9 +1,8 @@
 import { isAxiosError } from "axios";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
-  Checkbox,
   Input,
   Label,
   Modal,
@@ -15,36 +14,64 @@ import {
   TR,
   Textarea,
 } from "@/components/ui";
-import { type Sale, type SaleDetails } from "@/features/pos/types";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 import { useTenantSettingsQuery } from "@/features/foundation/queries";
+import { type Sale, type SaleDetails } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
 
-import { getRefundResult } from "./api";
+import {
+  confirmRefundAttempt,
+  createRefundAttempt,
+  getRefundAttempt,
+  getRefundResult,
+  voidRefundAttempt,
+} from "./api";
 import { useRefundSale } from "./queries";
 import {
   clearPendingRefundOperation,
   createPendingRefundOperation,
   loadPendingRefundOperation,
+  savePendingRefundAttemptId,
   type PendingRefundOperation,
 } from "./refundOperation";
+import {
+  type ElectronicRefundMethod,
+  type RefundAttempt,
+  type RefundAttemptConfirmation,
+} from "./types";
 
 interface LineState {
   selected: boolean;
   qty: string;
 }
 
+interface TerminalReferenceState {
+  terminalId: string;
+  documentNumber: string;
+}
+
+type TerminalReferences = Partial<Record<ElectronicRefundMethod, TerminalReferenceState>>;
 type RefundLookupResult =
   | { status: "found"; sale: Sale }
   | { status: "missing" }
   | { status: "unknown" };
+
+const METHOD_LABELS: Record<ElectronicRefundMethod, string> = {
+  card: "Карта",
+  qr: "QR-код",
+  bank_transfer: "Банковский перевод",
+};
 
 function sameRefundItems(
   left: { sale_item_id: string; qty: string }[],
   right: { sale_item_id: string; qty: string }[],
 ): boolean {
   if (left.length !== right.length) return false;
-  const rightById = new Map(right.map((item) => [item.sale_item_id, item.qty]));
-  return left.every((item) => rightById.get(item.sale_item_id) === item.qty);
+  const rightById = new Map(right.map((item) => [item.sale_item_id, Number(item.qty)]));
+  return left.every(
+    (item) => Math.abs((rightById.get(item.sale_item_id) ?? -1) - Number(item.qty)) < 0.0005,
+  );
 }
 
 async function lookupRefundResult(operationId: string): Promise<RefundLookupResult> {
@@ -58,6 +85,18 @@ async function lookupRefundResult(operationId: string): Promise<RefundLookupResu
   }
 }
 
+function referencesFromAttempt(attempt: RefundAttempt): TerminalReferences {
+  return Object.fromEntries(
+    attempt.payments.map((payment) => [
+      payment.payment_method,
+      {
+        terminalId: payment.terminal_id ?? "",
+        documentNumber: payment.document_number ?? "",
+      },
+    ]),
+  ) as TerminalReferences;
+}
+
 export function RefundModal({
   sale,
   onClose,
@@ -67,6 +106,8 @@ export function RefundModal({
   onClose: () => void;
   onRefunded: (returnSaleId: string) => void;
 }): JSX.Element {
+  const { user } = useAuth();
+  const canConfirmExternal = hasPermission(user, "pos.refund_external_confirm");
   const refund = useRefundSale();
   const settings = useTenantSettingsQuery();
   const reasonMode = settings.data?.refund_reason_mode;
@@ -74,10 +115,10 @@ export function RefundModal({
   const [reason, setReason] = useState("");
   const [comment, setComment] = useState("");
   const [initialPendingOperation] = useState(() => loadPendingRefundOperation(sale.id));
-  const [externalRefundConfirmed, setExternalRefundConfirmed] = useState(
-    initialPendingOperation?.externalRefundConfirmed ?? false,
-  );
+  const [refundAttempt, setRefundAttempt] = useState<RefundAttempt | null>(null);
+  const [terminalReferences, setTerminalReferences] = useState<TerminalReferences>({});
   const [reconciling, setReconciling] = useState(false);
+  const [attemptBusy, setAttemptBusy] = useState(false);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [financialOperationPending, setFinancialOperationPending] = useState(
     initialPendingOperation !== null,
@@ -85,29 +126,22 @@ export function RefundModal({
   const pendingOperationRef = useRef<PendingRefundOperation | null>(initialPendingOperation);
   const recoveryStartedRef = useRef(false);
   const submittingRef = useRef(false);
-  const externalPaymentMethods = Array.from(
-    new Set(
-      sale.payments
-        .map((payment) => payment.payment_method)
-        .filter((method) => method !== "cash"),
-    ),
+  const requiresExternalRefund = useMemo(
+    () => sale.payments.some((payment) => payment.payment_method !== "cash"),
+    [sale.payments],
   );
-  const requiresExternalRefund = externalPaymentMethods.length > 0;
-  // Default: every line selected at full quantity (the common "вернуть всё").
   const [lines, setLines] = useState<Record<string, LineState>>(() =>
     Object.fromEntries(
-      sale.items.map((it) => {
-        const available = Math.max(0, Number(it.qty) - Number(it.refunded_qty ?? "0"));
+      sale.items.map((item) => {
+        const available = Math.max(0, Number(item.qty) - Number(item.refunded_qty ?? "0"));
         const pendingLine = initialPendingOperation?.items.find(
-          (item) => item.sale_item_id === it.id,
+          (candidate) => candidate.sale_item_id === item.id,
         );
         return [
-          it.id,
+          item.id,
           {
             selected:
-              initialPendingOperation !== null
-                ? pendingLine !== undefined
-                : available > 0.0005,
+              initialPendingOperation !== null ? pendingLine !== undefined : available > 0.0005,
             qty:
               pendingLine?.qty ??
               (available > 0.0005 ? available.toFixed(3).replace(/\.?0+$/, "") : "0"),
@@ -128,11 +162,82 @@ export function RefundModal({
     [onRefunded, sale.id],
   );
 
-  const verifyPendingRefund = useCallback(
-    async (
-      operation: PendingRefundOperation,
-      missingMessage: string,
-    ): Promise<RefundLookupResult["status"]> => {
+  const applyRefundAttempt = useCallback((attempt: RefundAttempt) => {
+    setRefundAttempt(attempt);
+    setTerminalReferences(referencesFromAttempt(attempt));
+  }, []);
+
+  const restoreRefundAttempt = useCallback(
+    async (operation: PendingRefundOperation): Promise<boolean> => {
+      if (!operation.refundAttemptOperationId) return true;
+      setAttemptBusy(true);
+      try {
+        const attempt = operation.refundAttemptId
+          ? await getRefundAttempt(operation.refundAttemptId)
+          : await createRefundAttempt(
+              operation.parentSaleId,
+              operation.refundAttemptOperationId,
+              operation.items,
+            );
+        if (!sameRefundItems(attempt.items, operation.items)) {
+          setRecoveryBlocked(true);
+          setTopError(
+            "Сохранённая заявка не совпадает с выбранными позициями. Обратитесь к администратору.",
+          );
+          return false;
+        }
+        if (!operation.refundAttemptId) {
+          const updated = savePendingRefundAttemptId(operation, attempt.id);
+          if (!updated) {
+            setRecoveryBlocked(true);
+            setTopError(
+              "Не удалось безопасно сохранить номер заявки. Не повторяйте возврат во внешнем терминале.",
+            );
+            return false;
+          }
+          pendingOperationRef.current = updated;
+        }
+        if (attempt.status === "voided") {
+          clearPendingRefundOperation(operation.parentSaleId, operation.operationId);
+          pendingOperationRef.current = null;
+          setFinancialOperationPending(false);
+          setRefundAttempt(null);
+          setTopError("Предыдущая заявка отменена. Можно создать новый возврат.");
+          return true;
+        }
+        if (attempt.status === "consumed") {
+          setRecoveryBlocked(true);
+          setTopError(
+            "Возврат уже проведён, но чек пока не найден. Не повторяйте операцию и обратитесь к администратору.",
+          );
+          return false;
+        }
+        applyRefundAttempt(attempt);
+        setRecoveryBlocked(false);
+        setTopError(
+          attempt.status === "pending"
+            ? "Заявка восстановлена. Проверьте реквизиты терминального документа."
+            : "Подтверждение восстановлено. Можно повторить оформление чека возврата.",
+        );
+        return true;
+      } catch (error) {
+        setRecoveryBlocked(true);
+        setTopError(
+          describeApiError(
+            error,
+            "Не удалось восстановить заявку возврата. Не повторяйте возврат денег во внешнем терминале.",
+          ),
+        );
+        return false;
+      } finally {
+        setAttemptBusy(false);
+      }
+    },
+    [applyRefundAttempt],
+  );
+
+  const reconcileRefund = useCallback(
+    async (operation: PendingRefundOperation): Promise<RefundLookupResult["status"]> => {
       setReconciling(true);
       const result = await lookupRefundResult(operation.operationId);
       setReconciling(false);
@@ -142,16 +247,22 @@ export function RefundModal({
       }
       if (result.status === "missing") {
         setRecoveryBlocked(false);
-        setTopError(missingMessage);
+        if (operation.refundAttemptOperationId) {
+          await restoreRefundAttempt(operation);
+        } else {
+          setTopError(
+            "Предыдущий возврат не найден на сервере. Можно безопасно повторить отправку.",
+          );
+        }
         return "missing";
       }
       setRecoveryBlocked(true);
       setTopError(
-        "Не удалось проверить результат возврата. Не повторяйте возврат денег во внешнем терминале, пока связь не восстановится.",
+        "Не удалось проверить результат возврата. Не повторяйте возврат денег, пока связь не восстановится.",
       );
       return "unknown";
     },
-    [finishRefund],
+    [finishRefund, restoreRefundAttempt],
   );
 
   useEffect(() => {
@@ -159,78 +270,104 @@ export function RefundModal({
     if (!operation || recoveryStartedRef.current) return;
     recoveryStartedRef.current = true;
     setRecoveryBlocked(true);
-    void verifyPendingRefund(
-      operation,
-      "Предыдущий возврат не найден на сервере. Проверьте внешний терминал и затем повторите оформление с тем же расчётом.",
-    );
-  }, [verifyPendingRefund]);
+    void reconcileRefund(operation);
+  }, [reconcileRefund]);
 
   const setLine = (id: string, patch: Partial<LineState>) =>
-    setLines((prev) => ({ ...prev, [id]: { ...prev[id]!, ...patch } }));
+    setLines((previous) => ({ ...previous, [id]: { ...previous[id]!, ...patch } }));
 
-  const onSubmit = async () => {
-    if (submittingRef.current || reconciling || recoveryBlocked) return;
+  const selectedItems = () =>
+    sale.items
+      .filter((item) => lines[item.id]?.selected)
+      .map((item) => ({ sale_item_id: item.id, qty: lines[item.id]!.qty }));
+
+  const validateForm = (): { sale_item_id: string; qty: string }[] | null => {
     if (!reasonMode) {
       setTopError("Не удалось подтвердить настройки возврата. Обновите страницу.");
-      return;
+      return null;
     }
     if (
       (reasonMode === "required" || reasonMode === "required_with_text") &&
       reason.trim().length === 0
     ) {
       setTopError("Укажите причину возврата.");
-      return;
+      return null;
     }
     if (reasonMode === "required_with_text" && comment.trim().length === 0) {
       setTopError("Добавьте комментарий к возврату.");
-      return;
+      return null;
     }
-    if (requiresExternalRefund && !externalRefundConfirmed) {
-      setTopError("Подтвердите возврат денег во внешнем банковском или QR-терминале.");
-      return;
-    }
-
-    const chosen = sale.items
-      .filter((it) => lines[it.id]?.selected)
-      .map((it) => ({ sale_item_id: it.id, qty: lines[it.id]!.qty }));
-
+    const chosen = selectedItems();
     if (chosen.length === 0) {
       setTopError("Выберите хотя бы одну позицию для возврата.");
-      return;
+      return null;
     }
-    for (const it of sale.items) {
-      const l = lines[it.id];
-      if (!l?.selected) continue;
-      const q = Number(l.qty);
-      const available = Math.max(0, Number(it.qty) - Number(it.refunded_qty ?? "0"));
-      if (!(q > 0)) {
+    for (const item of sale.items) {
+      const line = lines[item.id];
+      if (!line?.selected) continue;
+      const qty = Number(line.qty);
+      const available = Math.max(0, Number(item.qty) - Number(item.refunded_qty ?? "0"));
+      if (!(qty > 0)) {
         setTopError("Количество возврата должно быть больше 0.");
-        return;
+        return null;
       }
-      if (q - available > 0.0005) {
+      if (qty - available > 0.0005) {
         setTopError("Количество возврата больше доступного остатка.");
-        return;
+        return null;
       }
     }
+    return chosen;
+  };
 
-    const currentOperation = pendingOperationRef.current;
-    if (
-      currentOperation !== null &&
-      !sameRefundItems(currentOperation.items, chosen)
-    ) {
+  const persistAttempt = (
+    operation: PendingRefundOperation,
+    attempt: RefundAttempt,
+  ): PendingRefundOperation | null => {
+    if (operation.refundAttemptId === attempt.id) return operation;
+    const updated = savePendingRefundAttemptId(operation, attempt.id);
+    if (!updated) {
       setRecoveryBlocked(true);
-      setTopError(
-        "Сохранённый состав возврата не совпадает с чеком. Не повторяйте возврат денег; выполните сверку с администратором.",
-      );
+      setTopError("Не удалось безопасно сохранить заявку. Денежная операция остановлена.");
+      return null;
+    }
+    pendingOperationRef.current = updated;
+    return updated;
+  };
+
+  const terminalConfirmations = (): RefundAttemptConfirmation[] | null => {
+    if (!refundAttempt) return null;
+    const confirmations: RefundAttemptConfirmation[] = [];
+    for (const payment of refundAttempt.payments) {
+      const reference = terminalReferences[payment.payment_method];
+      const terminalId = reference?.terminalId.trim() ?? "";
+      const documentNumber = reference?.documentNumber.trim() ?? "";
+      if (!terminalId || !documentNumber) {
+        setTopError("Для каждого электронного способа укажите терминал и номер документа.");
+        return null;
+      }
+      confirmations.push({
+        payment_method: payment.payment_method,
+        terminal_id: terminalId,
+        document_number: documentNumber,
+      });
+    }
+    return confirmations;
+  };
+
+  const onSubmit = async () => {
+    if (submittingRef.current || reconciling || recoveryBlocked || attemptBusy) return;
+    const chosen = validateForm();
+    if (!chosen) return;
+    const currentOperation = pendingOperationRef.current;
+    if (currentOperation && !sameRefundItems(currentOperation.items, chosen)) {
+      setRecoveryBlocked(true);
+      setTopError("Сохранённый состав возврата не совпадает с чеком. Обратитесь к администратору.");
       return;
     }
-    const operation =
-      currentOperation ??
-      createPendingRefundOperation(sale.id, chosen, externalRefundConfirmed);
+    let operation =
+      currentOperation ?? createPendingRefundOperation(sale.id, chosen, requiresExternalRefund);
     if (!operation) {
-      setTopError(
-        "Локальное хранилище недоступно. Возврат не отправлен: перезапустите приложение или освободите место.",
-      );
+      setTopError("Локальное хранилище недоступно. Возврат не отправлен.");
       return;
     }
     pendingOperationRef.current = operation;
@@ -238,6 +375,45 @@ export function RefundModal({
     setTopError(null);
     submittingRef.current = true;
     try {
+      let activeAttempt = refundAttempt;
+      if (requiresExternalRefund && !activeAttempt) {
+        if (!operation.refundAttemptOperationId) {
+          setRecoveryBlocked(true);
+          setTopError("Маркер заявки повреждён. Денежная операция остановлена.");
+          return;
+        }
+        const created = await createRefundAttempt(
+          sale.id,
+          operation.refundAttemptOperationId,
+          operation.items,
+        );
+        const updated = persistAttempt(operation, created);
+        if (!updated) return;
+        operation = updated;
+        applyRefundAttempt(created);
+        setTopError(
+          canConfirmExternal
+            ? "Сумма рассчитана. Выполните возврат в терминале и внесите реквизиты документа."
+            : "Заявка создана. Для подтверждения пригласите сотрудника с соответствующим правом.",
+        );
+        return;
+      }
+      if (activeAttempt?.status === "pending") {
+        if (!canConfirmExternal) {
+          setTopError(
+            "У вас нет права подтверждать электронные возвраты. Пригласите управляющего.",
+          );
+          return;
+        }
+        const confirmations = terminalConfirmations();
+        if (!confirmations) return;
+        activeAttempt = await confirmRefundAttempt(activeAttempt.id, confirmations);
+        applyRefundAttempt(activeAttempt);
+      }
+      if (requiresExternalRefund && activeAttempt?.status !== "confirmed") {
+        setTopError("Электронный возврат ещё не подтверждён.");
+        return;
+      }
       const returnSale = await refund.mutateAsync({
         parentSaleId: sale.id,
         payload: {
@@ -245,24 +421,55 @@ export function RefundModal({
           items: operation.items,
           reason: reason.trim() || null,
           comment: comment.trim() || null,
-          external_refund_confirmed: operation.externalRefundConfirmed,
+          refund_attempt_id: activeAttempt?.id ?? null,
         },
       });
       finishRefund(operation, returnSale.id);
-    } catch (err) {
-      const lookupStatus = await verifyPendingRefund(
-        operation,
-        "Возврат не найден на сервере. Проверьте внешний терминал и повторите оформление.",
-      );
-      if (lookupStatus === "missing" && isAxiosError(err) && err.response !== undefined) {
-        clearPendingRefundOperation(sale.id, operation.operationId);
-        pendingOperationRef.current = null;
-        setTopError(describeApiError(err, "Не удалось оформить возврат."));
+    } catch (error) {
+      const status = await reconcileRefund(operation);
+      if (status === "missing" && isAxiosError(error) && error.response !== undefined) {
+        setRecoveryBlocked(false);
+        setTopError(describeApiError(error, "Не удалось оформить возврат."));
+        if (!requiresExternalRefund) {
+          clearPendingRefundOperation(sale.id, operation.operationId);
+          pendingOperationRef.current = null;
+          setFinancialOperationPending(false);
+        }
       }
     } finally {
       submittingRef.current = false;
     }
   };
+
+  const cancelPendingAttempt = async () => {
+    const operation = pendingOperationRef.current;
+    if (!operation || refundAttempt?.status !== "pending" || attemptBusy) return;
+    setAttemptBusy(true);
+    setTopError(null);
+    try {
+      await voidRefundAttempt(refundAttempt.id);
+      clearPendingRefundOperation(sale.id, operation.operationId);
+      pendingOperationRef.current = null;
+      setRefundAttempt(null);
+      setTerminalReferences({});
+      setFinancialOperationPending(false);
+      setRecoveryBlocked(false);
+      setTopError("Заявка отменена. Деньги во внешнем терминале возвращать не нужно.");
+    } catch (error) {
+      setTopError(describeApiError(error, "Не удалось отменить заявку возврата."));
+    } finally {
+      setAttemptBusy(false);
+    }
+  };
+
+  const buttonLabel =
+    requiresExternalRefund && !refundAttempt
+      ? "Рассчитать возврат"
+      : refundAttempt?.status === "pending"
+        ? canConfirmExternal
+          ? "Подтвердить и оформить"
+          : "Ожидает подтверждения"
+        : "Оформить возврат";
 
   return (
     <Modal open onClose={onClose} title={`Возврат по чеку № ${sale.receipt_number ?? "—"}`}>
@@ -270,42 +477,39 @@ export function RefundModal({
         <Table>
           <THead>
             <TR>
-              <TH className="w-10"></TH>
+              <TH className="w-10" />
               <TH>Позиция</TH>
               <TH className="text-right">Доступно</TH>
               <TH className="text-right">Вернуть</TH>
             </TR>
           </THead>
           <TBody>
-            {sale.items.map((it) => {
-              const l = lines[it.id]!;
-              const available = Math.max(
-                0,
-                Number(it.qty) - Number(it.refunded_qty ?? "0"),
-              );
+            {sale.items.map((item) => {
+              const line = lines[item.id]!;
+              const available = Math.max(0, Number(item.qty) - Number(item.refunded_qty ?? "0"));
               return (
-                <TR key={it.id}>
+                <TR key={item.id}>
                   <TD>
                     <input
                       type="checkbox"
-                      aria-label={`Вернуть позицию ${it.position}`}
-                      checked={l.selected}
+                      aria-label={`Вернуть позицию ${item.position}`}
+                      checked={line.selected}
                       disabled={available <= 0.0005 || financialOperationPending}
-                      onChange={(e) => setLine(it.id, { selected: e.target.checked })}
+                      onChange={(event) => setLine(item.id, { selected: event.target.checked })}
                     />
                   </TD>
-                  <TD className="font-mono text-xs">{it.catalog_id.slice(0, 8)}</TD>
+                  <TD className="font-mono text-xs">{item.catalog_id.slice(0, 8)}</TD>
                   <TD className="text-right font-mono">{available.toFixed(3)}</TD>
                   <TD className="text-right">
                     <Input
                       type="text"
                       inputMode="decimal"
-                      value={l.qty}
-                      disabled={!l.selected || financialOperationPending}
-                      onChange={(e) => {
-                        const value = e.target.value.replace(",", ".");
+                      value={line.qty}
+                      disabled={!line.selected || financialOperationPending}
+                      onChange={(event) => {
+                        const value = event.target.value.replace(",", ".");
                         if (/^\d{0,11}(?:\.\d{0,3})?$/.test(value)) {
-                          setLine(it.id, { qty: value });
+                          setLine(item.id, { qty: value });
                         }
                       }}
                       className="w-20 text-right"
@@ -318,7 +522,7 @@ export function RefundModal({
         </Table>
 
         {reasonMode !== "off" ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label htmlFor="refund_reason">
                 Причина
@@ -328,7 +532,7 @@ export function RefundModal({
                 id="refund_reason"
                 value={reason}
                 maxLength={500}
-                onChange={(e) => setReason(e.target.value)}
+                onChange={(event) => setReason(event.target.value)}
                 placeholder="брак, ошибка кассира…"
               />
             </div>
@@ -341,52 +545,121 @@ export function RefundModal({
                 rows={1}
                 value={comment}
                 maxLength={2000}
-                onChange={(e) => setComment(e.target.value)}
+                onChange={(event) => setComment(event.target.value)}
               />
             </div>
           </div>
         ) : null}
 
         {requiresExternalRefund ? (
-          <label className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3">
-            <Checkbox
-              checked={externalRefundConfirmed}
-              disabled={financialOperationPending}
-              onChange={(event) => setExternalRefundConfirmed(event.target.checked)}
-              className="mt-0.5"
-            />
-            <span className="text-sm">
-              Подтверждаю, что деньги по{" "}
-              {externalPaymentMethods
-                .map((method) =>
-                  method === "card"
-                    ? "карте"
-                    : method === "qr"
-                      ? "QR"
-                      : "банковскому переводу",
-                )
-                .join(" и ")}{" "}
-              возвращены покупателю во внешнем терминале
-            </span>
-          </label>
+          <section className="rounded-lg border border-warning/40 bg-warning/5 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">Контроль электронного возврата</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Сначала система фиксирует сумму. Затем возврат выполняется в терминале и
+                  подтверждается его документом.
+                </p>
+              </div>
+              {refundAttempt ? (
+                <span className="whitespace-nowrap text-sm font-medium">
+                  {refundAttempt.external_amount} TJS
+                </span>
+              ) : null}
+            </div>
+            {refundAttempt ? (
+              <div className="mt-3 space-y-3">
+                {refundAttempt.payments.map((payment) => {
+                  const reference = terminalReferences[payment.payment_method] ?? {
+                    terminalId: "",
+                    documentNumber: "",
+                  };
+                  const disabled = refundAttempt.status !== "pending" || !canConfirmExternal;
+                  return (
+                    <div
+                      key={payment.payment_method}
+                      className="grid grid-cols-1 gap-2 border-t border-border/70 pt-3 sm:grid-cols-[minmax(8rem,0.8fr)_1fr_1.4fr]"
+                    >
+                      <div className="text-sm font-medium">
+                        {METHOD_LABELS[payment.payment_method]}
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          {payment.amount} TJS
+                        </span>
+                      </div>
+                      <div>
+                        <Label htmlFor={`terminal-${payment.payment_method}`}>Терминал</Label>
+                        <Input
+                          id={`terminal-${payment.payment_method}`}
+                          value={reference.terminalId}
+                          disabled={disabled}
+                          maxLength={64}
+                          autoComplete="off"
+                          onChange={(event) =>
+                            setTerminalReferences((previous) => ({
+                              ...previous,
+                              [payment.payment_method]: {
+                                ...reference,
+                                terminalId: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`document-${payment.payment_method}`}>
+                          Номер документа
+                        </Label>
+                        <Input
+                          id={`document-${payment.payment_method}`}
+                          value={reference.documentNumber}
+                          disabled={disabled}
+                          maxLength={128}
+                          autoComplete="off"
+                          onChange={(event) =>
+                            setTerminalReferences((previous) => ({
+                              ...previous,
+                              [payment.payment_method]: {
+                                ...reference,
+                                documentNumber: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                {!canConfirmExternal && refundAttempt.status === "pending" ? (
+                  <p className="text-sm text-warning-foreground">
+                    Подтвердить заявку может только сотрудник с правом электронного возврата.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
         ) : null}
 
-        {topError && <p className="text-sm text-danger">{topError}</p>}
+        {topError ? <p className="text-sm text-danger">{topError}</p> : null}
 
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={reconciling}>
-            Отмена
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={reconciling || attemptBusy}>
+            Закрыть
           </Button>
+          {refundAttempt?.status === "pending" ? (
+            <Button
+              variant="secondary"
+              onClick={() => void cancelPendingAttempt()}
+              isLoading={attemptBusy}
+            >
+              Отменить заявку
+            </Button>
+          ) : null}
           {recoveryBlocked ? (
             <Button
               variant="secondary"
               onClick={() => {
                 const operation = pendingOperationRef.current;
-                if (!operation) return;
-                void verifyPendingRefund(
-                  operation,
-                  "Возврат не найден на сервере. Проверьте внешний терминал и повторите оформление.",
-                );
+                if (operation) void reconcileRefund(operation);
               }}
               isLoading={reconciling}
             >
@@ -395,16 +668,18 @@ export function RefundModal({
           ) : null}
           <Button
             onClick={() => void onSubmit()}
-            isLoading={refund.isPending || reconciling}
+            isLoading={refund.isPending || reconciling || attemptBusy}
             disabled={
               !reasonMode ||
               settings.isLoading ||
               recoveryBlocked ||
               reconciling ||
-              refund.isPending
+              attemptBusy ||
+              refund.isPending ||
+              (refundAttempt?.status === "pending" && !canConfirmExternal)
             }
           >
-            Оформить возврат
+            {buttonLabel}
           </Button>
         </div>
       </div>

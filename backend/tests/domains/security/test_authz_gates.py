@@ -1408,3 +1408,119 @@ async def test_readonly_tenant_blocks_pos_mutations(
             assert body["error"]["details"] == {"status": "readonly"}
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+async def test_electronic_refund_confirmation_requires_separate_permission(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    await _override_db(db_session)
+    try:
+        foundation = FoundationService(FoundationRepository(db_session))
+        repo = POSRepository(db_session)
+        pos = POSService(repo)
+        nick = uuid4().hex[:8]
+        tenant = await foundation.create_tenant(
+            payload={
+                "name": f"Refund approval {nick}",
+                "contact_email": f"refund-approval-{nick}@aurum.tj",
+            }
+        )
+        await foundation.update_tenant(tenant.id, fields={"status": "active"})
+        branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
+        register = await foundation.create_register(
+            tenant_id=tenant.id,
+            fields={"branch_id": branch.id, "name": "Cashbox"},
+        )
+        catalog_item = await _create_stocked_item(
+            db_session,
+            tenant_id=tenant.id,
+            branch_id=branch.id,
+        )
+        cashier = AppUser(
+            email=f"refund-cashier-{nick}@aurum.tj",
+            full_name="Refund Cashier",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        approver = AppUser(
+            email=f"refund-approver-{nick}@aurum.tj",
+            full_name="Refund Approver",
+            home_tenant_id=tenant.id,
+            status="active",
+        )
+        db_session.add_all([cashier, approver])
+        await db_session.flush()
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=cashier.id,
+            permission_codes={"pos.refund"},
+        )
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=approver.id,
+            permission_codes={"pos.refund_external_confirm"},
+        )
+        await pos.open_shift(
+            tenant_id=tenant.id,
+            register_id=register.id,
+            opened_by_user_id=cashier.id,
+            opening_cash=Decimal("0"),
+        )
+        sale = await pos.create_sale(
+            tenant_id=tenant.id,
+            register_id=register.id,
+            cashier_user_id=cashier.id,
+        )
+        sale_items, _ = await pos.add_item(
+            sale_id=sale.id,
+            catalog_id=catalog_item.id,
+            qty=Decimal("1"),
+        )
+        await repo.insert_payment(
+            tenant_id=tenant.id,
+            sale_id=sale.id,
+            payment_method="card",
+            amount=Decimal("10"),
+        )
+        sale = await pos.complete(sale_id=sale.id)
+
+        cashier_headers = {"Authorization": f"Bearer {_token(cashier)}"}
+        create_response = await client.post(
+            f"/api/v1/sales/{sale.id}/refund-attempts",
+            headers=cashier_headers,
+            json={
+                "operation_id": str(uuid4()),
+                "items": [{"sale_item_id": str(sale_items[0].id), "qty": "1"}],
+            },
+        )
+        assert create_response.status_code == 201
+        attempt_id = create_response.json()["id"]
+        confirmation = {
+            "confirmations": [
+                {
+                    "payment_method": "card",
+                    "terminal_id": "TERM-SEC",
+                    "document_number": f"REFUND-{nick}",
+                }
+            ]
+        }
+
+        denied = await client.post(
+            f"/api/v1/pos/refund-attempts/{attempt_id}/confirm",
+            headers=cashier_headers,
+            json=confirmation,
+        )
+        assert denied.status_code == 403
+
+        approved = await client.post(
+            f"/api/v1/pos/refund-attempts/{attempt_id}/confirm",
+            headers={"Authorization": f"Bearer {_token(approver)}"},
+            json=confirmation,
+        )
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "confirmed"
+    finally:
+        app.dependency_overrides.pop(get_db, None)

@@ -28,6 +28,7 @@ PAYMENT_ATTEMPT_VOID_REASONS = frozenset(
         "manager_override",
     }
 )
+REFUND_ATTEMPT_METHODS = frozenset({"card", "qr", "bank_transfer"})
 
 
 # ---- personal POS favorites ----
@@ -454,6 +455,7 @@ class SaleRead(BaseModel):
     status: str
     receipt_number: str | None
     operation_id: UUID | None
+    refund_attempt_id: UUID | None
     is_test: bool
     total_amount: Decimal
     currency: str
@@ -494,6 +496,113 @@ class RefundItem(BaseModel):
     qty: Decimal = Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False)
 
 
+class POSRefundAttemptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: UUID4
+    items: list[RefundItem] = Field(min_length=1, max_length=200)
+
+
+class POSRefundConfirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    payment_method: Literal["card", "qr", "bank_transfer"]
+    terminal_id: str = Field(min_length=1, max_length=64)
+    document_number: str = Field(min_length=1, max_length=128)
+
+    @field_validator("terminal_id", "document_number", mode="before")
+    @classmethod
+    def _strip_terminal_reference(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if any(ord(char) < 32 for char in stripped):
+            raise ValueError("terminal reference contains control characters")
+        return stripped
+
+
+class POSRefundAttemptConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmations: list[POSRefundConfirmation] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def _unique_payment_methods(self) -> Self:
+        methods = [confirmation.payment_method for confirmation in self.confirmations]
+        if len(methods) != len(set(methods)):
+            raise ValueError("each payment method can be confirmed only once")
+        return self
+
+
+class POSRefundAttemptVoid(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Literal[
+        "cashier_cancelled",
+        "customer_cancelled",
+        "terminal_declined",
+        "timeout",
+        "duplicate",
+        "refund_failed",
+        "manager_override",
+    ]
+    operator_note: str | None = Field(default=None, max_length=160)
+
+    @field_validator("operator_note", mode="before")
+    @classmethod
+    def _strip_non_pii_note(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        lowered = stripped.lower()
+        if (
+            "@" in stripped
+            or "://" in lowered
+            or "www." in lowered
+            or any(ord(char) < 32 for char in stripped)
+        ):
+            raise ValueError("operator_note must not contain contact or link data")
+        digits = "".join(char if char.isdigit() else " " for char in stripped)
+        if any(len(group) >= 6 for group in digits.split()):
+            raise ValueError("operator_note must not contain long numeric identifiers")
+        return stripped or None
+
+
+class POSRefundAttemptPaymentRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    payment_method: Literal["card", "qr", "bank_transfer"]
+    amount: Decimal
+    terminal_id: str | None = None
+    document_number: str | None = None
+    confirmed_by_user_id: UUID | None = None
+    confirmed_at: datetime | None = None
+
+
+class POSRefundAttemptRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    tenant_id: UUID
+    parent_sale_id: UUID
+    register_id: UUID
+    requested_by_user_id: UUID
+    confirmed_by_user_id: UUID | None
+    operation_id: UUID
+    items: list[RefundItem]
+    payments: list[POSRefundAttemptPaymentRead]
+    total_amount: Decimal
+    external_amount: Decimal
+    currency: Literal["TJS"]
+    status: Literal["pending", "confirmed", "consumed", "voided"]
+    void_reason: str | None
+    void_note: str | None
+    created_at: datetime
+    confirmed_at: datetime | None
+    consumed_at: datetime | None
+    voided_at: datetime | None
+
+
 class RefundCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -501,7 +610,7 @@ class RefundCreate(BaseModel):
     items: list[RefundItem] = Field(min_length=1, max_length=200)
     reason: str | None = Field(default=None, max_length=500)
     comment: str | None = Field(default=None, max_length=2000)
-    external_refund_confirmed: bool = False
+    refund_attempt_id: UUID4 | None = None
 
 
 # ---- sales listing (receipt search) ----

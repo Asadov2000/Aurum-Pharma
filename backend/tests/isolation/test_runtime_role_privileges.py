@@ -47,10 +47,12 @@ CRUD_TABLES = {
 
 NO_DELETE_TABLES = {
     "pos_payment_attempt",
+    "pos_refund_attempt",
 }
 
 APPEND_ONLY_TABLES = {
     "batch_movement",
+    "pos_refund_reference",
     "supplier_return",
     "write_off",
 }
@@ -233,6 +235,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_platform_account_status",
     "trg_guard_platform_membership_scope",
     "trg_guard_pos_payment_attempt_transition",
+    "trg_guard_pos_refund_attempt_transition",
     "trg_guard_role_permission_mutation",
     "trg_guard_sale_child_immutability",
     "trg_guard_sale_immutability",

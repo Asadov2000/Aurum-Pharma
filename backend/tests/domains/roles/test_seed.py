@@ -24,12 +24,9 @@ async def _template_codes(db_session: AsyncSession, template_name: str) -> list[
 
 
 async def test_seed_permissions_count(db_session: AsyncSession) -> None:
-    """47 distinct permissions across 14 groups: 41 base (13 groups) + the
-    sales.view.* 'sales' group from migration 0014 (+1 group, +2 perms) +
-    roles.create / roles.update from migration 0018 (existing 'roles' group) +
-    explicit POS sale and shift management permissions."""
+    """The migrated permission catalogue remains complete and duplicate-free."""
     count = (await db_session.execute(select(func.count()).select_from(Permission))).scalar_one()
-    assert count == 47
+    assert count == 48
 
     groups = (
         await db_session.execute(select(func.count(func.distinct(Permission.group_code))))
@@ -78,6 +75,7 @@ async def test_kassir_template_has_only_min_level_4_permissions(
     ).all()
     for _, mlr in perms:
         assert mlr == 4, f"Кассир template has perm with min_level_required={mlr}"
+    assert "pos.refund_external_confirm" not in codes
 
 
 async def test_vladelec_template_excludes_global_audit(db_session: AsyncSession) -> None:
@@ -87,6 +85,7 @@ async def test_vladelec_template_excludes_global_audit(db_session: AsyncSession)
     assert "audit.view.global" not in codes
     assert "users.invite" in codes
     assert "pos.sell" in codes
+    assert "pos.refund_external_confirm" in codes
 
 
 async def test_developer_has_everything(db_session: AsyncSession, system_roles) -> None:

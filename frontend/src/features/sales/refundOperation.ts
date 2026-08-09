@@ -1,18 +1,17 @@
 import { type RefundLine } from "./types";
 
 const STORAGE_PREFIX = "sales:pendingRefund:";
-const UUID_V4_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface PendingRefundOperation {
   operationId: string;
+  refundAttemptOperationId: string | null;
+  refundAttemptId: string | null;
   parentSaleId: string;
   items: RefundLine[];
-  externalRefundConfirmed: boolean;
 }
 
-const refundOperationKey = (parentSaleId: string): string =>
-  `${STORAGE_PREFIX}${parentSaleId}`;
+const refundOperationKey = (parentSaleId: string): string => `${STORAGE_PREFIX}${parentSaleId}`;
 
 function safeLocalStorage(): Storage | null {
   try {
@@ -51,14 +50,19 @@ function isPendingRefundOperation(
     candidate.items.length > 0 &&
     candidate.items.length <= 200 &&
     candidate.items.every(isRefundLine) &&
-    new Set(candidate.items.map((item) => item.sale_item_id)).size ===
-      candidate.items.length;
+    new Set(candidate.items.map((item) => item.sale_item_id)).size === candidate.items.length;
   return (
     candidate.parentSaleId === parentSaleId &&
     typeof candidate.operationId === "string" &&
     UUID_V4_PATTERN.test(candidate.operationId) &&
     validItems &&
-    typeof candidate.externalRefundConfirmed === "boolean"
+    (candidate.refundAttemptOperationId === null ||
+      (typeof candidate.refundAttemptOperationId === "string" &&
+        UUID_V4_PATTERN.test(candidate.refundAttemptOperationId))) &&
+    (candidate.refundAttemptId === null ||
+      (typeof candidate.refundAttemptId === "string" &&
+        candidate.refundAttemptId.length > 0 &&
+        candidate.refundAttemptId.length <= 128))
   );
 }
 
@@ -78,9 +82,7 @@ function isRefundLine(value: unknown): value is RefundLine {
   return Number.isFinite(qty) && qty > 0;
 }
 
-export function loadPendingRefundOperation(
-  parentSaleId: string,
-): PendingRefundOperation | null {
+export function loadPendingRefundOperation(parentSaleId: string): PendingRefundOperation | null {
   const storage = safeLocalStorage();
   try {
     const raw = storage?.getItem(refundOperationKey(parentSaleId));
@@ -101,16 +103,17 @@ export function loadPendingRefundOperation(
 export function createPendingRefundOperation(
   parentSaleId: string,
   items: RefundLine[],
-  externalRefundConfirmed: boolean,
+  requiresExternalRefund: boolean,
 ): PendingRefundOperation | null {
   const existing = loadPendingRefundOperation(parentSaleId);
   if (existing) return existing;
 
   const operation: PendingRefundOperation = {
     operationId: generateUuidV4(),
+    refundAttemptOperationId: requiresExternalRefund ? generateUuidV4() : null,
+    refundAttemptId: null,
     parentSaleId,
     items: items.map((item) => ({ ...item })),
-    externalRefundConfirmed,
   };
   const storage = safeLocalStorage();
   const serialized = JSON.stringify(operation);
@@ -123,10 +126,27 @@ export function createPendingRefundOperation(
   return operation;
 }
 
-export function clearPendingRefundOperation(
-  parentSaleId: string,
-  operationId?: string,
-): void {
+export function savePendingRefundAttemptId(
+  operation: PendingRefundOperation,
+  refundAttemptId: string,
+): PendingRefundOperation | null {
+  const stored = loadPendingRefundOperation(operation.parentSaleId);
+  if (!stored || stored.operationId !== operation.operationId) return null;
+  const updated = { ...stored, refundAttemptId };
+  const storage = safeLocalStorage();
+  const serialized = JSON.stringify(updated);
+  try {
+    storage?.setItem(refundOperationKey(operation.parentSaleId), serialized);
+    if (storage?.getItem(refundOperationKey(operation.parentSaleId)) !== serialized) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return updated;
+}
+
+export function clearPendingRefundOperation(parentSaleId: string, operationId?: string): void {
   const storage = safeLocalStorage();
   try {
     if (
