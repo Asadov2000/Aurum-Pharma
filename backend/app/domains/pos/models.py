@@ -21,7 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, OID
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -154,6 +154,201 @@ class POSCommand(Base):
     )
 
 
+class EdgeCashNodeIdentity(Base):
+    __tablename__ = "edge_cash_node_identity"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    database_role: Mapped[str] = mapped_column(Text, nullable=False)
+    database_role_oid: Mapped[int] = mapped_column(OID, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    # Cross-domain Sync/Foundations FKs stay migration-only because each domain
+    # owns an independent SQLAlchemy metadata registry.
+    __table_args__ = (
+        UniqueConstraint("database_role", name="uq_edge_cash_node_identity_role"),
+        UniqueConstraint("database_role_oid", name="uq_edge_cash_node_identity_role_oid"),
+        UniqueConstraint("edge_node_id", name="uq_edge_cash_node_identity_node"),
+        UniqueConstraint(
+            "id",
+            "tenant_id",
+            "branch_id",
+            "edge_node_id",
+            "register_id",
+            name="uq_edge_cash_node_identity_scope",
+        ),
+        CheckConstraint(
+            "database_role ~ '^aurum_edge_node_[0-9a-f]{32}$' "
+            "AND octet_length(database_role) <= 63",
+            name="ck_edge_cash_node_identity_role",
+        ),
+        CheckConstraint(
+            "database_role_oid <> 0",
+            name="ck_edge_cash_node_identity_role_oid",
+        ),
+    )
+
+
+class EdgeCashCommand(Base):
+    __tablename__ = "edge_cash_command"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    edge_identity_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    activation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    cashier_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    sale_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    sale_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'completed'")
+    )
+    receipt_number: Mapped[str] = mapped_column(Text, nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
+    command_type: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'sale.cash.complete'")
+    )
+    request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    result_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    result_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    # Activation, epoch, node, and register FKs are migration-only for the same
+    # independent-metadata reason documented on EdgeCashNodeIdentity.
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "operation_id",
+            name="uq_edge_cash_command_tenant_operation",
+        ),
+        UniqueConstraint("tenant_id", "sale_id", name="uq_edge_cash_command_tenant_sale"),
+        UniqueConstraint("tenant_id", "id", name="uq_edge_cash_command_tenant_id"),
+        ForeignKeyConstraint(
+            [
+                "edge_identity_id",
+                "tenant_id",
+                "branch_id",
+                "edge_node_id",
+                "register_id",
+            ],
+            [
+                "edge_cash_node_identity.id",
+                "edge_cash_node_identity.tenant_id",
+                "edge_cash_node_identity.branch_id",
+                "edge_cash_node_identity.edge_node_id",
+                "edge_cash_node_identity.register_id",
+            ],
+            name="fk_edge_cash_command_identity_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            [
+                "sale_id",
+                "tenant_id",
+                "branch_id",
+                "register_id",
+                "cashier_user_id",
+                "operation_id",
+                "sale_status",
+                "receipt_number",
+                "total_amount",
+                "currency",
+            ],
+            [
+                "sale.id",
+                "sale.tenant_id",
+                "sale.branch_id",
+                "sale.register_id",
+                "sale.cashier_user_id",
+                "sale.operation_id",
+                "sale.status",
+                "sale.receipt_number",
+                "sale.total_amount",
+                "sale.currency",
+            ],
+            name="fk_edge_cash_command_sale_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "command_type = 'sale.cash.complete'",
+            name="ck_edge_cash_command_type",
+        ),
+        CheckConstraint(
+            "sale_status = 'completed'",
+            name="ck_edge_cash_command_sale_status",
+        ),
+        CheckConstraint(
+            "btrim(receipt_number) <> ''",
+            name="ck_edge_cash_command_receipt_number",
+        ),
+        CheckConstraint(
+            "total_amount >= 0",
+            name="ck_edge_cash_command_total_amount",
+        ),
+        CheckConstraint(
+            "currency = 'TJS'",
+            name="ck_edge_cash_command_currency",
+        ),
+        CheckConstraint(
+            "(get_byte(uuid_send(operation_id), 6) >> 4) = 4 "
+            "AND (get_byte(uuid_send(operation_id), 8) & 192) = 128",
+            name="ck_edge_cash_command_operation_uuid4",
+        ),
+        CheckConstraint(
+            "writer_epoch > 0",
+            name="ck_edge_cash_command_writer_epoch",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_edge_cash_command_request_hash",
+        ),
+        CheckConstraint(
+            "result_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_edge_cash_command_result_hash",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(result_payload) = 'object' "
+            "AND octet_length(result_payload::text) BETWEEN 2 AND 131072 "
+            "AND result_payload ->> 'command_type' = command_type "
+            "AND result_payload ->> 'operation_id' = operation_id::text "
+            "AND result_payload ->> 'sale_id' = sale_id::text "
+            "AND result_payload ->> 'receipt_number' = receipt_number "
+            "AND result_payload ->> 'total_amount' = "
+            "to_char(total_amount, 'FM9999999999990.00') "
+            "AND result_payload ->> 'currency' = currency",
+            name="ck_edge_cash_command_result_payload",
+        ),
+        Index(
+            "ix_edge_cash_command_node_created",
+            "tenant_id",
+            "edge_node_id",
+            "writer_epoch",
+            "created_at",
+        ),
+    )
+
+
 class Sale(Base):
     __tablename__ = "sale"
 
@@ -192,6 +387,19 @@ class Sale(Base):
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_sale_tenant_id_id"),
+        UniqueConstraint(
+            "id",
+            "tenant_id",
+            "branch_id",
+            "register_id",
+            "cashier_user_id",
+            "operation_id",
+            "status",
+            "receipt_number",
+            "total_amount",
+            "currency",
+            name="uq_sale_edge_cash_scope",
+        ),
         CheckConstraint("sale_type IN ('sale','return')", name="ck_sale_type"),
         CheckConstraint("status IN ('draft','completed','voided')", name="ck_sale_status"),
         CheckConstraint("receipt_seq IS NULL OR receipt_seq > 0", name="ck_sale_receipt_seq"),
