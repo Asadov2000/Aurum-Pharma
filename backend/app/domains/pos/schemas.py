@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -235,12 +235,14 @@ class ZReport(BaseModel):
 class SaleCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    operation_id: UUID4
     register_id: UUID
 
 
 class SaleItemAdd(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    operation_id: UUID4
     catalog_id: UUID
     qty: Decimal = Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False)
     expired_sale_confirmed: bool = False
@@ -249,7 +251,14 @@ class SaleItemAdd(BaseModel):
 class SaleItemPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    operation_id: UUID4
     qty: Decimal = Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False)
+
+
+class SaleItemDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: UUID4
 
 
 class PaymentAdd(BaseModel):
@@ -464,6 +473,44 @@ class SaleRead(BaseModel):
     cashier_user_id: UUID
     created_at: datetime
     completed_at: datetime | None
+
+
+class SaleItemDeleted(BaseModel):
+    command_type: Literal["item.delete"] = "item.delete"
+    sale_id: UUID
+    item_id: UUID
+    status: Literal["deleted"] = "deleted"
+
+
+class POSSaleCreateCommandResult(BaseModel):
+    command_type: Literal["sale.create"] = "sale.create"
+    sale: SaleRead
+
+
+class POSItemAddCommandResult(BaseModel):
+    command_type: Literal["item.add"] = "item.add"
+    item_add: SaleItemAdded
+
+
+class POSItemUpdateCommandResult(BaseModel):
+    command_type: Literal["item.update"] = "item.update"
+    item: SaleItemRead
+
+
+POSCommandResult = Annotated[
+    POSSaleCreateCommandResult
+    | POSItemAddCommandResult
+    | POSItemUpdateCommandResult
+    | SaleItemDeleted,
+    Field(discriminator="command_type"),
+]
+
+
+class POSCommandRead(BaseModel):
+    operation_id: UUID
+    sale_id: UUID | None
+    created_at: datetime
+    result: POSCommandResult
 
 
 class SaleDetails(SaleRead):

@@ -22,12 +22,7 @@ vi.mock("@/features/pos/api", () => ({
   updateSaleItem: vi.fn(),
 }));
 
-import {
-  posKeys,
-  useAddSaleItem,
-  useCreateSale,
-  useSaleQuery,
-} from "@/features/pos/queries";
+import { posKeys, useAddSaleItem, useCreateSale, useSaleQuery } from "@/features/pos/queries";
 import type { Sale, SaleDetails } from "@/features/pos/types";
 
 const SALE: Sale = {
@@ -49,6 +44,8 @@ const SALE: Sale = {
   created_at: "2026-07-11T08:00:00Z",
   completed_at: null,
 };
+
+const OPERATION_ID = "10000000-0000-4000-8000-000000000001";
 
 const SALE_WITH_ITEM: SaleDetails = {
   ...SALE,
@@ -95,7 +92,12 @@ describe("POS queries", () => {
     const { client, wrapper } = setupQueryClient();
     const { result } = renderHook(() => useCreateSale(), { wrapper });
 
-    await act(() => result.current.mutateAsync(SALE.register_id));
+    await act(() =>
+      result.current.mutateAsync({
+        registerId: SALE.register_id,
+        operationId: OPERATION_ID,
+      }),
+    );
 
     expect(client.getQueryData(posKeys.sale(SALE.id))).toEqual({
       ...SALE,
@@ -122,6 +124,7 @@ describe("POS queries", () => {
         saleId: SALE.id,
         catalogId: "catalog-1",
         qty: "7",
+        operationId: OPERATION_ID,
       }),
     );
 

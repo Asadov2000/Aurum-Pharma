@@ -1,7 +1,8 @@
 import { type PaymentMethod, type PaymentMethodRead } from "./types";
+import { generateUuidV4, isUuidV4 } from "./operationId";
+import { readStoredJson, removeStoredValue, writeStoredJson } from "./operationStorage";
 
 const STORAGE_PREFIX = "pos:pendingPayment:";
-const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const AMOUNT_PATTERN = /^\d+\.\d{2}$/;
 
 export interface PendingPaymentOperation {
@@ -17,40 +18,6 @@ export interface PendingPaymentOperation {
 
 const paymentOperationKey = (saleId: string): string => `${STORAGE_PREFIX}${saleId}`;
 
-function safeLocalStorage(): Storage | null {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-function removeStoredOperation(storage: Storage | null, saleId: string): void {
-  try {
-    storage?.removeItem(paymentOperationKey(saleId));
-  } catch {
-    // Keep the in-memory operation usable when browser storage is unavailable.
-  }
-}
-
-function generateUuidV4(): string {
-  if (typeof globalThis.crypto.randomUUID === "function") {
-    return globalThis.crypto.randomUUID();
-  }
-
-  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0"));
-  return [
-    hex.slice(0, 4).join(""),
-    hex.slice(4, 6).join(""),
-    hex.slice(6, 8).join(""),
-    hex.slice(8, 10).join(""),
-    hex.slice(10, 16).join(""),
-  ].join("-");
-}
-
 function isPaymentMethod(value: unknown): value is PaymentMethodRead {
   return value === "cash" || value === "card" || value === "qr" || value === "bank_transfer";
 }
@@ -63,8 +30,7 @@ function isPendingPaymentOperation(
   const candidate = value as Partial<PendingPaymentOperation>;
   const validBase =
     candidate.saleId === saleId &&
-    typeof candidate.operationId === "string" &&
-    UUID_V4_PATTERN.test(candidate.operationId) &&
+    isUuidV4(candidate.operationId) &&
     isPaymentMethod(candidate.paymentMethod) &&
     typeof candidate.amount === "string" &&
     AMOUNT_PATTERN.test(candidate.amount) &&
@@ -99,16 +65,9 @@ function isPendingPaymentOperation(
 }
 
 export function loadPendingPaymentOperation(saleId: string): PendingPaymentOperation | null {
-  const storage = safeLocalStorage();
-  try {
-    const raw = storage?.getItem(paymentOperationKey(saleId));
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (isPendingPaymentOperation(parsed, saleId)) return parsed;
-    removeStoredOperation(storage, saleId);
-  } catch {
-    removeStoredOperation(storage, saleId);
-  }
+  const parsed = readStoredJson(paymentOperationKey(saleId));
+  if (isPendingPaymentOperation(parsed, saleId)) return parsed;
+  if (parsed !== null) removeStoredValue(paymentOperationKey(saleId));
   return null;
 }
 
@@ -126,30 +85,17 @@ export function createPendingPaymentOperation(
     metadata,
   };
   if (!isPendingPaymentOperation(operation, saleId)) return null;
-  const storage = safeLocalStorage();
-  const serialized = JSON.stringify(operation);
-  try {
-    storage?.setItem(paymentOperationKey(saleId), serialized);
-    if (storage?.getItem(paymentOperationKey(saleId)) !== serialized) return null;
-  } catch {
-    return null;
-  }
-  return operation;
+  return writeStoredJson(paymentOperationKey(saleId), operation) ? operation : null;
 }
 
 export function clearPendingPaymentOperation(saleId: string, operationId?: string): void {
-  const storage = safeLocalStorage();
   if (!operationId) {
-    removeStoredOperation(storage, saleId);
+    removeStoredValue(paymentOperationKey(saleId));
     return;
   }
 
   const current = loadPendingPaymentOperation(saleId);
   if (current?.operationId === operationId) {
-    removeStoredOperation(storage, saleId);
+    removeStoredValue(paymentOperationKey(saleId));
   }
-}
-
-export function hasPendingPaymentOperation(saleId: string): boolean {
-  return loadPendingPaymentOperation(saleId) !== null;
 }

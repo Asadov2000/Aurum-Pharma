@@ -5,8 +5,9 @@
  */
 
 import { hasPendingCompletion } from "./completionOperation";
-import { hasPendingCheckoutOperation } from "./checkoutOperation";
-import { hasPendingPaymentOperation } from "./paymentOperation";
+import { loadPendingCheckoutOperation } from "./checkoutOperation";
+import { loadPendingPosCommand } from "./commandOperation";
+import { loadPendingPaymentOperation } from "./paymentOperation";
 import { hasPaymentAttemptOperation } from "./paymentAttemptOperation";
 
 export const draftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
@@ -63,11 +64,12 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
           ageMin > ttlMin &&
           parsed.status !== "completed" &&
           !hasElectronicPayment &&
+          !loadPendingPosCommand(registerId) &&
           parsed.externalPaymentReviewRequired !== true &&
           !hasPaymentAttemptOperation(parsed.saleId) &&
-          !hasPendingPaymentOperation(parsed.saleId) &&
+          !loadPendingPaymentOperation(parsed.saleId) &&
           !hasPendingCompletion(parsed.saleId) &&
-          !hasPendingCheckoutOperation(parsed.saleId)
+          !loadPendingCheckoutOperation(parsed.saleId)
         ) {
           // Stale: clear it and flag the cashier instead of reopening blind.
           window.localStorage.removeItem(draftKey(registerId));

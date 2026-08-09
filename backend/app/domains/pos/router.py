@@ -28,6 +28,7 @@ from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import (
     PaymentAdd,
     PaymentRead,
+    POSCommandRead,
     POSFavoriteCatalogRead,
     POSFavoriteCreate,
     POSFavoriteRead,
@@ -50,6 +51,8 @@ from app.domains.pos.schemas import (
     SaleDetails,
     SaleItemAdd,
     SaleItemAdded,
+    SaleItemDelete,
+    SaleItemDeleted,
     SaleItemPatch,
     SaleItemRead,
     SaleList,
@@ -649,15 +652,31 @@ async def create_sale(
     user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleRead:
-    sale = await service.create_sale(
+    return await service.create_sale_command(
         tenant_id=_current_tenant_or_400(user),
         register_id=payload.register_id,
         cashier_user_id=user.user_id,
+        operation_id=payload.operation_id,
         can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
-    return SaleRead.model_validate(sale)
+
+
+@router.get("/pos/commands/{operation_id}", response_model=POSCommandRead)
+async def get_pos_command_result(
+    operation_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSCommandRead:
+    return await service.get_pos_command_result(
+        tenant_id=_current_tenant_or_400(user),
+        actor_user_id=user.user_id,
+        operation_id=operation_id,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
 
 
 @router.post(
@@ -909,19 +928,17 @@ async def add_sale_item(
     user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleItemAdded:
-    created, requires_rx = await service.add_item(
+    return await service.add_item_command(
+        tenant_id=_current_tenant_or_400(user),
         sale_id=sale_id,
         catalog_id=payload.catalog_id,
         qty=payload.qty,
         expired_sale_confirmed=payload.expired_sale_confirmed,
         actor_id=user.user_id,
+        operation_id=payload.operation_id,
         can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
-    )
-    return SaleItemAdded(
-        items=[SaleItemRead.model_validate(i) for i in created],
-        requires_prescription_log=requires_rx,
     )
 
 
@@ -937,37 +954,41 @@ async def update_sale_item(
     user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleItemRead:
-    item = await service.update_item(
+    return await service.update_item_command(
+        tenant_id=_current_tenant_or_400(user),
         sale_id=sale_id,
         item_id=item_id,
         qty=payload.qty,
         actor_id=user.user_id,
+        operation_id=payload.operation_id,
         can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
-    return SaleItemRead.model_validate(item)
 
 
 @router.delete(
     "/sales/{sale_id}/items/{item_id}",
+    response_model=SaleItemDeleted,
     dependencies=[Depends(require_writable_tenant)],
 )
 async def delete_sale_item(
     sale_id: UUID,
     item_id: UUID,
+    payload: SaleItemDelete,
     user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
     service: Annotated[POSService, Depends(_service)],
-) -> dict[str, str]:
-    await service.delete_item(
+) -> SaleItemDeleted:
+    return await service.delete_item_command(
+        tenant_id=_current_tenant_or_400(user),
         sale_id=sale_id,
         item_id=item_id,
         actor_id=user.user_id,
+        operation_id=payload.operation_id,
         can_manage_tenant=_can_manage_tenant_sales(user),
         allowed_branch_ids=user.branch_scope_for("pos.sell"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
-    return {"status": "deleted"}
 
 
 @router.post(

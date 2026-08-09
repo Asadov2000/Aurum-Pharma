@@ -597,7 +597,7 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
         create_other_sale_resp = await client.post(
             "/api/v1/sales",
             headers=headers,
-            json={"register_id": str(register_b.id)},
+            json={"operation_id": str(uuid4()), "register_id": str(register_b.id)},
         )
         assert create_other_sale_resp.status_code == 403
     finally:
@@ -1085,7 +1085,7 @@ async def test_tenant_sales_view_does_not_expand_pos_sell_branch_scope(
         response = await client.post(
             f"/api/v1/sales/{draft.id}/items",
             headers={"Authorization": f"Bearer {_token(manager)}"},
-            json={"catalog_id": str(item.id), "qty": "1"},
+            json={"operation_id": str(uuid4()), "catalog_id": str(item.id), "qty": "1"},
         )
         assert response.status_code == 403
     finally:
@@ -1181,20 +1181,22 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
         add_item_resp = await client.post(
             f"/api/v1/sales/{sale.id}/items",
             headers=peer_headers,
-            json={"catalog_id": str(item.id), "qty": "1"},
+            json={"operation_id": str(uuid4()), "catalog_id": str(item.id), "qty": "1"},
         )
         assert add_item_resp.status_code == 403
 
         update_item_resp = await client.patch(
             f"/api/v1/sales/{sale.id}/items/{item_id}",
             headers=peer_headers,
-            json={"qty": "2"},
+            json={"operation_id": str(uuid4()), "qty": "2"},
         )
         assert update_item_resp.status_code == 403
 
-        delete_item_resp = await client.delete(
+        delete_item_resp = await client.request(
+            "DELETE",
             f"/api/v1/sales/{sale.id}/items/{item_id}",
             headers=peer_headers,
+            json={"operation_id": str(uuid4())},
         )
         assert delete_item_resp.status_code == 403
 
@@ -1353,18 +1355,26 @@ async def test_readonly_tenant_blocks_pos_mutations(
                 f"/api/v1/shifts/{shift.id}/close",
                 {"closing_cash_actual": "0"},
             ),
-            ("POST", "/api/v1/sales", {"register_id": str(register.id)}),
+            (
+                "POST",
+                "/api/v1/sales",
+                {"operation_id": str(uuid4()), "register_id": str(register.id)},
+            ),
             (
                 "POST",
                 f"/api/v1/sales/{draft_sale.id}/items",
-                {"catalog_id": str(item.id), "qty": "1"},
+                {"operation_id": str(uuid4()), "catalog_id": str(item.id), "qty": "1"},
             ),
             (
                 "PATCH",
                 f"/api/v1/sales/{draft_sale.id}/items/{draft_items[0].id}",
-                {"qty": "2"},
+                {"operation_id": str(uuid4()), "qty": "2"},
             ),
-            ("DELETE", f"/api/v1/sales/{draft_sale.id}/items/{draft_items[0].id}", None),
+            (
+                "DELETE",
+                f"/api/v1/sales/{draft_sale.id}/items/{draft_items[0].id}",
+                {"operation_id": str(uuid4())},
+            ),
             (
                 "POST",
                 f"/api/v1/sales/{draft_sale.id}/payments",

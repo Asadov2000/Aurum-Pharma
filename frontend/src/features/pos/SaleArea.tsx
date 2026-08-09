@@ -50,19 +50,15 @@ import {
   posKeys,
   useAddPayment,
   useAddPosFavorite,
-  useAddSaleItem,
   useAddPrescription,
   useCheckoutSale,
   useCompleteSale,
   useConfirmPaymentAttempt,
   useCreatePaymentAttempt,
-  useCreateSale,
   useCurrentShiftQuery,
-  useDeleteSaleItem,
   usePosFavoritesQuery,
   useRemovePosFavorite,
   useSaleQuery,
-  useUpdateSaleItem,
   useVoidPaymentAttempt,
 } from "./queries";
 import {
@@ -76,6 +72,7 @@ import {
   loadPendingPaymentOperation,
   type PendingPaymentOperation,
 } from "./paymentOperation";
+import { type AppliedPosCommand, usePosCommandResilience } from "./usePosCommandResilience";
 import {
   type Payment,
   type PaymentAttempt,
@@ -347,17 +344,31 @@ function ActiveWorkspace({
   const expiredItemConfirmationRef = useRef<ExpiredItemConfirmation | null>(null);
   const expiredSaleConfirmedRef = useRef(expiredSaleConfirmed);
   const saleIdRef = useRef<string | null>(saleId);
-  const saleCreationRef = useRef<Promise<string> | null>(null);
   const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
   saleIdRef.current = saleId;
   stagedPaymentsRef.current = stagedPayments;
   expiredSaleConfirmedRef.current = expiredSaleConfirmed;
   externalPaymentReviewRef.current = externalPaymentReviewRequired;
 
-  const createSale = useCreateSale();
-  const addItem = useAddSaleItem();
-  const updateItem = useUpdateSaleItem();
-  const deleteItem = useDeleteSaleItem();
+  const onPosCommandApplied = useCallback((applied: AppliedPosCommand) => {
+    saleIdRef.current = applied.sale.id;
+    setSaleId(applied.sale.id);
+    setStaleNotice(false);
+    if (
+      applied.command.commandType === "item.add" &&
+      typeof applied.result === "object" &&
+      applied.result !== null &&
+      "requires_prescription_log" in applied.result &&
+      applied.result.requires_prescription_log === true
+    ) {
+      setRequiresRx(true);
+      setPrescriptionOpen(true);
+    }
+  }, []);
+  const posCommand = usePosCommandResilience({
+    registerId,
+    onApplied: onPosCommandApplied,
+  });
   const addPayment = useAddPayment();
   const addPrescription = useAddPrescription();
   const completeSale = useCompleteSale();
@@ -415,8 +426,7 @@ function ActiveWorkspace({
         (stagedPayments.some((payment) => !paymentMethods.includes(payment.payment_method)) ||
           (!mixedPaymentEnabled &&
             (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
-  const cartMutationPending =
-    createSale.isPending || addItem.isPending || updateItem.isPending || deleteItem.isPending;
+  const cartMutationPending = posCommand.blocked;
   const paymentStarted = stagedPayments.length > 0 || recordedPayments.length > 0;
   const electronicPaymentPendingResolution = stagedPayments.some(
     (payment) => payment.payment_method === "card" || payment.payment_method === "qr",
@@ -424,28 +434,27 @@ function ActiveWorkspace({
   const saleEditingBlocked =
     completeSale.isPending ||
     checkoutSale.isPending ||
-    cartMutationPending ||
+    posCommand.blocked ||
     paymentStarted ||
     completionUncertain ||
     checkoutUncertain ||
     pendingCheckout !== null ||
     pendingPayment !== null ||
     (saleId !== null && sale === null);
-  const scanInputBlocked =
+  const scannerHardwareBlocked =
     completeSale.isPending ||
     checkoutSale.isPending ||
-    updateItem.isPending ||
-    deleteItem.isPending ||
     paymentStarted ||
     completionUncertain ||
     checkoutUncertain ||
     pendingCheckout !== null ||
     pendingPayment !== null;
+  const scanInputBlocked = scannerHardwareBlocked || posCommand.blocked;
   const shiftCloseBlocked =
     completeSale.isPending ||
     checkoutSale.isPending ||
     checkoutReconciling ||
-    cartMutationPending ||
+    posCommand.blocked ||
     addPayment.isPending ||
     createPaymentAttempt.isPending ||
     confirmPaymentAttempt.isPending ||
@@ -465,7 +474,7 @@ function ActiveWorkspace({
     completeSale.isPending ||
     checkoutSale.isPending ||
     checkoutReconciling ||
-    cartMutationPending ||
+    posCommand.blocked ||
     addPayment.isPending ||
     createPaymentAttempt.isPending ||
     confirmPaymentAttempt.isPending ||
@@ -744,23 +753,15 @@ function ActiveWorkspace({
   };
 
   // Lazily create a draft on the first add so we never leave empty drafts.
-  const ensureSaleId = useCallback(async (): Promise<string> => {
+  const ensureSaleId = useCallback(async (): Promise<string | null> => {
     if (saleIdRef.current) return saleIdRef.current;
-    if (saleCreationRef.current) return saleCreationRef.current;
-
-    const creation = createSale.mutateAsync(registerId).then((created) => {
-      saleIdRef.current = created.id;
-      setSaleId(created.id);
-      setStaleNotice(false);
-      return created.id;
+    const outcome = await posCommand.begin({
+      commandType: "sale.create",
+      registerId,
     });
-    saleCreationRef.current = creation;
-    try {
-      return await creation;
-    } finally {
-      if (saleCreationRef.current === creation) saleCreationRef.current = null;
-    }
-  }, [createSale, registerId]);
+    if (outcome.rejectedError !== undefined) throw outcome.rejectedError;
+    return outcome.applied?.sale.id ?? null;
+  }, [posCommand, registerId]);
 
   const onAdd = async (
     catalogId: string,
@@ -769,24 +770,25 @@ function ActiveWorkspace({
     expiredConfirmation = false,
     fromScanner = false,
   ): Promise<boolean> => {
-    if (fromScanner ? scanInputBlocked : saleEditingBlocked) return false;
+    if (fromScanner ? scannerHardwareBlocked : saleEditingBlocked) return false;
     setTopError(null);
     try {
       const id = await ensureSaleId();
+      if (!id) return false;
       if (name) setNameById((m) => ({ ...m, [catalogId]: name }));
-      const res = await addItem.mutateAsync({
+      const outcome = await posCommand.begin({
+        commandType: "item.add",
+        registerId,
         saleId: id,
         catalogId,
         qty: String(qty),
         expiredSaleConfirmed: expiredConfirmation,
       });
+      if (outcome.rejectedError !== undefined) throw outcome.rejectedError;
+      if (!outcome.applied) return false;
       if (expiredConfirmation) {
         expiredSaleConfirmedRef.current = true;
         setExpiredSaleConfirmed(true);
-      }
-      if (res.requires_prescription_log) {
-        setRequiresRx(true);
-        setPrescriptionOpen(true);
       }
       searchRef.current?.focus();
       return true;
@@ -839,7 +841,14 @@ function ActiveWorkspace({
     if (!saleId || saleEditingBlocked) return;
     setTopError(null);
     try {
-      await updateItem.mutateAsync({ saleId, itemId, qty: String(qty) });
+      const outcome = await posCommand.begin({
+        commandType: "item.update",
+        registerId,
+        saleId,
+        itemId,
+        qty: String(qty),
+      });
+      if (outcome.rejectedError !== undefined) throw outcome.rejectedError;
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось изменить количество"));
     }
@@ -848,7 +857,13 @@ function ActiveWorkspace({
   const onDelete = async (itemId: string) => {
     if (!saleId || saleEditingBlocked) return;
     try {
-      await deleteItem.mutateAsync({ saleId, itemId });
+      const outcome = await posCommand.begin({
+        commandType: "item.delete",
+        registerId,
+        saleId,
+        itemId,
+      });
+      if (outcome.rejectedError !== undefined) throw outcome.rejectedError;
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось удалить"));
     }
@@ -1599,6 +1614,10 @@ function ActiveWorkspace({
   };
 
   const startNewSale = (): boolean => {
+    if (posCommand.blocked) {
+      setTopError("Сначала завершите сверку последней команды с сервером.");
+      return false;
+    }
     if (
       sale?.status === "draft" &&
       saleId &&
@@ -1651,6 +1670,7 @@ function ActiveWorkspace({
   const onNewSale = (): boolean => {
     if (
       completingRef.current ||
+      posCommand.blocked ||
       completeSale.isPending ||
       checkoutSale.isPending ||
       checkoutReconciling ||
@@ -1794,7 +1814,7 @@ function ActiveWorkspace({
   return (
     <>
       {/* Global barcode capture — only while editing a draft. */}
-      <BarcodeListener enabled={isDraft && !scanInputBlocked} onScan={enqueueScan} />
+      <BarcodeListener enabled={isDraft && !scannerHardwareBlocked} onScan={enqueueScan} />
 
       {/* Scan feedback: green/red edge flash (collapses to a static border under
           reduced-motion). */}
@@ -1829,12 +1849,32 @@ function ActiveWorkspace({
           </p>
         )}
 
+        {posCommand.message ? (
+          <div
+            role="status"
+            className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground"
+          >
+            <p>{posCommand.message}</p>
+            {posCommand.canRetry ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                isLoading={posCommand.isWorking}
+                onClick={() => void posCommand.retry()}
+              >
+                Повторить
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         {isDraft && (
           <fieldset disabled={saleEditingBlocked} className="min-w-0 border-0 p-0">
             <SearchBar
               ref={searchRef}
               onAdd={onAdd}
-              busy={createSale.isPending || addItem.isPending}
+              busy={posCommand.blocked}
               scanner={scanInputBlocked ? "off" : queuedScans > 0 ? "scanning" : "ready"}
               queuedScans={queuedScans}
               touch={touch}
@@ -1852,7 +1892,7 @@ function ActiveWorkspace({
             <QuickProducts
               branchId={branchId ?? undefined}
               onAdd={onAdd}
-              busy={!isDraft || saleEditingBlocked || createSale.isPending || addItem.isPending}
+              busy={!isDraft || saleEditingBlocked || posCommand.blocked}
               touch={touch}
             />
           </div>
@@ -1907,7 +1947,7 @@ function ActiveWorkspace({
               onDelete={(id) => void onDelete(id)}
               onQtyTap={touch ? onQtyTap : undefined}
               touch={touch}
-              busy={updateItem.isPending || deleteItem.isPending}
+              busy={posCommand.blocked}
               embedded
             />
 

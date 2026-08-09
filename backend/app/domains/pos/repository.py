@@ -18,6 +18,7 @@ from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Register
 from app.domains.inventory.models import Batch
 from app.domains.pos.models import (
+    POSCommand,
     POSFavorite,
     POSPaymentAttempt,
     POSRefundAttempt,
@@ -436,6 +437,67 @@ class POSRepository:
             ),
             {"operation_id": str(operation_id)},
         )
+
+    async def get_pos_command(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> POSCommand | None:
+        stmt = select(POSCommand).where(
+            POSCommand.tenant_id == tenant_id,
+            POSCommand.operation_id == operation_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_owned_pos_command(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+        actor_user_id: UUID,
+    ) -> POSCommand | None:
+        stmt = select(POSCommand).where(
+            POSCommand.tenant_id == tenant_id,
+            POSCommand.operation_id == operation_id,
+            POSCommand.actor_user_id == actor_user_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def insert_pos_command(self, **fields: Any) -> POSCommand:
+        command = POSCommand(**fields)
+        self.session.add(command)
+        await self.session.flush()
+        await self.session.refresh(command)
+        return command
+
+    async def has_legacy_pos_operation(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> bool:
+        stmt = select(
+            or_(
+                exists().where(
+                    Sale.tenant_id == tenant_id,
+                    Sale.operation_id == operation_id,
+                ),
+                exists().where(
+                    SalePayment.tenant_id == tenant_id,
+                    SalePayment.operation_id == operation_id,
+                ),
+                exists().where(
+                    POSPaymentAttempt.tenant_id == tenant_id,
+                    POSPaymentAttempt.operation_id == operation_id,
+                ),
+                exists().where(
+                    POSRefundAttempt.tenant_id == tenant_id,
+                    POSRefundAttempt.operation_id == operation_id,
+                ),
+            )
+        )
+        return bool(await self.session.scalar(stmt))
 
     async def update_sale(self, sale: Sale, **fields: Any) -> Sale:
         for k, v in fields.items():

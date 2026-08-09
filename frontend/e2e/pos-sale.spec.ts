@@ -132,20 +132,54 @@ test.describe("POS sale (owner)", () => {
       (response) =>
         response.url().includes(`/api/v1/catalog/by-barcode/${barcode}`) && response.ok(),
     );
-    const physicalItemAdd = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        /\/api\/v1\/sales\/[^/]+\/items$/.test(response.url()) &&
-        response.ok(),
-    );
+    let itemOperationId: string | undefined;
+    let recoveredOperationId: string | undefined;
+    let blockRecoveryLookup = true;
+    await page.route("**/api/v1/sales/*/items", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      const payload = route.request().postDataJSON() as { operation_id?: string };
+      itemOperationId = payload.operation_id;
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.abort("failed");
+    });
+    await page.route("**/api/v1/pos/commands/*", async (route) => {
+      recoveredOperationId = route.request().url().split("/").at(-1);
+      if (blockRecoveryLookup) {
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
     await page.locator('[data-barcode-sink="true"]').focus();
     await page.keyboard.type(barcode, { delay: 5 });
     await page.keyboard.press("Enter");
 
     await physicalBarcodeLookup;
-    await physicalItemAdd;
+    await expect(
+      page.getByText("Команда не подтверждена. Проверьте связь и повторите."),
+    ).toBeVisible();
+    expect(itemOperationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(recoveredOperationId).toBe(itemOperationId);
+
+    blockRecoveryLookup = false;
+    await page.reload();
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await expect(page.getByTestId("cart-item")).toHaveCount(2, { timeout: 30_000 });
+    await expect(
+      page.getByText("Команда не подтверждена. Проверьте связь и повторите."),
+    ).toHaveCount(0);
+    expect(recoveredOperationId).toBe(itemOperationId);
     await expect(page.getByText("Оплачено 0.00", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: /Сбросить расчёт/i })).toHaveCount(0);
+
+    await page.unroute("**/api/v1/sales/*/items");
+    await page.unroute("**/api/v1/pos/commands/*");
   });
 
   test("binds card sale and refund to confirmed terminal attempts", async ({ page }) => {

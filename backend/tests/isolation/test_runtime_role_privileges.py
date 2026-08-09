@@ -52,6 +52,7 @@ NO_DELETE_TABLES = {
 
 APPEND_ONLY_TABLES = {
     "batch_movement",
+    "pos_command",
     "pos_refund_reference",
     "supplier_return",
     "write_off",
@@ -226,6 +227,7 @@ CUSTOM_FUNCTIONS = {
     "trg_capture_bootstrap_platform_access",
     "trg_guard_app_user_platform_flags",
     "trg_guard_batch_movement_immutability",
+    "trg_guard_pos_command_immutable",
     "trg_guard_write_off_immutability",
     "trg_guard_supplier_return_immutability",
     "trg_revoke_support_access_on_tenant_archive",

@@ -156,6 +156,26 @@ export interface SaleItemAddedResponse {
   requires_prescription_log: boolean;
 }
 
+export interface SaleItemDeletedResponse {
+  command_type: "item.delete";
+  sale_id: string;
+  item_id: string;
+  status: "deleted";
+}
+
+export type PosCommandSavedResult =
+  | { command_type: "sale.create"; sale: Sale }
+  | { command_type: "item.add"; item_add: SaleItemAddedResponse }
+  | { command_type: "item.update"; item: SaleItem }
+  | SaleItemDeletedResponse;
+
+export interface PosCommandResult {
+  operation_id: string;
+  sale_id: string | null;
+  created_at: string;
+  result: PosCommandSavedResult;
+}
+
 export interface PaymentAddPayload {
   operation_id: string;
   // Legacy is accepted only when retrying an operation stored by an older client.

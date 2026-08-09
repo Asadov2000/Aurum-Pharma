@@ -9,6 +9,7 @@ import {
   type PaymentAttemptVoidPayload,
   type PosFavorite,
   type PosFavoriteRecord,
+  type PosCommandResult,
   type PrescriptionLog,
   type PrescriptionLogPayload,
   type ReceiptData,
@@ -18,6 +19,7 @@ import {
   type SaleDetails,
   type SaleItem,
   type SaleItemAddedResponse,
+  type SaleItemDeletedResponse,
   type Shift,
   type ShiftClosePayload,
   type ShiftOpenPayload,
@@ -115,8 +117,11 @@ export async function getZReportXlsx(shiftId: string): Promise<Blob> {
 
 // ---- Sales ----
 
-export async function createSale(registerId: string): Promise<Sale> {
-  const { data } = await api.post<Sale>("/sales", { register_id: registerId });
+export async function createSale(registerId: string, operationId: string): Promise<Sale> {
+  const { data } = await api.post<Sale>("/sales", {
+    register_id: registerId,
+    operation_id: operationId,
+  });
   return data;
 }
 
@@ -129,12 +134,14 @@ export async function addSaleItem(
   saleId: string,
   catalogId: string,
   qty: string,
+  operationId: string,
   expiredSaleConfirmed = false,
 ): Promise<SaleItemAddedResponse> {
   const { data } = await api.post<SaleItemAddedResponse>(`/sales/${saleId}/items`, {
     catalog_id: catalogId,
     qty,
     expired_sale_confirmed: expiredSaleConfirmed,
+    operation_id: operationId,
   });
   return data;
 }
@@ -143,13 +150,29 @@ export async function updateSaleItem(
   saleId: string,
   itemId: string,
   qty: string,
+  operationId: string,
 ): Promise<SaleItem> {
-  const { data } = await api.patch<SaleItem>(`/sales/${saleId}/items/${itemId}`, { qty });
+  const { data } = await api.patch<SaleItem>(`/sales/${saleId}/items/${itemId}`, {
+    qty,
+    operation_id: operationId,
+  });
   return data;
 }
 
-export async function deleteSaleItem(saleId: string, itemId: string): Promise<void> {
-  await api.delete(`/sales/${saleId}/items/${itemId}`);
+export async function deleteSaleItem(
+  saleId: string,
+  itemId: string,
+  operationId: string,
+): Promise<SaleItemDeletedResponse> {
+  const { data } = await api.delete<SaleItemDeletedResponse>(`/sales/${saleId}/items/${itemId}`, {
+    data: { operation_id: operationId },
+  });
+  return data;
+}
+
+export async function getPosCommandResult(operationId: string): Promise<PosCommandResult> {
+  const { data } = await api.get<PosCommandResult>(`/pos/commands/${operationId}`);
+  return data;
 }
 
 export async function addPayment(saleId: string, payload: PaymentAddPayload): Promise<Payment> {
