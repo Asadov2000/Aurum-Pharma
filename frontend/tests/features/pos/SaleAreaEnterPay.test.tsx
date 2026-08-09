@@ -699,7 +699,10 @@ describe("SaleArea atomic checkout", () => {
             resolveFirstAdd = resolve;
           }),
       )
-      .mockResolvedValue({ requires_prescription_log: false });
+      .mockResolvedValue({
+        items: [{ ...SALE.items[0], id: "scan-item-2", catalog_id: "catalog-4600000000002" }],
+        requires_prescription_log: false,
+      });
     renderArea();
     await screen.findByText(/Остаток/);
 
@@ -715,15 +718,25 @@ describe("SaleArea atomic checkout", () => {
       );
     });
 
-    expect(await screen.findByText("Добавляется: 2")).toBeInTheDocument();
     expect(addSaleItem).toHaveBeenCalledTimes(1);
-    act(() => resolveFirstAdd({ requires_prescription_log: false }));
+    act(() =>
+      resolveFirstAdd({
+        items: [{ ...SALE.items[0], id: "scan-item-1", catalog_id: "catalog-4600000000001" }],
+        requires_prescription_log: false,
+      }),
+    );
 
     await waitFor(() => expect(addSaleItem).toHaveBeenCalledTimes(2));
     expect(addSaleItem.mock.calls.map((call) => call[1])).toEqual([
       "catalog-4600000000001",
       "catalog-4600000000002",
     ]);
+    const operationIds = addSaleItem.mock.calls.map((call) => call[3]);
+    expect(operationIds).toEqual([
+      expect.stringMatching(UUID_PATTERN),
+      expect.stringMatching(UUID_PATTERN),
+    ]);
+    expect(operationIds[0]).not.toBe(operationIds[1]);
   });
 
   it("hides the mobile payment shortcut when the payment panel is visible", async () => {

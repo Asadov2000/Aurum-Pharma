@@ -44,6 +44,7 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
 from app.domains.pos.models import (
+    POSCommand,
     POSFavorite,
     POSPaymentAttempt,
     POSRefundAttempt,
@@ -58,8 +59,12 @@ from app.domains.pos.repository import FavoriteCatalogRow, POSRepository
 from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.schemas import (
     PAYMENT_METHODS,
+    POSCommandRead,
+    POSItemAddCommandResult,
+    POSItemUpdateCommandResult,
     POSRefundAttemptPaymentRead,
     POSRefundAttemptRead,
+    POSSaleCreateCommandResult,
     ReceiptData,
     ReceiptLine,
     ReceiptPayment,
@@ -67,6 +72,10 @@ from app.domains.pos.schemas import (
     SaleCheckoutItemResult,
     SaleCheckoutPaymentResult,
     SaleCheckoutResult,
+    SaleItemAdded,
+    SaleItemDeleted,
+    SaleItemRead,
+    SaleRead,
     SalesSummaryData,
     SalesSummaryDay,
     SalesSummaryOverview,
@@ -244,6 +253,14 @@ class POSService:
             currency=currency,
         )
         await self.repo.lock_operation_id(operation_id)
+        if (
+            await self.repo.get_pos_command(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+        ):
+            raise ConflictError("Operation ID was already used for another POS operation")
         existing = await self.repo.get_payment_attempt_by_operation_id(
             tenant_id=tenant_id,
             operation_id=operation_id,
@@ -622,6 +639,14 @@ class POSService:
             items=per_item,
         )
         await self.repo.lock_operation_id(operation_id)
+        if (
+            await self.repo.get_pos_command(
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
+            is not None
+        ):
+            raise ConflictError("Operation ID was already used for another POS operation")
         existing = await self.repo.get_refund_attempt_by_operation_id(
             tenant_id=tenant_id,
             operation_id=operation_id,
@@ -1067,6 +1092,221 @@ class POSService:
         )
 
     @staticmethod
+    def _pos_command_request_hash(
+        *,
+        command_type: str,
+        payload: Mapping[str, object],
+    ) -> str:
+        try:
+            return canonical_json_hash(
+                {
+                    "command_type": command_type,
+                    **dict(payload),
+                }
+            )
+        except (TypeError, ValueError) as exc:
+            raise BusinessRuleError("POS command payload must contain valid JSON") from exc
+
+    @staticmethod
+    def _pos_command_sale_id(command: POSCommandRead) -> UUID:
+        result = command.result
+        if isinstance(result, POSSaleCreateCommandResult):
+            return result.sale.id
+        if isinstance(result, POSItemAddCommandResult):
+            sale_ids = {item.sale_id for item in result.item_add.items}
+            if len(sale_ids) != 1:
+                raise AurumError("POS item-add command result has inconsistent sales")
+            return next(iter(sale_ids))
+        if isinstance(result, POSItemUpdateCommandResult):
+            return result.item.sale_id
+        return result.sale_id
+
+    @classmethod
+    def _validate_pos_command_result(cls, command: POSCommand) -> POSCommandRead:
+        try:
+            restored = POSCommandRead.model_validate(
+                {
+                    "operation_id": command.operation_id,
+                    "sale_id": command.sale_id,
+                    "created_at": command.created_at,
+                    "result": command.result_payload,
+                }
+            )
+        except PydanticValidationError as exc:
+            raise AurumError("Stored POS command result is invalid") from exc
+        if restored.result.command_type != command.command_type:
+            raise AurumError("Stored POS command type does not match its result")
+        if command.sale_id is None or cls._pos_command_sale_id(restored) != command.sale_id:
+            raise AurumError("Stored POS command result does not match its sale")
+        return restored
+
+    async def _find_existing_pos_command(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_user_id: UUID,
+        operation_id: UUID,
+        command_type: str,
+        request_hash: str,
+        can_manage_tenant: bool,
+        allowed_branch_ids: set[UUID] | None,
+        allowed_manage_branch_ids: set[UUID] | None,
+    ) -> POSCommandRead | None:
+        existing = await self.repo.get_pos_command(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is not None:
+            if (
+                existing.actor_user_id != actor_user_id
+                or existing.command_type != command_type
+                or existing.request_hash != request_hash
+            ):
+                raise ConflictError("Operation ID was already used for another POS command")
+            restored = self._validate_pos_command_result(existing)
+            await self._assert_pos_command_access(
+                restored,
+                actor_user_id=actor_user_id,
+                can_manage_tenant=can_manage_tenant,
+                allowed_branch_ids=allowed_branch_ids,
+                allowed_manage_branch_ids=allowed_manage_branch_ids,
+            )
+            return restored
+        if await self.repo.has_legacy_pos_operation(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        ):
+            raise ConflictError("Operation ID was already used for another POS operation")
+        return None
+
+    async def _assert_pos_command_access(
+        self,
+        command: POSCommandRead,
+        *,
+        actor_user_id: UUID,
+        can_manage_tenant: bool,
+        allowed_branch_ids: set[UUID] | None,
+        allowed_manage_branch_ids: set[UUID] | None,
+    ) -> None:
+        sale_id = self._pos_command_sale_id(command)
+        sale = await self._lock_sale(sale_id)
+        self._assert_sale_owned_or_managed(
+            sale,
+            actor_id=actor_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+
+    async def _store_pos_command(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_user_id: UUID,
+        operation_id: UUID,
+        sale_id: UUID,
+        command_type: str,
+        request_hash: str,
+        result: (
+            POSSaleCreateCommandResult
+            | POSItemAddCommandResult
+            | POSItemUpdateCommandResult
+            | SaleItemDeleted
+        ),
+    ) -> POSCommandRead:
+        payload = result.model_dump(mode="json")
+        command = await self.repo.insert_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=actor_user_id,
+            operation_id=operation_id,
+            sale_id=sale_id,
+            command_type=command_type,
+            request_hash=request_hash,
+            result_payload=payload,
+            created_by=actor_user_id,
+        )
+        return self._validate_pos_command_result(command)
+
+    async def create_sale_command(
+        self,
+        *,
+        tenant_id: UUID,
+        register_id: UUID,
+        cashier_user_id: UUID,
+        operation_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> SaleRead:
+        command_type = "sale.create"
+        request_hash = self._pos_command_request_hash(
+            command_type=command_type,
+            payload={"register_id": str(register_id)},
+        )
+        await self.repo.lock_operation_id(operation_id)
+        existing = await self._find_existing_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=cashier_user_id,
+            operation_id=operation_id,
+            command_type=command_type,
+            request_hash=request_hash,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if existing is not None:
+            if not isinstance(existing.result, POSSaleCreateCommandResult):
+                raise AurumError("Stored POS command has an unexpected result")
+            return existing.result.sale
+
+        sale = await self.create_sale(
+            tenant_id=tenant_id,
+            register_id=register_id,
+            cashier_user_id=cashier_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        result = POSSaleCreateCommandResult(sale=SaleRead.model_validate(sale))
+        await self._store_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=cashier_user_id,
+            operation_id=operation_id,
+            sale_id=sale.id,
+            command_type=command_type,
+            request_hash=request_hash,
+            result=result,
+        )
+        return result.sale
+
+    async def get_pos_command_result(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_user_id: UUID,
+        operation_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> POSCommandRead:
+        command = await self.repo.get_owned_pos_command(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+            actor_user_id=actor_user_id,
+        )
+        if command is None:
+            raise NotFoundError("POS command not found")
+        restored = self._validate_pos_command_result(command)
+        await self._assert_pos_command_access(
+            restored,
+            actor_user_id=actor_user_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        return restored
+
+    @staticmethod
     def _aggregate_checkout_items(
         items: list[tuple[UUID, Decimal]],
     ) -> list[tuple[UUID, Decimal]]:
@@ -1159,6 +1399,12 @@ class POSService:
         allowed_branch_ids: set[UUID] | None,
         allowed_manage_branch_ids: set[UUID] | None,
     ) -> SaleCheckoutResult | None:
+        existing_command = await self.repo.get_pos_command(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing_command is not None:
+            raise ConflictError("Operation ID was already used for another POS operation")
         existing_attempt = await self.repo.get_payment_attempt_by_operation_id(
             tenant_id=tenant_id,
             operation_id=operation_id,
@@ -2520,6 +2766,183 @@ class POSService:
             raise NotFoundError("Sale item not found")
         await self._recompute_total(sale)
 
+    async def add_item_command(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+        catalog_id: UUID,
+        qty: Decimal,
+        expired_sale_confirmed: bool,
+        actor_id: UUID,
+        operation_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> SaleItemAdded:
+        command_type = "item.add"
+        request_hash = self._pos_command_request_hash(
+            command_type=command_type,
+            payload={
+                "sale_id": str(sale_id),
+                "catalog_id": str(catalog_id),
+                "qty": format(qty.normalize(), "f"),
+                "expired_sale_confirmed": expired_sale_confirmed,
+            },
+        )
+        await self.repo.lock_operation_id(operation_id)
+        existing = await self._find_existing_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=actor_id,
+            operation_id=operation_id,
+            command_type=command_type,
+            request_hash=request_hash,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if existing is not None:
+            if not isinstance(existing.result, POSItemAddCommandResult):
+                raise AurumError("Stored POS command has an unexpected result")
+            return existing.result.item_add
+
+        created, requires_rx = await self.add_item(
+            sale_id=sale_id,
+            catalog_id=catalog_id,
+            qty=qty,
+            expired_sale_confirmed=expired_sale_confirmed,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        item_add = SaleItemAdded(
+            items=[SaleItemRead.model_validate(item) for item in created],
+            requires_prescription_log=requires_rx,
+        )
+        await self._store_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=actor_id,
+            operation_id=operation_id,
+            sale_id=sale_id,
+            command_type=command_type,
+            request_hash=request_hash,
+            result=POSItemAddCommandResult(item_add=item_add),
+        )
+        return item_add
+
+    async def update_item_command(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+        item_id: UUID,
+        qty: Decimal,
+        actor_id: UUID,
+        operation_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> SaleItemRead:
+        command_type = "item.update"
+        request_hash = self._pos_command_request_hash(
+            command_type=command_type,
+            payload={
+                "sale_id": str(sale_id),
+                "item_id": str(item_id),
+                "qty": format(qty.normalize(), "f"),
+            },
+        )
+        await self.repo.lock_operation_id(operation_id)
+        existing = await self._find_existing_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=actor_id,
+            operation_id=operation_id,
+            command_type=command_type,
+            request_hash=request_hash,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if existing is not None:
+            if not isinstance(existing.result, POSItemUpdateCommandResult):
+                raise AurumError("Stored POS command has an unexpected result")
+            return existing.result.item
+
+        item = await self.update_item(
+            sale_id=sale_id,
+            item_id=item_id,
+            qty=qty,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        item_result = SaleItemRead.model_validate(item)
+        await self._store_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=actor_id,
+            operation_id=operation_id,
+            sale_id=sale_id,
+            command_type=command_type,
+            request_hash=request_hash,
+            result=POSItemUpdateCommandResult(item=item_result),
+        )
+        return item_result
+
+    async def delete_item_command(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+        item_id: UUID,
+        actor_id: UUID,
+        operation_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> SaleItemDeleted:
+        command_type = "item.delete"
+        request_hash = self._pos_command_request_hash(
+            command_type=command_type,
+            payload={"sale_id": str(sale_id), "item_id": str(item_id)},
+        )
+        await self.repo.lock_operation_id(operation_id)
+        existing = await self._find_existing_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=actor_id,
+            operation_id=operation_id,
+            command_type=command_type,
+            request_hash=request_hash,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        if existing is not None:
+            if not isinstance(existing.result, SaleItemDeleted):
+                raise AurumError("Stored POS command has an unexpected result")
+            return existing.result
+
+        await self.delete_item(
+            sale_id=sale_id,
+            item_id=item_id,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        result = SaleItemDeleted(sale_id=sale_id, item_id=item_id)
+        await self._store_pos_command(
+            tenant_id=tenant_id,
+            actor_user_id=actor_id,
+            operation_id=operation_id,
+            sale_id=sale_id,
+            command_type=command_type,
+            request_hash=request_hash,
+            result=result,
+        )
+        return result
+
     async def _recompute_total(self, sale: Sale) -> None:
         items = await self.repo.list_items(sale.id)
         total = sum((i.total_price for i in items), Decimal("0"))
@@ -2560,6 +2983,12 @@ class POSService:
         operation_id: UUID,
         operation_hash: str,
     ) -> SalePayment | None:
+        existing_command = await self.repo.get_pos_command(
+            tenant_id=sale.tenant_id,
+            operation_id=operation_id,
+        )
+        if existing_command is not None:
+            raise ConflictError("Operation ID was already used for another POS operation")
         existing_attempt = await self.repo.get_payment_attempt_by_operation_id(
             tenant_id=sale.tenant_id,
             operation_id=operation_id,
@@ -3032,6 +3461,12 @@ class POSService:
         operation_id: UUID,
         operation_hash: str,
     ) -> Sale | None:
+        existing_command = await self.repo.get_pos_command(
+            tenant_id=parent.tenant_id,
+            operation_id=operation_id,
+        )
+        if existing_command is not None:
+            raise ConflictError("Operation ID was already used for another POS operation")
         existing_payment = await self.repo.get_payment_by_operation_id(
             tenant_id=parent.tenant_id,
             operation_id=operation_id,

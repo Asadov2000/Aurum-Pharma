@@ -173,7 +173,8 @@ export function useSaleQuery(saleId: string | null) {
 export function useCreateSale() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (registerId: string) => createSale(registerId),
+    mutationFn: (args: { registerId: string; operationId: string }) =>
+      createSale(args.registerId, args.operationId),
     onSuccess: (data) => {
       const draft: SaleDetails = { ...data, items: [], payments: [] };
       qc.setQueryData(posKeys.sale(data.id), draft);
@@ -197,7 +198,15 @@ export function useAddSaleItem() {
       catalogId: string;
       qty: string;
       expiredSaleConfirmed?: boolean;
-    }) => addSaleItem(args.saleId, args.catalogId, args.qty, args.expiredSaleConfirmed),
+      operationId: string;
+    }) =>
+      addSaleItem(
+        args.saleId,
+        args.catalogId,
+        args.qty,
+        args.operationId,
+        args.expiredSaleConfirmed,
+      ),
     onSuccess: (_data, vars) =>
       qc.invalidateQueries({ queryKey: posKeys.sale(vars.saleId), exact: true }),
   });
@@ -206,8 +215,8 @@ export function useAddSaleItem() {
 export function useUpdateSaleItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { saleId: string; itemId: string; qty: string }) =>
-      updateSaleItem(args.saleId, args.itemId, args.qty),
+    mutationFn: (args: { saleId: string; itemId: string; qty: string; operationId: string }) =>
+      updateSaleItem(args.saleId, args.itemId, args.qty, args.operationId),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: posKeys.sale(vars.saleId) });
     },
@@ -217,8 +226,8 @@ export function useUpdateSaleItem() {
 export function useDeleteSaleItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { saleId: string; itemId: string }) =>
-      deleteSaleItem(args.saleId, args.itemId),
+    mutationFn: (args: { saleId: string; itemId: string; operationId: string }) =>
+      deleteSaleItem(args.saleId, args.itemId, args.operationId),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: posKeys.sale(vars.saleId) });
     },

@@ -93,6 +93,67 @@ class POSFavorite(Base):
     )
 
 
+class POSCommand(Base):
+    __tablename__ = "pos_command"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    actor_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    sale_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    command_type: Mapped[str] = mapped_column(Text, nullable=False)
+    request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    result_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "operation_id",
+            name="uq_pos_command_tenant_operation",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_pos_command_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "sale_id"],
+            ["sale.tenant_id", "sale.id"],
+            name="fk_pos_command_tenant_sale",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "command_type IN ('sale.create','item.add','item.update','item.delete')",
+            name="ck_pos_command_type",
+        ),
+        CheckConstraint(
+            "command_type = 'sale.create' OR sale_id IS NOT NULL",
+            name="ck_pos_command_sale_reference",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_pos_command_request_hash",
+        ),
+        Index(
+            "ix_pos_command_actor_created",
+            "tenant_id",
+            "actor_user_id",
+            "created_at",
+        ),
+        Index(
+            "ix_pos_command_sale_created",
+            "tenant_id",
+            "sale_id",
+            "created_at",
+            postgresql_where=text("sale_id IS NOT NULL"),
+        ),
+    )
+
+
 class Sale(Base):
     __tablename__ = "sale"
 

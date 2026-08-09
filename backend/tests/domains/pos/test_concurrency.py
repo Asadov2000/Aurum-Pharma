@@ -22,7 +22,7 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.inventory.models import Batch, BatchMovement
 from app.domains.inventory.repository import InventoryRepository
-from app.domains.pos.models import Sale, SalePayment, Shift
+from app.domains.pos.models import POSCommand, Sale, SalePayment, Shift
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 from app.domains.sync.models import SyncOutboxEvent
@@ -113,6 +113,7 @@ async def committed_pos(
     finally:
         guarded_tables = (
             ("batch_movement", "trg_guard_batch_movement_immutability"),
+            ("pos_command", "trg_pos_command_immutable"),
             ("prescription_log", "trg_guard_prescription_log_immutability"),
             ("sale_payment", "trg_guard_sale_payment_immutability"),
             ("sale_item", "trg_guard_sale_item_immutability"),
@@ -202,6 +203,22 @@ async def _atomic_checkout(
             payments=[("cash", qty * Decimal("10"), None)],
         )
         return result.sale_id, result.event_id, result.receipt_number
+
+
+async def _create_draft_command(
+    factory: async_sessionmaker[AsyncSession],
+    context: CommittedPOS,
+    *,
+    operation_id: UUID,
+) -> UUID:
+    async with factory.begin() as session:
+        sale = await POSService(POSRepository(session)).create_sale_command(
+            tenant_id=context.tenant_id,
+            register_id=context.register_id,
+            cashier_user_id=context.cashier_id,
+            operation_id=operation_id,
+        )
+        return sale.id
 
 
 async def _add_payment(
@@ -307,6 +324,32 @@ async def test_concurrent_identical_atomic_sales_have_one_effect(committed_pos) 
         assert batch is not None
         assert batch.qty_remaining == context.initial_qty - Decimal("2")
         assert await _movement_count(session, first[0], "sale") == 1
+
+
+async def test_concurrent_identical_draft_commands_have_one_effect(committed_pos) -> None:
+    factory, context = committed_pos
+    operation_id = uuid4()
+
+    first, second = await asyncio.gather(
+        _create_draft_command(factory, context, operation_id=operation_id),
+        _create_draft_command(factory, context, operation_id=operation_id),
+    )
+
+    assert first == second
+    async with factory() as session:
+        command_count = await session.scalar(
+            select(func.count())
+            .select_from(POSCommand)
+            .where(
+                POSCommand.tenant_id == context.tenant_id,
+                POSCommand.operation_id == operation_id,
+            )
+        )
+        sale_count = await session.scalar(
+            select(func.count()).select_from(Sale).where(Sale.id == first)
+        )
+        assert command_count == 1
+        assert sale_count == 1
 
 
 async def test_concurrent_distinct_atomic_sales_do_not_oversell(committed_pos) -> None:
