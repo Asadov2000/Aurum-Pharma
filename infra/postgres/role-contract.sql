@@ -105,6 +105,135 @@ BEGIN
 END
 $$;
 
+-- Ownership grants implicit privileges that REVOKE cannot remove. Detect any
+-- pre-existing Edge ownership before changing roles, memberships, or ACLs.
+DO $$
+DECLARE
+    unsafe_owned_object TEXT;
+BEGIN
+    SELECT object_name
+    INTO unsafe_owned_object
+    FROM (
+        SELECT 'database:' || pg_catalog.quote_ident(databases.datname) AS object_name
+        FROM pg_catalog.pg_database AS databases
+        JOIN pg_catalog.pg_roles AS owners
+          ON owners.oid = databases.datdba
+        WHERE owners.rolname IN (
+            'aurum_edge_cash_executor',
+            'aurum_edge_cash_owner'
+        )
+
+        UNION ALL
+
+        SELECT 'tablespace:' || pg_catalog.quote_ident(tablespaces.spcname)
+        FROM pg_catalog.pg_tablespace AS tablespaces
+        JOIN pg_catalog.pg_roles AS owners
+          ON owners.oid = tablespaces.spcowner
+        WHERE owners.rolname IN (
+            'aurum_edge_cash_executor',
+            'aurum_edge_cash_owner'
+        )
+
+        UNION ALL
+
+        SELECT 'schema:' || pg_catalog.quote_ident(schemas.nspname)
+        FROM pg_catalog.pg_namespace AS schemas
+        JOIN pg_catalog.pg_roles AS owners
+          ON owners.oid = schemas.nspowner
+        WHERE schemas.nspname <> 'information_schema'
+          AND schemas.nspname !~ '^pg_'
+          AND owners.rolname IN (
+              'aurum_edge_cash_executor',
+              'aurum_edge_cash_owner'
+          )
+
+        UNION ALL
+
+        SELECT 'relation:' || pg_catalog.format(
+            '%I.%I', schemas.nspname, relations.relname
+        )
+        FROM pg_catalog.pg_class AS relations
+        JOIN pg_catalog.pg_namespace AS schemas
+          ON schemas.oid = relations.relnamespace
+        JOIN pg_catalog.pg_roles AS owners
+          ON owners.oid = relations.relowner
+        WHERE schemas.nspname <> 'information_schema'
+          AND schemas.nspname !~ '^pg_'
+          AND owners.rolname IN (
+              'aurum_edge_cash_executor',
+              'aurum_edge_cash_owner'
+          )
+
+        UNION ALL
+
+        SELECT 'function:' || routines.oid::REGPROCEDURE::TEXT
+        FROM pg_catalog.pg_proc AS routines
+        JOIN pg_catalog.pg_namespace AS schemas
+          ON schemas.oid = routines.pronamespace
+        JOIN pg_catalog.pg_roles AS owners
+          ON owners.oid = routines.proowner
+        WHERE schemas.nspname <> 'information_schema'
+          AND schemas.nspname !~ '^pg_'
+          AND owners.rolname IN (
+              'aurum_edge_cash_executor',
+              'aurum_edge_cash_owner'
+          )
+
+        UNION ALL
+
+        SELECT 'type:' || pg_catalog.format(
+            '%I.%I', schemas.nspname, types.typname
+        )
+        FROM pg_catalog.pg_type AS types
+        JOIN pg_catalog.pg_namespace AS schemas
+          ON schemas.oid = types.typnamespace
+        JOIN pg_catalog.pg_roles AS owners
+          ON owners.oid = types.typowner
+        WHERE schemas.nspname <> 'information_schema'
+          AND schemas.nspname !~ '^pg_'
+          AND owners.rolname IN (
+              'aurum_edge_cash_executor',
+              'aurum_edge_cash_owner'
+          )
+    ) AS unsafe_owned_objects
+    LIMIT 1;
+
+    IF unsafe_owned_object IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Edge cash role owns forbidden object %',
+            unsafe_owned_object;
+    END IF;
+END
+$$;
+
+DO $$
+DECLARE
+    unsafe_default_acl TEXT;
+BEGIN
+    SELECT pg_catalog.format(
+        'owner=%I object_type=%s', owners.rolname, defaults.defaclobjtype
+    )
+    INTO unsafe_default_acl
+    FROM pg_catalog.pg_default_acl AS defaults
+    JOIN pg_catalog.pg_roles AS owners
+      ON owners.oid = defaults.defaclrole
+    CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
+    JOIN pg_catalog.pg_roles AS grantees
+      ON grantees.oid = acl.grantee
+    WHERE grantees.rolname IN (
+        'aurum_edge_cash_executor',
+        'aurum_edge_cash_owner'
+    )
+    LIMIT 1;
+
+    IF unsafe_default_acl IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Edge cash role has forbidden default privilege (%)',
+            unsafe_default_acl;
+    END IF;
+END
+$$;
+
 SELECT 'CREATE ROLE aurum_app'
 WHERE NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_app'
@@ -129,6 +258,18 @@ WHERE NOT EXISTS (
 )
 \gexec
 
+SELECT 'CREATE ROLE aurum_edge_cash_executor'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_edge_cash_executor'
+)
+\gexec
+
+SELECT 'CREATE ROLE aurum_edge_cash_owner'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_edge_cash_owner'
+)
+\gexec
+
 ALTER ROLE aurum_app WITH
     LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
     PASSWORD :'app_password';
@@ -140,6 +281,12 @@ ALTER ROLE aurum_schema_owner WITH
 ALTER ROLE aurum_migrator WITH
     LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
     PASSWORD :'migrator_password';
+ALTER ROLE aurum_edge_cash_executor WITH
+    NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    PASSWORD NULL;
+ALTER ROLE aurum_edge_cash_owner WITH
+    NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    PASSWORD NULL;
 
 -- This contract runs as the PostgreSQL bootstrap superuser. The target role
 -- never needs CREATEDB, even transiently, to receive this one fixed database.
@@ -149,6 +296,8 @@ GRANT aurum_schema_owner TO aurum_migrator
     WITH ADMIN FALSE, INHERIT TRUE, SET TRUE;
 GRANT aurum_support TO aurum_migrator
     WITH ADMIN FALSE, INHERIT TRUE, SET TRUE;
+GRANT aurum_edge_cash_owner TO aurum_migrator
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
 
 SELECT pg_catalog.format(
     'REVOKE %I FROM %I',
@@ -161,17 +310,75 @@ JOIN pg_catalog.pg_roles AS granted
 JOIN pg_catalog.pg_roles AS member
   ON member.oid = membership.member
 WHERE (
-    granted.rolname IN ('aurum_schema_owner', 'aurum_migrator')
-    AND member.rolname IN ('aurum_app', 'aurum_support')
+    granted.rolname IN (
+        'aurum_schema_owner',
+        'aurum_migrator',
+        'aurum_edge_cash_owner'
+    )
+    AND member.rolname IN (
+        'aurum_app',
+        'aurum_support',
+        'aurum_edge_cash_executor'
+    )
 ) OR (
     granted.rolname = 'aurum_support'
-    AND member.rolname = 'aurum_app'
+    AND member.rolname IN ('aurum_app', 'aurum_edge_cash_executor')
+) OR (
+    (
+        granted.rolname IN (
+            'aurum_edge_cash_executor',
+            'aurum_edge_cash_owner'
+        )
+        OR member.rolname IN (
+            'aurum_edge_cash_executor',
+            'aurum_edge_cash_owner'
+        )
+    )
+    AND NOT (
+        granted.rolname = 'aurum_edge_cash_owner'
+        AND member.rolname = 'aurum_migrator'
+    )
 )
 \gexec
 
 REVOKE ALL PRIVILEGES ON DATABASE :"database_name"
-    FROM PUBLIC, aurum_app, aurum_support, aurum_migrator;
+    FROM PUBLIC, aurum_app, aurum_support, aurum_migrator,
+         aurum_edge_cash_executor, aurum_edge_cash_owner;
 GRANT CONNECT ON DATABASE :"database_name" TO aurum_app, aurum_migrator;
+
+DO $$
+DECLARE
+    application_schema TEXT;
+BEGIN
+    FOR application_schema IN
+        SELECT schemas.nspname
+        FROM pg_catalog.pg_namespace AS schemas
+        WHERE schemas.nspname <> 'information_schema'
+          AND schemas.nspname !~ '^pg_'
+    LOOP
+        EXECUTE pg_catalog.format(
+            'REVOKE ALL PRIVILEGES ON SCHEMA %I '
+            'FROM aurum_edge_cash_executor, aurum_edge_cash_owner',
+            application_schema
+        );
+        EXECUTE pg_catalog.format(
+            'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I '
+            'FROM aurum_edge_cash_executor, aurum_edge_cash_owner',
+            application_schema
+        );
+        EXECUTE pg_catalog.format(
+            'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I '
+            'FROM aurum_edge_cash_executor, aurum_edge_cash_owner',
+            application_schema
+        );
+        EXECUTE pg_catalog.format(
+            'REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA %I '
+            'FROM aurum_edge_cash_executor, aurum_edge_cash_owner',
+            application_schema
+        );
+    END LOOP;
+END
+$$;
 
 DO $$
 DECLARE
@@ -240,7 +447,8 @@ BEGIN
     LOOP
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON FUNCTION %s '
-            'FROM PUBLIC, aurum_app, aurum_support',
+            'FROM PUBLIC, aurum_app, aurum_support, '
+            'aurum_edge_cash_executor, aurum_edge_cash_owner',
             extension_function
         );
     END LOOP;
@@ -262,6 +470,114 @@ BEGIN
             TO aurum_support, aurum_schema_owner;
         GRANT EXECUTE ON FUNCTION public.pgp_sym_decrypt(BYTEA, TEXT, TEXT)
             TO aurum_support, aurum_schema_owner;
+    END IF;
+END
+$$;
+
+DO $$
+DECLARE
+    unsafe_object TEXT;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_authid
+        WHERE rolname = 'aurum_edge_cash_executor'
+          AND NOT rolcanlogin
+          AND rolinherit
+          AND NOT rolsuper
+          AND NOT rolcreatedb
+          AND NOT rolcreaterole
+          AND NOT rolreplication
+          AND NOT rolbypassrls
+          AND rolpassword IS NULL
+    ) OR NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_authid
+        WHERE rolname = 'aurum_edge_cash_owner'
+          AND NOT rolcanlogin
+          AND rolinherit
+          AND NOT rolsuper
+          AND NOT rolcreatedb
+          AND NOT rolcreaterole
+          AND NOT rolreplication
+          AND NOT rolbypassrls
+          AND rolpassword IS NULL
+    ) THEN
+        RAISE EXCEPTION 'Edge cash roles violate the deny-by-default contract';
+    END IF;
+
+    SELECT pg_catalog.quote_ident(schemas.nspname)
+    INTO unsafe_object
+    FROM pg_catalog.pg_namespace AS schemas
+    JOIN pg_catalog.pg_roles AS owners
+      ON owners.oid = schemas.nspowner
+    WHERE schemas.nspname <> 'information_schema'
+      AND schemas.nspname !~ '^pg_'
+      AND owners.rolname IN (
+        'aurum_edge_cash_executor',
+        'aurum_edge_cash_owner'
+      )
+    LIMIT 1;
+
+    IF unsafe_object IS NOT NULL THEN
+        RAISE EXCEPTION 'Edge cash role owns application schema %', unsafe_object;
+    END IF;
+
+    SELECT pg_catalog.format('%I.%I', schemas.nspname, relations.relname)
+    INTO unsafe_object
+    FROM pg_catalog.pg_class AS relations
+    JOIN pg_catalog.pg_namespace AS schemas
+      ON schemas.oid = relations.relnamespace
+    JOIN pg_catalog.pg_roles AS owners
+      ON owners.oid = relations.relowner
+    WHERE schemas.nspname <> 'information_schema'
+      AND schemas.nspname !~ '^pg_'
+      AND owners.rolname IN (
+        'aurum_edge_cash_executor',
+        'aurum_edge_cash_owner'
+      )
+    LIMIT 1;
+
+    IF unsafe_object IS NOT NULL THEN
+        RAISE EXCEPTION 'Edge cash role owns application relation %', unsafe_object;
+    END IF;
+
+    SELECT routines.oid::REGPROCEDURE::TEXT
+    INTO unsafe_object
+    FROM pg_catalog.pg_proc AS routines
+    JOIN pg_catalog.pg_namespace AS schemas
+      ON schemas.oid = routines.pronamespace
+    JOIN pg_catalog.pg_roles AS owners
+      ON owners.oid = routines.proowner
+    WHERE schemas.nspname <> 'information_schema'
+      AND schemas.nspname !~ '^pg_'
+      AND owners.rolname IN (
+        'aurum_edge_cash_executor',
+        'aurum_edge_cash_owner'
+      )
+    LIMIT 1;
+
+    IF unsafe_object IS NOT NULL THEN
+        RAISE EXCEPTION 'Edge cash role owns application function %', unsafe_object;
+    END IF;
+
+    SELECT types.oid::REGTYPE::TEXT
+    INTO unsafe_object
+    FROM pg_catalog.pg_type AS types
+    JOIN pg_catalog.pg_namespace AS schemas
+      ON schemas.oid = types.typnamespace
+    JOIN pg_catalog.pg_roles AS owners
+      ON owners.oid = types.typowner
+    WHERE schemas.nspname <> 'information_schema'
+      AND schemas.nspname !~ '^pg_'
+      AND owners.rolname IN (
+        'aurum_edge_cash_executor',
+        'aurum_edge_cash_owner'
+      )
+    LIMIT 1;
+
+    IF unsafe_object IS NOT NULL THEN
+        RAISE EXCEPTION 'Edge cash role owns application type %', unsafe_object;
     END IF;
 END
 $$;
