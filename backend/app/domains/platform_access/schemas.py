@@ -123,6 +123,8 @@ class PlatformAccessGrantRead(BaseModel):
     version: int
     created_at: datetime
     updated_at: datetime
+    user_email: str | None = None
+    user_full_name: str | None = None
 
 
 class PlatformAccessGrantList(BaseModel):

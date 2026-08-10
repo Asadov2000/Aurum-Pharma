@@ -185,8 +185,12 @@ class PlatformAccessService:
                 "Platform access request changed",
                 details={"current_version": grant.version},
             )
-        if not set(grant.capabilities).issubset(actor.capabilities):
-            raise PermissionDeniedError("Approval exceeds the Developer capability envelope")
+        await self._require_capability_envelope(
+            actor=actor,
+            actor_user_id=actor_user_id,
+            access_kind=grant.access_kind,
+            capabilities=grant.capabilities,
+        )
 
         target = await self.repo.lock_target(grant.user_id)
         self._require_eligible_target(target)

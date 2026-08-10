@@ -55,6 +55,29 @@ describe("PlatformControlPage", () => {
     );
   });
 
+  it("shows platform access only to a developer with the exact capability", () => {
+    mockUser = {
+      is_developer: true,
+      is_administrator: false,
+      platform_capabilities: ["platform.access.view"],
+    };
+    const { rerender } = render(<PlatformControlPage />);
+
+    expect(screen.getByRole("link", { name: /Доступ платформы/i })).toHaveAttribute(
+      "href",
+      "/admin/access",
+    );
+
+    mockUser = {
+      is_developer: false,
+      is_administrator: true,
+      platform_capabilities: ["platform.access.view"],
+    };
+    rerender(<PlatformControlPage />);
+
+    expect(screen.queryByRole("link", { name: /Доступ платформы/i })).not.toBeInTheDocument();
+  });
+
   it("fails closed when the account has no platform capabilities", () => {
     mockUser = {
       is_developer: true,
@@ -66,5 +89,6 @@ describe("PlatformControlPage", () => {
     expect(screen.getByText(/не назначены инструменты управления платформой/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Аптеки" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Глобальный аудит" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Доступ платформы" })).not.toBeInTheDocument();
   });
 });

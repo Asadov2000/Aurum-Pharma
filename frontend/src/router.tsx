@@ -82,128 +82,136 @@ const rootRoute = createRootRoute({
   component: RootLayout,
 });
 
+const getParentRoute = () => rootRoute;
+
 const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/",
   component: DashboardPage,
 });
 
 const tenantsRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/admin/tenants",
   component: TenantsPage,
 });
 
 const platformControlRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/admin",
   component: PlatformControlPage,
 });
 
+const platformAccessRoute = createRoute({
+  getParentRoute,
+  path: "/admin/access",
+  component: lazyRouteComponent(() => import("@/features/platformAccess/PlatformAccessPage")),
+});
+
 const branchesRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/branches",
   component: BranchesPage,
 });
 
 const registersRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/registers",
   component: RegistersPage,
 });
 
 const settingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/settings",
   component: SettingsPage,
 });
 
 const usersRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/users",
   component: UsersPage,
 });
 
 const rolesRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/roles",
   component: RolesPage,
 });
 
 const catalogRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/catalog",
   component: CatalogPage,
 });
 
 const batchesRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/batches",
   component: BatchesPage,
 });
 
 const suppliersRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/suppliers",
   component: SuppliersPage,
 });
 
 const incomingRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/incoming",
   component: IncomingPage,
 });
 
 const incomingDetailRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/incoming/$id",
   component: IncomingDetailPage,
 });
 
 const posRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/pos",
   component: POSPage,
 });
 
 const salesRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/sales",
   component: SalesPage,
 });
 
 const billingRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/billing",
   component: BillingPage,
 });
 
 const auditRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/audit",
   component: AuditPage,
 });
 
 const onboardingRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/onboarding",
   component: OnboardingPage,
 });
 
 const notificationsRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/notifications",
   component: NotificationsPage,
 });
 
 const securityRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/security",
   component: SecurityPage,
 });
 
 const reportsRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/reports",
   component: ReportsPage,
 });
@@ -213,7 +221,7 @@ function parseLoginSearch(raw: Record<string, unknown>): { from?: string } {
 }
 
 const loginRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute,
   path: "/login",
   component: LoginPage,
   validateSearch: parseLoginSearch,
@@ -222,6 +230,7 @@ const loginRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   platformControlRoute,
+  platformAccessRoute,
   tenantsRoute,
   branchesRoute,
   registersRoute,

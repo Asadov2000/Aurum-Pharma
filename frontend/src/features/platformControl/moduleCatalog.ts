@@ -4,12 +4,13 @@ import {
 } from "@/features/auth/platformCapabilities";
 
 export interface PlatformModule {
-  id: "tenants" | "audit";
+  id: "tenants" | "audit" | "access";
   title: string;
   description: string;
-  to: "/admin/tenants" | "/audit";
+  to: "/admin/tenants" | "/audit" | "/admin/access";
   capability: PlatformCapability;
   tone: "primary" | "neutral";
+  developerOnly?: boolean;
 }
 
 const MODULES: readonly PlatformModule[] = [
@@ -22,6 +23,15 @@ const MODULES: readonly PlatformModule[] = [
     tone: "primary",
   },
   {
+    id: "access",
+    title: "Доступ платформы",
+    description: "Проверка, подтверждение и отзыв полномочий команды Aurum Pharma",
+    to: "/admin/access",
+    capability: PLATFORM_CAPABILITIES.accessView,
+    tone: "neutral",
+    developerOnly: true,
+  },
+  {
     id: "audit",
     title: "Глобальный аудит",
     description: "Контроль критических действий и событий платформы",
@@ -31,6 +41,11 @@ const MODULES: readonly PlatformModule[] = [
   },
 ] as const;
 
-export function availablePlatformModules(capabilities: readonly string[]): PlatformModule[] {
-  return MODULES.filter((module) => capabilities.includes(module.capability));
+export function availablePlatformModules(
+  capabilities: readonly string[],
+  isDeveloper = false,
+): PlatformModule[] {
+  return MODULES.filter(
+    (module) => capabilities.includes(module.capability) && (!module.developerOnly || isDeveloper),
+  );
 }

@@ -233,6 +233,56 @@ async def test_second_developer_must_independently_approve(
     assert target_session.revoked_at is not None
 
 
+async def test_approval_rechecks_current_delegation_envelope(
+    db_session: AsyncSession,
+    platform_client: AsyncClient,
+) -> None:
+    requester = await create_test_platform_user(
+        db_session,
+        access_kind="developer",
+        full_name="Requesting Developer",
+    )
+    approver = await create_test_platform_user(
+        db_session,
+        access_kind="developer",
+        full_name="Approving Developer",
+    )
+    target = await _target(db_session)
+    requester_token = await create_support_access_token(db_session, requester)
+    approver_token = await create_support_access_token(db_session, approver)
+
+    requested = await platform_client.post(
+        "/api/v1/admin/platform-access/grants",
+        json={"user_id": str(target.id), **REQUEST_PAYLOAD},
+        headers=_headers(requester_token),
+    )
+    assert requested.status_code == 201, requested.text
+    pending = requested.json()
+    assert pending["status"] == "pending"
+
+    await db_session.execute(
+        text("""
+            UPDATE public.permission
+            SET administrator_grantable = false
+            WHERE code = 'platform.support.use'
+            """),
+    )
+
+    rejected = await platform_client.post(
+        f"/api/v1/admin/platform-access/grants/{pending['id']}/approve",
+        json={
+            "version": pending["version"],
+            "reason_code": "access_review",
+            "reason": "Independent access review completed",
+        },
+        headers=_headers(approver_token),
+    )
+
+    assert rejected.status_code == 403, rejected.text
+    await db_session.refresh(target)
+    assert target.is_administrator is False
+
+
 async def test_expired_approval_is_closed_atomically(
     db_session: AsyncSession,
     platform_client: AsyncClient,
@@ -294,6 +344,7 @@ async def test_administrator_and_stale_mfa_cannot_read_grants(
     developer = await create_test_platform_user(
         db_session,
         access_kind="developer",
+        full_name="Access Review Developer",
     )
     administrator = await create_test_platform_user(
         db_session,
@@ -306,6 +357,7 @@ async def test_administrator_and_stale_mfa_cannot_read_grants(
         developer,
         mfa_verified_at=stale_at,
     )
+    fresh_developer_token = await create_support_access_token(db_session, developer)
 
     administrator_response = await platform_client.get(
         "/api/v1/admin/platform-access/grants",
@@ -315,10 +367,20 @@ async def test_administrator_and_stale_mfa_cannot_read_grants(
         "/api/v1/admin/platform-access/grants",
         headers=_headers(stale_developer_token),
     )
+    list_response = await platform_client.get(
+        "/api/v1/admin/platform-access/grants",
+        params={"user_id": str(developer.id)},
+        headers=_headers(fresh_developer_token),
+    )
 
     assert administrator_response.status_code == 403
     assert stale_response.status_code == 403
     assert stale_response.json()["error"]["details"]["reason"] == "mfa_step_up_required"
+    assert list_response.status_code == 200, list_response.text
+    listed_grant = list_response.json()["items"][0]
+    assert listed_grant["user_id"] == str(developer.id)
+    assert listed_grant["user_email"] == developer.email
+    assert listed_grant["user_full_name"] == "Access Review Developer"
 
 
 async def test_administrator_can_view_but_cannot_manage_edge_sync(
