@@ -8,6 +8,7 @@ const authState = vi.hoisted(() => ({
     is_developer: false,
     is_administrator: false,
     home_tenant_id: null as string | null,
+    platform_capabilities: [] as string[],
   },
 }));
 
@@ -53,6 +54,7 @@ describe("AuditPage", () => {
       is_developer: false,
       is_administrator: false,
       home_tenant_id: null,
+      platform_capabilities: [],
     };
   });
   afterEach(() => {
@@ -73,6 +75,7 @@ describe("AuditPage", () => {
       is_developer: true,
       is_administrator: false,
       home_tenant_id: null,
+      platform_capabilities: ["platform.audit.global.view"],
     };
     searchAudit.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 50 });
 
@@ -157,7 +160,12 @@ describe("AuditPage", () => {
   });
 
   it("does not expose global audit to an Aurum administrator", async () => {
-    authState.user = { is_developer: false, is_administrator: true };
+    authState.user = {
+      is_developer: false,
+      is_administrator: true,
+      home_tenant_id: null,
+      platform_capabilities: [],
+    };
     searchAudit.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 50 });
 
     renderPage();
@@ -166,8 +174,13 @@ describe("AuditPage", () => {
     expect(screen.queryByRole("option", { name: "Глобально" })).not.toBeInTheDocument();
   });
 
-  it("exposes global audit only to a developer", async () => {
-    authState.user = { is_developer: true, is_administrator: false };
+  it("exposes global audit only with the exact platform capability", async () => {
+    authState.user = {
+      is_developer: true,
+      is_administrator: false,
+      home_tenant_id: null,
+      platform_capabilities: ["platform.audit.global.view"],
+    };
     searchAudit.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 50 });
 
     renderPage();

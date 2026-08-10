@@ -13,6 +13,7 @@ const SELLER: RouteAccessContext = {
   isTenantOwner: false,
   hasTenant: true,
   permissions: ["catalog.view", "pos.shift_open", "pos.sell", "sales.view.own", "audit.view.own"],
+  platformCapabilities: [],
 };
 
 describe("route access", () => {
@@ -40,9 +41,11 @@ describe("route access", () => {
       isTenantOwner: false,
       hasTenant: false,
       permissions: [],
+      platformCapabilities: ["platform.tenants.view"],
     };
 
     expect(canAccessPath("/", support)).toBe(true);
+    expect(canAccessPath("/admin", support)).toBe(true);
     expect(canAccessPath("/admin/tenants", support)).toBe(true);
     expect(canAccessPath("/notifications", support)).toBe(true);
     expect(canAccessPath("/security", support)).toBe(true);
@@ -58,11 +61,13 @@ describe("route access", () => {
       isTenantOwner: false,
       hasTenant: false,
       permissions: [],
+      platformCapabilities: ["platform.audit.global.view"],
     };
     const administrator: RouteAccessContext = {
       ...developer,
       isDeveloper: false,
       isAdministrator: true,
+      platformCapabilities: [],
     };
 
     expect(canAccessPath("/audit", developer)).toBe(true);
@@ -77,6 +82,7 @@ describe("route access", () => {
       isTenantOwner: false,
       hasTenant: true,
       permissions: ["users.view", "roles.update"],
+      platformCapabilities: ["platform.tenants.view"],
     };
 
     expect(canAccessPath("/roles", scopedSupport)).toBe(true);
@@ -101,6 +107,33 @@ describe("route access", () => {
         ...SELLER,
         isAdministrator: true,
         isSupportScoped: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("fails closed for unknown admin routes and partial platform access", () => {
+    const tenantViewer: RouteAccessContext = {
+      ...SELLER,
+      isAdministrator: true,
+      hasTenant: false,
+      permissions: [],
+      platformCapabilities: ["platform.tenants.view"],
+    };
+
+    expect(canAccessPath("/admin", tenantViewer)).toBe(true);
+    expect(canAccessPath("/admin/tenants", tenantViewer)).toBe(true);
+    expect(canAccessPath("/admin/future", tenantViewer)).toBe(false);
+    expect(canAccessPath("/audit", tenantViewer)).toBe(false);
+  });
+
+  it("does not expose an empty control center for capabilities without a module", () => {
+    expect(
+      canAccessPath("/admin", {
+        ...SELLER,
+        isDeveloper: true,
+        hasTenant: false,
+        permissions: [],
+        platformCapabilities: ["platform.access.view"],
       }),
     ).toBe(false);
   });

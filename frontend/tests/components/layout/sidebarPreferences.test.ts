@@ -79,8 +79,8 @@ describe("sidebar preferences", () => {
     const preferences = parseSidebarPreferences({
       desktopMode: "expanded",
       hiddenRoutes: [],
-      favoriteRoutes: ["/admin/tenants"],
-      routeOrder: ["/admin/tenants", "/catalog", "/pos"],
+      favoriteRoutes: ["/admin"],
+      routeOrder: ["/admin", "/catalog", "/pos"],
     });
 
     expect(visibleSidebarItems(ITEMS, preferences).map((item) => item.to)).toEqual([

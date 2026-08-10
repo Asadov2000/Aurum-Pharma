@@ -23,6 +23,8 @@ const OWNER_PERMS = [
   "batches.view",
   "settings.update",
 ] as const;
+const TENANT_PLATFORM_ACCESS = ["platform.tenants.view"] as const;
+const AUDIT_PLATFORM_ACCESS = ["platform.audit.global.view"] as const;
 
 describe("buildNav — dashboard visibility", () => {
   it("hides «Главная» (dashboard) from a tenant user without reports.view (seller)", () => {
@@ -43,15 +45,21 @@ describe("buildNav — dashboard visibility", () => {
   });
 
   it("shows «Главная» to a support user (admin/dev)", () => {
-    const items = buildNav(true, false, false, []);
+    const items = buildNav(true, false, false, [], false, false, TENANT_PLATFORM_ACCESS);
     expect(items[0]?.to).toBe("/");
-    expect(items.some((i) => i.to === "/admin/tenants")).toBe(true);
+    expect(items.some((i) => i.to === "/admin")).toBe(true);
     expect(items.some((i) => i.to === "/security")).toBe(true);
   });
 
+  it("does not expose platform navigation without an active capability", () => {
+    const items = buildNav(true, false, false, []);
+    expect(items.some((item) => item.to === "/admin")).toBe(false);
+    expect(items.some((item) => item.to === "/admin/tenants")).toBe(false);
+  });
+
   it("shows global audit only to an unscoped developer", () => {
-    const adminItems = buildNav(true, false, false, []);
-    const developerItems = buildNav(true, false, false, [], true);
+    const adminItems = buildNav(true, false, false, [], false, false, TENANT_PLATFORM_ACCESS);
+    const developerItems = buildNav(true, false, false, [], true, false, AUDIT_PLATFORM_ACCESS);
 
     expect(adminItems.some((item) => item.to === "/audit")).toBe(false);
     expect(developerItems.some((item) => item.to === "/audit")).toBe(true);

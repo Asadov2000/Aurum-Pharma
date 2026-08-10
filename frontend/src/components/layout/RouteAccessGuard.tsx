@@ -4,12 +4,7 @@ import { type ReactNode } from "react";
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import { useAuth } from "@/features/auth/hooks";
 
-import {
-  canAccessPath,
-  firstAccessiblePath,
-  getRouteAccessContext,
-  routeLabel,
-} from "./routeAccess";
+import { canAccessPath, firstAccessiblePath, getRouteAccessContext } from "./routeAccess";
 
 export function RouteAccessGuard({ children }: { children: ReactNode }): JSX.Element | null {
   const { user } = useAuth();
@@ -28,7 +23,7 @@ export function RouteAccessGuard({ children }: { children: ReactNode }): JSX.Ele
       title="Раздел недоступен"
       message="Этот раздел не входит в доступы вашего аккаунта. Если он нужен для работы, обратитесь к владельцу аптеки или администратору Aurum Pharma."
       fallbackTo={fallbackTo}
-      fallbackLabel={fallbackTo ? routeLabel[fallbackTo] : undefined}
+      fallbackLabel="Перейти"
     />
   );
 }

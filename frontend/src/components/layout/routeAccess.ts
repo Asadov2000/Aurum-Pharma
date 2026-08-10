@@ -1,6 +1,9 @@
 import { type MeResponse } from "@/features/auth/types";
 import { activeTenantId } from "@/features/auth/tenantContext";
 
+const TENANTS_VIEW_CAPABILITY = "platform.tenants.view";
+const GLOBAL_AUDIT_VIEW_CAPABILITY = "platform.audit.global.view";
+
 export const BRANCH_VIEW_PERMISSIONS = ["branches.view"] as const;
 export const REGISTER_VIEW_PERMISSIONS = ["registers.view"] as const;
 export const ROLE_MANAGEMENT_PERMISSIONS = [
@@ -18,6 +21,7 @@ export const AUDIT_VIEW_PERMISSIONS = [
 
 export type AppRoutePath =
   | "/"
+  | "/admin"
   | "/admin/tenants"
   | "/onboarding"
   | "/branches"
@@ -44,6 +48,7 @@ export interface RouteAccessContext {
   isTenantOwner: boolean;
   hasTenant: boolean;
   permissions: readonly string[];
+  platformCapabilities: readonly string[];
 }
 
 export function getRouteAccessContext(user: MeResponse | null | undefined): RouteAccessContext {
@@ -54,6 +59,7 @@ export function getRouteAccessContext(user: MeResponse | null | undefined): Rout
     isTenantOwner: user?.is_tenant_owner === true,
     hasTenant: Boolean(activeTenantId(user)),
     permissions: user?.permissions ?? [],
+    platformCapabilities: user?.platform_capabilities ?? [],
   };
 }
 
@@ -67,6 +73,10 @@ function hasAnyPermission(context: RouteAccessContext, codes: readonly string[])
   return codes.some((code) => hasPermission(context, code));
 }
 
+function hasPlatformCapability(context: RouteAccessContext, code: string): boolean {
+  return context.platformCapabilities.includes(code);
+}
+
 function isPath(pathname: string, route: AppRoutePath): boolean {
   return pathname === route || pathname.startsWith(`${route}/`);
 }
@@ -77,8 +87,18 @@ function isPath(pathname: string, route: AppRoutePath): boolean {
  */
 export function canAccessPath(pathname: string, context: RouteAccessContext): boolean {
   if (pathname === "/login") return true;
+  if (pathname === "/admin") {
+    return (
+      !context.isSupportScoped &&
+      (hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY) ||
+        hasPlatformCapability(context, GLOBAL_AUDIT_VIEW_CAPABILITY))
+    );
+  }
   if (isPath(pathname, "/admin/tenants")) {
-    return context.isDeveloper || context.isAdministrator;
+    return !context.isSupportScoped && hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY);
+  }
+  if (pathname.startsWith("/admin/")) {
+    return false;
   }
   if (pathname === "/") {
     return context.hasTenant
@@ -91,11 +111,11 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   // Session inventory is account-scoped and deliberately independent of a
   // tenant role, so a cashier can protect their own account as well.
   if (isPath(pathname, "/security")) return true;
-  // Global audit is a developer-only support surface and does not require a
-  // selected tenant. Scoped tenant audit still follows explicit permissions.
+  // Global audit is capability-scoped and does not require a selected tenant.
+  // Scoped tenant audit still follows explicit permissions.
   if (isPath(pathname, "/audit")) {
     return (
-      (context.isDeveloper && !context.isSupportScoped) ||
+      (!context.isSupportScoped && hasPlatformCapability(context, GLOBAL_AUDIT_VIEW_CAPABILITY)) ||
       (context.hasTenant && hasAnyPermission(context, AUDIT_VIEW_PERMISSIONS))
     );
   }
@@ -153,31 +173,9 @@ const FALLBACK_PATHS: readonly AppRoutePath[] = [
   "/sales",
   "/incoming",
   "/notifications",
-  "/admin/tenants",
+  "/admin",
 ];
 
 export function firstAccessiblePath(context: RouteAccessContext): AppRoutePath | null {
   return FALLBACK_PATHS.find((path) => canAccessPath(path, context)) ?? null;
 }
-
-export const routeLabel: Record<AppRoutePath, string> = {
-  "/": "Главная",
-  "/admin/tenants": "Аптеки",
-  "/onboarding": "Старт",
-  "/branches": "Точки",
-  "/registers": "Кассы",
-  "/users": "Пользователи",
-  "/roles": "Роли",
-  "/catalog": "Каталог",
-  "/batches": "Партии",
-  "/suppliers": "Поставщики",
-  "/incoming": "Приходы",
-  "/pos": "Касса",
-  "/sales": "Чеки",
-  "/billing": "Биллинг",
-  "/reports": "Отчёты",
-  "/audit": "Аудит",
-  "/notifications": "Уведомления",
-  "/security": "Безопасность",
-  "/settings": "Настройки",
-};

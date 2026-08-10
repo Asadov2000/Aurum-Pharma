@@ -62,6 +62,6 @@ describe("RouteAccessGuard", () => {
 
     expect(screen.queryByText("Settings content")).not.toBeInTheDocument();
     expect(screen.getByText("Раздел недоступен")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Касса" })).toHaveAttribute("href", "/pos");
+    expect(screen.getByRole("link", { name: "Перейти" })).toHaveAttribute("href", "/pos");
   });
 });

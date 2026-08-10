@@ -48,6 +48,7 @@ const ACCOUNT: MeResponse = {
   is_tenant_owner: false,
   branch_assignments: {},
   permissions: [],
+  platform_capabilities: [],
   support_access: null,
 };
 
