@@ -340,34 +340,59 @@ def upgrade() -> None:
            'platform', 'critical', true, false, false, true, false, false, true, true)
         """)
 
-    # Hardened pre-0067 tables intentionally revoke REFERENCES even from their
-    # owner. Restore it only for FK creation, then remove it again below.
     op.execute("""
-        GRANT REFERENCES ON TABLE
-          public.platform_access_grant,
-          public.permission,
-          public.app_user
-        TO aurum_schema_owner
-        """)
-    op.execute("GRANT TRIGGER ON TABLE public.platform_access_grant TO aurum_schema_owner")
-    op.execute("""
-        CREATE TABLE public.platform_access_grant_permission (
-          grant_id UUID NOT NULL
-            REFERENCES public.platform_access_grant(id) ON DELETE RESTRICT,
-          permission_code TEXT NOT NULL
-            REFERENCES public.permission(code) ON UPDATE RESTRICT ON DELETE RESTRICT,
-          created_by UUID
-            REFERENCES public.app_user(id) ON DELETE SET NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp(),
-          PRIMARY KEY (grant_id, permission_code)
-        )
-        """)
-    op.execute("""
-        REVOKE REFERENCES ON TABLE
-          public.platform_access_grant,
-          public.permission,
-          public.app_user
-        FROM aurum_schema_owner
+        DO $$
+        DECLARE
+          v_grant_had_references BOOLEAN := pg_catalog.has_table_privilege(
+            'aurum_schema_owner',
+            'public.platform_access_grant',
+            'REFERENCES'
+          );
+          v_permission_had_references BOOLEAN := pg_catalog.has_table_privilege(
+            'aurum_schema_owner',
+            'public.permission',
+            'REFERENCES'
+          );
+          v_user_had_references BOOLEAN := pg_catalog.has_table_privilege(
+            'aurum_schema_owner',
+            'public.app_user',
+            'REFERENCES'
+          );
+        BEGIN
+          IF NOT v_grant_had_references THEN
+            GRANT REFERENCES ON TABLE public.platform_access_grant
+              TO aurum_schema_owner;
+          END IF;
+          IF NOT v_permission_had_references THEN
+            GRANT REFERENCES ON TABLE public.permission TO aurum_schema_owner;
+          END IF;
+          IF NOT v_user_had_references THEN
+            GRANT REFERENCES ON TABLE public.app_user TO aurum_schema_owner;
+          END IF;
+
+          CREATE TABLE public.platform_access_grant_permission (
+            grant_id UUID NOT NULL
+              REFERENCES public.platform_access_grant(id) ON DELETE RESTRICT,
+            permission_code TEXT NOT NULL
+              REFERENCES public.permission(code) ON UPDATE RESTRICT ON DELETE RESTRICT,
+            created_by UUID
+              REFERENCES public.app_user(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp(),
+            PRIMARY KEY (grant_id, permission_code)
+          );
+
+          IF NOT v_grant_had_references THEN
+            REVOKE REFERENCES ON TABLE public.platform_access_grant
+              FROM aurum_schema_owner;
+          END IF;
+          IF NOT v_permission_had_references THEN
+            REVOKE REFERENCES ON TABLE public.permission FROM aurum_schema_owner;
+          END IF;
+          IF NOT v_user_had_references THEN
+            REVOKE REFERENCES ON TABLE public.app_user FROM aurum_schema_owner;
+          END IF;
+        END
+        $$
         """)
 
     op.execute("""
@@ -405,27 +430,43 @@ def upgrade() -> None:
     _secure_trigger_function("public.trg_audit_platform_access_grant_permission()")
 
     op.execute("""
-        CREATE TRIGGER trg_10_guard_platform_access_grant_permission
-        BEFORE INSERT OR DELETE OR UPDATE ON public.platform_access_grant_permission
-        FOR EACH ROW EXECUTE FUNCTION public.trg_guard_platform_access_grant_permission()
+        DO $$
+        DECLARE
+          v_grant_had_trigger BOOLEAN := pg_catalog.has_table_privilege(
+            'aurum_schema_owner',
+            'public.platform_access_grant',
+            'TRIGGER'
+          );
+        BEGIN
+          IF NOT v_grant_had_trigger THEN
+            GRANT TRIGGER ON TABLE public.platform_access_grant
+              TO aurum_schema_owner;
+          END IF;
+
+          CREATE TRIGGER trg_10_guard_platform_access_grant_permission
+          BEFORE INSERT OR DELETE OR UPDATE ON public.platform_access_grant_permission
+          FOR EACH ROW EXECUTE FUNCTION public.trg_guard_platform_access_grant_permission();
+
+          CREATE TRIGGER trg_20_audit_platform_access_grant_permission
+          AFTER INSERT ON public.platform_access_grant_permission
+          FOR EACH ROW EXECUTE FUNCTION public.trg_audit_platform_access_grant_permission();
+
+          CREATE TRIGGER trg_15_seed_bootstrap_platform_capabilities
+          AFTER INSERT ON public.platform_access_grant
+          FOR EACH ROW EXECUTE FUNCTION public.trg_seed_bootstrap_platform_capabilities();
+
+          CREATE CONSTRAINT TRIGGER trg_90_validate_platform_grant_capabilities
+          AFTER INSERT OR UPDATE OF status ON public.platform_access_grant
+          DEFERRABLE INITIALLY DEFERRED
+          FOR EACH ROW EXECUTE FUNCTION public.trg_validate_platform_grant_capabilities();
+
+          IF NOT v_grant_had_trigger THEN
+            REVOKE TRIGGER ON TABLE public.platform_access_grant
+              FROM aurum_schema_owner;
+          END IF;
+        END
+        $$
         """)
-    op.execute("""
-        CREATE TRIGGER trg_20_audit_platform_access_grant_permission
-        AFTER INSERT ON public.platform_access_grant_permission
-        FOR EACH ROW EXECUTE FUNCTION public.trg_audit_platform_access_grant_permission()
-        """)
-    op.execute("""
-        CREATE TRIGGER trg_15_seed_bootstrap_platform_capabilities
-        AFTER INSERT ON public.platform_access_grant
-        FOR EACH ROW EXECUTE FUNCTION public.trg_seed_bootstrap_platform_capabilities()
-        """)
-    op.execute("""
-        CREATE CONSTRAINT TRIGGER trg_90_validate_platform_grant_capabilities
-        AFTER INSERT OR UPDATE OF status ON public.platform_access_grant
-        DEFERRABLE INITIALLY DEFERRED
-        FOR EACH ROW EXECUTE FUNCTION public.trg_validate_platform_grant_capabilities()
-        """)
-    op.execute("REVOKE TRIGGER ON TABLE public.platform_access_grant FROM aurum_schema_owner")
 
     op.execute(
         "REVOKE ALL PRIVILEGES ON TABLE public.platform_access_grant_permission "
@@ -434,6 +475,8 @@ def upgrade() -> None:
     op.execute(
         "GRANT SELECT, INSERT ON TABLE public.platform_access_grant_permission " "TO aurum_support"
     )
+
+
 def downgrade() -> None:
     op.execute(
         "DROP TRIGGER trg_90_validate_platform_grant_capabilities "
