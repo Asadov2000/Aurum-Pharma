@@ -63,5 +63,11 @@ describe("RootLayout", () => {
     expect(screen.queryByTestId("app-layout")).not.toBeInTheDocument();
     expect(screen.getByTestId("route-outlet")).toBeInTheDocument();
     expect(state.layoutUnmounts).toBe(1);
+
+    state.pathname = "/activate-platform";
+    view.rerender(<RootLayout />);
+
+    expect(screen.queryByTestId("app-layout")).not.toBeInTheDocument();
+    expect(screen.getByTestId("route-outlet")).toBeInTheDocument();
   });
 });

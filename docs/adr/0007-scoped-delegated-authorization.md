@@ -38,7 +38,12 @@ Aurum Pharma является multi-tenant системой: один глоба
 - Только Developer создает, изменяет и отзывает platform-доступ Developer и
   Aurum Administrator.
 - Aurum Administrator создает tenant-аккаунты, tenant membership и первоначальное
-  владение, но не создает platform-аккаунты и не назначает platform-доступ.
+  владение. При наличии отдельной platform capability он также может пригласить
+  непривилегированного кандидата команды Aurum Pharma, но не может назначить ему
+  platform-доступ Developer/Administrator или изменить собственные полномочия.
+- Platform-доступ Developer/Administrator создается, изменяется и отзывается
+  только защищенным Developer workflow. Приглашение кандидата само по себе не
+  дает ни одной platform capability.
 - Владелец создает роли и назначает их только активным membership своего tenant.
 - Передача владения выполняется отдельным подтверждаемым workflow. В tenant
   всегда остается хотя бы один активный владелец.

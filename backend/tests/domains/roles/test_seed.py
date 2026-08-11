@@ -25,6 +25,8 @@ GRANT_SCOPED_PLATFORM_CODES = {
     "platform.audit.global.view",
     "platform.access.view",
     "platform.access.manage",
+    "platform.accounts.view",
+    "platform.accounts.manage",
 }
 
 
@@ -40,7 +42,7 @@ async def _template_codes(db_session: AsyncSession, template_name: str) -> list[
 async def test_seed_permissions_count(db_session: AsyncSession) -> None:
     """The migrated permission catalogue remains complete and duplicate-free."""
     count = (await db_session.execute(select(func.count()).select_from(Permission))).scalar_one()
-    assert count == 59
+    assert count == 61
 
     groups = (
         await db_session.execute(select(func.count(func.distinct(Permission.group_code))))

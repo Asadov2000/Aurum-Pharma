@@ -27,6 +27,8 @@ class PlatformTargetRecord:
     has_membership: bool
     is_developer: bool
     is_administrator: bool
+    has_platform_staff_profile: bool
+    has_password: bool
 
 
 @dataclass(frozen=True)
@@ -291,6 +293,13 @@ class PlatformAccessRepository:
                           account.home_tenant_id,
                           account.is_developer,
                           account.is_administrator,
+                          account.password_hash IS NOT NULL AS has_password,
+                          EXISTS (
+                            SELECT 1
+                            FROM public.platform_staff_account AS profile
+                            WHERE profile.user_id = account.id
+                              AND profile.status = 'active'
+                          ) AS has_platform_staff_profile,
                           EXISTS (
                             SELECT 1
                             FROM public.tenant_membership AS membership
@@ -319,6 +328,8 @@ class PlatformAccessRepository:
             has_membership=bool(row["has_membership"]),
             is_developer=bool(row["is_developer"]),
             is_administrator=bool(row["is_administrator"]),
+            has_platform_staff_profile=bool(row["has_platform_staff_profile"]),
+            has_password=bool(row["has_password"]),
         )
 
     async def expire_pending_for_target(

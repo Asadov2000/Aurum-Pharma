@@ -101,6 +101,12 @@ function ModuleIcon({ id }: { id: PlatformModule["id"] }): JSX.Element {
           <rect x="13" y="8" width="8" height="13" rx="1" />
           <path d="M6 7h2M6 11h2M6 15h2M16 12h2M16 16h2" />
         </>
+      ) : id === "accounts" ? (
+        <>
+          <circle cx="9" cy="8" r="3" />
+          <path d="M3.5 20c.5-4 2.3-6 5.5-6s5 2 5.5 6" />
+          <path d="M16 8h5M18.5 5.5v5" />
+        </>
       ) : id === "access" ? (
         <>
           <circle cx="12" cy="8" r="3" />

@@ -26,6 +26,8 @@ class PlatformCapabilityCode(StrEnum):
     AUDIT_GLOBAL_VIEW = "platform.audit.global.view"
     ACCESS_VIEW = "platform.access.view"
     ACCESS_MANAGE = "platform.access.manage"
+    ACCOUNTS_VIEW = "platform.accounts.view"
+    ACCOUNTS_MANAGE = "platform.accounts.manage"
 
 
 class PlatformAccessStatus(StrEnum):

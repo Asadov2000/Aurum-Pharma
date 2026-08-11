@@ -4,10 +4,10 @@ import {
 } from "@/features/auth/platformCapabilities";
 
 export interface PlatformModule {
-  id: "tenants" | "audit" | "access";
+  id: "tenants" | "audit" | "access" | "accounts";
   title: string;
   description: string;
-  to: "/admin/tenants" | "/audit" | "/admin/access";
+  to: "/admin/tenants" | "/audit" | "/admin/access" | "/admin/accounts";
   capability: PlatformCapability;
   tone: "primary" | "neutral";
   developerOnly?: boolean;
@@ -20,6 +20,14 @@ const MODULES: readonly PlatformModule[] = [
     description: "Реестр аптек, владельцы, сотрудники, биллинг и защищённая поддержка",
     to: "/admin/tenants",
     capability: PLATFORM_CAPABILITIES.tenantsView,
+    tone: "primary",
+  },
+  {
+    id: "accounts",
+    title: "Команда Aurum",
+    description: "Безопасные приглашения и состояние аккаунтов сотрудников платформы",
+    to: "/admin/accounts",
+    capability: PLATFORM_CAPABILITIES.accountsView,
     tone: "primary",
   },
   {

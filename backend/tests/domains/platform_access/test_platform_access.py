@@ -14,7 +14,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.security import hash_token
+from app.core.security import hash_password, hash_token
 from app.core.time import utc_now
 from app.domains.audit.models import AuditLog
 from app.domains.auth.models import AppUser, PlatformAccessGrant, Session
@@ -38,15 +38,47 @@ REQUEST_PAYLOAD = {
 }
 
 
-async def _target(db: AsyncSession) -> AppUser:
-    user = AppUser(
-        email=f"platform-target-{uuid4().hex}@example.invalid",
-        full_name="Platform Target",
-        status="active",
+async def _target(db: AsyncSession, actor: AppUser) -> AppUser:
+    actor_session = await _session(db, actor)
+    token_hash = hash_token(secrets.token_urlsafe(32))
+    await db.execute(
+        text("SELECT set_config('app.user_id', :value, true)"),
+        {"value": str(actor.id)},
     )
-    db.add(user)
-    await db.flush()
-    await db.refresh(user)
+    await db.execute(
+        text("SELECT set_config('app.auth_session_id', :value, true)"),
+        {"value": str(actor_session.id)},
+    )
+    user_id = await db.scalar(
+        text("""
+            SELECT invitation.user_id
+            FROM public.create_platform_staff_invitation(
+              :actor_user_id,
+              :actor_session_id,
+              :email,
+              'Platform Target',
+              :token_hash,
+              statement_timestamp() + INTERVAL '1 hour'
+            ) AS invitation
+            """),
+        {
+            "actor_user_id": actor.id,
+            "actor_session_id": actor_session.id,
+            "email": f"platform-target-{uuid4().hex}@example.invalid",
+            "token_hash": token_hash,
+        },
+    )
+    assert user_id is not None
+    activated_id = await db.scalar(
+        text("SELECT public.accept_platform_staff_invitation(:token_hash, :password_hash)"),
+        {
+            "token_hash": token_hash,
+            "password_hash": hash_password("PlatformTest9Password"),
+        },
+    )
+    assert activated_id == user_id
+    user = await db.get(AppUser, user_id)
+    assert user is not None
     return user
 
 
@@ -79,7 +111,7 @@ async def test_grant_activation_revokes_target_sessions_and_redacts_audit_reason
         full_name="Sole Developer",
     )
     await make_test_developer_sole(db_session, developer)
-    target = await _target(db_session)
+    target = await _target(db_session, developer)
     target_session = await _session(db_session, target)
     token = await create_support_access_token(db_session, developer)
     request_id = "platform-grant-test"
@@ -190,7 +222,7 @@ async def test_second_developer_must_independently_approve(
         access_kind="developer",
         full_name="Approving Developer",
     )
-    target = await _target(db_session)
+    target = await _target(db_session, requester)
     target_session = await _session(db_session, target)
     requester_token = await create_support_access_token(db_session, requester)
     approver_token = await create_support_access_token(db_session, approver)
@@ -247,7 +279,7 @@ async def test_approval_rechecks_current_delegation_envelope(
         access_kind="developer",
         full_name="Approving Developer",
     )
-    target = await _target(db_session)
+    target = await _target(db_session, requester)
     requester_token = await create_support_access_token(db_session, requester)
     approver_token = await create_support_access_token(db_session, approver)
 
@@ -298,7 +330,7 @@ async def test_expired_approval_is_closed_atomically(
         access_kind="developer",
         full_name="Expiry Approving Developer",
     )
-    target = await _target(db_session)
+    target = await _target(db_session, requester)
     target_session = await _session(db_session, target)
     requester_token = await create_support_access_token(db_session, requester)
     approver_token = await create_support_access_token(db_session, approver)
@@ -421,7 +453,7 @@ async def test_tenant_status_change_requires_billing_capability(
         access_kind="developer",
     )
     await make_test_developer_sole(db_session, developer)
-    target = await _target(db_session)
+    target = await _target(db_session, developer)
     developer_token = await create_support_access_token(db_session, developer)
     grant_response = await platform_client.post(
         "/api/v1/admin/platform-access/grants",

@@ -48,4 +48,6 @@ export const platformCapabilityLabel: Record<string, string> = {
   [PLATFORM_CAPABILITIES.auditGlobalView]: "Глобальный аудит",
   [PLATFORM_CAPABILITIES.accessView]: "Просмотр доступов платформы",
   [PLATFORM_CAPABILITIES.accessManage]: "Управление доступами платформы",
+  [PLATFORM_CAPABILITIES.accountsView]: "Просмотр команды Aurum",
+  [PLATFORM_CAPABILITIES.accountsManage]: "Приглашение команды Aurum",
 };

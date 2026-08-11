@@ -98,6 +98,8 @@ NO_ACCESS_TABLES = {
     "notification_delivery",
     "platform_access_grant",
     "platform_access_grant_permission",
+    "platform_staff_account",
+    "platform_staff_account_event",
     "session",
     "support_mfa",
     "support_mfa_recovery_code",
@@ -143,6 +145,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "accept_platform_staff_invitation",
     "accept_tenant_invitation",
     "activate_edge_writer_handover",
     "allocate_register_receipt",
@@ -158,6 +161,7 @@ CUSTOM_FUNCTIONS = {
     "current_app_user_id",
     "current_tenant_id",
     "create_invited_app_user",
+    "create_platform_staff_invitation",
     "create_auth_session_from_email_code",
     "create_scoped_notification",
     "create_tenant_user_assignment",
@@ -216,6 +220,8 @@ CUSTOM_FUNCTIONS = {
     "touch_auth_user_last_login",
     "prepare_edge_writer_handover",
     "prepare_edge_writer_foundation_handover",
+    "platform_actor_has_capability",
+    "platform_staff_invitation_is_usable",
     "trg_audit_log",
     "trg_audit_edge_cash_command_insert",
     "trg_audit_platform_access_grant",
@@ -265,6 +271,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_tenant_role_mutation",
     "trg_initialize_branch_sync_writer",
     "trg_project_platform_access_grant",
+    "trg_reject_platform_staff_event_mutation",
     "trg_seed_bootstrap_platform_capabilities",
     "trg_require_full_activation_bootstrap",
     "trg_require_full_bootstrap_transition",
@@ -283,6 +290,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "accept_platform_staff_invitation",
     "accept_tenant_invitation",
     "allocate_register_receipt",
     "append_audit_event",
@@ -309,6 +317,7 @@ APP_EXECUTABLE_FUNCTIONS = {
     "lookup_login_user_by_email",
     "mark_all_scoped_notifications_read",
     "mark_scoped_notification_read",
+    "platform_staff_invitation_is_usable",
     "reactivate_tenant_user_assignment",
     "register_auth_session_device",
     "record_edge_writer_readiness",

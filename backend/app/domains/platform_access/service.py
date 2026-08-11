@@ -92,6 +92,8 @@ class PlatformAccessService:
             or target.has_membership
             or target.is_developer
             or target.is_administrator
+            or not target.has_platform_staff_profile
+            or not target.has_password
         ):
             raise BusinessRuleError("Target account is not eligible for platform access")
 
