@@ -12,6 +12,10 @@ const DashboardPage = lazyRouteComponent(
   "DashboardPage",
 );
 const LoginPage = lazyRouteComponent(() => import("@/features/auth/LoginPage"), "LoginPage");
+const PlatformActivationPage = lazyRouteComponent(
+  () => import("@/features/platformAccounts/PlatformActivationPage"),
+  "PlatformActivationPage",
+);
 const TenantsPage = lazyRouteComponent(
   () => import("@/features/foundation/TenantsPage"),
   "TenantsPage",
@@ -106,6 +110,15 @@ const platformAccessRoute = createRoute({
   getParentRoute,
   path: "/admin/access",
   component: lazyRouteComponent(() => import("@/features/platformAccess/PlatformAccessPage")),
+});
+
+const platformAccountsRoute = createRoute({
+  getParentRoute,
+  path: "/admin/accounts",
+  component: lazyRouteComponent(
+    () => import("@/features/platformAccounts/PlatformAccountsPage"),
+    "PlatformAccountsPage",
+  ),
 });
 
 const branchesRoute = createRoute({
@@ -227,10 +240,22 @@ const loginRoute = createRoute({
   validateSearch: parseLoginSearch,
 });
 
+function parseActivationSearch(raw: Record<string, unknown>): { token?: string } {
+  return typeof raw.token === "string" ? { token: raw.token } : {};
+}
+
+const platformActivationRoute = createRoute({
+  getParentRoute,
+  path: "/activate-platform",
+  component: PlatformActivationPage,
+  validateSearch: parseActivationSearch,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   platformControlRoute,
   platformAccessRoute,
+  platformAccountsRoute,
   tenantsRoute,
   branchesRoute,
   registersRoute,
@@ -251,6 +276,7 @@ const routeTree = rootRoute.addChildren([
   securityRoute,
   reportsRoute,
   loginRoute,
+  platformActivationRoute,
 ]);
 
 export const router = createRouter({

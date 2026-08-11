@@ -78,6 +78,20 @@ describe("PlatformControlPage", () => {
     expect(screen.queryByRole("link", { name: /Доступ платформы/i })).not.toBeInTheDocument();
   });
 
+  it("shows the Aurum team to an administrator with account visibility", () => {
+    mockUser = {
+      is_developer: false,
+      is_administrator: true,
+      platform_capabilities: ["platform.accounts.view"],
+    };
+    render(<PlatformControlPage />);
+
+    expect(screen.getByRole("link", { name: /Команда Aurum/i })).toHaveAttribute(
+      "href",
+      "/admin/accounts",
+    );
+  });
+
   it("fails closed when the account has no platform capabilities", () => {
     mockUser = {
       is_developer: true,

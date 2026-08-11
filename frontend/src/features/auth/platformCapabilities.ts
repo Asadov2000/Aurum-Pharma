@@ -12,6 +12,8 @@ export const PLATFORM_CAPABILITIES = {
   auditGlobalView: "platform.audit.global.view",
   accessView: "platform.access.view",
   accessManage: "platform.access.manage",
+  accountsView: "platform.accounts.view",
+  accountsManage: "platform.accounts.manage",
 } as const;
 
 export type PlatformCapability = (typeof PLATFORM_CAPABILITIES)[keyof typeof PLATFORM_CAPABILITIES];

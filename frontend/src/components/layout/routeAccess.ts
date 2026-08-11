@@ -4,6 +4,7 @@ import { activeTenantId } from "@/features/auth/tenantContext";
 const TENANTS_VIEW_CAPABILITY = "platform.tenants.view";
 const GLOBAL_AUDIT_VIEW_CAPABILITY = "platform.audit.global.view";
 const PLATFORM_ACCESS_VIEW_CAPABILITY = "platform.access.view";
+const PLATFORM_ACCOUNTS_VIEW_CAPABILITY = "platform.accounts.view";
 
 export const BRANCH_VIEW_PERMISSIONS = ["branches.view"] as const;
 export const REGISTER_VIEW_PERMISSIONS = ["registers.view"] as const;
@@ -24,6 +25,7 @@ export type AppRoutePath =
   | "/"
   | "/admin"
   | "/admin/access"
+  | "/admin/accounts"
   | "/admin/tenants"
   | "/onboarding"
   | "/branches"
@@ -89,19 +91,24 @@ function isPath(pathname: string, route: AppRoutePath): boolean {
  * still performs the authoritative server-side authorization check.
  */
 export function canAccessPath(pathname: string, context: RouteAccessContext): boolean {
-  if (pathname === "/login") return true;
+  if (pathname === "/login" || pathname === "/activate-platform") return true;
   if (context.isSupportScoped && pathname.startsWith("/admin")) return false;
   const canGovernPlatformAccess =
     context.isDeveloper && hasPlatformCapability(context, PLATFORM_ACCESS_VIEW_CAPABILITY);
+  const canViewPlatformAccounts = hasPlatformCapability(context, PLATFORM_ACCOUNTS_VIEW_CAPABILITY);
   if (pathname === "/admin") {
     return (
       hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY) ||
       hasPlatformCapability(context, GLOBAL_AUDIT_VIEW_CAPABILITY) ||
-      canGovernPlatformAccess
+      canGovernPlatformAccess ||
+      canViewPlatformAccounts
     );
   }
   if (pathname === "/admin/access") {
     return canGovernPlatformAccess;
+  }
+  if (pathname === "/admin/accounts") {
+    return canViewPlatformAccounts;
   }
   if (isPath(pathname, "/admin/tenants")) {
     return hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY);

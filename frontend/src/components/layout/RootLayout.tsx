@@ -18,7 +18,7 @@ const routePending = (
 
 export function RootLayout(): JSX.Element {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  if (pathname === "/login") {
+  if (pathname === "/login" || pathname === "/activate-platform") {
     return (
       <Suspense fallback={routePending}>
         <Outlet />

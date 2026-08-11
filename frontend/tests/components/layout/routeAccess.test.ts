@@ -17,6 +17,10 @@ const SELLER: RouteAccessContext = {
 };
 
 describe("route access", () => {
+  it("keeps platform activation public", () => {
+    expect(canAccessPath("/activate-platform", SELLER)).toBe(true);
+  });
+
   it("allows only explicitly granted seller sections", () => {
     expect(canAccessPath("/pos", SELLER)).toBe(true);
     expect(canAccessPath("/catalog", SELLER)).toBe(true);
@@ -145,5 +149,27 @@ describe("route access", () => {
       }),
     ).toBe(false);
     expect(canAccessPath("/admin/access", { ...developer, isSupportScoped: true })).toBe(false);
+  });
+
+  it("shows platform accounts to either platform role with the exact capability", () => {
+    const administrator: RouteAccessContext = {
+      ...SELLER,
+      isAdministrator: true,
+      hasTenant: false,
+      permissions: [],
+      platformCapabilities: ["platform.accounts.view"],
+    };
+
+    expect(canAccessPath("/admin", administrator)).toBe(true);
+    expect(canAccessPath("/admin/accounts", administrator)).toBe(true);
+    expect(
+      canAccessPath("/admin/accounts", {
+        ...administrator,
+        platformCapabilities: [],
+      }),
+    ).toBe(false);
+    expect(canAccessPath("/admin/accounts", { ...administrator, isSupportScoped: true })).toBe(
+      false,
+    );
   });
 });
