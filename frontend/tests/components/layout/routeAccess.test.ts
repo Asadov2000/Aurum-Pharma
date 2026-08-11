@@ -126,15 +126,24 @@ describe("route access", () => {
     expect(canAccessPath("/audit", tenantViewer)).toBe(false);
   });
 
-  it("does not expose an empty control center for capabilities without a module", () => {
+  it("limits platform access governance to an unscoped developer", () => {
+    const developer: RouteAccessContext = {
+      ...SELLER,
+      isDeveloper: true,
+      hasTenant: false,
+      permissions: [],
+      platformCapabilities: ["platform.access.view"],
+    };
+
+    expect(canAccessPath("/admin", developer)).toBe(true);
+    expect(canAccessPath("/admin/access", developer)).toBe(true);
     expect(
-      canAccessPath("/admin", {
-        ...SELLER,
-        isDeveloper: true,
-        hasTenant: false,
-        permissions: [],
-        platformCapabilities: ["platform.access.view"],
+      canAccessPath("/admin/access", {
+        ...developer,
+        isDeveloper: false,
+        isAdministrator: true,
       }),
     ).toBe(false);
+    expect(canAccessPath("/admin/access", { ...developer, isSupportScoped: true })).toBe(false);
   });
 });

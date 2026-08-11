@@ -53,6 +53,8 @@ class PlatformAccessGrantRecord:
     created_at: datetime
     updated_at: datetime
     capabilities: tuple[str, ...]
+    user_email: str | None = None
+    user_full_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,8 @@ def _grant_record(row: RowMapping) -> PlatformAccessGrantRecord:
         created_at=cast(datetime, row["created_at"]),
         updated_at=cast(datetime, row["updated_at"]),
         capabilities=(),
+        user_email=cast(str | None, row.get("user_email")),
+        user_full_name=cast(str | None, row.get("user_full_name")),
     )
 
 
@@ -607,18 +611,43 @@ class PlatformAccessRepository:
     ) -> list[PlatformAccessGrantRecord]:
         rows = (
             await self.session.execute(
-                text(f"""
-                    SELECT {_GRANT_COLUMNS}
-                    FROM public.platform_access_grant
+                text("""
+                    SELECT
+                      platform_grant.id,
+                      platform_grant.user_id,
+                      platform_grant.access_kind,
+                      platform_grant.status,
+                      platform_grant.requested_by,
+                      platform_grant.request_reason_code,
+                      platform_grant.request_reason,
+                      platform_grant.requested_at,
+                      platform_grant.requires_approval,
+                      platform_grant.approval_expires_at,
+                      platform_grant.approved_by,
+                      platform_grant.approved_at,
+                      platform_grant.approval_reason_code,
+                      platform_grant.approval_reason,
+                      platform_grant.revoked_by,
+                      platform_grant.revoked_at,
+                      platform_grant.revoke_reason_code,
+                      platform_grant.revoke_reason,
+                      platform_grant.version,
+                      platform_grant.created_at,
+                      platform_grant.updated_at,
+                      account.email AS user_email,
+                      account.full_name AS user_full_name
+                    FROM public.platform_access_grant AS platform_grant
+                    JOIN public.app_user AS account
+                      ON account.id = platform_grant.user_id
                     WHERE (
                       CAST(:status AS TEXT) IS NULL
-                      OR status = CAST(:status AS TEXT)
+                      OR platform_grant.status = CAST(:status AS TEXT)
                     )
                       AND (
                         CAST(:user_id AS UUID) IS NULL
-                        OR user_id = CAST(:user_id AS UUID)
+                        OR platform_grant.user_id = CAST(:user_id AS UUID)
                       )
-                    ORDER BY requested_at DESC, id DESC
+                    ORDER BY platform_grant.requested_at DESC, platform_grant.id DESC
                     LIMIT :limit
                     """),
                 {"status": status, "user_id": user_id, "limit": limit},

@@ -9,7 +9,10 @@ import { availablePlatformModules, type PlatformModule } from "./moduleCatalog";
 
 export function PlatformControlPage(): JSX.Element {
   const { user } = useAuth();
-  const modules = availablePlatformModules(user?.platform_capabilities ?? []);
+  const modules = availablePlatformModules(
+    user?.platform_capabilities ?? [],
+    user?.is_developer === true,
+  );
 
   if (modules.length === 0) {
     return (
@@ -97,6 +100,12 @@ function ModuleIcon({ id }: { id: PlatformModule["id"] }): JSX.Element {
           <rect x="3" y="3" width="8" height="18" rx="1" />
           <rect x="13" y="8" width="8" height="13" rx="1" />
           <path d="M6 7h2M6 11h2M6 15h2M16 12h2M16 16h2" />
+        </>
+      ) : id === "access" ? (
+        <>
+          <circle cx="12" cy="8" r="3" />
+          <path d="M5 20c.6-4 2.9-6 7-6s6.4 2 7 6" />
+          <path d="M18 4v4M16 6h4" />
         </>
       ) : (
         <>

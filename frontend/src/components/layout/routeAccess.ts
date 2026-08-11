@@ -3,6 +3,7 @@ import { activeTenantId } from "@/features/auth/tenantContext";
 
 const TENANTS_VIEW_CAPABILITY = "platform.tenants.view";
 const GLOBAL_AUDIT_VIEW_CAPABILITY = "platform.audit.global.view";
+const PLATFORM_ACCESS_VIEW_CAPABILITY = "platform.access.view";
 
 export const BRANCH_VIEW_PERMISSIONS = ["branches.view"] as const;
 export const REGISTER_VIEW_PERMISSIONS = ["registers.view"] as const;
@@ -22,6 +23,7 @@ export const AUDIT_VIEW_PERMISSIONS = [
 export type AppRoutePath =
   | "/"
   | "/admin"
+  | "/admin/access"
   | "/admin/tenants"
   | "/onboarding"
   | "/branches"
@@ -52,14 +54,15 @@ export interface RouteAccessContext {
 }
 
 export function getRouteAccessContext(user: MeResponse | null | undefined): RouteAccessContext {
+  const identity: Partial<MeResponse> = user ?? {};
   return {
-    isDeveloper: user?.is_developer === true,
-    isAdministrator: user?.is_administrator === true,
-    isSupportScoped: user?.support_access !== null && user?.support_access !== undefined,
-    isTenantOwner: user?.is_tenant_owner === true,
+    isDeveloper: !!identity.is_developer,
+    isAdministrator: !!identity.is_administrator,
+    isSupportScoped: !!identity.support_access,
+    isTenantOwner: !!identity.is_tenant_owner,
     hasTenant: Boolean(activeTenantId(user)),
-    permissions: user?.permissions ?? [],
-    platformCapabilities: user?.platform_capabilities ?? [],
+    permissions: identity.permissions ?? [],
+    platformCapabilities: identity.platform_capabilities ?? [],
   };
 }
 
@@ -87,15 +90,21 @@ function isPath(pathname: string, route: AppRoutePath): boolean {
  */
 export function canAccessPath(pathname: string, context: RouteAccessContext): boolean {
   if (pathname === "/login") return true;
+  if (context.isSupportScoped && pathname.startsWith("/admin")) return false;
+  const canGovernPlatformAccess =
+    context.isDeveloper && hasPlatformCapability(context, PLATFORM_ACCESS_VIEW_CAPABILITY);
   if (pathname === "/admin") {
     return (
-      !context.isSupportScoped &&
-      (hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY) ||
-        hasPlatformCapability(context, GLOBAL_AUDIT_VIEW_CAPABILITY))
+      hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY) ||
+      hasPlatformCapability(context, GLOBAL_AUDIT_VIEW_CAPABILITY) ||
+      canGovernPlatformAccess
     );
   }
+  if (pathname === "/admin/access") {
+    return canGovernPlatformAccess;
+  }
   if (isPath(pathname, "/admin/tenants")) {
-    return !context.isSupportScoped && hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY);
+    return hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY);
   }
   if (pathname.startsWith("/admin/")) {
     return false;
