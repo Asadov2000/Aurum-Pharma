@@ -278,5 +278,5 @@ export function PlatformAccountActionModal({
 }
 
 function createActivationUrl(invitation: PlatformStaffInvitation): string {
-  return `${window.location.origin}/activate-platform?token=${encodeURIComponent(invitation.activation_token ?? "")}`;
+  return `${window.location.origin}/activate-platform#token=${encodeURIComponent(invitation.activation_token ?? "")}`;
 }

@@ -8,15 +8,22 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
-from app.core.security import generate_code_salt, hash_code, verify_password
+from app.core.security import (
+    email_outbox_encryption_keyring_json,
+    generate_code_salt,
+    hash_code,
+    verify_password,
+)
 from app.core.time import utc_now
 from app.domains.auth.models import EmailCode, Session
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.service import AuthService
 from app.domains.platform_accounts import service as platform_accounts_service
+from app.domains.platform_accounts.repository import PlatformAccountsRepository
 from tests.auth_helpers import create_support_access_token
 from tests.platform_access_helpers import create_test_platform_user
 
@@ -100,6 +107,13 @@ async def test_developer_invites_and_candidate_activates_without_platform_access
         )
     )
     await db_session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
+    assert (
+        await PlatformAccountsRepository(db_session).claim_invitation_email(
+            encryption_keyring=email_outbox_encryption_keyring_json(),
+            lease_seconds=300,
+        )
+        is None
+    )
 
     account = (
         (
@@ -324,6 +338,149 @@ async def test_reinvite_rotates_token_is_idempotent_and_blocks_normal_login(
         or 0
     )
     assert events == 1
+    assert (
+        await PlatformAccountsRepository(db_session).claim_invitation_email(
+            encryption_keyring=email_outbox_encryption_keyring_json(),
+            lease_seconds=300,
+        )
+        is None
+    )
+    deliveries = (
+        (
+            await db_session.execute(
+                text("""
+                    SELECT account_version, status, payload_ciphertext
+                    FROM public.platform_email_outbox
+                    WHERE account_user_id = :user_id
+                    ORDER BY account_version
+                    """),
+                {"user_id": UUID(invited.json()["user_id"])},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert [(row["account_version"], row["status"]) for row in deliveries] == [
+        (1, "cancelled"),
+        (2, "cancelled"),
+    ]
+    assert all(row["payload_ciphertext"] is None for row in deliveries)
+
+
+async def test_invitation_outbox_encrypts_claims_retries_and_clears_payload(
+    db_session: AsyncSession,
+    platform_accounts_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    developer = await create_test_platform_user(db_session, access_kind="developer")
+    access_token = await create_support_access_token(db_session, developer)
+    activation_token = "outbox-platform-activation-token-123456789"
+    monkeypatch.setattr(
+        platform_accounts_service.secrets,
+        "token_urlsafe",
+        lambda _size: activation_token,
+    )
+    email = f"outbox-{uuid4().hex}@example.com"
+    invited = await platform_accounts_client.post(
+        "/api/v1/admin/platform-accounts/invitations",
+        json={"email": email, "full_name": "Outbox Candidate"},
+        headers=_headers(access_token),
+    )
+    assert invited.status_code == 201, invited.text
+
+    stored = (
+        (
+            await db_session.execute(
+                text("""
+                    SELECT id, status, attempt_count, payload_ciphertext
+                    FROM public.platform_email_outbox
+                    WHERE account_user_id = :user_id
+                    """),
+                {"user_id": UUID(invited.json()["user_id"])},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    ciphertext = bytes(stored["payload_ciphertext"])
+    assert stored["status"] == "pending"
+    assert stored["attempt_count"] == 0
+    assert activation_token.encode() not in ciphertext
+    assert email.encode() not in ciphertext
+
+    repo = PlatformAccountsRepository(db_session)
+    with pytest.raises(DBAPIError, match="encryption key version is unavailable"):
+        async with db_session.begin_nested():
+            await repo.claim_invitation_email(
+                encryption_keyring="{}",
+                lease_seconds=300,
+            )
+    claim = await repo.claim_invitation_email(
+        encryption_keyring=email_outbox_encryption_keyring_json(),
+        lease_seconds=300,
+    )
+    assert claim is not None
+    assert claim.activation_token == activation_token
+    assert claim.recipient_email == email
+    assert claim.attempt_count == 1
+
+    status = await repo.complete_invitation_email(
+        outbox_id=claim.outbox_id,
+        claim_token=claim.claim_token,
+        outcome="transient_failure",
+        error_code="smtp_unavailable",
+    )
+    assert status == "pending"
+    assert (
+        await repo.claim_invitation_email(
+            encryption_keyring=email_outbox_encryption_keyring_json(),
+            lease_seconds=300,
+        )
+        is None
+    )
+
+    await db_session.execute(
+        text("""
+            UPDATE public.platform_email_outbox
+            SET available_at = statement_timestamp()
+            WHERE id = :outbox_id
+            """),
+        {"outbox_id": claim.outbox_id},
+    )
+    retry = await repo.claim_invitation_email(
+        encryption_keyring=email_outbox_encryption_keyring_json(),
+        lease_seconds=300,
+    )
+    assert retry is not None
+    assert retry.attempt_count == 2
+    assert retry.activation_token == activation_token
+    assert (
+        await repo.complete_invitation_email(
+            outbox_id=retry.outbox_id,
+            claim_token=retry.claim_token,
+            outcome="sent",
+            error_code=None,
+        )
+        == "sent"
+    )
+    terminal = (
+        (
+            await db_session.execute(
+                text("""
+                    SELECT status, attempt_count, payload_ciphertext, sent_at
+                    FROM public.platform_email_outbox
+                    WHERE id = :outbox_id
+                    """),
+                {"outbox_id": retry.outbox_id},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert terminal["status"] == "sent"
+    assert terminal["attempt_count"] == 2
+    assert terminal["payload_ciphertext"] is None
+    assert terminal["sent_at"] is not None
 
 
 async def test_block_unblock_and_offboard_revoke_sessions_without_restoring_access(

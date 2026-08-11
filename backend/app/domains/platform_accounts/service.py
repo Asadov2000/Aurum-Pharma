@@ -11,6 +11,7 @@ from uuid import UUID
 import structlog
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from app.core.config import get_settings
 from app.core.errors import (
     AurumError,
     AuthenticationError,
@@ -19,7 +20,7 @@ from app.core.errors import (
     NotFoundError,
     PermissionDeniedError,
 )
-from app.core.security import hash_password, hash_token
+from app.core.security import derive_email_outbox_encryption_key, hash_password, hash_token
 from app.core.time import utc_now
 from app.domains.platform_accounts.repository import (
     PlatformAccountsRepository,
@@ -31,6 +32,7 @@ ACCOUNTS_MANAGE = "platform.accounts.manage"
 INVITATION_LIFETIME = timedelta(hours=24)
 PlatformStaffAction = Literal["block", "unblock", "offboard"]
 logger = structlog.get_logger("platform_accounts.service")
+settings = get_settings()
 
 
 def _lifecycle_error(exc: DBAPIError) -> AurumError:
@@ -114,6 +116,7 @@ class PlatformAccountsService:
             capability=ACCOUNTS_MANAGE,
         )
         activation_token = secrets.token_urlsafe(32)
+        delivery_enabled = not self.expose_activation_token
         try:
             account = await self.repo.create_invitation(
                 actor_user_id=actor_user_id,
@@ -122,9 +125,18 @@ class PlatformAccountsService:
                 full_name=full_name,
                 token_hash=hash_token(activation_token),
                 expires_at=utc_now() + INVITATION_LIFETIME,
+                delivery_token=activation_token if delivery_enabled else None,
+                delivery_key_version=(
+                    settings.EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION if delivery_enabled else None
+                ),
+                delivery_encryption_key=(
+                    derive_email_outbox_encryption_key() if delivery_enabled else None
+                ),
             )
         except IntegrityError as exc:
             raise ConflictError("Account cannot be invited") from exc
+        except DBAPIError as exc:
+            raise _lifecycle_error(exc) from exc
         return PlatformStaffInvitationResult(
             account=account,
             activation_token=activation_token if self.expose_activation_token else None,
@@ -159,6 +171,7 @@ class PlatformAccountsService:
             capability=ACCOUNTS_MANAGE,
         )
         activation_token = secrets.token_urlsafe(32)
+        delivery_enabled = not self.expose_activation_token
         try:
             result = await self.repo.reinvite(
                 actor_user_id=actor_user_id,
@@ -170,6 +183,13 @@ class PlatformAccountsService:
                 reason=reason,
                 token_hash=hash_token(activation_token),
                 expires_at=utc_now() + INVITATION_LIFETIME,
+                delivery_token=activation_token if delivery_enabled else None,
+                delivery_key_version=(
+                    settings.EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION if delivery_enabled else None
+                ),
+                delivery_encryption_key=(
+                    derive_email_outbox_encryption_key() if delivery_enabled else None
+                ),
             )
         except DBAPIError as exc:
             raise _lifecycle_error(exc) from exc

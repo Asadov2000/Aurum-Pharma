@@ -3,9 +3,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const activatePlatformStaffAccount = vi.fn();
+let searchToken: string | undefined;
 
 vi.mock("@tanstack/react-router", () => ({
-  useSearch: () => ({ token: "activation-token" }),
+  useSearch: () => ({ token: searchToken }),
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
     <a href={to}>{children}</a>
   ),
@@ -34,12 +35,14 @@ describe("PlatformActivationPage", () => {
   beforeEach(() => {
     activatePlatformStaffAccount.mockReset();
     activatePlatformStaffAccount.mockResolvedValue(undefined);
-    window.history.replaceState({}, "", "/activate-platform?token=activation-token");
+    searchToken = undefined;
+    window.history.replaceState({}, "", "/activate-platform#token=activation-token");
   });
 
   it("validates matching strong passwords and consumes the token from memory", async () => {
     renderPage();
     expect(window.location.search).toBe("");
+    expect(window.location.hash).toBe("");
 
     fireEvent.change(screen.getByLabelText("Новый пароль"), {
       target: { value: "StrongPlatform9Password" },

@@ -20,6 +20,7 @@ celery_app = Celery(
         "app.tasks.catalog",
         "app.tasks.billing",
         "app.tasks.notifications",
+        "app.tasks.platform_accounts",
     ],
 )
 
@@ -62,6 +63,10 @@ celery_app.conf.beat_schedule = {
     },
     "notifications-process-pending-deliveries": {
         "task": "notifications.process_pending_deliveries",
+        "schedule": crontab(minute="*"),
+    },
+    "platform-accounts-process-invitation-emails": {
+        "task": "platform_accounts.process_invitation_emails",
         "schedule": crontab(minute="*"),
     },
     "notifications-check-expiring-licenses": {

@@ -17,6 +17,8 @@ _PROD_DB_SUPPORT = "postgresql+asyncpg://support:Str0ng-Sup-Pw@db/aurum"
 _METRICS_TOKEN = "m" * 40
 _MFA_ENCRYPTION_KEY = "k" * 40
 _PREVIOUS_MFA_ENCRYPTION_KEY = "p" * 40
+_EMAIL_OUTBOX_ENCRYPTION_KEY = "e" * 40
+_PREVIOUS_EMAIL_OUTBOX_ENCRYPTION_KEY = "o" * 40
 _PRODUCTION_ORIGIN = "https://pharmacy.example.com"
 
 
@@ -29,6 +31,7 @@ def _build(**overrides: object) -> Settings:
         "MINIO_SECRET_KEY": "m" * 40,
         "METRICS_TOKEN": _METRICS_TOKEN,
         "MFA_ENCRYPTION_KEY": _MFA_ENCRYPTION_KEY,
+        "EMAIL_OUTBOX_ENCRYPTION_KEY": _EMAIL_OUTBOX_ENCRYPTION_KEY,
         "REDIS_URL": "redis://:Str0ng-Redis-Pw@redis:6379/0",
         "CORS_ORIGINS": [_PRODUCTION_ORIGIN],
         "TRUSTED_HOSTS": ["pharmacy.example.com"],
@@ -38,6 +41,7 @@ def _build(**overrides: object) -> Settings:
         "EMAIL_USER": "aurum@example.com",
         "EMAIL_PASSWORD": "smtp-provider-token",
         "EMAIL_FROM": "no-reply@example.com",
+        "PUBLIC_APP_URL": _PRODUCTION_ORIGIN,
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)  # type: ignore[arg-type]
@@ -173,6 +177,7 @@ def test_credentials_are_hidden_from_settings_representation() -> None:
         "application-user-key",
         "m" * 40,
         "smtp-provider-token",
+        _EMAIL_OUTBOX_ENCRYPTION_KEY,
     ):
         assert secret not in representation
 
@@ -229,6 +234,45 @@ def test_mfa_keyring_rejects_ambiguous_or_reused_roots() -> None:
         )
 
 
+def test_non_development_requires_independent_email_outbox_key() -> None:
+    with pytest.raises(ValidationError, match="EMAIL_OUTBOX_ENCRYPTION_KEY"):
+        _build(ENVIRONMENT="staging", EMAIL_OUTBOX_ENCRYPTION_KEY=None)
+
+    with pytest.raises(ValidationError, match="independent secrets"):
+        _build(ENVIRONMENT="production", EMAIL_OUTBOX_ENCRYPTION_KEY=_STRONG_SECRET)
+
+    with pytest.raises(ValidationError, match="independent secrets"):
+        _build(
+            ENVIRONMENT="production",
+            EMAIL_OUTBOX_ENCRYPTION_KEY=_MFA_ENCRYPTION_KEY,
+        )
+
+
+def test_email_outbox_keyring_supports_rotation_without_exposing_roots() -> None:
+    settings = _build(
+        EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION=2,
+        EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS={
+            1: _PREVIOUS_EMAIL_OUTBOX_ENCRYPTION_KEY,
+        },
+    )
+    representation = repr(settings)
+    assert _EMAIL_OUTBOX_ENCRYPTION_KEY not in representation
+    assert _PREVIOUS_EMAIL_OUTBOX_ENCRYPTION_KEY not in representation
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "http://pharmacy.example.com",
+        "https://user:password@pharmacy.example.com",
+        "https://pharmacy.example.com/?token=secret",
+    ],
+)
+def test_non_development_rejects_unsafe_public_app_url(public_url: str) -> None:
+    with pytest.raises(ValidationError, match="PUBLIC_APP_URL"):
+        _build(ENVIRONMENT="production", PUBLIC_APP_URL=public_url)
+
+
 def test_development_allows_defaults() -> None:
     s = _build(
         ENVIRONMENT="development",
@@ -270,6 +314,10 @@ def test_settings_read_secrets_from_files(
         "JWT_SECRET": _STRONG_SECRET,
         "MFA_ENCRYPTION_KEY": _MFA_ENCRYPTION_KEY,
         "MFA_ENCRYPTION_PREVIOUS_KEYS": '{"1":"' + _PREVIOUS_MFA_ENCRYPTION_KEY + '"}',
+        "EMAIL_OUTBOX_ENCRYPTION_KEY": _EMAIL_OUTBOX_ENCRYPTION_KEY,
+        "EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS": (
+            '{"1":"' + _PREVIOUS_EMAIL_OUTBOX_ENCRYPTION_KEY + '"}'
+        ),
         "METRICS_TOKEN": _METRICS_TOKEN,
         "REDIS_URL": "redis://:Str0ng-Redis-Pw@redis:6379/0",
         "MINIO_ACCESS_KEY": "application-user-key",
@@ -289,9 +337,11 @@ def test_settings_read_secrets_from_files(
         TRUSTED_PROXY_IPS=["172.30.0.10"],
         REFRESH_COOKIE_SECURE=True,
         MFA_ENCRYPTION_KEY_VERSION=2,
+        EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION=2,
         EMAIL_HOST="smtp.example.com",
         EMAIL_USER="aurum@example.com",
         EMAIL_FROM="no-reply@example.com",
+        PUBLIC_APP_URL=_PRODUCTION_ORIGIN,
     )
 
     assert settings.JWT_SECRET == _STRONG_SECRET
@@ -300,3 +350,5 @@ def test_settings_read_secrets_from_files(
     assert settings.MFA_ENCRYPTION_PREVIOUS_KEYS[1].get_secret_value() == (
         _PREVIOUS_MFA_ENCRYPTION_KEY
     )
+    assert settings.EMAIL_OUTBOX_ENCRYPTION_KEY is not None
+    assert settings.EMAIL_OUTBOX_ENCRYPTION_KEY.get_secret_value() == (_EMAIL_OUTBOX_ENCRYPTION_KEY)

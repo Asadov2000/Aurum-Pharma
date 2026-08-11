@@ -28,6 +28,16 @@ class PlatformStaffAccountRecord:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class PlatformInvitationEmailClaim:
+    outbox_id: UUID
+    claim_token: UUID
+    recipient_email: str
+    activation_token: str
+    invitation_expires_at: datetime
+    attempt_count: int
+
+
 def _record(row: RowMapping) -> PlatformStaffAccountRecord:
     return PlatformStaffAccountRecord(
         user_id=cast(UUID, row["user_id"]),
@@ -144,6 +154,9 @@ class PlatformAccountsRepository:
         full_name: str,
         token_hash: str,
         expires_at: datetime,
+        delivery_token: str | None,
+        delivery_key_version: int | None,
+        delivery_encryption_key: str | None,
     ) -> PlatformStaffAccountRecord:
         row = (
             (
@@ -172,7 +185,18 @@ class PlatformAccountsRepository:
             .mappings()
             .one()
         )
-        return _record(row)
+        record = _record(row)
+        if delivery_token is not None:
+            await self._enqueue_invitation_email(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                account=record,
+                activation_token=delivery_token,
+                token_hash=token_hash,
+                key_version=delivery_key_version,
+                encryption_key=delivery_encryption_key,
+            )
+        return record
 
     async def reinvite(
         self,
@@ -186,6 +210,9 @@ class PlatformAccountsRepository:
         reason: str,
         token_hash: str,
         expires_at: datetime,
+        delivery_token: str | None,
+        delivery_key_version: int | None,
+        delivery_encryption_key: str | None,
     ) -> tuple[PlatformStaffAccountRecord, bool] | None:
         row = (
             (
@@ -215,7 +242,112 @@ class PlatformAccountsRepository:
         )
         if row is None:
             return None
-        return _record(row), bool(row["applied"])
+        record = _record(row)
+        applied = bool(row["applied"])
+        if applied and delivery_token is not None:
+            await self._enqueue_invitation_email(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                account=record,
+                activation_token=delivery_token,
+                token_hash=token_hash,
+                key_version=delivery_key_version,
+                encryption_key=delivery_encryption_key,
+            )
+        return record, applied
+
+    async def _enqueue_invitation_email(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        account: PlatformStaffAccountRecord,
+        activation_token: str,
+        token_hash: str,
+        key_version: int | None,
+        encryption_key: str | None,
+    ) -> None:
+        if key_version is None or encryption_key is None:
+            raise ValueError("Invitation delivery encryption is not configured")
+        await self.session.scalar(
+            text("""
+                SELECT public.enqueue_platform_invitation_email(
+                  :actor_user_id, :actor_session_id, :target_user_id,
+                  :expected_version, :activation_token, :token_hash, :key_version,
+                  :encryption_key
+                )
+                """),
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "target_user_id": account.user_id,
+                "expected_version": account.version,
+                "activation_token": activation_token,
+                "token_hash": token_hash,
+                "key_version": key_version,
+                "encryption_key": encryption_key,
+            },
+        )
+
+    async def claim_invitation_email(
+        self,
+        *,
+        encryption_keyring: str,
+        lease_seconds: int,
+    ) -> PlatformInvitationEmailClaim | None:
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+                        SELECT *
+                        FROM public.claim_platform_invitation_email(
+                          CAST(:encryption_keyring AS JSONB), :lease_seconds
+                        )
+                        """),
+                    {
+                        "encryption_keyring": encryption_keyring,
+                        "lease_seconds": lease_seconds,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return PlatformInvitationEmailClaim(
+            outbox_id=cast(UUID, row["outbox_id"]),
+            claim_token=cast(UUID, row["claim_token"]),
+            recipient_email=str(row["recipient_email"]),
+            activation_token=str(row["activation_token"]),
+            invitation_expires_at=cast(datetime, row["invitation_expires_at"]),
+            attempt_count=int(cast(int, row["attempt_count"])),
+        )
+
+    async def complete_invitation_email(
+        self,
+        *,
+        outbox_id: UUID,
+        claim_token: UUID,
+        outcome: str,
+        error_code: str | None,
+    ) -> str | None:
+        return cast(
+            str | None,
+            await self.session.scalar(
+                text("""
+                    SELECT public.complete_platform_invitation_email(
+                      :outbox_id, :claim_token, :outcome, :error_code
+                    )
+                    """),
+                {
+                    "outbox_id": outbox_id,
+                    "claim_token": claim_token,
+                    "outcome": outcome,
+                    "error_code": error_code,
+                },
+            ),
+        )
 
     async def change_status(
         self,
