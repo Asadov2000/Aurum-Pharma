@@ -21,13 +21,14 @@ from app.domains.platform_accounts.repository import PlatformAccountsRepository
 from app.domains.platform_accounts.schemas import (
     PlatformStaffAccountList,
     PlatformStaffAccountRead,
+    PlatformStaffActionRequest,
     PlatformStaffActivationRead,
     PlatformStaffActivationRequest,
     PlatformStaffInvitationCreate,
     PlatformStaffInvitationRead,
     PlatformStaffStatus,
 )
-from app.domains.platform_accounts.service import PlatformAccountsService
+from app.domains.platform_accounts.service import PlatformAccountsService, PlatformStaffAction
 
 admin_router = APIRouter(prefix="/api/v1/admin/platform-accounts", tags=["platform-accounts"])
 activation_router = APIRouter(prefix="/api/v1/auth/platform-activation", tags=["auth"])
@@ -113,3 +114,94 @@ async def activate_platform_account(
 ) -> PlatformStaffActivationRead:
     await service.activate(token=payload.token, password=payload.password)
     return PlatformStaffActivationRead()
+
+
+@admin_router.post("/{user_id}/reinvite", response_model=PlatformStaffInvitationRead)
+async def reinvite_platform_account(
+    user_id: UUID,
+    payload: PlatformStaffActionRequest,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.accounts.manage")),
+    ],
+    service: Annotated[PlatformAccountsService, Depends(_admin_service)],
+) -> PlatformStaffInvitationRead:
+    invitation = await service.reinvite(
+        actor_user_id=user.user_id,
+        actor_session_id=_auth_session_id(user),
+        user_id=user_id,
+        version=payload.version,
+        operation_id=payload.operation_id,
+        reason_code=payload.reason_code.value,
+        reason=payload.reason,
+    )
+    return PlatformStaffInvitationRead(
+        **_read(invitation.account).model_dump(),
+        activation_token=invitation.activation_token,
+    )
+
+
+async def _change_status(
+    *,
+    action: PlatformStaffAction,
+    user_id: UUID,
+    payload: PlatformStaffActionRequest,
+    user: CurrentUser,
+    service: PlatformAccountsService,
+) -> PlatformStaffAccountRead:
+    account = await service.change_status(
+        actor_user_id=user.user_id,
+        actor_session_id=_auth_session_id(user),
+        user_id=user_id,
+        version=payload.version,
+        operation_id=payload.operation_id,
+        action=action,
+        reason_code=payload.reason_code.value,
+        reason=payload.reason,
+    )
+    return _read(account)
+
+
+@admin_router.post("/{user_id}/block", response_model=PlatformStaffAccountRead)
+async def block_platform_account(
+    user_id: UUID,
+    payload: PlatformStaffActionRequest,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.accounts.manage")),
+    ],
+    service: Annotated[PlatformAccountsService, Depends(_admin_service)],
+) -> PlatformStaffAccountRead:
+    return await _change_status(
+        action="block", user_id=user_id, payload=payload, user=user, service=service
+    )
+
+
+@admin_router.post("/{user_id}/unblock", response_model=PlatformStaffAccountRead)
+async def unblock_platform_account(
+    user_id: UUID,
+    payload: PlatformStaffActionRequest,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.accounts.manage")),
+    ],
+    service: Annotated[PlatformAccountsService, Depends(_admin_service)],
+) -> PlatformStaffAccountRead:
+    return await _change_status(
+        action="unblock", user_id=user_id, payload=payload, user=user, service=service
+    )
+
+
+@admin_router.post("/{user_id}/offboard", response_model=PlatformStaffAccountRead)
+async def offboard_platform_account(
+    user_id: UUID,
+    payload: PlatformStaffActionRequest,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.accounts.manage")),
+    ],
+    service: Annotated[PlatformAccountsService, Depends(_admin_service)],
+) -> PlatformStaffAccountRead:
+    return await _change_status(
+        action="offboard", user_id=user_id, payload=payload, user=user, service=service
+    )

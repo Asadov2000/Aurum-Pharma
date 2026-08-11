@@ -87,6 +87,7 @@ async def _session(db: AsyncSession, user: AppUser) -> Session:
         user_id=user.id,
         refresh_token_hash=hash_token(secrets.token_hex(32)),
         expires_at=utc_now() + timedelta(days=1),
+        mfa_verified_at=utc_now(),
     )
     db.add(session)
     await db.flush()

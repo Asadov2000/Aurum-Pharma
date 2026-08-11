@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import {
   Badge,
+  ActionMenu,
   Button,
   ConfigurableFilterBar,
   Input,
@@ -23,8 +24,13 @@ import { hasPlatformCapability, PLATFORM_CAPABILITIES } from "@/features/auth/pl
 import { describeApiError } from "@/lib/errorMessages";
 
 import { PlatformInvitationModal } from "./PlatformInvitationModal";
+import { PlatformAccountActionModal } from "./PlatformAccountActionModal";
 import { usePlatformStaffAccounts } from "./queries";
-import { type PlatformStaffStatus } from "./types";
+import {
+  type PlatformAccountAction,
+  type PlatformStaffAccount,
+  type PlatformStaffStatus,
+} from "./types";
 
 type StatusFilter = "all" | PlatformStaffStatus;
 
@@ -45,10 +51,13 @@ const statusTone: Record<PlatformStaffStatus, "info" | "success" | "danger" | "n
 export function PlatformAccountsPage(): JSX.Element {
   const { user } = useAuth();
   const preferenceKey = useFilterPreferenceKey("platform-accounts");
-  const canInvite = hasPlatformCapability(user, PLATFORM_CAPABILITIES.accountsManage);
+  const canManage = hasPlatformCapability(user, PLATFORM_CAPABILITIES.accountsManage);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<PlatformStaffAccount | null>(null);
+  const [selectedAction, setSelectedAction] = useState<PlatformAccountAction>("reinvite");
+  const [notice, setNotice] = useState<string | null>(null);
   const accounts = usePlatformStaffAccounts({
     q: search.trim().length >= 2 ? search.trim() : undefined,
     status: status === "all" ? undefined : status,
@@ -62,11 +71,17 @@ export function PlatformAccountsPage(): JSX.Element {
         description="Аккаунты платформы без смешивания с сотрудниками аптек"
         meta={<>найдено: {accounts.data?.total ?? 0}</>}
         actions={
-          canInvite ? (
+          canManage ? (
             <Button onClick={() => setInviteOpen(true)}>Пригласить сотрудника</Button>
           ) : null
         }
       />
+
+      {notice && (
+        <div role="status" className="rounded-md border border-info/30 bg-info-subtle p-3 text-sm">
+          {notice}
+        </div>
+      )}
 
       <ConfigurableFilterBar
         preferenceKey={preferenceKey}
@@ -148,39 +163,97 @@ export function PlatformAccountsPage(): JSX.Element {
               <TH>Статус аккаунта</TH>
               <TH>Приглашён</TH>
               <TH>Активация</TH>
+              {canManage && <TH className="text-right">Действия</TH>}
             </TR>
           </THead>
           <TBody>
-            {accounts.data?.items.map((account) => (
-              <TR key={account.user_id}>
-                <TD>
-                  <div className="max-w-72">
-                    <p className="truncate font-medium">{account.full_name}</p>
-                    <p className="truncate text-xs text-foreground-muted">{account.email}</p>
-                  </div>
-                </TD>
-                <TD>
-                  <Badge tone={statusTone[account.status]}>{statusLabel[account.status]}</Badge>
-                </TD>
-                <TD className="whitespace-nowrap">
-                  {new Date(account.invited_at).toLocaleString("ru-RU")}
-                </TD>
-                <TD className="whitespace-nowrap">
-                  {account.activated_at
-                    ? new Date(account.activated_at).toLocaleString("ru-RU")
-                    : account.invitation_expires_at
-                      ? `до ${new Date(account.invitation_expires_at).toLocaleString("ru-RU")}`
-                      : "—"}
-                </TD>
-              </TR>
-            ))}
+            {accounts.data?.items.map((account) => {
+              const actions = account.user_id === user?.id ? [] : actionsForStatus(account.status);
+              return (
+                <TR key={account.user_id}>
+                  <TD>
+                    <div className="max-w-72">
+                      <p className="truncate font-medium">{account.full_name}</p>
+                      <p className="truncate text-xs text-foreground-muted">{account.email}</p>
+                    </div>
+                  </TD>
+                  <TD>
+                    <Badge tone={statusTone[account.status]}>{statusLabel[account.status]}</Badge>
+                  </TD>
+                  <TD className="whitespace-nowrap">
+                    {new Date(account.invited_at).toLocaleString("ru-RU")}
+                  </TD>
+                  <TD className="whitespace-nowrap">
+                    {account.activated_at
+                      ? new Date(account.activated_at).toLocaleString("ru-RU")
+                      : account.invitation_expires_at
+                        ? `до ${new Date(account.invitation_expires_at).toLocaleString("ru-RU")}`
+                        : "—"}
+                  </TD>
+                  {canManage && (
+                    <TD className="text-right">
+                      {actions.length > 0 ? (
+                        <ActionMenu
+                          label={`Действия с аккаунтом ${account.full_name}`}
+                          items={actions.map((action) => ({
+                            label: actionLabel[action],
+                            tone:
+                              action === "block" || action === "offboard" ? "danger" : "default",
+                            onSelect: () => {
+                              setSelectedAction(action);
+                              setSelectedAccount(account);
+                            },
+                          }))}
+                        />
+                      ) : (
+                        <span className="text-foreground-muted">—</span>
+                      )}
+                    </TD>
+                  )}
+                </TR>
+              );
+            })}
           </TBody>
         </Table>
       )}
 
       <PlatformInvitationModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <PlatformAccountActionModal
+        action={selectedAction}
+        account={selectedAccount}
+        open={selectedAccount !== null}
+        onClose={() => setSelectedAccount(null)}
+        onCompleted={(action) => {
+          setNotice(actionSuccessMessage[action]);
+        }}
+        onRefreshRequired={(message) => {
+          setNotice(message);
+          void accounts.refetch();
+        }}
+      />
     </div>
   );
+}
+
+const actionLabel: Record<PlatformAccountAction, string> = {
+  reinvite: "Отправить приглашение повторно",
+  block: "Заблокировать",
+  unblock: "Разблокировать",
+  offboard: "Вывести из команды",
+};
+
+const actionSuccessMessage: Record<PlatformAccountAction, string> = {
+  reinvite: "Новое приглашение создано.",
+  block: "Аккаунт заблокирован, сессии и права отозваны.",
+  unblock: "Аккаунт разблокирован. Права не восстановлены.",
+  offboard: "Сотрудник выведен из команды.",
+};
+
+function actionsForStatus(status: PlatformStaffStatus): PlatformAccountAction[] {
+  if (status === "invited") return ["reinvite", "offboard"];
+  if (status === "active") return ["block", "offboard"];
+  if (status === "blocked") return ["unblock", "offboard"];
+  return [];
 }
 
 export default PlatformAccountsPage;

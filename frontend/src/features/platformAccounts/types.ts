@@ -40,3 +40,20 @@ export interface PlatformStaffActivationPayload {
   token: string;
   password: string;
 }
+
+export type PlatformAccountAction = "reinvite" | "block" | "unblock" | "offboard";
+
+export type PlatformAccountReasonCode =
+  | "invitation_delivery"
+  | "responsibility_change"
+  | "security_incident"
+  | "access_review"
+  | "employment_ended"
+  | "other";
+
+export interface PlatformAccountLifecyclePayload {
+  version: number;
+  operation_id: string;
+  reason_code: PlatformAccountReasonCode;
+  reason: string;
+}

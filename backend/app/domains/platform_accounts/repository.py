@@ -174,6 +174,88 @@ class PlatformAccountsRepository:
         )
         return _record(row)
 
+    async def reinvite(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        user_id: UUID,
+        version: int,
+        operation_id: UUID,
+        reason_code: str,
+        reason: str,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> tuple[PlatformStaffAccountRecord, bool] | None:
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+                    SELECT *
+                    FROM public.reinvite_platform_staff_account(
+                      :actor_user_id, :actor_session_id, :user_id, :version,
+                      :operation_id, :reason_code, :reason, :token_hash, :expires_at
+                    )
+                    """),
+                    {
+                        "actor_user_id": actor_user_id,
+                        "actor_session_id": actor_session_id,
+                        "user_id": user_id,
+                        "version": version,
+                        "operation_id": operation_id,
+                        "reason_code": reason_code,
+                        "reason": reason,
+                        "token_hash": token_hash,
+                        "expires_at": expires_at,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return _record(row), bool(row["applied"])
+
+    async def change_status(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        user_id: UUID,
+        version: int,
+        operation_id: UUID,
+        action: str,
+        reason_code: str,
+        reason: str,
+    ) -> PlatformStaffAccountRecord | None:
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+                    SELECT *
+                    FROM public.change_platform_staff_account_status(
+                      :actor_user_id, :actor_session_id, :user_id, :version,
+                      :operation_id, :action, :reason_code, :reason
+                    )
+                    """),
+                    {
+                        "actor_user_id": actor_user_id,
+                        "actor_session_id": actor_session_id,
+                        "user_id": user_id,
+                        "version": version,
+                        "operation_id": operation_id,
+                        "action": action,
+                        "reason_code": reason_code,
+                        "reason": reason,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return _record(row) if row is not None else None
+
     async def invitation_is_usable(self, token_hash: str) -> bool:
         return bool(
             await self.session.scalar(
