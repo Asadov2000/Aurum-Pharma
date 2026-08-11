@@ -46,7 +46,7 @@ test.describe("Platform staff account lifecycle", () => {
       await page.getByLabel("Комментарий").fill("Исходное приглашение не было доставлено");
       await page.getByRole("button", { name: "Создать новую ссылку" }).click();
       const activationUrl = await page.getByLabel("Ссылка активации").inputValue();
-      const replacementToken = new URL(activationUrl).searchParams.get("token");
+      const replacementToken = new URLSearchParams(new URL(activationUrl).hash.slice(1)).get("token");
       expect(replacementToken).toBeTruthy();
 
       const oldActivation = await platformApi.post("auth/platform-activation", {

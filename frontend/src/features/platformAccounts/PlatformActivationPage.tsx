@@ -29,14 +29,17 @@ type FormValues = z.infer<typeof schema>;
 
 export function PlatformActivationPage(): JSX.Element {
   const search = useSearch({ strict: false }) as { token?: string };
-  const [token] = useState(search.token ?? "");
+  const [token] = useState(() => {
+    const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get("token");
+    return fragmentToken ?? search.token ?? "";
+  });
   const [error, setError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
   const activation = useActivatePlatformStaffAccount();
   const form = useForm<FormValues>({ defaultValues: { password: "", confirmation: "" } });
 
   useEffect(() => {
-    if (search.token) {
+    if (search.token || window.location.hash) {
       window.history.replaceState(window.history.state, "", "/activate-platform");
     }
   }, [search.token]);

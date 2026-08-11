@@ -150,6 +150,9 @@ class Settings(BaseSettings):
     MFA_ENCRYPTION_KEY: SecretStr | None = None
     MFA_ENCRYPTION_KEY_VERSION: int = Field(default=1, ge=1, le=32767)
     MFA_ENCRYPTION_PREVIOUS_KEYS: dict[int, SecretStr] = Field(default_factory=dict)
+    EMAIL_OUTBOX_ENCRYPTION_KEY: SecretStr | None = None
+    EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION: int = Field(default=1, ge=1, le=32767)
+    EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS: dict[int, SecretStr] = Field(default_factory=dict)
     ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 7
     MFA_STEP_UP_MINUTES: int = Field(default=10, ge=1, le=15)
@@ -187,6 +190,9 @@ class Settings(BaseSettings):
     EMAIL_PASSWORD: str = Field(default="", repr=False)
     EMAIL_FROM: str = "no-reply@aurum-pharma.tj"
     EMAIL_USE_TLS: bool = True
+    EMAIL_SMTP_TIMEOUT_SECONDS: int = Field(default=10, ge=3, le=30)
+    EMAIL_OUTBOX_BATCH_SIZE: int = Field(default=25, ge=1, le=100)
+    PUBLIC_APP_URL: AnyHttpUrl = AnyHttpUrl("http://localhost:5173")
 
     APP_NAME: str = "Aurum Pharma"
     LOG_LEVEL: str = "INFO"
@@ -255,6 +261,40 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _guard_email_outbox_keyring(self) -> Settings:
+        if self.ENVIRONMENT != "development" and self.EMAIL_OUTBOX_ENCRYPTION_KEY is None:
+            raise ValueError("EMAIL_OUTBOX_ENCRYPTION_KEY must be set outside development")
+
+        roots: dict[int, str] = {
+            version: secret.get_secret_value()
+            for version, secret in self.EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS.items()
+        }
+        if self.EMAIL_OUTBOX_ENCRYPTION_KEY is not None:
+            roots[self.EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION] = (
+                self.EMAIL_OUTBOX_ENCRYPTION_KEY.get_secret_value()
+            )
+        if self.EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION in (self.EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS):
+            raise ValueError(
+                "EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS must not contain the current version"
+            )
+        protected_roots = {self.JWT_SECRET}
+        if self.MFA_ENCRYPTION_KEY is not None:
+            protected_roots.add(self.MFA_ENCRYPTION_KEY.get_secret_value())
+        protected_roots.update(
+            secret.get_secret_value() for secret in self.MFA_ENCRYPTION_PREVIOUS_KEYS.values()
+        )
+        for version, root in roots.items():
+            if version < 1 or version > 32767:
+                raise ValueError("Email outbox key versions must be between 1 and 32767")
+            if len(root) < 32:
+                raise ValueError("Email outbox encryption keys must contain at least 32 characters")
+            if root in protected_roots:
+                raise ValueError("Email outbox encryption keys must be independent secrets")
+        if len(set(roots.values())) != len(roots):
+            raise ValueError("Email outbox encryption key versions must use distinct secrets")
+        return self
+
+    @model_validator(mode="after")
     def _guard_non_development_security(self) -> Settings:
         """Fail fast if a deployment would start with insecure configuration.
         Development keeps working with the defaults used in docker-compose and
@@ -291,6 +331,15 @@ class Settings(BaseSettings):
                 self.EMAIL_USE_TLS,
             )
         )
+        public_app_url = urlsplit(str(self.PUBLIC_APP_URL))
+        if (
+            public_app_url.scheme != "https"
+            or public_app_url.username is not None
+            or public_app_url.password is not None
+            or public_app_url.query
+            or public_app_url.fragment
+        ):
+            problems.append("PUBLIC_APP_URL must be a public HTTPS URL without credentials")
 
         if self.EDGE_SYNC_ENABLED:
             problems.append(

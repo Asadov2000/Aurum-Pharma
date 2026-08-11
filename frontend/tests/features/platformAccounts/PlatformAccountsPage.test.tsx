@@ -151,7 +151,7 @@ describe("PlatformAccountsPage", () => {
       });
     });
     expect(await screen.findByLabelText("Ссылка активации")).toHaveValue(
-      "http://localhost:3000/activate-platform?token=replacement-token",
+      "http://localhost:3000/activate-platform#token=replacement-token",
     );
   });
 
@@ -201,7 +201,7 @@ describe("PlatformAccountsPage", () => {
       });
     });
     expect(await screen.findByLabelText("Ссылка активации")).toHaveValue(
-      "http://localhost:3000/activate-platform?token=one-time-token",
+      "http://localhost:3000/activate-platform#token=one-time-token",
     );
   });
 

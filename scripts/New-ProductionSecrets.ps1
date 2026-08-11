@@ -98,6 +98,8 @@ Write-Secret -Name "REDIS_URL" -Value ("redis://:{0}@redis:6379/0" -f $redisPass
 Write-Secret -Name "JWT_SECRET" -Value (New-RandomHex -Bytes 48)
 Write-Secret -Name "MFA_ENCRYPTION_KEY" -Value (New-RandomHex -Bytes 48)
 Write-Secret -Name "MFA_ENCRYPTION_PREVIOUS_KEYS" -Value "{}"
+Write-Secret -Name "EMAIL_OUTBOX_ENCRYPTION_KEY" -Value (New-RandomHex -Bytes 48)
+Write-Secret -Name "EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS" -Value "{}"
 Write-Secret -Name "METRICS_TOKEN" -Value (New-RandomHex -Bytes 48)
 Write-Secret -Name "MINIO_ROOT_USER" -Value $minioRootUser
 Write-Secret -Name "MINIO_ROOT_PASSWORD" -Value $minioRootPassword
@@ -128,4 +130,4 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     }
 }
 
-Write-Host "Created 18 production secret files in a protected external directory."
+Write-Host "Created 20 production secret files in a protected external directory."

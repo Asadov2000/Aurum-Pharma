@@ -16,11 +16,13 @@ x-backend-environment: &backend-environment
   MINIO_BUCKET: aurum
   MINIO_SECURE: "false"
   MFA_ENCRYPTION_KEY_VERSION: "${AURUM_MFA_KEY_VERSION:-1}"
+  EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION: "${AURUM_EMAIL_OUTBOX_KEY_VERSION:-1}"
   EMAIL_HOST: "${AURUM_EMAIL_HOST:?AURUM_EMAIL_HOST is required}"
   EMAIL_PORT: "${AURUM_EMAIL_PORT:-587}"
   EMAIL_USER: "${AURUM_EMAIL_USER:?AURUM_EMAIL_USER is required}"
   EMAIL_FROM: "${AURUM_EMAIL_FROM:?AURUM_EMAIL_FROM is required}"
   EMAIL_USE_TLS: "${AURUM_EMAIL_USE_TLS:-true}"
+  PUBLIC_APP_URL: "${AURUM_PUBLIC_ORIGIN:?AURUM_PUBLIC_ORIGIN is required}"
   LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
   PYTHONPATH: /app
 
@@ -37,6 +39,10 @@ x-backend-secrets: &backend-secrets
     target: MFA_ENCRYPTION_KEY
   - source: mfa_previous_keys
     target: MFA_ENCRYPTION_PREVIOUS_KEYS
+  - source: email_outbox_encryption_key
+    target: EMAIL_OUTBOX_ENCRYPTION_KEY
+  - source: email_outbox_previous_keys
+    target: EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS
   - source: metrics_token
     target: METRICS_TOKEN
   - source: minio_access_key
@@ -422,6 +428,10 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MFA_ENCRYPTION_KEY"
   mfa_previous_keys:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MFA_ENCRYPTION_PREVIOUS_KEYS"
+  email_outbox_encryption_key:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/EMAIL_OUTBOX_ENCRYPTION_KEY"
+  email_outbox_previous_keys:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS"
   metrics_token:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/METRICS_TOKEN"
   minio_root_user:

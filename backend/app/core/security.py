@@ -162,6 +162,45 @@ def mfa_encryption_keyring_json() -> str:
     return json.dumps(keyring, separators=(",", ":"), sort_keys=True)
 
 
+def derive_email_outbox_encryption_key(*, version: int | None = None) -> str:
+    """Derive a domain-separated pgcrypto key for short-lived email credentials."""
+    selected_version = version or settings.EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION
+    if (
+        selected_version == settings.EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION
+        and settings.EMAIL_OUTBOX_ENCRYPTION_KEY is not None
+    ):
+        root_key = settings.EMAIL_OUTBOX_ENCRYPTION_KEY.get_secret_value().encode()
+    elif selected_version in settings.EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS:
+        root_key = (
+            settings.EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS[selected_version]
+            .get_secret_value()
+            .encode()
+        )
+    elif (
+        settings.ENVIRONMENT == "development"
+        and selected_version == 1
+        and settings.EMAIL_OUTBOX_ENCRYPTION_KEY is None
+    ):
+        root_key = _derive_key(b"aurum-email-outbox-root:v1")
+    else:
+        raise ValueError(f"Email outbox encryption key version {selected_version} is unavailable")
+    return hmac.new(
+        root_key,
+        f"aurum-email-outbox-pgcrypto:v{selected_version}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def email_outbox_encryption_keyring_json() -> str:
+    versions = set(settings.EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS)
+    versions.add(settings.EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION)
+    keyring = {
+        str(version): derive_email_outbox_encryption_key(version=version)
+        for version in sorted(versions)
+    }
+    return json.dumps(keyring, separators=(",", ":"), sort_keys=True)
+
+
 def generate_totp_secret() -> str:
     """Generate a 160-bit Base32 secret compatible with authenticator apps."""
     return base64.b32encode(secrets.token_bytes(TOTP_SECRET_BYTES)).decode().rstrip("=")

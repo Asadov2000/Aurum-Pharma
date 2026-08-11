@@ -51,7 +51,7 @@ export function PlatformInvitationModal({ open, onClose }: Props): JSX.Element |
       const result = await invitation.mutateAsync(parsed.data);
       if (result.activation_token) {
         setActivationUrl(
-          `${window.location.origin}/activate-platform?token=${encodeURIComponent(result.activation_token)}`,
+          `${window.location.origin}/activate-platform#token=${encodeURIComponent(result.activation_token)}`,
         );
       } else {
         onClose();
