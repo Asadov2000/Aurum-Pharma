@@ -51,4 +51,9 @@ class PlatformStaffAccountEvent(Base):
     )
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     account_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()")
+    )
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
