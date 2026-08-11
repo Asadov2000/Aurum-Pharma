@@ -16,6 +16,10 @@ const TenantsPage = lazyRouteComponent(
   () => import("@/features/foundation/TenantsPage"),
   "TenantsPage",
 );
+const PlatformControlPage = lazyRouteComponent(
+  () => import("@/features/platformControl/PlatformControlPage"),
+  "PlatformControlPage",
+);
 const BranchesPage = lazyRouteComponent(
   () => import("@/features/foundation/BranchesPage"),
   "BranchesPage",
@@ -88,6 +92,12 @@ const tenantsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/tenants",
   component: TenantsPage,
+});
+
+const platformControlRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin",
+  component: PlatformControlPage,
 });
 
 const branchesRoute = createRoute({
@@ -211,6 +221,7 @@ const loginRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  platformControlRoute,
   tenantsRoute,
   branchesRoute,
   registersRoute,

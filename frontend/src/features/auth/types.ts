@@ -40,7 +40,7 @@ export interface MeResponse {
   is_tenant_owner: boolean;
   branch_assignments: Record<string, string>;
   permissions: string[];
-  platform_capabilities?: string[];
+  platform_capabilities: string[];
   support_access: {
     id: string;
     tenant_id: string;

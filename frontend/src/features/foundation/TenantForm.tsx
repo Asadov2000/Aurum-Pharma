@@ -63,12 +63,13 @@ interface FormValues {
 
 interface Props {
   tenant: Tenant | null;
+  canManageStatus: boolean;
   onClose: () => void;
 }
 
 const trim = (v: string | undefined) => (v && v.trim() !== "" ? v.trim() : null);
 
-export function TenantForm({ tenant, onClose }: Props): JSX.Element {
+export function TenantForm({ tenant, canManageStatus, onClose }: Props): JSX.Element {
   const isEdit = tenant !== null;
   const createMutation = useCreateTenant();
   const updateMutation = useUpdateTenant();
@@ -138,7 +139,7 @@ export function TenantForm({ tenant, onClose }: Props): JSX.Element {
             registration_number: trim(values.registration_number),
             contact_phone: trim(values.contact_phone),
             legal_address: trim(values.legal_address),
-            status: values.status,
+            ...(canManageStatus ? { status: values.status } : {}),
           },
         });
         onClose();
@@ -250,7 +251,7 @@ export function TenantForm({ tenant, onClose }: Props): JSX.Element {
           />
         </div>
 
-        {isEdit && (
+        {isEdit && canManageStatus && (
           <div className="col-span-2">
             <Label htmlFor="status">Статус</Label>
             <Select id="status" {...form.register("status")}>

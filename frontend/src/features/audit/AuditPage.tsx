@@ -18,6 +18,7 @@ import {
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
+import { hasPlatformCapability, PLATFORM_CAPABILITIES } from "@/features/auth/platformCapabilities";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { AuditEntryModal } from "./AuditEntryModal";
@@ -36,7 +37,7 @@ const scopeLabel: Record<AuditScope, string> = {
 export function AuditPage(): JSX.Element {
   const { user } = useAuth();
   const filterPreferenceKey = useFilterPreferenceKey("audit");
-  const canViewGlobalAudit = Boolean(user?.is_developer);
+  const canViewGlobalAudit = hasPlatformCapability(user, PLATFORM_CAPABILITIES.auditGlobalView);
   const defaultScope: AuditScope = canViewGlobalAudit && !user?.home_tenant_id ? "global" : "my";
 
   const [scope, setScope] = useState<AuditScope>(defaultScope);

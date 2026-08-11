@@ -10,6 +10,7 @@ export function buildNav(
   permissions: readonly string[],
   isDeveloper = false,
   isSupportScoped = false,
+  platformCapabilities: readonly string[] = [],
 ): NavItem[] {
   const context: RouteAccessContext = {
     isDeveloper,
@@ -18,10 +19,11 @@ export function buildNav(
     isTenantOwner,
     hasTenant,
     permissions,
+    platformCapabilities,
   };
   const candidates: Array<NavItem & { to: AppRoutePath }> = [
     { to: "/", label: "Главная", icon: <HomeIcon /> },
-    { to: "/admin/tenants", label: "Тенанты" },
+    { to: "/admin", label: "Центр управления" },
     { to: "/onboarding", label: "Старт" },
     { to: "/branches", label: "Точки" },
     { to: "/registers", label: "Кассы" },

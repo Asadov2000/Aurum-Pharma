@@ -149,7 +149,7 @@ const ICONS: Record<string, ReactNode> = {
     </Svg>
   ),
   // Тенанты — buildings / org
-  "/admin/tenants": (
+  "/admin": (
     <Svg>
       <rect x="3" y="3" width="8" height="18" rx="1" />
       <rect x="13" y="8" width="8" height="13" rx="1" />

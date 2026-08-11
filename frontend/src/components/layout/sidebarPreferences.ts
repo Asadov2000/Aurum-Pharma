@@ -33,7 +33,7 @@ export const SIDEBAR_SECTIONS: readonly SidebarSection[] = [
     caption: "Система",
     routes: ["/billing", "/notifications", "/security", "/settings"],
   },
-  { id: "administration", caption: "Администрирование", routes: ["/admin/tenants"] },
+  { id: "administration", caption: "Администрирование", routes: ["/admin"] },
 ];
 
 const STORAGE_PREFIX = "aurum:sidebar:v1";

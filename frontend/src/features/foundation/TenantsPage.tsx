@@ -21,6 +21,7 @@ import {
   TR,
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
+import { hasPlatformCapability, PLATFORM_CAPABILITIES } from "@/features/auth/platformCapabilities";
 import { AdminBillingDrawer } from "@/features/billing/AdminBillingDrawer";
 import { SupportAccessForm } from "@/features/supportAccess/SupportAccessForm";
 
@@ -52,7 +53,15 @@ const statusLabel: Record<TenantStatus, string> = {
 
 export function TenantsPage(): JSX.Element {
   const { user } = useAuth();
-  const canManageTenants = Boolean(user?.is_developer || user?.is_administrator);
+  const canViewTenants = hasPlatformCapability(user, PLATFORM_CAPABILITIES.tenantsView);
+  const canManageTenants = hasPlatformCapability(user, PLATFORM_CAPABILITIES.tenantsManage);
+  const canCreateOwner = hasPlatformCapability(user, PLATFORM_CAPABILITIES.ownershipProvision);
+  const canManageMembers = hasPlatformCapability(user, PLATFORM_CAPABILITIES.membershipsManage);
+  const canManageBilling = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingManage);
+  const canUseSupport = hasPlatformCapability(user, PLATFORM_CAPABILITIES.supportUse);
+  const canCreateTenant = canManageTenants && canCreateOwner;
+  const hasTenantActions =
+    canManageTenants || canManageMembers || canManageBilling || canUseSupport;
   const [editing, setEditing] = useState<Tenant | null>(null);
   const [creating, setCreating] = useState(false);
   const [billingTenant, setBillingTenant] = useState<Tenant | null>(null);
@@ -61,7 +70,7 @@ export function TenantsPage(): JSX.Element {
   const [supportRequestPending, setSupportRequestPending] = useState(false);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
-  const { data, isLoading, error } = useTenantsQuery(canManageTenants);
+  const { data, isLoading, error } = useTenantsQuery(canViewTenants);
 
   // Search + pagination are client-side: the API has no search param and the
   // tenant count is small (we already fetch up to 500).
@@ -77,7 +86,7 @@ export function TenantsPage(): JSX.Element {
 
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  if (!canManageTenants) {
+  if (!canViewTenants) {
     return (
       <AccessDeniedCard title="Аптеки" message="У вас нет доступа к администрированию аптек." />
     );
@@ -86,8 +95,12 @@ export function TenantsPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Тенанты"
-        actions={<Button onClick={() => setCreating(true)}>+ Новая аптека</Button>}
+        title="Аптеки"
+        actions={
+          canCreateTenant ? (
+            <Button onClick={() => setCreating(true)}>+ Новая аптека</Button>
+          ) : undefined
+        }
       />
 
       {data && data.length > 0 && (
@@ -129,7 +142,7 @@ export function TenantsPage(): JSX.Element {
                 <TH>Email</TH>
                 <TH>Статус</TH>
                 <TH>Создан</TH>
-                <TH className="text-right">Действия</TH>
+                {hasTenantActions && <TH className="text-right">Действия</TH>}
               </TR>
             </THead>
             <TBody>
@@ -141,30 +154,40 @@ export function TenantsPage(): JSX.Element {
                     <Badge tone={statusTone[t.status]}>{statusLabel[t.status]}</Badge>
                   </TD>
                   <TD>{new Date(t.created_at).toLocaleDateString("ru-RU")}</TD>
-                  <TD className="w-12 text-right">
-                    <ActionMenu
-                      label={`Действия для ${t.name}`}
-                      items={[
-                        { label: "Изменить", onSelect: () => setEditing(t) },
-                        { label: "Биллинг", onSelect: () => setBillingTenant(t) },
-                        ...(t.status === "archived"
-                          ? []
-                          : [
-                              {
-                                label: "Открыть защищённый доступ",
-                                onSelect: () => {
-                                  setSupportRequestPending(false);
-                                  setSupportTenant(t);
+                  {hasTenantActions && (
+                    <TD className="w-12 text-right">
+                      <ActionMenu
+                        label={`Действия для ${t.name}`}
+                        items={[
+                          ...(canManageTenants
+                            ? [{ label: "Изменить", onSelect: () => setEditing(t) }]
+                            : []),
+                          ...(canManageBilling
+                            ? [{ label: "Биллинг", onSelect: () => setBillingTenant(t) }]
+                            : []),
+                          ...(t.status !== "archived" && canUseSupport
+                            ? [
+                                {
+                                  label: "Открыть защищённый доступ",
+                                  onSelect: () => {
+                                    setSupportRequestPending(false);
+                                    setSupportTenant(t);
+                                  },
                                 },
-                              },
-                              {
-                                label: "Добавить сотрудника",
-                                onSelect: () => setMemberTenant(t),
-                              },
-                            ]),
-                      ]}
-                    />
-                  </TD>
+                              ]
+                            : []),
+                          ...(t.status !== "archived" && canManageMembers
+                            ? [
+                                {
+                                  label: "Добавить сотрудника",
+                                  onSelect: () => setMemberTenant(t),
+                                },
+                              ]
+                            : []),
+                        ]}
+                      />
+                    </TD>
+                  )}
                 </TR>
               ))}
             </TBody>
@@ -183,6 +206,7 @@ export function TenantsPage(): JSX.Element {
       >
         <TenantForm
           tenant={editing}
+          canManageStatus={canManageBilling}
           onClose={() => {
             setCreating(false);
             setEditing(null);

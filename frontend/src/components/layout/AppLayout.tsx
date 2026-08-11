@@ -71,8 +71,17 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         perms ?? [],
         user?.is_developer === true,
         user?.support_access !== null && user?.support_access !== undefined,
+        user?.platform_capabilities ?? [],
       ),
-    [hasTenant, isSupport, isTenantOwner, perms, user?.is_developer, user?.support_access],
+    [
+      hasTenant,
+      isSupport,
+      isTenantOwner,
+      perms,
+      user?.is_developer,
+      user?.platform_capabilities,
+      user?.support_access,
+    ],
   );
   const sidebarScope = `${user?.id ?? "anonymous"}:${tenantId ?? "global"}`;
   const [sidebarPreferences, setSidebarPreferences] = useState<SidebarPreferences>(() =>

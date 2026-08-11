@@ -75,7 +75,17 @@ const SAMPLE = {
 
 describe("TenantsPage", () => {
   beforeEach(() => {
-    mockUser = { is_administrator: true };
+    mockUser = {
+      is_administrator: true,
+      platform_capabilities: [
+        "platform.tenants.view",
+        "platform.tenants.manage",
+        "platform.memberships.manage",
+        "platform.ownership.provision",
+        "platform.billing.manage",
+        "platform.support.use",
+      ],
+    };
     listTenants.mockReset();
     createTenant.mockReset();
     createTenantOwner.mockReset();
@@ -117,11 +127,27 @@ describe("TenantsPage", () => {
       is_administrator: false,
       is_developer: false,
       home_tenant_id: SAMPLE.id,
+      platform_capabilities: [],
     };
     renderPage();
 
     expect(screen.getByText(/нет доступа к администрированию аптек/i)).toBeInTheDocument();
     expect(listTenants).not.toHaveBeenCalled();
+  });
+
+  it("shows a view-only administrator no management actions", async () => {
+    mockUser = {
+      is_administrator: true,
+      platform_capabilities: ["platform.tenants.view"],
+    };
+    listTenants.mockResolvedValueOnce([SAMPLE]);
+    renderPage();
+
+    expect(await screen.findByText("Demo Pharmacy")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Новая аптека/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: `Действия для ${SAMPLE.name}` }),
+    ).not.toBeInTheDocument();
   });
 
   it("validates required fields when submitting an empty create form", async () => {
