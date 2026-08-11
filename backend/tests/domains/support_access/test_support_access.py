@@ -360,8 +360,9 @@ async def _create_runtime_support_scenario(
         text("SELECT set_config('app.user_id', :developer_id, true)"),
         {"developer_id": str(developer_id)},
     )
-    await connection.execute(
-        text("""
+    actor_grant_id = (
+        await connection.execute(
+            text("""
             INSERT INTO public.platform_access_grant (
               user_id,
               access_kind,
@@ -379,8 +380,28 @@ async def _create_runtime_support_scenario(
               'Runtime support isolation fixture',
               false
             )
+            RETURNING id
             """),
-        {"actor_id": actor_id, "developer_id": developer_id},
+            {"actor_id": actor_id, "developer_id": developer_id},
+        )
+    ).scalar_one()
+    await connection.execute(
+        text("""
+            INSERT INTO public.platform_access_grant_permission (
+              grant_id,
+              permission_code,
+              created_by
+            )
+            SELECT :grant_id, permission.code, :developer_id
+            FROM public.permission AS permission
+            WHERE permission.is_active
+              AND permission.target_role_type = 'platform'
+              AND permission.scope_type = 'PLATFORM'
+              AND permission.developer_delegable
+              AND permission.administrator_grantable
+            ORDER BY permission.code
+            """),
+        {"grant_id": actor_grant_id, "developer_id": developer_id},
     )
     await connection.execute(text("SELECT set_config('app.user_id', '', true)"))
     auth_sessions = list(

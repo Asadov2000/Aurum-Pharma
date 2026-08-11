@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import cast
 from uuid import UUID
@@ -17,6 +17,7 @@ class PlatformActorRecord:
     status: str
     is_developer: bool
     has_active_developer_grant: bool
+    capabilities: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,18 @@ class PlatformAccessGrantRecord:
     version: int
     created_at: datetime
     updated_at: datetime
+    capabilities: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PlatformCapabilityRecord:
+    code: str
+    group_code: str
+    name: str
+    description: str | None
+    risk_level: str
+    requires_step_up: bool
+    requires_confirmation: bool
 
 
 def _grant_record(row: RowMapping) -> PlatformAccessGrantRecord:
@@ -76,6 +89,7 @@ def _grant_record(row: RowMapping) -> PlatformAccessGrantRecord:
         version=int(cast(int, row["version"])),
         created_at=cast(datetime, row["created_at"]),
         updated_at=cast(datetime, row["updated_at"]),
+        capabilities=(),
     )
 
 
@@ -126,6 +140,20 @@ class PlatformAccessRepository:
                               AND active_grant.access_kind = 'developer'
                               AND active_grant.status = 'active'
                           ) AS has_active_developer_grant
+                          , ARRAY(
+                            SELECT assignment.permission_code
+                            FROM public.platform_access_grant AS actor_capability_grant
+                            JOIN public.platform_access_grant_permission AS assignment
+                              ON assignment.grant_id = actor_capability_grant.id
+                            JOIN public.permission AS permission
+                              ON permission.code = assignment.permission_code
+                             AND permission.is_active
+                             AND permission.target_role_type = 'platform'
+                             AND permission.scope_type = 'PLATFORM'
+                            WHERE actor_capability_grant.user_id = account.id
+                              AND actor_capability_grant.status = 'active'
+                            ORDER BY assignment.permission_code
+                          ) AS capabilities
                         FROM public.app_user AS account
                         WHERE account.id = :actor_user_id
                         FOR UPDATE
@@ -142,7 +170,87 @@ class PlatformAccessRepository:
             status=str(row["status"]),
             is_developer=bool(row["is_developer"]),
             has_active_developer_grant=bool(row["has_active_developer_grant"]),
+            capabilities=frozenset(str(code) for code in row["capabilities"]),
         )
+
+    async def _capabilities_by_grant(self, grant_ids: list[UUID]) -> dict[UUID, tuple[str, ...]]:
+        if not grant_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                text("""
+                    SELECT assignment.grant_id, assignment.permission_code
+                    FROM public.platform_access_grant_permission AS assignment
+                    WHERE assignment.grant_id = ANY(CAST(:grant_ids AS UUID[]))
+                    ORDER BY assignment.grant_id, assignment.permission_code
+                    """),
+                {"grant_ids": grant_ids},
+            )
+        ).mappings()
+        grouped: dict[UUID, list[str]] = {}
+        for row in rows:
+            grant_id = cast(UUID, row["grant_id"])
+            grouped.setdefault(grant_id, []).append(str(row["permission_code"]))
+        return {grant_id: tuple(codes) for grant_id, codes in grouped.items()}
+
+    async def _attach_capabilities(
+        self, grants: list[PlatformAccessGrantRecord]
+    ) -> list[PlatformAccessGrantRecord]:
+        capabilities = await self._capabilities_by_grant([grant.id for grant in grants])
+        return [replace(grant, capabilities=capabilities.get(grant.id, ())) for grant in grants]
+
+    async def list_grantable_capabilities(
+        self,
+        *,
+        actor_user_id: UUID,
+        access_kind: str,
+    ) -> list[PlatformCapabilityRecord]:
+        grantable_column = (
+            "permission.developer_grantable"
+            if access_kind == "developer"
+            else "permission.administrator_grantable"
+        )
+        rows = (
+            await self.session.execute(
+                text(f"""
+                    SELECT
+                      permission.code,
+                      permission.group_code,
+                      permission.name,
+                      permission.description,
+                      permission.risk_level,
+                      permission.requires_step_up,
+                      permission.requires_confirmation
+                    FROM public.platform_access_grant AS actor_grant
+                    JOIN public.platform_access_grant_permission AS actor_capability
+                      ON actor_capability.grant_id = actor_grant.id
+                    JOIN public.permission AS permission
+                      ON permission.code = actor_capability.permission_code
+                    WHERE actor_grant.user_id = :actor_user_id
+                      AND actor_grant.access_kind = 'developer'
+                      AND actor_grant.status = 'active'
+                      AND permission.is_active
+                      AND permission.scope_type = 'PLATFORM'
+                      AND permission.target_role_type = 'platform'
+                      AND permission.developer_delegable
+                      AND {grantable_column}
+                    ORDER BY permission.group_code, permission.code
+                    """),
+                {"actor_user_id": actor_user_id},
+            )
+        ).mappings()
+        return [
+            PlatformCapabilityRecord(
+                code=str(row["code"]),
+                group_code=str(row["group_code"]),
+                name=str(row["name"]),
+                description=cast(str | None, row["description"]),
+                risk_level=str(row["risk_level"]),
+                requires_step_up=bool(row["requires_step_up"]),
+                requires_confirmation=bool(row["requires_confirmation"]),
+            )
+            for row in rows
+        ]
 
     async def auth_session_is_active(
         self,
@@ -235,7 +343,7 @@ class PlatformAccessRepository:
                 {"user_id": user_id, "actor_user_id": actor_user_id},
             )
         ).mappings()
-        return [_grant_record(row) for row in rows]
+        return await self._attach_capabilities([_grant_record(row) for row in rows])
 
     async def has_current_grant(self, user_id: UUID) -> bool:
         return bool(
@@ -281,6 +389,7 @@ class PlatformAccessRepository:
         reason: str,
         requires_approval: bool,
         approval_expires_at: datetime | None,
+        capabilities: tuple[str, ...],
     ) -> PlatformAccessGrantRecord:
         row = (
             (
@@ -322,7 +431,25 @@ class PlatformAccessRepository:
             .mappings()
             .one()
         )
-        return _grant_record(row)
+        grant = _grant_record(row)
+        await self.session.execute(
+            text("""
+                INSERT INTO public.platform_access_grant_permission (
+                  grant_id,
+                  permission_code,
+                  created_by
+                )
+                SELECT :grant_id, capability.code, :actor_user_id
+                FROM unnest(CAST(:capabilities AS TEXT[])) AS capability(code)
+                ORDER BY capability.code
+                """),
+            {
+                "grant_id": grant.id,
+                "actor_user_id": actor_user_id,
+                "capabilities": list(capabilities),
+            },
+        )
+        return replace(grant, capabilities=capabilities)
 
     async def lock_grant(self, grant_id: UUID) -> PlatformAccessGrantRecord | None:
         row = (
@@ -340,7 +467,9 @@ class PlatformAccessRepository:
             .mappings()
             .one_or_none()
         )
-        return _grant_record(row) if row is not None else None
+        if row is None:
+            return None
+        return (await self._attach_capabilities([_grant_record(row)]))[0]
 
     async def approve_grant(
         self,
@@ -382,7 +511,9 @@ class PlatformAccessRepository:
             .mappings()
             .one_or_none()
         )
-        return _grant_record(row) if row is not None else None
+        if row is None:
+            return None
+        return (await self._attach_capabilities([_grant_record(row)]))[0]
 
     async def expire_grant(
         self,
@@ -420,7 +551,9 @@ class PlatformAccessRepository:
             .mappings()
             .one_or_none()
         )
-        return _grant_record(row) if row is not None else None
+        if row is None:
+            return None
+        return (await self._attach_capabilities([_grant_record(row)]))[0]
 
     async def revoke_grant(
         self,
@@ -461,7 +594,9 @@ class PlatformAccessRepository:
             .mappings()
             .one_or_none()
         )
-        return _grant_record(row) if row is not None else None
+        if row is None:
+            return None
+        return (await self._attach_capabilities([_grant_record(row)]))[0]
 
     async def list_grants(
         self,
@@ -489,4 +624,4 @@ class PlatformAccessRepository:
                 {"status": status, "user_id": user_id, "limit": limit},
             )
         ).mappings()
-        return [_grant_record(row) for row in rows]
+        return await self._attach_capabilities([_grant_record(row) for row in rows])

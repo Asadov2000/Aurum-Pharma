@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import create_access_token
+from app.core.security import create_access_token, decode_access_token
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.roles.models import (
@@ -17,6 +19,8 @@ from app.domains.roles.models import (
 )
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
+from tests.auth_helpers import create_support_access_token
+from tests.platform_access_helpers import create_test_platform_user
 
 
 async def test_me_without_token_returns_401(auth_client: AsyncClient) -> None:
@@ -51,6 +55,58 @@ async def test_me_with_valid_token_returns_user(
     assert body["is_administrator"] is False
     assert body["is_tenant_owner"] is False
     assert body["level"] == 4
+    assert body["platform_capabilities"] == []
+
+
+async def test_me_keeps_platform_capabilities_separate_from_tenant_permissions(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    administrator = await create_test_platform_user(
+        db_session,
+        access_kind="administrator",
+    )
+    token = await create_support_access_token(db_session, administrator)
+
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["permissions"] == []
+    assert "platform.tenants.view" in body["platform_capabilities"]
+    assert "platform.sync.manage" not in body["platform_capabilities"]
+
+
+async def test_platform_capability_lookup_rejects_another_active_session(
+    db_session: AsyncSession,
+) -> None:
+    first = await create_test_platform_user(db_session, access_kind="developer")
+    second = await create_test_platform_user(db_session, access_kind="developer")
+    first_token = await create_support_access_token(db_session, first)
+    second_token = await create_support_access_token(db_session, second)
+    first_session_id = decode_access_token(first_token)["sid"]
+    second_session_id = decode_access_token(second_token)["sid"]
+
+    with pytest.raises(DBAPIError, match="outside the request identity"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("""
+                    SELECT code
+                    FROM public.lookup_active_platform_capabilities(
+                      :user_id,
+                      :session_id
+                    )
+                    """),
+                {
+                    "user_id": first.id,
+                    "session_id": second_session_id,
+                },
+            )
+
+    assert first_session_id != second_session_id
 
 
 async def test_me_with_garbage_token_returns_401(auth_client: AsyncClient) -> None:

@@ -214,6 +214,24 @@ class AuthRepository:
         row = result.mappings().one_or_none()
         return _auth_user_from_row(row) if row is not None else None
 
+    async def get_active_platform_capabilities(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+    ) -> frozenset[str]:
+        result = await self.session.scalars(
+            text("""
+                SELECT capability.code
+                FROM public.lookup_active_platform_capabilities(
+                  :user_id,
+                  :session_id
+                )
+                  AS capability
+                """),
+            {"user_id": user_id, "session_id": session_id},
+        )
+        return frozenset(str(code) for code in result)
+
     async def touch_last_login(self, user_id: UUID, session_id: UUID) -> None:
         await self.session.execute(
             text("SELECT public.touch_auth_user_last_login(:user_id, :session_id)"),

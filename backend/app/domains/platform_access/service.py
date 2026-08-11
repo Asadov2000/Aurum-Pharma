@@ -18,12 +18,16 @@ from app.domains.platform_access.repository import (
     PlatformAccessGrantRecord,
     PlatformAccessRepository,
     PlatformActorRecord,
+    PlatformCapabilityRecord,
     PlatformTargetRecord,
 )
 
 logger = structlog.get_logger("platform_access.service")
 
 APPROVAL_WINDOW = timedelta(minutes=15)
+ACCESS_VIEW = "platform.access.view"
+ACCESS_MANAGE = "platform.access.manage"
+MANDATORY_DEVELOPER_CAPABILITIES = frozenset({ACCESS_VIEW, ACCESS_MANAGE})
 
 
 class PlatformAccessService:
@@ -36,6 +40,7 @@ class PlatformAccessService:
         actor_user_id: UUID,
         actor_session_id: UUID,
         actor_is_developer: bool,
+        required_capability: str,
     ) -> PlatformActorRecord:
         actor = await self.repo.lock_actor(actor_user_id)
         if (
@@ -44,6 +49,7 @@ class PlatformAccessService:
             or not actor_is_developer
             or not actor.is_developer
             or not actor.has_active_developer_grant
+            or required_capability not in actor.capabilities
         ):
             raise PermissionDeniedError("Active Developer access required")
         if not await self.repo.auth_session_is_active(
@@ -52,6 +58,30 @@ class PlatformAccessService:
         ):
             raise PermissionDeniedError("Active authentication session required")
         return actor
+
+    async def _require_capability_envelope(
+        self,
+        *,
+        actor: PlatformActorRecord,
+        actor_user_id: UUID,
+        access_kind: str,
+        capabilities: tuple[str, ...],
+    ) -> None:
+        catalog = await self.repo.list_grantable_capabilities(
+            actor_user_id=actor_user_id,
+            access_kind=access_kind,
+        )
+        allowed = {capability.code for capability in catalog}
+        requested = set(capabilities)
+        if not requested or not requested.issubset(allowed):
+            raise PermissionDeniedError("Capabilities are outside the delegation envelope")
+        if not requested.issubset(actor.capabilities):
+            raise PermissionDeniedError("Capabilities exceed the Developer grant")
+        if access_kind == "developer" and not MANDATORY_DEVELOPER_CAPABILITIES.issubset(requested):
+            raise BusinessRuleError(
+                "Developer grant requires platform access governance",
+                details={"required_capabilities": sorted(MANDATORY_DEVELOPER_CAPABILITIES)},
+            )
 
     @staticmethod
     def _require_eligible_target(target: PlatformTargetRecord | None) -> None:
@@ -75,18 +105,26 @@ class PlatformAccessService:
         access_kind: str,
         reason_code: str,
         reason: str,
+        capabilities: tuple[str, ...],
     ) -> PlatformAccessGrantRecord:
         await self.repo.acquire_control_plane_lock()
-        await self._require_actor(
+        actor = await self._require_actor(
             actor_user_id=actor_user_id,
             actor_session_id=actor_session_id,
             actor_is_developer=actor_is_developer,
+            required_capability=ACCESS_MANAGE,
         )
         if user_id == actor_user_id:
             raise PermissionDeniedError("Platform access cannot be self-assigned")
 
         target = await self.repo.lock_target(user_id)
         self._require_eligible_target(target)
+        await self._require_capability_envelope(
+            actor=actor,
+            actor_user_id=actor_user_id,
+            access_kind=access_kind,
+            capabilities=capabilities,
+        )
         await self.repo.expire_pending_for_target(
             user_id=user_id,
             actor_user_id=actor_user_id,
@@ -103,6 +141,7 @@ class PlatformAccessService:
             reason=reason,
             requires_approval=requires_approval,
             approval_expires_at=utc_now() + APPROVAL_WINDOW if requires_approval else None,
+            capabilities=capabilities,
         )
         logger.info(
             "platform_access_requested",
@@ -126,10 +165,11 @@ class PlatformAccessService:
         reason: str,
     ) -> PlatformAccessGrantRecord:
         await self.repo.acquire_control_plane_lock()
-        await self._require_actor(
+        actor = await self._require_actor(
             actor_user_id=actor_user_id,
             actor_session_id=actor_session_id,
             actor_is_developer=actor_is_developer,
+            required_capability=ACCESS_MANAGE,
         )
         grant = await self.repo.lock_grant(grant_id)
         if grant is None:
@@ -145,6 +185,8 @@ class PlatformAccessService:
                 "Platform access request changed",
                 details={"current_version": grant.version},
             )
+        if not set(grant.capabilities).issubset(actor.capabilities):
+            raise PermissionDeniedError("Approval exceeds the Developer capability envelope")
 
         target = await self.repo.lock_target(grant.user_id)
         self._require_eligible_target(target)
@@ -198,6 +240,7 @@ class PlatformAccessService:
             actor_user_id=actor_user_id,
             actor_session_id=actor_session_id,
             actor_is_developer=actor_is_developer,
+            required_capability=ACCESS_MANAGE,
         )
         grant = await self.repo.lock_grant(grant_id)
         if grant is None:
@@ -250,9 +293,29 @@ class PlatformAccessService:
             actor_user_id=actor_user_id,
             actor_session_id=actor_session_id,
             actor_is_developer=actor_is_developer,
+            required_capability=ACCESS_VIEW,
         )
         return await self.repo.list_grants(
             status=status,
             user_id=user_id,
             limit=limit,
+        )
+
+    async def list_capabilities(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        actor_is_developer: bool,
+        access_kind: str,
+    ) -> list[PlatformCapabilityRecord]:
+        await self._require_actor(
+            actor_user_id=actor_user_id,
+            actor_session_id=actor_session_id,
+            actor_is_developer=actor_is_developer,
+            required_capability=ACCESS_VIEW,
+        )
+        return await self.repo.list_grantable_capabilities(
+            actor_user_id=actor_user_id,
+            access_kind=access_kind,
         )

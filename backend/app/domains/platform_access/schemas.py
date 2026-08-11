@@ -14,6 +14,20 @@ class PlatformAccessKind(StrEnum):
     ADMINISTRATOR = "administrator"
 
 
+class PlatformCapabilityCode(StrEnum):
+    TENANTS_VIEW = "platform.tenants.view"
+    TENANTS_MANAGE = "platform.tenants.manage"
+    MEMBERSHIPS_MANAGE = "platform.memberships.manage"
+    OWNERSHIP_PROVISION = "platform.ownership.provision"
+    BILLING_MANAGE = "platform.billing.manage"
+    SUPPORT_USE = "platform.support.use"
+    SYNC_VIEW = "platform.sync.view"
+    SYNC_MANAGE = "platform.sync.manage"
+    AUDIT_GLOBAL_VIEW = "platform.audit.global.view"
+    ACCESS_VIEW = "platform.access.view"
+    ACCESS_MANAGE = "platform.access.manage"
+
+
 class PlatformAccessStatus(StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
@@ -41,8 +55,18 @@ class PlatformAccessRequest(BaseModel):
 
     user_id: UUID
     access_kind: PlatformAccessKind
+    capabilities: list[PlatformCapabilityCode] = Field(min_length=1, max_length=32)
     reason_code: PlatformAccessReasonCode
     reason: str = Field(min_length=10, max_length=500)
+
+    @field_validator("capabilities")
+    @classmethod
+    def normalize_capabilities(
+        cls, value: list[PlatformCapabilityCode]
+    ) -> list[PlatformCapabilityCode]:
+        if len(set(value)) != len(value):
+            raise ValueError("capabilities must be unique")
+        return sorted(value, key=str)
 
     @field_validator("reason")
     @classmethod
@@ -80,6 +104,7 @@ class PlatformAccessGrantRead(BaseModel):
     id: UUID
     user_id: UUID
     access_kind: PlatformAccessKind
+    capabilities: list[PlatformCapabilityCode]
     status: PlatformAccessStatus
     requested_by: UUID | None
     request_reason_code: str
@@ -102,3 +127,13 @@ class PlatformAccessGrantRead(BaseModel):
 
 class PlatformAccessGrantList(BaseModel):
     items: list[PlatformAccessGrantRead]
+
+
+class PlatformCapabilityRead(BaseModel):
+    code: PlatformCapabilityCode
+    group_code: str
+    name: str
+    description: str | None
+    risk_level: str
+    requires_step_up: bool
+    requires_confirmation: bool

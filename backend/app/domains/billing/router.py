@@ -17,7 +17,7 @@ from app.core.deps import (
     CurrentUser,
     current_user,
     get_db,
-    require_recent_support_mfa,
+    require_recent_platform_capability,
     require_tenant_permission,
 )
 from app.core.errors import BusinessRuleError
@@ -118,7 +118,7 @@ admin_router = APIRouter(prefix="/api/v1/admin/tenants", tags=["admin"])
     "/{tenant_id}/subscription",
     response_model=SubscriptionRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_recent_support_mfa)],
+    dependencies=[Depends(require_recent_platform_capability("platform.billing.manage"))],
 )
 async def create_subscription(
     tenant_id: UUID,
@@ -139,7 +139,7 @@ async def create_subscription(
     "/{tenant_id}/invoices",
     response_model=InvoiceRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_recent_support_mfa)],
+    dependencies=[Depends(require_recent_platform_capability("platform.billing.manage"))],
 )
 async def create_invoice(
     tenant_id: UUID,
@@ -167,7 +167,10 @@ async def record_payment(
     tenant_id: UUID,
     invoice_id: UUID,
     payload: PaymentCreate,
-    user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.manage")),
+    ],
     service: Annotated[BillingService, Depends(_service)],
 ) -> PaymentRead:
     payment = await service.record_payment(

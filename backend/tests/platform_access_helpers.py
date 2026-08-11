@@ -107,6 +107,29 @@ async def _grant_for_test(
         .mappings()
         .one()
     )
+    grantable_column = (
+        "permission.developer_grantable"
+        if access_kind == "developer"
+        else "permission.administrator_grantable"
+    )
+    await session.execute(
+        text(f"""
+            INSERT INTO public.platform_access_grant_permission (
+              grant_id,
+              permission_code,
+              created_by
+            )
+            SELECT :grant_id, permission.code, CAST(:requester_id AS UUID)
+            FROM public.permission AS permission
+            WHERE permission.is_active
+              AND permission.target_role_type = 'platform'
+              AND permission.scope_type = 'PLATFORM'
+              AND permission.developer_delegable
+              AND {grantable_column}
+            ORDER BY permission.code
+            """),
+        {"grant_id": grant["id"], "requester_id": requester_id},
+    )
     if requires_approval:
         await _set_actor(session, developer_ids[1])
         await session.execute(
