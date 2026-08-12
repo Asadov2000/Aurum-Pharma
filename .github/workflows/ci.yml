@@ -585,6 +585,18 @@ jobs:
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
             -c "DROP SCHEMA shadow CASCADE"
 
+          # The negative checks intentionally spoof older revisions without
+          # downgrading objects. Restore the actual head before application tests.
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "UPDATE public.alembic_version SET version_num = '0091'"
+          run_role_contract
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT has_schema_privilege('aurum_mailer', 'public', 'USAGE')"
+          )" = "t"
+
       - name: Ruff
         run: poetry run ruff check app tests
 
