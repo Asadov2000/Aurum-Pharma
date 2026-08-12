@@ -194,6 +194,17 @@ jobs:
         env:
           POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
         run: |
+          actual_head="$(poetry run alembic heads | awk 'NR == 1 { print $1 }')"
+          actual_head_number="$(printf '%s' "$actual_head" | sed 's/^0*//')"
+          role_contract_head="$(
+            sed -nE \
+              's/.*revision_number > ([0-9]+).*/\1/p' \
+              ../infra/postgres/role-contract.sql
+          )"
+          test -n "$actual_head"
+          test -n "$actual_head_number"
+          test "$actual_head_number" = "$role_contract_head"
+
           run_role_bootstrap() {
             docker exec -i \
               -e POSTGRES_HOST=127.0.0.1 \
@@ -588,8 +599,9 @@ jobs:
           # The negative checks intentionally spoof older revisions without
           # downgrading objects. Restore the actual head before application tests.
           docker exec "$POSTGRES_SERVICE_ID" \
-            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
-            -c "UPDATE public.alembic_version SET version_num = '0091'"
+            psql -v ON_ERROR_STOP=1 -v actual_head="$actual_head" \
+              -U postgres -d aurum_test \
+              -c "UPDATE public.alembic_version SET version_num = :'actual_head'"
           run_role_contract
           test "$(
             docker exec "$POSTGRES_SERVICE_ID" \
