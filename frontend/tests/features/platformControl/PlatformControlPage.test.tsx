@@ -92,6 +92,20 @@ describe("PlatformControlPage", () => {
     );
   });
 
+  it("shows synchronization to an administrator with read capability", () => {
+    mockUser = {
+      is_developer: false,
+      is_administrator: true,
+      platform_capabilities: ["platform.sync.view"],
+    };
+    render(<PlatformControlPage />);
+
+    expect(screen.getByRole("link", { name: /Синхронизация/i })).toHaveAttribute(
+      "href",
+      "/admin/sync",
+    );
+  });
+
   it("fails closed when the account has no platform capabilities", () => {
     mockUser = {
       is_developer: true,

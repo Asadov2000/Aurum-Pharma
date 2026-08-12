@@ -5,6 +5,7 @@ const TENANTS_VIEW_CAPABILITY = "platform.tenants.view";
 const GLOBAL_AUDIT_VIEW_CAPABILITY = "platform.audit.global.view";
 const PLATFORM_ACCESS_VIEW_CAPABILITY = "platform.access.view";
 const PLATFORM_ACCOUNTS_VIEW_CAPABILITY = "platform.accounts.view";
+const PLATFORM_SYNC_VIEW_CAPABILITY = "platform.sync.view";
 
 export const BRANCH_VIEW_PERMISSIONS = ["branches.view"] as const;
 export const REGISTER_VIEW_PERMISSIONS = ["registers.view"] as const;
@@ -26,6 +27,7 @@ export type AppRoutePath =
   | "/admin"
   | "/admin/access"
   | "/admin/accounts"
+  | "/admin/sync"
   | "/admin/tenants"
   | "/onboarding"
   | "/branches"
@@ -96,12 +98,14 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   const canGovernPlatformAccess =
     context.isDeveloper && hasPlatformCapability(context, PLATFORM_ACCESS_VIEW_CAPABILITY);
   const canViewPlatformAccounts = hasPlatformCapability(context, PLATFORM_ACCOUNTS_VIEW_CAPABILITY);
+  const canViewPlatformSync = hasPlatformCapability(context, PLATFORM_SYNC_VIEW_CAPABILITY);
   if (pathname === "/admin") {
     return (
       hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY) ||
       hasPlatformCapability(context, GLOBAL_AUDIT_VIEW_CAPABILITY) ||
       canGovernPlatformAccess ||
-      canViewPlatformAccounts
+      canViewPlatformAccounts ||
+      canViewPlatformSync
     );
   }
   if (pathname === "/admin/access") {
@@ -109,6 +113,9 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   }
   if (pathname === "/admin/accounts") {
     return canViewPlatformAccounts;
+  }
+  if (pathname === "/admin/sync") {
+    return canViewPlatformSync;
   }
   if (isPath(pathname, "/admin/tenants")) {
     return hasPlatformCapability(context, TENANTS_VIEW_CAPABILITY);

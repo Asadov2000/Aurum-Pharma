@@ -420,6 +420,7 @@ async def test_administrator_can_view_but_cannot_manage_edge_sync(
     db_session: AsyncSession,
     platform_client: AsyncClient,
 ) -> None:
+    anonymous_response = await platform_client.get("/api/v1/admin/sync/overview")
     administrator = await create_test_platform_user(
         db_session,
         access_kind="administrator",
@@ -427,6 +428,10 @@ async def test_administrator_can_view_but_cannot_manage_edge_sync(
     token = await create_support_access_token(db_session, administrator)
 
     view_response = await platform_client.get(
+        "/api/v1/admin/sync/overview",
+        headers=_headers(token),
+    )
+    legacy_internal_response = await platform_client.get(
         "/api/v1/admin/sync/nodes",
         headers=_headers(token),
     )
@@ -440,7 +445,12 @@ async def test_administrator_can_view_but_cannot_manage_edge_sync(
         headers=_headers(token),
     )
 
+    assert anonymous_response.status_code == 401
     assert view_response.status_code == 200, view_response.text
+    assert view_response.headers["cache-control"] == "no-store"
+    assert "credential_kid" not in view_response.text
+    assert "checksum" not in view_response.text
+    assert legacy_internal_response.status_code == 403
     assert manage_response.status_code == 403
     assert "platform.sync.manage" in manage_response.json()["error"]["message"]
 

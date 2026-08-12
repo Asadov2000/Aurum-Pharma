@@ -113,6 +113,13 @@ function ModuleIcon({ id }: { id: PlatformModule["id"] }): JSX.Element {
           <path d="M5 20c.6-4 2.9-6 7-6s6.4 2 7 6" />
           <path d="M18 4v4M16 6h4" />
         </>
+      ) : id === "sync" ? (
+        <>
+          <path d="M20 7h-5V2" />
+          <path d="M4 17h5v5" />
+          <path d="M5.7 9a7 7 0 0 1 11.9-3.1L20 7" />
+          <path d="M18.3 15a7 7 0 0 1-11.9 3.1L4 17" />
+        </>
       ) : (
         <>
           <path d="M9 5h10M9 12h10M9 19h10" />

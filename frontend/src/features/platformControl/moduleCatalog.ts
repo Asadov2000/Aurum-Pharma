@@ -4,10 +4,10 @@ import {
 } from "@/features/auth/platformCapabilities";
 
 export interface PlatformModule {
-  id: "tenants" | "audit" | "access" | "accounts";
+  id: "tenants" | "audit" | "access" | "accounts" | "sync";
   title: string;
   description: string;
-  to: "/admin/tenants" | "/audit" | "/admin/access" | "/admin/accounts";
+  to: "/admin/tenants" | "/audit" | "/admin/access" | "/admin/accounts" | "/admin/sync";
   capability: PlatformCapability;
   tone: "primary" | "neutral";
   developerOnly?: boolean;
@@ -28,6 +28,15 @@ const MODULES: readonly PlatformModule[] = [
     description: "Безопасные приглашения и состояние аккаунтов сотрудников платформы",
     to: "/admin/accounts",
     capability: PLATFORM_CAPABILITIES.accountsView,
+    tone: "primary",
+  },
+  {
+    id: "sync",
+    title: "Синхронизация",
+    description:
+      "Связь Edge-узлов, актуальность данных и контроль целостности без доступа к содержимому продаж",
+    to: "/admin/sync",
+    capability: PLATFORM_CAPABILITIES.syncView,
     tone: "primary",
   },
   {
