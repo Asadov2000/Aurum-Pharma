@@ -2,20 +2,37 @@
 
 Статус: макет для продуктового согласования
 
-Версия: 1.0
+Версия: 1.1
 
-Дата: 2026-08-12
+Дата: 2026-08-13
 
 Связано: [финансовая спецификация](billing-financial-spec.md),
 [ADR-0017](adr/0017-versioned-pricing-and-immutable-billing-ledger.md),
 [интерактивный прототип](mockups/billing-low-fi.html)
 
-Снимки макета:
+## Варианты макетов
 
-- [клиент: обзор](mockups/billing-client-overview.png)
-- [клиент: подтверждение оплаты](mockups/billing-client-payment.png)
-- [сотрудник: сводка](mockups/billing-staff-overview.png)
-- [сотрудник: проверка платежа](mockups/billing-staff-review.png)
+Интерактивный прототип позволяет переключать три целостных направления дизайна
+на одних и тех же данных. Это макеты для выбора концепции, а не реализация
+production-интерфейса.
+
+| Вариант | Характер | Основной сценарий | Рекомендация |
+| --- | --- | --- | --- |
+| **1. Пульт** | Спокойный, сбалансированный dashboard | Повседневная работа клиента и сотрудника | Базовый вариант для пилота |
+| **2. Поток** | Последовательность этапов и решений | Новые пользователи и редкие финансовые операции | Лучший вариант для обучения без инструкций |
+| **3. Консоль** | Компактное рабочее пространство | Большая очередь и опытные сотрудники | Профессиональный режим повышенной плотности |
+
+Полный набор изображений:
+
+| Экран | 1. Пульт | 2. Поток | 3. Консоль |
+| --- | --- | --- | --- |
+| Клиент: обзор | [открыть](mockups/billing-v1-client-overview.png) | [открыть](mockups/billing-v2-client-overview.png) | [открыть](mockups/billing-v3-client-overview.png) |
+| Клиент: подтверждение оплаты | [открыть](mockups/billing-v1-client-payment.png) | [открыть](mockups/billing-v2-client-payment.png) | [открыть](mockups/billing-v3-client-payment.png) |
+| Сотрудник: сводка | [открыть](mockups/billing-v1-staff-overview.png) | [открыть](mockups/billing-v2-staff-overview.png) | [открыть](mockups/billing-v3-staff-overview.png) |
+| Сотрудник: проверка платежа | [открыть](mockups/billing-v1-staff-review.png) | [открыть](mockups/billing-v2-staff-review.png) | [открыть](mockups/billing-v3-staff-review.png) |
+
+Дополнительная проверка базового варианта:
+
 - [проверка платежа на 1024px](mockups/billing-staff-review-1024.png)
 - [проверка платежа при масштабе 200%](mockups/billing-staff-review-200.png)
 

@@ -72,11 +72,15 @@
       .rail-spacer { flex: 1; }
 
       main { min-width: 0; padding: 20px 24px 28px; }
-      .prototype-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-      .mode-switch, .screen-switch { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-      .mode-button, .screen-button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-weight: 600; }
-      .mode-button.active, .screen-button.active { background: var(--primary-soft); color: var(--primary-dark); }
+      .prototype-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+      .mode-switch, .screen-switch, .variant-switch { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+      .mode-button, .screen-button, .variant-button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-weight: 600; }
+      .mode-button.active, .screen-button.active, .variant-button.active { background: var(--primary-soft); color: var(--primary-dark); }
       .prototype-label { color: var(--muted); font-size: 12px; }
+      .variant-note { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 42px; padding: 8px 12px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-soft); color: var(--muted); font-size: 12px; }
+      .variant-note strong { color: var(--ink); }
+      .variant-only { display: none; }
+      body[data-variant="flow"] .variant-flow, body[data-variant="console"] .variant-console { display: grid; }
 
       .workspace { display: none; }
       .workspace.active { display: block; }
@@ -192,6 +196,73 @@
       .allocation:first-child { border-top: 0; }
       .review-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 16px; margin: 16px -16px -16px; border-top: 1px solid var(--line); background: var(--surface); }
 
+      .process-line { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-bottom: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--line); }
+      .process-step { min-height: 70px; padding: 12px 14px; background: var(--surface); }
+      .process-step.current { box-shadow: inset 0 3px var(--primary); background: var(--primary-soft); }
+      .process-step.done { box-shadow: inset 0 3px var(--success); }
+      .process-number { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+      .process-title { margin-top: 6px; font-weight: 700; }
+      .process-copy { margin-top: 3px; color: var(--muted); font-size: 12px; }
+      .console-summary { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+      .console-cell { padding: 10px 12px; border-left: 1px solid var(--line); }
+      .console-cell:first-child { border-left: 0; }
+      .console-cell strong { display: block; margin-top: 3px; font-size: 16px; }
+      .process-line.variant-only, .console-summary.variant-only { display: none; }
+      body[data-variant="flow"] .process-line.variant-flow,
+      body[data-variant="console"] .console-summary.variant-console { display: grid; }
+
+      body[data-variant="flow"] { --bg: #f7f8f8; --surface-soft: #fafcfc; }
+      body[data-variant="flow"] .panel { border-radius: 4px; }
+      body[data-variant="flow"] .status-strip { border-width: 1px 0; border-left-width: 0; border-radius: 0; background: var(--surface); }
+      body[data-variant="flow"] #client-overview .overview-grid { grid-template-columns: 1fr; }
+      body[data-variant="flow"] #client-overview .summary-sticky { position: static; order: -1; }
+      body[data-variant="flow"] #client-overview .summary-sticky .panel-body { display: grid; grid-template-columns: minmax(220px,.7fr) minmax(320px,1.3fr) 260px; align-items: center; gap: 18px; }
+      body[data-variant="flow"] #client-overview .summary-sticky .panel-body > .button,
+      body[data-variant="flow"] #client-overview .summary-sticky .panel-body > .submission-state { grid-column: 3; }
+      body[data-variant="flow"] #client-overview .overview-grid > div { display: grid; grid-template-columns: .9fr 1.1fr; gap: 16px; }
+      body[data-variant="flow"] #client-overview .overview-grid > div > section { margin-top: 0 !important; }
+      body[data-variant="flow"] #client-payment .form-layout { grid-template-columns: 1fr; }
+      body[data-variant="flow"] #client-payment .summary-sticky { position: static; order: -1; }
+      body[data-variant="flow"] #client-payment .summary-sticky .panel-body { display: grid; grid-template-columns: 1fr 1fr 260px; align-items: center; gap: 18px; }
+      body[data-variant="flow"] #client-payment .summary-sticky .panel-body > * { margin: 0 !important; }
+      body[data-variant="flow"] #staff-overview .metrics { grid-template-columns: repeat(3, 1fr); }
+      body[data-variant="flow"] #staff-overview .staff-grid { grid-template-columns: 1fr; }
+      body[data-variant="flow"] #staff-overview .staff-grid > aside { order: -1; }
+      body[data-variant="flow"] #staff-overview .staff-grid > aside .timeline { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      body[data-variant="flow"] #staff-overview .staff-grid > aside .timeline li { border-top: 0; padding: 0; }
+      body[data-variant="flow"] #staff-review .review-layout { grid-template-columns: 1fr; max-width: 980px; margin-inline: auto; }
+      body[data-variant="flow"] #staff-review .queue-list { display: none; }
+
+      body[data-variant="console"] { --bg: #f1f4f5; --radius: 4px; font-size: 13px; }
+      body[data-variant="console"] .app { grid-template-columns: 64px 1fr; grid-template-rows: 56px 1fr; }
+      body[data-variant="console"] .topbar { height: 56px; }
+      body[data-variant="console"] .rail-button { width: 42px; height: 42px; }
+      body[data-variant="console"] main { padding: 12px 16px 20px; }
+      body[data-variant="console"] .page-heading { margin-bottom: 10px; }
+      body[data-variant="console"] .page-heading h1 { font-size: 24px; }
+      body[data-variant="console"] .tabs { margin-bottom: 10px; }
+      body[data-variant="console"] .tab { min-height: 44px; }
+      body[data-variant="console"] .panel-header { min-height: 46px; }
+      body[data-variant="console"] .panel-body { padding: 12px; }
+      body[data-variant="console"] .status-strip { min-height: 68px; padding: 10px 14px; }
+      body[data-variant="console"] #client-overview .overview-grid { grid-template-columns: 330px minmax(0,1fr); gap: 10px; margin-top: 10px; }
+      body[data-variant="console"] #client-overview .summary-sticky { position: static; order: -1; }
+      body[data-variant="console"] #client-overview .overview-grid > div { display: grid; grid-template-columns: .9fr 1.1fr; gap: 10px; }
+      body[data-variant="console"] #client-overview .overview-grid > div > section { margin-top: 0 !important; }
+      body[data-variant="console"] #client-overview .plan-line { grid-template-columns: 1fr 1fr; gap: 10px; }
+      body[data-variant="console"] #client-overview .timeline li { padding: 8px 0; }
+      body[data-variant="console"] #client-payment .form-layout { grid-template-columns: minmax(0,1fr) 300px; gap: 10px; }
+      body[data-variant="console"] #client-payment .form-section { padding: 12px 0; }
+      body[data-variant="console"] #client-payment .upload { min-height: 96px; }
+      body[data-variant="console"] #staff-overview .metrics { gap: 6px; }
+      body[data-variant="console"] #staff-overview .metric { padding: 10px; }
+      body[data-variant="console"] #staff-overview .metric-value { font-size: 22px; }
+      body[data-variant="console"] #staff-overview .staff-grid { gap: 8px; }
+      body[data-variant="console"] #staff-review .filters { padding: 8px; margin-bottom: 8px; }
+      body[data-variant="console"] #staff-review .review-layout { grid-template-columns: 290px minmax(0,1fr); gap: 8px; }
+      body[data-variant="console"] #staff-review .review-section { padding: 11px 0; }
+      body[data-variant="console"] #staff-review .evidence { min-height: 130px; }
+
       .screen { display: none; }
       .screen.active { display: block; }
       .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -202,6 +273,11 @@
         .summary-sticky { position: static; }
         .plan-line { grid-template-columns: 1fr 1fr; }
         .topbar { grid-template-columns: 250px 1fr auto; }
+        body[data-variant="flow"] #client-overview .summary-sticky .panel-body,
+        body[data-variant="flow"] #client-payment .summary-sticky .panel-body { grid-template-columns: 1fr 1fr; }
+        body[data-variant="flow"] #client-overview .summary-sticky .panel-body > .button,
+        body[data-variant="flow"] #client-overview .summary-sticky .panel-body > .submission-state { grid-column: auto; }
+        body[data-variant="console"] #client-overview .overview-grid { grid-template-columns: 1fr; }
       }
 
       @media (max-width: 1100px) {
@@ -229,8 +305,8 @@
         .rail-button { flex: 0 0 44px; width: 44px; height: 44px; }
         .rail-spacer { display: none; }
         main { grid-row: 3; padding: 14px; }
-        .mode-switch, .screen-switch { width: 100%; }
-        .mode-button, .screen-button { flex: 1; min-width: 0; white-space: normal; }
+        .mode-switch, .screen-switch, .variant-switch { width: 100%; }
+        .mode-button, .screen-button, .variant-button { flex: 1; min-width: 0; white-space: normal; }
         .prototype-label { display: none; }
         .page-heading { align-items: stretch; flex-direction: column; }
         .page-heading h1 { font-size: 24px; }
@@ -244,6 +320,12 @@
         .priority-row .badge, .priority-row .button { grid-column: 2; justify-self: start; }
         .review-actions { position: static; flex-wrap: wrap; }
         .review-actions .button { flex: 1 1 180px; }
+        .process-line, .console-summary { grid-template-columns: 1fr 1fr; }
+        body[data-variant="flow"] #client-overview .summary-sticky .panel-body,
+        body[data-variant="flow"] #client-payment .summary-sticky .panel-body,
+        body[data-variant="flow"] #client-overview .overview-grid > div,
+        body[data-variant="flow"] #staff-overview .staff-grid > aside .timeline,
+        body[data-variant="console"] #client-overview .overview-grid > div { grid-template-columns: 1fr; }
       }
 
       @media (prefers-reduced-motion: no-preference) {
@@ -251,7 +333,7 @@
       }
     </style>
   </head>
-  <body>
+  <body data-variant="dashboard">
     <div class="app">
       <header class="topbar">
         <div class="brand"><span class="brand-mark">A</span><span>Aurum Pharma</span></div>
@@ -283,13 +365,35 @@
             <button class="screen-button active" role="tab" aria-selected="true" tabindex="0" data-screen="staff-overview">Сводка</button>
             <button class="screen-button" role="tab" aria-selected="false" tabindex="-1" data-screen="staff-review">Проверка платежа</button>
           </div>
-          <span class="prototype-label">Low-fi v1 · 1366 × 768 · обычная плотность</span>
+          <div class="variant-switch" role="tablist" aria-label="Вариант макета">
+            <button class="variant-button active" role="tab" aria-selected="true" tabindex="0" data-variant="dashboard">1 · Пульт</button>
+            <button class="variant-button" role="tab" aria-selected="false" tabindex="-1" data-variant="flow">2 · Поток</button>
+            <button class="variant-button" role="tab" aria-selected="false" tabindex="-1" data-variant="console">3 · Консоль</button>
+          </div>
+          <span class="prototype-label">Low-fi · обычная плотность</span>
+        </div>
+        <div class="variant-note" role="status">
+          <span><strong id="variant-name">Вариант 1 · Пульт</strong> — <span id="variant-description">спокойная универсальная композиция: статус, сумма и действие считываются сразу.</span></span>
+          <span id="variant-audience">Рекомендуется для пилота</span>
         </div>
 
         <section class="workspace active" id="client-workspace">
           <div class="screen active" id="client-overview">
             <div class="page-heading"><div><h1>Тариф и оплата</h1><p>Подписка, счета и подтверждения банковских переводов</p></div></div>
             <nav class="tabs" aria-label="Тариф и оплата"><button class="tab active">Обзор</button><button class="tab">Счета</button><button class="tab">Платежи</button><button class="tab">Реквизиты</button></nav>
+
+            <div class="process-line variant-only variant-flow" aria-label="Финансовая линия времени">
+              <div class="process-step done"><div class="process-number">1 августа</div><div class="process-title">Предыдущий период оплачен</div><div class="process-copy">1 650,00 TJS подтверждено</div></div>
+              <div class="process-step done"><div class="process-number">8 августа</div><div class="process-title">Новый счёт выпущен</div><div class="process-copy">INV-2026-0084</div></div>
+              <div class="process-step current"><div class="process-number">Сейчас</div><div class="process-title">Перевод проверяется</div><div class="process-copy">Повторная отправка не нужна</div></div>
+              <div class="process-step"><div class="process-number">1 сентября</div><div class="process-title">Новый период</div><div class="process-copy">После подтверждения</div></div>
+            </div>
+            <div class="console-summary variant-only variant-console">
+              <div class="console-cell"><span class="label">Доступ</span><strong>Активен</strong></div>
+              <div class="console-cell"><span class="label">Оплачено до</span><strong>31.08.2026</strong></div>
+              <div class="console-cell"><span class="label">Следующий счёт</span><strong>1 650,00 TJS</strong></div>
+              <div class="console-cell"><span class="label">Проверка</span><strong>В процессе</strong></div>
+            </div>
 
             <div class="status-strip">
               <div><p class="status-title">Платёж проверяется</p><p class="status-copy">Подтверждение № AP-260812-041 получено. Повторно отправлять перевод не нужно.</p></div>
@@ -335,6 +439,18 @@
 
           <div class="screen" id="client-payment">
             <div class="page-heading"><div><h1>Подтверждение оплаты</h1><p>Счёт INV-2026-0084 · остаток 1 650,00 TJS</p></div><button class="button secondary">Сохранить и закрыть</button></div>
+            <div class="process-line variant-only variant-flow" aria-label="Шаги подтверждения оплаты">
+              <div class="process-step done"><div class="process-number">Шаг 1</div><div class="process-title">Счёт выбран</div><div class="process-copy">INV-2026-0084</div></div>
+              <div class="process-step done"><div class="process-number">Шаг 2</div><div class="process-title">Данные перевода</div><div class="process-copy">Сумма и референс заполнены</div></div>
+              <div class="process-step current"><div class="process-number">Шаг 3</div><div class="process-title">Документ и проверка</div><div class="process-copy">Добавьте файл банка</div></div>
+              <div class="process-step"><div class="process-number">Результат</div><div class="process-title">Заявление отправлено</div><div class="process-copy">Номер выдаст сервер</div></div>
+            </div>
+            <div class="console-summary variant-only variant-console">
+              <div class="console-cell"><span class="label">Счёт</span><strong>INV-2026-0084</strong></div>
+              <div class="console-cell"><span class="label">Остаток</span><strong>1 650,00 TJS</strong></div>
+              <div class="console-cell"><span class="label">Референс</span><strong>749301</strong></div>
+              <div class="console-cell"><span class="label">Файл</span><strong>Не добавлен</strong></div>
+            </div>
             <div class="form-layout">
               <section class="panel"><div class="panel-header"><h2 class="panel-title">Данные банковского перевода</h2><span class="badge info">Шаг 3 из 3</span></div><div class="panel-body">
                 <div class="form-section"><h2>Реквизиты Aurum Pharma</h2><div class="bank-box"><div class="bank-row"><span class="label">Получатель</span><strong>ООО «Aurum Pharma»</strong></div><div class="bank-row"><span class="label">Банк</span><strong>Амонатбанк</strong></div><div class="bank-row"><span class="label">Расчётный счёт</span><strong class="mono">20202972000123456789</strong></div><div class="bank-row"><span class="label">Назначение</span><strong>INV-2026-0084</strong></div></div></div>
@@ -350,6 +466,18 @@
           <div class="screen active" id="staff-overview">
             <div class="page-heading"><div><h1>Биллинг</h1><p>Платежи, клиенты и финансовые операции Aurum Pharma</p></div><button class="button large">Проверить следующий платёж</button></div>
             <nav class="tabs" aria-label="Рабочее место биллинга"><button class="tab active">Сводка</button><button class="tab">Очередь платежей</button><button class="tab">Клиенты</button><button class="tab">Счета</button><button class="tab">Корректировки</button><button class="tab">Тарифы</button><button class="tab">Аудит</button></nav>
+            <div class="process-line variant-only variant-flow" aria-label="Рабочие потоки биллинга">
+              <div class="process-step current"><div class="process-number">Нужно проверить</div><div class="process-title">12 заявлений</div><div class="process-copy">3 SLA истекают сегодня</div></div>
+              <div class="process-step"><div class="process-number">Есть риск</div><div class="process-title">4 операции</div><div class="process-copy">Дубли, ID и quarantine</div></div>
+              <div class="process-step"><div class="process-number">Ждут решения</div><div class="process-title">3 операции</div><div class="process-copy">Нужен второй сотрудник</div></div>
+              <div class="process-step done"><div class="process-number">Завершено сегодня</div><div class="process-title">27 операций</div><div class="process-copy">Без расхождений ledger</div></div>
+            </div>
+            <div class="console-summary variant-only variant-console">
+              <div class="console-cell"><span class="label">Мои задачи</span><strong>12</strong></div>
+              <div class="console-cell"><span class="label">Просрочено SLA</span><strong>3</strong></div>
+              <div class="console-cell"><span class="label">Блокирующий долг</span><strong>28 420 TJS</strong></div>
+              <div class="console-cell"><span class="label">Конфликты</span><strong>2</strong></div>
+            </div>
             <div class="metrics"><div class="metric"><div class="label">Ожидают проверки</div><div class="metric-value">12</div><div class="metric-note">3 требуют решения сегодня</div></div><div class="metric"><div class="label">Блокирующий долг</div><div class="metric-value money">28 420</div><div class="metric-note">TJS · 9 клиентов</div></div><div class="metric"><div class="label">Grace period</div><div class="metric-value">7</div><div class="metric-note">2 завершатся сегодня</div></div><div class="metric"><div class="label">Режим просмотра</div><div class="metric-value">3</div><div class="metric-note">Требуется связь</div></div><div class="metric"><div class="label">Нераспределено</div><div class="metric-value money">1 240</div><div class="metric-note">TJS · 2 платежа</div></div></div>
             <div class="staff-grid">
               <section class="panel"><div class="panel-header"><h2 class="panel-title">Срочные задачи</h2><button class="button ghost">Открыть очередь</button></div><div><div class="priority-row"><span class="priority-index">1</span><div><div class="priority-title">ООО «Сино-Фарм» · платёж 4 400,00 TJS</div><div class="priority-copy">SLA истекает через 24 минуты · банковский ID найден</div></div><span class="badge warning">Сегодня</span><button class="button secondary">Проверить</button></div><div class="priority-row"><span class="priority-index">2</span><div><div class="priority-title">Аптека «Шифо» · требуется уточнение</div><div class="priority-copy">Клиент ответил 18 минут назад · новый документ проверен</div></div><span class="badge info">Ответ получен</span><button class="button secondary">Открыть</button></div><div class="priority-row"><span class="priority-index">3</span><div><div class="priority-title">ООО «Дармон» · возможный дубль</div><div class="priority-copy">Совпадают сумма, дата и банковский референс</div></div><span class="badge danger">Риск</span><button class="button secondary">Сверить</button></div></div></section>
@@ -359,6 +487,18 @@
 
           <div class="screen" id="staff-review">
             <div class="page-heading"><div><h1>Проверка платежа</h1><p>ООО «Сино-Фарм» · заявление AP-260812-041</p></div><button class="button secondary">Вернуться к очереди</button></div>
+            <div class="process-line variant-only variant-flow" aria-label="Этапы проверки платежа">
+              <div class="process-step done"><div class="process-number">Этап 1</div><div class="process-title">Заявление</div><div class="process-copy">Идентификация завершена</div></div>
+              <div class="process-step current"><div class="process-number">Этап 2</div><div class="process-title">Документ</div><div class="process-copy">Проверьте банковский файл</div></div>
+              <div class="process-step"><div class="process-number">Этап 3</div><div class="process-title">Распределение</div><div class="process-copy">Серверный preview</div></div>
+              <div class="process-step"><div class="process-number">Этап 4</div><div class="process-title">Решение</div><div class="process-copy">Эффект и MFA</div></div>
+            </div>
+            <div class="console-summary variant-only variant-console">
+              <div class="console-cell"><span class="label">Сумма</span><strong>4 400,00 TJS</strong></div>
+              <div class="console-cell"><span class="label">Банк ID</span><strong>749301</strong></div>
+              <div class="console-cell"><span class="label">Риск</span><strong>Не найден</strong></div>
+              <div class="console-cell"><span class="label">SLA</span><strong>24 минуты</strong></div>
+            </div>
             <div class="filters"><div class="field grow"><label for="staff-search">Клиент, счёт или референс</label><input id="staff-search" class="input" placeholder="Поиск" /></div><div class="field"><label for="risk">Риск</label><select id="risk" class="select"><option>Все</option><option>Есть риск</option></select></div><button class="button secondary">Настроить фильтры</button></div>
             <div class="review-layout">
               <aside class="queue-list"><button class="queue-item active"><div><div class="queue-name">ООО «Сино-Фарм»</div><div class="queue-copy">INV-2026-0084 · 24 мин до SLA</div></div><strong>4 400,00</strong></button><button class="queue-item"><div><div class="queue-name">Аптека «Шифо»</div><div class="queue-copy">Ответ на уточнение · 18 мин</div></div><strong>1 100,00</strong></button><button class="queue-item"><div><div class="queue-name">ООО «Дармон»</div><div class="queue-copy">Возможный дубль</div></div><strong>2 750,00</strong></button><button class="queue-item"><div><div class="queue-name">Аптека «Саломат»</div><div class="queue-copy">Документ проверяется</div></div><strong>550,00</strong></button></aside>
@@ -378,7 +518,28 @@
     <script>
       const modeButtons = document.querySelectorAll("[data-mode]");
       const screenButtons = document.querySelectorAll("[data-screen]");
+      const variantButtons = document.querySelectorAll(".variant-button[data-variant]");
       const topTitle = document.getElementById("top-title");
+      const variantName = document.getElementById("variant-name");
+      const variantDescription = document.getElementById("variant-description");
+      const variantAudience = document.getElementById("variant-audience");
+      const variantContent = {
+        dashboard: {
+          name: "Вариант 1 · Пульт",
+          description: "спокойная универсальная композиция: статус, сумма и действие считываются сразу.",
+          audience: "Рекомендуется для пилота",
+        },
+        flow: {
+          name: "Вариант 2 · Поток",
+          description: "платёж и проверка представлены как понятная последовательность этапов.",
+          audience: "Лучше для новых пользователей",
+        },
+        console: {
+          name: "Вариант 3 · Консоль",
+          description: "плотное рабочее пространство для быстрой сверки и большого объёма данных.",
+          audience: "Лучше для опытных сотрудников",
+        },
+      };
 
       function selectScreen(screenId) {
         const screen = document.getElementById(screenId);
@@ -409,6 +570,21 @@
       }));
 
       screenButtons.forEach((button) => button.addEventListener("click", () => selectScreen(button.dataset.screen)));
+
+      variantButtons.forEach((button) => button.addEventListener("click", () => {
+        const variant = button.dataset.variant;
+        const content = variantContent[variant];
+        document.body.dataset.variant = variant;
+        variantButtons.forEach((item) => {
+          const selected = item === button;
+          item.classList.toggle("active", selected);
+          item.setAttribute("aria-selected", String(selected));
+          item.tabIndex = selected ? 0 : -1;
+        });
+        variantName.textContent = content.name;
+        variantDescription.textContent = content.description;
+        variantAudience.textContent = content.audience;
+      }));
 
       document.querySelectorAll('[role="tablist"]').forEach((tablist) => {
         tablist.addEventListener("keydown", (event) => {
