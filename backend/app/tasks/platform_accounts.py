@@ -14,17 +14,16 @@ from urllib.parse import quote
 
 import structlog
 
-from app.core.config import get_settings
-from app.core.db import WorkerSessionLocal
-from app.core.security import email_outbox_encryption_keyring_json
+from app.core.mailer_config import get_mailer_settings
+from app.core.mailer_db import MailerSessionLocal
 from app.domains.platform_accounts.repository import (
     PlatformAccountsRepository,
     PlatformInvitationEmailClaim,
 )
-from app.tasks.celery_app import celery_app
+from app.tasks.mailer_app import mailer_app
 
 logger = structlog.get_logger("tasks.platform_accounts")
-settings = get_settings()
+settings = get_mailer_settings()
 DeliveryOutcome = Literal["sent", "transient_failure", "permanent_failure"]
 
 
@@ -71,7 +70,7 @@ def _send_smtp(claim: PlatformInvitationEmailClaim) -> DeliveryResult:
             smtp.starttls(context=ssl.create_default_context())
             smtp.ehlo()
             if settings.EMAIL_USER:
-                smtp.login(settings.EMAIL_USER, settings.EMAIL_PASSWORD)
+                smtp.login(settings.EMAIL_USER, settings.EMAIL_PASSWORD.get_secret_value())
             smtp.send_message(_message(claim))
     except smtplib.SMTPRecipientsRefused:
         result = DeliveryResult("permanent_failure", "recipient_rejected")
@@ -93,11 +92,11 @@ def _send_smtp(claim: PlatformInvitationEmailClaim) -> DeliveryResult:
 
 
 async def _claim() -> PlatformInvitationEmailClaim | None:
-    async with WorkerSessionLocal() as db:
+    async with MailerSessionLocal() as db:
         async with db.begin():
             return await PlatformAccountsRepository(db).claim_invitation_email(
-                encryption_keyring=email_outbox_encryption_keyring_json(),
-                lease_seconds=300,
+                encryption_keyring=settings.encryption_keyring_json(),
+                lease_seconds=settings.EMAIL_OUTBOX_CLAIM_TIMEOUT_SECONDS,
             )
 
 
@@ -105,7 +104,7 @@ async def _complete(
     claim: PlatformInvitationEmailClaim,
     result: DeliveryResult,
 ) -> str | None:
-    async with WorkerSessionLocal() as db:
+    async with MailerSessionLocal() as db:
         async with db.begin():
             return await PlatformAccountsRepository(db).complete_invitation_email(
                 outbox_id=claim.outbox_id,
@@ -134,6 +133,6 @@ async def _process_pending() -> int:
     return processed
 
 
-@celery_app.task(name="platform_accounts.process_invitation_emails")  # type: ignore[misc]
+@mailer_app.task(name="platform_accounts.process_invitation_emails")  # type: ignore[misc]
 def process_invitation_emails() -> int:
     return asyncio.run(_process_pending())

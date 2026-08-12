@@ -29,9 +29,11 @@ jobs:
       DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
       DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
       DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
+      DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
+      TEST_DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test
       REDIS_URL: redis://localhost:6379/0
       JWT_SECRET: ci-only-secret-do-not-use-outside-tests-123456
       CORS_ORIGINS: '["http://localhost:5173"]'
@@ -166,6 +168,7 @@ jobs:
             printf %s aurum_app_pw > /tmp/aurum-app-password
             printf %s aurum_support_pw > /tmp/aurum-support-password
             printf %s aurum_migrator_pw > /tmp/aurum-migrator-password
+            printf %s aurum_mailer_pw > /tmp/aurum-mailer-password
           '
           docker exec -i \
             -e POSTGRES_HOST=127.0.0.1 \
@@ -176,12 +179,14 @@ jobs:
             -e AURUM_APP_PASSWORD_FILE=/tmp/aurum-app-password \
             -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
             -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
+            -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
             "$POSTGRES_SERVICE_ID" sh -c '
               unset \
                 POSTGRES_PASSWORD \
                 AURUM_APP_PASSWORD \
                 AURUM_SUPPORT_PASSWORD \
-                AURUM_MIGRATOR_PASSWORD
+                AURUM_MIGRATOR_PASSWORD \
+                AURUM_MAILER_PASSWORD
               exec sh /tmp/bootstrap-roles.sh
             '
 
@@ -199,12 +204,14 @@ jobs:
               -e AURUM_APP_PASSWORD_FILE=/tmp/aurum-app-password \
               -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
               -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
+              -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               "$POSTGRES_SERVICE_ID" sh -c '
                 unset \
                   POSTGRES_PASSWORD \
                   AURUM_APP_PASSWORD \
                   AURUM_SUPPORT_PASSWORD \
-                  AURUM_MIGRATOR_PASSWORD
+                  AURUM_MIGRATOR_PASSWORD \
+                  AURUM_MAILER_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
               '
           }
@@ -428,12 +435,14 @@ jobs:
               -e AURUM_APP_PASSWORD_FILE=/tmp/aurum-app-password \
               -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
               -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
+              -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               "$POSTGRES_SERVICE_ID" sh -c '
                 unset \
                   POSTGRES_PASSWORD \
                   AURUM_APP_PASSWORD \
                   AURUM_SUPPORT_PASSWORD \
-                  AURUM_MIGRATOR_PASSWORD
+                  AURUM_MIGRATOR_PASSWORD \
+                  AURUM_MAILER_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
               '
           }
@@ -457,6 +466,7 @@ jobs:
                     'aurum_app',
                     'aurum_edge_cash_executor',
                     'aurum_edge_cash_owner',
+                    'aurum_mailer',
                     'aurum_support',
                     'aurum_migrator',
                     'aurum_schema_owner'
@@ -574,6 +584,18 @@ jobs:
           docker exec "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
             -c "DROP SCHEMA shadow CASCADE"
+
+          # The negative checks intentionally spoof older revisions without
+          # downgrading objects. Restore the actual head before application tests.
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "UPDATE public.alembic_version SET version_num = '0091'"
+          run_role_contract
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT has_schema_privilege('aurum_mailer', 'public', 'USAGE')"
+          )" = "t"
 
       - name: Ruff
         run: poetry run ruff check app tests
@@ -927,7 +949,9 @@ jobs:
                   f"{name} network must be internal"
               )
 
-          hardened = ("backend", "celery-worker", "celery-beat", "gateway")
+          hardened = (
+              "backend", "celery-worker", "celery-beat", "platform-mailer", "gateway"
+          )
           for name in hardened:
               service = model["services"][name]
               assert service["read_only"] is True, (
@@ -948,9 +972,11 @@ jobs:
               "AURUM_APP_PASSWORD",
               "AURUM_SUPPORT_PASSWORD",
               "AURUM_MIGRATOR_PASSWORD",
+              "AURUM_MAILER_PASSWORD",
               "TEST_DATABASE_URL_APP",
               "TEST_DATABASE_URL_SUPPORT",
               "TEST_DATABASE_URL_MIGRATION",
+              "TEST_DATABASE_URL_MAILER",
               "MINIO_ROOT_USER",
               "MINIO_ROOT_PASSWORD",
           }
@@ -996,7 +1022,24 @@ jobs:
               "aurum_app_password",
               "aurum_support_password",
               "aurum_migrator_password",
+              "aurum_mailer_password",
           }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
+
+          mailer_secrets = {
+              secret["source"]
+              for secret in model["services"]["platform-mailer"].get("secrets", [])
+          }
+          assert mailer_secrets == {
+              "database_url_mailer",
+              "redis_url",
+              "email_outbox_encryption_key",
+              "email_outbox_previous_keys",
+              "email_password",
+          }, f"unexpected mailer secrets: {sorted(mailer_secrets)}"
+          assert set(model["services"]["platform-mailer"]["networks"]) == {
+              "data",
+              "mailer-egress",
+          }
           PY
 
       - name: Build production backend

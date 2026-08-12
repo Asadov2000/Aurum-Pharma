@@ -29,6 +29,7 @@ load_secret() {
 load_secret POSTGRES_PASSWORD
 load_secret AURUM_APP_PASSWORD
 load_secret AURUM_SUPPORT_PASSWORD
+load_secret AURUM_MAILER_PASSWORD
 load_secret AURUM_MIGRATOR_PASSWORD
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -71,4 +72,5 @@ unset \
     POSTGRES_PASSWORD \
     AURUM_APP_PASSWORD \
     AURUM_SUPPORT_PASSWORD \
+    AURUM_MAILER_PASSWORD \
     AURUM_MIGRATOR_PASSWORD

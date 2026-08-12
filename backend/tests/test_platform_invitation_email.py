@@ -10,6 +10,7 @@ from types import TracebackType
 from uuid import uuid4
 
 import pytest
+from pydantic import SecretStr
 
 from app.domains.platform_accounts.repository import PlatformInvitationEmailClaim
 from app.tasks import platform_accounts as email_task
@@ -65,7 +66,7 @@ def test_smtp_transport_requires_tls_and_uses_fragment_link(
     monkeypatch.setattr(email_task.settings, "EMAIL_HOST", "smtp.example.com")
     monkeypatch.setattr(email_task.settings, "EMAIL_PORT", 587)
     monkeypatch.setattr(email_task.settings, "EMAIL_USER", "mailer@example.com")
-    monkeypatch.setattr(email_task.settings, "EMAIL_PASSWORD", "provider-token")
+    monkeypatch.setattr(email_task.settings, "EMAIL_PASSWORD", SecretStr("provider-token"))
     monkeypatch.setattr(email_task.settings, "EMAIL_FROM", "no-reply@example.com")
     monkeypatch.setattr(email_task.settings, "EMAIL_USE_TLS", True)
     monkeypatch.setattr(email_task.settings, "EMAIL_SMTP_TIMEOUT_SECONDS", 10)

@@ -41,8 +41,10 @@ from app.domains.inventory import router as inventory_router
 from app.domains.notifications import router as notifications_router
 from app.domains.onboarding import router as onboarding_router
 from app.domains.platform_access import router as platform_access_router
-from app.domains.platform_accounts import activation_router as platform_accounts_activation_router
-from app.domains.platform_accounts import admin_router as platform_accounts_admin_router
+from app.domains.platform_accounts.router import (
+    activation_router as platform_accounts_activation_router,
+)
+from app.domains.platform_accounts.router import admin_router as platform_accounts_admin_router
 from app.domains.pos import router as pos_router
 from app.domains.roles import router as roles_router
 from app.domains.suppliers import router as suppliers_router

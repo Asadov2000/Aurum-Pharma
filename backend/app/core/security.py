@@ -181,7 +181,11 @@ def derive_email_outbox_encryption_key(*, version: int | None = None) -> str:
         and selected_version == 1
         and settings.EMAIL_OUTBOX_ENCRYPTION_KEY is None
     ):
-        root_key = _derive_key(b"aurum-email-outbox-root:v1")
+        root_key = hmac.new(
+            b"development-mailer-only",
+            b"aurum-email-outbox-root:v1",
+            hashlib.sha256,
+        ).digest()
     else:
         raise ValueError(f"Email outbox encryption key version {selected_version} is unavailable")
     return hmac.new(

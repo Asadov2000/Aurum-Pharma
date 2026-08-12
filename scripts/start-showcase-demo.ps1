@@ -17,6 +17,7 @@ $secretHexLengths = [ordered]@{
     AURUM_DEMO_POSTGRES_PASSWORD = 64
     AURUM_DEMO_APP_PASSWORD = 64
     AURUM_DEMO_SUPPORT_PASSWORD = 64
+    AURUM_DEMO_MAILER_PASSWORD = 64
     AURUM_DEMO_MIGRATOR_PASSWORD = 64
     AURUM_DEMO_REDIS_PASSWORD = 64
     AURUM_DEMO_JWT_SECRET = 96
@@ -35,6 +36,7 @@ $showcaseContainers = @(
     "aurum-demo-minio",
     "aurum-demo-backend",
     "aurum-demo-celery-worker",
+    "aurum-demo-platform-mailer",
     "aurum-demo-celery-beat",
     "aurum-demo-frontend"
 )
@@ -248,29 +250,29 @@ function New-ShowcaseEnvironmentFile {
     }
 }
 
-function Add-MissingShowcaseMigratorSecret {
+function Add-MissingShowcaseSecrets {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path
     )
 
-    $key = "AURUM_DEMO_MIGRATOR_PASSWORD"
-    $hasKey = [System.IO.File]::ReadAllLines($Path) |
-        Where-Object { $_ -match "^$key=" }
-    if ($hasKey) {
-        return
-    }
-    if ($DryRun) {
-        throw "$environmentFileName needs a one-time migration-secret upgrade"
-    }
+    $existing = [System.IO.File]::ReadAllLines($Path)
+    $missing = @(
+        "AURUM_DEMO_MIGRATOR_PASSWORD",
+        "AURUM_DEMO_MAILER_PASSWORD"
+    ) | Where-Object { $key = $_; -not ($existing | Where-Object { $_ -match "^$key=" }) }
+    if ($missing.Count -eq 0) { return }
+    if ($DryRun) { throw "$environmentFileName needs a one-time secret upgrade" }
 
-    $value = New-CryptographicHex -ByteCount 32
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::AppendAllText(
-        $Path,
-        [Environment]::NewLine + "$key=$value" + [Environment]::NewLine,
-        $utf8NoBom
-    )
+    foreach ($key in $missing) {
+        $value = New-CryptographicHex -ByteCount 32
+        [System.IO.File]::AppendAllText(
+            $Path,
+            [Environment]::NewLine + "$key=$value" + [Environment]::NewLine,
+            $utf8NoBom
+        )
+    }
     Protect-LocalSecretFile -Path $Path
 }
 
@@ -279,7 +281,7 @@ function Ensure-ShowcaseEnvironment {
     Assert-NoProcessSecretOverrides
 
     if (Test-Path -LiteralPath $environmentFile) {
-        Add-MissingShowcaseMigratorSecret -Path $environmentFile
+        Add-MissingShowcaseSecrets -Path $environmentFile
         Assert-ValidShowcaseEnvironmentFile -Path $environmentFile
         if (-not $DryRun) {
             Protect-LocalSecretFile -Path $environmentFile
@@ -474,7 +476,7 @@ if (-not $SkipSeed) {
 
 Invoke-DemoCompose `
     -Title "Start showcase workers and frontend" `
-    -Arguments @("up", "--detach", "celery-worker", "celery-beat", "frontend")
+    -Arguments @("up", "--detach", "celery-worker", "platform-mailer", "celery-beat", "frontend")
 
 Wait-HttpOk -Name "Showcase frontend" -Url "http://localhost:5173"
 

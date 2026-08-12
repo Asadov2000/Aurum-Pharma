@@ -49,6 +49,7 @@ services:
       POSTGRES_PASSWORD: "${AURUM_DEMO_POSTGRES_PASSWORD:?AURUM_DEMO_POSTGRES_PASSWORD is required}"
       AURUM_APP_PASSWORD: "${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}"
       AURUM_SUPPORT_PASSWORD: "${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}"
+      AURUM_MAILER_PASSWORD: "${AURUM_DEMO_MAILER_PASSWORD:?AURUM_DEMO_MAILER_PASSWORD is required}"
       AURUM_MIGRATOR_PASSWORD: "${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -116,6 +117,7 @@ services:
       POSTGRES_PASSWORD: "${AURUM_DEMO_POSTGRES_PASSWORD:?AURUM_DEMO_POSTGRES_PASSWORD is required}"
       AURUM_APP_PASSWORD: "${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}"
       AURUM_SUPPORT_PASSWORD: "${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}"
+      AURUM_MAILER_PASSWORD: "${AURUM_DEMO_MAILER_PASSWORD:?AURUM_DEMO_MAILER_PASSWORD is required}"
       AURUM_MIGRATOR_PASSWORD: "${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}"
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
@@ -168,6 +170,37 @@ services:
       - --loglevel=warning
       - --concurrency=1
       - --prefetch-multiplier=1
+      - -Q
+      - default
+
+  platform-mailer:
+    image: aurum-pharma-demo-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aurum-demo-platform-mailer
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_MAILER: "postgresql+asyncpg://aurum_mailer:${AURUM_DEMO_MAILER_PASSWORD:?AURUM_DEMO_MAILER_PASSWORD is required}@postgres:5432/aurum_demo"
+      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - celery
+      - -A
+      - app.tasks.mailer_app
+      - worker
+      - --loglevel=warning
+      - --concurrency=1
+      - --prefetch-multiplier=1
+      - -Q
+      - platform-mailer
+    init: true
+    restart: unless-stopped
 
   celery-beat:
     <<: *backend-service
