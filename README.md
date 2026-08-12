@@ -59,6 +59,8 @@ aurum-pharma/
 
 - [CLAUDE.md](CLAUDE.md) — правила, стек, архитектурные ограничения
 - [docs/spec-v3.md](docs/spec-v3.md) — функциональная спецификация
+- [docs/billing-financial-spec.md](docs/billing-financial-spec.md) — целевой
+  контракт тарифов, счетов, платежей и интерфейсов биллинга
 - [docs/db-schema-v2.md](docs/db-schema-v2.md) — схема БД
 - [docs/handoff.md](docs/handoff.md) — план разработки по доменам
 - [docs/local-demo.md](docs/local-demo.md) — безопасная проверка локального demo
