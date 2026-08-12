@@ -437,6 +437,9 @@ jobs:
         env:
           POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
         run: |
+          actual_head="$(poetry run alembic heads | awk 'NR == 1 { print $1 }')"
+          [[ "$actual_head" =~ ^[0-9]{4}$ ]]
+
           run_role_contract() {
             docker exec -i \
               -e POSTGRES_HOST=127.0.0.1 \
