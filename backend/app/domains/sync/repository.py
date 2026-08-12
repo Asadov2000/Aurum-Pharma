@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal, cast
 from uuid import UUID
 
 from sqlalchemy import insert, select, text, update
@@ -45,6 +46,219 @@ class ActivationFoundationSource:
     settings: TenantSettings
     branch: Branch
     register: Register
+
+
+SyncHealth = Literal["healthy", "delayed", "offline", "critical", "revoked"]
+SyncContactState = Literal["recent", "stale", "offline", "never_seen"]
+SyncIntegrityState = Literal["verified", "stale_report", "unverified", "mismatch"]
+
+
+@dataclass(frozen=True, slots=True)
+class SyncMonitoringRow:
+    node_id: UUID
+    tenant_id: UUID
+    tenant_name: str
+    branch_id: UUID
+    branch_name: str
+    register_id: UUID | None
+    register_name: str | None
+    display_name: str
+    mode: str
+    node_status: str
+    health: SyncHealth
+    contact_state: SyncContactState
+    integrity_state: SyncIntegrityState
+    credential_expires_at: datetime
+    last_seen_at: datetime | None
+    latest_report_at: datetime | None
+    latest_report_status: str | None
+    source_verified: bool | None
+    writer_epoch: int
+    current_sequence: int
+    reported_sequence: int | None
+    lag_events: int
+
+
+@dataclass(frozen=True, slots=True)
+class SyncMonitoringSummary:
+    total_nodes: int
+    healthy_nodes: int
+    delayed_nodes: int
+    offline_nodes: int
+    critical_nodes: int
+    revoked_nodes: int
+    never_connected_nodes: int
+    expiring_credentials: int
+    pending_handovers: int
+
+
+@dataclass(frozen=True, slots=True)
+class SyncTenantScope:
+    tenant_id: UUID
+    tenant_name: str
+    node_count: int
+
+
+_MONITORING_BASE_SQL = """
+WITH latest_report AS (
+  SELECT DISTINCT ON (report.edge_node_id)
+    report.edge_node_id,
+    report.last_sequence,
+    report.source_verified,
+    report.origin_node_id,
+    report.writer_epoch,
+    report.status,
+    report.created_at
+  FROM public.sync_shadow_report AS report
+  ORDER BY report.edge_node_id, report.created_at DESC, report.report_id DESC
+), monitored AS (
+  SELECT
+    node.id AS node_id,
+    node.tenant_id,
+    tenant.name AS tenant_name,
+    node.branch_id,
+    branch.name AS branch_name,
+    node.register_id,
+    register.name AS register_name,
+    node.display_name,
+    node.mode,
+    node.status AS node_status,
+    node.credential_expires_at,
+    node.last_seen_at,
+    report.created_at AS latest_report_at,
+    report.status AS latest_report_status,
+    report.source_verified,
+    stream.writer_epoch,
+    stream.last_sequence AS current_sequence,
+    report.last_sequence AS reported_sequence,
+    GREATEST(stream.last_sequence - COALESCE(report.last_sequence, 0), 0) AS lag_events,
+    CASE
+      WHEN node.last_seen_at IS NULL THEN 'never_seen'
+      WHEN node.last_seen_at < pg_catalog.now() - INTERVAL '30 minutes' THEN 'offline'
+      WHEN node.last_seen_at < pg_catalog.now() - INTERVAL '5 minutes' THEN 'stale'
+      ELSE 'recent'
+    END AS contact_state,
+    CASE
+      WHEN report.status = 'mismatch' OR report.source_verified IS FALSE
+        OR (
+          report.edge_node_id IS NOT NULL
+          AND (
+            report.origin_node_id IS DISTINCT FROM stream.writer_node_id
+            OR report.writer_epoch IS DISTINCT FROM stream.writer_epoch
+          )
+        ) THEN 'mismatch'
+      WHEN report.edge_node_id IS NULL THEN 'unverified'
+      WHEN report.created_at < pg_catalog.now() - INTERVAL '10 minutes'
+        OR stream.last_sequence > report.last_sequence THEN 'stale_report'
+      ELSE 'verified'
+    END AS integrity_state,
+    CASE
+      WHEN node.status = 'revoked' THEN 'revoked'
+      WHEN node.credential_expires_at <= pg_catalog.now()
+        OR report.status = 'mismatch'
+        OR report.source_verified IS FALSE
+        OR (
+          report.edge_node_id IS NOT NULL
+          AND (
+            report.origin_node_id IS DISTINCT FROM stream.writer_node_id
+            OR report.writer_epoch IS DISTINCT FROM stream.writer_epoch
+          )
+        ) THEN 'critical'
+      WHEN node.last_seen_at IS NULL
+        OR node.last_seen_at < pg_catalog.now() - INTERVAL '30 minutes' THEN 'offline'
+      WHEN report.edge_node_id IS NULL
+        OR node.last_seen_at < pg_catalog.now() - INTERVAL '5 minutes'
+        OR report.created_at < pg_catalog.now() - INTERVAL '10 minutes'
+        OR stream.last_sequence > report.last_sequence
+        OR node.credential_expires_at <= pg_catalog.now() + INTERVAL '7 days' THEN 'delayed'
+      ELSE 'healthy'
+    END AS health
+  FROM public.sync_node AS node
+  JOIN public.tenant AS tenant ON tenant.id = node.tenant_id
+  JOIN public.branch AS branch
+    ON branch.id = node.branch_id AND branch.tenant_id = node.tenant_id
+  LEFT JOIN public.register AS register
+    ON register.id = node.register_id AND register.tenant_id = node.tenant_id
+  JOIN public.sync_stream AS stream
+    ON stream.tenant_id = node.tenant_id AND stream.branch_id = node.branch_id
+  LEFT JOIN latest_report AS report ON report.edge_node_id = node.id
+  WHERE node.node_kind = 'edge'
+    AND (CAST(:tenant_id AS UUID) IS NULL OR node.tenant_id = CAST(:tenant_id AS UUID))
+)
+"""
+
+_MONITORING_LIST_SQL = _MONITORING_BASE_SQL + """
+SELECT monitored.*
+FROM monitored
+WHERE (CAST(:health AS TEXT) IS NULL OR monitored.health = CAST(:health AS TEXT))
+  AND (CAST(:mode AS TEXT) IS NULL OR monitored.mode = CAST(:mode AS TEXT))
+  AND (
+    CAST(:query AS TEXT) IS NULL
+    OR monitored.display_name ILIKE CAST(:query AS TEXT)
+    OR monitored.tenant_name ILIKE CAST(:query AS TEXT)
+    OR monitored.branch_name ILIKE CAST(:query AS TEXT)
+    OR COALESCE(monitored.register_name, '') ILIKE CAST(:query AS TEXT)
+  )
+ORDER BY
+  CASE monitored.health
+    WHEN 'critical' THEN 1
+    WHEN 'offline' THEN 2
+    WHEN 'delayed' THEN 3
+    WHEN 'healthy' THEN 4
+    ELSE 5
+  END,
+  monitored.last_seen_at ASC NULLS FIRST,
+  monitored.node_id
+LIMIT :limit OFFSET :offset
+"""
+
+_MONITORING_COUNT_SQL = _MONITORING_BASE_SQL + """
+SELECT COUNT(*)
+FROM monitored
+WHERE (CAST(:health AS TEXT) IS NULL OR monitored.health = CAST(:health AS TEXT))
+  AND (CAST(:mode AS TEXT) IS NULL OR monitored.mode = CAST(:mode AS TEXT))
+  AND (
+    CAST(:query AS TEXT) IS NULL
+    OR monitored.display_name ILIKE CAST(:query AS TEXT)
+    OR monitored.tenant_name ILIKE CAST(:query AS TEXT)
+    OR monitored.branch_name ILIKE CAST(:query AS TEXT)
+    OR COALESCE(monitored.register_name, '') ILIKE CAST(:query AS TEXT)
+  )
+"""
+
+_MONITORING_SUMMARY_SQL = _MONITORING_BASE_SQL + """
+SELECT
+  COUNT(*) AS total_nodes,
+  COUNT(*) FILTER (WHERE health = 'healthy') AS healthy_nodes,
+  COUNT(*) FILTER (WHERE health = 'delayed') AS delayed_nodes,
+  COUNT(*) FILTER (WHERE health = 'offline') AS offline_nodes,
+  COUNT(*) FILTER (WHERE health = 'critical') AS critical_nodes,
+  COUNT(*) FILTER (WHERE health = 'revoked') AS revoked_nodes,
+  COUNT(*) FILTER (WHERE last_seen_at IS NULL AND node_status = 'active')
+    AS never_connected_nodes,
+  COUNT(*) FILTER (
+    WHERE node_status = 'active'
+      AND credential_expires_at <= pg_catalog.now() + INTERVAL '7 days'
+  ) AS expiring_credentials,
+  (
+    SELECT COUNT(*) FROM public.sync_writer_activation AS activation
+    WHERE activation.state IN ('prepared', 'ready')
+      AND (
+        CAST(:tenant_id AS UUID) IS NULL
+        OR activation.tenant_id = CAST(:tenant_id AS UUID)
+      )
+  ) AS pending_handovers
+FROM monitored
+"""
+
+_MONITORING_TENANTS_SQL = """
+SELECT tenant.id AS tenant_id, tenant.name AS tenant_name, COUNT(node.id) AS node_count
+FROM public.sync_node AS node
+JOIN public.tenant AS tenant ON tenant.id = node.tenant_id
+WHERE node.node_kind = 'edge'
+GROUP BY tenant.id, tenant.name
+ORDER BY tenant.name, tenant.id
+"""
 
 
 class SyncOutboxRepository:
@@ -259,6 +473,102 @@ class SyncCloudRepository:
             stmt = stmt.where(SyncNode.tenant_id == tenant_id)
         result = await self.session.execute(stmt.order_by(SyncNode.created_at, SyncNode.id))
         return list(result.scalars().all())
+
+    async def list_monitoring_nodes(
+        self,
+        *,
+        tenant_id: UUID | None,
+        health: SyncHealth | None,
+        mode: str | None,
+        query: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[SyncMonitoringRow], int]:
+        parameters = {
+            "tenant_id": tenant_id,
+            "health": health,
+            "mode": mode,
+            "query": f"%{query}%" if query else None,
+        }
+        total = int(
+            (
+                await self.session.execute(
+                    text(_MONITORING_COUNT_SQL),
+                    parameters,
+                )
+            ).scalar_one()
+        )
+        result = await self.session.execute(
+            text(_MONITORING_LIST_SQL),
+            {
+                **parameters,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+        mappings = result.mappings().all()
+        rows = [
+            SyncMonitoringRow(
+                node_id=row["node_id"],
+                tenant_id=row["tenant_id"],
+                tenant_name=str(row["tenant_name"]),
+                branch_id=row["branch_id"],
+                branch_name=str(row["branch_name"]),
+                register_id=row["register_id"],
+                register_name=(str(row["register_name"]) if row["register_name"] else None),
+                display_name=str(row["display_name"]),
+                mode=str(row["mode"]),
+                node_status=str(row["node_status"]),
+                health=cast(SyncHealth, str(row["health"])),
+                contact_state=cast(SyncContactState, str(row["contact_state"])),
+                integrity_state=cast(SyncIntegrityState, str(row["integrity_state"])),
+                credential_expires_at=row["credential_expires_at"],
+                last_seen_at=row["last_seen_at"],
+                latest_report_at=row["latest_report_at"],
+                latest_report_status=(
+                    str(row["latest_report_status"])
+                    if row["latest_report_status"] is not None
+                    else None
+                ),
+                source_verified=row["source_verified"],
+                writer_epoch=int(row["writer_epoch"]),
+                current_sequence=int(row["current_sequence"]),
+                reported_sequence=(
+                    int(row["reported_sequence"]) if row["reported_sequence"] is not None else None
+                ),
+                lag_events=int(row["lag_events"]),
+            )
+            for row in mappings
+        ]
+        return rows, total
+
+    async def monitoring_summary(
+        self,
+        *,
+        tenant_id: UUID | None,
+    ) -> SyncMonitoringSummary:
+        row = (
+            (
+                await self.session.execute(
+                    text(_MONITORING_SUMMARY_SQL),
+                    {"tenant_id": tenant_id},
+                )
+            )
+            .mappings()
+            .one()
+        )
+        return SyncMonitoringSummary(**{key: int(value) for key, value in row.items()})
+
+    async def list_monitoring_tenants(self) -> list[SyncTenantScope]:
+        result = await self.session.execute(text(_MONITORING_TENANTS_SQL))
+        return [
+            SyncTenantScope(
+                tenant_id=row["tenant_id"],
+                tenant_name=str(row["tenant_name"]),
+                node_count=int(row["node_count"]),
+            )
+            for row in result.mappings().all()
+        ]
 
     async def get_edge_node(self, node_id: UUID) -> SyncNode | None:
         result = await self.session.execute(

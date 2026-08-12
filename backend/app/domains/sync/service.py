@@ -56,6 +56,7 @@ from app.domains.sync.repository import (
     ActivationFoundationSource,
     SyncCloudRepository,
     SyncEdgeRepository,
+    SyncHealth,
 )
 from app.domains.sync.schemas import (
     EdgeApplyResult,
@@ -64,6 +65,10 @@ from app.domains.sync.schemas import (
     SyncBootstrapChunkRead,
     SyncBootstrapManifestRead,
     SyncEventEnvelope,
+    SyncMonitoringNodeRead,
+    SyncMonitoringRead,
+    SyncMonitoringSummaryRead,
+    SyncMonitoringTenantRead,
     SyncNodeCreate,
     SyncNodeCredentialRead,
     SyncNodeRead,
@@ -220,6 +225,42 @@ class SyncAdminService:
     async def list_nodes(self, *, tenant_id: UUID | None) -> list[SyncNodeRead]:
         nodes = await self.repo.list_edge_nodes(tenant_id=tenant_id)
         return [SyncNodeRead.model_validate(node) for node in nodes]
+
+    async def monitoring_overview(
+        self,
+        *,
+        tenant_id: UUID | None,
+        health: SyncHealth | None,
+        mode: str | None,
+        query: str | None,
+        limit: int,
+        offset: int,
+    ) -> SyncMonitoringRead:
+        normalized_query = " ".join(query.split()) if query else None
+        rows, total = await self.repo.list_monitoring_nodes(
+            tenant_id=tenant_id,
+            health=health,
+            mode=mode,
+            query=normalized_query,
+            limit=limit,
+            offset=offset,
+        )
+        summary = await self.repo.monitoring_summary(tenant_id=tenant_id)
+        tenants = await self.repo.list_monitoring_tenants()
+        return SyncMonitoringRead(
+            generated_at=utc_now(),
+            summary=SyncMonitoringSummaryRead.model_validate(summary, from_attributes=True),
+            tenants=[
+                SyncMonitoringTenantRead.model_validate(scope, from_attributes=True)
+                for scope in tenants
+            ],
+            items=[
+                SyncMonitoringNodeRead.model_validate(row, from_attributes=True) for row in rows
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     async def rotate_credential(self, *, node_id: UUID, valid_days: int) -> SyncNodeCredentialRead:
         existing = await self.repo.get_edge_node(node_id)

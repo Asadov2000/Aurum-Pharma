@@ -20,6 +20,9 @@ from app.domains.sync.schemas import (
     SyncBootstrapChunkRead,
     SyncBootstrapManifestRead,
     SyncCredentialRotate,
+    SyncMonitoringHealth,
+    SyncMonitoringMode,
+    SyncMonitoringRead,
     SyncNodeCreate,
     SyncNodeCredentialRead,
     SyncNodeRead,
@@ -91,13 +94,42 @@ async def create_node(
 @admin_router.get(
     "/nodes",
     response_model=list[SyncNodeRead],
-    dependencies=[Depends(require_recent_platform_capability("platform.sync.view"))],
+    deprecated=True,
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
 )
 async def list_nodes(
+    response: Response,
     service: Annotated[SyncAdminService, Depends(_admin_service)],
     tenant_id: Annotated[UUID | None, Query()] = None,
 ) -> list[SyncNodeRead]:
+    _prevent_credential_caching(response)
     return await service.list_nodes(tenant_id=tenant_id)
+
+
+@admin_router.get(
+    "/overview",
+    response_model=SyncMonitoringRead,
+    dependencies=[Depends(require_recent_platform_capability("platform.sync.view"))],
+)
+async def monitoring_overview(
+    response: Response,
+    service: Annotated[SyncAdminService, Depends(_admin_service)],
+    tenant_id: Annotated[UUID | None, Query()] = None,
+    health: Annotated[SyncMonitoringHealth | None, Query()] = None,
+    mode: Annotated[SyncMonitoringMode | None, Query()] = None,
+    query: Annotated[str | None, Query(alias="q", max_length=100)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> SyncMonitoringRead:
+    _prevent_credential_caching(response)
+    return await service.monitoring_overview(
+        tenant_id=tenant_id,
+        health=health,
+        mode=mode,
+        query=query,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @admin_router.post(

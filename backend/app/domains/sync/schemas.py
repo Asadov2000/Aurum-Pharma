@@ -402,6 +402,65 @@ class SyncNodeCredentialRead(SyncNodeRead):
     credential: str = Field(min_length=1)
 
 
+SyncMonitoringHealth = Literal["healthy", "delayed", "offline", "critical", "revoked"]
+SyncMonitoringMode = Literal["shadow_readonly", "edge_writer"]
+SyncMonitoringContactState = Literal["recent", "stale", "offline", "never_seen"]
+SyncMonitoringIntegrityState = Literal["verified", "stale_report", "unverified", "mismatch"]
+
+
+class SyncMonitoringNodeRead(BaseModel):
+    node_id: UUID
+    tenant_id: UUID
+    tenant_name: str
+    branch_id: UUID
+    branch_name: str
+    register_id: UUID | None
+    register_name: str | None
+    display_name: str
+    mode: SyncMonitoringMode
+    node_status: Literal["active", "revoked"]
+    health: SyncMonitoringHealth
+    contact_state: SyncMonitoringContactState
+    integrity_state: SyncMonitoringIntegrityState
+    credential_expires_at: datetime
+    last_seen_at: datetime | None
+    latest_report_at: datetime | None
+    latest_report_status: Literal["matched", "mismatch"] | None
+    source_verified: bool | None
+    writer_epoch: int = Field(gt=0)
+    current_sequence: int = Field(ge=0)
+    reported_sequence: int | None = Field(default=None, ge=0)
+    lag_events: int = Field(ge=0)
+
+
+class SyncMonitoringSummaryRead(BaseModel):
+    total_nodes: int = Field(ge=0)
+    healthy_nodes: int = Field(ge=0)
+    delayed_nodes: int = Field(ge=0)
+    offline_nodes: int = Field(ge=0)
+    critical_nodes: int = Field(ge=0)
+    revoked_nodes: int = Field(ge=0)
+    never_connected_nodes: int = Field(ge=0)
+    expiring_credentials: int = Field(ge=0)
+    pending_handovers: int = Field(ge=0)
+
+
+class SyncMonitoringTenantRead(BaseModel):
+    tenant_id: UUID
+    tenant_name: str
+    node_count: int = Field(ge=0)
+
+
+class SyncMonitoringRead(BaseModel):
+    generated_at: datetime
+    summary: SyncMonitoringSummaryRead
+    tenants: list[SyncMonitoringTenantRead]
+    items: list[SyncMonitoringNodeRead]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+
+
 class SyncCredentialRotate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

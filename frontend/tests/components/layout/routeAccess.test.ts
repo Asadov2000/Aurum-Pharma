@@ -172,4 +172,21 @@ describe("route access", () => {
       false,
     );
   });
+
+  it("shows synchronization only with the exact platform capability", () => {
+    const administrator: RouteAccessContext = {
+      ...SELLER,
+      isAdministrator: true,
+      hasTenant: false,
+      permissions: [],
+      platformCapabilities: ["platform.sync.view"],
+    };
+
+    expect(canAccessPath("/admin", administrator)).toBe(true);
+    expect(canAccessPath("/admin/sync", administrator)).toBe(true);
+    expect(canAccessPath("/admin/sync", { ...administrator, platformCapabilities: [] })).toBe(
+      false,
+    );
+    expect(canAccessPath("/admin/sync", { ...administrator, isSupportScoped: true })).toBe(false);
+  });
 });

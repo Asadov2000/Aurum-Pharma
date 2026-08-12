@@ -107,7 +107,10 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const activeItem = items.find(
     (item) => pathname === item.to || (item.to !== "/" && pathname.startsWith(`${item.to}/`)),
   );
-  const pageTitle = activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma";
+  const pageTitle =
+    pathname === "/admin/sync"
+      ? "Синхронизация"
+      : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
 
   // Clean identity: a recognizable name + a quiet caption. We have no role name
   // in the payload, so the caption is the support role (dev/admin) when set, or

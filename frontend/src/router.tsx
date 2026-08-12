@@ -24,6 +24,10 @@ const PlatformControlPage = lazyRouteComponent(
   () => import("@/features/platformControl/PlatformControlPage"),
   "PlatformControlPage",
 );
+const SyncCenterPage = lazyRouteComponent(
+  () => import("@/features/syncCenter/SyncCenterPage"),
+  "SyncCenterPage",
+);
 const BranchesPage = lazyRouteComponent(
   () => import("@/features/foundation/BranchesPage"),
   "BranchesPage",
@@ -119,6 +123,12 @@ const platformAccountsRoute = createRoute({
     () => import("@/features/platformAccounts/PlatformAccountsPage"),
     "PlatformAccountsPage",
   ),
+});
+
+const syncCenterRoute = createRoute({
+  getParentRoute,
+  path: "/admin/sync",
+  component: SyncCenterPage,
 });
 
 const branchesRoute = createRoute({
@@ -256,6 +266,7 @@ const routeTree = rootRoute.addChildren([
   platformControlRoute,
   platformAccessRoute,
   platformAccountsRoute,
+  syncCenterRoute,
   tenantsRoute,
   branchesRoute,
   registersRoute,
