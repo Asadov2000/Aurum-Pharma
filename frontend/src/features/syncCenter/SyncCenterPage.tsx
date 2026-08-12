@@ -36,11 +36,13 @@ import {
   modeLabel,
 } from "./labels";
 import { useSyncMonitoringOverview } from "./queries";
+import { SyncNodeActionModal } from "./SyncNodeActionModal";
 import {
   type SyncMonitoringHealth,
   type SyncMonitoringMode,
   type SyncMonitoringNode,
   type SyncMonitoringSummary,
+  type SyncNodeAction,
 } from "./types";
 
 const PAGE_SIZE = 25;
@@ -51,6 +53,7 @@ type ModeFilter = "all" | SyncMonitoringMode;
 export function SyncCenterPage(): JSX.Element {
   const { user } = useAuth();
   const canView = hasPlatformCapability(user, PLATFORM_CAPABILITIES.syncView);
+  const canManage = hasPlatformCapability(user, PLATFORM_CAPABILITIES.syncManage);
   const preferenceKey = useFilterPreferenceKey("platform-sync");
   const [tenantId, setTenantId] = useState("all");
   const [health, setHealth] = useState<HealthFilter>("all");
@@ -59,6 +62,7 @@ export function SyncCenterPage(): JSX.Element {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [selectedNode, setSelectedNode] = useState<SyncMonitoringNode | null>(null);
+  const [nodeAction, setNodeAction] = useState<SyncNodeAction | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -292,7 +296,23 @@ export function SyncCenterPage(): JSX.Element {
         </>
       )}
 
-      <NodeDetailModal node={selectedNode} onClose={() => setSelectedNode(null)} />
+      <NodeDetailModal
+        node={nodeAction ? null : selectedNode}
+        canManage={canManage}
+        onAction={setNodeAction}
+        onClose={() => setSelectedNode(null)}
+      />
+      {nodeAction && selectedNode && (
+        <SyncNodeActionModal
+          action={nodeAction}
+          node={selectedNode}
+          onCompleted={() => void overview.refetch()}
+          onClose={() => {
+            setNodeAction(null);
+            setSelectedNode(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -324,11 +344,13 @@ function Summary({ summary }: { summary: SyncMonitoringSummary }): JSX.Element {
       </div>
       {(summary.never_connected_nodes > 0 ||
         summary.expiring_credentials > 0 ||
-        summary.pending_handovers > 0) && (
+        summary.pending_handovers > 0 ||
+        summary.pending_credential_rotations > 0) && (
         <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-border px-3 py-2 text-xs text-foreground-secondary sm:px-4">
           <span>Не подключались: {summary.never_connected_nodes}</span>
           <span>Истекли или скоро истекут ключи: {summary.expiring_credentials}</span>
           <span>Ожидают переключения: {summary.pending_handovers}</span>
+          <span>Замен ключа в работе: {summary.pending_credential_rotations}</span>
         </div>
       )}
     </section>
@@ -446,9 +468,13 @@ function MobileNodeList({
 
 function NodeDetailModal({
   node,
+  canManage,
+  onAction,
   onClose,
 }: {
   node: SyncMonitoringNode | null;
+  canManage: boolean;
+  onAction: (action: SyncNodeAction) => void;
   onClose: () => void;
 }): JSX.Element {
   return (
@@ -511,6 +537,19 @@ function NodeDetailModal({
               label="Ключ доступа действует до"
               value={formatDateTime(node.credential_expires_at)}
             />
+            <DetailField label="Версия безопасности" value={String(node.lifecycle_version)} />
+            {node.credential_rotation_status && (
+              <DetailField
+                label="Замена ключа"
+                value={credentialRotationLabel(node.credential_rotation_status)}
+              />
+            )}
+            {node.credential_rotation_activate_before && (
+              <DetailField
+                label="Установить новый ключ до"
+                value={formatDateTime(node.credential_rotation_activate_before)}
+              />
+            )}
           </div>
 
           <div className="rounded-md border border-border bg-foreground/[0.025] px-3 py-2 text-xs text-foreground-muted">
@@ -518,7 +557,27 @@ function NodeDetailModal({
             <span className="break-all font-mono text-foreground-secondary">{node.node_id}</span>
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
+            {canManage && node.node_status === "active" && node.mode === "shadow_readonly" && (
+              <>
+                {node.credential_rotation_status === null && (
+                  <Button variant="secondary" onClick={() => onAction("rotate")}>
+                    Заменить ключ
+                  </Button>
+                )}
+                {node.credential_rotation_status === "verified" && (
+                  <Button onClick={() => onAction("complete")}>Завершить замену</Button>
+                )}
+                {node.credential_rotation_status !== null && (
+                  <Button variant="secondary" onClick={() => onAction("cancel")}>
+                    Отменить замену
+                  </Button>
+                )}
+                <Button variant="danger" onClick={() => onAction("revoke")}>
+                  Отозвать узел
+                </Button>
+              </>
+            )}
             <Button variant="secondary" onClick={onClose}>
               Закрыть
             </Button>
@@ -527,6 +586,12 @@ function NodeDetailModal({
       )}
     </Modal>
   );
+}
+
+function credentialRotationLabel(status: "pending" | "verified" | "expired"): string {
+  if (status === "verified") return "Новый ключ подтверждён";
+  if (status === "expired") return "Срок установки истёк";
+  return "Ожидается подключение нового ключа";
 }
 
 function DetailField({ label, value }: { label: string; value: string }): JSX.Element {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from enum import StrEnum
 from typing import Literal, Self
 from uuid import UUID
 
@@ -396,6 +397,7 @@ class SyncNodeRead(BaseModel):
     last_seen_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    lifecycle_version: int = Field(ge=1)
 
 
 class SyncNodeCredentialRead(SyncNodeRead):
@@ -431,6 +433,11 @@ class SyncMonitoringNodeRead(BaseModel):
     current_sequence: int = Field(ge=0)
     reported_sequence: int | None = Field(default=None, ge=0)
     lag_events: int = Field(ge=0)
+    lifecycle_version: int = Field(ge=1)
+    credential_rotation_id: UUID | None = None
+    credential_rotation_status: Literal["pending", "verified", "expired"] | None = None
+    credential_rotation_activate_before: datetime | None = None
+    credential_rotation_verified_at: datetime | None = None
 
 
 class SyncMonitoringSummaryRead(BaseModel):
@@ -443,6 +450,7 @@ class SyncMonitoringSummaryRead(BaseModel):
     never_connected_nodes: int = Field(ge=0)
     expiring_credentials: int = Field(ge=0)
     pending_handovers: int = Field(ge=0)
+    pending_credential_rotations: int = Field(ge=0)
 
 
 class SyncMonitoringTenantRead(BaseModel):
@@ -465,6 +473,70 @@ class SyncCredentialRotate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     credential_valid_days: int = Field(default=90, ge=1, le=365)
+
+
+class SyncNodeActionReasonCode(StrEnum):
+    ROUTINE_MAINTENANCE = "routine_maintenance"
+    CREDENTIAL_EXPIRY = "credential_expiry"
+    SECURITY_INCIDENT = "security_incident"
+    DEVICE_REPLACEMENT = "device_replacement"
+    DEVICE_RETIRED = "device_retired"
+    OTHER = "other"
+
+
+def _normalize_action_text(value: str) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) < 10:
+        raise ValueError("reason must contain at least 10 non-whitespace characters")
+    return normalized
+
+
+class SyncNodeActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    expected_version: int = Field(ge=1)
+    operation_id: UUID4
+    confirmation_name: str = Field(min_length=1, max_length=120)
+    reason_code: SyncNodeActionReasonCode
+    reason: str = Field(min_length=10, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        return _normalize_action_text(value)
+
+
+class SyncCredentialRotationStartRequest(SyncNodeActionRequest):
+    credential_valid_days: int = Field(default=90, ge=1, le=365)
+
+
+class SyncCredentialRotationSecretRead(BaseModel):
+    rotation_id: UUID
+    node_id: UUID
+    status: Literal["pending", "verified", "completed", "cancelled"]
+    node_version: int = Field(ge=1)
+    credential_issued_at: datetime
+    credential_expires_at: datetime
+    activate_before: datetime
+    verified_at: datetime | None
+    credential: str | None = None
+    replayed: bool
+
+
+class SyncCredentialRotationTransitionRead(BaseModel):
+    rotation_id: UUID
+    node_id: UUID
+    rotation_status: Literal["pending", "verified", "completed", "cancelled"]
+    node_status: Literal["active", "revoked"]
+    node_version: int = Field(ge=1)
+    replayed: bool
+
+
+class SyncNodeLifecycleRead(BaseModel):
+    node_id: UUID
+    node_status: Literal["active", "revoked"]
+    node_version: int = Field(ge=1)
+    replayed: bool
 
 
 class SyncWriterPrepareRequest(BaseModel):

@@ -15,6 +15,7 @@ export interface SyncMonitoringSummary {
   never_connected_nodes: number;
   expiring_credentials: number;
   pending_handovers: number;
+  pending_credential_rotations: number;
 }
 
 export interface SyncMonitoringTenant {
@@ -46,6 +47,11 @@ export interface SyncMonitoringNode {
   current_sequence: number;
   reported_sequence: number | null;
   lag_events: number;
+  lifecycle_version: number;
+  credential_rotation_id: string | null;
+  credential_rotation_status: "pending" | "verified" | "expired" | null;
+  credential_rotation_activate_before: string | null;
+  credential_rotation_verified_at: string | null;
 }
 
 export interface SyncMonitoringOverview {
@@ -66,3 +72,54 @@ export interface SyncMonitoringFilters {
   limit: number;
   offset: number;
 }
+
+export type SyncNodeActionReasonCode =
+  | "routine_maintenance"
+  | "credential_expiry"
+  | "security_incident"
+  | "device_replacement"
+  | "device_retired"
+  | "other";
+
+export interface SyncNodeActionPayload {
+  expected_version: number;
+  operation_id: string;
+  confirmation_name: string;
+  reason_code: SyncNodeActionReasonCode;
+  reason: string;
+}
+
+export interface SyncCredentialRotationStartPayload extends SyncNodeActionPayload {
+  credential_valid_days: number;
+}
+
+export interface SyncCredentialRotationSecret {
+  rotation_id: string;
+  node_id: string;
+  status: "pending" | "verified" | "completed" | "cancelled";
+  node_version: number;
+  credential_issued_at: string;
+  credential_expires_at: string;
+  activate_before: string;
+  verified_at: string | null;
+  credential: string | null;
+  replayed: boolean;
+}
+
+export interface SyncCredentialRotationTransition {
+  rotation_id: string;
+  node_id: string;
+  rotation_status: "pending" | "verified" | "completed" | "cancelled";
+  node_status: SyncNodeStatus;
+  node_version: number;
+  replayed: boolean;
+}
+
+export interface SyncNodeLifecycleResult {
+  node_id: string;
+  node_status: SyncNodeStatus;
+  node_version: number;
+  replayed: boolean;
+}
+
+export type SyncNodeAction = "rotate" | "complete" | "cancel" | "revoke";

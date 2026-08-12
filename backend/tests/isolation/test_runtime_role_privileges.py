@@ -106,6 +106,8 @@ NO_ACCESS_TABLES = {
     "support_mfa_recovery_code",
     "support_access_capability",
     "support_access_session",
+    "sync_node_admin_event",
+    "sync_node_credential_rotation",
     "sync_node",
 }
 
@@ -224,6 +226,7 @@ CUSTOM_FUNCTIONS = {
     "touch_auth_user_last_login",
     "prepare_edge_writer_handover",
     "prepare_edge_writer_foundation_handover",
+    "prepare_sync_node_credential_rotation",
     "platform_actor_has_capability",
     "platform_actor_has_recent_capability",
     "claim_platform_invitation_email",
@@ -268,6 +271,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_sync_activation_bootstrap_chunk",
     "trg_guard_sync_activation_bootstrap_component",
     "trg_guard_sync_activation_foundation",
+    "trg_guard_sync_handover_credential_rotation",
     "trg_guard_sync_outbox_writer",
     "trg_guard_sync_stream_scope",
     "trg_guard_sync_writer_activation",
@@ -279,6 +283,7 @@ CUSTOM_FUNCTIONS = {
     "trg_initialize_branch_sync_writer",
     "trg_project_platform_access_grant",
     "trg_reject_platform_staff_event_mutation",
+    "trg_reject_sync_node_admin_event_mutation",
     "trg_seed_bootstrap_platform_capabilities",
     "trg_require_full_activation_bootstrap",
     "trg_require_full_bootstrap_transition",
@@ -293,6 +298,9 @@ CUSTOM_FUNCTIONS = {
     "trg_validate_platform_staff_status_consistency",
     "trg_copy_session_mfa_verification",
     "trg_validate_sync_stream_checkpoint",
+    "trg_audit_sync_node_admin_event",
+    "transition_sync_node_credential_rotation",
+    "revoke_sync_node",
     "update_tenant_membership_profile",
     "update_tenant_user_profile",
 }

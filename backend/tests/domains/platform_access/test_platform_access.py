@@ -444,6 +444,17 @@ async def test_administrator_can_view_but_cannot_manage_edge_sync(
         },
         headers=_headers(token),
     )
+    lifecycle_response = await platform_client.post(
+        f"/api/v1/admin/sync/nodes/{uuid4()}/revoke",
+        json={
+            "expected_version": 1,
+            "operation_id": str(uuid4()),
+            "confirmation_name": "Forbidden node",
+            "reason_code": "security_incident",
+            "reason": "Administrator must not manage synchronization nodes",
+        },
+        headers=_headers(token),
+    )
 
     assert anonymous_response.status_code == 401
     assert view_response.status_code == 200, view_response.text
@@ -452,6 +463,7 @@ async def test_administrator_can_view_but_cannot_manage_edge_sync(
     assert "checksum" not in view_response.text
     assert legacy_internal_response.status_code == 403
     assert manage_response.status_code == 403
+    assert lifecycle_response.status_code == 403
     assert "platform.sync.manage" in manage_response.json()["error"]["message"]
 
 

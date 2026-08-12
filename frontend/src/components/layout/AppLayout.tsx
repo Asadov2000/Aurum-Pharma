@@ -115,13 +115,14 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   // Clean identity: a recognizable name + a quiet caption. We have no role name
   // in the payload, so the caption is the support role (dev/admin) when set, or
   // the email for tenant users (what they recognize) — never the English "Account".
-  const name = user?.full_name?.trim() || user?.email || "—";
+  const fullName = user?.full_name?.trim();
+  const name = fullName || user?.email || "—";
   const caption = user?.is_developer
-    ? "Разработчик"
-    : user?.is_administrator
-      ? "Администратор"
-      : user?.full_name?.trim()
-        ? (user.email ?? null)
+      ? "Разработчик"
+      : user?.is_administrator
+        ? "Администратор"
+        : fullName
+        ? (user?.email ?? null)
         : null;
   const initial = name.charAt(0).toUpperCase();
 
