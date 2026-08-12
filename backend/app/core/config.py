@@ -114,21 +114,6 @@ def _minio_security_problems(access_key: str, secret_key: str) -> list[str]:
     return []
 
 
-def _email_security_problems(
-    host: str,
-    user: str,
-    password: str,
-    sender: str,
-    use_tls: bool,
-) -> list[str]:
-    problems: list[str] = []
-    if not host or host.lower() == "localhost" or not user or not password or "@" not in sender:
-        problems.append("Production SMTP settings must contain dedicated credentials")
-    if not use_tls:
-        problems.append("EMAIL_USE_TLS must be true outside development")
-    return problems
-
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -183,16 +168,6 @@ class Settings(BaseSettings):
     # Upper bound for catalog import uploads (CSV/XLSX). Bigger files are
     # rejected at the upload endpoint with a friendly 422.
     MAX_IMPORT_FILE_MB: int = 10
-
-    EMAIL_HOST: str = "localhost"
-    EMAIL_PORT: int = 587
-    EMAIL_USER: str = ""
-    EMAIL_PASSWORD: str = Field(default="", repr=False)
-    EMAIL_FROM: str = "no-reply@aurum-pharma.tj"
-    EMAIL_USE_TLS: bool = True
-    EMAIL_SMTP_TIMEOUT_SECONDS: int = Field(default=10, ge=3, le=30)
-    EMAIL_OUTBOX_BATCH_SIZE: int = Field(default=25, ge=1, le=100)
-    PUBLIC_APP_URL: AnyHttpUrl = AnyHttpUrl("http://localhost:5173")
 
     APP_NAME: str = "Aurum Pharma"
     LOG_LEVEL: str = "INFO"
@@ -322,25 +297,6 @@ class Settings(BaseSettings):
         problems.extend(_trusted_host_security_problems(self.TRUSTED_HOSTS, cors_hosts))
         problems.extend(_proxy_security_problems(self.TRUSTED_PROXY_IPS))
         problems.extend(_redis_security_problems(self.REDIS_URL))
-        problems.extend(
-            _email_security_problems(
-                self.EMAIL_HOST,
-                self.EMAIL_USER,
-                self.EMAIL_PASSWORD,
-                self.EMAIL_FROM,
-                self.EMAIL_USE_TLS,
-            )
-        )
-        public_app_url = urlsplit(str(self.PUBLIC_APP_URL))
-        if (
-            public_app_url.scheme != "https"
-            or public_app_url.username is not None
-            or public_app_url.password is not None
-            or public_app_url.query
-            or public_app_url.fragment
-        ):
-            problems.append("PUBLIC_APP_URL must be a public HTTPS URL without credentials")
-
         if self.EDGE_SYNC_ENABLED:
             problems.append(
                 "EDGE_SYNC_ENABLED uses development token auth; production requires mTLS"

@@ -37,11 +37,6 @@ def _build(**overrides: object) -> Settings:
         "TRUSTED_HOSTS": ["pharmacy.example.com"],
         "TRUSTED_PROXY_IPS": ["172.30.0.10"],
         "REFRESH_COOKIE_SECURE": True,
-        "EMAIL_HOST": "smtp.example.com",
-        "EMAIL_USER": "aurum@example.com",
-        "EMAIL_PASSWORD": "smtp-provider-token",
-        "EMAIL_FROM": "no-reply@example.com",
-        "PUBLIC_APP_URL": _PRODUCTION_ORIGIN,
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)  # type: ignore[arg-type]
@@ -157,14 +152,6 @@ def test_non_development_requires_redis_authentication() -> None:
         _build(ENVIRONMENT="production", REDIS_URL="redis://:[invalid")
 
 
-def test_non_development_requires_secure_smtp() -> None:
-    with pytest.raises(ValidationError, match="SMTP"):
-        _build(ENVIRONMENT="production", EMAIL_PASSWORD="")
-
-    with pytest.raises(ValidationError, match="EMAIL_USE_TLS"):
-        _build(ENVIRONMENT="production", EMAIL_USE_TLS=False)
-
-
 def test_credentials_are_hidden_from_settings_representation() -> None:
     settings = _build()
     representation = repr(settings)
@@ -176,7 +163,6 @@ def test_credentials_are_hidden_from_settings_representation() -> None:
         "Str0ng-Redis-Pw",
         "application-user-key",
         "m" * 40,
-        "smtp-provider-token",
         _EMAIL_OUTBOX_ENCRYPTION_KEY,
     ):
         assert secret not in representation
@@ -260,19 +246,6 @@ def test_email_outbox_keyring_supports_rotation_without_exposing_roots() -> None
     assert _PREVIOUS_EMAIL_OUTBOX_ENCRYPTION_KEY not in representation
 
 
-@pytest.mark.parametrize(
-    "public_url",
-    [
-        "http://pharmacy.example.com",
-        "https://user:password@pharmacy.example.com",
-        "https://pharmacy.example.com/?token=secret",
-    ],
-)
-def test_non_development_rejects_unsafe_public_app_url(public_url: str) -> None:
-    with pytest.raises(ValidationError, match="PUBLIC_APP_URL"):
-        _build(ENVIRONMENT="production", PUBLIC_APP_URL=public_url)
-
-
 def test_development_allows_defaults() -> None:
     s = _build(
         ENVIRONMENT="development",
@@ -322,7 +295,6 @@ def test_settings_read_secrets_from_files(
         "REDIS_URL": "redis://:Str0ng-Redis-Pw@redis:6379/0",
         "MINIO_ACCESS_KEY": "application-user-key",
         "MINIO_SECRET_KEY": "m" * 40,
-        "EMAIL_PASSWORD": "smtp-provider-token",
     }
     for name, value in secret_values.items():
         monkeypatch.delenv(name, raising=False)
@@ -338,10 +310,6 @@ def test_settings_read_secrets_from_files(
         REFRESH_COOKIE_SECURE=True,
         MFA_ENCRYPTION_KEY_VERSION=2,
         EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION=2,
-        EMAIL_HOST="smtp.example.com",
-        EMAIL_USER="aurum@example.com",
-        EMAIL_FROM="no-reply@example.com",
-        PUBLIC_APP_URL=_PRODUCTION_ORIGIN,
     )
 
     assert settings.JWT_SECRET == _STRONG_SECRET

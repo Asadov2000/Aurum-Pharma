@@ -17,12 +17,6 @@ x-backend-environment: &backend-environment
   MINIO_SECURE: "false"
   MFA_ENCRYPTION_KEY_VERSION: "${AURUM_MFA_KEY_VERSION:-1}"
   EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION: "${AURUM_EMAIL_OUTBOX_KEY_VERSION:-1}"
-  EMAIL_HOST: "${AURUM_EMAIL_HOST:?AURUM_EMAIL_HOST is required}"
-  EMAIL_PORT: "${AURUM_EMAIL_PORT:-587}"
-  EMAIL_USER: "${AURUM_EMAIL_USER:?AURUM_EMAIL_USER is required}"
-  EMAIL_FROM: "${AURUM_EMAIL_FROM:?AURUM_EMAIL_FROM is required}"
-  EMAIL_USE_TLS: "${AURUM_EMAIL_USE_TLS:-true}"
-  PUBLIC_APP_URL: "${AURUM_PUBLIC_ORIGIN:?AURUM_PUBLIC_ORIGIN is required}"
   LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
   PYTHONPATH: /app
 
@@ -41,16 +35,12 @@ x-backend-secrets: &backend-secrets
     target: MFA_ENCRYPTION_PREVIOUS_KEYS
   - source: email_outbox_encryption_key
     target: EMAIL_OUTBOX_ENCRYPTION_KEY
-  - source: email_outbox_previous_keys
-    target: EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS
   - source: metrics_token
     target: METRICS_TOKEN
   - source: minio_access_key
     target: MINIO_ACCESS_KEY
   - source: minio_secret_key
     target: MINIO_SECRET_KEY
-  - source: email_password
-    target: EMAIL_PASSWORD
 
 x-backend-service: &backend-service
   image: "aurum-pharma-backend:${AURUM_IMAGE_TAG:-local}"
@@ -82,6 +72,7 @@ services:
       AURUM_APP_PASSWORD_FILE: /run/secrets/AURUM_APP_PASSWORD
       AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
+      AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -91,6 +82,8 @@ services:
         target: AURUM_SUPPORT_PASSWORD
       - source: aurum_migrator_password
         target: AURUM_MIGRATOR_PASSWORD
+      - source: aurum_mailer_password
+        target: AURUM_MAILER_PASSWORD
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -211,6 +204,7 @@ services:
       AURUM_APP_PASSWORD_FILE: /run/secrets/AURUM_APP_PASSWORD
       AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
+      AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -220,6 +214,8 @@ services:
         target: AURUM_SUPPORT_PASSWORD
       - source: aurum_migrator_password
         target: AURUM_MIGRATOR_PASSWORD
+      - source: aurum_mailer_password
+        target: AURUM_MAILER_PASSWORD
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
     networks:
@@ -316,6 +312,8 @@ services:
         "--loglevel=warning",
         "--concurrency=${AURUM_CELERY_CONCURRENCY:-2}",
         "--prefetch-multiplier=1",
+        "-Q",
+        "default",
       ]
     depends_on:
       postgres:
@@ -324,6 +322,67 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+
+  platform-mailer:
+    image: "aurum-pharma-backend:${AURUM_IMAGE_TAG:-local}"
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    environment:
+      ENVIRONMENT: production
+      AURUM_SECRETS_DIR: /run/secrets
+      EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION: "${AURUM_EMAIL_OUTBOX_KEY_VERSION:-1}"
+      EMAIL_HOST: "${AURUM_EMAIL_HOST:?AURUM_EMAIL_HOST is required}"
+      EMAIL_PORT: "${AURUM_EMAIL_PORT:-587}"
+      EMAIL_USER: "${AURUM_EMAIL_USER:?AURUM_EMAIL_USER is required}"
+      EMAIL_FROM: "${AURUM_EMAIL_FROM:?AURUM_EMAIL_FROM is required}"
+      EMAIL_USE_TLS: "${AURUM_EMAIL_USE_TLS:-true}"
+      PUBLIC_APP_URL: "${AURUM_PUBLIC_ORIGIN:?AURUM_PUBLIC_ORIGIN is required}"
+      EMAIL_OUTBOX_BATCH_SIZE: "${AURUM_MAILER_BATCH_SIZE:-25}"
+      EMAIL_OUTBOX_CLAIM_TIMEOUT_SECONDS: "${AURUM_MAILER_CLAIM_TIMEOUT_SECONDS:-300}"
+      LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
+      PYTHONPATH: /app
+    secrets:
+      - source: database_url_mailer
+        target: DATABASE_URL_MAILER
+      - source: redis_url
+        target: REDIS_URL
+      - source: email_outbox_encryption_key
+        target: EMAIL_OUTBOX_ENCRYPTION_KEY
+      - source: email_outbox_previous_keys
+        target: EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS
+      - source: email_password
+        target: EMAIL_PASSWORD
+    networks:
+      - data
+      - mailer-egress
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasks.mailer_app",
+        "worker",
+        "--loglevel=warning",
+        "--concurrency=${AURUM_MAILER_CONCURRENCY:-1}",
+        "--prefetch-multiplier=1",
+        "-Q",
+        "platform-mailer",
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    init: true
+    restart: unless-stopped
 
   celery-beat:
     <<: *backend-service
@@ -412,12 +471,16 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_SUPPORT_PASSWORD"
   aurum_migrator_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_MIGRATOR_PASSWORD"
+  aurum_mailer_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_MAILER_PASSWORD"
   database_url_app:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_APP"
   database_url_support:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_SUPPORT"
   database_url_migration:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_MIGRATION"
+  database_url_mailer:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_MAILER"
   redis_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_PASSWORD"
   redis_url:
@@ -464,3 +527,4 @@ networks:
     internal: true
   monitoring:
     internal: true
+  mailer-egress:

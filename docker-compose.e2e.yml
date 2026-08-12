@@ -22,6 +22,7 @@ services:
       POSTGRES_PASSWORD: postgres
       AURUM_APP_PASSWORD: aurum_app_pw
       AURUM_SUPPORT_PASSWORD: aurum_support_pw
+      AURUM_MAILER_PASSWORD: aurum_mailer_pw
       AURUM_MIGRATOR_PASSWORD: aurum_migrator_pw
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -70,6 +71,7 @@ services:
       POSTGRES_PASSWORD: postgres
       AURUM_APP_PASSWORD: aurum_app_pw
       AURUM_SUPPORT_PASSWORD: aurum_support_pw
+      AURUM_MAILER_PASSWORD: aurum_mailer_pw
       AURUM_MIGRATOR_PASSWORD: aurum_migrator_pw
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
@@ -122,7 +124,22 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    command: celery -A app.tasks.celery_app worker --loglevel=warning
+    command: celery -A app.tasks.celery_app worker --loglevel=warning -Q default
+    restart: "no"
+
+  platform-mailer:
+    image: aurum-pharma-e2e-backend:local
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
+      REDIS_URL: redis://redis:6379/0
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.mailer_app worker --loglevel=warning -Q platform-mailer --concurrency=1
     restart: "no"
 
   frontend:

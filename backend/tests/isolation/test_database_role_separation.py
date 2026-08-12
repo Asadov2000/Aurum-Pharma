@@ -62,6 +62,7 @@ async def test_database_roles_have_exact_attributes_and_memberships(
                       'aurum_app',
                       'aurum_edge_cash_executor',
                       'aurum_edge_cash_owner',
+                      'aurum_mailer',
                       'aurum_support',
                       'aurum_migrator',
                       'aurum_schema_owner'
@@ -124,6 +125,16 @@ async def test_database_roles_have_exact_attributes_and_memberships(
             "rolname": "aurum_migrator",
             "rolcanlogin": True,
             "rolinherit": True,
+            "rolsuper": False,
+            "rolcreatedb": False,
+            "rolcreaterole": False,
+            "rolreplication": False,
+            "rolbypassrls": False,
+        },
+        "aurum_mailer": {
+            "rolname": "aurum_mailer",
+            "rolcanlogin": True,
+            "rolinherit": False,
             "rolsuper": False,
             "rolcreatedb": False,
             "rolcreaterole": False,
@@ -195,6 +206,7 @@ async def test_runtime_roles_have_no_transitive_elevated_membership(
                       'aurum_app',
                       'aurum_edge_cash_executor',
                       'aurum_edge_cash_owner',
+                      'aurum_mailer',
                       'aurum_support'
                     )
                       AND elevated.rolname IN (
@@ -232,6 +244,16 @@ async def test_runtime_roles_have_no_transitive_elevated_membership(
         },
         {
             "runtime_role": "aurum_edge_cash_owner",
+            "elevated_role": "aurum_schema_owner",
+            "is_member": False,
+        },
+        {
+            "runtime_role": "aurum_mailer",
+            "elevated_role": "aurum_migrator",
+            "is_member": False,
+        },
+        {
+            "runtime_role": "aurum_mailer",
             "elevated_role": "aurum_schema_owner",
             "is_member": False,
         },
@@ -276,6 +298,7 @@ async def test_runtime_roles_own_no_application_objects(
                             'aurum_app',
                             'aurum_edge_cash_executor',
                             'aurum_edge_cash_owner',
+                            'aurum_mailer',
                             'aurum_support'
                           )
                       ) AS runtime_owned_relations,
@@ -291,6 +314,7 @@ async def test_runtime_roles_own_no_application_objects(
                             'aurum_app',
                             'aurum_edge_cash_executor',
                             'aurum_edge_cash_owner',
+                            'aurum_mailer',
                             'aurum_support'
                           )
                       ) AS runtime_owned_functions
