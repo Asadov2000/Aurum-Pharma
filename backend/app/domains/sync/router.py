@@ -5,13 +5,15 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
+    CurrentUser,
     get_db,
     require_recent_platform_capability,
 )
+from app.core.errors import AuthenticationError
 from app.domains.sync.auth import EdgeRequestContext, get_edge_context
 from app.domains.sync.bootstrap import BootstrapScope
 from app.domains.sync.repository import SyncCloudRepository
@@ -20,11 +22,16 @@ from app.domains.sync.schemas import (
     SyncBootstrapChunkRead,
     SyncBootstrapManifestRead,
     SyncCredentialRotate,
+    SyncCredentialRotationSecretRead,
+    SyncCredentialRotationStartRequest,
+    SyncCredentialRotationTransitionRead,
     SyncMonitoringHealth,
     SyncMonitoringMode,
     SyncMonitoringRead,
+    SyncNodeActionRequest,
     SyncNodeCreate,
     SyncNodeCredentialRead,
+    SyncNodeLifecycleRead,
     SyncNodeRead,
     SyncPullResponse,
     SyncShadowReportRead,
@@ -74,6 +81,12 @@ def _bootstrap_scope(context: EdgeRequestContext) -> BootstrapScope:
         source_checksum=principal.shadow_start_checksum,
         projection_checksum=principal.shadow_start_projection_checksum,
     )
+
+
+def _auth_session_id(user: CurrentUser) -> UUID:
+    if user.session_id is None:
+        raise AuthenticationError("Authentication session is unavailable")
+    return user.session_id
 
 
 @admin_router.post(
@@ -136,6 +149,8 @@ async def monitoring_overview(
     "/nodes/{node_id}/credential",
     response_model=SyncNodeCredentialRead,
     dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
+    deprecated=True,
+    include_in_schema=False,
 )
 async def rotate_node_credential(
     node_id: UUID,
@@ -143,10 +158,11 @@ async def rotate_node_credential(
     response: Response,
     service: Annotated[SyncAdminService, Depends(_admin_service)],
 ) -> SyncNodeCredentialRead:
+    del node_id, payload, service
     _prevent_credential_caching(response)
-    return await service.rotate_credential(
-        node_id=node_id,
-        valid_days=payload.credential_valid_days,
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Immediate credential rotation was replaced by staged rotation",
     )
 
 
@@ -154,12 +170,113 @@ async def rotate_node_credential(
     "/nodes/{node_id}",
     response_model=SyncNodeRead,
     dependencies=[Depends(require_recent_platform_capability("platform.sync.manage"))],
+    deprecated=True,
+    include_in_schema=False,
 )
 async def revoke_node(
     node_id: UUID,
     service: Annotated[SyncAdminService, Depends(_admin_service)],
 ) -> SyncNodeRead:
-    return await service.revoke_node(node_id)
+    del node_id, service
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Use the confirmed node revocation operation",
+    )
+
+
+@admin_router.post(
+    "/nodes/{node_id}/credential-rotations",
+    response_model=SyncCredentialRotationSecretRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_node_credential_rotation(
+    node_id: UUID,
+    payload: SyncCredentialRotationStartRequest,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.sync.manage")),
+    ],
+    service: Annotated[SyncAdminService, Depends(_admin_service)],
+) -> SyncCredentialRotationSecretRead:
+    _prevent_credential_caching(response)
+    return await service.start_credential_rotation(
+        actor_user_id=user.user_id,
+        actor_session_id=_auth_session_id(user),
+        node_id=node_id,
+        payload=payload,
+    )
+
+
+@admin_router.post(
+    "/credential-rotations/{rotation_id}/complete",
+    response_model=SyncCredentialRotationTransitionRead,
+)
+async def complete_node_credential_rotation(
+    rotation_id: UUID,
+    payload: SyncNodeActionRequest,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.sync.manage")),
+    ],
+    service: Annotated[SyncAdminService, Depends(_admin_service)],
+) -> SyncCredentialRotationTransitionRead:
+    _prevent_credential_caching(response)
+    return await service.transition_credential_rotation(
+        actor_user_id=user.user_id,
+        actor_session_id=_auth_session_id(user),
+        rotation_id=rotation_id,
+        action="complete",
+        payload=payload,
+    )
+
+
+@admin_router.post(
+    "/credential-rotations/{rotation_id}/cancel",
+    response_model=SyncCredentialRotationTransitionRead,
+)
+async def cancel_node_credential_rotation(
+    rotation_id: UUID,
+    payload: SyncNodeActionRequest,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.sync.manage")),
+    ],
+    service: Annotated[SyncAdminService, Depends(_admin_service)],
+) -> SyncCredentialRotationTransitionRead:
+    _prevent_credential_caching(response)
+    return await service.transition_credential_rotation(
+        actor_user_id=user.user_id,
+        actor_session_id=_auth_session_id(user),
+        rotation_id=rotation_id,
+        action="cancel",
+        payload=payload,
+    )
+
+
+@admin_router.post(
+    "/nodes/{node_id}/revoke",
+    response_model=SyncNodeLifecycleRead,
+)
+async def revoke_node_safely(
+    node_id: UUID,
+    payload: SyncNodeActionRequest,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.sync.manage")),
+    ],
+    service: Annotated[SyncAdminService, Depends(_admin_service)],
+) -> SyncNodeLifecycleRead:
+    _prevent_credential_caching(response)
+    return await service.revoke_node_safely(
+        actor_user_id=user.user_id,
+        actor_session_id=_auth_session_id(user),
+        node_id=node_id,
+        payload=payload,
+    )
 
 
 @admin_router.post(

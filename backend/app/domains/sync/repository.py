@@ -77,6 +77,11 @@ class SyncMonitoringRow:
     current_sequence: int
     reported_sequence: int | None
     lag_events: int
+    lifecycle_version: int
+    credential_rotation_id: UUID | None
+    credential_rotation_status: str | None
+    credential_rotation_activate_before: datetime | None
+    credential_rotation_verified_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +95,38 @@ class SyncMonitoringSummary:
     never_connected_nodes: int
     expiring_credentials: int
     pending_handovers: int
+    pending_credential_rotations: int
+
+
+@dataclass(frozen=True, slots=True)
+class SyncCredentialRotationRecord:
+    rotation_id: UUID
+    node_id: UUID
+    rotation_status: str
+    node_version: int
+    credential_issued_at: datetime
+    credential_expires_at: datetime
+    activate_before: datetime
+    verified_at: datetime | None
+    applied: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SyncCredentialRotationTransitionRecord:
+    rotation_id: UUID
+    node_id: UUID
+    rotation_status: str
+    node_status: str
+    node_version: int
+    applied: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SyncNodeLifecycleRecord:
+    node_id: UUID
+    node_status: str
+    node_version: int
+    applied: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +148,18 @@ WITH latest_report AS (
     report.created_at
   FROM public.sync_shadow_report AS report
   ORDER BY report.edge_node_id, report.created_at DESC, report.report_id DESC
+), open_rotation AS (
+  SELECT
+    rotation.id,
+    rotation.node_id,
+    CASE
+      WHEN rotation.activate_before <= pg_catalog.now() THEN 'expired'
+      ELSE rotation.status
+    END AS status,
+    rotation.activate_before,
+    rotation.verified_at
+  FROM public.sync_node_credential_rotation AS rotation
+  WHERE rotation.status IN ('pending', 'verified')
 ), monitored AS (
   SELECT
     node.id AS node_id,
@@ -123,7 +172,12 @@ WITH latest_report AS (
     node.display_name,
     node.mode,
     node.status AS node_status,
+    node.lifecycle_version,
     node.credential_expires_at,
+    rotation.id AS credential_rotation_id,
+    rotation.status AS credential_rotation_status,
+    rotation.activate_before AS credential_rotation_activate_before,
+    rotation.verified_at AS credential_rotation_verified_at,
     node.last_seen_at,
     report.created_at AS latest_report_at,
     report.status AS latest_report_status,
@@ -182,6 +236,7 @@ WITH latest_report AS (
   JOIN public.sync_stream AS stream
     ON stream.tenant_id = node.tenant_id AND stream.branch_id = node.branch_id
   LEFT JOIN latest_report AS report ON report.edge_node_id = node.id
+  LEFT JOIN open_rotation AS rotation ON rotation.node_id = node.id
   WHERE node.node_kind = 'edge'
     AND (CAST(:tenant_id AS UUID) IS NULL OR node.tenant_id = CAST(:tenant_id AS UUID))
 )
@@ -247,7 +302,9 @@ SELECT
         CAST(:tenant_id AS UUID) IS NULL
         OR activation.tenant_id = CAST(:tenant_id AS UUID)
       )
-  ) AS pending_handovers
+  ) AS pending_handovers,
+  COUNT(*) FILTER (WHERE credential_rotation_id IS NOT NULL)
+    AS pending_credential_rotations
 FROM monitored
 """
 
@@ -537,6 +594,15 @@ class SyncCloudRepository:
                     int(row["reported_sequence"]) if row["reported_sequence"] is not None else None
                 ),
                 lag_events=int(row["lag_events"]),
+                lifecycle_version=int(row["lifecycle_version"]),
+                credential_rotation_id=row["credential_rotation_id"],
+                credential_rotation_status=(
+                    str(row["credential_rotation_status"])
+                    if row["credential_rotation_status"] is not None
+                    else None
+                ),
+                credential_rotation_activate_before=row["credential_rotation_activate_before"],
+                credential_rotation_verified_at=row["credential_rotation_verified_at"],
             )
             for row in mappings
         ]
@@ -575,6 +641,166 @@ class SyncCloudRepository:
             select(SyncNode).where(SyncNode.id == node_id, SyncNode.node_kind == "edge")
         )
         return result.scalar_one_or_none()
+
+    async def prepare_credential_rotation(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        node_id: UUID,
+        expected_version: int,
+        operation_id: UUID,
+        credential_kid: UUID,
+        credential_hash: str,
+        credential_expires_at: datetime,
+        confirmation_name: str,
+        request_hash: str,
+        reason_code: str,
+        reason: str,
+    ) -> SyncCredentialRotationRecord | None:
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+                    SELECT * FROM public.prepare_sync_node_credential_rotation(
+                      :actor_user_id, :actor_session_id, :node_id, :expected_version,
+                      :operation_id, :credential_kid, :credential_hash,
+                      :credential_expires_at, :confirmation_name, :request_hash,
+                      :reason_code, :reason
+                    )
+                    """),
+                    {
+                        "actor_user_id": actor_user_id,
+                        "actor_session_id": actor_session_id,
+                        "node_id": node_id,
+                        "expected_version": expected_version,
+                        "operation_id": operation_id,
+                        "credential_kid": credential_kid,
+                        "credential_hash": credential_hash,
+                        "credential_expires_at": credential_expires_at,
+                        "confirmation_name": confirmation_name,
+                        "request_hash": request_hash,
+                        "reason_code": reason_code,
+                        "reason": reason,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return SyncCredentialRotationRecord(
+            rotation_id=row["rotation_id"],
+            node_id=row["node_id"],
+            rotation_status=str(row["rotation_status"]),
+            node_version=int(row["node_version"]),
+            credential_issued_at=row["credential_issued_at"],
+            credential_expires_at=row["credential_expires_at"],
+            activate_before=row["activate_before"],
+            verified_at=row["verified_at"],
+            applied=bool(row["applied"]),
+        )
+
+    async def transition_credential_rotation(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        rotation_id: UUID,
+        expected_version: int,
+        operation_id: UUID,
+        action: str,
+        confirmation_name: str,
+        request_hash: str,
+        reason_code: str,
+        reason: str,
+    ) -> SyncCredentialRotationTransitionRecord | None:
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+                    SELECT * FROM public.transition_sync_node_credential_rotation(
+                      :actor_user_id, :actor_session_id, :rotation_id, :expected_version,
+                      :operation_id, :action, :confirmation_name, :request_hash,
+                      :reason_code, :reason
+                    )
+                    """),
+                    {
+                        "actor_user_id": actor_user_id,
+                        "actor_session_id": actor_session_id,
+                        "rotation_id": rotation_id,
+                        "expected_version": expected_version,
+                        "operation_id": operation_id,
+                        "action": action,
+                        "confirmation_name": confirmation_name,
+                        "request_hash": request_hash,
+                        "reason_code": reason_code,
+                        "reason": reason,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return SyncCredentialRotationTransitionRecord(
+            rotation_id=row["rotation_id"],
+            node_id=row["node_id"],
+            rotation_status=str(row["rotation_status"]),
+            node_status=str(row["node_status"]),
+            node_version=int(row["node_version"]),
+            applied=bool(row["applied"]),
+        )
+
+    async def revoke_node_safely(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        node_id: UUID,
+        expected_version: int,
+        operation_id: UUID,
+        confirmation_name: str,
+        request_hash: str,
+        reason_code: str,
+        reason: str,
+    ) -> SyncNodeLifecycleRecord | None:
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+                    SELECT * FROM public.revoke_sync_node(
+                      :actor_user_id, :actor_session_id, :node_id, :expected_version,
+                      :operation_id, :confirmation_name, :request_hash,
+                      :reason_code, :reason
+                    )
+                    """),
+                    {
+                        "actor_user_id": actor_user_id,
+                        "actor_session_id": actor_session_id,
+                        "node_id": node_id,
+                        "expected_version": expected_version,
+                        "operation_id": operation_id,
+                        "confirmation_name": confirmation_name,
+                        "request_hash": request_hash,
+                        "reason_code": reason_code,
+                        "reason": reason,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return SyncNodeLifecycleRecord(
+            node_id=row["node_id"],
+            node_status=str(row["node_status"]),
+            node_version=int(row["node_version"]),
+            applied=bool(row["applied"]),
+        )
 
     async def rotate_edge_credential(
         self,

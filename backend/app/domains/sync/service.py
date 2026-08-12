@@ -64,13 +64,18 @@ from app.domains.sync.schemas import (
     SyncActivationFoundationSnapshot,
     SyncBootstrapChunkRead,
     SyncBootstrapManifestRead,
+    SyncCredentialRotationSecretRead,
+    SyncCredentialRotationStartRequest,
+    SyncCredentialRotationTransitionRead,
     SyncEventEnvelope,
     SyncMonitoringNodeRead,
     SyncMonitoringRead,
     SyncMonitoringSummaryRead,
     SyncMonitoringTenantRead,
+    SyncNodeActionRequest,
     SyncNodeCreate,
     SyncNodeCredentialRead,
+    SyncNodeLifecycleRead,
     SyncNodeRead,
     SyncPullResponse,
     SyncShadowReportRead,
@@ -102,6 +107,19 @@ def _handover_error(exc: DBAPIError) -> AurumError:
     if sqlstate in {"23503", "23505", "23514", "40001", "40P01", "55000"}:
         return ConflictError("Writer handover state changed; refresh and retry")
     return AurumError("Writer handover database guard failed")
+
+
+def _node_lifecycle_error(exc: DBAPIError) -> AurumError:
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "42501":
+        return PermissionDeniedError("Sync node operation is not allowed")
+    if sqlstate == "P0002":
+        return NotFoundError("Edge node or credential rotation not found")
+    if sqlstate in {"22023", "23502", "23514"}:
+        return BusinessRuleError("Sync node operation request is invalid")
+    if sqlstate in {"23503", "23505", "40001", "40P01", "55000"}:
+        return ConflictError("Sync node state changed; refresh and retry")
+    return AurumError("Sync node database guard failed")
 
 
 def _node_with_credential(node: SyncNode, credential: EdgeCredential) -> SyncNodeCredentialRead:
@@ -280,6 +298,155 @@ class SyncAdminService:
         if node is None:
             raise ConflictError("Edge node changed while rotating its credential")
         return _node_with_credential(node, credential)
+
+    async def start_credential_rotation(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        node_id: UUID,
+        payload: SyncCredentialRotationStartRequest,
+    ) -> SyncCredentialRotationSecretRead:
+        credential = issue_edge_credential()
+        issued_at = utc_now()
+        expires_at = issued_at + timedelta(days=payload.credential_valid_days)
+        request_hash = canonical_json_hash(
+            {
+                "action": "start_credential_rotation",
+                "node_id": str(node_id),
+                "expected_version": payload.expected_version,
+                "operation_id": str(payload.operation_id),
+                "confirmation_name": payload.confirmation_name,
+                "credential_valid_days": payload.credential_valid_days,
+                "reason_code": payload.reason_code.value,
+                "reason": payload.reason,
+            }
+        )
+        try:
+            rotation = await self.repo.prepare_credential_rotation(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                node_id=node_id,
+                expected_version=payload.expected_version,
+                operation_id=payload.operation_id,
+                credential_kid=credential.kid,
+                credential_hash=credential.digest,
+                credential_expires_at=expires_at,
+                confirmation_name=payload.confirmation_name,
+                request_hash=request_hash,
+                reason_code=payload.reason_code.value,
+                reason=payload.reason,
+            )
+        except DBAPIError as exc:
+            raise _node_lifecycle_error(exc) from exc
+        if rotation is None:
+            raise ConflictError("Sync node changed; refresh and retry")
+        return SyncCredentialRotationSecretRead(
+            rotation_id=rotation.rotation_id,
+            node_id=rotation.node_id,
+            status=cast(
+                Literal["pending", "verified", "completed", "cancelled"],
+                rotation.rotation_status,
+            ),
+            node_version=rotation.node_version,
+            credential_issued_at=rotation.credential_issued_at,
+            credential_expires_at=rotation.credential_expires_at,
+            activate_before=rotation.activate_before,
+            verified_at=rotation.verified_at,
+            credential=credential.token if rotation.applied else None,
+            replayed=not rotation.applied,
+        )
+
+    async def transition_credential_rotation(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        rotation_id: UUID,
+        action: Literal["complete", "cancel"],
+        payload: SyncNodeActionRequest,
+    ) -> SyncCredentialRotationTransitionRead:
+        request_hash = canonical_json_hash(
+            {
+                "action": action,
+                "rotation_id": str(rotation_id),
+                "expected_version": payload.expected_version,
+                "operation_id": str(payload.operation_id),
+                "confirmation_name": payload.confirmation_name,
+                "reason_code": payload.reason_code.value,
+                "reason": payload.reason,
+            }
+        )
+        try:
+            transition = await self.repo.transition_credential_rotation(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                rotation_id=rotation_id,
+                expected_version=payload.expected_version,
+                operation_id=payload.operation_id,
+                action=action,
+                confirmation_name=payload.confirmation_name,
+                request_hash=request_hash,
+                reason_code=payload.reason_code.value,
+                reason=payload.reason,
+            )
+        except DBAPIError as exc:
+            raise _node_lifecycle_error(exc) from exc
+        if transition is None:
+            raise ConflictError("Sync node changed; refresh and retry")
+        return SyncCredentialRotationTransitionRead(
+            rotation_id=transition.rotation_id,
+            node_id=transition.node_id,
+            rotation_status=cast(
+                Literal["pending", "verified", "completed", "cancelled"],
+                transition.rotation_status,
+            ),
+            node_status=cast(Literal["active", "revoked"], transition.node_status),
+            node_version=transition.node_version,
+            replayed=not transition.applied,
+        )
+
+    async def revoke_node_safely(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        node_id: UUID,
+        payload: SyncNodeActionRequest,
+    ) -> SyncNodeLifecycleRead:
+        request_hash = canonical_json_hash(
+            {
+                "action": "revoke_node",
+                "node_id": str(node_id),
+                "expected_version": payload.expected_version,
+                "operation_id": str(payload.operation_id),
+                "confirmation_name": payload.confirmation_name,
+                "reason_code": payload.reason_code.value,
+                "reason": payload.reason,
+            }
+        )
+        try:
+            revoked = await self.repo.revoke_node_safely(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                node_id=node_id,
+                expected_version=payload.expected_version,
+                operation_id=payload.operation_id,
+                confirmation_name=payload.confirmation_name,
+                request_hash=request_hash,
+                reason_code=payload.reason_code.value,
+                reason=payload.reason,
+            )
+        except DBAPIError as exc:
+            raise _node_lifecycle_error(exc) from exc
+        if revoked is None:
+            raise ConflictError("Sync node changed; refresh and retry")
+        return SyncNodeLifecycleRead(
+            node_id=revoked.node_id,
+            node_status=cast(Literal["active", "revoked"], revoked.node_status),
+            node_version=revoked.node_version,
+            replayed=not revoked.applied,
+        )
 
     async def revoke_node(self, node_id: UUID) -> SyncNodeRead:
         existing = await self.repo.get_edge_node(node_id)

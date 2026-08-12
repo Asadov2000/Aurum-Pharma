@@ -53,6 +53,51 @@ class SyncNode(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    lifecycle_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+
+
+class SyncNodeCredentialRotation(Base):
+    __tablename__ = "sync_node_credential_rotation"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    credential_kid: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    credential_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    credential_issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    credential_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    activate_before: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SyncNodeAdminEvent(Base):
+    __tablename__ = "sync_node_admin_event"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    actor_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    node_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_hash: Mapped[str | None] = mapped_column(Text)
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class SyncStream(Base):
