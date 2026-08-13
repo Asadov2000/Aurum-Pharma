@@ -6,6 +6,7 @@ ORM mapping for views in this project.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -41,6 +42,26 @@ class PlatformInvoiceRecord:
     subscription_status: str
     paid_amount: Decimal
     outstanding_amount: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformPricingPlanRecord:
+    plan_id: UUID
+    code: str
+    name: str
+    description: str | None
+    currency: str
+    is_active: bool
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+    versions: list[dict[str, object]]
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformPricingCommandRecord:
+    result: dict[str, object]
+    applied: bool
 
 
 class BillingRepository:
@@ -328,4 +349,165 @@ class BillingRepository:
                 for row in rows
             ],
             total,
+        )
+
+    async def list_platform_pricing_plans(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[PlatformPricingPlanRecord], int]:
+        row = (
+            (
+                await self.session.execute(
+                    text(
+                        "SELECT * FROM public.list_platform_billing_plans("
+                        ":actor_user_id, :actor_session_id, :limit, :offset)"
+                    ),
+                    {
+                        "actor_user_id": actor_user_id,
+                        "actor_session_id": actor_session_id,
+                        "limit": page_size,
+                        "offset": (page - 1) * page_size,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        items = list(row["items"])
+        return (
+            [
+                PlatformPricingPlanRecord(
+                    plan_id=UUID(str(item["plan_id"])),
+                    code=str(item["code"]),
+                    name=str(item["name"]),
+                    description=(
+                        str(item["description"]) if item["description"] is not None else None
+                    ),
+                    currency=str(item["currency"]),
+                    is_active=bool(item["is_active"]),
+                    created_by=UUID(str(item["created_by"])),
+                    created_at=datetime.fromisoformat(str(item["created_at"])),
+                    updated_at=datetime.fromisoformat(str(item["updated_at"])),
+                    versions=list(item["versions"]),
+                )
+                for item in items
+            ],
+            int(row["total_count"]),
+        )
+
+    async def create_platform_pricing_plan(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        code: str,
+        name: str,
+        description: str | None,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.create_billing_plan_draft("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":code, :name, :description)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "code": code,
+                "name": name,
+                "description": description,
+            },
+        )
+
+    async def create_platform_pricing_price(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        plan_id: UUID,
+        monthly_price_per_branch: Decimal,
+        annual_discount_pct: Decimal,
+        audience: str,
+        notice_days: int,
+        change_reason: str,
+        terms_snapshot: dict[str, object],
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.create_billing_price_draft("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":plan_id, :monthly_price, :annual_discount, :audience, :notice_days, "
+            ":change_reason, CAST(:terms_snapshot AS JSONB))",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "plan_id": plan_id,
+                "monthly_price": monthly_price_per_branch,
+                "annual_discount": annual_discount_pct,
+                "audience": audience,
+                "notice_days": notice_days,
+                "change_reason": change_reason,
+                "terms_snapshot": json.dumps(
+                    terms_snapshot,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                ),
+            },
+        )
+
+    async def schedule_platform_pricing_price(
+        self,
+        **parameters: object,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.approve_and_schedule_billing_price("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":price_version_id, :expected_row_version, :effective_from)",
+            parameters,
+        )
+
+    async def activate_platform_pricing_price(
+        self,
+        **parameters: object,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.activate_billing_price_version("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":price_version_id, :expected_row_version)",
+            parameters,
+        )
+
+    async def cancel_platform_pricing_price(
+        self,
+        **parameters: object,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.cancel_scheduled_billing_price("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":price_version_id, :expected_row_version, :reason_code, :reason)",
+            parameters,
+        )
+
+    async def _pricing_command(
+        self,
+        statement: str,
+        parameters: dict[str, object],
+    ) -> PlatformPricingCommandRecord:
+        # A rejected DB guard must not poison a longer caller-owned transaction
+        # (notably the rollback-only integration-test transaction).
+        async with self.session.begin_nested():
+            row = (await self.session.execute(text(statement), parameters)).mappings().one()
+        return PlatformPricingCommandRecord(
+            result=dict(row["result"]),
+            applied=bool(row["applied"]),
         )

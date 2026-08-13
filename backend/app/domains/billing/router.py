@@ -7,6 +7,7 @@ Two routers:
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -33,6 +34,16 @@ from app.domains.billing.schemas import (
     PlatformBillingOverviewRead,
     PlatformInvoiceList,
     PlatformInvoiceRead,
+    PlatformPricingPlanCommandResult,
+    PlatformPricingPlanList,
+    PlatformPricingPlanRead,
+    PlatformPricingVersionCommandResult,
+    PlatformPricingVersionRead,
+    PricingActivate,
+    PricingCancel,
+    PricingPlanCreate,
+    PricingPriceDraftCreate,
+    PricingSchedule,
     SubscriptionCreate,
     SubscriptionRead,
     SubscriptionWithPlan,
@@ -122,6 +133,229 @@ platform_router = APIRouter(prefix="/api/v1/admin/billing", tags=["admin", "bill
 def _set_financial_no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Pragma"] = "no-cache"
+
+
+def _platform_session_or_401(user: CurrentUser) -> UUID:
+    if user.session_id is None:
+        raise BusinessRuleError("Platform operation requires an authentication session")
+    return user.session_id
+
+
+@platform_router.get(
+    "/plans",
+    response_model=PlatformPricingPlanList,
+)
+async def list_platform_pricing_plans(
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.view")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+    page: int = Query(default=1, ge=1, le=1000),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> PlatformPricingPlanList:
+    _set_financial_no_store(response)
+    records, total = await service.list_platform_pricing_plans(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        page=page,
+        page_size=page_size,
+    )
+    return PlatformPricingPlanList(
+        items=[
+            PlatformPricingPlanRead(
+                plan_id=record.plan_id,
+                code=record.code,
+                name=record.name,
+                description=record.description,
+                currency=record.currency,
+                is_active=record.is_active,
+                created_by=record.created_by,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+                versions=[
+                    PlatformPricingVersionRead.model_validate(item) for item in record.versions
+                ],
+            )
+            for record in records
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@platform_router.post(
+    "/plans",
+    response_model=PlatformPricingPlanCommandResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_platform_pricing_plan(
+    payload: PricingPlanCreate,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.plan.manage")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PlatformPricingPlanCommandResult:
+    _set_financial_no_store(response)
+    record = await service.create_platform_pricing_plan(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        code=payload.code,
+        name=payload.name,
+        description=payload.description,
+    )
+    return PlatformPricingPlanCommandResult(
+        item=PlatformPricingPlanRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.post(
+    "/plans/{plan_id}/prices",
+    response_model=PlatformPricingVersionCommandResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_platform_pricing_price(
+    plan_id: UUID,
+    payload: PricingPriceDraftCreate,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.plan.manage")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PlatformPricingVersionCommandResult:
+    _set_financial_no_store(response)
+    record = await service.create_platform_pricing_price(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        plan_id=plan_id,
+        monthly_price_per_branch=payload.monthly_price_per_branch,
+        annual_discount_pct=payload.annual_discount_pct,
+        audience=payload.audience,
+        notice_days=payload.notice_days,
+        change_reason=payload.change_reason,
+        terms_snapshot=dict(payload.terms_snapshot),
+    )
+    return PlatformPricingVersionCommandResult(
+        item=PlatformPricingVersionRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+async def _transition_platform_price(
+    *,
+    action: str,
+    price_id: UUID,
+    operation_id: UUID,
+    expected_row_version: int,
+    response: Response,
+    user: CurrentUser,
+    service: BillingService,
+    effective_from: datetime | None = None,
+    reason_code: str | None = None,
+    reason: str | None = None,
+) -> PlatformPricingVersionCommandResult:
+    _set_financial_no_store(response)
+    record = await service.transition_platform_pricing_price(
+        action=action,
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=operation_id,
+        price_version_id=price_id,
+        expected_row_version=expected_row_version,
+        effective_from=effective_from,
+        reason_code=reason_code,
+        reason=reason,
+    )
+    return PlatformPricingVersionCommandResult(
+        item=PlatformPricingVersionRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.post(
+    "/prices/{price_id}/schedule",
+    response_model=PlatformPricingVersionCommandResult,
+)
+async def schedule_platform_pricing_price(
+    price_id: UUID,
+    payload: PricingSchedule,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.plan.manage")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PlatformPricingVersionCommandResult:
+    return await _transition_platform_price(
+        action="price_scheduled",
+        price_id=price_id,
+        operation_id=payload.operation_id,
+        expected_row_version=payload.expected_row_version,
+        effective_from=payload.effective_from,
+        response=response,
+        user=user,
+        service=service,
+    )
+
+
+@platform_router.post(
+    "/prices/{price_id}/activate",
+    response_model=PlatformPricingVersionCommandResult,
+)
+async def activate_platform_pricing_price(
+    price_id: UUID,
+    payload: PricingActivate,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.plan.manage")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PlatformPricingVersionCommandResult:
+    return await _transition_platform_price(
+        action="price_activated",
+        price_id=price_id,
+        operation_id=payload.operation_id,
+        expected_row_version=payload.expected_row_version,
+        response=response,
+        user=user,
+        service=service,
+    )
+
+
+@platform_router.post(
+    "/prices/{price_id}/cancel",
+    response_model=PlatformPricingVersionCommandResult,
+)
+async def cancel_platform_pricing_price(
+    price_id: UUID,
+    payload: PricingCancel,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.plan.manage")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PlatformPricingVersionCommandResult:
+    return await _transition_platform_price(
+        action="price_cancelled",
+        price_id=price_id,
+        operation_id=payload.operation_id,
+        expected_row_version=payload.expected_row_version,
+        reason_code=payload.reason_code,
+        reason=payload.reason,
+        response=response,
+        user=user,
+        service=service,
+    )
 
 
 @platform_router.get(

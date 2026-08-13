@@ -60,6 +60,13 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
                     except ValueError:
                         pass
                 request.state.auth_session_id = auth_session_id
+                raw_mfa_verified_at = claims.get("mfa_at")
+                request.state.mfa_verified_at = (
+                    raw_mfa_verified_at
+                    if isinstance(raw_mfa_verified_at, int)
+                    and not isinstance(raw_mfa_verified_at, bool)
+                    else None
+                )
                 is_developer = bool(claims.get("is_developer", False))
                 is_administrator = bool(claims.get("is_administrator", False))
                 is_admin_route = request.url.path == "/api/v1/admin" or request.url.path.startswith(

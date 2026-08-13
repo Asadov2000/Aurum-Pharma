@@ -17,6 +17,7 @@ from app.core.config import get_settings
 PRICING_TABLES = {
     "billing_contract_override",
     "billing_plan",
+    "billing_pricing_admin_event",
     "billing_price_version",
 }
 
@@ -283,6 +284,153 @@ async def test_price_publication_requires_separate_approver(
                 )
             assert getattr(self_approval_error.value.orig, "sqlstate", None) == "23514"
             assert "ck_billing_price_separation" in str(self_approval_error.value)
+        finally:
+            await transaction.rollback()
+
+
+async def test_pricing_command_functions_and_event_ledger_are_closed(
+    support_engine_billing_pricing: AsyncEngine,
+) -> None:
+    executable_functions = {
+        "list_platform_billing_plans",
+        "create_billing_plan_draft",
+        "create_billing_price_draft",
+        "approve_and_schedule_billing_price",
+        "activate_billing_price_version",
+        "cancel_scheduled_billing_price",
+    }
+    async with support_engine_billing_pricing.connect() as connection:
+        functions = list(
+            (
+                await connection.execute(
+                    text("""
+                        SELECT
+                          routines.proname,
+                          pg_get_userbyid(routines.proowner) AS owner,
+                          routines.prosecdef,
+                          array_to_string(routines.proconfig, ',') AS config,
+                          has_function_privilege(
+                            'aurum_support', routines.oid, 'EXECUTE'
+                          ) AS support_execute,
+                          has_function_privilege(
+                            'aurum_app', routines.oid, 'EXECUTE'
+                          ) AS app_execute,
+                          has_function_privilege(
+                            'public', routines.oid, 'EXECUTE'
+                          ) AS public_execute
+                        FROM pg_catalog.pg_proc AS routines
+                        WHERE routines.pronamespace = 'public'::regnamespace
+                          AND routines.proname = ANY(:names)
+                        ORDER BY routines.proname
+                        """),
+                    {"names": sorted(executable_functions)},
+                )
+            ).mappings()
+        )
+
+    assert {row["proname"] for row in functions} == executable_functions
+    assert all(row["owner"] == "aurum_schema_owner" for row in functions)
+    assert all(row["prosecdef"] for row in functions)
+    assert all(row["config"] == "search_path=pg_catalog, pg_temp" for row in functions)
+    assert all(row["support_execute"] for row in functions)
+    assert not any(row["app_execute"] or row["public_execute"] for row in functions)
+
+
+async def test_pricing_event_ledger_rejects_mutation(
+    maintenance_engine: AsyncEngine,
+) -> None:
+    async with maintenance_engine.connect() as connection:
+        transaction = await connection.begin()
+        try:
+            user_id, session_id = (
+                await connection.execute(
+                    text("""
+                        WITH actor AS (
+                          INSERT INTO public.app_user (email, full_name, status)
+                          VALUES (:email, 'Pricing ledger actor', 'active')
+                          RETURNING id
+                        ), auth_session AS (
+                          INSERT INTO public.session (
+                            user_id, refresh_token_hash, expires_at,
+                            mfa_verified_at
+                          )
+                          SELECT
+                            actor.id, :token_hash,
+                            statement_timestamp() + interval '1 day',
+                            statement_timestamp()
+                          FROM actor
+                          RETURNING id, user_id
+                        )
+                        SELECT actor.id, auth_session.id
+                        FROM actor
+                        JOIN auth_session ON auth_session.user_id = actor.id
+                        """),
+                    {
+                        "email": f"pricing-ledger-{uuid4().hex}@example.invalid",
+                        "token_hash": uuid4().hex + uuid4().hex,
+                    },
+                )
+            ).one()
+            plan_id = (
+                await connection.execute(
+                    text("""
+                        INSERT INTO public.billing_plan (
+                          code, name, is_active, created_by
+                        ) VALUES (:code, 'Pricing ledger', false, :user_id)
+                        RETURNING id
+                        """),
+                    {"code": f"ledger_{uuid4().hex}", "user_id": user_id},
+                )
+            ).scalar_one()
+            event_id = (
+                await connection.execute(
+                    text("""
+                        INSERT INTO public.billing_pricing_admin_event (
+                          operation_id, request_hash, request_payload,
+                          event_type, plan_id, actor_user_id, actor_session_id,
+                          mfa_verified_at, result_status, result_row_version,
+                          result_snapshot
+                        ) VALUES (
+                          :operation_id, :request_hash, '{}'::jsonb,
+                          'plan_created', :plan_id, :user_id, :session_id,
+                          statement_timestamp(), 'draft', 1,
+                          jsonb_build_object('plan_id', CAST(:plan_id AS UUID))
+                        ) RETURNING id
+                        """),
+                    {
+                        "operation_id": uuid4(),
+                        "request_hash": "a" * 64,
+                        "plan_id": plan_id,
+                        "user_id": user_id,
+                        "session_id": session_id,
+                    },
+                )
+            ).scalar_one()
+            savepoint = await connection.begin_nested()
+            try:
+                with pytest.raises(DBAPIError) as mutation_error:
+                    await connection.execute(
+                        text(
+                            "DELETE FROM public.billing_pricing_admin_event " "WHERE id = :event_id"
+                        ),
+                        {"event_id": event_id},
+                    )
+                assert getattr(mutation_error.value.orig, "sqlstate", None) == "42501"
+            finally:
+                await savepoint.rollback()
+
+            await connection.execute(
+                text("DELETE FROM public.session WHERE id = :session_id"),
+                {"session_id": session_id},
+            )
+            retained_session_id = await connection.scalar(
+                text(
+                    "SELECT actor_session_id "
+                    "FROM public.billing_pricing_admin_event WHERE id = :event_id"
+                ),
+                {"event_id": event_id},
+            )
+            assert retained_session_id == session_id
         finally:
             await transaction.rollback()
 
