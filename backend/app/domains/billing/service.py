@@ -15,14 +15,23 @@ Subscription life cycle:
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 
-from app.core.errors import BusinessRuleError, NotFoundError
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.time import utc_now
 from app.domains.billing.models import (
     Invoice,
@@ -34,12 +43,48 @@ from app.domains.billing.repository import (
     BillingRepository,
     PlatformBillingOverview,
     PlatformInvoiceRecord,
+    PlatformPricingCommandRecord,
+    PlatformPricingPlanRecord,
 )
 from app.domains.foundation.models import Branch, Tenant
 
 logger = structlog.get_logger("billing.service")
 
 GRACE_DAYS = 7
+
+
+def _pricing_error(exc: DBAPIError) -> AurumError:
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "42501":
+        return PermissionDeniedError("Billing pricing operation is not allowed")
+    if sqlstate == "P0002":
+        return NotFoundError("Billing plan or price version not found")
+    if sqlstate in {"22001", "22023", "23502", "23514", "P0001"}:
+        return BusinessRuleError("Billing pricing request is invalid")
+    if sqlstate in {"23503", "23505", "40001", "40P01", "55000"}:
+        return ConflictError("Billing pricing state changed; refresh and retry")
+    logger.error("billing_pricing_database_guard_failed", sqlstate=sqlstate)
+    return AurumError("Billing pricing database guard failed")
+
+
+def _pricing_request_hash(action: str, payload: dict[str, object]) -> str:
+    def _json_default(value: object) -> str:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, Decimal):
+            return format(value, "f")
+        if isinstance(value, UUID):
+            return str(value)
+        raise TypeError(f"Unsupported pricing hash value: {type(value).__name__}")
+
+    canonical = json.dumps(
+        {"action": action, "payload": payload},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=_json_default,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 class BillingService:
@@ -50,6 +95,139 @@ class BillingService:
 
     async def list_plans(self) -> list[SubscriptionPlan]:
         return await self.repo.list_plans()
+
+    async def list_platform_pricing_plans(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[PlatformPricingPlanRecord], int]:
+        try:
+            return await self.repo.list_platform_pricing_plans(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                page=page,
+                page_size=page_size,
+            )
+        except DBAPIError as exc:
+            raise _pricing_error(exc) from exc
+
+    async def create_platform_pricing_plan(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        code: str,
+        name: str,
+        description: str | None,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "code": code,
+            "name": name.strip(),
+            "description": description.strip() if description else None,
+        }
+        try:
+            return await self.repo.create_platform_pricing_plan(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("plan_created", payload),
+                code=code,
+                name=name,
+                description=description,
+            )
+        except DBAPIError as exc:
+            raise _pricing_error(exc) from exc
+
+    async def create_platform_pricing_price(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        plan_id: UUID,
+        monthly_price_per_branch: Decimal,
+        annual_discount_pct: Decimal,
+        audience: str,
+        notice_days: int,
+        change_reason: str,
+        terms_snapshot: dict[str, object],
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "plan_id": plan_id,
+            "monthly_price_per_branch": monthly_price_per_branch,
+            "annual_discount_pct": annual_discount_pct,
+            "audience": audience,
+            "notice_days": notice_days,
+            "change_reason": change_reason.strip(),
+            "terms_snapshot": terms_snapshot,
+        }
+        try:
+            return await self.repo.create_platform_pricing_price(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("price_draft_created", payload),
+                plan_id=plan_id,
+                monthly_price_per_branch=monthly_price_per_branch,
+                annual_discount_pct=annual_discount_pct,
+                audience=audience,
+                notice_days=notice_days,
+                change_reason=change_reason,
+                terms_snapshot=terms_snapshot,
+            )
+        except DBAPIError as exc:
+            raise _pricing_error(exc) from exc
+
+    async def transition_platform_pricing_price(
+        self,
+        *,
+        action: str,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        price_version_id: UUID,
+        expected_row_version: int,
+        effective_from: datetime | None = None,
+        reason_code: str | None = None,
+        reason: str | None = None,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "price_version_id": price_version_id,
+            "expected_row_version": expected_row_version,
+        }
+        parameters: dict[str, object] = {
+            "actor_user_id": actor_user_id,
+            "actor_session_id": actor_session_id,
+            "operation_id": operation_id,
+            "price_version_id": price_version_id,
+            "expected_row_version": expected_row_version,
+        }
+        if action == "price_scheduled":
+            payload["effective_from"] = effective_from
+            parameters["effective_from"] = effective_from
+            command = self.repo.schedule_platform_pricing_price
+        elif action == "price_activated":
+            command = self.repo.activate_platform_pricing_price
+        elif action == "price_cancelled":
+            payload.update(
+                {
+                    "reason_code": reason_code,
+                    "reason": reason.strip() if reason else None,
+                }
+            )
+            parameters.update({"reason_code": reason_code, "reason": reason})
+            command = self.repo.cancel_platform_pricing_price
+        else:
+            raise ValueError("Unsupported billing pricing transition")
+        parameters["request_hash"] = _pricing_request_hash(action, payload)
+        try:
+            return await command(**parameters)
+        except DBAPIError as exc:
+            raise _pricing_error(exc) from exc
 
     # -------- subscriptions --------
 

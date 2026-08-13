@@ -241,6 +241,35 @@ class BillingPriceVersion(Base):
     )
 
 
+class BillingPricingAdminEvent(Base):
+    __tablename__ = "billing_pricing_admin_event"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    price_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    actor_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    actor_session_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    mfa_verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approval_terms_hash: Mapped[str | None] = mapped_column(Text)
+    previous_price_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    result_status: Mapped[str] = mapped_column(Text, nullable=False)
+    result_row_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    result_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+
+
 class BillingContractOverride(Base):
     __tablename__ = "billing_contract_override"
 

@@ -236,6 +236,7 @@ async def _seed_request_db_context(request: Request, session: AsyncSession) -> N
         None,
     )
     auth_session_id = getattr(request.state, "auth_session_id", None)
+    mfa_verified_at = getattr(request.state, "mfa_verified_at", None)
     request_id = getattr(request.state, "request_id", None)
     if request_id is not None:
         await session.execute(
@@ -262,6 +263,11 @@ async def _seed_request_db_context(request: Request, session: AsyncSession) -> N
         await session.execute(
             text("SELECT set_config('app.auth_session_id', :v, true)"),
             {"v": str(auth_session_id)},
+        )
+    if isinstance(mfa_verified_at, int) and not isinstance(mfa_verified_at, bool):
+        await session.execute(
+            text("SELECT set_config('app.mfa_verified_at', :v, true)"),
+            {"v": str(mfa_verified_at)},
         )
     if bool(getattr(request.state, "is_support_session", False)):
         await session.execute(

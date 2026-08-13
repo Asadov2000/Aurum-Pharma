@@ -487,6 +487,20 @@ jobs:
               psql -U postgres -d aurum_test -Atc \
               "SELECT count(*) = 1 AND bool_and(amount = 321.00) FROM public.tenant_subscription WHERE id = '94000000-0000-4000-8000-000000000003'"
           )" = "t"
+          # 0095 is independently reversible only while its immutable
+          # administration journal is empty. Existing 0094 pricing data stays.
+          poetry run python -m app.migrate downgrade 0094 --allow-test-downgrade
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT version_num FROM public.alembic_version"
+          )" = "0094"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT to_regclass('public.billing_plan') IS NOT NULL"
+          )" = "t"
+          poetry run python -m app.migrate upgrade head
           docker exec -i "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
           DELETE FROM public.tenant_subscription
