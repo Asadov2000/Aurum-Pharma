@@ -63,6 +63,8 @@ aurum-pharma/
   контракт тарифов, счетов, платежей и интерфейсов биллинга
 - [docs/billing-ux-low-fi.md](docs/billing-ux-low-fi.md) — UX-структура и
   интерактивный low-fi прототип клиентского и внутреннего биллинга
+- [docs/billing-console-high-fi.md](docs/billing-console-high-fi.md) — выбранная
+  high-fi концепция «Консоль», состояния и адаптивные макеты биллинга
 - [docs/db-schema-v2.md](docs/db-schema-v2.md) — схема БД
 - [docs/handoff.md](docs/handoff.md) — план разработки по доменам
 - [docs/local-demo.md](docs/local-demo.md) — безопасная проверка локального demo
