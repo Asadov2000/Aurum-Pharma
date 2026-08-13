@@ -35,7 +35,7 @@ export function buildNav(
     { to: "/batches", label: "Партии" },
     { to: "/pos", label: "Касса" },
     { to: "/sales", label: "Чеки" },
-    { to: "/billing", label: "Биллинг" },
+    { to: "/billing", label: "Тариф и оплата" },
     { to: "/reports", label: "Отчёты" },
     { to: "/audit", label: "Аудит" },
     { to: "/notifications", label: "Уведомления" },
