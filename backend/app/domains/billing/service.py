@@ -30,7 +30,11 @@ from app.domains.billing.models import (
     SubscriptionPlan,
     TenantSubscription,
 )
-from app.domains.billing.repository import BillingRepository
+from app.domains.billing.repository import (
+    BillingRepository,
+    PlatformBillingOverview,
+    PlatformInvoiceRecord,
+)
 from app.domains.foundation.models import Branch, Tenant
 
 logger = structlog.get_logger("billing.service")
@@ -167,7 +171,7 @@ class BillingService:
             notes=notes,
         )
 
-        paid_so_far = Decimal(str(await self.repo.sum_payments(invoice_id)))
+        paid_so_far = await self.repo.sum_payments(invoice_id)
         if paid_so_far >= inv.amount:
             await self.repo.update_invoice(inv, status="paid", paid_at=paid_at)
             # Extend subscription on full payment.
@@ -175,6 +179,25 @@ class BillingService:
             if sub is not None:
                 await self._extend_subscription(sub)
         return payment
+
+    async def get_platform_overview(self) -> PlatformBillingOverview:
+        return await self.repo.get_platform_overview(now=utc_now())
+
+    async def list_platform_invoices(
+        self,
+        *,
+        query: str | None,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[PlatformInvoiceRecord], int]:
+        return await self.repo.list_platform_invoices(
+            now=utc_now(),
+            query=query,
+            status=status,
+            page=page,
+            page_size=page_size,
+        )
 
     async def _extend_subscription(self, sub: TenantSubscription) -> None:
         """Bump period_end by another billing cycle when an invoice is paid."""

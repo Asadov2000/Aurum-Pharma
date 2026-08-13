@@ -42,7 +42,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Главная" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Касса" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Роли" })).not.toHaveAttribute("aria-current");
-    expect(screen.queryByRole("link", { name: "Биллинг" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Тариф и оплата" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Настроить боковую панель" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();

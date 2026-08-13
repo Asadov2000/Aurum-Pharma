@@ -47,7 +47,7 @@ export function AdminBillingDrawer({
       <div className="space-y-4">
         <p className="rounded-md bg-foreground/[0.03] px-3 py-2 text-xs text-foreground-secondary">
           Поля только для записи. Прочитать созданное через эту панель нельзя — в Этапе 1 нет
-          admin-эндпоинтов чтения. Тенант увидит изменения на своей странице «Биллинг». ID
+          admin-эндпоинтов чтения. Тенант увидит изменения на странице «Тариф и оплата». ID
           результатов появляются ниже каждой формы.
         </p>
 

@@ -189,4 +189,23 @@ describe("route access", () => {
     );
     expect(canAccessPath("/admin/sync", { ...administrator, isSupportScoped: true })).toBe(false);
   });
+
+  it("shows platform billing only with the exact read capability", () => {
+    const administrator: RouteAccessContext = {
+      ...SELLER,
+      isAdministrator: true,
+      hasTenant: false,
+      permissions: [],
+      platformCapabilities: ["platform.billing.view"],
+    };
+
+    expect(canAccessPath("/admin", administrator)).toBe(true);
+    expect(canAccessPath("/admin/billing", administrator)).toBe(true);
+    expect(canAccessPath("/admin/billing", { ...administrator, platformCapabilities: [] })).toBe(
+      false,
+    );
+    expect(canAccessPath("/admin/billing", { ...administrator, isSupportScoped: true })).toBe(
+      false,
+    );
+  });
 });

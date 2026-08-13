@@ -7,10 +7,10 @@ Two routers:
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -21,6 +21,7 @@ from app.core.deps import (
     require_tenant_permission,
 )
 from app.core.errors import BusinessRuleError
+from app.core.time import utc_now
 from app.domains.billing.repository import BillingRepository
 from app.domains.billing.schemas import (
     InvoiceCreate,
@@ -29,6 +30,9 @@ from app.domains.billing.schemas import (
     PaymentCreate,
     PaymentRead,
     PlanRead,
+    PlatformBillingOverviewRead,
+    PlatformInvoiceList,
+    PlatformInvoiceRead,
     SubscriptionCreate,
     SubscriptionRead,
     SubscriptionWithPlan,
@@ -112,6 +116,84 @@ async def get_invoice(
 # =============================================================================
 
 admin_router = APIRouter(prefix="/api/v1/admin/tenants", tags=["admin"])
+platform_router = APIRouter(prefix="/api/v1/admin/billing", tags=["admin", "billing"])
+
+
+def _set_financial_no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+
+
+@platform_router.get(
+    "/overview",
+    response_model=PlatformBillingOverviewRead,
+    dependencies=[Depends(require_recent_platform_capability("platform.billing.view"))],
+)
+async def get_platform_billing_overview(
+    response: Response,
+    service: Annotated[BillingService, Depends(_service)],
+) -> PlatformBillingOverviewRead:
+    _set_financial_no_store(response)
+    overview = await service.get_platform_overview()
+    return PlatformBillingOverviewRead(
+        generated_at=utc_now(),
+        tenants_total=overview.tenants_total,
+        active_subscriptions=overview.active_subscriptions,
+        attention_subscriptions=overview.attention_subscriptions,
+        open_invoices=overview.open_invoices,
+        overdue_invoices=overview.overdue_invoices,
+        outstanding_amount=overview.outstanding_amount,
+    )
+
+
+@platform_router.get(
+    "/invoices",
+    response_model=PlatformInvoiceList,
+    dependencies=[Depends(require_recent_platform_capability("platform.billing.view"))],
+)
+async def list_platform_billing_invoices(
+    response: Response,
+    service: Annotated[BillingService, Depends(_service)],
+    q: str | None = Query(default=None, min_length=1, max_length=120),
+    invoice_status: Literal["pending", "overdue", "paid", "cancelled"] | None = Query(
+        default=None,
+        alias="status",
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> PlatformInvoiceList:
+    _set_financial_no_store(response)
+    records, total = await service.list_platform_invoices(
+        query=q,
+        status=invoice_status,
+        page=page,
+        page_size=page_size,
+    )
+    now = utc_now()
+    items: list[PlatformInvoiceRead] = []
+    for record in records:
+        invoice_status_value = record.invoice.status
+        if (
+            invoice_status_value in ("pending", "overdue")
+            and record.outstanding_amount > 0
+            and record.invoice.due_at < now
+        ):
+            invoice_status_value = "overdue"
+        items.append(
+            PlatformInvoiceRead(
+                tenant_name=record.tenant_name,
+                invoice_number=record.invoice.invoice_number,
+                issued_at=record.invoice.issued_at,
+                due_at=record.invoice.due_at,
+                amount=record.invoice.amount,
+                paid_amount=record.paid_amount,
+                outstanding_amount=record.outstanding_amount,
+                currency=record.invoice.currency,
+                status=invoice_status_value,
+                subscription_status=record.subscription_status,
+            )
+        )
+    return PlatformInvoiceList(items=items, total=total, page=page, page_size=page_size)
 
 
 @admin_router.post(

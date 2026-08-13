@@ -106,6 +106,20 @@ describe("PlatformControlPage", () => {
     );
   });
 
+  it("shows billing workspace to an administrator with read capability", () => {
+    mockUser = {
+      is_developer: false,
+      is_administrator: true,
+      platform_capabilities: ["platform.billing.view"],
+    };
+    render(<PlatformControlPage />);
+
+    expect(screen.getByRole("link", { name: /Расчёты Aurum/i })).toHaveAttribute(
+      "href",
+      "/admin/billing",
+    );
+  });
+
   it("fails closed when the account has no platform capabilities", () => {
     mockUser = {
       is_developer: true,

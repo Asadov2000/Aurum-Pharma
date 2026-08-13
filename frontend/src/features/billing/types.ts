@@ -5,10 +5,11 @@ export type PaymentMethod = "bank_transfer" | "card" | "cash";
 export type SubscriptionStatus =
   | "trial"
   | "active"
-  | "past_due"
+  | "grace_period"
+  | "suspended"
   | "cancelled"
-  | "expired";
-export type InvoiceStatus = "open" | "paid" | "void" | "overdue";
+  | "archived";
+export type InvoiceStatus = "pending" | "paid" | "overdue" | "cancelled";
 
 export interface Plan {
   id: string;

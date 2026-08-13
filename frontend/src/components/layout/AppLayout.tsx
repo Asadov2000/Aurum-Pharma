@@ -27,7 +27,7 @@ import { PwaUpdateBanner } from "./PwaUpdateBanner";
 import { RuntimeSurfaceBadge } from "./RuntimeSurfaceBadge";
 import { ServerStatusBanner } from "./ServerStatusBanner";
 import { Sidebar } from "./Sidebar";
-import { buildNav } from "./nav";
+import { buildNav, findActiveNavItem } from "./nav";
 import {
   loadSidebarPreferences,
   orderSidebarItems,
@@ -104,9 +104,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const shellStyle = {
     "--app-sidebar-width": sidebarExpanded ? "15rem" : "4.5rem",
   } as CSSProperties;
-  const activeItem = items.find(
-    (item) => pathname === item.to || (item.to !== "/" && pathname.startsWith(`${item.to}/`)),
-  );
+  const activeItem = findActiveNavItem(items, pathname);
   const pageTitle =
     pathname === "/admin/sync"
       ? "Синхронизация"

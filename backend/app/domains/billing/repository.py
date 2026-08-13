@@ -6,11 +6,13 @@ ORM mapping for views in this project.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.billing.models import (
@@ -19,6 +21,26 @@ from app.domains.billing.models import (
     SubscriptionPlan,
     TenantSubscription,
 )
+from app.domains.foundation.models import Tenant
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformBillingOverview:
+    tenants_total: int
+    active_subscriptions: int
+    attention_subscriptions: int
+    open_invoices: int
+    overdue_invoices: int
+    outstanding_amount: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformInvoiceRecord:
+    invoice: Invoice
+    tenant_name: str
+    subscription_status: str
+    paid_amount: Decimal
+    outstanding_amount: Decimal
 
 
 class BillingRepository:
@@ -146,9 +168,164 @@ class BillingRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def sum_payments(self, invoice_id: UUID) -> float:
+    async def sum_payments(self, invoice_id: UUID) -> Decimal:
         stmt = select(func.coalesce(func.sum(Payment.amount), 0)).where(
             Payment.invoice_id == invoice_id
         )
         result = await self.session.execute(stmt)
-        return float(result.scalar_one())
+        return Decimal(result.scalar_one()).quantize(Decimal("0.01"))
+
+    # -------- platform read model --------
+
+    async def get_platform_overview(self, *, now: datetime) -> PlatformBillingOverview:
+        payment_totals = (
+            select(
+                Payment.tenant_id.label("tenant_id"),
+                Payment.invoice_id.label("invoice_id"),
+                func.coalesce(func.sum(Payment.amount), 0).label("paid_amount"),
+            )
+            .group_by(Payment.tenant_id, Payment.invoice_id)
+            .subquery()
+        )
+        paid_amount = func.coalesce(payment_totals.c.paid_amount, 0)
+        outstanding = func.greatest(Invoice.amount - paid_amount, 0)
+        open_clause = and_(Invoice.status.in_(("pending", "overdue")), outstanding > 0)
+
+        tenant_count = await self.session.scalar(select(func.count()).select_from(Tenant))
+        active_count = await self.session.scalar(
+            select(func.count())
+            .select_from(TenantSubscription)
+            .where(TenantSubscription.status.in_(("trial", "active")))
+        )
+        attention_count = await self.session.scalar(
+            select(func.count())
+            .select_from(TenantSubscription)
+            .where(TenantSubscription.status.in_(("grace_period", "suspended")))
+        )
+        invoice_row = (
+            await self.session.execute(
+                select(
+                    func.count(Invoice.id).filter(open_clause),
+                    func.count(Invoice.id).filter(and_(open_clause, Invoice.due_at < now)),
+                    func.coalesce(func.sum(outstanding).filter(open_clause), 0),
+                )
+                .select_from(Invoice)
+                .outerjoin(
+                    payment_totals,
+                    and_(
+                        payment_totals.c.tenant_id == Invoice.tenant_id,
+                        payment_totals.c.invoice_id == Invoice.id,
+                    ),
+                )
+            )
+        ).one()
+        return PlatformBillingOverview(
+            tenants_total=int(tenant_count or 0),
+            active_subscriptions=int(active_count or 0),
+            attention_subscriptions=int(attention_count or 0),
+            open_invoices=int(invoice_row[0] or 0),
+            overdue_invoices=int(invoice_row[1] or 0),
+            outstanding_amount=Decimal(invoice_row[2] or 0).quantize(Decimal("0.01")),
+        )
+
+    async def list_platform_invoices(
+        self,
+        *,
+        now: datetime,
+        query: str | None,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[PlatformInvoiceRecord], int]:
+        payment_totals = (
+            select(
+                Payment.tenant_id.label("tenant_id"),
+                Payment.invoice_id.label("invoice_id"),
+                func.coalesce(func.sum(Payment.amount), 0).label("paid_amount"),
+            )
+            .group_by(Payment.tenant_id, Payment.invoice_id)
+            .subquery()
+        )
+        paid_amount = func.coalesce(payment_totals.c.paid_amount, 0)
+        outstanding = func.greatest(Invoice.amount - paid_amount, 0)
+        clauses = []
+        term = query.strip() if query is not None else ""
+        if term:
+            clauses.append(
+                or_(
+                    Invoice.invoice_number.icontains(term, autoescape=True),
+                    Tenant.name.icontains(term, autoescape=True),
+                )
+            )
+        if status == "overdue":
+            clauses.append(
+                and_(
+                    Invoice.status.in_(("pending", "overdue")),
+                    outstanding > 0,
+                    Invoice.due_at < now,
+                )
+            )
+        elif status == "pending":
+            clauses.append(
+                and_(
+                    Invoice.status == "pending",
+                    outstanding > 0,
+                    Invoice.due_at >= now,
+                )
+            )
+        elif status is not None:
+            clauses.append(Invoice.status == status)
+
+        joins = (
+            Invoice.__table__.join(Tenant.__table__, Tenant.id == Invoice.tenant_id)
+            .join(
+                TenantSubscription.__table__,
+                and_(
+                    TenantSubscription.id == Invoice.subscription_id,
+                    TenantSubscription.tenant_id == Invoice.tenant_id,
+                ),
+            )
+            .outerjoin(
+                payment_totals,
+                and_(
+                    payment_totals.c.tenant_id == Invoice.tenant_id,
+                    payment_totals.c.invoice_id == Invoice.id,
+                ),
+            )
+        )
+        total = int(
+            await self.session.scalar(select(func.count()).select_from(joins).where(*clauses)) or 0
+        )
+        priority = case(
+            (and_(outstanding > 0, Invoice.due_at < now), 0),
+            (outstanding > 0, 1),
+            else_=2,
+        )
+        stmt = (
+            select(
+                Invoice,
+                Tenant.name,
+                TenantSubscription.status,
+                paid_amount.label("paid_amount"),
+                outstanding.label("outstanding_amount"),
+            )
+            .select_from(joins)
+            .where(*clauses)
+            .order_by(priority, Invoice.due_at.asc(), Invoice.id.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return (
+            [
+                PlatformInvoiceRecord(
+                    invoice=row[0],
+                    tenant_name=str(row[1]),
+                    subscription_status=str(row[2]),
+                    paid_amount=Decimal(row[3] or 0).quantize(Decimal("0.01")),
+                    outstanding_amount=Decimal(row[4] or 0).quantize(Decimal("0.01")),
+                )
+                for row in rows
+            ],
+            total,
+        )

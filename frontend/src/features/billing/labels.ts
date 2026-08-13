@@ -21,9 +21,10 @@ export const paymentMethodOptions: PaymentMethod[] = ["bank_transfer", "card", "
 export const subscriptionStatusLabel: Record<SubscriptionStatus, string> = {
   trial: "Пробный",
   active: "Активна",
-  past_due: "Просрочена",
+  grace_period: "Льготный период",
+  suspended: "Приостановлена",
   cancelled: "Отменена",
-  expired: "Истекла",
+  archived: "В архиве",
 };
 
 export const subscriptionStatusTone: Record<
@@ -32,24 +33,25 @@ export const subscriptionStatusTone: Record<
 > = {
   trial: "info",
   active: "success",
-  past_due: "warning",
+  grace_period: "warning",
+  suspended: "danger",
   cancelled: "neutral",
-  expired: "danger",
+  archived: "neutral",
 };
 
 export const invoiceStatusLabel: Record<InvoiceStatus, string> = {
-  open: "Открыт",
+  pending: "Ожидает оплаты",
   paid: "Оплачен",
-  void: "Аннулирован",
   overdue: "Просрочен",
+  cancelled: "Отменён",
 };
 
 export const invoiceStatusTone: Record<
   InvoiceStatus,
   "neutral" | "success" | "warning" | "danger" | "info"
 > = {
-  open: "info",
+  pending: "info",
   paid: "success",
-  void: "neutral",
   overdue: "danger",
+  cancelled: "neutral",
 };

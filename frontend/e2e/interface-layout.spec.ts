@@ -8,7 +8,7 @@ const WORKSPACES = [
   { path: "/users", heading: "Сотрудники" },
   { path: "/roles", heading: "Роли" },
   { path: "/pos", heading: "Касса" },
-  { path: "/billing", heading: "Биллинг" },
+  { path: "/billing", heading: "Тариф и оплата" },
 ] as const;
 
 async function expectNoHorizontalOverflow(page: Page, workspace: string) {
@@ -32,6 +32,7 @@ test.describe("Interface layout", () => {
 
     for (const viewport of [
       { width: 1366, height: 768 },
+      { width: 1024, height: 768 },
       { width: 390, height: 844 },
     ]) {
       await page.setViewportSize(viewport);
@@ -226,6 +227,30 @@ test.describe("Interface layout", () => {
     expect(
       await directory.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
     ).toBe(true);
+  });
+
+  test("keeps billing controls usable with touch on a narrow screen", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      window.localStorage.setItem("ui:density", "touch");
+    });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/billing");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Тариф и оплата", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+    await expect(page.getByRole("region", { name: "Сводка по тарифу и оплате" })).toBeVisible();
+
+    const invoiceSearch = page.getByRole("searchbox", { name: "Номер счёта" });
+    const searchBounds = await invoiceSearch.boundingBox();
+    expect(searchBounds).not.toBeNull();
+    expect(searchBounds!.height).toBeGreaterThanOrEqual(48);
+    const filterBounds = await page.getByRole("button", { name: "Фильтры" }).boundingBox();
+    expect(filterBounds).not.toBeNull();
+    expect(filterBounds!.height).toBeGreaterThanOrEqual(44);
+    await expectNoHorizontalOverflow(page, "/billing touch @ 390x844");
   });
 
   test("keeps the login form usable at the narrow Windows app width", async ({ page }) => {
