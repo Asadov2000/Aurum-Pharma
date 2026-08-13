@@ -1,6 +1,18 @@
 import { HomeIcon, type NavItem } from "./Sidebar";
 import { canAccessPath, type AppRoutePath, type RouteAccessContext } from "./routeAccess";
 
+export function findActiveNavItem(
+  items: readonly NavItem[],
+  pathname: string,
+): NavItem | undefined {
+  return items.reduce<NavItem | undefined>((bestMatch, item) => {
+    const matches =
+      pathname === item.to || (item.to !== "/" && pathname.startsWith(`${item.to}/`));
+    if (!matches) return bestMatch;
+    return !bestMatch || item.to.length > bestMatch.to.length ? item : bestMatch;
+  }, undefined);
+}
+
 /** Builds the sidebar items for the current user. Kept out of AppLayout so it
  *  can be unit-tested (and so AppLayout stays a component-only module). */
 export function buildNav(
@@ -24,6 +36,7 @@ export function buildNav(
   const candidates: Array<NavItem & { to: AppRoutePath }> = [
     { to: "/", label: "Главная", icon: <HomeIcon /> },
     { to: "/admin", label: "Центр управления" },
+    { to: "/admin/billing", label: "Расчёты Aurum" },
     { to: "/onboarding", label: "Старт" },
     { to: "/branches", label: "Точки" },
     { to: "/registers", label: "Кассы" },

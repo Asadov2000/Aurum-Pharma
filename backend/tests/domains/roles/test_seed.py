@@ -19,6 +19,14 @@ GRANT_SCOPED_PLATFORM_CODES = {
     "platform.memberships.manage",
     "platform.ownership.provision",
     "platform.billing.manage",
+    "platform.billing.view",
+    "platform.billing.payment.review",
+    "platform.billing.payment.approve",
+    "platform.billing.invoice.issue",
+    "platform.billing.adjustment.create",
+    "platform.billing.adjustment.approve",
+    "platform.billing.plan.manage",
+    "platform.billing.audit.view",
     "platform.support.use",
     "platform.sync.view",
     "platform.sync.manage",
@@ -42,7 +50,7 @@ async def _template_codes(db_session: AsyncSession, template_name: str) -> list[
 async def test_seed_permissions_count(db_session: AsyncSession) -> None:
     """The migrated permission catalogue remains complete and duplicate-free."""
     count = (await db_session.execute(select(func.count()).select_from(Permission))).scalar_one()
-    assert count == 61
+    assert count == 69
 
     groups = (
         await db_session.execute(select(func.count(func.distinct(Permission.group_code))))

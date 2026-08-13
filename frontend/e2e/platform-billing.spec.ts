@@ -1,0 +1,51 @@
+import { test, type Page } from "@playwright/test";
+
+import { clearLoginRateLimit, DEV, expect, loginInBrowser } from "./helpers";
+
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const width = await page.evaluate(() => ({
+    document: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(width.document).toBeLessThanOrEqual(width.viewport + 1);
+}
+
+test("platform billing workspace remains read-only and usable on desktop and touch", async ({
+  page,
+}) => {
+  clearLoginRateLimit(DEV.email);
+  await loginInBrowser(page, DEV);
+
+  for (const viewport of [
+    { width: 1366, height: 768 },
+    { width: 1024, height: 768 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/admin/billing");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Расчёты Aurum", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Только чтение")).toBeVisible();
+    await expect(page.getByRole("button", { name: /подтвердить оплату/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /создать счёт/i })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  }
+
+  await page.addInitScript(() => {
+    window.localStorage.setItem("ui:density", "touch");
+  });
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+
+  const search = page.getByRole("searchbox", { name: "Аптека или номер счёта" });
+  const searchBounds = await search.boundingBox();
+  expect(searchBounds).not.toBeNull();
+  expect(searchBounds!.height).toBeGreaterThanOrEqual(44);
+
+  const filters = page.getByRole("button", { name: "Фильтры" });
+  const filterBounds = await filters.boundingBox();
+  expect(filterBounds).not.toBeNull();
+  expect(filterBounds!.height).toBeGreaterThanOrEqual(44);
+});

@@ -121,3 +121,34 @@ class PaymentRead(BaseModel):
 
 class InvoiceWithPayments(InvoiceRead):
     payments: list[PaymentRead]
+
+
+class PlatformBillingOverviewRead(BaseModel):
+    generated_at: datetime
+    tenants_total: int
+    active_subscriptions: int
+    attention_subscriptions: int
+    open_invoices: int
+    overdue_invoices: int
+    outstanding_amount: Decimal
+    currency: str = "TJS"
+
+
+class PlatformInvoiceRead(BaseModel):
+    tenant_name: str
+    invoice_number: str
+    issued_at: datetime
+    due_at: datetime
+    amount: Decimal
+    paid_amount: Decimal
+    outstanding_amount: Decimal
+    currency: str
+    status: str
+    subscription_status: str
+
+
+class PlatformInvoiceList(BaseModel):
+    items: list[PlatformInvoiceRead]
+    total: int
+    page: int
+    page_size: int

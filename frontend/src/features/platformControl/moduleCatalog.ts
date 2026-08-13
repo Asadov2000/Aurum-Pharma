@@ -4,16 +4,30 @@ import {
 } from "@/features/auth/platformCapabilities";
 
 export interface PlatformModule {
-  id: "tenants" | "audit" | "access" | "accounts" | "sync";
+  id: "tenants" | "billing" | "audit" | "access" | "accounts" | "sync";
   title: string;
   description: string;
-  to: "/admin/tenants" | "/audit" | "/admin/access" | "/admin/accounts" | "/admin/sync";
+  to:
+    | "/admin/tenants"
+    | "/admin/billing"
+    | "/audit"
+    | "/admin/access"
+    | "/admin/accounts"
+    | "/admin/sync";
   capability: PlatformCapability;
   tone: "primary" | "neutral";
   developerOnly?: boolean;
 }
 
 const MODULES: readonly PlatformModule[] = [
+  {
+    id: "billing",
+    title: "Расчёты Aurum",
+    description: "Подписки, открытые счета и просроченные расчёты аптек",
+    to: "/admin/billing",
+    capability: PLATFORM_CAPABILITIES.billingView,
+    tone: "primary",
+  },
   {
     id: "tenants",
     title: "Аптеки",

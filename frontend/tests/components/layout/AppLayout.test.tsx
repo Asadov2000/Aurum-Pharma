@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildNav } from "@/components/layout/nav";
+import { buildNav, findActiveNavItem } from "@/components/layout/nav";
 
 const labels = (items: ReturnType<typeof buildNav>) => items.map((i) => i.label);
 const SELLER_PERMS = [
@@ -25,6 +25,7 @@ const OWNER_PERMS = [
 ] as const;
 const TENANT_PLATFORM_ACCESS = ["platform.tenants.view"] as const;
 const AUDIT_PLATFORM_ACCESS = ["platform.audit.global.view"] as const;
+const BILLING_PLATFORM_ACCESS = ["platform.billing.view"] as const;
 
 describe("buildNav — dashboard visibility", () => {
   it("hides «Главная» (dashboard) from a tenant user without reports.view (seller)", () => {
@@ -63,6 +64,20 @@ describe("buildNav — dashboard visibility", () => {
 
     expect(adminItems.some((item) => item.to === "/audit")).toBe(false);
     expect(developerItems.some((item) => item.to === "/audit")).toBe(true);
+  });
+
+  it("shows platform billing only with its read capability", () => {
+    const items = buildNav(true, false, false, [], false, false, BILLING_PLATFORM_ACCESS);
+    expect(items.some((item) => item.to === "/admin/billing")).toBe(true);
+    expect(labels(items)).toContain("Расчёты Aurum");
+  });
+});
+
+describe("findActiveNavItem", () => {
+  it("uses the most specific item for nested platform routes", () => {
+    const items = buildNav(true, false, false, [], false, false, BILLING_PLATFORM_ACCESS);
+
+    expect(findActiveNavItem(items, "/admin/billing")?.label).toBe("Расчёты Aurum");
   });
 });
 

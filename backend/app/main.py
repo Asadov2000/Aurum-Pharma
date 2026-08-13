@@ -31,6 +31,7 @@ from app.domains.audit import admin_router as audit_admin_router
 from app.domains.audit import router as audit_router
 from app.domains.auth import router as auth_router
 from app.domains.billing import admin_router as billing_admin_router
+from app.domains.billing import platform_router as billing_platform_router
 from app.domains.billing import tenant_router as billing_tenant_router
 from app.domains.catalog import router as catalog_router
 from app.domains.dashboard import router as dashboard_router
@@ -135,6 +136,7 @@ app.include_router(incoming_router)
 app.include_router(pos_router)
 app.include_router(billing_tenant_router)
 app.include_router(billing_admin_router)
+app.include_router(billing_platform_router)
 app.include_router(audit_admin_router)
 app.include_router(audit_router)
 app.include_router(onboarding_router)

@@ -6,6 +6,7 @@ export const PLATFORM_CAPABILITIES = {
   membershipsManage: "platform.memberships.manage",
   ownershipProvision: "platform.ownership.provision",
   billingManage: "platform.billing.manage",
+  billingView: "platform.billing.view",
   supportUse: "platform.support.use",
   syncView: "platform.sync.view",
   syncManage: "platform.sync.manage",

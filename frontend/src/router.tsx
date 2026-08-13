@@ -28,6 +28,10 @@ const SyncCenterPage = lazyRouteComponent(
   () => import("@/features/syncCenter/SyncCenterPage"),
   "SyncCenterPage",
 );
+const PlatformBillingPage = lazyRouteComponent(
+  () => import("@/features/platformBilling/PlatformBillingPage"),
+  "PlatformBillingPage",
+);
 const BranchesPage = lazyRouteComponent(
   () => import("@/features/foundation/BranchesPage"),
   "BranchesPage",
@@ -129,6 +133,12 @@ const syncCenterRoute = createRoute({
   getParentRoute,
   path: "/admin/sync",
   component: SyncCenterPage,
+});
+
+const platformBillingRoute = createRoute({
+  getParentRoute,
+  path: "/admin/billing",
+  component: PlatformBillingPage,
 });
 
 const branchesRoute = createRoute({
@@ -267,6 +277,7 @@ const routeTree = rootRoute.addChildren([
   platformAccessRoute,
   platformAccountsRoute,
   syncCenterRoute,
+  platformBillingRoute,
   tenantsRoute,
   branchesRoute,
   registersRoute,

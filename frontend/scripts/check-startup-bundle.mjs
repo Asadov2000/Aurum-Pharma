@@ -27,9 +27,9 @@ const routeBudgets = [
   {
     label: "POS /pos",
     source: "src/features/pos/POSPage.tsx",
-    // The public platform-activation route adds a small amount of shared
-    // router metadata while its page remains a lazy chunk.
-    maxRawBytes: 611 * 1024,
+    // Public activation and the capability-gated billing workspace add small
+    // shared router metadata while both page implementations remain lazy.
+    maxRawBytes: 612 * 1024,
     maxGzipBytes: 195 * 1024,
     maxRequests: 19,
   },
