@@ -742,7 +742,63 @@ def _secure_function(signature: str, *, grant_to: str | None = None) -> None:
         op.execute(f"GRANT EXECUTE ON FUNCTION {signature} TO {grant_to}")
 
 
+def _grant_missing_reference_privileges() -> None:
+    op.execute("""
+        CREATE TEMPORARY TABLE aurum_0092_missing_reference_privilege (
+          table_name TEXT PRIMARY KEY
+        ) ON COMMIT DROP
+        """)
+    op.execute("""
+        DO $$
+        DECLARE
+          target_table TEXT;
+        BEGIN
+          FOREACH target_table IN ARRAY ARRAY[
+            'tenant', 'branch', 'sync_node', 'app_user'
+          ]
+          LOOP
+            IF NOT pg_catalog.has_table_privilege(
+              'aurum_schema_owner',
+              pg_catalog.format('public.%I', target_table),
+              'REFERENCES'
+            ) THEN
+              INSERT INTO pg_temp.aurum_0092_missing_reference_privilege (
+                table_name
+              ) VALUES (target_table);
+              EXECUTE pg_catalog.format(
+                'GRANT REFERENCES ON TABLE public.%I TO aurum_schema_owner',
+                target_table
+              );
+            END IF;
+          END LOOP;
+        END
+        $$
+        """)
+
+
+def _restore_reference_privileges() -> None:
+    op.execute("""
+        DO $$
+        DECLARE
+          target_table TEXT;
+        BEGIN
+          FOR target_table IN
+            SELECT table_name
+            FROM pg_temp.aurum_0092_missing_reference_privilege
+          LOOP
+            EXECUTE pg_catalog.format(
+              'REVOKE REFERENCES ON TABLE public.%I FROM aurum_schema_owner',
+              target_table
+            );
+          END LOOP;
+        END
+        $$
+        """)
+    op.execute("DROP TABLE pg_temp.aurum_0092_missing_reference_privilege")
+
+
 def upgrade() -> None:
+    _grant_missing_reference_privileges()
     op.execute("""
         ALTER TABLE public.sync_node
           ADD COLUMN lifecycle_version INTEGER NOT NULL DEFAULT 1
@@ -823,6 +879,7 @@ def upgrade() -> None:
           )
         )
         """)
+    _restore_reference_privileges()
     op.execute("""
         CREATE INDEX ix_sync_node_admin_event_node_created
         ON public.sync_node_admin_event(node_id, created_at DESC, id)
