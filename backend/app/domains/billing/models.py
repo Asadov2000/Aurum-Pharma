@@ -168,3 +168,124 @@ class Payment(Base):
         CheckConstraint("amount > 0", name="ck_payment_amount"),
         CheckConstraint("method IN ('bank_transfer','card','cash')", name="ck_payment_method"),
     )
+
+
+class BillingPlan(Base):
+    __tablename__ = "billing_plan"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    code: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class BillingPriceVersion(Base):
+    __tablename__ = "billing_price_version"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    plan_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("billing_plan.id"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    monthly_price_per_branch: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    annual_discount_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, server_default=text("20.00")
+    )
+    currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
+    audience: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'default'"))
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notice_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("30"))
+    reason: Mapped[str | None] = mapped_column(Text)
+    terms_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    approved_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','scheduled','active','archived','cancelled')",
+            name="ck_billing_price_status",
+        ),
+        CheckConstraint("monthly_price_per_branch >= 0", name="ck_billing_price_amount"),
+        CheckConstraint("currency = 'TJS'", name="ck_billing_price_currency"),
+    )
+
+
+class BillingContractOverride(Base):
+    __tablename__ = "billing_contract_override"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    plan_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("billing_plan.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    monthly_price_per_branch: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    annual_discount_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, server_default=text("20.00")
+    )
+    currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str | None] = mapped_column(Text)
+    terms_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    approved_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','scheduled','active','archived','cancelled')",
+            name="ck_billing_contract_override_status",
+        ),
+        CheckConstraint(
+            "monthly_price_per_branch >= 0",
+            name="ck_billing_contract_override_amount",
+        ),
+        CheckConstraint("currency = 'TJS'", name="ck_billing_contract_override_currency"),
+    )
