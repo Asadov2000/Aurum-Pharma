@@ -7,6 +7,7 @@ export const PLATFORM_CAPABILITIES = {
   ownershipProvision: "platform.ownership.provision",
   billingManage: "platform.billing.manage",
   billingView: "platform.billing.view",
+  billingPlanManage: "platform.billing.plan.manage",
   supportUse: "platform.support.use",
   syncView: "platform.sync.view",
   syncManage: "platform.sync.manage",

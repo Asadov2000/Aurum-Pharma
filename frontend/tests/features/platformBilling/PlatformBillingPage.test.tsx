@@ -4,21 +4,34 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getPlatformBillingOverview = vi.fn();
 const listPlatformInvoices = vi.fn();
+const listPlatformPricingPlans = vi.fn();
+const createPlatformPricingPlan = vi.fn();
+const createPlatformPricingPrice = vi.fn();
+const schedulePlatformPricingPrice = vi.fn();
+const activatePlatformPricingPrice = vi.fn();
+const cancelPlatformPricingPrice = vi.fn();
+const authState = vi.hoisted(() => ({
+  user: {
+    id: "developer-1",
+    is_developer: true,
+    is_administrator: false,
+    platform_capabilities: ["platform.billing.view"] as string[],
+  },
+}));
 
 vi.mock("@/features/platformBilling/api", () => ({
   getPlatformBillingOverview: (...args: unknown[]) => getPlatformBillingOverview(...args),
   listPlatformInvoices: (...args: unknown[]) => listPlatformInvoices(...args),
+  listPlatformPricingPlans: (...args: unknown[]) => listPlatformPricingPlans(...args),
+  createPlatformPricingPlan: (...args: unknown[]) => createPlatformPricingPlan(...args),
+  createPlatformPricingPrice: (...args: unknown[]) => createPlatformPricingPrice(...args),
+  schedulePlatformPricingPrice: (...args: unknown[]) => schedulePlatformPricingPrice(...args),
+  activatePlatformPricingPrice: (...args: unknown[]) => activatePlatformPricingPrice(...args),
+  cancelPlatformPricingPrice: (...args: unknown[]) => cancelPlatformPricingPrice(...args),
 }));
 
 vi.mock("@/features/auth/hooks", () => ({
-  useAuth: () => ({
-    user: {
-      id: "developer-1",
-      is_developer: true,
-      is_administrator: false,
-      platform_capabilities: ["platform.billing.view"],
-    },
-  }),
+  useAuth: () => authState,
 }));
 
 import { PlatformBillingPage } from "@/features/platformBilling/PlatformBillingPage";
@@ -47,6 +60,40 @@ const INVOICE = {
   subscription_status: "grace_period",
 };
 
+const PRICING_PLAN = {
+  plan_id: "plan-1",
+  code: "business",
+  name: "Бизнес",
+  description: "Для растущих аптечных сетей",
+  currency: "TJS" as const,
+  is_active: false,
+  created_by: "developer-2",
+  created_at: "2026-08-01T00:00:00Z",
+  updated_at: "2026-08-01T00:00:00Z",
+  versions: [
+    {
+      price_version_id: "price-1",
+      plan_id: "plan-1",
+      version_number: 1,
+      status: "draft" as const,
+      monthly_price_per_branch: "590.00",
+      annual_discount_pct: "20.00",
+      currency: "TJS" as const,
+      audience: "default" as const,
+      effective_from: null,
+      notice_days: 30,
+      change_reason: "Плановое обновление коммерческой цены.",
+      created_by: "developer-2",
+      approved_by: null,
+      approved_at: null,
+      activated_at: null,
+      archived_at: null,
+      row_version: 1,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+  ],
+};
+
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -63,9 +110,22 @@ describe("PlatformBillingPage", () => {
     window.localStorage.clear();
     getPlatformBillingOverview.mockReset();
     listPlatformInvoices.mockReset();
+    listPlatformPricingPlans.mockReset();
+    createPlatformPricingPlan.mockReset();
+    createPlatformPricingPrice.mockReset();
+    schedulePlatformPricingPrice.mockReset();
+    activatePlatformPricingPrice.mockReset();
+    cancelPlatformPricingPrice.mockReset();
+    authState.user.platform_capabilities = ["platform.billing.view"];
     getPlatformBillingOverview.mockResolvedValue(OVERVIEW);
     listPlatformInvoices.mockResolvedValue({
       items: [INVOICE],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    listPlatformPricingPlans.mockResolvedValue({
+      items: [PRICING_PLAN],
       total: 1,
       page: 1,
       page_size: 20,
@@ -120,5 +180,79 @@ describe("PlatformBillingPage", () => {
 
     await waitFor(() => expect(listPlatformInvoices).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("Счета не найдены")).toBeInTheDocument();
+  });
+
+  it("keeps pricing mutations hidden for a view-only platform grant", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Тарифы и цены" }));
+
+    expect(await screen.findByText("Бизнес")).toBeInTheDocument();
+    expect(screen.getAllByText("590,00 TJS").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Создать тариф" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Новая цена" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Согласовать" })).not.toBeInTheDocument();
+  });
+
+  it("creates a plan for an authorized manager with one stable operation id", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.plan.manage",
+    ];
+    const operationId = "123e4567-e89b-42d3-a456-426614174000";
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(operationId);
+    createPlatformPricingPlan.mockResolvedValue({ item: PRICING_PLAN, applied: true });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Тарифы и цены" }));
+    await screen.findByText("Бизнес");
+
+    fireEvent.click(screen.getByRole("button", { name: "Создать тариф" }));
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Премиум" } });
+    fireEvent.change(screen.getByLabelText("Системный код"), {
+      target: { value: "premium" },
+    });
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Новый тариф" })).getByRole("button", {
+        name: "Создать тариф",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(createPlatformPricingPlan).toHaveBeenCalledWith({
+        operation_id: operationId,
+        code: "premium",
+        name: "Премиум",
+        description: null,
+      });
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Тариф создан");
+  });
+
+  it("lets only a different authorized user schedule a draft", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.plan.manage",
+    ];
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Тарифы и цены" }));
+    await screen.findByText("Бизнес");
+    expect(screen.getAllByRole("button", { name: "Согласовать" }).length).toBeGreaterThan(0);
+
+    listPlatformPricingPlans.mockResolvedValue({
+      items: [
+        {
+          ...PRICING_PLAN,
+          versions: [{ ...PRICING_PLAN.versions[0], created_by: "developer-1" }],
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Обновить" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Согласовать" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByText("Ожидает другого согласующего").length).toBeGreaterThan(0);
   });
 });

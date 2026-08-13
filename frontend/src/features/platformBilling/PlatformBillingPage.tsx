@@ -11,6 +11,7 @@ import {
   PageHeader,
   Pagination,
   Select,
+  SegmentedControl,
   Skeleton,
   SkeletonRows,
   Table,
@@ -27,6 +28,7 @@ import { hasPlatformCapability, PLATFORM_CAPABILITIES } from "@/features/auth/pl
 import { formatBillingDate, formatBillingMoney } from "@/features/billing/format";
 import { describeApiError } from "@/lib/errorMessages";
 
+import { PricingWorkspace } from "./PricingWorkspace";
 import { usePlatformBillingOverview, usePlatformInvoices } from "./queries";
 import {
   type PlatformBillingOverview,
@@ -36,6 +38,7 @@ import {
 
 const PAGE_SIZE = 20;
 const SEARCH_DELAY_MS = 350;
+type BillingWorkspace = "invoices" | "pricing";
 
 const invoiceStatusLabel: Record<PlatformInvoiceStatus, string> = {
   pending: "Ожидает оплаты",
@@ -64,7 +67,11 @@ const subscriptionStatusLabel: Record<string, string> = {
 export function PlatformBillingPage(): JSX.Element {
   const { user } = useAuth();
   const canView = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingView);
+  const canManagePricing = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingPlanManage);
   const preferenceKey = useFilterPreferenceKey("platform-billing");
+  const [workspace, setWorkspace] = useState<BillingWorkspace>("invoices");
+  const [pricingRefreshSignal, setPricingRefreshSignal] = useState(0);
+  const [pricingFetching, setPricingFetching] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<PlatformInvoiceStatus | "all">("all");
@@ -89,8 +96,8 @@ export function PlatformBillingPage(): JSX.Element {
     }),
     [page, search, status],
   );
-  const overview = usePlatformBillingOverview(canView);
-  const invoices = usePlatformInvoices(filters, canView);
+  const overview = usePlatformBillingOverview(canView && workspace === "invoices");
+  const invoices = usePlatformInvoices(filters, canView && workspace === "invoices");
 
   useEffect(() => {
     const total = invoices.data?.total;
@@ -117,6 +124,10 @@ export function PlatformBillingPage(): JSX.Element {
     setPage(1);
   };
   const refresh = () => {
+    if (workspace === "pricing") {
+      setPricingRefreshSignal((value) => value + 1);
+      return;
+    }
     void Promise.all([overview.refetch(), invoices.refetch()]);
   };
 
@@ -126,13 +137,17 @@ export function PlatformBillingPage(): JSX.Element {
         title="Расчёты Aurum"
         description="Состояние подписок и счетов аптек"
         meta={
-          overview.data ? <>данные на {formatDateTime(overview.data.generated_at)}</> : undefined
+          workspace === "invoices" && overview.data ? (
+            <>данные на {formatDateTime(overview.data.generated_at)}</>
+          ) : undefined
         }
         actions={
           <Button
             variant="secondary"
             size="sm"
-            isLoading={overview.isFetching || invoices.isFetching}
+            isLoading={
+              workspace === "pricing" ? pricingFetching : overview.isFetching || invoices.isFetching
+            }
             onClick={refresh}
           >
             Обновить
@@ -140,6 +155,67 @@ export function PlatformBillingPage(): JSX.Element {
         }
       />
 
+      <SegmentedControl
+        value={workspace}
+        onChange={setWorkspace}
+        label="Раздел расчётов Aurum"
+        options={[
+          { value: "invoices", label: "Сводка и счета" },
+          { value: "pricing", label: "Тарифы и цены" },
+        ]}
+        className="w-full sm:w-auto"
+      />
+
+      {workspace === "pricing" ? (
+        <PricingWorkspace
+          canManage={canManagePricing}
+          currentUserId={user?.id ?? ""}
+          onFetchingChange={setPricingFetching}
+          refreshSignal={pricingRefreshSignal}
+        />
+      ) : (
+        <InvoiceWorkspace
+          overview={overview}
+          invoices={invoices}
+          preferenceKey={preferenceKey}
+          searchInput={searchInput}
+          setSearchInput={setSearchInput}
+          setSearch={setSearch}
+          status={status}
+          setStatus={setStatus}
+          setPage={setPage}
+          resetFilters={resetFilters}
+        />
+      )}
+    </div>
+  );
+}
+
+function InvoiceWorkspace({
+  overview,
+  invoices,
+  preferenceKey,
+  searchInput,
+  setSearchInput,
+  setSearch,
+  status,
+  setStatus,
+  setPage,
+  resetFilters,
+}: {
+  overview: ReturnType<typeof usePlatformBillingOverview>;
+  invoices: ReturnType<typeof usePlatformInvoices>;
+  preferenceKey: string;
+  searchInput: string;
+  setSearchInput: (value: string) => void;
+  setSearch: (value: string) => void;
+  status: PlatformInvoiceStatus | "all";
+  setStatus: (value: PlatformInvoiceStatus | "all") => void;
+  setPage: (value: number) => void;
+  resetFilters: () => void;
+}): JSX.Element {
+  return (
+    <>
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-info/25 bg-info-subtle px-3 py-2 text-sm text-info-foreground">
         <Badge tone="info">Только чтение</Badge>
         <span>
@@ -275,7 +351,7 @@ export function PlatformBillingPage(): JSX.Element {
           </>
         ) : null}
       </section>
-    </div>
+    </>
   );
 }
 

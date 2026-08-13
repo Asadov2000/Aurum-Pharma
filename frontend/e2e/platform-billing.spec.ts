@@ -49,3 +49,35 @@ test("platform billing workspace remains read-only and usable on desktop and tou
   expect(filterBounds).not.toBeNull();
   expect(filterBounds!.height).toBeGreaterThanOrEqual(44);
 });
+
+test("platform pricing console exposes protected commands without leaking technical identifiers", async ({
+  page,
+}) => {
+  clearLoginRateLimit(DEV.email);
+  await loginInBrowser(page, DEV);
+  await page.goto("/admin/billing");
+
+  await page.getByRole("button", { name: "Тарифы и цены" }).click();
+  await expect(page.getByRole("heading", { name: "Тарифы и версии цен" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Создать тариф" })).toBeVisible();
+  await expect(page.getByText(/operation_id|row_version|price_version_id/i)).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+
+  await page.getByRole("button", { name: "Создать тариф" }).click();
+  const dialog = page.getByRole("dialog", { name: "Новый тариф" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Название").fill("X");
+  await dialog.getByLabel("Системный код").fill("AB");
+  await dialog.getByRole("button", { name: "Создать тариф" }).click();
+  await expect(dialog.getByText("Минимум 2 символа")).toBeVisible();
+  await expect(dialog.getByText("Латиница: от 3 символов, без пробелов")).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoHorizontalOverflow(page);
+  await dialog.getByRole("button", { name: "Закрыть" }).click();
+
+  await page.context().setOffline(true);
+  await expect(page.getByText(/финансовые команды временно отключены/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Создать тариф" })).toBeDisabled();
+  await page.context().setOffline(false);
+});
