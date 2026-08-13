@@ -407,6 +407,10 @@ jobs:
               psql -U postgres -d aurum_test -Atc \
               "SELECT has_table_privilege('aurum_schema_owner', 'public.app_user', 'REFERENCES')"
           )" = "f"
+          # Restore the fixture before the independent downgrade/upgrade roundtrip.
+          docker exec "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
+            -c "GRANT REFERENCES ON TABLE public.app_user TO aurum_schema_owner"
 
           docker exec "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
