@@ -395,11 +395,16 @@ jobs:
           poetry run python -m app.migrate upgrade 0091
           docker exec "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
-            -c "REVOKE REFERENCES ON TABLE public.app_user FROM aurum_schema_owner"
+            -c "REVOKE REFERENCES ON TABLE public.app_user, public.tenant FROM aurum_schema_owner"
           test "$(
             docker exec "$POSTGRES_SERVICE_ID" \
               psql -U postgres -d aurum_test -Atc \
               "SELECT has_table_privilege('aurum_schema_owner', 'public.app_user', 'REFERENCES')"
+          )" = "f"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT has_table_privilege('aurum_schema_owner', 'public.tenant', 'REFERENCES')"
           )" = "f"
           poetry run python -m app.migrate upgrade head
           test "$(
@@ -407,10 +412,90 @@ jobs:
               psql -U postgres -d aurum_test -Atc \
               "SELECT has_table_privilege('aurum_schema_owner', 'public.app_user', 'REFERENCES')"
           )" = "f"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT has_table_privilege('aurum_schema_owner', 'public.tenant', 'REFERENCES')"
+          )" = "f"
           # Restore the fixture before the independent downgrade/upgrade roundtrip.
           docker exec "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test \
-            -c "GRANT REFERENCES ON TABLE public.app_user TO aurum_schema_owner"
+            -c "GRANT REFERENCES ON TABLE public.app_user, public.tenant TO aurum_schema_owner"
+
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          INSERT INTO public.app_user (id, email, full_name, status)
+          VALUES (
+            '94000000-0000-4000-8000-000000000001',
+            'billing-0094-downgrade@example.invalid',
+            'Billing 0094 downgrade guard',
+            'active'
+          );
+          INSERT INTO public.billing_plan (code, name, created_by)
+          VALUES (
+            'billing_0094_guard',
+            'Billing 0094 downgrade guard',
+            '94000000-0000-4000-8000-000000000001'
+          );
+          INSERT INTO public.tenant (id, name, contact_email)
+          VALUES (
+            '94000000-0000-4000-8000-000000000002',
+            'Billing 0094 legacy tenant',
+            'billing-0094-legacy@example.invalid'
+          );
+          INSERT INTO public.tenant_subscription (
+            id, tenant_id, plan_id, status, period_end, branches_count, amount
+          ) VALUES (
+            '94000000-0000-4000-8000-000000000003',
+            '94000000-0000-4000-8000-000000000002',
+            (SELECT id FROM public.subscription_plan WHERE code = 'aurum_pharma'),
+            'active',
+            now() + interval '30 days',
+            1,
+            321.00
+          );
+          SQL
+          if poetry run python -m app.migrate downgrade 0093 --allow-test-downgrade; then
+            echo "0094 downgrade removed non-empty versioned pricing tables"
+            exit 1
+          fi
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          DELETE FROM public.billing_plan WHERE code = 'billing_0094_guard';
+          DELETE FROM public.app_user
+          WHERE id = '94000000-0000-4000-8000-000000000001';
+          SQL
+          poetry run python -m app.migrate downgrade 0093 --allow-test-downgrade
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT version_num FROM public.alembic_version"
+          )" = "0093"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT to_regclass('public.billing_plan') IS NULL"
+          )" = "t"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT count(*) = 1 AND bool_and(amount = 321.00) FROM public.tenant_subscription WHERE id = '94000000-0000-4000-8000-000000000003'"
+          )" = "t"
+          poetry run python -m app.migrate upgrade head
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT count(*) = 1 AND bool_and(amount = 321.00) FROM public.tenant_subscription WHERE id = '94000000-0000-4000-8000-000000000003'"
+          )" = "t"
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          DELETE FROM public.tenant_subscription
+          WHERE id = '94000000-0000-4000-8000-000000000003';
+          DELETE FROM public.tenant_settings
+          WHERE tenant_id = '94000000-0000-4000-8000-000000000002';
+          DELETE FROM public.tenant
+          WHERE id = '94000000-0000-4000-8000-000000000002';
+          SQL
 
           docker exec "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
