@@ -524,6 +524,112 @@ class BillingRepository:
             },
         )
 
+    async def issue_subscription_invoice(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        subscription_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.issue_billing_subscription_invoice("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :subscription_id, :expected_row_version)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "subscription_id": subscription_id,
+                "expected_row_version": expected_row_version,
+            },
+        )
+
+    async def create_bank_payment_review(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        target_invoice_id: UUID,
+        amount: Decimal,
+        paid_at: datetime,
+        recipient_account_key: str,
+        external_reference: str,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.create_billing_bank_payment_review("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :target_invoice_id, :amount, :paid_at, "
+            ":recipient_account_key, :external_reference)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "target_invoice_id": target_invoice_id,
+                "amount": amount,
+                "paid_at": paid_at,
+                "recipient_account_key": recipient_account_key,
+                "external_reference": external_reference,
+            },
+        )
+
+    async def approve_bank_payment(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        review_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.approve_billing_bank_payment("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :review_id, :expected_row_version)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "review_id": review_id,
+                "expected_row_version": expected_row_version,
+            },
+        )
+
+    async def read_platform_financial_account(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.read_platform_billing_financial_account("
+                    ":actor_user_id, :actor_session_id, :tenant_id)"
+                ),
+                {
+                    "actor_user_id": actor_user_id,
+                    "actor_session_id": actor_session_id,
+                    "tenant_id": tenant_id,
+                },
+            )
+        return dict(result)
+
     async def _pricing_command(
         self,
         statement: str,
