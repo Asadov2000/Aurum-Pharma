@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -318,3 +320,163 @@ class SubscriptionPriceApplicationRead(BaseModel):
 class SubscriptionPriceApplicationCommandResult(BaseModel):
     item: SubscriptionPriceApplicationRead
     applied: bool
+
+
+class BillingInvoiceIssue(_StrictBillingCommand):
+    operation_id: UUID
+    expected_row_version: int = Field(ge=1)
+
+
+class BillingFinancialInvoiceRead(BaseModel):
+    invoice_id: UUID
+    tenant_id: UUID
+    subscription_id: UUID
+    price_application_id: UUID
+    price_application_kind: Literal["initial", "renewal"]
+    invoice_number: str
+    document_state: Literal["issued", "void"]
+    settlement_state: Literal["unpaid", "partially_paid", "paid", "written_off"]
+    collection_state: Literal["not_due", "due", "overdue"]
+    period_start: datetime
+    period_end: datetime
+    due_at: datetime
+    total_amount: Decimal
+    outstanding_amount: Decimal
+    currency: Literal["TJS"]
+    issued_at: datetime
+
+    @field_serializer("total_amount", "outstanding_amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BillingInvoiceCommandResult(BaseModel):
+    item: BillingFinancialInvoiceRead
+    applied: bool
+
+
+class BankPaymentReviewCreate(_StrictBillingCommand):
+    operation_id: UUID
+    target_invoice_id: UUID
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    paid_at: datetime
+    recipient_account_key: str = Field(pattern=r"^[a-z0-9][a-z0-9_.:-]{2,63}$")
+    external_reference: str = Field(min_length=4, max_length=128)
+
+    @field_validator("paid_at")
+    @classmethod
+    def _normalize_paid_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("paid_at must include a timezone")
+        return value.astimezone(UTC)
+
+    @field_validator("external_reference")
+    @classmethod
+    def _normalize_external_reference(cls, value: str) -> str:
+        normalized = unicodedata.normalize("NFKC", value).strip().upper()
+        normalized = re.sub(r"[\s\-_/]+", "", normalized)
+        if not re.fullmatch(r"[A-Z0-9]{4,128}", normalized):
+            raise ValueError("external_reference must normalize to 4-128 Latin letters or digits")
+        return normalized
+
+
+class BankPaymentReviewRead(BaseModel):
+    review_id: UUID
+    tenant_id: UUID
+    target_invoice_id: UUID
+    amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    status: Literal["pending_approval", "approved", "rejected", "duplicate"]
+    row_version: int
+    created_at: datetime
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BankPaymentReviewCommandResult(BaseModel):
+    item: BankPaymentReviewRead
+    applied: bool
+
+
+class BankPaymentApprove(_StrictBillingCommand):
+    operation_id: UUID
+    expected_row_version: int = Field(ge=1)
+
+
+class BillingPaymentAllocationRead(BaseModel):
+    invoice_id: UUID
+    invoice_number: str
+    amount: Decimal
+    allocation_order: int
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BillingPaymentApprovalRead(BaseModel):
+    review_id: UUID
+    payment_id: UUID
+    tenant_id: UUID
+    target_invoice_id: UUID
+    amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    confirmed_at: datetime
+    lifecycle_state: Literal["confirmed", "reversed"]
+    allocated_amount: Decimal
+    credit_amount: Decimal
+    target_outstanding_amount: Decimal
+    blocking_outstanding_amount: Decimal
+    allocations: list[BillingPaymentAllocationRead]
+    access_restored: bool
+    subscription_status: str
+    subscription_period_start: datetime
+    subscription_period_end: datetime
+
+    @field_serializer(
+        "amount",
+        "allocated_amount",
+        "credit_amount",
+        "target_outstanding_amount",
+        "blocking_outstanding_amount",
+    )
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BillingPaymentApprovalCommandResult(BaseModel):
+    item: BillingPaymentApprovalRead
+    applied: bool
+
+
+class BillingPaymentHistoryRead(BaseModel):
+    payment_id: UUID
+    amount: Decimal
+    allocated_amount: Decimal
+    credit_amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    confirmed_at: datetime
+    lifecycle_state: Literal["confirmed", "reversed"]
+
+    @field_serializer("amount", "allocated_amount", "credit_amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BillingFinancialAccountRead(BaseModel):
+    tenant_id: UUID
+    currency: Literal["TJS"]
+    outstanding_amount: Decimal
+    credit_balance: Decimal
+    invoices: list[BillingFinancialInvoiceRead]
+    payments: list[BillingPaymentHistoryRead]
+    journal_balanced: bool
+
+    @field_serializer("outstanding_amount", "credit_balance")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")

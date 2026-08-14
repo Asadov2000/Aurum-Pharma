@@ -67,6 +67,20 @@ def _pricing_error(exc: DBAPIError) -> AurumError:
     return AurumError("Billing pricing database guard failed")
 
 
+def _financial_error(exc: DBAPIError) -> AurumError:
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "42501":
+        return PermissionDeniedError("Billing financial operation is not allowed")
+    if sqlstate == "P0002":
+        return NotFoundError("Billing financial record not found")
+    if sqlstate in {"22001", "22023", "23502", "23514", "P0001"}:
+        return BusinessRuleError("Billing financial request is invalid")
+    if sqlstate in {"23503", "23505", "40001", "40P01", "55000"}:
+        return ConflictError("Billing financial state changed; refresh and retry")
+    logger.error("billing_financial_database_guard_failed", sqlstate=sqlstate)
+    return AurumError("Billing financial database guard failed")
+
+
 def _pricing_request_hash(action: str, payload: dict[str, object]) -> str:
     def _json_default(value: object) -> str:
         if isinstance(value, datetime):
@@ -259,6 +273,115 @@ class BillingService:
             )
         except DBAPIError as exc:
             raise _pricing_error(exc) from exc
+
+    async def issue_subscription_invoice(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        subscription_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "subscription_id": subscription_id,
+            "expected_row_version": expected_row_version,
+        }
+        try:
+            return await self.repo.issue_subscription_invoice(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("invoice_issued", payload),
+                tenant_id=tenant_id,
+                subscription_id=subscription_id,
+                expected_row_version=expected_row_version,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def create_bank_payment_review(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        target_invoice_id: UUID,
+        amount: Decimal,
+        paid_at: datetime,
+        recipient_account_key: str,
+        external_reference: str,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "target_invoice_id": target_invoice_id,
+            "amount": amount,
+            "paid_at": paid_at,
+            "recipient_account_key": recipient_account_key,
+            "external_reference": external_reference,
+        }
+        try:
+            return await self.repo.create_bank_payment_review(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_review_created", payload),
+                tenant_id=tenant_id,
+                target_invoice_id=target_invoice_id,
+                amount=amount,
+                paid_at=paid_at,
+                recipient_account_key=recipient_account_key,
+                external_reference=external_reference,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def approve_bank_payment(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        review_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "review_id": review_id,
+            "expected_row_version": expected_row_version,
+        }
+        try:
+            return await self.repo.approve_bank_payment(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_approved", payload),
+                tenant_id=tenant_id,
+                review_id=review_id,
+                expected_row_version=expected_row_version,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def read_platform_financial_account(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.read_platform_financial_account(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                tenant_id=tenant_id,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
 
     # -------- subscriptions --------
 

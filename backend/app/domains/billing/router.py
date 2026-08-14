@@ -25,6 +25,16 @@ from app.core.errors import BusinessRuleError
 from app.core.time import utc_now
 from app.domains.billing.repository import BillingRepository
 from app.domains.billing.schemas import (
+    BankPaymentApprove,
+    BankPaymentReviewCommandResult,
+    BankPaymentReviewCreate,
+    BankPaymentReviewRead,
+    BillingFinancialAccountRead,
+    BillingFinancialInvoiceRead,
+    BillingInvoiceCommandResult,
+    BillingInvoiceIssue,
+    BillingPaymentApprovalCommandResult,
+    BillingPaymentApprovalRead,
     InvoiceCreate,
     InvoiceRead,
     InvoiceWithPayments,
@@ -481,6 +491,122 @@ async def apply_initial_subscription_price(
     )
     return SubscriptionPriceApplicationCommandResult(
         item=SubscriptionPriceApplicationRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@admin_router.post(
+    "/{tenant_id}/subscriptions/{subscription_id}/financial-invoices",
+    response_model=BillingInvoiceCommandResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def issue_subscription_invoice(
+    tenant_id: UUID,
+    subscription_id: UUID,
+    payload: BillingInvoiceIssue,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.invoice.issue")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BillingInvoiceCommandResult:
+    _set_financial_no_store(response)
+    record = await service.issue_subscription_invoice(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        subscription_id=subscription_id,
+        expected_row_version=payload.expected_row_version,
+    )
+    return BillingInvoiceCommandResult(
+        item=BillingFinancialInvoiceRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/payment-reviews",
+    response_model=BankPaymentReviewCommandResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_bank_payment_review(
+    tenant_id: UUID,
+    payload: BankPaymentReviewCreate,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.review")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BankPaymentReviewCommandResult:
+    _set_financial_no_store(response)
+    record = await service.create_bank_payment_review(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        target_invoice_id=payload.target_invoice_id,
+        amount=payload.amount,
+        paid_at=payload.paid_at,
+        recipient_account_key=payload.recipient_account_key,
+        external_reference=payload.external_reference,
+    )
+    return BankPaymentReviewCommandResult(
+        item=BankPaymentReviewRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.get(
+    "/tenants/{tenant_id}/financial-account",
+    response_model=BillingFinancialAccountRead,
+)
+async def read_platform_financial_account(
+    tenant_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.view")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BillingFinancialAccountRead:
+    _set_financial_no_store(response)
+    account = await service.read_platform_financial_account(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        tenant_id=tenant_id,
+    )
+    return BillingFinancialAccountRead.model_validate(account)
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/payment-reviews/{review_id}/approve",
+    response_model=BillingPaymentApprovalCommandResult,
+)
+async def approve_bank_payment(
+    tenant_id: UUID,
+    review_id: UUID,
+    payload: BankPaymentApprove,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.approve")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BillingPaymentApprovalCommandResult:
+    _set_financial_no_store(response)
+    record = await service.approve_bank_payment(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        review_id=review_id,
+        expected_row_version=payload.expected_row_version,
+    )
+    return BillingPaymentApprovalCommandResult(
+        item=BillingPaymentApprovalRead.model_validate(record.result),
         applied=record.applied,
     )
 
