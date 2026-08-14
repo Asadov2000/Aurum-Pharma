@@ -665,6 +665,154 @@ class BillingRepository:
             },
         )
 
+    async def reject_bank_payment_review(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        review_id: UUID,
+        expected_row_version: int,
+        reason_code: str,
+        reason_note: str | None,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.reject_billing_bank_payment_review("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :review_id, :expected_row_version, :reason_code, :reason_note)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "review_id": review_id,
+                "expected_row_version": expected_row_version,
+                "reason_code": reason_code,
+                "reason_note": reason_note,
+            },
+        )
+
+    async def create_payment_adjustment(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        payment_id: UUID,
+        adjustment_kind: str,
+        amount: Decimal,
+        reason_code: str,
+        reason_note: str,
+        refunded_at: datetime | None,
+        refund_reference: str | None,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.create_billing_payment_adjustment_request("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :payment_id, :adjustment_kind, :amount, :reason_code, "
+            ":reason_note, :refunded_at, :refund_reference)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "payment_id": payment_id,
+                "adjustment_kind": adjustment_kind,
+                "amount": amount,
+                "reason_code": reason_code,
+                "reason_note": reason_note,
+                "refunded_at": refunded_at,
+                "refund_reference": refund_reference,
+            },
+        )
+
+    async def list_payment_adjustments(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.list_platform_billing_payment_adjustments("
+                    ":actor_user_id, :actor_session_id, :tenant_id, :limit, :offset)"
+                ),
+                {
+                    "actor_user_id": actor_user_id,
+                    "actor_session_id": actor_session_id,
+                    "tenant_id": tenant_id,
+                    "limit": page_size,
+                    "offset": (page - 1) * page_size,
+                },
+            )
+        return dict(result)
+
+    async def approve_payment_adjustment(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        adjustment_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.approve_billing_payment_adjustment("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :adjustment_id, :expected_row_version)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "adjustment_id": adjustment_id,
+                "expected_row_version": expected_row_version,
+            },
+        )
+
+    async def reject_payment_adjustment(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        adjustment_id: UUID,
+        expected_row_version: int,
+        reason_code: str,
+        reason_note: str | None,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.reject_billing_payment_adjustment("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :adjustment_id, :expected_row_version, :reason_code, :reason_note)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "adjustment_id": adjustment_id,
+                "expected_row_version": expected_row_version,
+                "reason_code": reason_code,
+                "reason_note": reason_note,
+            },
+        )
+
     async def read_platform_financial_account(
         self,
         *,

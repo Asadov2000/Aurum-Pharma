@@ -30,10 +30,21 @@ from app.domains.billing.schemas import (
     BankPaymentReviewCommandResult,
     BankPaymentReviewCreate,
     BankPaymentReviewRead,
+    BankPaymentReviewReject,
     BillingFinancialAccountRead,
     BillingFinancialInvoiceRead,
     BillingInvoiceCommandResult,
     BillingInvoiceIssue,
+    BillingPaymentAdjustmentApprovalCommandResult,
+    BillingPaymentAdjustmentApprovalRead,
+    BillingPaymentAdjustmentApprove,
+    BillingPaymentAdjustmentCreate,
+    BillingPaymentAdjustmentQueue,
+    BillingPaymentAdjustmentReject,
+    BillingPaymentAdjustmentRejectionCommandResult,
+    BillingPaymentAdjustmentRejectionRead,
+    BillingPaymentAdjustmentRequestCommandResult,
+    BillingPaymentAdjustmentRequestRead,
     BillingPaymentApprovalCommandResult,
     BillingPaymentApprovalRead,
     InvoiceCreate,
@@ -670,6 +681,164 @@ async def approve_bank_payment(
     )
     return BillingPaymentApprovalCommandResult(
         item=BillingPaymentApprovalRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/payment-reviews/{review_id}/reject",
+    response_model=BankPaymentReviewCommandResult,
+)
+async def reject_bank_payment_review(
+    tenant_id: UUID,
+    review_id: UUID,
+    payload: BankPaymentReviewReject,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.approve")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BankPaymentReviewCommandResult:
+    _set_financial_no_store(response)
+    record = await service.reject_bank_payment_review(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        review_id=review_id,
+        expected_row_version=payload.expected_row_version,
+        reason_code=payload.reason_code,
+        reason_note=payload.reason_note,
+    )
+    return BankPaymentReviewCommandResult(
+        item=BankPaymentReviewRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/payments/{payment_id}/adjustments",
+    response_model=BillingPaymentAdjustmentRequestCommandResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_payment_adjustment(
+    tenant_id: UUID,
+    payment_id: UUID,
+    payload: BillingPaymentAdjustmentCreate,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.adjustment.create")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BillingPaymentAdjustmentRequestCommandResult:
+    _set_financial_no_store(response)
+    record = await service.create_payment_adjustment(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        payment_id=payment_id,
+        adjustment_kind=payload.adjustment_kind,
+        amount=payload.amount,
+        reason_code=payload.reason_code,
+        reason_note=payload.reason_note,
+        refunded_at=payload.refunded_at,
+        refund_reference=payload.refund_reference,
+    )
+    return BillingPaymentAdjustmentRequestCommandResult(
+        item=BillingPaymentAdjustmentRequestRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.get(
+    "/tenants/{tenant_id}/payment-adjustments",
+    response_model=BillingPaymentAdjustmentQueue,
+)
+async def list_payment_adjustments(
+    tenant_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.adjustment.approve")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> BillingPaymentAdjustmentQueue:
+    _set_financial_no_store(response)
+    queue = await service.list_payment_adjustments(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        tenant_id=tenant_id,
+        page=page,
+        page_size=page_size,
+    )
+    return BillingPaymentAdjustmentQueue.model_validate(
+        {**queue, "page": page, "page_size": page_size}
+    )
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/payment-adjustments/{adjustment_id}/approve",
+    response_model=BillingPaymentAdjustmentApprovalCommandResult,
+)
+async def approve_payment_adjustment(
+    tenant_id: UUID,
+    adjustment_id: UUID,
+    payload: BillingPaymentAdjustmentApprove,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.adjustment.approve")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BillingPaymentAdjustmentApprovalCommandResult:
+    _set_financial_no_store(response)
+    record = await service.approve_payment_adjustment(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        adjustment_id=adjustment_id,
+        expected_row_version=payload.expected_row_version,
+    )
+    return BillingPaymentAdjustmentApprovalCommandResult(
+        item=BillingPaymentAdjustmentApprovalRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/payment-adjustments/{adjustment_id}/reject",
+    response_model=BillingPaymentAdjustmentRejectionCommandResult,
+)
+async def reject_payment_adjustment(
+    tenant_id: UUID,
+    adjustment_id: UUID,
+    payload: BillingPaymentAdjustmentReject,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.adjustment.approve")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BillingPaymentAdjustmentRejectionCommandResult:
+    _set_financial_no_store(response)
+    record = await service.reject_payment_adjustment(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        adjustment_id=adjustment_id,
+        expected_row_version=payload.expected_row_version,
+        reason_code=payload.reason_code,
+        reason_note=payload.reason_note,
+    )
+    return BillingPaymentAdjustmentRejectionCommandResult(
+        item=BillingPaymentAdjustmentRejectionRead.model_validate(record.result),
         applied=record.applied,
     )
 

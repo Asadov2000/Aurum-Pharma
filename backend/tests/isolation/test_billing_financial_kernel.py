@@ -16,6 +16,9 @@ TENANT_READ_TABLES = {
 PRIVATE_TABLES = {
     "billing_financial_operation",
     "billing_payment_review",
+    "billing_payment_adjustment_request",
+    "billing_payment_adjustment",
+    "billing_payment_adjustment_allocation",
     "billing_journal_entry",
     "billing_journal_posting",
     "billing_outbox_event",
@@ -27,19 +30,29 @@ IMMUTABLE_TABLES = {
     "billing_invoice_line",
     "billing_payment",
     "billing_payment_allocation",
+    "billing_payment_adjustment",
+    "billing_payment_adjustment_allocation",
     "billing_tenant_credit",
     "billing_journal_entry",
     "billing_journal_posting",
 }
 
 PROTECTED_COMMANDS = {
+    "approve_billing_payment_adjustment(uuid,uuid,uuid,text,uuid,uuid,integer)",
     "approve_billing_bank_payment(uuid,uuid,uuid,text,uuid,uuid,integer)",
+    (
+        "create_billing_payment_adjustment_request(uuid,uuid,uuid,text,uuid,uuid,text,"
+        "numeric,text,text,timestamp with time zone,text)"
+    ),
     (
         "create_billing_bank_payment_review(uuid,uuid,uuid,text,uuid,uuid,numeric,"
         "timestamp with time zone,text,text)"
     ),
     "issue_billing_subscription_invoice(uuid,uuid,uuid,text,uuid,uuid,integer)",
+    "list_platform_billing_payment_adjustments(uuid,uuid,uuid,integer,integer)",
     "read_platform_billing_financial_account(uuid,uuid,uuid)",
+    "reject_billing_bank_payment_review(uuid,uuid,uuid,text,uuid,uuid,integer,text,text)",
+    "reject_billing_payment_adjustment(uuid,uuid,uuid,text,uuid,uuid,integer,text,text)",
 }
 
 

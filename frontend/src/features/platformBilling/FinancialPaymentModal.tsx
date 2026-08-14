@@ -3,12 +3,16 @@ import { isAxiosError } from "axios";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Button, FormError, Input, Label, Modal, Select } from "@/components/ui";
+import { Button, FormError, Input, Label, Modal, Select, Textarea } from "@/components/ui";
 import { formatBillingDate, formatBillingMoney } from "@/features/billing/format";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { createOperationId } from "./operationId";
-import { useApprovePlatformBankPayment, useCreatePlatformBankPaymentReview } from "./queries";
+import {
+  useApprovePlatformBankPayment,
+  useCreatePlatformBankPaymentReview,
+  useRejectPlatformBankPaymentReview,
+} from "./queries";
 import {
   type PlatformFinancialInvoice,
   type PlatformPaymentApproval,
@@ -225,30 +229,63 @@ const approvalSchema = z.object({
 
 type ApprovalForm = z.infer<typeof approvalSchema>;
 
+const reviewRejectionSchema = z
+  .object({
+    reason_code: z.enum([
+      "bank_payment_not_found",
+      "amount_mismatch",
+      "date_mismatch",
+      "duplicate",
+      "wrong_tenant_or_invoice",
+      "other",
+    ]),
+    reason_note: z.string().trim().max(500, "Не более 500 символов"),
+  })
+  .superRefine((value, context) => {
+    if (value.reason_code === "other" && value.reason_note.length < 10) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reason_note"],
+        message: "Опишите причину минимум в 10 символах",
+      });
+    }
+  });
+
+type ReviewRejectionForm = z.infer<typeof reviewRejectionSchema>;
+
 export function ApprovePaymentModal({
   item,
   online,
   onClose,
   onCompleted,
+  onRejected,
   onRefreshRequired,
 }: {
   item: PlatformPaymentApprovalQueueItem | null;
   online: boolean;
   onClose: () => void;
   onCompleted: (result: PlatformPaymentApproval) => void;
+  onRejected: () => void;
   onRefreshRequired: (message: string) => void;
 }): JSX.Element | null {
   const mutation = useApprovePlatformBankPayment();
+  const rejectionMutation = useRejectPlatformBankPaymentReview();
   const [operationId, setOperationId] = useState(createOperationId);
   const [topError, setTopError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"approve" | "reject">("approve");
   const form = useForm<ApprovalForm>({ defaultValues: { confirmed: false } });
+  const rejectionForm = useForm<ReviewRejectionForm>({
+    defaultValues: { reason_code: "bank_payment_not_found", reason_note: "" },
+  });
 
   useEffect(() => {
     if (!item) return;
     setOperationId(createOperationId());
     setTopError(null);
+    setMode("approve");
     form.reset({ confirmed: false });
-  }, [form, item]);
+    rejectionForm.reset({ reason_code: "bank_payment_not_found", reason_note: "" });
+  }, [form, item, rejectionForm]);
 
   if (!item) return null;
 
@@ -280,8 +317,52 @@ export function ApprovePaymentModal({
     }
   });
 
+  const reject = rejectionForm.handleSubmit(async (values) => {
+    const parsed = reviewRejectionSchema.safeParse(values);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0];
+        if (field === "reason_code" || field === "reason_note") {
+          rejectionForm.setError(field, { message: issue.message });
+        }
+      }
+      return;
+    }
+    if (!online) {
+      setTopError("Нет подключения. Отклонение платежа временно отключено.");
+      return;
+    }
+    setTopError(null);
+    try {
+      await rejectionMutation.mutateAsync({
+        tenantId: item.tenant_id,
+        reviewId: item.review_id,
+        payload: {
+          operation_id: operationId,
+          expected_row_version: item.row_version,
+          reason_code: parsed.data.reason_code,
+          reason_note: parsed.data.reason_note || null,
+        },
+      });
+      onRejected();
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.status === 409) {
+        onClose();
+        onRefreshRequired("Другой сотрудник уже обработал платёж. Очередь обновлена.");
+        return;
+      }
+      setTopError(describeApiError(error, "Не удалось отклонить платёж."));
+    }
+  });
+
+  const pending = mutation.isPending || rejectionMutation.isPending;
+
   return (
-    <Modal open onClose={() => !mutation.isPending && onClose()} title="Подтверждение платежа">
+    <Modal
+      open
+      onClose={() => !pending && onClose()}
+      title={mode === "reject" ? "Отклонение платежа" : "Проверка платежа"}
+    >
       {item.is_own_review ? (
         <div className="space-y-4">
           <p className="rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
@@ -293,6 +374,66 @@ export function ApprovePaymentModal({
             </Button>
           </div>
         </div>
+      ) : mode === "reject" ? (
+        <form className="space-y-4" noValidate onSubmit={reject}>
+          <dl className="grid gap-3 rounded-lg border border-border bg-surface-subtle p-4 sm:grid-cols-2">
+            <Summary label="Аптека" value={item.tenant_name} />
+            <Summary label="Счёт" value={item.invoice_number} />
+            <Summary label="Сумма" value={formatBillingMoney(item.amount, item.currency)} />
+            <Summary label="Дата платежа" value={formatBillingDate(item.paid_at)} />
+          </dl>
+          <div>
+            <Label htmlFor="financial-payment-rejection-reason">Причина</Label>
+            <Select
+              id="financial-payment-rejection-reason"
+              autoFocus
+              disabled={pending}
+              {...rejectionForm.register("reason_code")}
+            >
+              <option value="bank_payment_not_found">Платёж не найден в банке</option>
+              <option value="amount_mismatch">Сумма не совпадает</option>
+              <option value="date_mismatch">Дата не совпадает</option>
+              <option value="duplicate">Дубликат заявки</option>
+              <option value="wrong_tenant_or_invoice">Другая аптека или счёт</option>
+              <option value="other">Другая причина</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="financial-payment-rejection-note">Комментарий</Label>
+            <Textarea
+              id="financial-payment-rejection-note"
+              rows={3}
+              maxLength={500}
+              disabled={pending}
+              invalid={Boolean(rejectionForm.formState.errors.reason_note)}
+              placeholder="Необязательно, кроме варианта «Другая причина»"
+              {...rejectionForm.register("reason_note")}
+            />
+            <FormError>{rejectionForm.formState.errors.reason_note?.message}</FormError>
+          </div>
+          {topError ? (
+            <p className="text-sm text-danger" role="alert">
+              {topError}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pending}
+              onClick={() => {
+                setTopError(null);
+                setOperationId(createOperationId());
+                setMode("approve");
+              }}
+            >
+              Назад
+            </Button>
+            <Button type="submit" variant="danger" disabled={!online} isLoading={pending}>
+              Отклонить платёж
+            </Button>
+          </div>
+        </form>
       ) : (
         <form className="space-y-4" noValidate onSubmit={submit}>
           <dl className="grid gap-3 rounded-lg border border-border bg-surface-subtle p-4 sm:grid-cols-2">
@@ -309,7 +450,7 @@ export function ApprovePaymentModal({
             <input
               type="checkbox"
               className="mt-0.5 h-5 w-5"
-              disabled={mutation.isPending}
+              disabled={pending}
               {...form.register("confirmed")}
             />
             <span>Я независимо сверил сумму и дату с банковской системой.</span>
@@ -321,13 +462,20 @@ export function ApprovePaymentModal({
             </p>
           ) : null}
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+            <Button type="button" variant="secondary" disabled={pending} onClick={onClose}>
+              Отмена
+            </Button>
             <Button
               type="button"
-              variant="secondary"
-              disabled={mutation.isPending}
-              onClick={onClose}
+              variant="danger"
+              disabled={!online || pending}
+              onClick={() => {
+                setTopError(null);
+                setOperationId(createOperationId());
+                setMode("reject");
+              }}
             >
-              Отмена
+              Отклонить
             </Button>
             <Button
               type="submit"

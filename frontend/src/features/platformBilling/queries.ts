@@ -3,8 +3,10 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   activatePlatformPricingPrice,
   approvePlatformBankPayment,
+  approvePlatformPaymentAdjustment,
   cancelPlatformPricingPrice,
   createPlatformBankPaymentReview,
+  createPlatformPaymentAdjustment,
   createPlatformPricingPlan,
   createPlatformPricingPrice,
   getPlatformFinancialAccount,
@@ -12,14 +14,21 @@ import {
   listPlatformBillingTenants,
   listPlatformInvoices,
   listPlatformPaymentApprovalQueue,
+  listPlatformPaymentAdjustmentQueue,
   listPlatformPricingPlans,
   schedulePlatformPricingPrice,
+  rejectPlatformBankPaymentReview,
+  rejectPlatformPaymentAdjustment,
 } from "./api";
 import {
   type PlatformBankPaymentApprove,
+  type PlatformBankPaymentReviewReject,
   type PlatformBankPaymentReviewCreate,
   type PlatformBillingTenantFilters,
   type PlatformInvoiceFilters,
+  type PlatformPaymentAdjustmentApprove,
+  type PlatformPaymentAdjustmentCreate,
+  type PlatformPaymentAdjustmentReject,
   type PricingActivate,
   type PricingCancel,
   type PricingPlanCreate,
@@ -40,6 +49,8 @@ export const platformBillingKeys = {
     [...platformBillingKeys.all, "v2", "tenants", filters] as const,
   approvalQueue: (tenantId: string, page: number, pageSize: number) =>
     [...platformBillingKeys.all, "v2", "approval-queue", tenantId, page, pageSize] as const,
+  adjustmentQueue: (tenantId: string, page: number, pageSize: number) =>
+    [...platformBillingKeys.all, "v2", "adjustment-queue", tenantId, page, pageSize] as const,
 };
 
 export function usePlatformBillingOverview(enabled: boolean) {
@@ -99,6 +110,21 @@ export function usePlatformPaymentApprovalQueue(
   return useQuery({
     queryKey: platformBillingKeys.approvalQueue(tenantId, page, pageSize),
     queryFn: ({ signal }) => listPlatformPaymentApprovalQueue(tenantId, page, pageSize, signal),
+    enabled: enabled && tenantId.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 5_000,
+  });
+}
+
+export function usePlatformPaymentAdjustmentQueue(
+  tenantId: string,
+  page: number,
+  pageSize: number,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: platformBillingKeys.adjustmentQueue(tenantId, page, pageSize),
+    queryFn: ({ signal }) => listPlatformPaymentAdjustmentQueue(tenantId, page, pageSize, signal),
     enabled: enabled && tenantId.length > 0,
     placeholderData: keepPreviousData,
     staleTime: 5_000,
@@ -186,6 +212,96 @@ export function useApprovePlatformBankPayment() {
           queryKey: [...platformBillingKeys.all, "v2", "approval-queue", variables.tenantId],
         }),
       ]);
+    },
+  });
+}
+
+export function useRejectPlatformBankPaymentReview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      reviewId,
+      payload,
+    }: {
+      tenantId: string;
+      reviewId: string;
+      payload: PlatformBankPaymentReviewReject;
+    }) => rejectPlatformBankPaymentReview(tenantId, reviewId, payload),
+    onSuccess: async (_result, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: [...platformBillingKeys.all, "v2", "approval-queue", variables.tenantId],
+      });
+    },
+  });
+}
+
+export function useCreatePlatformPaymentAdjustment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      paymentId,
+      payload,
+    }: {
+      tenantId: string;
+      paymentId: string;
+      payload: PlatformPaymentAdjustmentCreate;
+    }) => createPlatformPaymentAdjustment(tenantId, paymentId, payload),
+    onSuccess: async (_result, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: platformBillingKeys.financialAccount(variables.tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [...platformBillingKeys.all, "v2", "adjustment-queue", variables.tenantId],
+        }),
+      ]);
+    },
+  });
+}
+
+export function useApprovePlatformPaymentAdjustment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      adjustmentId,
+      payload,
+    }: {
+      tenantId: string;
+      adjustmentId: string;
+      payload: PlatformPaymentAdjustmentApprove;
+    }) => approvePlatformPaymentAdjustment(tenantId, adjustmentId, payload),
+    onSuccess: async (_result, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: platformBillingKeys.financialAccount(variables.tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [...platformBillingKeys.all, "v2", "adjustment-queue", variables.tenantId],
+        }),
+      ]);
+    },
+  });
+}
+
+export function useRejectPlatformPaymentAdjustment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      adjustmentId,
+      payload,
+    }: {
+      tenantId: string;
+      adjustmentId: string;
+      payload: PlatformPaymentAdjustmentReject;
+    }) => rejectPlatformPaymentAdjustment(tenantId, adjustmentId, payload),
+    onSuccess: async (_result, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: [...platformBillingKeys.all, "v2", "adjustment-queue", variables.tenantId],
+      });
     },
   });
 }

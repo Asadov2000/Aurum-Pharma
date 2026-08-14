@@ -8,15 +8,20 @@ vi.mock("@/lib/api", () => ({ api: { get, post } }));
 import {
   activatePlatformPricingPrice,
   approvePlatformBankPayment,
+  approvePlatformPaymentAdjustment,
   cancelPlatformPricingPrice,
   createPlatformBankPaymentReview,
+  createPlatformPaymentAdjustment,
   createPlatformPricingPlan,
   createPlatformPricingPrice,
   getPlatformFinancialAccount,
   listPlatformBillingTenants,
   listPlatformPaymentApprovalQueue,
+  listPlatformPaymentAdjustmentQueue,
   listPlatformPricingPlans,
   schedulePlatformPricingPrice,
+  rejectPlatformBankPaymentReview,
+  rejectPlatformPaymentAdjustment,
 } from "@/features/platformBilling/api";
 
 describe("platform pricing API", () => {
@@ -156,6 +161,62 @@ describe("platform financial kernel API", () => {
       2,
       "/admin/billing/tenants/tenant-1/payment-reviews/review-1/approve",
       approvePayload,
+    );
+  });
+
+  it("uses protected rejection and adjustment endpoints", async () => {
+    const signal = new AbortController().signal;
+    const operation_id = "123e4567-e89b-42d3-a456-426614174000";
+    const decision = { operation_id, expected_row_version: 1 };
+    const adjustment = {
+      operation_id,
+      adjustment_kind: "bank_refund" as const,
+      amount: "120.00",
+      reason_code: "bank_refund_completed" as const,
+      reason_note: "Возврат подтверждён банковской выпиской.",
+      refunded_at: "2026-08-14T08:40:00.000Z",
+      refund_reference: "BANKREF001",
+    };
+    get.mockResolvedValueOnce({ data: { items: [], total: 0, page: 1, page_size: 20 } });
+    post.mockResolvedValue({ data: { item: {}, applied: true } });
+
+    await rejectPlatformBankPaymentReview("tenant-1", "review-1", {
+      ...decision,
+      reason_code: "amount_mismatch",
+      reason_note: null,
+    });
+    await createPlatformPaymentAdjustment("tenant-1", "payment-1", adjustment);
+    await listPlatformPaymentAdjustmentQueue("tenant-1", 2, 20, signal);
+    await approvePlatformPaymentAdjustment("tenant-1", "adjustment-1", decision);
+    await rejectPlatformPaymentAdjustment("tenant-1", "adjustment-2", {
+      ...decision,
+      reason_code: "request_not_supported",
+      reason_note: null,
+    });
+
+    expect(post).toHaveBeenNthCalledWith(
+      1,
+      "/admin/billing/tenants/tenant-1/payment-reviews/review-1/reject",
+      expect.objectContaining({ reason_code: "amount_mismatch" }),
+    );
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      "/admin/billing/tenants/tenant-1/payments/payment-1/adjustments",
+      adjustment,
+    );
+    expect(get).toHaveBeenCalledWith("/admin/billing/tenants/tenant-1/payment-adjustments", {
+      params: { page: 2, page_size: 20 },
+      signal,
+    });
+    expect(post).toHaveBeenNthCalledWith(
+      3,
+      "/admin/billing/tenants/tenant-1/payment-adjustments/adjustment-1/approve",
+      decision,
+    );
+    expect(post).toHaveBeenNthCalledWith(
+      4,
+      "/admin/billing/tenants/tenant-1/payment-adjustments/adjustment-2/reject",
+      expect.objectContaining({ reason_code: "request_not_supported" }),
     );
   });
 });

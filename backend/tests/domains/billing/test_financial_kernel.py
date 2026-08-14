@@ -489,3 +489,339 @@ async def test_renewals_repeat_and_payment_covers_oldest_debt_before_credit(
     assert account["journal_balanced"] is True
     assert len(account["invoices"]) == 3
     assert len({item["invoice_number"] for item in account["invoices"]}) == 3
+
+
+async def test_payment_review_rejection_is_independent_idempotent_and_final(
+    db_session: AsyncSession,
+    platform_client: AsyncClient,
+    make_tenant_with_plan,
+) -> None:
+    _, tenant_id, _, invoice = await _create_initial_invoice(
+        db_session,
+        platform_client,
+        make_tenant_with_plan,
+    )
+    _, reviewer_token = await _platform_identity(db_session)
+    _, approver_token = await _platform_identity(db_session)
+    review_response = await platform_client.post(
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-reviews",
+        headers=_headers(reviewer_token),
+        json={
+            "operation_id": str(uuid4()),
+            "target_invoice_id": invoice["invoice_id"],
+            "amount": "590.00",
+            "paid_at": (utc_now() - timedelta(minutes=5)).isoformat(),
+            "recipient_account_key": "aurum_tjs_primary",
+            "external_reference": "REJECT0001",
+        },
+    )
+    assert review_response.status_code == 201, review_response.text
+    review = review_response.json()["item"]
+    path = (
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-reviews/"
+        f"{review['review_id']}/reject"
+    )
+    payload = {
+        "operation_id": str(uuid4()),
+        "expected_row_version": review["row_version"],
+        "reason_code": "bank_payment_not_found",
+        "reason_note": None,
+    }
+
+    self_rejection = await platform_client.post(
+        path,
+        headers=_headers(reviewer_token),
+        json={**payload, "operation_id": str(uuid4())},
+    )
+    assert self_rejection.status_code == 422, self_rejection.text
+
+    rejection = await platform_client.post(
+        path,
+        headers=_headers(approver_token),
+        json=payload,
+    )
+    replay = await platform_client.post(
+        path,
+        headers=_headers(approver_token),
+        json=payload,
+    )
+    assert rejection.status_code == 200, rejection.text
+    assert rejection.headers["cache-control"] == "private, no-store"
+    assert rejection.json()["applied"] is True
+    assert rejection.json()["item"]["status"] == "rejected"
+    assert rejection.json()["item"]["reason_code"] == "bank_payment_not_found"
+    assert "REJECT0001" not in rejection.text
+    assert "aurum_tjs_primary" not in rejection.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["applied"] is False
+    assert replay.json()["item"] == rejection.json()["item"]
+
+    late_approval = await platform_client.post(
+        path.removesuffix("/reject") + "/approve",
+        headers=_headers(approver_token),
+        json={
+            "operation_id": str(uuid4()),
+            "expected_row_version": review["row_version"],
+        },
+    )
+    assert late_approval.status_code == 409, late_approval.text
+    account = await _financial_account(
+        platform_client,
+        tenant_id=tenant_id,
+        token=approver_token,
+    )
+    assert account["payments"] == []
+
+
+async def test_bank_refund_reverses_ledger_without_mutating_original_payment(  # noqa: PLR0915
+    db_session: AsyncSession,
+    platform_client: AsyncClient,
+    make_tenant_with_plan,
+) -> None:
+    _, tenant_id, _, invoice = await _create_initial_invoice(
+        db_session,
+        platform_client,
+        make_tenant_with_plan,
+    )
+    _, requester_token = await _platform_identity(db_session)
+    _, approver_token = await _platform_identity(db_session)
+    payment_response = await _review_and_approve(
+        platform_client,
+        tenant_id=tenant_id,
+        invoice_id=str(invoice["invoice_id"]),
+        amount="700.00",
+        reference="REFUNDSOURCE1",
+        reviewer_token=requester_token,
+        approver_token=approver_token,
+    )
+    assert payment_response.status_code == 200, payment_response.text
+    payment = payment_response.json()["item"]
+    payment_id = payment["payment_id"]
+    account_before_refund = await _financial_account(
+        platform_client,
+        tenant_id=tenant_id,
+        token=approver_token,
+    )
+    original_history = account_before_refund["payments"][0]
+
+    refund_reference = "TJREFUND0001"
+    create_path = f"/api/v1/admin/billing/tenants/{tenant_id}/payments/{payment_id}/adjustments"
+    create_response = await platform_client.post(
+        create_path,
+        headers=_headers(requester_token),
+        json={
+            "operation_id": str(uuid4()),
+            "adjustment_kind": "bank_refund",
+            "amount": "120.00",
+            "reason_code": "bank_refund_completed",
+            "reason_note": "Возврат подтверждён банковской выпиской.",
+            "refunded_at": (utc_now() - timedelta(minutes=2)).isoformat(),
+            "refund_reference": refund_reference,
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    assert create_response.headers["cache-control"] == "private, no-store"
+    assert refund_reference not in create_response.text
+    adjustment = create_response.json()["item"]
+
+    queue_response = await platform_client.get(
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-adjustments",
+        headers=_headers(approver_token),
+    )
+    assert queue_response.status_code == 200, queue_response.text
+    assert queue_response.json()["items"][0]["adjustment_id"] == adjustment["adjustment_id"]
+    assert queue_response.json()["items"][0]["is_own_request"] is False
+    assert refund_reference not in queue_response.text
+    decision_path = (
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-adjustments/"
+        f"{adjustment['adjustment_id']}/approve"
+    )
+    approval_payload = {
+        "operation_id": str(uuid4()),
+        "expected_row_version": adjustment["row_version"],
+    }
+    self_approval = await platform_client.post(
+        decision_path,
+        headers=_headers(requester_token),
+        json={**approval_payload, "operation_id": str(uuid4())},
+    )
+    assert self_approval.status_code == 422, self_approval.text
+
+    approval = await platform_client.post(
+        decision_path,
+        headers=_headers(approver_token),
+        json=approval_payload,
+    )
+    replay = await platform_client.post(
+        decision_path,
+        headers=_headers(approver_token),
+        json=approval_payload,
+    )
+    assert approval.status_code == 200, approval.text
+    assert approval.json()["applied"] is True
+    assert approval.json()["item"]["credit_reversed_amount"] == "110.00"
+    assert approval.json()["item"]["allocation_reversed_amount"] == "10.00"
+    assert approval.json()["item"]["reversible_amount"] == "580.00"
+    assert approval.json()["item"]["access_review_required"] is False
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["applied"] is False
+    assert replay.json()["item"] == approval.json()["item"]
+
+    account = await _financial_account(
+        platform_client,
+        tenant_id=tenant_id,
+        token=approver_token,
+    )
+    history = account["payments"][0]
+    assert account["outstanding_amount"] == "10.00"
+    assert account["credit_balance"] == "0.00"
+    assert account["journal_balanced"] is True
+    assert history["amount"] == "700.00"
+    assert history["allocated_amount"] == "580.00"
+    assert history["credit_amount"] == "0.00"
+    assert history["refunded_amount"] == "120.00"
+    assert history["reversible_amount"] == "580.00"
+    assert history["lifecycle_state"] == "confirmed"
+    assert history["amount"] == original_history["amount"]
+    assert history["paid_at"] == original_history["paid_at"]
+    assert history["confirmed_at"] == original_history["confirmed_at"]
+
+    over_limit = await platform_client.post(
+        create_path,
+        headers=_headers(requester_token),
+        json={
+            "operation_id": str(uuid4()),
+            "adjustment_kind": "bank_refund",
+            "amount": "580.01",
+            "reason_code": "bank_refund_completed",
+            "reason_note": "Проверка запрета возврата сверх остатка.",
+            "refunded_at": (utc_now() - timedelta(minutes=1)).isoformat(),
+            "refund_reference": "TJREFUND0002",
+        },
+    )
+    assert over_limit.status_code == 422, over_limit.text
+    correction_after_refund = await platform_client.post(
+        create_path,
+        headers=_headers(requester_token),
+        json={
+            "operation_id": str(uuid4()),
+            "adjustment_kind": "correction",
+            "amount": "580.00",
+            "reason_code": "amount_correction",
+            "reason_note": "Проверка запрета корректировки после возврата.",
+            "refunded_at": None,
+            "refund_reference": None,
+        },
+    )
+    assert correction_after_refund.status_code == 422, correction_after_refund.text
+
+
+async def test_rejected_correction_has_no_effect_and_full_correction_reopens_invoice(
+    db_session: AsyncSession,
+    platform_client: AsyncClient,
+    make_tenant_with_plan,
+) -> None:
+    _, tenant_id, _, invoice = await _create_initial_invoice(
+        db_session,
+        platform_client,
+        make_tenant_with_plan,
+    )
+    _, requester_token = await _platform_identity(db_session)
+    _, approver_token = await _platform_identity(db_session)
+    payment_response = await _review_and_approve(
+        platform_client,
+        tenant_id=tenant_id,
+        invoice_id=str(invoice["invoice_id"]),
+        amount="590.00",
+        reference="CORRECTIONSOURCE1",
+        reviewer_token=requester_token,
+        approver_token=approver_token,
+    )
+    assert payment_response.status_code == 200, payment_response.text
+    payment_id = payment_response.json()["item"]["payment_id"]
+    request_path = f"/api/v1/admin/billing/tenants/{tenant_id}/payments/{payment_id}/adjustments"
+
+    async def create_correction(note: str) -> dict[str, object]:
+        response = await platform_client.post(
+            request_path,
+            headers=_headers(requester_token),
+            json={
+                "operation_id": str(uuid4()),
+                "adjustment_kind": "correction",
+                "amount": "590.00",
+                "reason_code": "payment_entered_in_error",
+                "reason_note": note,
+                "refunded_at": None,
+                "refund_reference": None,
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["item"]
+
+    rejected_request = await create_correction("Ошибочная заявка для проверки отклонения.")
+    reject_path = (
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-adjustments/"
+        f"{rejected_request['adjustment_id']}/reject"
+    )
+    reject_payload = {
+        "operation_id": str(uuid4()),
+        "expected_row_version": rejected_request["row_version"],
+        "reason_code": "request_not_supported",
+        "reason_note": None,
+    }
+    self_rejection = await platform_client.post(
+        reject_path,
+        headers=_headers(requester_token),
+        json={**reject_payload, "operation_id": str(uuid4())},
+    )
+    assert self_rejection.status_code == 422, self_rejection.text
+    rejection = await platform_client.post(
+        reject_path,
+        headers=_headers(approver_token),
+        json=reject_payload,
+    )
+    assert rejection.status_code == 200, rejection.text
+    assert rejection.json()["item"]["status"] == "rejected"
+    unchanged = await _financial_account(
+        platform_client,
+        tenant_id=tenant_id,
+        token=approver_token,
+    )
+    assert unchanged["outstanding_amount"] == "0.00"
+    assert unchanged["payments"][0]["reversible_amount"] == "590.00"
+
+    correction = await create_correction("Платёж ошибочно подтверждён и отсутствует в банке.")
+    approve_path = (
+        reject_path.replace(
+            str(rejected_request["adjustment_id"]),
+            str(correction["adjustment_id"]),
+        ).removesuffix("/reject")
+        + "/approve"
+    )
+    approval = await platform_client.post(
+        approve_path,
+        headers=_headers(approver_token),
+        json={
+            "operation_id": str(uuid4()),
+            "expected_row_version": correction["row_version"],
+        },
+    )
+    assert approval.status_code == 200, approval.text
+    assert approval.json()["item"]["adjustment_kind"] == "correction"
+    assert approval.json()["item"]["allocation_reversed_amount"] == "590.00"
+    assert approval.json()["item"]["reversible_amount"] == "0.00"
+
+    corrected = await _financial_account(
+        platform_client,
+        tenant_id=tenant_id,
+        token=approver_token,
+    )
+    history = corrected["payments"][0]
+    assert corrected["outstanding_amount"] == "590.00"
+    assert corrected["journal_balanced"] is True
+    assert history["amount"] == "590.00"
+    assert history["allocated_amount"] == "0.00"
+    assert history["corrected_amount"] == "590.00"
+    assert history["refunded_amount"] == "0.00"
+    assert history["reversible_amount"] == "0.00"
+    assert history["lifecycle_state"] == "reversed"

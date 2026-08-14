@@ -15,6 +15,11 @@ const getPlatformFinancialAccount = vi.fn();
 const listPlatformPaymentApprovalQueue = vi.fn();
 const createPlatformBankPaymentReview = vi.fn();
 const approvePlatformBankPayment = vi.fn();
+const rejectPlatformBankPaymentReview = vi.fn();
+const listPlatformPaymentAdjustmentQueue = vi.fn();
+const createPlatformPaymentAdjustment = vi.fn();
+const approvePlatformPaymentAdjustment = vi.fn();
+const rejectPlatformPaymentAdjustment = vi.fn();
 const authState = vi.hoisted(() => ({
   user: {
     id: "developer-1",
@@ -39,6 +44,13 @@ vi.mock("@/features/platformBilling/api", () => ({
     listPlatformPaymentApprovalQueue(...args),
   createPlatformBankPaymentReview: (...args: unknown[]) => createPlatformBankPaymentReview(...args),
   approvePlatformBankPayment: (...args: unknown[]) => approvePlatformBankPayment(...args),
+  rejectPlatformBankPaymentReview: (...args: unknown[]) => rejectPlatformBankPaymentReview(...args),
+  listPlatformPaymentAdjustmentQueue: (...args: unknown[]) =>
+    listPlatformPaymentAdjustmentQueue(...args),
+  createPlatformPaymentAdjustment: (...args: unknown[]) => createPlatformPaymentAdjustment(...args),
+  approvePlatformPaymentAdjustment: (...args: unknown[]) =>
+    approvePlatformPaymentAdjustment(...args),
+  rejectPlatformPaymentAdjustment: (...args: unknown[]) => rejectPlatformPaymentAdjustment(...args),
 }));
 
 vi.mock("@/features/auth/hooks", () => ({
@@ -141,6 +153,21 @@ const FINANCIAL_ACCOUNT = {
   journal_balanced: true,
 };
 
+const PAYMENT = {
+  payment_id: "77777777-7777-4777-8777-777777777777",
+  amount: "700.00",
+  allocated_amount: "590.00",
+  credit_amount: "110.00",
+  corrected_amount: "0.00",
+  refunded_amount: "0.00",
+  reversible_amount: "700.00",
+  adjustment_pending: false,
+  currency: "TJS" as const,
+  paid_at: "2026-08-14T08:30:00Z",
+  confirmed_at: "2026-08-14T08:35:00Z",
+  lifecycle_state: "confirmed" as const,
+};
+
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -168,6 +195,11 @@ describe("PlatformBillingPage", () => {
     listPlatformPaymentApprovalQueue.mockReset();
     createPlatformBankPaymentReview.mockReset();
     approvePlatformBankPayment.mockReset();
+    rejectPlatformBankPaymentReview.mockReset();
+    listPlatformPaymentAdjustmentQueue.mockReset();
+    createPlatformPaymentAdjustment.mockReset();
+    approvePlatformPaymentAdjustment.mockReset();
+    rejectPlatformPaymentAdjustment.mockReset();
     authState.user.platform_capabilities = ["platform.billing.view"];
     getPlatformBillingOverview.mockResolvedValue(OVERVIEW);
     listPlatformInvoices.mockResolvedValue({
@@ -190,6 +222,12 @@ describe("PlatformBillingPage", () => {
     });
     getPlatformFinancialAccount.mockResolvedValue(FINANCIAL_ACCOUNT);
     listPlatformPaymentApprovalQueue.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+    });
+    listPlatformPaymentAdjustmentQueue.mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
@@ -445,6 +483,158 @@ describe("PlatformBillingPage", () => {
         BILLING_TENANT.tenant_id,
         "review-other",
         expect.objectContaining({ expected_row_version: 2 }),
+      ),
+    );
+  });
+
+  it("lets an independent employee reject a bank payment review", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.payment.approve",
+    ];
+    listPlatformPaymentApprovalQueue.mockResolvedValue({
+      items: [
+        {
+          review_id: "review-reject",
+          tenant_id: BILLING_TENANT.tenant_id,
+          tenant_name: BILLING_TENANT.name,
+          target_invoice_id: FINANCIAL_INVOICE.invoice_id,
+          invoice_number: FINANCIAL_INVOICE.invoice_number,
+          amount: "590.00",
+          currency: "TJS",
+          paid_at: "2026-08-14T08:30:00Z",
+          status: "pending_approval",
+          row_version: 1,
+          created_at: "2026-08-14T08:31:00Z",
+          is_own_review: false,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    rejectPlatformBankPaymentReview.mockResolvedValue({ item: { status: "rejected" } });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отклонить" }));
+    fireEvent.change(screen.getByLabelText("Причина"), { target: { value: "amount_mismatch" } });
+    fireEvent.click(screen.getByRole("button", { name: "Отклонить платёж" }));
+
+    await waitFor(() =>
+      expect(rejectPlatformBankPaymentReview).toHaveBeenCalledWith(
+        BILLING_TENANT.tenant_id,
+        "review-reject",
+        expect.objectContaining({
+          expected_row_version: 1,
+          reason_code: "amount_mismatch",
+          reason_note: null,
+        }),
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Платёж отклонён");
+  });
+
+  it("registers a bank refund request and removes its reference from the DOM", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.adjustment.create",
+    ];
+    getPlatformFinancialAccount.mockResolvedValue({
+      ...FINANCIAL_ACCOUNT,
+      outstanding_amount: "0.00",
+      credit_balance: "110.00",
+      payments: [PAYMENT],
+    });
+    createPlatformPaymentAdjustment.mockResolvedValue({
+      item: { adjustment_id: "adjustment-1", status: "pending_approval" },
+      applied: true,
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Корректировать" }));
+    fireEvent.change(screen.getByLabelText("Операция"), { target: { value: "bank_refund" } });
+    await screen.findByLabelText("Банковский номер");
+    fireEvent.change(screen.getByLabelText("Сумма, TJS"), { target: { value: "120.00" } });
+    fireEvent.change(screen.getByLabelText("Дата возврата"), {
+      target: { value: "2026-08-14T10:00" },
+    });
+    const reference = "TJ-PRIVATE-REFUND-01";
+    fireEvent.change(screen.getByLabelText("Банковский номер"), {
+      target: { value: reference },
+    });
+    fireEvent.change(screen.getByLabelText("Обоснование"), {
+      target: { value: "Возврат подтверждён банковской выпиской." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Передать на подтверждение" }));
+
+    await waitFor(() =>
+      expect(createPlatformPaymentAdjustment).toHaveBeenCalledWith(
+        BILLING_TENANT.tenant_id,
+        PAYMENT.payment_id,
+        expect.objectContaining({
+          adjustment_kind: "bank_refund",
+          amount: "120.00",
+          refund_reference: reference,
+        }),
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Запрос передан");
+    expect(document.body.textContent).not.toContain(reference);
+  });
+
+  it("approves a payment adjustment only after an independent confirmation", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.adjustment.approve",
+    ];
+    getPlatformFinancialAccount.mockResolvedValue({
+      ...FINANCIAL_ACCOUNT,
+      payments: [{ ...PAYMENT, adjustment_pending: true }],
+    });
+    listPlatformPaymentAdjustmentQueue.mockResolvedValue({
+      items: [
+        {
+          adjustment_id: "adjustment-other",
+          tenant_id: BILLING_TENANT.tenant_id,
+          tenant_name: BILLING_TENANT.name,
+          payment_id: PAYMENT.payment_id,
+          payment_amount: PAYMENT.amount,
+          payment_paid_at: PAYMENT.paid_at,
+          adjustment_kind: "bank_refund",
+          amount: "120.00",
+          currency: "TJS",
+          reason_code: "bank_refund_completed",
+          reason_note: "Возврат подтверждён банковской выпиской.",
+          refunded_at: "2026-08-14T08:40:00Z",
+          status: "pending_approval",
+          row_version: 1,
+          created_at: "2026-08-14T08:41:00Z",
+          is_own_request: false,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    approvePlatformPaymentAdjustment.mockResolvedValue({
+      item: { access_review_required: false },
+      applied: true,
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+
+    await waitFor(() =>
+      expect(approvePlatformPaymentAdjustment).toHaveBeenCalledWith(
+        BILLING_TENANT.tenant_id,
+        "adjustment-other",
+        expect.objectContaining({ expected_row_version: 1 }),
       ),
     );
   });

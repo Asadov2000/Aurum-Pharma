@@ -9,6 +9,8 @@ export const PLATFORM_CAPABILITIES = {
   billingView: "platform.billing.view",
   billingPaymentReview: "platform.billing.payment.review",
   billingPaymentApprove: "platform.billing.payment.approve",
+  billingAdjustmentCreate: "platform.billing.adjustment.create",
+  billingAdjustmentApprove: "platform.billing.adjustment.approve",
   billingInvoiceIssue: "platform.billing.invoice.issue",
   billingPlanManage: "platform.billing.plan.manage",
   supportUse: "platform.support.use",
