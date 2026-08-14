@@ -7,9 +7,12 @@ vi.mock("@/lib/api", () => ({ api: { get, post } }));
 
 import {
   activatePlatformPricingPrice,
+  approvePlatformBankPayment,
   cancelPlatformPricingPrice,
+  createPlatformBankPaymentReview,
   createPlatformPricingPlan,
   createPlatformPricingPrice,
+  getPlatformFinancialAccount,
   listPlatformPricingPlans,
   schedulePlatformPricingPrice,
 } from "@/features/platformBilling/api";
@@ -76,6 +79,64 @@ describe("platform pricing API", () => {
       5,
       "/admin/billing/prices/price-1/cancel",
       expect.objectContaining({ reason_code: "commercial_change" }),
+    );
+  });
+});
+
+describe("platform financial kernel API", () => {
+  beforeEach(() => {
+    get.mockReset();
+    post.mockReset();
+  });
+
+  it("reads a tenant financial account with request cancellation support", async () => {
+    const signal = new AbortController().signal;
+    const account = {
+      tenant_id: "tenant-1",
+      currency: "TJS",
+      outstanding_amount: "590.00",
+      credit_balance: "0.00",
+      invoices: [],
+      payments: [],
+      journal_balanced: true,
+    } as const;
+    get.mockResolvedValueOnce({ data: account });
+
+    await expect(getPlatformFinancialAccount("tenant-1", signal)).resolves.toEqual(account);
+    expect(get).toHaveBeenCalledWith("/admin/billing/tenants/tenant-1/financial-account", {
+      signal,
+    });
+  });
+
+  it("submits review and approval commands without changing financial strings", async () => {
+    const reviewPayload = {
+      operation_id: "123e4567-e89b-42d3-a456-426614174000",
+      target_invoice_id: "invoice-1",
+      amount: "590.00",
+      paid_at: "2026-08-14T08:30:00.000Z",
+      recipient_account_key: "bank.primary.tjs",
+      external_reference: "BANK-REF-001",
+    };
+    const approvePayload = {
+      operation_id: "123e4567-e89b-42d3-a456-426614174001",
+      expected_row_version: 1,
+    };
+    post
+      .mockResolvedValueOnce({ data: { item: { review_id: "review-1" }, applied: true } })
+      .mockResolvedValueOnce({ data: { item: { payment_id: "payment-1" }, applied: true } });
+
+    await createPlatformBankPaymentReview("tenant-1", reviewPayload);
+    await approvePlatformBankPayment("tenant-1", "review-1", approvePayload);
+
+    expect(post).toHaveBeenNthCalledWith(
+      1,
+      "/admin/billing/tenants/tenant-1/payment-reviews",
+      reviewPayload,
+    );
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      "/admin/billing/tenants/tenant-1/payment-reviews/review-1/approve",
+      approvePayload,
     );
   });
 });

@@ -1,9 +1,14 @@
 import { api } from "@/lib/api";
 
 import {
+  type PlatformBankPaymentApprove,
+  type PlatformBankPaymentReviewCommandResult,
+  type PlatformBankPaymentReviewCreate,
   type PlatformBillingOverview,
+  type PlatformFinancialAccount,
   type PlatformInvoiceFilters,
   type PlatformInvoiceList,
+  type PlatformPaymentApprovalCommandResult,
   type PlatformPricingPlanCommandResult,
   type PlatformPricingPlanList,
   type PlatformPricingVersionCommandResult,
@@ -74,6 +79,37 @@ export async function activatePlatformPricingPrice(priceId: string, payload: Pri
 export async function cancelPlatformPricingPrice(priceId: string, payload: PricingCancel) {
   const { data } = await api.post<PlatformPricingVersionCommandResult>(
     `/admin/billing/prices/${priceId}/cancel`,
+    payload,
+  );
+  return data;
+}
+
+export async function getPlatformFinancialAccount(tenantId: string, signal?: AbortSignal) {
+  const { data } = await api.get<PlatformFinancialAccount>(
+    `/admin/billing/tenants/${tenantId}/financial-account`,
+    { signal },
+  );
+  return data;
+}
+
+export async function createPlatformBankPaymentReview(
+  tenantId: string,
+  payload: PlatformBankPaymentReviewCreate,
+) {
+  const { data } = await api.post<PlatformBankPaymentReviewCommandResult>(
+    `/admin/billing/tenants/${tenantId}/payment-reviews`,
+    payload,
+  );
+  return data;
+}
+
+export async function approvePlatformBankPayment(
+  tenantId: string,
+  reviewId: string,
+  payload: PlatformBankPaymentApprove,
+) {
+  const { data } = await api.post<PlatformPaymentApprovalCommandResult>(
+    `/admin/billing/tenants/${tenantId}/payment-reviews/${reviewId}/approve`,
     payload,
   );
   return data;
