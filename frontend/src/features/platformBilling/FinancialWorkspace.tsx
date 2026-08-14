@@ -20,16 +20,20 @@ import { formatBillingDate, formatBillingMoney } from "@/features/billing/format
 import { describeApiError } from "@/lib/errorMessages";
 
 import { ApprovePaymentModal, RegisterPaymentModal } from "./FinancialPaymentModal";
+import { PaymentAdjustmentDecisionModal, PaymentAdjustmentModal } from "./FinancialAdjustmentModal";
 import {
   usePlatformBillingTenants,
   usePlatformFinancialAccount,
+  usePlatformPaymentAdjustmentQueue,
   usePlatformPaymentApprovalQueue,
 } from "./queries";
 import {
   type PlatformBillingTenant,
   type PlatformFinancialAccount,
   type PlatformFinancialInvoice,
+  type PlatformPaymentAdjustmentQueueItem,
   type PlatformPaymentApprovalQueueItem,
+  type PlatformPaymentHistoryItem,
 } from "./types";
 import { useOnlineStatus } from "./useOnlineStatus";
 
@@ -39,11 +43,15 @@ const SEARCH_DELAY_MS = 350;
 export function FinancialWorkspace({
   canReview,
   canApprove,
+  canCreateAdjustment,
+  canApproveAdjustment,
   refreshSignal,
   onFetchingChange,
 }: {
   canReview: boolean;
   canApprove: boolean;
+  canCreateAdjustment: boolean;
+  canApproveAdjustment: boolean;
   refreshSignal: number;
   onFetchingChange?: (fetching: boolean) => void;
 }): JSX.Element {
@@ -52,11 +60,15 @@ export function FinancialWorkspace({
   const [search, setSearch] = useState("");
   const [tenantPage, setTenantPage] = useState(1);
   const [queuePage, setQueuePage] = useState(1);
+  const [adjustmentPage, setAdjustmentPage] = useState(1);
   const [selectedTenant, setSelectedTenant] = useState<PlatformBillingTenant | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [approvalTarget, setApprovalTarget] = useState<PlatformPaymentApprovalQueueItem | null>(
     null,
   );
+  const [adjustmentTarget, setAdjustmentTarget] = useState<PlatformPaymentHistoryItem | null>(null);
+  const [adjustmentDecisionTarget, setAdjustmentDecisionTarget] =
+    useState<PlatformPaymentAdjustmentQueueItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,13 +94,28 @@ export function FinancialWorkspace({
     PAGE_SIZE,
     canApprove && selectedTenant !== null,
   );
+  const adjustmentQueue = usePlatformPaymentAdjustmentQueue(
+    tenantId,
+    adjustmentPage,
+    PAGE_SIZE,
+    canApproveAdjustment && selectedTenant !== null,
+  );
   const refetchTenants = tenants.refetch;
   const refetchAccount = account.refetch;
   const refetchQueue = queue.refetch;
+  const refetchAdjustmentQueue = adjustmentQueue.refetch;
 
   useEffect(() => {
-    onFetchingChange?.(tenants.isFetching || account.isFetching || queue.isFetching);
-  }, [account.isFetching, onFetchingChange, queue.isFetching, tenants.isFetching]);
+    onFetchingChange?.(
+      tenants.isFetching || account.isFetching || queue.isFetching || adjustmentQueue.isFetching,
+    );
+  }, [
+    account.isFetching,
+    adjustmentQueue.isFetching,
+    onFetchingChange,
+    queue.isFetching,
+    tenants.isFetching,
+  ]);
 
   useEffect(() => {
     if (refreshSignal === 0) return;
@@ -96,8 +123,18 @@ export function FinancialWorkspace({
       refetchTenants(),
       ...(selectedTenant ? [refetchAccount()] : []),
       ...(selectedTenant && canApprove ? [refetchQueue()] : []),
+      ...(selectedTenant && canApproveAdjustment ? [refetchAdjustmentQueue()] : []),
     ]);
-  }, [canApprove, refetchAccount, refetchQueue, refetchTenants, refreshSignal, selectedTenant]);
+  }, [
+    canApprove,
+    canApproveAdjustment,
+    refetchAccount,
+    refetchAdjustmentQueue,
+    refetchQueue,
+    refetchTenants,
+    refreshSignal,
+    selectedTenant,
+  ]);
 
   useEffect(() => {
     const total = tenants.data?.total;
@@ -108,13 +145,20 @@ export function FinancialWorkspace({
 
   useEffect(() => {
     setQueuePage(1);
+    setAdjustmentPage(1);
     setApprovalTarget(null);
+    setAdjustmentTarget(null);
+    setAdjustmentDecisionTarget(null);
     setNotice(null);
   }, [tenantId]);
 
   const refreshFinancialData = (message: string) => {
     setNotice(message);
-    void Promise.all([account.refetch(), ...(canApprove ? [queue.refetch()] : [])]);
+    void Promise.all([
+      account.refetch(),
+      ...(canApprove ? [queue.refetch()] : []),
+      ...(canApproveAdjustment ? [adjustmentQueue.refetch()] : []),
+    ]);
   };
 
   return (
@@ -128,7 +172,9 @@ export function FinancialWorkspace({
             Защищённый финансовый журнал и независимое подтверждение банковских платежей.
           </p>
         </div>
-        {!canReview && !canApprove ? <Badge tone="neutral">Только просмотр</Badge> : null}
+        {!canReview && !canApprove && !canCreateAdjustment && !canApproveAdjustment ? (
+          <Badge tone="neutral">Только просмотр</Badge>
+        ) : null}
       </div>
 
       {!online ? (
@@ -182,8 +228,10 @@ export function FinancialWorkspace({
                 tenant={selectedTenant}
                 account={account.data}
                 canReview={canReview}
+                canCreateAdjustment={canCreateAdjustment}
                 online={online}
                 onRegister={() => setRegisterOpen(true)}
+                onAdjust={setAdjustmentTarget}
               />
               {canApprove ? (
                 <ApprovalQueuePanel
@@ -193,6 +241,16 @@ export function FinancialWorkspace({
                   online={online}
                   journalBalanced={account.data.journal_balanced}
                   onApprove={setApprovalTarget}
+                />
+              ) : null}
+              {canApproveAdjustment ? (
+                <AdjustmentQueuePanel
+                  queue={adjustmentQueue}
+                  page={adjustmentPage}
+                  onPage={setAdjustmentPage}
+                  online={online}
+                  journalBalanced={account.data.journal_balanced}
+                  onReview={setAdjustmentDecisionTarget}
                 />
               ) : null}
             </>
@@ -226,6 +284,41 @@ export function FinancialWorkspace({
               ? `Платёж подтверждён. Доступ аптеки восстановлен, остаток долга ${formatBillingMoney(result.blocking_outstanding_amount, "TJS")}.`
               : `Платёж подтверждён. Остаток долга ${formatBillingMoney(result.blocking_outstanding_amount, "TJS")}.`,
           );
+        }}
+        onRejected={() => {
+          setApprovalTarget(null);
+          refreshFinancialData("Платёж отклонён и удалён из очереди.");
+        }}
+        onRefreshRequired={refreshFinancialData}
+      />
+
+      <PaymentAdjustmentModal
+        tenantId={tenantId}
+        payment={adjustmentTarget}
+        online={online && account.data?.journal_balanced === true}
+        onClose={() => setAdjustmentTarget(null)}
+        onCompleted={() => {
+          setAdjustmentTarget(null);
+          refreshFinancialData("Запрос передан другому сотруднику на подтверждение.");
+        }}
+        onRefreshRequired={refreshFinancialData}
+      />
+
+      <PaymentAdjustmentDecisionModal
+        item={adjustmentDecisionTarget}
+        online={online && account.data?.journal_balanced === true}
+        onClose={() => setAdjustmentDecisionTarget(null)}
+        onApproved={(result) => {
+          setAdjustmentDecisionTarget(null);
+          refreshFinancialData(
+            result.access_review_required
+              ? "Корректировка подтверждена. Требуется проверить доступ аптеки."
+              : "Корректировка подтверждена и отражена в журнале.",
+          );
+        }}
+        onRejected={() => {
+          setAdjustmentDecisionTarget(null);
+          refreshFinancialData("Запрос корректировки отклонён.");
         }}
         onRefreshRequired={refreshFinancialData}
       />
@@ -324,14 +417,18 @@ function FinancialAccountPanel({
   tenant,
   account,
   canReview,
+  canCreateAdjustment,
   online,
   onRegister,
+  onAdjust,
 }: {
   tenant: PlatformBillingTenant;
   account: PlatformFinancialAccount;
   canReview: boolean;
+  canCreateAdjustment: boolean;
   online: boolean;
   onRegister: () => void;
+  onAdjust: (payment: PlatformPaymentHistoryItem) => void;
 }): JSX.Element {
   const openInvoices = account.invoices.filter(
     (invoice) => invoice.document_state === "issued" && Number(invoice.outstanding_amount) > 0,
@@ -386,7 +483,12 @@ function FinancialAccountPanel({
       ) : null}
 
       <InvoicesPanel invoices={account.invoices} />
-      <PaymentsPanel account={account} />
+      <PaymentsPanel
+        account={account}
+        canCreateAdjustment={canCreateAdjustment}
+        commandsEnabled={commandsEnabled}
+        onAdjust={onAdjust}
+      />
     </div>
   );
 }
@@ -459,7 +561,17 @@ function InvoicesPanel({
   );
 }
 
-function PaymentsPanel({ account }: { account: PlatformFinancialAccount }): JSX.Element {
+function PaymentsPanel({
+  account,
+  canCreateAdjustment,
+  commandsEnabled,
+  onAdjust,
+}: {
+  account: PlatformFinancialAccount;
+  canCreateAdjustment: boolean;
+  commandsEnabled: boolean;
+  onAdjust: (payment: PlatformPaymentHistoryItem) => void;
+}): JSX.Element {
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-border px-4 py-3">
@@ -476,6 +588,8 @@ function PaymentsPanel({ account }: { account: PlatformFinancialAccount }): JSX.
                 <TH className="text-right">Сумма</TH>
                 <TH className="text-right">Распределено</TH>
                 <TH className="text-right">В кредит</TH>
+                <TH>Состояние</TH>
+                {canCreateAdjustment ? <TH className="text-right">Действие</TH> : null}
               </TR>
             </THead>
             <TBody>
@@ -491,6 +605,25 @@ function PaymentsPanel({ account }: { account: PlatformFinancialAccount }): JSX.
                   <TD className="text-right tabular-nums">
                     {formatBillingMoney(payment.credit_amount, payment.currency)}
                   </TD>
+                  <TD>
+                    <PaymentState payment={payment} />
+                  </TD>
+                  {canCreateAdjustment ? (
+                    <TD className="text-right">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={
+                          !commandsEnabled ||
+                          payment.adjustment_pending ||
+                          Number(payment.reversible_amount) <= 0
+                        }
+                        onClick={() => onAdjust(payment)}
+                      >
+                        {payment.adjustment_pending ? "Ожидает решения" : "Корректировать"}
+                      </Button>
+                    </TD>
+                  ) : null}
                 </TR>
               ))}
             </TBody>
@@ -499,6 +632,19 @@ function PaymentsPanel({ account }: { account: PlatformFinancialAccount }): JSX.
       )}
     </Card>
   );
+}
+
+function PaymentState({ payment }: { payment: PlatformPaymentHistoryItem }): JSX.Element {
+  if (payment.adjustment_pending) return <Badge tone="warning">Ожидает решения</Badge>;
+  if (payment.lifecycle_state === "reversed") {
+    return (
+      <Badge tone="neutral">
+        {Number(payment.refunded_amount) > 0 ? "Возвращён" : "Скорректирован"}
+      </Badge>
+    );
+  }
+  if (Number(payment.refunded_amount) > 0) return <Badge tone="info">Частичный возврат</Badge>;
+  return <Badge tone="success">Подтверждён</Badge>;
 }
 
 function ApprovalQueuePanel({
@@ -566,6 +712,92 @@ function ApprovalQueuePanel({
                   onClick={() => onApprove(item)}
                 >
                   {item.is_own_review ? "Нужен другой сотрудник" : "Проверить"}
+                </Button>
+              </li>
+            ))}
+          </ul>
+          {queue.data.total > PAGE_SIZE ? (
+            <div className="border-t border-border p-3">
+              <Pagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={queue.data.total}
+                onPage={onPage}
+              />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
+function AdjustmentQueuePanel({
+  queue,
+  page,
+  onPage,
+  online,
+  journalBalanced,
+  onReview,
+}: {
+  queue: ReturnType<typeof usePlatformPaymentAdjustmentQueue>;
+  page: number;
+  onPage: (page: number) => void;
+  online: boolean;
+  journalBalanced: boolean;
+  onReview: (item: PlatformPaymentAdjustmentQueueItem) => void;
+}): JSX.Element {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <div>
+          <h3 className="font-semibold text-foreground">Корректировки на проверке</h3>
+          <p className="mt-0.5 text-xs text-foreground-muted">
+            Возвраты и исправления подтверждает второй сотрудник.
+          </p>
+        </div>
+        {queue.data ? (
+          <Badge tone={queue.data.total > 0 ? "warning" : "neutral"}>{queue.data.total}</Badge>
+        ) : null}
+      </div>
+      {queue.isLoading ? (
+        <div className="p-4">
+          <SkeletonRows rows={3} />
+        </div>
+      ) : queue.error && !queue.data ? (
+        <div className="p-4">
+          <ReadError
+            message={describeApiError(queue.error, "Не удалось загрузить корректировки")}
+            retrying={queue.isFetching}
+            onRetry={() => void queue.refetch()}
+          />
+        </div>
+      ) : queue.data?.items.length === 0 ? (
+        <p className="p-4 text-sm text-foreground-muted">Очередь пуста.</p>
+      ) : queue.data ? (
+        <>
+          <ul className="divide-y divide-border">
+            {queue.data.items.map((item) => (
+              <li
+                key={item.adjustment_id}
+                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground">
+                    {item.adjustment_kind === "bank_refund" ? "Возврат" : "Корректировка"} ·{" "}
+                    {formatBillingMoney(item.amount, item.currency)}
+                  </p>
+                  <p className="mt-1 text-xs text-foreground-muted">
+                    Исходный платёж {formatBillingMoney(item.payment_amount, item.currency)}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!online || !journalBalanced || item.is_own_request}
+                  onClick={() => onReview(item)}
+                >
+                  {item.is_own_request ? "Нужен другой сотрудник" : "Проверить"}
                 </Button>
               </li>
             ))}

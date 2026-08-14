@@ -204,6 +204,8 @@ export interface PlatformBankPaymentReview {
   status: PlatformBankPaymentReviewStatus;
   row_version: number;
   created_at: string;
+  decided_at?: string | null;
+  reason_code?: string | null;
 }
 
 export interface PlatformBankPaymentReviewCommandResult {
@@ -236,6 +238,19 @@ export interface PlatformPaymentApprovalQueue {
 export interface PlatformBankPaymentApprove {
   operation_id: string;
   expected_row_version: number;
+}
+
+export type PlatformBankPaymentReviewRejectionReason =
+  | "bank_payment_not_found"
+  | "amount_mismatch"
+  | "date_mismatch"
+  | "duplicate"
+  | "wrong_tenant_or_invoice"
+  | "other";
+
+export interface PlatformBankPaymentReviewReject extends PlatformBankPaymentApprove {
+  reason_code: PlatformBankPaymentReviewRejectionReason;
+  reason_note: string | null;
 }
 
 export interface PlatformPaymentAllocation {
@@ -285,10 +300,115 @@ export interface PlatformPaymentHistoryItem {
   amount: string;
   allocated_amount: string;
   credit_amount: string;
+  corrected_amount: string;
+  refunded_amount: string;
+  reversible_amount: string;
+  adjustment_pending: boolean;
   currency: "TJS";
   paid_at: string;
   confirmed_at: string;
   lifecycle_state: PlatformPaymentLifecycleState;
+}
+
+export type PlatformPaymentAdjustmentKind = "correction" | "bank_refund";
+export type PlatformPaymentAdjustmentReason =
+  | "payment_entered_in_error"
+  | "amount_correction"
+  | "bank_refund_completed"
+  | "contract_resolution"
+  | "other";
+
+export interface PlatformPaymentAdjustmentCreate {
+  operation_id: string;
+  adjustment_kind: PlatformPaymentAdjustmentKind;
+  amount: string;
+  reason_code: PlatformPaymentAdjustmentReason;
+  reason_note: string;
+  refunded_at: string | null;
+  refund_reference: string | null;
+}
+
+export interface PlatformPaymentAdjustmentRequest {
+  adjustment_id: string;
+  tenant_id: string;
+  payment_id: string;
+  adjustment_kind: PlatformPaymentAdjustmentKind;
+  amount: string;
+  currency: "TJS";
+  reason_code: PlatformPaymentAdjustmentReason;
+  reason_note: string;
+  refunded_at: string | null;
+  status: "pending_approval";
+  row_version: number;
+  created_at: string;
+}
+
+export interface PlatformPaymentAdjustmentRequestCommandResult {
+  item: PlatformPaymentAdjustmentRequest;
+  applied: boolean;
+}
+
+export interface PlatformPaymentAdjustmentQueueItem extends PlatformPaymentAdjustmentRequest {
+  tenant_name: string;
+  payment_amount: string;
+  payment_paid_at: string;
+  is_own_request: boolean;
+}
+
+export interface PlatformPaymentAdjustmentQueue {
+  items: PlatformPaymentAdjustmentQueueItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PlatformPaymentAdjustmentApprove {
+  operation_id: string;
+  expected_row_version: number;
+}
+
+export type PlatformPaymentAdjustmentRejectionReason =
+  | "bank_refund_not_verified"
+  | "amount_mismatch"
+  | "request_not_supported"
+  | "duplicate"
+  | "other";
+
+export interface PlatformPaymentAdjustmentReject extends PlatformPaymentAdjustmentApprove {
+  reason_code: PlatformPaymentAdjustmentRejectionReason;
+  reason_note: string | null;
+}
+
+export interface PlatformPaymentAdjustmentApproval {
+  adjustment_id: string;
+  adjustment_record_id: string;
+  tenant_id: string;
+  payment_id: string;
+  adjustment_kind: PlatformPaymentAdjustmentKind;
+  amount: string;
+  credit_reversed_amount: string;
+  allocation_reversed_amount: string;
+  total_adjusted_amount: string;
+  reversible_amount: string;
+  blocking_outstanding_amount: string;
+  access_review_required: boolean;
+  currency: "TJS";
+  status: "approved";
+  approved_at: string;
+}
+
+export interface PlatformPaymentAdjustmentApprovalCommandResult {
+  item: PlatformPaymentAdjustmentApproval;
+  applied: boolean;
+}
+
+export interface PlatformPaymentAdjustmentRejectionCommandResult {
+  item: {
+    adjustment_id: string;
+    status: "rejected";
+    decision_reason_code: PlatformPaymentAdjustmentRejectionReason;
+  };
+  applied: boolean;
 }
 
 export interface PlatformFinancialAccount {

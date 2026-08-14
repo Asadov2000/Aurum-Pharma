@@ -368,6 +368,165 @@ class BillingService:
         except DBAPIError as exc:
             raise _financial_error(exc) from exc
 
+    async def reject_bank_payment_review(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        review_id: UUID,
+        expected_row_version: int,
+        reason_code: str,
+        reason_note: str | None,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "review_id": review_id,
+            "expected_row_version": expected_row_version,
+            "reason_code": reason_code,
+            "reason_note": reason_note,
+        }
+        try:
+            return await self.repo.reject_bank_payment_review(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_review_rejected", payload),
+                tenant_id=tenant_id,
+                review_id=review_id,
+                expected_row_version=expected_row_version,
+                reason_code=reason_code,
+                reason_note=reason_note,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def create_payment_adjustment(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        payment_id: UUID,
+        adjustment_kind: str,
+        amount: Decimal,
+        reason_code: str,
+        reason_note: str,
+        refunded_at: datetime | None,
+        refund_reference: str | None,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "payment_id": payment_id,
+            "adjustment_kind": adjustment_kind,
+            "amount": amount,
+            "reason_code": reason_code,
+            "reason_note": reason_note,
+            "refunded_at": refunded_at,
+            "refund_reference": refund_reference,
+        }
+        try:
+            return await self.repo.create_payment_adjustment(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_adjustment_requested", payload),
+                tenant_id=tenant_id,
+                payment_id=payment_id,
+                adjustment_kind=adjustment_kind,
+                amount=amount,
+                reason_code=reason_code,
+                reason_note=reason_note,
+                refunded_at=refunded_at,
+                refund_reference=refund_reference,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def list_payment_adjustments(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.list_payment_adjustments(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                tenant_id=tenant_id,
+                page=page,
+                page_size=page_size,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def approve_payment_adjustment(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        adjustment_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "adjustment_id": adjustment_id,
+            "expected_row_version": expected_row_version,
+        }
+        try:
+            return await self.repo.approve_payment_adjustment(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_adjustment_approved", payload),
+                tenant_id=tenant_id,
+                adjustment_id=adjustment_id,
+                expected_row_version=expected_row_version,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def reject_payment_adjustment(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        adjustment_id: UUID,
+        expected_row_version: int,
+        reason_code: str,
+        reason_note: str | None,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "adjustment_id": adjustment_id,
+            "expected_row_version": expected_row_version,
+            "reason_code": reason_code,
+            "reason_note": reason_note,
+        }
+        try:
+            return await self.repo.reject_payment_adjustment(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_adjustment_rejected", payload),
+                tenant_id=tenant_id,
+                adjustment_id=adjustment_id,
+                expected_row_version=expected_row_version,
+                reason_code=reason_code,
+                reason_note=reason_note,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
     async def read_platform_financial_account(
         self,
         *,

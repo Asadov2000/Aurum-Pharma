@@ -17,6 +17,7 @@ from pydantic import (
     ValidationInfo,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
 BILLING_PERIODS = {"monthly", "yearly"}
@@ -404,6 +405,8 @@ class BankPaymentReviewRead(BaseModel):
     status: Literal["pending_approval", "approved", "rejected", "duplicate"]
     row_version: int
     created_at: datetime
+    decided_at: datetime | None = None
+    reason_code: str | None = None
 
     @field_serializer("amount")
     def _serialize_money(self, value: Decimal) -> str:
@@ -444,6 +447,25 @@ class BankPaymentApprovalQueue(BaseModel):
 class BankPaymentApprove(_StrictBillingCommand):
     operation_id: UUID
     expected_row_version: int = Field(ge=1)
+
+
+class BankPaymentReviewReject(BankPaymentApprove):
+    reason_code: Literal[
+        "bank_payment_not_found",
+        "amount_mismatch",
+        "date_mismatch",
+        "duplicate",
+        "wrong_tenant_or_invoice",
+        "other",
+    ]
+    reason_note: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _validate_reason_note(self) -> BankPaymentReviewReject:
+        self.reason_note = self.reason_note.strip() if self.reason_note else None
+        if self.reason_code == "other" and (self.reason_note is None or len(self.reason_note) < 10):
+            raise ValueError("reason_note must contain at least 10 characters for other")
+        return self
 
 
 class BillingPaymentAllocationRead(BaseModel):
@@ -498,14 +520,207 @@ class BillingPaymentHistoryRead(BaseModel):
     amount: Decimal
     allocated_amount: Decimal
     credit_amount: Decimal
+    corrected_amount: Decimal
+    refunded_amount: Decimal
+    reversible_amount: Decimal
+    adjustment_pending: bool
     currency: Literal["TJS"]
     paid_at: datetime
     confirmed_at: datetime
     lifecycle_state: Literal["confirmed", "reversed"]
 
-    @field_serializer("amount", "allocated_amount", "credit_amount")
+    @field_serializer(
+        "amount",
+        "allocated_amount",
+        "credit_amount",
+        "corrected_amount",
+        "refunded_amount",
+        "reversible_amount",
+    )
     def _serialize_money(self, value: Decimal) -> str:
         return format(value, "f")
+
+
+class BillingPaymentAdjustmentCreate(_StrictBillingCommand):
+    operation_id: UUID
+    adjustment_kind: Literal["correction", "bank_refund"]
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    reason_code: Literal[
+        "payment_entered_in_error",
+        "amount_correction",
+        "bank_refund_completed",
+        "contract_resolution",
+        "other",
+    ]
+    reason_note: str = Field(min_length=10, max_length=500)
+    refunded_at: datetime | None = None
+    refund_reference: str | None = Field(default=None, max_length=128)
+
+    @field_validator("reason_note")
+    @classmethod
+    def _normalize_reason_note(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 10:
+            raise ValueError("reason_note must contain at least 10 characters")
+        return normalized
+
+    @field_validator("refunded_at")
+    @classmethod
+    def _normalize_refunded_at(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("refunded_at must include a timezone")
+        return value.astimezone(UTC)
+
+    @field_validator("refund_reference")
+    @classmethod
+    def _normalize_refund_reference(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = unicodedata.normalize("NFKC", value).strip().upper()
+        normalized = re.sub(r"[\s\-_/]+", "", normalized)
+        if not re.fullmatch(r"[A-Z0-9]{4,128}", normalized):
+            raise ValueError("refund_reference must normalize to 4-128 Latin letters or digits")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_adjustment_kind(self) -> BillingPaymentAdjustmentCreate:
+        correction_reasons = {"payment_entered_in_error", "amount_correction", "other"}
+        refund_reasons = {"bank_refund_completed", "contract_resolution", "other"}
+        if self.adjustment_kind == "correction":
+            if self.reason_code not in correction_reasons:
+                raise ValueError("reason_code is not valid for a correction")
+            if self.refunded_at is not None or self.refund_reference is not None:
+                raise ValueError("correction cannot contain bank refund details")
+        else:
+            if self.reason_code not in refund_reasons:
+                raise ValueError("reason_code is not valid for a bank refund")
+            if self.refunded_at is None or self.refund_reference is None:
+                raise ValueError("bank refund timestamp and reference are required")
+        return self
+
+
+class BillingPaymentAdjustmentRequestRead(BaseModel):
+    adjustment_id: UUID
+    tenant_id: UUID
+    payment_id: UUID
+    adjustment_kind: Literal["correction", "bank_refund"]
+    amount: Decimal
+    currency: Literal["TJS"]
+    reason_code: str
+    reason_note: str
+    refunded_at: datetime | None
+    status: Literal["pending_approval"]
+    row_version: int
+    created_at: datetime
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BillingPaymentAdjustmentRequestCommandResult(BaseModel):
+    item: BillingPaymentAdjustmentRequestRead
+    applied: bool
+
+
+class BillingPaymentAdjustmentQueueItem(BillingPaymentAdjustmentRequestRead):
+    tenant_name: str
+    payment_amount: Decimal
+    payment_paid_at: datetime
+    is_own_request: bool
+
+    @field_serializer("payment_amount")
+    def _serialize_payment_amount(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BillingPaymentAdjustmentQueue(BaseModel):
+    items: list[BillingPaymentAdjustmentQueueItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class BillingPaymentAdjustmentApprove(_StrictBillingCommand):
+    operation_id: UUID
+    expected_row_version: int = Field(ge=1)
+
+
+class BillingPaymentAdjustmentReject(BillingPaymentAdjustmentApprove):
+    reason_code: Literal[
+        "bank_refund_not_verified",
+        "amount_mismatch",
+        "request_not_supported",
+        "duplicate",
+        "other",
+    ]
+    reason_note: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _validate_reason_note(self) -> BillingPaymentAdjustmentReject:
+        self.reason_note = self.reason_note.strip() if self.reason_note else None
+        if self.reason_code == "other" and (self.reason_note is None or len(self.reason_note) < 10):
+            raise ValueError("reason_note must contain at least 10 characters for other")
+        return self
+
+
+class BillingPaymentAdjustmentApprovalRead(BaseModel):
+    adjustment_id: UUID
+    adjustment_record_id: UUID
+    tenant_id: UUID
+    payment_id: UUID
+    adjustment_kind: Literal["correction", "bank_refund"]
+    amount: Decimal
+    credit_reversed_amount: Decimal
+    allocation_reversed_amount: Decimal
+    total_adjusted_amount: Decimal
+    reversible_amount: Decimal
+    blocking_outstanding_amount: Decimal
+    access_review_required: bool
+    currency: Literal["TJS"]
+    status: Literal["approved"]
+    approved_at: datetime
+
+    @field_serializer(
+        "amount",
+        "credit_reversed_amount",
+        "allocation_reversed_amount",
+        "total_adjusted_amount",
+        "reversible_amount",
+        "blocking_outstanding_amount",
+    )
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BillingPaymentAdjustmentApprovalCommandResult(BaseModel):
+    item: BillingPaymentAdjustmentApprovalRead
+    applied: bool
+
+
+class BillingPaymentAdjustmentRejectionRead(BaseModel):
+    adjustment_id: UUID
+    tenant_id: UUID
+    payment_id: UUID
+    adjustment_kind: Literal["correction", "bank_refund"]
+    amount: Decimal
+    currency: Literal["TJS"]
+    status: Literal["rejected"]
+    row_version: int
+    created_at: datetime
+    decided_at: datetime
+    decision_reason_code: str
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BillingPaymentAdjustmentRejectionCommandResult(BaseModel):
+    item: BillingPaymentAdjustmentRejectionRead
+    applied: bool
 
 
 class BillingFinancialAccountRead(BaseModel):

@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 
 import {
   type PlatformBankPaymentApprove,
+  type PlatformBankPaymentReviewReject,
   type PlatformBankPaymentReviewCommandResult,
   type PlatformBankPaymentReviewCreate,
   type PlatformBillingOverview,
@@ -12,6 +13,13 @@ import {
   type PlatformInvoiceList,
   type PlatformPaymentApprovalCommandResult,
   type PlatformPaymentApprovalQueue,
+  type PlatformPaymentAdjustmentApprovalCommandResult,
+  type PlatformPaymentAdjustmentApprove,
+  type PlatformPaymentAdjustmentCreate,
+  type PlatformPaymentAdjustmentQueue,
+  type PlatformPaymentAdjustmentReject,
+  type PlatformPaymentAdjustmentRejectionCommandResult,
+  type PlatformPaymentAdjustmentRequestCommandResult,
   type PlatformPricingPlanCommandResult,
   type PlatformPricingPlanList,
   type PlatformPricingVersionCommandResult,
@@ -137,6 +145,67 @@ export async function approvePlatformBankPayment(
 ) {
   const { data } = await api.post<PlatformPaymentApprovalCommandResult>(
     `/admin/billing/tenants/${tenantId}/payment-reviews/${reviewId}/approve`,
+    payload,
+  );
+  return data;
+}
+
+export async function rejectPlatformBankPaymentReview(
+  tenantId: string,
+  reviewId: string,
+  payload: PlatformBankPaymentReviewReject,
+) {
+  const { data } = await api.post<PlatformBankPaymentReviewCommandResult>(
+    `/admin/billing/tenants/${tenantId}/payment-reviews/${reviewId}/reject`,
+    payload,
+  );
+  return data;
+}
+
+export async function createPlatformPaymentAdjustment(
+  tenantId: string,
+  paymentId: string,
+  payload: PlatformPaymentAdjustmentCreate,
+) {
+  const { data } = await api.post<PlatformPaymentAdjustmentRequestCommandResult>(
+    `/admin/billing/tenants/${tenantId}/payments/${paymentId}/adjustments`,
+    payload,
+  );
+  return data;
+}
+
+export async function listPlatformPaymentAdjustmentQueue(
+  tenantId: string,
+  page: number,
+  pageSize: number,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.get<PlatformPaymentAdjustmentQueue>(
+    `/admin/billing/tenants/${tenantId}/payment-adjustments`,
+    { params: { page, page_size: pageSize }, signal },
+  );
+  return data;
+}
+
+export async function approvePlatformPaymentAdjustment(
+  tenantId: string,
+  adjustmentId: string,
+  payload: PlatformPaymentAdjustmentApprove,
+) {
+  const { data } = await api.post<PlatformPaymentAdjustmentApprovalCommandResult>(
+    `/admin/billing/tenants/${tenantId}/payment-adjustments/${adjustmentId}/approve`,
+    payload,
+  );
+  return data;
+}
+
+export async function rejectPlatformPaymentAdjustment(
+  tenantId: string,
+  adjustmentId: string,
+  payload: PlatformPaymentAdjustmentReject,
+) {
+  const { data } = await api.post<PlatformPaymentAdjustmentRejectionCommandResult>(
+    `/admin/billing/tenants/${tenantId}/payment-adjustments/${adjustmentId}/reject`,
     payload,
   );
   return data;

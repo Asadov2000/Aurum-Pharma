@@ -78,6 +78,14 @@ export function PlatformBillingPage(): JSX.Element {
     user,
     PLATFORM_CAPABILITIES.billingPaymentApprove,
   );
+  const canCreateAdjustments = hasPlatformCapability(
+    user,
+    PLATFORM_CAPABILITIES.billingAdjustmentCreate,
+  );
+  const canApproveAdjustments = hasPlatformCapability(
+    user,
+    PLATFORM_CAPABILITIES.billingAdjustmentApprove,
+  );
   const preferenceKey = useFilterPreferenceKey("platform-billing");
   const [workspace, setWorkspace] = useState<BillingWorkspace>("invoices");
   const [pricingRefreshSignal, setPricingRefreshSignal] = useState(0);
@@ -199,6 +207,8 @@ export function PlatformBillingPage(): JSX.Element {
           <FinancialWorkspace
             canReview={canReviewPayments}
             canApprove={canApprovePayments}
+            canCreateAdjustment={canCreateAdjustments}
+            canApproveAdjustment={canApproveAdjustments}
             onFetchingChange={setFinancialFetching}
             refreshSignal={financialRefreshSignal}
           />
