@@ -500,6 +500,42 @@ jobs:
               psql -U postgres -d aurum_test -Atc \
               "SELECT to_regclass('public.billing_plan') IS NOT NULL"
           )" = "t"
+          poetry run python -m app.migrate upgrade 0095
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          INSERT INTO public.tenant_subscription (
+            id, tenant_id, plan_id, status, period_start, period_end,
+            branches_count, amount
+          ) VALUES (
+            '94000000-0000-4000-8000-000000000004',
+            '94000000-0000-4000-8000-000000000002',
+            (SELECT id FROM public.subscription_plan WHERE code = 'aurum_pharma'),
+            'active',
+            now() + interval '30 days',
+            now() + interval '60 days',
+            1,
+            654.00
+          );
+          SQL
+          if poetry run python -m app.migrate upgrade head; then
+            echo "0096 accepted ambiguous current tenant subscriptions"
+            exit 1
+          fi
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT version_num FROM public.alembic_version"
+          )" = "0095"
+          test "$(
+            docker exec "$POSTGRES_SERVICE_ID" \
+              psql -U postgres -d aurum_test -Atc \
+              "SELECT string_agg(id::text || ':' || status, ',' ORDER BY id) FROM public.tenant_subscription WHERE tenant_id = '94000000-0000-4000-8000-000000000002'"
+          )" = "94000000-0000-4000-8000-000000000003:active,94000000-0000-4000-8000-000000000004:active"
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          DELETE FROM public.tenant_subscription
+          WHERE id = '94000000-0000-4000-8000-000000000004';
+          SQL
           poetry run python -m app.migrate upgrade head
           docker exec -i "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'

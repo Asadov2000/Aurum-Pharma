@@ -498,6 +498,32 @@ class BillingRepository:
             parameters,
         )
 
+    async def apply_initial_subscription_price(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        subscription_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.apply_initial_subscription_price("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :subscription_id, :expected_row_version)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "subscription_id": subscription_id,
+                "expected_row_version": expected_row_version,
+            },
+        )
+
     async def _pricing_command(
         self,
         statement: str,

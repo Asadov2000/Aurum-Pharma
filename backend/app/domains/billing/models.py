@@ -88,6 +88,7 @@ class TenantSubscription(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
 
     __table_args__ = (
         CheckConstraint(
@@ -183,6 +184,9 @@ class BillingPlan(Base):
     description: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    legacy_subscription_plan_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("subscription_plan.id")
+    )
     created_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(
@@ -318,3 +322,41 @@ class BillingContractOverride(Base):
         ),
         CheckConstraint("currency = 'TJS'", name="ck_billing_contract_override_currency"),
     )
+
+
+class BillingSubscriptionPriceApplication(Base):
+    __tablename__ = "billing_subscription_price_application"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    subscription_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    plan_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    application_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    price_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    contract_override_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    plan_code: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_name: Mapped[str] = mapped_column(Text, nullable=False)
+    billing_period: Mapped[str] = mapped_column(Text, nullable=False)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    calendar_anchor_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False)
+    branches_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    monthly_price_per_branch: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    annual_discount_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    calculated_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    terms_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    actor_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    actor_session_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    mfa_verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    result_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
