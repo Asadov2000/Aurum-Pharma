@@ -42,6 +42,7 @@ from app.domains.billing.models import (
 from app.domains.billing.repository import (
     BillingRepository,
     PlatformBillingOverview,
+    PlatformBillingTenantRecord,
     PlatformInvoiceRecord,
     PlatformPricingCommandRecord,
     PlatformPricingPlanRecord,
@@ -383,6 +384,26 @@ class BillingService:
         except DBAPIError as exc:
             raise _financial_error(exc) from exc
 
+    async def list_platform_payment_reviews(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.list_platform_payment_reviews(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                tenant_id=tenant_id,
+                page=page,
+                page_size=page_size,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
     # -------- subscriptions --------
 
     async def get_active_subscription(self, tenant_id: UUID) -> dict[str, object] | None:
@@ -527,6 +548,19 @@ class BillingService:
             now=utc_now(),
             query=query,
             status=status,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def list_platform_billing_tenants(
+        self,
+        *,
+        query: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[PlatformBillingTenantRecord], int]:
+        return await self.repo.list_platform_billing_tenants(
+            query=query,
             page=page,
             page_size=page_size,
         )

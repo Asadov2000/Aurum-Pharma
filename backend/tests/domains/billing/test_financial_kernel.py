@@ -127,6 +127,90 @@ async def _financial_account(
     return response.json()
 
 
+async def test_platform_tenant_picker_and_approval_queue_hide_bank_reference(
+    db_session: AsyncSession,
+    platform_client: AsyncClient,
+    make_tenant_with_plan,
+) -> None:
+    _, tenant_id, _, invoice = await _create_initial_invoice(
+        db_session,
+        platform_client,
+        make_tenant_with_plan,
+    )
+    reviewer, reviewer_token = await _platform_identity(db_session)
+    approver, approver_token = await _platform_identity(db_session)
+
+    tenants_response = await platform_client.get(
+        "/api/v1/admin/billing/tenants?page=1&page_size=100",
+        headers=_headers(reviewer_token),
+    )
+    assert tenants_response.status_code == 200, tenants_response.text
+    assert tenants_response.headers["cache-control"] == "private, no-store"
+    tenant_items = tenants_response.json()["items"]
+    assert any(item["tenant_id"] == str(tenant_id) for item in tenant_items)
+    assert "contact_email" not in tenants_response.text
+
+    external_reference = "TJ-QUEUE/0001"
+    review_response = await platform_client.post(
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-reviews",
+        headers=_headers(reviewer_token),
+        json={
+            "operation_id": str(uuid4()),
+            "target_invoice_id": invoice["invoice_id"],
+            "amount": "125.00",
+            "paid_at": (utc_now() - timedelta(minutes=5)).isoformat(),
+            "recipient_account_key": "aurum_tjs_primary",
+            "external_reference": external_reference,
+        },
+    )
+    assert review_response.status_code == 201, review_response.text
+    review = review_response.json()["item"]
+
+    own_queue_response = await platform_client.get(
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-reviews",
+        headers=_headers(reviewer_token),
+    )
+    assert own_queue_response.status_code == 200, own_queue_response.text
+    assert own_queue_response.headers["cache-control"] == "private, no-store"
+    own_item = own_queue_response.json()["items"][0]
+    assert own_item["review_id"] == review["review_id"]
+    assert own_item["is_own_review"] is True
+    assert external_reference not in own_queue_response.text
+    assert "aurum_tjs_primary" not in own_queue_response.text
+    assert str(reviewer.id) not in own_queue_response.text
+
+    approval_queue_response = await platform_client.get(
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-reviews",
+        headers=_headers(approver_token),
+    )
+    assert approval_queue_response.status_code == 200, approval_queue_response.text
+    approval_item = approval_queue_response.json()["items"][0]
+    assert approval_item["is_own_review"] is False
+    assert approval_item["invoice_number"] == invoice["invoice_number"]
+    assert approval_item["amount"] == "125.00"
+    assert str(approver.id) not in approval_queue_response.text
+
+    approval_response = await platform_client.post(
+        (
+            f"/api/v1/admin/billing/tenants/{tenant_id}/payment-reviews/"
+            f"{review['review_id']}/approve"
+        ),
+        headers=_headers(approver_token),
+        json={
+            "operation_id": str(uuid4()),
+            "expected_row_version": review["row_version"],
+        },
+    )
+    assert approval_response.status_code == 200, approval_response.text
+    empty_queue = await platform_client.get(
+        f"/api/v1/admin/billing/tenants/{tenant_id}/payment-reviews",
+        headers=_headers(approver_token),
+    )
+    assert empty_queue.status_code == 200, empty_queue.text
+    assert empty_queue.json()["items"] == []
+    assert empty_queue.json()["total"] == 0
+
+
 async def test_invoice_is_exact_idempotent_tenant_bound_and_balanced(
     db_session: AsyncSession,
     platform_client: AsyncClient,

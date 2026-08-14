@@ -219,6 +219,7 @@ CUSTOM_FUNCTIONS = {
     "lookup_auth_user_by_id",
     "lookup_active_platform_capabilities",
     "lookup_auth_mfa_challenge",
+    "list_platform_billing_payment_reviews",
     "lookup_auth_sessions",
     "lookup_auth_session_mfa",
     "lookup_login_user_by_email",

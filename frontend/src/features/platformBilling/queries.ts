@@ -2,15 +2,23 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 
 import {
   activatePlatformPricingPrice,
+  approvePlatformBankPayment,
   cancelPlatformPricingPrice,
+  createPlatformBankPaymentReview,
   createPlatformPricingPlan,
   createPlatformPricingPrice,
+  getPlatformFinancialAccount,
   getPlatformBillingOverview,
+  listPlatformBillingTenants,
   listPlatformInvoices,
+  listPlatformPaymentApprovalQueue,
   listPlatformPricingPlans,
   schedulePlatformPricingPrice,
 } from "./api";
 import {
+  type PlatformBankPaymentApprove,
+  type PlatformBankPaymentReviewCreate,
+  type PlatformBillingTenantFilters,
   type PlatformInvoiceFilters,
   type PricingActivate,
   type PricingCancel,
@@ -26,6 +34,12 @@ export const platformBillingKeys = {
     [...platformBillingKeys.all, "invoices", filters] as const,
   pricingPlans: (page: number, pageSize: number) =>
     [...platformBillingKeys.all, "pricing-plans", page, pageSize] as const,
+  financialAccount: (tenantId: string) =>
+    [...platformBillingKeys.all, "v2", "financial-account", tenantId] as const,
+  tenants: (filters: PlatformBillingTenantFilters) =>
+    [...platformBillingKeys.all, "v2", "tenants", filters] as const,
+  approvalQueue: (tenantId: string, page: number, pageSize: number) =>
+    [...platformBillingKeys.all, "v2", "approval-queue", tenantId, page, pageSize] as const,
 };
 
 export function usePlatformBillingOverview(enabled: boolean) {
@@ -54,6 +68,40 @@ export function usePlatformPricingPlans(page: number, pageSize: number, enabled:
     enabled,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
+  });
+}
+
+export function usePlatformFinancialAccount(tenantId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: platformBillingKeys.financialAccount(tenantId),
+    queryFn: ({ signal }) => getPlatformFinancialAccount(tenantId, signal),
+    enabled: enabled && tenantId.length > 0,
+    staleTime: 15_000,
+  });
+}
+
+export function usePlatformBillingTenants(filters: PlatformBillingTenantFilters, enabled: boolean) {
+  return useQuery({
+    queryKey: platformBillingKeys.tenants(filters),
+    queryFn: ({ signal }) => listPlatformBillingTenants(filters, signal),
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+export function usePlatformPaymentApprovalQueue(
+  tenantId: string,
+  page: number,
+  pageSize: number,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: platformBillingKeys.approvalQueue(tenantId, page, pageSize),
+    queryFn: ({ signal }) => listPlatformPaymentApprovalQueue(tenantId, page, pageSize, signal),
+    enabled: enabled && tenantId.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 5_000,
   });
 }
 
@@ -92,4 +140,52 @@ export function useCancelPlatformPricingPrice() {
   return usePricingMutation(({ priceId, payload }: { priceId: string; payload: PricingCancel }) =>
     cancelPlatformPricingPrice(priceId, payload),
   );
+}
+
+export function useCreatePlatformBankPaymentReview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      payload,
+    }: {
+      tenantId: string;
+      payload: PlatformBankPaymentReviewCreate;
+    }) => createPlatformBankPaymentReview(tenantId, payload),
+    onSuccess: async (_result, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: platformBillingKeys.financialAccount(variables.tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [...platformBillingKeys.all, "v2", "approval-queue", variables.tenantId],
+        }),
+      ]);
+    },
+  });
+}
+
+export function useApprovePlatformBankPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      reviewId,
+      payload,
+    }: {
+      tenantId: string;
+      reviewId: string;
+      payload: PlatformBankPaymentApprove;
+    }) => approvePlatformBankPayment(tenantId, reviewId, payload),
+    onSuccess: async (_result, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: platformBillingKeys.financialAccount(variables.tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [...platformBillingKeys.all, "v2", "approval-queue", variables.tenantId],
+        }),
+      ]);
+    },
+  });
 }

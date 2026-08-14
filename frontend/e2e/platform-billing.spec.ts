@@ -81,3 +81,29 @@ test("platform pricing console exposes protected commands without leaking techni
   await expect(page.getByRole("button", { name: "Создать тариф" })).toBeDisabled();
   await page.context().setOffline(false);
 });
+
+test("platform financial console selects a pharmacy without exposing technical ids", async ({
+  page,
+}) => {
+  clearLoginRateLimit(DEV.email);
+  await loginInBrowser(page, DEV);
+  await page.goto("/admin/billing");
+
+  await page.getByRole("button", { name: "Клиенты и оплаты" }).click();
+  await expect(page.getByRole("heading", { name: "Клиенты и оплаты" })).toBeVisible();
+  const tenantList = page.getByRole("list", { name: "Аптеки для расчётов" });
+  await expect(tenantList).toBeVisible();
+  await tenantList.getByRole("button").first().click();
+
+  await expect(page.getByText("Контроль журнала")).toBeVisible();
+  await expect(page.getByText("Сбалансирован")).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(/[0-9a-f]{8}-[0-9a-f-]{27}/i);
+  await expectNoHorizontalOverflow(page);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoHorizontalOverflow(page);
+  const search = page.getByRole("searchbox", { name: "Аптека" });
+  const searchBounds = await search.boundingBox();
+  expect(searchBounds).not.toBeNull();
+  expect(searchBounds!.height).toBeGreaterThanOrEqual(40);
+});

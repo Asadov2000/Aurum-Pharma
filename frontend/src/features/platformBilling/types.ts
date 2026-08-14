@@ -11,6 +11,26 @@ export interface PlatformBillingOverview {
   currency: string;
 }
 
+export interface PlatformBillingTenant {
+  tenant_id: string;
+  name: string;
+  tenant_status: string;
+  subscription_status: string | null;
+}
+
+export interface PlatformBillingTenantList {
+  items: PlatformBillingTenant[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PlatformBillingTenantFilters {
+  q?: string;
+  page: number;
+  page_size: number;
+}
+
 export interface PlatformInvoice {
   tenant_name: string;
   invoice_number: string;
@@ -130,4 +150,153 @@ export interface PlatformPricingPlanCommandResult {
 export interface PlatformPricingVersionCommandResult {
   item: PlatformPricingVersion;
   applied: boolean;
+}
+
+export type PlatformFinancialInvoiceDocumentState = "issued" | "void";
+export type PlatformFinancialInvoiceSettlementState =
+  | "unpaid"
+  | "partially_paid"
+  | "paid"
+  | "written_off";
+export type PlatformFinancialInvoiceCollectionState = "not_due" | "due" | "overdue";
+
+export interface PlatformFinancialInvoice {
+  invoice_id: string;
+  tenant_id: string;
+  subscription_id: string;
+  price_application_id: string;
+  price_application_kind: "initial" | "renewal";
+  invoice_number: string;
+  document_state: PlatformFinancialInvoiceDocumentState;
+  settlement_state: PlatformFinancialInvoiceSettlementState;
+  collection_state: PlatformFinancialInvoiceCollectionState;
+  period_start: string;
+  period_end: string;
+  due_at: string;
+  total_amount: string;
+  outstanding_amount: string;
+  currency: "TJS";
+  issued_at: string;
+}
+
+export interface PlatformBankPaymentReviewCreate {
+  operation_id: string;
+  target_invoice_id: string;
+  amount: string;
+  paid_at: string;
+  recipient_account_key: string;
+  external_reference: string;
+}
+
+export type PlatformBankPaymentReviewStatus =
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "duplicate";
+
+export interface PlatformBankPaymentReview {
+  review_id: string;
+  tenant_id: string;
+  target_invoice_id: string;
+  amount: string;
+  currency: "TJS";
+  paid_at: string;
+  status: PlatformBankPaymentReviewStatus;
+  row_version: number;
+  created_at: string;
+}
+
+export interface PlatformBankPaymentReviewCommandResult {
+  item: PlatformBankPaymentReview;
+  applied: boolean;
+}
+
+export interface PlatformPaymentApprovalQueueItem {
+  review_id: string;
+  tenant_id: string;
+  tenant_name: string;
+  target_invoice_id: string;
+  invoice_number: string;
+  amount: string;
+  currency: "TJS";
+  paid_at: string;
+  status: "pending_approval";
+  row_version: number;
+  created_at: string;
+  is_own_review: boolean;
+}
+
+export interface PlatformPaymentApprovalQueue {
+  items: PlatformPaymentApprovalQueueItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PlatformBankPaymentApprove {
+  operation_id: string;
+  expected_row_version: number;
+}
+
+export interface PlatformPaymentAllocation {
+  invoice_id: string;
+  invoice_number: string;
+  amount: string;
+  allocation_order: number;
+}
+
+export type PlatformPaymentLifecycleState = "confirmed" | "reversed";
+export type PlatformSubscriptionStatus =
+  | "trial"
+  | "active"
+  | "grace_period"
+  | "suspended"
+  | "cancelled"
+  | "archived";
+
+export interface PlatformPaymentApproval {
+  review_id: string;
+  payment_id: string;
+  tenant_id: string;
+  target_invoice_id: string;
+  amount: string;
+  currency: "TJS";
+  paid_at: string;
+  confirmed_at: string;
+  lifecycle_state: PlatformPaymentLifecycleState;
+  allocated_amount: string;
+  credit_amount: string;
+  target_outstanding_amount: string;
+  blocking_outstanding_amount: string;
+  allocations: PlatformPaymentAllocation[];
+  access_restored: boolean;
+  subscription_status: PlatformSubscriptionStatus;
+  subscription_period_start: string;
+  subscription_period_end: string;
+}
+
+export interface PlatformPaymentApprovalCommandResult {
+  item: PlatformPaymentApproval;
+  applied: boolean;
+}
+
+export interface PlatformPaymentHistoryItem {
+  payment_id: string;
+  amount: string;
+  allocated_amount: string;
+  credit_amount: string;
+  currency: "TJS";
+  paid_at: string;
+  confirmed_at: string;
+  lifecycle_state: PlatformPaymentLifecycleState;
+}
+
+export interface PlatformFinancialAccount {
+  tenant_id: string;
+  currency: "TJS";
+  outstanding_amount: string;
+  credit_balance: string;
+  invoices: PlatformFinancialInvoice[];
+  payments: PlatformPaymentHistoryItem[];
+  journal_balanced: boolean;
 }

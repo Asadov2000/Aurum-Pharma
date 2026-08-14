@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import {
@@ -38,7 +38,12 @@ import {
 
 const PAGE_SIZE = 20;
 const SEARCH_DELAY_MS = 350;
-type BillingWorkspace = "invoices" | "pricing";
+type BillingWorkspace = "invoices" | "financial" | "pricing";
+
+const FinancialWorkspace = lazy(async () => {
+  const module = await import("./FinancialWorkspace");
+  return { default: module.FinancialWorkspace };
+});
 
 const invoiceStatusLabel: Record<PlatformInvoiceStatus, string> = {
   pending: "Ожидает оплаты",
@@ -68,10 +73,17 @@ export function PlatformBillingPage(): JSX.Element {
   const { user } = useAuth();
   const canView = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingView);
   const canManagePricing = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingPlanManage);
+  const canReviewPayments = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingPaymentReview);
+  const canApprovePayments = hasPlatformCapability(
+    user,
+    PLATFORM_CAPABILITIES.billingPaymentApprove,
+  );
   const preferenceKey = useFilterPreferenceKey("platform-billing");
   const [workspace, setWorkspace] = useState<BillingWorkspace>("invoices");
   const [pricingRefreshSignal, setPricingRefreshSignal] = useState(0);
   const [pricingFetching, setPricingFetching] = useState(false);
+  const [financialRefreshSignal, setFinancialRefreshSignal] = useState(0);
+  const [financialFetching, setFinancialFetching] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<PlatformInvoiceStatus | "all">("all");
@@ -128,6 +140,10 @@ export function PlatformBillingPage(): JSX.Element {
       setPricingRefreshSignal((value) => value + 1);
       return;
     }
+    if (workspace === "financial") {
+      setFinancialRefreshSignal((value) => value + 1);
+      return;
+    }
     void Promise.all([overview.refetch(), invoices.refetch()]);
   };
 
@@ -146,7 +162,11 @@ export function PlatformBillingPage(): JSX.Element {
             variant="secondary"
             size="sm"
             isLoading={
-              workspace === "pricing" ? pricingFetching : overview.isFetching || invoices.isFetching
+              workspace === "pricing"
+                ? pricingFetching
+                : workspace === "financial"
+                  ? financialFetching
+                  : overview.isFetching || invoices.isFetching
             }
             onClick={refresh}
           >
@@ -161,6 +181,7 @@ export function PlatformBillingPage(): JSX.Element {
         label="Раздел расчётов Aurum"
         options={[
           { value: "invoices", label: "Сводка и счета" },
+          { value: "financial", label: "Клиенты и оплаты" },
           { value: "pricing", label: "Тарифы и цены" },
         ]}
         className="w-full sm:w-auto"
@@ -173,6 +194,15 @@ export function PlatformBillingPage(): JSX.Element {
           onFetchingChange={setPricingFetching}
           refreshSignal={pricingRefreshSignal}
         />
+      ) : workspace === "financial" ? (
+        <Suspense fallback={<SkeletonRows rows={7} />}>
+          <FinancialWorkspace
+            canReview={canReviewPayments}
+            canApprove={canApprovePayments}
+            onFetchingChange={setFinancialFetching}
+            refreshSignal={financialRefreshSignal}
+          />
+        </Suspense>
       ) : (
         <InvoiceWorkspace
           overview={overview}

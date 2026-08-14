@@ -45,6 +45,14 @@ class PlatformInvoiceRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class PlatformBillingTenantRecord:
+    tenant_id: UUID
+    name: str
+    tenant_status: str
+    subscription_status: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class PlatformPricingPlanRecord:
     plan_id: UUID
     code: str
@@ -351,6 +359,54 @@ class BillingRepository:
             total,
         )
 
+    async def list_platform_billing_tenants(
+        self,
+        *,
+        query: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[PlatformBillingTenantRecord], int]:
+        clauses = []
+        term = query.strip() if query is not None else ""
+        if term:
+            clauses.append(Tenant.name.icontains(term, autoescape=True))
+        latest_subscription_status = (
+            select(TenantSubscription.status)
+            .where(TenantSubscription.tenant_id == Tenant.id)
+            .order_by(TenantSubscription.created_at.desc(), TenantSubscription.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        total = int(
+            await self.session.scalar(select(func.count()).select_from(Tenant).where(*clauses)) or 0
+        )
+        rows = (
+            await self.session.execute(
+                select(
+                    Tenant.id,
+                    Tenant.name,
+                    Tenant.status,
+                    latest_subscription_status.label("subscription_status"),
+                )
+                .where(*clauses)
+                .order_by(func.lower(Tenant.name), Tenant.id)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).all()
+        return (
+            [
+                PlatformBillingTenantRecord(
+                    tenant_id=row[0],
+                    name=str(row[1]),
+                    tenant_status=str(row[2]),
+                    subscription_status=str(row[3]) if row[3] is not None else None,
+                )
+                for row in rows
+            ],
+            total,
+        )
+
     async def list_platform_pricing_plans(
         self,
         *,
@@ -626,6 +682,31 @@ class BillingRepository:
                     "actor_user_id": actor_user_id,
                     "actor_session_id": actor_session_id,
                     "tenant_id": tenant_id,
+                },
+            )
+        return dict(result)
+
+    async def list_platform_payment_reviews(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.list_platform_billing_payment_reviews("
+                    ":actor_user_id, :actor_session_id, :tenant_id, :limit, :offset)"
+                ),
+                {
+                    "actor_user_id": actor_user_id,
+                    "actor_session_id": actor_session_id,
+                    "tenant_id": tenant_id,
+                    "limit": page_size,
+                    "offset": (page - 1) * page_size,
                 },
             )
         return dict(result)
