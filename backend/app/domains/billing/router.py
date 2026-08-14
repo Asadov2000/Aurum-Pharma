@@ -45,6 +45,9 @@ from app.domains.billing.schemas import (
     PricingPriceDraftCreate,
     PricingSchedule,
     SubscriptionCreate,
+    SubscriptionPriceApplicationCommandResult,
+    SubscriptionPriceApplicationCreate,
+    SubscriptionPriceApplicationRead,
     SubscriptionRead,
     SubscriptionWithPlan,
 )
@@ -449,6 +452,37 @@ async def create_subscription(
         status="active",
     )
     return SubscriptionRead.model_validate(sub)
+
+
+@admin_router.post(
+    "/{tenant_id}/subscriptions/{subscription_id}/price-applications/initial",
+    response_model=SubscriptionPriceApplicationCommandResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def apply_initial_subscription_price(
+    tenant_id: UUID,
+    subscription_id: UUID,
+    payload: SubscriptionPriceApplicationCreate,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.plan.manage")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> SubscriptionPriceApplicationCommandResult:
+    _set_financial_no_store(response)
+    record = await service.apply_initial_subscription_price(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        subscription_id=subscription_id,
+        expected_row_version=payload.expected_row_version,
+    )
+    return SubscriptionPriceApplicationCommandResult(
+        item=SubscriptionPriceApplicationRead.model_validate(record.result),
+        applied=record.applied,
+    )
 
 
 @admin_router.post(

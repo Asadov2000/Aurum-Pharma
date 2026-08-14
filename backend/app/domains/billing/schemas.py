@@ -50,6 +50,7 @@ class SubscriptionRead(BaseModel):
     amount: Decimal
     currency: str
     cancelled_at: datetime | None
+    row_version: int
 
 
 class SubscriptionWithPlan(SubscriptionRead):
@@ -279,4 +280,41 @@ class PlatformPricingPlanCommandResult(BaseModel):
 
 class PlatformPricingVersionCommandResult(BaseModel):
     item: PlatformPricingVersionRead
+    applied: bool
+
+
+class SubscriptionPriceApplicationCreate(_StrictBillingCommand):
+    operation_id: UUID
+    expected_row_version: int = Field(ge=1)
+
+
+class SubscriptionPriceApplicationRead(BaseModel):
+    application_id: UUID
+    subscription_id: UUID
+    application_kind: Literal["initial", "renewal"]
+    source_type: Literal["price_version", "contract_override"]
+    plan_code: str
+    plan_name: str
+    billing_period: Literal["monthly", "yearly"]
+    period_start: datetime
+    period_end: datetime
+    timezone: Literal["Asia/Dushanbe"]
+    branches_count: int
+    monthly_price_per_branch: Decimal
+    annual_discount_pct: Decimal
+    calculated_amount: Decimal
+    currency: Literal["TJS"]
+    created_at: datetime
+
+    @field_serializer(
+        "monthly_price_per_branch",
+        "annual_discount_pct",
+        "calculated_amount",
+    )
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class SubscriptionPriceApplicationCommandResult(BaseModel):
+    item: SubscriptionPriceApplicationRead
     applied: bool
