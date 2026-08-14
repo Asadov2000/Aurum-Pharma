@@ -5,10 +5,13 @@ import {
   type PlatformBankPaymentReviewCommandResult,
   type PlatformBankPaymentReviewCreate,
   type PlatformBillingOverview,
+  type PlatformBillingTenantFilters,
+  type PlatformBillingTenantList,
   type PlatformFinancialAccount,
   type PlatformInvoiceFilters,
   type PlatformInvoiceList,
   type PlatformPaymentApprovalCommandResult,
+  type PlatformPaymentApprovalQueue,
   type PlatformPricingPlanCommandResult,
   type PlatformPricingPlanList,
   type PlatformPricingVersionCommandResult,
@@ -26,6 +29,17 @@ export async function getPlatformBillingOverview(signal?: AbortSignal) {
 
 export async function listPlatformInvoices(filters: PlatformInvoiceFilters, signal?: AbortSignal) {
   const { data } = await api.get<PlatformInvoiceList>("/admin/billing/invoices", {
+    params: filters,
+    signal,
+  });
+  return data;
+}
+
+export async function listPlatformBillingTenants(
+  filters: PlatformBillingTenantFilters,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.get<PlatformBillingTenantList>("/admin/billing/tenants", {
     params: filters,
     signal,
   });
@@ -88,6 +102,19 @@ export async function getPlatformFinancialAccount(tenantId: string, signal?: Abo
   const { data } = await api.get<PlatformFinancialAccount>(
     `/admin/billing/tenants/${tenantId}/financial-account`,
     { signal },
+  );
+  return data;
+}
+
+export async function listPlatformPaymentApprovalQueue(
+  tenantId: string,
+  page: number,
+  pageSize: number,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.get<PlatformPaymentApprovalQueue>(
+    `/admin/billing/tenants/${tenantId}/payment-reviews`,
+    { params: { page, page_size: pageSize }, signal },
   );
   return data;
 }

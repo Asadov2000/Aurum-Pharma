@@ -25,6 +25,7 @@ from app.core.errors import BusinessRuleError
 from app.core.time import utc_now
 from app.domains.billing.repository import BillingRepository
 from app.domains.billing.schemas import (
+    BankPaymentApprovalQueue,
     BankPaymentApprove,
     BankPaymentReviewCommandResult,
     BankPaymentReviewCreate,
@@ -42,6 +43,8 @@ from app.domains.billing.schemas import (
     PaymentRead,
     PlanRead,
     PlatformBillingOverviewRead,
+    PlatformBillingTenantList,
+    PlatformBillingTenantRead,
     PlatformInvoiceList,
     PlatformInvoiceRead,
     PlatformPricingPlanCommandResult,
@@ -394,6 +397,40 @@ async def get_platform_billing_overview(
 
 
 @platform_router.get(
+    "/tenants",
+    response_model=PlatformBillingTenantList,
+    dependencies=[Depends(require_recent_platform_capability("platform.billing.view"))],
+)
+async def list_platform_billing_tenants(
+    response: Response,
+    service: Annotated[BillingService, Depends(_service)],
+    q: str | None = Query(default=None, min_length=1, max_length=120),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> PlatformBillingTenantList:
+    _set_financial_no_store(response)
+    records, total = await service.list_platform_billing_tenants(
+        query=q,
+        page=page,
+        page_size=page_size,
+    )
+    return PlatformBillingTenantList(
+        items=[
+            PlatformBillingTenantRead(
+                tenant_id=record.tenant_id,
+                name=record.name,
+                tenant_status=record.tenant_status,
+                subscription_status=record.subscription_status,
+            )
+            for record in records
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@platform_router.get(
     "/invoices",
     response_model=PlatformInvoiceList,
     dependencies=[Depends(require_recent_platform_capability("platform.billing.view"))],
@@ -557,6 +594,32 @@ async def create_bank_payment_review(
         item=BankPaymentReviewRead.model_validate(record.result),
         applied=record.applied,
     )
+
+
+@platform_router.get(
+    "/tenants/{tenant_id}/payment-reviews",
+    response_model=BankPaymentApprovalQueue,
+)
+async def list_bank_payment_reviews(
+    tenant_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.approve")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> BankPaymentApprovalQueue:
+    _set_financial_no_store(response)
+    queue = await service.list_platform_payment_reviews(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        tenant_id=tenant_id,
+        page=page,
+        page_size=page_size,
+    )
+    return BankPaymentApprovalQueue.model_validate({**queue, "page": page, "page_size": page_size})
 
 
 @platform_router.get(

@@ -145,6 +145,20 @@ class PlatformBillingOverviewRead(BaseModel):
     currency: str = "TJS"
 
 
+class PlatformBillingTenantRead(BaseModel):
+    tenant_id: UUID
+    name: str
+    tenant_status: str
+    subscription_status: str | None
+
+
+class PlatformBillingTenantList(BaseModel):
+    items: list[PlatformBillingTenantRead]
+    total: int
+    page: int
+    page_size: int
+
+
 class PlatformInvoiceRead(BaseModel):
     tenant_name: str
     invoice_number: str
@@ -399,6 +413,32 @@ class BankPaymentReviewRead(BaseModel):
 class BankPaymentReviewCommandResult(BaseModel):
     item: BankPaymentReviewRead
     applied: bool
+
+
+class BankPaymentApprovalQueueItem(BaseModel):
+    review_id: UUID
+    tenant_id: UUID
+    tenant_name: str
+    target_invoice_id: UUID
+    invoice_number: str
+    amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    status: Literal["pending_approval"]
+    row_version: int
+    created_at: datetime
+    is_own_review: bool
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class BankPaymentApprovalQueue(BaseModel):
+    items: list[BankPaymentApprovalQueueItem]
+    total: int
+    page: int
+    page_size: int
 
 
 class BankPaymentApprove(_StrictBillingCommand):

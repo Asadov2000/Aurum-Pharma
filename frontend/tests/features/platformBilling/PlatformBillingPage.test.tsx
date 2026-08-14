@@ -10,6 +10,11 @@ const createPlatformPricingPrice = vi.fn();
 const schedulePlatformPricingPrice = vi.fn();
 const activatePlatformPricingPrice = vi.fn();
 const cancelPlatformPricingPrice = vi.fn();
+const listPlatformBillingTenants = vi.fn();
+const getPlatformFinancialAccount = vi.fn();
+const listPlatformPaymentApprovalQueue = vi.fn();
+const createPlatformBankPaymentReview = vi.fn();
+const approvePlatformBankPayment = vi.fn();
 const authState = vi.hoisted(() => ({
   user: {
     id: "developer-1",
@@ -28,6 +33,12 @@ vi.mock("@/features/platformBilling/api", () => ({
   schedulePlatformPricingPrice: (...args: unknown[]) => schedulePlatformPricingPrice(...args),
   activatePlatformPricingPrice: (...args: unknown[]) => activatePlatformPricingPrice(...args),
   cancelPlatformPricingPrice: (...args: unknown[]) => cancelPlatformPricingPrice(...args),
+  listPlatformBillingTenants: (...args: unknown[]) => listPlatformBillingTenants(...args),
+  getPlatformFinancialAccount: (...args: unknown[]) => getPlatformFinancialAccount(...args),
+  listPlatformPaymentApprovalQueue: (...args: unknown[]) =>
+    listPlatformPaymentApprovalQueue(...args),
+  createPlatformBankPaymentReview: (...args: unknown[]) => createPlatformBankPaymentReview(...args),
+  approvePlatformBankPayment: (...args: unknown[]) => approvePlatformBankPayment(...args),
 }));
 
 vi.mock("@/features/auth/hooks", () => ({
@@ -94,6 +105,42 @@ const PRICING_PLAN = {
   ],
 };
 
+const BILLING_TENANT = {
+  tenant_id: "11111111-1111-4111-8111-111111111111",
+  name: "Шифо Марказ",
+  tenant_status: "active",
+  subscription_status: "active",
+};
+
+const FINANCIAL_INVOICE = {
+  invoice_id: "22222222-2222-4222-8222-222222222222",
+  tenant_id: BILLING_TENANT.tenant_id,
+  subscription_id: "33333333-3333-4333-8333-333333333333",
+  price_application_id: "44444444-4444-4444-8444-444444444444",
+  price_application_kind: "initial" as const,
+  invoice_number: "AF-2026-000042",
+  document_state: "issued" as const,
+  settlement_state: "unpaid" as const,
+  collection_state: "overdue" as const,
+  period_start: "2026-08-01T00:00:00Z",
+  period_end: "2026-09-01T00:00:00Z",
+  due_at: "2026-08-10T00:00:00Z",
+  total_amount: "590.00",
+  outstanding_amount: "590.00",
+  currency: "TJS" as const,
+  issued_at: "2026-08-01T00:00:00Z",
+};
+
+const FINANCIAL_ACCOUNT = {
+  tenant_id: BILLING_TENANT.tenant_id,
+  currency: "TJS" as const,
+  outstanding_amount: "590.00",
+  credit_balance: "0.00",
+  invoices: [FINANCIAL_INVOICE],
+  payments: [],
+  journal_balanced: true,
+};
+
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -116,6 +163,11 @@ describe("PlatformBillingPage", () => {
     schedulePlatformPricingPrice.mockReset();
     activatePlatformPricingPrice.mockReset();
     cancelPlatformPricingPrice.mockReset();
+    listPlatformBillingTenants.mockReset();
+    getPlatformFinancialAccount.mockReset();
+    listPlatformPaymentApprovalQueue.mockReset();
+    createPlatformBankPaymentReview.mockReset();
+    approvePlatformBankPayment.mockReset();
     authState.user.platform_capabilities = ["platform.billing.view"];
     getPlatformBillingOverview.mockResolvedValue(OVERVIEW);
     listPlatformInvoices.mockResolvedValue({
@@ -127,6 +179,19 @@ describe("PlatformBillingPage", () => {
     listPlatformPricingPlans.mockResolvedValue({
       items: [PRICING_PLAN],
       total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    listPlatformBillingTenants.mockResolvedValue({
+      items: [BILLING_TENANT],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    getPlatformFinancialAccount.mockResolvedValue(FINANCIAL_ACCOUNT);
+    listPlatformPaymentApprovalQueue.mockResolvedValue({
+      items: [],
+      total: 0,
       page: 1,
       page_size: 20,
     });
@@ -254,5 +319,133 @@ describe("PlatformBillingPage", () => {
       expect(screen.queryByRole("button", { name: "Согласовать" })).not.toBeInTheDocument(),
     );
     expect(screen.getAllByText("Ожидает другого согласующего").length).toBeGreaterThan(0);
+  });
+
+  it("keeps the financial account read-only without payment capabilities", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+
+    const tenantButton = await screen.findByRole("button", { name: /Шифо Марказ/ });
+    fireEvent.click(tenantButton);
+
+    expect((await screen.findAllByText("590,00 TJS")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Сбалансирован")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Зарегистрировать оплату" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Ожидают подтверждения")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(BILLING_TENANT.tenant_id);
+  });
+
+  it("registers a payment and never leaves the bank reference in the DOM", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.payment.review",
+    ];
+    createPlatformBankPaymentReview.mockResolvedValue({
+      item: {
+        review_id: "55555555-5555-4555-8555-555555555555",
+        tenant_id: BILLING_TENANT.tenant_id,
+        target_invoice_id: FINANCIAL_INVOICE.invoice_id,
+        amount: "590.00",
+        currency: "TJS",
+        paid_at: "2026-08-14T08:30:00Z",
+        status: "pending_approval",
+        row_version: 1,
+        created_at: "2026-08-14T08:31:00Z",
+      },
+      applied: true,
+    });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("66666666-6666-4666-8666-666666666666");
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
+
+    const reference = "TJ-2026-PRIVATE-001";
+    fireEvent.change(screen.getByLabelText("Банковский номер операции"), {
+      target: { value: reference },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Передать на подтверждение" }));
+
+    await waitFor(() =>
+      expect(createPlatformBankPaymentReview).toHaveBeenCalledWith(
+        BILLING_TENANT.tenant_id,
+        expect.objectContaining({
+          operation_id: "66666666-6666-4666-8666-666666666666",
+          target_invoice_id: FINANCIAL_INVOICE.invoice_id,
+          amount: "590.00",
+          recipient_account_key: "aurum_tjs_primary",
+          external_reference: reference,
+        }),
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("передан другому сотруднику");
+    expect(document.body.textContent).not.toContain(reference);
+  });
+
+  it("blocks own approval and lets an independent approver confirm", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.payment.approve",
+    ];
+    listPlatformPaymentApprovalQueue.mockResolvedValue({
+      items: [
+        {
+          review_id: "review-own",
+          tenant_id: BILLING_TENANT.tenant_id,
+          tenant_name: BILLING_TENANT.name,
+          target_invoice_id: FINANCIAL_INVOICE.invoice_id,
+          invoice_number: FINANCIAL_INVOICE.invoice_number,
+          amount: "100.00",
+          currency: "TJS",
+          paid_at: "2026-08-14T08:30:00Z",
+          status: "pending_approval",
+          row_version: 1,
+          created_at: "2026-08-14T08:31:00Z",
+          is_own_review: true,
+        },
+        {
+          review_id: "review-other",
+          tenant_id: BILLING_TENANT.tenant_id,
+          tenant_name: BILLING_TENANT.name,
+          target_invoice_id: FINANCIAL_INVOICE.invoice_id,
+          invoice_number: FINANCIAL_INVOICE.invoice_number,
+          amount: "200.00",
+          currency: "TJS",
+          paid_at: "2026-08-14T08:35:00Z",
+          status: "pending_approval",
+          row_version: 2,
+          created_at: "2026-08-14T08:36:00Z",
+          is_own_review: false,
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+    });
+    approvePlatformBankPayment.mockResolvedValue({
+      item: {
+        access_restored: false,
+        blocking_outstanding_amount: "390.00",
+      },
+      applied: true,
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+
+    expect(await screen.findByRole("button", { name: "Нужен другой сотрудник" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить платёж" }));
+
+    await waitFor(() =>
+      expect(approvePlatformBankPayment).toHaveBeenCalledWith(
+        BILLING_TENANT.tenant_id,
+        "review-other",
+        expect.objectContaining({ expected_row_version: 2 }),
+      ),
+    );
   });
 });

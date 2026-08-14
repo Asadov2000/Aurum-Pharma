@@ -11,6 +11,26 @@ export interface PlatformBillingOverview {
   currency: string;
 }
 
+export interface PlatformBillingTenant {
+  tenant_id: string;
+  name: string;
+  tenant_status: string;
+  subscription_status: string | null;
+}
+
+export interface PlatformBillingTenantList {
+  items: PlatformBillingTenant[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PlatformBillingTenantFilters {
+  q?: string;
+  page: number;
+  page_size: number;
+}
+
 export interface PlatformInvoice {
   tenant_name: string;
   invoice_number: string;
@@ -189,6 +209,28 @@ export interface PlatformBankPaymentReview {
 export interface PlatformBankPaymentReviewCommandResult {
   item: PlatformBankPaymentReview;
   applied: boolean;
+}
+
+export interface PlatformPaymentApprovalQueueItem {
+  review_id: string;
+  tenant_id: string;
+  tenant_name: string;
+  target_invoice_id: string;
+  invoice_number: string;
+  amount: string;
+  currency: "TJS";
+  paid_at: string;
+  status: "pending_approval";
+  row_version: number;
+  created_at: string;
+  is_own_review: boolean;
+}
+
+export interface PlatformPaymentApprovalQueue {
+  items: PlatformPaymentApprovalQueueItem[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface PlatformBankPaymentApprove {

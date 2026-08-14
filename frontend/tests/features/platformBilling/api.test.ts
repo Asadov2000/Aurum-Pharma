@@ -13,6 +13,8 @@ import {
   createPlatformPricingPlan,
   createPlatformPricingPrice,
   getPlatformFinancialAccount,
+  listPlatformBillingTenants,
+  listPlatformPaymentApprovalQueue,
   listPlatformPricingPlans,
   schedulePlatformPricingPrice,
 } from "@/features/platformBilling/api";
@@ -104,6 +106,23 @@ describe("platform financial kernel API", () => {
 
     await expect(getPlatformFinancialAccount("tenant-1", signal)).resolves.toEqual(account);
     expect(get).toHaveBeenCalledWith("/admin/billing/tenants/tenant-1/financial-account", {
+      signal,
+    });
+  });
+
+  it("lists billing tenants and the protected approval queue", async () => {
+    const signal = new AbortController().signal;
+    get.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20 } });
+
+    await listPlatformBillingTenants({ q: "Шифо", page: 2, page_size: 20 }, signal);
+    await listPlatformPaymentApprovalQueue("tenant-1", 3, 20, signal);
+
+    expect(get).toHaveBeenNthCalledWith(1, "/admin/billing/tenants", {
+      params: { q: "Шифо", page: 2, page_size: 20 },
+      signal,
+    });
+    expect(get).toHaveBeenNthCalledWith(2, "/admin/billing/tenants/tenant-1/payment-reviews", {
+      params: { page: 3, page_size: 20 },
       signal,
     });
   });
