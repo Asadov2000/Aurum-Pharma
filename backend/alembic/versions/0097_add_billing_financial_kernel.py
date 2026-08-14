@@ -1338,7 +1338,63 @@ def _revoke_table(table: str, *, tenant_read: bool) -> None:
         op.execute(f"GRANT SELECT ON TABLE public.{table} TO aurum_app")
 
 
+def _grant_missing_reference_privileges() -> None:
+    op.execute("""
+        CREATE TEMPORARY TABLE aurum_0097_missing_reference_privilege (
+          table_name TEXT PRIMARY KEY
+        ) ON COMMIT DROP
+        """)
+    op.execute("""
+        DO $$
+        DECLARE
+          target_table TEXT;
+        BEGIN
+          FOREACH target_table IN ARRAY ARRAY[
+            'app_user', 'billing_subscription_price_application',
+            'tenant', 'tenant_subscription'
+          ]
+          LOOP
+            IF NOT pg_catalog.has_table_privilege(
+              'aurum_schema_owner',
+              pg_catalog.format('public.%I', target_table),
+              'REFERENCES'
+            ) THEN
+              INSERT INTO pg_temp.aurum_0097_missing_reference_privilege(table_name)
+              VALUES (target_table);
+              EXECUTE pg_catalog.format(
+                'GRANT REFERENCES ON TABLE public.%I TO aurum_schema_owner',
+                target_table
+              );
+            END IF;
+          END LOOP;
+        END
+        $$
+        """)
+
+
+def _restore_reference_privileges() -> None:
+    op.execute("""
+        DO $$
+        DECLARE
+          target_table TEXT;
+        BEGIN
+          FOR target_table IN
+            SELECT table_name
+            FROM pg_temp.aurum_0097_missing_reference_privilege
+          LOOP
+            EXECUTE pg_catalog.format(
+              'REVOKE REFERENCES ON TABLE public.%I FROM aurum_schema_owner',
+              target_table
+            );
+          END LOOP;
+        END
+        $$
+        """)
+    op.execute("DROP TABLE pg_temp.aurum_0097_missing_reference_privilege")
+
+
 def upgrade() -> None:
+    _grant_missing_reference_privileges()
     op.execute("""
         ALTER TABLE public.billing_subscription_price_application
         ADD CONSTRAINT uq_billing_application_tenant_id UNIQUE (tenant_id, id)
@@ -1787,6 +1843,7 @@ def upgrade() -> None:
         "public.read_platform_billing_financial_account(UUID, UUID, UUID)",
         grant_support=True,
     )
+    _restore_reference_privileges()
 
 
 def downgrade() -> None:
