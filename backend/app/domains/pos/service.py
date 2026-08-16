@@ -2635,6 +2635,14 @@ class POSService:
         if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
             raise PermissionDeniedError("Branch access denied")
 
+    @staticmethod
+    def _assert_catalog_dispensing_allowed(catalog: TenantCatalog) -> None:
+        if catalog.dispensing_type == "special":
+            raise BusinessRuleError(
+                "Special-dispensing medicines are unavailable until regulatory approval",
+                details={"reason": "special_dispensing_regulatory_approval_required"},
+            )
+
     # ---- items ----
 
     async def add_item(
@@ -2664,6 +2672,7 @@ class POSService:
         catalog = await self.repo.session.get(TenantCatalog, catalog_id)
         if catalog is None or catalog.tenant_id != sale.tenant_id:
             raise NotFoundError("Catalog item not found")
+        self._assert_catalog_dispensing_allowed(catalog)
 
         inventory = InventoryService(InventoryRepository(self.repo.session))
         selection = await inventory.find_batches_fefo(
@@ -3336,7 +3345,10 @@ class POSService:
         rx_items: list[SaleItem] = []
         for item in items:
             catalog = await self.repo.session.get(TenantCatalog, item.catalog_id)
-            if catalog is not None and catalog.dispensing_type == "prescription":
+            if catalog is None:
+                continue
+            self._assert_catalog_dispensing_allowed(catalog)
+            if catalog.dispensing_type == "prescription":
                 rx_items.append(item)
         if not rx_items:
             return
