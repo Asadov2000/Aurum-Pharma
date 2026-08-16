@@ -834,6 +834,25 @@ class BillingRepository:
             )
         return dict(result)
 
+    async def read_tenant_financial_account(
+        self,
+        *,
+        actor_user_id: UUID,
+        tenant_id: UUID,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.read_tenant_billing_financial_account("
+                    ":actor_user_id, :tenant_id)"
+                ),
+                {
+                    "actor_user_id": actor_user_id,
+                    "tenant_id": tenant_id,
+                },
+            )
+        return dict(result)
+
     async def list_platform_payment_reviews(
         self,
         *,

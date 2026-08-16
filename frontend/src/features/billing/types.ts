@@ -98,3 +98,61 @@ export interface PaymentCreatePayload {
 export interface InvoiceWithPayments extends Invoice {
   payments: Payment[];
 }
+
+export type FinancialInvoiceDocumentState = "issued" | "void";
+export type FinancialInvoiceSettlementState = "unpaid" | "partially_paid" | "paid" | "written_off";
+export type FinancialInvoiceCollectionState = "not_due" | "due" | "overdue";
+export type FinancialInvoiceDisplayStatus =
+  | "unpaid"
+  | "partially_paid"
+  | "paid"
+  | "written_off"
+  | "overdue"
+  | "void";
+
+export interface TenantBillingSubscription {
+  status: SubscriptionStatus;
+  plan_name: string;
+  billing_period: BillingPeriod;
+  period_start: string;
+  period_end: string;
+  branches_count: number;
+  amount: string;
+  currency: "TJS";
+}
+
+export interface TenantFinancialInvoice {
+  invoice_id: string;
+  invoice_number: string;
+  document_state: FinancialInvoiceDocumentState;
+  settlement_state: FinancialInvoiceSettlementState;
+  collection_state: FinancialInvoiceCollectionState;
+  period_start: string;
+  period_end: string;
+  due_at: string;
+  total_amount: string;
+  outstanding_amount: string;
+  currency: "TJS";
+  issued_at: string;
+}
+
+export interface TenantBillingPayment {
+  amount: string;
+  allocated_amount: string;
+  credit_amount: string;
+  corrected_amount: string;
+  refunded_amount: string;
+  currency: "TJS";
+  paid_at: string;
+  confirmed_at: string;
+  lifecycle_state: "confirmed" | "reversed";
+}
+
+export interface TenantFinancialAccount {
+  subscription: TenantBillingSubscription | null;
+  currency: "TJS";
+  outstanding_amount: string;
+  credit_balance: string;
+  invoices: TenantFinancialInvoice[];
+  payments: TenantBillingPayment[];
+}

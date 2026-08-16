@@ -41,6 +41,8 @@ async def test_permission_scope_metadata_uses_explicit_capability_mapping(
         "roles.assign": "TENANT_ALL",
         "incoming.create": "BRANCH_SET",
         "reports.view": "BRANCH_SET",
+        "billing.overview.view": "TENANT_ALL",
+        "billing.invoice.view": "TENANT_ALL",
         "catalog.view": "TENANT_ALL",
         "suppliers.view": "TENANT_ALL",
         "settings.update": "TENANT_ALL",

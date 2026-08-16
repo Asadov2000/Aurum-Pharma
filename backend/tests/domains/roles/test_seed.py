@@ -50,12 +50,12 @@ async def _template_codes(db_session: AsyncSession, template_name: str) -> list[
 async def test_seed_permissions_count(db_session: AsyncSession) -> None:
     """The migrated permission catalogue remains complete and duplicate-free."""
     count = (await db_session.execute(select(func.count()).select_from(Permission))).scalar_one()
-    assert count == 69
+    assert count == 71
 
     groups = (
         await db_session.execute(select(func.count(func.distinct(Permission.group_code))))
     ).scalar_one()
-    assert groups == 21
+    assert groups == 22
 
 
 async def test_every_permission_has_a_description(db_session: AsyncSession) -> None:
@@ -110,6 +110,8 @@ async def test_vladelec_template_excludes_global_audit(db_session: AsyncSession)
     assert "users.invite" in codes
     assert "pos.sell" in codes
     assert "pos.refund_external_confirm" in codes
+    assert "billing.overview.view" in codes
+    assert "billing.invoice.view" in codes
 
 
 async def test_developer_has_everything(db_session: AsyncSession, system_roles) -> None:

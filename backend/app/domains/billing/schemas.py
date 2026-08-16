@@ -365,6 +365,82 @@ class BillingFinancialInvoiceRead(BaseModel):
         return format(value, "f")
 
 
+class TenantBillingSubscriptionRead(BaseModel):
+    status: Literal[
+        "trial",
+        "active",
+        "grace_period",
+        "suspended",
+        "cancelled",
+        "archived",
+    ]
+    plan_name: str
+    billing_period: Literal["monthly", "yearly"]
+    period_start: datetime
+    period_end: datetime
+    branches_count: int = Field(ge=1)
+    amount: Decimal
+    currency: Literal["TJS"]
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class TenantBillingFinancialInvoiceRead(BaseModel):
+    invoice_id: UUID
+    invoice_number: str
+    document_state: Literal["issued", "void"]
+    settlement_state: Literal["unpaid", "partially_paid", "paid", "written_off"]
+    collection_state: Literal["not_due", "due", "overdue"]
+    period_start: datetime
+    period_end: datetime
+    due_at: datetime
+    total_amount: Decimal
+    outstanding_amount: Decimal
+    currency: Literal["TJS"]
+    issued_at: datetime
+
+    @field_serializer("total_amount", "outstanding_amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class TenantBillingPaymentRead(BaseModel):
+    amount: Decimal
+    allocated_amount: Decimal
+    credit_amount: Decimal
+    corrected_amount: Decimal
+    refunded_amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    confirmed_at: datetime
+    lifecycle_state: Literal["confirmed", "reversed"]
+
+    @field_serializer(
+        "amount",
+        "allocated_amount",
+        "credit_amount",
+        "corrected_amount",
+        "refunded_amount",
+    )
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class TenantBillingFinancialAccountRead(BaseModel):
+    subscription: TenantBillingSubscriptionRead | None
+    currency: Literal["TJS"]
+    outstanding_amount: Decimal
+    credit_balance: Decimal
+    invoices: list[TenantBillingFinancialInvoiceRead]
+    payments: list[TenantBillingPaymentRead]
+
+    @field_serializer("outstanding_amount", "credit_balance")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
 class BillingInvoiceCommandResult(BaseModel):
     item: BillingFinancialInvoiceRead
     applied: bool

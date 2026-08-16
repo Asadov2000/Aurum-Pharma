@@ -1,9 +1,22 @@
 import {
   type BillingPeriod,
+  type FinancialInvoiceDisplayStatus,
   type InvoiceStatus,
   type PaymentMethod,
   type SubscriptionStatus,
+  type TenantFinancialInvoice,
 } from "./types";
+
+export function financialInvoiceStatus(
+  invoice: TenantFinancialInvoice,
+): FinancialInvoiceDisplayStatus {
+  if (invoice.document_state === "void") return "void";
+  if (invoice.settlement_state === "written_off") return "written_off";
+  if (invoice.settlement_state === "paid") return "paid";
+  if (invoice.collection_state === "overdue") return "overdue";
+  if (invoice.settlement_state === "partially_paid") return "partially_paid";
+  return "unpaid";
+}
 
 export const billingPeriodLabel: Record<BillingPeriod, string> = {
   monthly: "Помесячно",
@@ -54,4 +67,25 @@ export const invoiceStatusTone: Record<
   paid: "success",
   overdue: "danger",
   cancelled: "neutral",
+};
+
+export const financialInvoiceStatusLabel: Record<FinancialInvoiceDisplayStatus, string> = {
+  unpaid: "Ожидает оплаты",
+  partially_paid: "Оплачен частично",
+  paid: "Оплачен",
+  written_off: "Списан",
+  overdue: "Просрочен",
+  void: "Аннулирован",
+};
+
+export const financialInvoiceStatusTone: Record<
+  FinancialInvoiceDisplayStatus,
+  "neutral" | "success" | "warning" | "danger" | "info"
+> = {
+  unpaid: "info",
+  partially_paid: "warning",
+  paid: "success",
+  written_off: "neutral",
+  overdue: "danger",
+  void: "neutral",
 };

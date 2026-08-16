@@ -10,6 +10,7 @@ import {
   type Subscription,
   type SubscriptionCreatePayload,
   type SubscriptionWithPlan,
+  type TenantFinancialAccount,
 } from "./types";
 
 // ---- tenant-facing (read-only) ----
@@ -34,16 +35,18 @@ export async function getInvoice(id: string): Promise<InvoiceWithPayments> {
   return data;
 }
 
+export async function getFinancialAccount(signal?: AbortSignal): Promise<TenantFinancialAccount> {
+  const { data } = await api.get<TenantFinancialAccount>("/billing/financial-account", { signal });
+  return data;
+}
+
 // ---- admin (support-only writes) ----
 
 export async function createSubscription(
   tenantId: string,
   payload: SubscriptionCreatePayload,
 ): Promise<Subscription> {
-  const { data } = await api.post<Subscription>(
-    `/admin/tenants/${tenantId}/subscription`,
-    payload,
-  );
+  const { data } = await api.post<Subscription>(`/admin/tenants/${tenantId}/subscription`, payload);
   return data;
 }
 
