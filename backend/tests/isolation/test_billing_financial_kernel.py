@@ -226,3 +226,66 @@ async def test_financial_commands_are_narrow_security_definers(
         "support_usage": False,
         "public_usage": False,
     }
+
+
+async def test_tenant_financial_projection_rechecks_identity_scope_and_permission(
+    maintenance_engine: AsyncEngine,
+) -> None:
+    async with maintenance_engine.connect() as connection:
+        function = (
+            (
+                await connection.execute(
+                    text("""
+                SELECT
+                  pg_get_userbyid(routine.proowner) AS owner,
+                  routine.prosecdef,
+                  array_to_string(routine.proconfig, ',') AS config,
+                  routine.prosrc,
+                  has_function_privilege(
+                    'aurum_app', routine.oid, 'EXECUTE'
+                  ) AS app_execute,
+                  has_function_privilege(
+                    'aurum_support', routine.oid, 'EXECUTE'
+                  ) AS support_execute,
+                  has_function_privilege(
+                    'public', routine.oid, 'EXECUTE'
+                  ) AS public_execute,
+                  has_function_privilege(
+                    'aurum_mailer', routine.oid, 'EXECUTE'
+                  ) AS mailer_execute,
+                  has_function_privilege(
+                    'aurum_edge_cash_executor', routine.oid, 'EXECUTE'
+                  ) AS edge_executor_execute,
+                  has_function_privilege(
+                    'aurum_edge_cash_owner', routine.oid, 'EXECUTE'
+                  ) AS edge_owner_execute
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_namespace AS namespace
+                  ON namespace.oid = routine.pronamespace
+                WHERE namespace.nspname = 'public'
+                  AND routine.oid::regprocedure::TEXT =
+                    'read_tenant_billing_financial_account(uuid,uuid)'
+                """),
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert function["owner"] == "aurum_schema_owner"
+    assert function["prosecdef"] is True
+    assert function["config"] == "search_path=pg_catalog, pg_temp"
+    assert function["app_execute"] is True
+    assert function["support_execute"] is False
+    assert function["public_execute"] is False
+    assert function["mailer_execute"] is False
+    assert function["edge_executor_execute"] is False
+    assert function["edge_owner_execute"] is False
+    source = str(function["prosrc"])
+    assert "SESSION_USER <> 'aurum_app'" in source
+    assert "current_setting('app.support_session', true)" in source
+    assert "current_app_user_id()" in source
+    assert "current_tenant_id()" in source
+    assert "p_actor_user_id IS DISTINCT FROM public.current_app_user_id()" in source
+    assert "tenant_actor_has_permission(p_tenant_id, 'billing.overview.view')" in source
+    assert "tenant_actor_has_permission(p_tenant_id, 'billing.invoice.view')" in source

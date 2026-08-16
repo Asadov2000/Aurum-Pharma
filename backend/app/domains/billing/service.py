@@ -543,6 +543,20 @@ class BillingService:
         except DBAPIError as exc:
             raise _financial_error(exc) from exc
 
+    async def read_tenant_financial_account(
+        self,
+        *,
+        actor_user_id: UUID,
+        tenant_id: UUID,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.read_tenant_financial_account(
+                actor_user_id=actor_user_id,
+                tenant_id=tenant_id,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
     async def list_platform_payment_reviews(
         self,
         *,

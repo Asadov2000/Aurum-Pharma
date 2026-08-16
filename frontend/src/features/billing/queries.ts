@@ -4,6 +4,7 @@ import {
   createInvoice,
   createSubscription,
   getCurrentSubscription,
+  getFinancialAccount,
   getInvoice,
   listInvoices,
   listPlans,
@@ -20,6 +21,7 @@ export const billingKeys = {
   subscription: ["billing", "subscription"] as const,
   invoices: ["billing", "invoices"] as const,
   invoice: (id: string) => ["billing", "invoice", id] as const,
+  financialAccount: ["billing", "financial-account"] as const,
 };
 
 export function usePlansQuery(enabled = true) {
@@ -54,6 +56,14 @@ export function useInvoiceQuery(id: string | null) {
   });
 }
 
+export function useFinancialAccountQuery() {
+  return useQuery({
+    queryKey: billingKeys.financialAccount,
+    queryFn: ({ signal }) => getFinancialAccount(signal),
+    staleTime: 15_000,
+  });
+}
+
 export function useCreateSubscription() {
   const qc = useQueryClient();
   return useMutation({
@@ -79,11 +89,8 @@ export function useCreateInvoice() {
 export function useRecordPayment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: {
-      tenantId: string;
-      invoiceId: string;
-      payload: PaymentCreatePayload;
-    }) => recordPayment(args.tenantId, args.invoiceId, args.payload),
+    mutationFn: (args: { tenantId: string; invoiceId: string; payload: PaymentCreatePayload }) =>
+      recordPayment(args.tenantId, args.invoiceId, args.payload),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: billingKeys.invoices });
       void qc.invalidateQueries({ queryKey: billingKeys.invoice(vars.invoiceId) });

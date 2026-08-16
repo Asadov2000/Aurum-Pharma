@@ -14,6 +14,8 @@ const SELLER_PERMS = [
 const OWNER_PERMS = [
   ...SELLER_PERMS,
   "reports.view",
+  "billing.overview.view",
+  "billing.invoice.view",
   "branches.view",
   "registers.view",
   "users.view",

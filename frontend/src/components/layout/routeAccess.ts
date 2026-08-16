@@ -17,6 +17,10 @@ export const ROLE_MANAGEMENT_PERMISSIONS = [
 ] as const;
 export const POS_PERMISSIONS = ["pos.shift_open", "pos.shift_close", "pos.sell"] as const;
 export const SALES_VIEW_PERMISSIONS = ["sales.view.own", "sales.view.tenant"] as const;
+export const TENANT_BILLING_VIEW_PERMISSIONS = [
+  "billing.overview.view",
+  "billing.invoice.view",
+] as const;
 export const AUDIT_VIEW_PERMISSIONS = [
   "audit.view.own",
   "audit.view.tenant",
@@ -188,7 +192,12 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   if (isPath(pathname, "/sales")) {
     return hasAnyPermission(context, SALES_VIEW_PERMISSIONS);
   }
-  if (isPath(pathname, "/billing") || isPath(pathname, "/reports")) {
+  if (isPath(pathname, "/billing")) {
+    return TENANT_BILLING_VIEW_PERMISSIONS.every((permission) =>
+      hasPermission(context, permission),
+    );
+  }
+  if (isPath(pathname, "/reports")) {
     return hasPermission(context, "reports.view");
   }
   // A scoped support identity is fail-closed: a newly added route must opt in

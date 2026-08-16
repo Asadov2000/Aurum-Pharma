@@ -74,6 +74,7 @@ from app.domains.billing.schemas import (
     SubscriptionPriceApplicationRead,
     SubscriptionRead,
     SubscriptionWithPlan,
+    TenantBillingFinancialAccountRead,
 )
 from app.domains.billing.service import BillingService
 
@@ -131,6 +132,27 @@ async def list_invoices(
 ) -> list[InvoiceRead]:
     invoices = await service.list_invoices(_current_tenant_or_400(user))
     return [InvoiceRead.model_validate(i) for i in invoices]
+
+
+@tenant_router.get(
+    "/financial-account",
+    response_model=TenantBillingFinancialAccountRead,
+    dependencies=[Depends(require_tenant_permission("billing.overview.view"))],
+)
+async def read_tenant_financial_account(
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_tenant_permission("billing.invoice.view")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> TenantBillingFinancialAccountRead:
+    _set_financial_no_store(response)
+    account = await service.read_tenant_financial_account(
+        actor_user_id=user.user_id,
+        tenant_id=_current_tenant_or_400(user),
+    )
+    return TenantBillingFinancialAccountRead.model_validate(account)
 
 
 @tenant_router.get("/invoices/{invoice_id}", response_model=InvoiceWithPayments)

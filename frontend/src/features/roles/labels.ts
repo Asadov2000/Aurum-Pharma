@@ -11,6 +11,7 @@ export const GROUP_LABEL: Record<string, string> = {
   pos: "Касса",
   sales: "Чеки",
   reports: "Отчёты",
+  billing: "Тариф и оплата",
   audit: "Аудит",
   settings: "Настройки",
   tenant: "Аптека",

@@ -37,6 +37,24 @@ describe("route access", () => {
     expect(firstAccessiblePath(SELLER)).toBe("/pos");
   });
 
+  it("shows tenant billing only with both dedicated read permissions", () => {
+    const billingViewer: RouteAccessContext = {
+      ...SELLER,
+      permissions: ["billing.overview.view", "billing.invoice.view"],
+    };
+
+    expect(canAccessPath("/billing", billingViewer)).toBe(true);
+    expect(
+      canAccessPath("/billing", {
+        ...billingViewer,
+        permissions: ["billing.overview.view"],
+      }),
+    ).toBe(false);
+    expect(canAccessPath("/billing", { ...billingViewer, permissions: ["reports.view"] })).toBe(
+      false,
+    );
+  });
+
   it("keeps an unscoped support account outside tenant routes", () => {
     const support: RouteAccessContext = {
       isDeveloper: false,
