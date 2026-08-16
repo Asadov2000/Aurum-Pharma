@@ -236,6 +236,64 @@ async def test_prescription_required_for_rx_items(db_session: AsyncSession, pos_
     assert completed.status == "completed"
 
 
+async def test_special_dispensing_is_blocked_until_regulatory_approval(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    s = await pos_scaffold(dispensing_type="special", sale_price=20)
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+
+    with pytest.raises(BusinessRuleError) as exc_info:
+        await service.add_item(
+            sale_id=sale.id,
+            catalog_id=s["item"].id,
+            qty=Decimal("1"),
+        )
+
+    assert exc_info.value.details == {"reason": "special_dispensing_regulatory_approval_required"}
+    assert await POSRepository(db_session).list_items(sale.id) == []
+
+
+async def test_completion_rechecks_special_dispensing_for_existing_draft(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    s = await pos_scaffold(dispensing_type="otc", sale_price=20)
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=sale.id,
+        catalog_id=s["item"].id,
+        qty=Decimal("1"),
+    )
+    await service.add_payment(
+        sale_id=sale.id,
+        payment_method="cash",
+        amount=Decimal("20.00"),
+    )
+    s["item"].dispensing_type = "special"
+    await db_session.flush()
+
+    with pytest.raises(BusinessRuleError) as exc_info:
+        await service.complete(sale_id=sale.id)
+
+    assert exc_info.value.details == {"reason": "special_dispensing_regulatory_approval_required"}
+    await db_session.refresh(sale)
+    assert sale.status == "draft"
+    batch = await InventoryRepository(db_session).get_batch(s["batch"].id)
+    assert batch is not None
+    assert batch.qty_remaining == Decimal("100.000")
+
+
 async def test_prescription_log_rejects_empty_and_unrelated_details(
     db_session: AsyncSession, pos_scaffold
 ) -> None:
