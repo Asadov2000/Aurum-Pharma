@@ -13,7 +13,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from starlette.requests import Request
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
+from app.core.db import app_engine
 from app.core.errors import AuthenticationError, RateLimitError
 from app.core.time import utc_now
 from app.domains.foundation.repository import FoundationRepository
@@ -41,6 +42,13 @@ from app.domains.sync.schemas import (
     SyncPullResponse,
 )
 from app.domains.sync.service import SyncAdminService, SyncEdgeApplyService
+
+
+async def _enable_edge_sync_with_fresh_app_pool(settings: Settings) -> None:
+    # The request pool is process-scoped, while pytest gives async tests
+    # separate event loops. Discard any pool left by an earlier loop.
+    await app_engine.dispose(close=False)
+    settings.EDGE_SYNC_ENABLED = True
 
 
 def test_edge_node_display_name_is_normalized_and_cannot_be_blank() -> None:
@@ -265,7 +273,7 @@ async def test_machine_dependency_derives_rls_scope_from_committed_credential(
                     branch_id=branch.id,
                 )
 
-        settings.EDGE_SYNC_ENABLED = True
+        await _enable_edge_sync_with_fresh_app_pool(settings)
         assert issued is not None
         assert stream is not None
         nonce = uuid4()
@@ -324,6 +332,7 @@ async def test_machine_dependency_derives_rls_scope_from_committed_credential(
             await anext(replay)
     finally:
         settings.EDGE_SYNC_ENABLED = previous_enabled
+        await app_engine.dispose()
         if tenant_id is not None:
             async with db_engine.begin() as connection:
                 for table in (
