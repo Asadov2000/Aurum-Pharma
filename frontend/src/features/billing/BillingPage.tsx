@@ -20,6 +20,8 @@ import {
   TR,
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { BillingOverview } from "./BillingOverview";
@@ -35,12 +37,15 @@ import {
   financialInvoiceStatusLabel,
   financialInvoiceStatusTone,
 } from "./labels";
+import { PaymentSubmissionModal } from "./PaymentSubmissionModal";
+import { PaymentSubmissionsPanel } from "./PaymentSubmissionsPanel";
 import { useFinancialAccountQuery } from "./queries";
 import {
   type FinancialInvoiceDisplayStatus,
   type TenantBillingPayment,
   type TenantFinancialInvoice,
 } from "./types";
+import { useOnlineStatus } from "./useOnlineStatus";
 
 const PAGE_SIZE = 10;
 const EMPTY_INVOICES: readonly TenantFinancialInvoice[] = [];
@@ -55,6 +60,10 @@ const FILTER_STATUSES: readonly FinancialInvoiceDisplayStatus[] = [
 ];
 
 export function BillingPage(): JSX.Element {
+  const { user } = useAuth();
+  const canCreatePaymentSubmission = hasPermission(user, "billing.payment_submission.create");
+  const canWithdrawPaymentSubmission = hasPermission(user, "billing.payment_submission.withdraw");
+  const online = useOnlineStatus();
   const accountQuery = useFinancialAccountQuery();
   const account = accountQuery.data;
   const filterPreferenceKey = useFilterPreferenceKey("billing");
@@ -64,9 +73,15 @@ export function BillingPage(): JSX.Element {
   const [yearFilter, setYearFilter] = useState("");
   const [invoicePage, setInvoicePage] = useState(1);
   const [paymentPage, setPaymentPage] = useState(1);
+  const [submissionOpen, setSubmissionOpen] = useState(false);
+  const [submissionInvoiceId, setSubmissionInvoiceId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const deferredInvoiceSearch = useDeferredValue(invoiceSearch);
   const invoices = account?.invoices ?? EMPTY_INVOICES;
   const payments = account?.payments ?? EMPTY_PAYMENTS;
+  const openInvoices = invoices.filter(
+    (invoice) => invoice.document_state === "issued" && Number(invoice.outstanding_amount) > 0,
+  );
 
   const invoiceYears = useMemo(
     () =>
@@ -119,7 +134,42 @@ export function BillingPage(): JSX.Element {
       <PageHeader
         title="Тариф и оплата"
         description="Текущий тариф, задолженность, счета и подтвержденные платежи аптеки."
+        actions={
+          canCreatePaymentSubmission ? (
+            <Button
+              size="sm"
+              disabled={!online || openInvoices.length === 0}
+              onClick={() => {
+                setSubmissionInvoiceId(openInvoices[0]?.invoice_id ?? null);
+                setSubmissionOpen(true);
+              }}
+            >
+              Сообщить об оплате
+            </Button>
+          ) : undefined
+        }
       />
+
+      {!online && (canCreatePaymentSubmission || canWithdrawPaymentSubmission) ? (
+        <div
+          className="rounded-lg border border-warning/30 bg-warning-subtle px-4 py-3 text-sm text-warning-foreground"
+          role="status"
+        >
+          Нет подключения. Данные можно просматривать, отправка и отзыв заявок временно отключены.
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-info/30 bg-info-subtle px-4 py-3 text-sm text-info-foreground"
+          role="status"
+        >
+          <span>{notice}</span>
+          <Button size="sm" variant="ghost" onClick={() => setNotice(null)}>
+            Закрыть
+          </Button>
+        </div>
+      ) : null}
 
       {accountQuery.isLoading ? (
         <Card className="p-4" aria-label="Загрузка расчетов" aria-busy="true">
@@ -281,6 +331,12 @@ export function BillingPage(): JSX.Element {
             )}
           </section>
 
+          <PaymentSubmissionsPanel
+            canWithdraw={canWithdrawPaymentSubmission}
+            online={online}
+            onNotice={setNotice}
+          />
+
           <section className="min-w-0 space-y-3" aria-labelledby="billing-payments-heading">
             <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
               <div className="min-w-0">
@@ -318,6 +374,24 @@ export function BillingPage(): JSX.Element {
       ) : null}
 
       <InvoiceDetailModal invoice={selectedInvoice} onClose={() => setOpenInvoiceId(null)} />
+      {canCreatePaymentSubmission ? (
+        <PaymentSubmissionModal
+          open={submissionOpen}
+          invoices={invoices}
+          initialInvoiceId={submissionInvoiceId}
+          online={online}
+          onClose={() => {
+            setSubmissionOpen(false);
+            setSubmissionInvoiceId(null);
+          }}
+          onCompleted={() => {
+            setSubmissionOpen(false);
+            setSubmissionInvoiceId(null);
+            setNotice("Подтверждение оплаты отправлено в Aurum Pharma.");
+          }}
+          onRefreshRequired={setNotice}
+        />
+      ) : null}
     </div>
   );
 }

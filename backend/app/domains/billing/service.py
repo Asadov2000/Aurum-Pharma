@@ -557,6 +557,191 @@ class BillingService:
         except DBAPIError as exc:
             raise _financial_error(exc) from exc
 
+    async def create_tenant_payment_submission(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        target_invoice_id: UUID,
+        amount: Decimal,
+        paid_at: datetime,
+        external_reference: str,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "target_invoice_id": target_invoice_id,
+            "amount": amount,
+            "paid_at": paid_at,
+            "external_reference": external_reference,
+        }
+        try:
+            return await self.repo.create_tenant_payment_submission(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_submission_created", payload),
+                tenant_id=tenant_id,
+                target_invoice_id=target_invoice_id,
+                amount=amount,
+                paid_at=paid_at,
+                external_reference=external_reference,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def list_tenant_payment_submissions(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.list_tenant_payment_submissions(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                tenant_id=tenant_id,
+                page=page,
+                page_size=page_size,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def withdraw_tenant_payment_submission(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        submission_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "submission_id": submission_id,
+            "expected_row_version": expected_row_version,
+        }
+        try:
+            return await self.repo.withdraw_tenant_payment_submission(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_submission_withdrawn", payload),
+                tenant_id=tenant_id,
+                submission_id=submission_id,
+                expected_row_version=expected_row_version,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def list_platform_payment_submissions(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.list_platform_payment_submissions(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                tenant_id=tenant_id,
+                page=page,
+                page_size=page_size,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def read_platform_payment_submission(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        submission_id: UUID,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.read_platform_payment_submission(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                tenant_id=tenant_id,
+                submission_id=submission_id,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def promote_payment_submission_to_review(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        submission_id: UUID,
+        expected_row_version: int,
+        recipient_account_key: str,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "submission_id": submission_id,
+            "expected_row_version": expected_row_version,
+            "recipient_account_key": recipient_account_key,
+        }
+        try:
+            return await self.repo.promote_payment_submission_to_review(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_submission_review_created", payload),
+                tenant_id=tenant_id,
+                submission_id=submission_id,
+                expected_row_version=expected_row_version,
+                recipient_account_key=recipient_account_key,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def reject_platform_payment_submission(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        submission_id: UUID,
+        expected_row_version: int,
+        reason_code: str,
+        reason_note: str | None,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "submission_id": submission_id,
+            "expected_row_version": expected_row_version,
+            "reason_code": reason_code,
+            "reason_note": reason_note,
+        }
+        try:
+            return await self.repo.reject_platform_payment_submission(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                operation_id=operation_id,
+                request_hash=_pricing_request_hash("payment_submission_rejected", payload),
+                tenant_id=tenant_id,
+                submission_id=submission_id,
+                expected_row_version=expected_row_version,
+                reason_code=reason_code,
+                reason_note=reason_note,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
     async def list_platform_payment_reviews(
         self,
         *,
@@ -573,6 +758,24 @@ class BillingService:
                 tenant_id=tenant_id,
                 page=page,
                 page_size=page_size,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def read_platform_payment_review(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        review_id: UUID,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.read_platform_payment_review(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                tenant_id=tenant_id,
+                review_id=review_id,
             )
         except DBAPIError as exc:
             raise _financial_error(exc) from exc

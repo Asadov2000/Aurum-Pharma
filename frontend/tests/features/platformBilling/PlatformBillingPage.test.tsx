@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getPlatformBillingOverview = vi.fn();
 const listPlatformInvoices = vi.fn();
@@ -13,10 +13,15 @@ const cancelPlatformPricingPrice = vi.fn();
 const listPlatformBillingTenants = vi.fn();
 const getPlatformFinancialAccount = vi.fn();
 const listPlatformPaymentApprovalQueue = vi.fn();
+const getPlatformPaymentApprovalDetail = vi.fn();
 const createPlatformBankPaymentReview = vi.fn();
 const approvePlatformBankPayment = vi.fn();
 const rejectPlatformBankPaymentReview = vi.fn();
 const listPlatformPaymentAdjustmentQueue = vi.fn();
+const listPlatformPaymentSubmissions = vi.fn();
+const getPlatformPaymentSubmission = vi.fn();
+const reviewPlatformPaymentSubmission = vi.fn();
+const rejectPlatformPaymentSubmission = vi.fn();
 const createPlatformPaymentAdjustment = vi.fn();
 const approvePlatformPaymentAdjustment = vi.fn();
 const rejectPlatformPaymentAdjustment = vi.fn();
@@ -42,11 +47,20 @@ vi.mock("@/features/platformBilling/api", () => ({
   getPlatformFinancialAccount: (...args: unknown[]) => getPlatformFinancialAccount(...args),
   listPlatformPaymentApprovalQueue: (...args: unknown[]) =>
     listPlatformPaymentApprovalQueue(...args),
+  getPlatformPaymentApprovalDetail: (...args: unknown[]) =>
+    getPlatformPaymentApprovalDetail(...args),
   createPlatformBankPaymentReview: (...args: unknown[]) => createPlatformBankPaymentReview(...args),
   approvePlatformBankPayment: (...args: unknown[]) => approvePlatformBankPayment(...args),
   rejectPlatformBankPaymentReview: (...args: unknown[]) => rejectPlatformBankPaymentReview(...args),
   listPlatformPaymentAdjustmentQueue: (...args: unknown[]) =>
     listPlatformPaymentAdjustmentQueue(...args),
+  listPlatformPaymentSubmissions: (...args: unknown[]) =>
+    listPlatformPaymentSubmissions(...args),
+  getPlatformPaymentSubmission: (...args: unknown[]) => getPlatformPaymentSubmission(...args),
+  reviewPlatformPaymentSubmission: (...args: unknown[]) =>
+    reviewPlatformPaymentSubmission(...args),
+  rejectPlatformPaymentSubmission: (...args: unknown[]) =>
+    rejectPlatformPaymentSubmission(...args),
   createPlatformPaymentAdjustment: (...args: unknown[]) => createPlatformPaymentAdjustment(...args),
   approvePlatformPaymentAdjustment: (...args: unknown[]) =>
     approvePlatformPaymentAdjustment(...args),
@@ -153,6 +167,57 @@ const FINANCIAL_ACCOUNT = {
   journal_balanced: true,
 };
 
+const PAYMENT_SUBMISSION = {
+  submission_id: "submission-1",
+  tenant_id: BILLING_TENANT.tenant_id,
+  target_invoice_id: FINANCIAL_INVOICE.invoice_id,
+  invoice_number: FINANCIAL_INVOICE.invoice_number,
+  amount: "590.00",
+  currency: "TJS" as const,
+  paid_at: "2026-08-14T08:30:00Z",
+  reference_suffix: "9001",
+  status: "submitted" as const,
+  row_version: 1,
+  created_at: "2026-08-14T08:31:00Z",
+  can_withdraw: true,
+};
+
+const PRIVATE_SUBMISSION_REFERENCE = "TJ-PRIVATE-SUBMISSION-9001";
+const PAYMENT_SUBMISSION_DETAIL = {
+  ...PAYMENT_SUBMISSION,
+  tenant_name: BILLING_TENANT.name,
+  external_reference: PRIVATE_SUBMISSION_REFERENCE,
+};
+
+const PAYMENT_SUBMISSION_DETAIL_KEY = [
+  "platform-billing",
+  "v2",
+  "submission-detail",
+  BILLING_TENANT.tenant_id,
+  PAYMENT_SUBMISSION.submission_id,
+];
+
+const PRIVATE_APPROVAL_REFERENCE = "TJPRIVATEAPPROVAL9001";
+
+function paymentApprovalDetail(reviewId: string, rowVersion = 1) {
+  return {
+    review_id: reviewId,
+    tenant_id: BILLING_TENANT.tenant_id,
+    tenant_name: BILLING_TENANT.name,
+    target_invoice_id: FINANCIAL_INVOICE.invoice_id,
+    invoice_number: FINANCIAL_INVOICE.invoice_number,
+    amount: "200.00",
+    currency: "TJS" as const,
+    paid_at: "2026-08-14T08:35:00Z",
+    recipient_account_key: "aurum_tjs_primary" as const,
+    external_reference: PRIVATE_APPROVAL_REFERENCE,
+    status: "pending_approval" as const,
+    row_version: rowVersion,
+    created_at: "2026-08-14T08:36:00Z",
+    is_own_review: false,
+  };
+}
+
 const PAYMENT = {
   payment_id: "77777777-7777-4777-8777-777777777777",
   amount: "700.00",
@@ -172,11 +237,12 @@ function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <PlatformBillingPage />
     </QueryClientProvider>,
   );
+  return { ...view, queryClient: client };
 }
 
 describe("PlatformBillingPage", () => {
@@ -193,10 +259,15 @@ describe("PlatformBillingPage", () => {
     listPlatformBillingTenants.mockReset();
     getPlatformFinancialAccount.mockReset();
     listPlatformPaymentApprovalQueue.mockReset();
+    getPlatformPaymentApprovalDetail.mockReset();
     createPlatformBankPaymentReview.mockReset();
     approvePlatformBankPayment.mockReset();
     rejectPlatformBankPaymentReview.mockReset();
     listPlatformPaymentAdjustmentQueue.mockReset();
+    listPlatformPaymentSubmissions.mockReset();
+    getPlatformPaymentSubmission.mockReset();
+    reviewPlatformPaymentSubmission.mockReset();
+    rejectPlatformPaymentSubmission.mockReset();
     createPlatformPaymentAdjustment.mockReset();
     approvePlatformPaymentAdjustment.mockReset();
     rejectPlatformPaymentAdjustment.mockReset();
@@ -227,12 +298,26 @@ describe("PlatformBillingPage", () => {
       page: 1,
       page_size: 20,
     });
+    getPlatformPaymentApprovalDetail.mockImplementation(
+      (_tenantId: string, reviewId: string) =>
+        Promise.resolve(paymentApprovalDetail(reviewId, reviewId === "review-other" ? 2 : 1)),
+    );
     listPlatformPaymentAdjustmentQueue.mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
       page_size: 20,
     });
+    listPlatformPaymentSubmissions.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("shows a useful read-only summary without financial mutation controls", async () => {
@@ -372,14 +457,159 @@ describe("PlatformBillingPage", () => {
       screen.queryByRole("button", { name: "Зарегистрировать оплату" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Ожидают подтверждения")).not.toBeInTheDocument();
+    expect(screen.queryByText("Заявки клиентов")).not.toBeInTheDocument();
+    expect(listPlatformPaymentSubmissions).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain(BILLING_TENANT.tenant_id);
   });
 
-  it("registers a payment and never leaves the bank reference in the DOM", async () => {
+  it("shows the tenant submission queue only to reviewers and purges details on close", async () => {
     authState.user.platform_capabilities = [
       "platform.billing.view",
       "platform.billing.payment.review",
     ];
+    listPlatformPaymentSubmissions.mockResolvedValue({
+      items: [PAYMENT_SUBMISSION],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    getPlatformPaymentSubmission.mockResolvedValue(PAYMENT_SUBMISSION_DETAIL);
+    const { queryClient } = renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+
+    expect(await screen.findByText("Заявки клиентов")).toBeInTheDocument();
+    expect(screen.getAllByText("•••• 9001").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: "Проверить" })[0]!);
+    expect(await screen.findByText(PRIVATE_SUBMISSION_REFERENCE)).toBeInTheDocument();
+    expect(queryClient.getQueryData(PAYMENT_SUBMISSION_DETAIL_KEY)).toEqual(
+      PAYMENT_SUBMISSION_DETAIL,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Проверка заявки об оплате" });
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "Закрыть" })[0]!);
+
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain(PRIVATE_SUBMISSION_REFERENCE);
+      expect(queryClient.getQueryData(PAYMENT_SUBMISSION_DETAIL_KEY)).toBeUndefined();
+    });
+  });
+
+  it("reviews a tenant submission with a stable command and clears sensitive data", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.payment.review",
+    ];
+    listPlatformPaymentSubmissions.mockResolvedValue({
+      items: [PAYMENT_SUBMISSION],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    getPlatformPaymentSubmission.mockResolvedValue(PAYMENT_SUBMISSION_DETAIL);
+    reviewPlatformPaymentSubmission.mockResolvedValue({
+      item: {
+        review_id: "review-from-submission",
+        tenant_id: BILLING_TENANT.tenant_id,
+        target_invoice_id: FINANCIAL_INVOICE.invoice_id,
+        amount: "590.00",
+        currency: "TJS",
+        paid_at: PAYMENT_SUBMISSION.paid_at,
+        status: "pending_approval",
+        row_version: 1,
+        created_at: "2026-08-14T08:35:00Z",
+      },
+      applied: true,
+    });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    const { queryClient } = renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Проверить" }))[0]!);
+    expect(await screen.findByText(PRIVATE_SUBMISSION_REFERENCE)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Передать на подтверждение" }));
+
+    await waitFor(() =>
+      expect(reviewPlatformPaymentSubmission).toHaveBeenCalledWith(
+        BILLING_TENANT.tenant_id,
+        PAYMENT_SUBMISSION.submission_id,
+        {
+          operation_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          expected_row_version: 1,
+          recipient_account_key: "aurum_tjs_primary",
+        },
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("передана другому сотруднику");
+    expect(document.body.textContent).not.toContain(PRIVATE_SUBMISSION_REFERENCE);
+    expect(queryClient.getQueryData(PAYMENT_SUBMISSION_DETAIL_KEY)).toBeUndefined();
+  });
+
+  it("rejects a tenant submission and clears sensitive data from DOM and cache", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.payment.review",
+    ];
+    listPlatformPaymentSubmissions.mockResolvedValue({
+      items: [PAYMENT_SUBMISSION],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    getPlatformPaymentSubmission.mockResolvedValue(PAYMENT_SUBMISSION_DETAIL);
+    rejectPlatformPaymentSubmission.mockResolvedValue({
+      item: { ...PAYMENT_SUBMISSION, status: "rejected", reason_code: "amount_mismatch" },
+      applied: true,
+    });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+    const { queryClient } = renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Проверить" }))[0]!);
+    expect(await screen.findByText(PRIVATE_SUBMISSION_REFERENCE)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Отклонить" }));
+    fireEvent.change(screen.getByLabelText("Причина"), { target: { value: "amount_mismatch" } });
+    fireEvent.click(screen.getByRole("button", { name: "Отклонить заявку" }));
+
+    await waitFor(() =>
+      expect(rejectPlatformPaymentSubmission).toHaveBeenCalledWith(
+        BILLING_TENANT.tenant_id,
+        PAYMENT_SUBMISSION.submission_id,
+        {
+          operation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          expected_row_version: 1,
+          reason_code: "amount_mismatch",
+          reason_note: null,
+        },
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Заявка клиента отклонена");
+    expect(document.body.textContent).not.toContain(PRIVATE_SUBMISSION_REFERENCE);
+    expect(queryClient.getQueryData(PAYMENT_SUBMISSION_DETAIL_KEY)).toBeUndefined();
+  });
+
+  it("registers the selected invoice amount and never leaves the bank reference in the DOM", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.payment.review",
+    ];
+    const secondInvoice = {
+      ...FINANCIAL_INVOICE,
+      invoice_id: "99999999-9999-4999-8999-999999999999",
+      invoice_number: "AF-2026-000043",
+      total_amount: "275.50",
+      outstanding_amount: "275.50",
+    };
+    getPlatformFinancialAccount.mockResolvedValue({
+      ...FINANCIAL_ACCOUNT,
+      outstanding_amount: "865.50",
+      invoices: [FINANCIAL_INVOICE, secondInvoice],
+    });
     createPlatformBankPaymentReview.mockResolvedValue({
       item: {
         review_id: "55555555-5555-4555-8555-555555555555",
@@ -400,19 +630,35 @@ describe("PlatformBillingPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
 
+    const dialog = screen.getByRole("dialog", { name: "Регистрация банковского платежа" });
+    fireEvent.change(within(dialog).getByLabelText("Счёт"), {
+      target: { value: secondInvoice.invoice_id },
+    });
+    expect(within(dialog).getByLabelText("Сумма, TJS")).toHaveValue("275.50");
+
+    fireEvent.change(within(dialog).getByLabelText("Сумма, TJS"), {
+      target: { value: "0.00" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Передать на подтверждение" }));
+    expect(await within(dialog).findByText("Сумма должна быть больше нуля")).toBeInTheDocument();
+    expect(createPlatformBankPaymentReview).not.toHaveBeenCalled();
+
+    fireEvent.change(within(dialog).getByLabelText("Сумма, TJS"), {
+      target: { value: "275.50" },
+    });
     const reference = "TJ-2026-PRIVATE-001";
-    fireEvent.change(screen.getByLabelText("Банковский номер операции"), {
+    fireEvent.change(within(dialog).getByLabelText("Банковский номер операции"), {
       target: { value: reference },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Передать на подтверждение" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Передать на подтверждение" }));
 
     await waitFor(() =>
       expect(createPlatformBankPaymentReview).toHaveBeenCalledWith(
         BILLING_TENANT.tenant_id,
         expect.objectContaining({
           operation_id: "66666666-6666-4666-8666-666666666666",
-          target_invoice_id: FINANCIAL_INVOICE.invoice_id,
-          amount: "590.00",
+          target_invoice_id: secondInvoice.invoice_id,
+          amount: "275.50",
           recipient_account_key: "aurum_tjs_primary",
           external_reference: reference,
         }),
@@ -420,6 +666,28 @@ describe("PlatformBillingPage", () => {
     );
     expect(await screen.findByRole("status")).toHaveTextContent("передан другому сотруднику");
     expect(document.body.textContent).not.toContain(reference);
+  });
+
+  it("clears a bank reference when manual registration is cancelled", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.payment.review",
+    ];
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
+
+    const reference = "TJ-PRIVATE-CANCELLED-001";
+    const dialog = screen.getByRole("dialog", { name: "Регистрация банковского платежа" });
+    fireEvent.change(within(dialog).getByLabelText("Банковский номер операции"), {
+      target: { value: reference },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    expect(document.body.textContent).not.toContain(reference);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
+    expect(screen.getByLabelText("Банковский номер операции")).toHaveValue("");
   });
 
   it("blocks own approval and lets an independent approver confirm", async () => {
@@ -475,7 +743,8 @@ describe("PlatformBillingPage", () => {
 
     expect(await screen.findByRole("button", { name: "Нужен другой сотрудник" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
-    fireEvent.click(screen.getByRole("checkbox"));
+    expect(await screen.findByText(PRIVATE_APPROVAL_REFERENCE)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить платёж" }));
 
     await waitFor(() =>
@@ -485,6 +754,7 @@ describe("PlatformBillingPage", () => {
         expect.objectContaining({ expected_row_version: 2 }),
       ),
     );
+    expect(document.body.textContent).not.toContain(PRIVATE_APPROVAL_REFERENCE);
   });
 
   it("lets an independent employee reject a bank payment review", async () => {
@@ -518,7 +788,8 @@ describe("PlatformBillingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
     fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
-    fireEvent.click(screen.getByRole("button", { name: "Отклонить" }));
+    expect(await screen.findByText(PRIVATE_APPROVAL_REFERENCE)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Отклонить" }));
     fireEvent.change(screen.getByLabelText("Причина"), { target: { value: "amount_mismatch" } });
     fireEvent.click(screen.getByRole("button", { name: "Отклонить платёж" }));
 
@@ -534,6 +805,49 @@ describe("PlatformBillingPage", () => {
       ),
     );
     expect(await screen.findByRole("status")).toHaveTextContent("Платёж отклонён");
+    expect(document.body.textContent).not.toContain(PRIVATE_APPROVAL_REFERENCE);
+  });
+
+  it("purges protected payment details when the tab becomes hidden", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.payment.approve",
+    ];
+    listPlatformPaymentApprovalQueue.mockResolvedValue({
+      items: [
+        {
+          ...paymentApprovalDetail("review-sensitive"),
+          external_reference: undefined,
+          recipient_account_key: undefined,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const { queryClient } = renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
+
+    expect(await screen.findByText(PRIVATE_APPROVAL_REFERENCE)).toBeInTheDocument();
+    const detailKey = [
+      "platform-billing",
+      "v2",
+      "approval-detail",
+      BILLING_TENANT.tenant_id,
+      "review-sensitive",
+    ];
+    expect(queryClient.getQueryData(detailKey)).toBeDefined();
+
+    visibility.mockReturnValue("hidden");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(queryClient.getQueryData(detailKey)).toBeUndefined());
+    expect(document.body.textContent).not.toContain(PRIVATE_APPROVAL_REFERENCE);
   });
 
   it("registers a bank refund request and removes its reference from the DOM", async () => {

@@ -21,11 +21,14 @@ import { describeApiError } from "@/lib/errorMessages";
 
 import { ApprovePaymentModal, RegisterPaymentModal } from "./FinancialPaymentModal";
 import { PaymentAdjustmentDecisionModal, PaymentAdjustmentModal } from "./FinancialAdjustmentModal";
+import { PaymentSubmissionQueue } from "./PaymentSubmissionQueue";
+import { PaymentSubmissionReviewModal } from "./PaymentSubmissionReviewModal";
 import {
   usePlatformBillingTenants,
   usePlatformFinancialAccount,
   usePlatformPaymentAdjustmentQueue,
   usePlatformPaymentApprovalQueue,
+  usePlatformPaymentSubmissions,
 } from "./queries";
 import {
   type PlatformBillingTenant,
@@ -34,6 +37,7 @@ import {
   type PlatformPaymentAdjustmentQueueItem,
   type PlatformPaymentApprovalQueueItem,
   type PlatformPaymentHistoryItem,
+  type PlatformPaymentSubmissionListItem,
 } from "./types";
 import { useOnlineStatus } from "./useOnlineStatus";
 
@@ -61,6 +65,7 @@ export function FinancialWorkspace({
   const [tenantPage, setTenantPage] = useState(1);
   const [queuePage, setQueuePage] = useState(1);
   const [adjustmentPage, setAdjustmentPage] = useState(1);
+  const [submissionPage, setSubmissionPage] = useState(1);
   const [selectedTenant, setSelectedTenant] = useState<PlatformBillingTenant | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [approvalTarget, setApprovalTarget] = useState<PlatformPaymentApprovalQueueItem | null>(
@@ -69,6 +74,8 @@ export function FinancialWorkspace({
   const [adjustmentTarget, setAdjustmentTarget] = useState<PlatformPaymentHistoryItem | null>(null);
   const [adjustmentDecisionTarget, setAdjustmentDecisionTarget] =
     useState<PlatformPaymentAdjustmentQueueItem | null>(null);
+  const [submissionTarget, setSubmissionTarget] =
+    useState<PlatformPaymentSubmissionListItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -100,20 +107,32 @@ export function FinancialWorkspace({
     PAGE_SIZE,
     canApproveAdjustment && selectedTenant !== null,
   );
+  const submissionQueue = usePlatformPaymentSubmissions(
+    tenantId,
+    submissionPage,
+    PAGE_SIZE,
+    canReview && selectedTenant !== null,
+  );
   const refetchTenants = tenants.refetch;
   const refetchAccount = account.refetch;
   const refetchQueue = queue.refetch;
   const refetchAdjustmentQueue = adjustmentQueue.refetch;
+  const refetchSubmissionQueue = submissionQueue.refetch;
 
   useEffect(() => {
     onFetchingChange?.(
-      tenants.isFetching || account.isFetching || queue.isFetching || adjustmentQueue.isFetching,
+      tenants.isFetching ||
+        account.isFetching ||
+        queue.isFetching ||
+        adjustmentQueue.isFetching ||
+        submissionQueue.isFetching,
     );
   }, [
     account.isFetching,
     adjustmentQueue.isFetching,
     onFetchingChange,
     queue.isFetching,
+    submissionQueue.isFetching,
     tenants.isFetching,
   ]);
 
@@ -124,13 +143,16 @@ export function FinancialWorkspace({
       ...(selectedTenant ? [refetchAccount()] : []),
       ...(selectedTenant && canApprove ? [refetchQueue()] : []),
       ...(selectedTenant && canApproveAdjustment ? [refetchAdjustmentQueue()] : []),
+      ...(selectedTenant && canReview ? [refetchSubmissionQueue()] : []),
     ]);
   }, [
     canApprove,
     canApproveAdjustment,
+    canReview,
     refetchAccount,
     refetchAdjustmentQueue,
     refetchQueue,
+    refetchSubmissionQueue,
     refetchTenants,
     refreshSignal,
     selectedTenant,
@@ -144,11 +166,34 @@ export function FinancialWorkspace({
   }, [tenantPage, tenants.data?.total]);
 
   useEffect(() => {
+    const total = queue.data?.total;
+    if (total === undefined) return;
+    const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (queuePage > lastPage) setQueuePage(lastPage);
+  }, [queue.data?.total, queuePage]);
+
+  useEffect(() => {
+    const total = adjustmentQueue.data?.total;
+    if (total === undefined) return;
+    const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (adjustmentPage > lastPage) setAdjustmentPage(lastPage);
+  }, [adjustmentPage, adjustmentQueue.data?.total]);
+
+  useEffect(() => {
+    const total = submissionQueue.data?.total;
+    if (total === undefined) return;
+    const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (submissionPage > lastPage) setSubmissionPage(lastPage);
+  }, [submissionPage, submissionQueue.data?.total]);
+
+  useEffect(() => {
     setQueuePage(1);
     setAdjustmentPage(1);
+    setSubmissionPage(1);
     setApprovalTarget(null);
     setAdjustmentTarget(null);
     setAdjustmentDecisionTarget(null);
+    setSubmissionTarget(null);
     setNotice(null);
   }, [tenantId]);
 
@@ -158,6 +203,7 @@ export function FinancialWorkspace({
       account.refetch(),
       ...(canApprove ? [queue.refetch()] : []),
       ...(canApproveAdjustment ? [adjustmentQueue.refetch()] : []),
+      ...(canReview ? [submissionQueue.refetch()] : []),
     ]);
   };
 
@@ -233,6 +279,15 @@ export function FinancialWorkspace({
                 onRegister={() => setRegisterOpen(true)}
                 onAdjust={setAdjustmentTarget}
               />
+              {canReview ? (
+                <PaymentSubmissionQueue
+                  query={submissionQueue}
+                  page={submissionPage}
+                  onPage={setSubmissionPage}
+                  online={online && account.data.journal_balanced}
+                  onReview={setSubmissionTarget}
+                />
+              ) : null}
               {canApprove ? (
                 <ApprovalQueuePanel
                   queue={queue}
@@ -291,6 +346,23 @@ export function FinancialWorkspace({
         }}
         onRefreshRequired={refreshFinancialData}
       />
+
+      {canReview ? (
+        <PaymentSubmissionReviewModal
+          item={submissionTarget}
+          online={online && account.data?.journal_balanced === true}
+          onClose={() => setSubmissionTarget(null)}
+          onReviewed={() => {
+            setSubmissionTarget(null);
+            refreshFinancialData("Заявка передана другому сотруднику на подтверждение платежа.");
+          }}
+          onRejected={() => {
+            setSubmissionTarget(null);
+            refreshFinancialData("Заявка клиента отклонена.");
+          }}
+          onRefreshRequired={refreshFinancialData}
+        />
+      ) : null}
 
       <PaymentAdjustmentModal
         tenantId={tenantId}

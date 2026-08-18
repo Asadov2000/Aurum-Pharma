@@ -853,6 +853,194 @@ class BillingRepository:
             )
         return dict(result)
 
+    async def create_tenant_payment_submission(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        target_invoice_id: UUID,
+        amount: Decimal,
+        paid_at: datetime,
+        external_reference: str,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.create_tenant_billing_payment_submission("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :target_invoice_id, :amount, :paid_at, :external_reference)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "target_invoice_id": target_invoice_id,
+                "amount": amount,
+                "paid_at": paid_at,
+                "external_reference": external_reference,
+            },
+        )
+
+    async def list_tenant_payment_submissions(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.list_tenant_billing_payment_submissions("
+                    ":actor_user_id, :actor_session_id, :tenant_id, :limit, :offset)"
+                ),
+                {
+                    "actor_user_id": actor_user_id,
+                    "actor_session_id": actor_session_id,
+                    "tenant_id": tenant_id,
+                    "limit": page_size,
+                    "offset": (page - 1) * page_size,
+                },
+            )
+        return dict(result)
+
+    async def withdraw_tenant_payment_submission(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        submission_id: UUID,
+        expected_row_version: int,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.withdraw_tenant_billing_payment_submission("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :submission_id, :expected_row_version)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "submission_id": submission_id,
+                "expected_row_version": expected_row_version,
+            },
+        )
+
+    async def list_platform_payment_submissions(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.list_platform_billing_payment_submissions("
+                    ":actor_user_id, :actor_session_id, :tenant_id, :status, :limit, :offset)"
+                ),
+                {
+                    "actor_user_id": actor_user_id,
+                    "actor_session_id": actor_session_id,
+                    "tenant_id": tenant_id,
+                    "status": "submitted",
+                    "limit": page_size,
+                    "offset": (page - 1) * page_size,
+                },
+            )
+        return dict(result)
+
+    async def read_platform_payment_submission(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        submission_id: UUID,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.read_platform_billing_payment_submission("
+                    ":actor_user_id, :actor_session_id, :tenant_id, :submission_id)"
+                ),
+                {
+                    "actor_user_id": actor_user_id,
+                    "actor_session_id": actor_session_id,
+                    "tenant_id": tenant_id,
+                    "submission_id": submission_id,
+                },
+            )
+        return dict(result)
+
+    async def promote_payment_submission_to_review(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        submission_id: UUID,
+        expected_row_version: int,
+        recipient_account_key: str,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.promote_billing_payment_submission_to_review("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :submission_id, :expected_row_version, :recipient_account_key)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "submission_id": submission_id,
+                "expected_row_version": expected_row_version,
+                "recipient_account_key": recipient_account_key,
+            },
+        )
+
+    async def reject_platform_payment_submission(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        request_hash: str,
+        tenant_id: UUID,
+        submission_id: UUID,
+        expected_row_version: int,
+        reason_code: str,
+        reason_note: str | None,
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.reject_platform_billing_payment_submission("
+            ":actor_user_id, :actor_session_id, :operation_id, :request_hash, "
+            ":tenant_id, :submission_id, :expected_row_version, :reason_code, :reason_note)",
+            {
+                "actor_user_id": actor_user_id,
+                "actor_session_id": actor_session_id,
+                "operation_id": operation_id,
+                "request_hash": request_hash,
+                "tenant_id": tenant_id,
+                "submission_id": submission_id,
+                "expected_row_version": expected_row_version,
+                "reason_code": reason_code,
+                "reason_note": reason_note,
+            },
+        )
+
     async def list_platform_payment_reviews(
         self,
         *,
@@ -874,6 +1062,29 @@ class BillingRepository:
                     "tenant_id": tenant_id,
                     "limit": page_size,
                     "offset": (page - 1) * page_size,
+                },
+            )
+        return dict(result)
+
+    async def read_platform_payment_review(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        tenant_id: UUID,
+        review_id: UUID,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.read_platform_billing_payment_review("
+                    ":actor_user_id, :actor_session_id, :tenant_id, :review_id)"
+                ),
+                {
+                    "actor_user_id": actor_user_id,
+                    "actor_session_id": actor_session_id,
+                    "tenant_id": tenant_id,
+                    "review_id": review_id,
                 },
             )
         return dict(result)

@@ -25,6 +25,7 @@ from app.core.errors import BusinessRuleError
 from app.core.time import utc_now
 from app.domains.billing.repository import BillingRepository
 from app.domains.billing.schemas import (
+    BankPaymentApprovalDetail,
     BankPaymentApprovalQueue,
     BankPaymentApprove,
     BankPaymentReviewCommandResult,
@@ -52,12 +53,21 @@ from app.domains.billing.schemas import (
     InvoiceWithPayments,
     PaymentCreate,
     PaymentRead,
+    PaymentSubmissionCommandResult,
+    PaymentSubmissionCreate,
+    PaymentSubmissionList,
+    PaymentSubmissionRead,
+    PaymentSubmissionWithdraw,
     PlanRead,
     PlatformBillingOverviewRead,
     PlatformBillingTenantList,
     PlatformBillingTenantRead,
     PlatformInvoiceList,
     PlatformInvoiceRead,
+    PlatformPaymentSubmissionDetail,
+    PlatformPaymentSubmissionQueue,
+    PlatformPaymentSubmissionReject,
+    PlatformPaymentSubmissionReview,
     PlatformPricingPlanCommandResult,
     PlatformPricingPlanList,
     PlatformPricingPlanRead,
@@ -89,6 +99,12 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     if user.tenant_id is None:
         raise BusinessRuleError("Request is not scoped to a tenant")
     return user.tenant_id
+
+
+def _tenant_session_or_401(user: CurrentUser) -> UUID:
+    if user.session_id is None:
+        raise BusinessRuleError("Billing operation requires an authentication session")
+    return user.session_id
 
 
 # =============================================================================
@@ -153,6 +169,91 @@ async def read_tenant_financial_account(
         tenant_id=_current_tenant_or_400(user),
     )
     return TenantBillingFinancialAccountRead.model_validate(account)
+
+
+@tenant_router.get(
+    "/payment-submissions",
+    response_model=PaymentSubmissionList,
+)
+async def list_tenant_payment_submissions(
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_tenant_permission("billing.invoice.view")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> PaymentSubmissionList:
+    _set_financial_no_store(response)
+    result = await service.list_tenant_payment_submissions(
+        actor_user_id=user.user_id,
+        actor_session_id=_tenant_session_or_401(user),
+        tenant_id=_current_tenant_or_400(user),
+        page=page,
+        page_size=page_size,
+    )
+    return PaymentSubmissionList.model_validate({**result, "page": page, "page_size": page_size})
+
+
+@tenant_router.post(
+    "/payment-submissions",
+    response_model=PaymentSubmissionCommandResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_tenant_payment_submission(
+    payload: PaymentSubmissionCreate,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_tenant_permission("billing.payment_submission.create")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PaymentSubmissionCommandResult:
+    _set_financial_no_store(response)
+    record = await service.create_tenant_payment_submission(
+        actor_user_id=user.user_id,
+        actor_session_id=_tenant_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=_current_tenant_or_400(user),
+        target_invoice_id=payload.target_invoice_id,
+        amount=payload.amount,
+        paid_at=payload.paid_at,
+        external_reference=payload.external_reference,
+    )
+    return PaymentSubmissionCommandResult(
+        item=PaymentSubmissionRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@tenant_router.post(
+    "/payment-submissions/{submission_id}/withdraw",
+    response_model=PaymentSubmissionCommandResult,
+)
+async def withdraw_tenant_payment_submission(
+    submission_id: UUID,
+    payload: PaymentSubmissionWithdraw,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_tenant_permission("billing.payment_submission.withdraw")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PaymentSubmissionCommandResult:
+    _set_financial_no_store(response)
+    record = await service.withdraw_tenant_payment_submission(
+        actor_user_id=user.user_id,
+        actor_session_id=_tenant_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=_current_tenant_or_400(user),
+        submission_id=submission_id,
+        expected_row_version=payload.expected_row_version,
+    )
+    return PaymentSubmissionCommandResult(
+        item=PaymentSubmissionRead.model_validate(record.result),
+        applied=record.applied,
+    )
 
 
 @tenant_router.get("/invoices/{invoice_id}", response_model=InvoiceWithPayments)
@@ -596,6 +697,122 @@ async def issue_subscription_invoice(
     )
 
 
+@platform_router.get(
+    "/tenants/{tenant_id}/payment-submissions",
+    response_model=PlatformPaymentSubmissionQueue,
+)
+async def list_platform_payment_submissions(
+    tenant_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.review")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> PlatformPaymentSubmissionQueue:
+    _set_financial_no_store(response)
+    queue = await service.list_platform_payment_submissions(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        tenant_id=tenant_id,
+        page=page,
+        page_size=page_size,
+    )
+    return PlatformPaymentSubmissionQueue.model_validate(
+        {**queue, "page": page, "page_size": page_size}
+    )
+
+
+@platform_router.get(
+    "/tenants/{tenant_id}/payment-submissions/{submission_id}",
+    response_model=PlatformPaymentSubmissionDetail,
+)
+async def read_platform_payment_submission(
+    tenant_id: UUID,
+    submission_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.review")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PlatformPaymentSubmissionDetail:
+    _set_financial_no_store(response)
+    item = await service.read_platform_payment_submission(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        tenant_id=tenant_id,
+        submission_id=submission_id,
+    )
+    return PlatformPaymentSubmissionDetail.model_validate(item)
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/payment-submissions/{submission_id}/review",
+    response_model=BankPaymentReviewCommandResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def promote_payment_submission_to_review(
+    tenant_id: UUID,
+    submission_id: UUID,
+    payload: PlatformPaymentSubmissionReview,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.review")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BankPaymentReviewCommandResult:
+    _set_financial_no_store(response)
+    record = await service.promote_payment_submission_to_review(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        submission_id=submission_id,
+        expected_row_version=payload.expected_row_version,
+        recipient_account_key=payload.recipient_account_key,
+    )
+    return BankPaymentReviewCommandResult(
+        item=BankPaymentReviewRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/payment-submissions/{submission_id}/reject",
+    response_model=PaymentSubmissionCommandResult,
+)
+async def reject_platform_payment_submission(
+    tenant_id: UUID,
+    submission_id: UUID,
+    payload: PlatformPaymentSubmissionReject,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.review")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> PaymentSubmissionCommandResult:
+    _set_financial_no_store(response)
+    record = await service.reject_platform_payment_submission(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        submission_id=submission_id,
+        expected_row_version=payload.expected_row_version,
+        reason_code=payload.reason_code,
+        reason_note=payload.reason_note,
+    )
+    return PaymentSubmissionCommandResult(
+        item=PaymentSubmissionRead.model_validate(record.result),
+        applied=record.applied,
+    )
+
+
 @platform_router.post(
     "/tenants/{tenant_id}/payment-reviews",
     response_model=BankPaymentReviewCommandResult,
@@ -653,6 +870,30 @@ async def list_bank_payment_reviews(
         page_size=page_size,
     )
     return BankPaymentApprovalQueue.model_validate({**queue, "page": page, "page_size": page_size})
+
+
+@platform_router.get(
+    "/tenants/{tenant_id}/payment-reviews/{review_id}",
+    response_model=BankPaymentApprovalDetail,
+)
+async def read_bank_payment_review(
+    tenant_id: UUID,
+    review_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_recent_platform_capability("platform.billing.payment.approve")),
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> BankPaymentApprovalDetail:
+    _set_financial_no_store(response)
+    item = await service.read_platform_payment_review(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        tenant_id=tenant_id,
+        review_id=review_id,
+    )
+    return BankPaymentApprovalDetail.model_validate(item)
 
 
 @platform_router.get(

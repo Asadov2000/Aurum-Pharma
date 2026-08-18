@@ -62,8 +62,12 @@ async def _prepare_trial_context(
     await db_session.refresh(subscription)
 
 
-async def _platform_identity(db_session: AsyncSession) -> tuple[AppUser, str]:
-    user = await create_test_platform_user(db_session, access_kind="developer")
+async def _platform_identity(
+    db_session: AsyncSession,
+    *,
+    access_kind: str = "developer",
+) -> tuple[AppUser, str]:
+    user = await create_test_platform_user(db_session, access_kind=access_kind)
     return user, await create_support_access_token(db_session, user)
 
 
@@ -72,14 +76,16 @@ async def _publish_new_customer_price(
     client: AsyncClient,
     *,
     activate: bool = True,
+    plan_code: str = "aurum_pharma",
+    access_kind: str = "developer",
 ) -> str:
-    _, author_token = await _platform_identity(db_session)
+    _, author_token = await _platform_identity(db_session, access_kind=access_kind)
     plan_response = await client.post(
         "/api/v1/admin/billing/plans",
         headers=_headers(author_token),
         json={
             "operation_id": str(uuid4()),
-            "code": "aurum_pharma",
+            "code": plan_code,
             "name": "Aurum Pharma",
             "description": "Версионируемый тариф для первого платного периода.",
         },
@@ -103,7 +109,7 @@ async def _publish_new_customer_price(
     assert draft_response.status_code == 201, draft_response.text
     draft = draft_response.json()["item"]
 
-    _, approver_token = await _platform_identity(db_session)
+    _, approver_token = await _platform_identity(db_session, access_kind=access_kind)
     scheduled_response = await client.post(
         f"/api/v1/admin/billing/prices/{draft['price_version_id']}/schedule",
         headers=_headers(approver_token),
