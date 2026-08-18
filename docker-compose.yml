@@ -103,6 +103,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:-aurum_app_pw}
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
+      AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
     volumes:
       - postgres-test-data:/var/lib/postgresql/data
@@ -197,6 +198,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:-aurum_app_pw}
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
+      AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro

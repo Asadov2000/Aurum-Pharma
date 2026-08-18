@@ -184,7 +184,7 @@ export interface PlatformBankPaymentReviewCreate {
   target_invoice_id: string;
   amount: string;
   paid_at: string;
-  recipient_account_key: string;
+  recipient_account_key: "aurum_tjs_primary";
   external_reference: string;
 }
 
@@ -235,6 +235,11 @@ export interface PlatformPaymentApprovalQueue {
   page_size: number;
 }
 
+export interface PlatformPaymentApprovalDetail extends PlatformPaymentApprovalQueueItem {
+  recipient_account_key: "aurum_tjs_primary";
+  external_reference: string;
+}
+
 export interface PlatformBankPaymentApprove {
   operation_id: string;
   expected_row_version: number;
@@ -251,6 +256,61 @@ export type PlatformBankPaymentReviewRejectionReason =
 export interface PlatformBankPaymentReviewReject extends PlatformBankPaymentApprove {
   reason_code: PlatformBankPaymentReviewRejectionReason;
   reason_note: string | null;
+}
+
+export type PlatformPaymentSubmissionStatus =
+  | "submitted"
+  | "under_review"
+  | "approved"
+  | "rejected"
+  | "duplicate"
+  | "withdrawn";
+
+export interface PlatformPaymentSubmissionListItem {
+  submission_id: string;
+  tenant_id: string;
+  target_invoice_id: string;
+  invoice_number: string;
+  amount: string;
+  currency: "TJS";
+  paid_at: string;
+  reference_suffix: string;
+  status: PlatformPaymentSubmissionStatus;
+  row_version: number;
+  created_at: string;
+  decided_at?: string | null;
+  reason_code?: string | null;
+  can_withdraw?: boolean;
+}
+
+export interface PlatformPaymentSubmissionList {
+  items: PlatformPaymentSubmissionListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PlatformPaymentSubmissionDetail extends PlatformPaymentSubmissionListItem {
+  tenant_name: string;
+  external_reference: string;
+}
+
+export interface PlatformPaymentSubmissionReview {
+  operation_id: string;
+  expected_row_version: number;
+  recipient_account_key: "aurum_tjs_primary";
+}
+
+export interface PlatformPaymentSubmissionReject {
+  operation_id: string;
+  expected_row_version: number;
+  reason_code: PlatformBankPaymentReviewRejectionReason;
+  reason_note: string | null;
+}
+
+export interface PlatformPaymentSubmissionCommandResult {
+  item: PlatformPaymentSubmissionListItem;
+  applied: boolean;
 }
 
 export interface PlatformPaymentAllocation {

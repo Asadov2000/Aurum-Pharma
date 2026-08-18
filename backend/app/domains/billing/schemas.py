@@ -441,18 +441,22 @@ class TenantBillingFinancialAccountRead(BaseModel):
         return format(value, "f")
 
 
-class BillingInvoiceCommandResult(BaseModel):
-    item: BillingFinancialInvoiceRead
-    applied: bool
+PaymentSubmissionStatus = Literal[
+    "submitted",
+    "under_review",
+    "approved",
+    "rejected",
+    "duplicate",
+    "withdrawn",
+]
 
 
-class BankPaymentReviewCreate(_StrictBillingCommand):
+class PaymentSubmissionCreate(_StrictBillingCommand):
     operation_id: UUID
     target_invoice_id: UUID
     amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     paid_at: datetime
-    recipient_account_key: str = Field(pattern=r"^[a-z0-9][a-z0-9_.:-]{2,63}$")
-    external_reference: str = Field(min_length=4, max_length=128)
+    external_reference: str = Field(min_length=8, max_length=128)
 
     @field_validator("paid_at")
     @classmethod
@@ -466,8 +470,131 @@ class BankPaymentReviewCreate(_StrictBillingCommand):
     def _normalize_external_reference(cls, value: str) -> str:
         normalized = unicodedata.normalize("NFKC", value).strip().upper()
         normalized = re.sub(r"[\s\-_/]+", "", normalized)
-        if not re.fullmatch(r"[A-Z0-9]{4,128}", normalized):
-            raise ValueError("external_reference must normalize to 4-128 Latin letters or digits")
+        if not re.fullmatch(r"[A-Z0-9]{8,128}", normalized):
+            raise ValueError("external_reference must normalize to 8-128 Latin letters or digits")
+        return normalized
+
+
+class PaymentSubmissionWithdraw(_StrictBillingCommand):
+    operation_id: UUID
+    expected_row_version: int = Field(ge=1)
+
+
+class PaymentSubmissionRead(BaseModel):
+    submission_id: UUID
+    tenant_id: UUID
+    target_invoice_id: UUID
+    invoice_number: str
+    amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    reference_suffix: str = Field(min_length=4, max_length=4)
+    status: PaymentSubmissionStatus
+    row_version: int = Field(ge=1)
+    created_at: datetime
+    decided_at: datetime | None = None
+    reason_code: str | None = None
+    can_withdraw: bool = False
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class PaymentSubmissionCommandResult(BaseModel):
+    item: PaymentSubmissionRead
+    applied: bool
+
+
+class PaymentSubmissionList(BaseModel):
+    items: list[PaymentSubmissionRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class PlatformPaymentSubmissionQueueItem(BaseModel):
+    submission_id: UUID
+    tenant_id: UUID
+    tenant_name: str
+    target_invoice_id: UUID
+    invoice_number: str
+    amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    reference_suffix: str = Field(min_length=4, max_length=4)
+    status: Literal["submitted"]
+    row_version: int = Field(ge=1)
+    created_at: datetime
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, "f")
+
+
+class PlatformPaymentSubmissionQueue(BaseModel):
+    items: list[PlatformPaymentSubmissionQueueItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class PlatformPaymentSubmissionDetail(PlatformPaymentSubmissionQueueItem):
+    external_reference: str
+
+
+class PlatformPaymentSubmissionReview(_StrictBillingCommand):
+    operation_id: UUID
+    expected_row_version: int = Field(ge=1)
+    recipient_account_key: Literal["aurum_tjs_primary"]
+
+
+class PlatformPaymentSubmissionReject(PaymentSubmissionWithdraw):
+    reason_code: Literal[
+        "bank_payment_not_found",
+        "amount_mismatch",
+        "date_mismatch",
+        "duplicate",
+        "wrong_tenant_or_invoice",
+        "other",
+    ]
+    reason_note: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _validate_reason_note(self) -> PlatformPaymentSubmissionReject:
+        self.reason_note = self.reason_note.strip() if self.reason_note else None
+        if self.reason_code == "other" and (self.reason_note is None or len(self.reason_note) < 10):
+            raise ValueError("reason_note must contain at least 10 characters for other")
+        return self
+
+
+class BillingInvoiceCommandResult(BaseModel):
+    item: BillingFinancialInvoiceRead
+    applied: bool
+
+
+class BankPaymentReviewCreate(_StrictBillingCommand):
+    operation_id: UUID
+    target_invoice_id: UUID
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    paid_at: datetime
+    recipient_account_key: Literal["aurum_tjs_primary"]
+    external_reference: str = Field(min_length=8, max_length=128)
+
+    @field_validator("paid_at")
+    @classmethod
+    def _normalize_paid_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("paid_at must include a timezone")
+        return value.astimezone(UTC)
+
+    @field_validator("external_reference")
+    @classmethod
+    def _normalize_external_reference(cls, value: str) -> str:
+        normalized = unicodedata.normalize("NFKC", value).strip().upper()
+        normalized = re.sub(r"[\s\-_/]+", "", normalized)
+        if not re.fullmatch(r"[A-Z0-9]{8,128}", normalized):
+            raise ValueError("external_reference must normalize to 8-128 Latin letters or digits")
         return normalized
 
 
@@ -518,6 +645,11 @@ class BankPaymentApprovalQueue(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class BankPaymentApprovalDetail(BankPaymentApprovalQueueItem):
+    recipient_account_key: Literal["aurum_tjs_primary"]
+    external_reference: str = Field(min_length=8, max_length=128)
 
 
 class BankPaymentApprove(_StrictBillingCommand):

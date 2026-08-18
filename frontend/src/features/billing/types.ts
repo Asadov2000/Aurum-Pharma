@@ -156,3 +156,53 @@ export interface TenantFinancialAccount {
   invoices: TenantFinancialInvoice[];
   payments: TenantBillingPayment[];
 }
+
+export type TenantPaymentSubmissionStatus =
+  | "submitted"
+  | "under_review"
+  | "approved"
+  | "rejected"
+  | "duplicate"
+  | "withdrawn";
+
+export interface TenantPaymentSubmission {
+  submission_id: string;
+  tenant_id: string;
+  target_invoice_id: string;
+  invoice_number: string;
+  amount: string;
+  currency: "TJS";
+  paid_at: string;
+  reference_suffix: string;
+  status: TenantPaymentSubmissionStatus;
+  row_version: number;
+  created_at: string;
+  decided_at?: string | null;
+  reason_code?: string | null;
+  can_withdraw?: boolean;
+}
+
+export interface TenantPaymentSubmissionList {
+  items: TenantPaymentSubmission[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface TenantPaymentSubmissionCreate {
+  operation_id: string;
+  target_invoice_id: string;
+  amount: string;
+  paid_at: string;
+  external_reference: string;
+}
+
+export interface TenantPaymentSubmissionWithdraw {
+  operation_id: string;
+  expected_row_version: number;
+}
+
+export interface TenantPaymentSubmissionCommandResult {
+  item: TenantPaymentSubmission;
+  applied: boolean;
+}

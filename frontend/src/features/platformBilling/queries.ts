@@ -9,16 +9,21 @@ import {
   createPlatformPaymentAdjustment,
   createPlatformPricingPlan,
   createPlatformPricingPrice,
+  getPlatformPaymentApprovalDetail,
+  getPlatformPaymentSubmission,
   getPlatformFinancialAccount,
   getPlatformBillingOverview,
   listPlatformBillingTenants,
   listPlatformInvoices,
   listPlatformPaymentApprovalQueue,
   listPlatformPaymentAdjustmentQueue,
+  listPlatformPaymentSubmissions,
   listPlatformPricingPlans,
   schedulePlatformPricingPrice,
   rejectPlatformBankPaymentReview,
+  rejectPlatformPaymentSubmission,
   rejectPlatformPaymentAdjustment,
+  reviewPlatformPaymentSubmission,
 } from "./api";
 import {
   type PlatformBankPaymentApprove,
@@ -29,6 +34,8 @@ import {
   type PlatformPaymentAdjustmentApprove,
   type PlatformPaymentAdjustmentCreate,
   type PlatformPaymentAdjustmentReject,
+  type PlatformPaymentSubmissionReject,
+  type PlatformPaymentSubmissionReview,
   type PricingActivate,
   type PricingCancel,
   type PricingPlanCreate,
@@ -49,8 +56,14 @@ export const platformBillingKeys = {
     [...platformBillingKeys.all, "v2", "tenants", filters] as const,
   approvalQueue: (tenantId: string, page: number, pageSize: number) =>
     [...platformBillingKeys.all, "v2", "approval-queue", tenantId, page, pageSize] as const,
+  approvalDetail: (tenantId: string, reviewId: string) =>
+    [...platformBillingKeys.all, "v2", "approval-detail", tenantId, reviewId] as const,
   adjustmentQueue: (tenantId: string, page: number, pageSize: number) =>
     [...platformBillingKeys.all, "v2", "adjustment-queue", tenantId, page, pageSize] as const,
+  submissionQueue: (tenantId: string, page: number, pageSize: number) =>
+    [...platformBillingKeys.all, "v2", "submission-queue", tenantId, page, pageSize] as const,
+  submissionDetail: (tenantId: string, submissionId: string) =>
+    [...platformBillingKeys.all, "v2", "submission-detail", tenantId, submissionId] as const,
 };
 
 export function usePlatformBillingOverview(enabled: boolean) {
@@ -116,6 +129,20 @@ export function usePlatformPaymentApprovalQueue(
   });
 }
 
+export function usePlatformPaymentApprovalDetail(
+  tenantId: string,
+  reviewId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: platformBillingKeys.approvalDetail(tenantId, reviewId),
+    queryFn: ({ signal }) => getPlatformPaymentApprovalDetail(tenantId, reviewId, signal),
+    enabled: enabled && tenantId.length > 0 && reviewId.length > 0,
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
 export function usePlatformPaymentAdjustmentQueue(
   tenantId: string,
   page: number,
@@ -128,6 +155,35 @@ export function usePlatformPaymentAdjustmentQueue(
     enabled: enabled && tenantId.length > 0,
     placeholderData: keepPreviousData,
     staleTime: 5_000,
+  });
+}
+
+export function usePlatformPaymentSubmissions(
+  tenantId: string,
+  page: number,
+  pageSize: number,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: platformBillingKeys.submissionQueue(tenantId, page, pageSize),
+    queryFn: ({ signal }) => listPlatformPaymentSubmissions(tenantId, page, pageSize, signal),
+    enabled: enabled && tenantId.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 5_000,
+  });
+}
+
+export function usePlatformPaymentSubmissionDetail(
+  tenantId: string,
+  submissionId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: platformBillingKeys.submissionDetail(tenantId, submissionId),
+    queryFn: ({ signal }) => getPlatformPaymentSubmission(tenantId, submissionId, signal),
+    enabled: enabled && tenantId.length > 0 && submissionId.length > 0,
+    staleTime: 0,
+    gcTime: 0,
   });
 }
 
@@ -204,6 +260,9 @@ export function useApprovePlatformBankPayment() {
       payload: PlatformBankPaymentApprove;
     }) => approvePlatformBankPayment(tenantId, reviewId, payload),
     onSuccess: async (_result, variables) => {
+      queryClient.removeQueries({
+        queryKey: platformBillingKeys.approvalDetail(variables.tenantId, variables.reviewId),
+      });
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: platformBillingKeys.financialAccount(variables.tenantId),
@@ -229,8 +288,68 @@ export function useRejectPlatformBankPaymentReview() {
       payload: PlatformBankPaymentReviewReject;
     }) => rejectPlatformBankPaymentReview(tenantId, reviewId, payload),
     onSuccess: async (_result, variables) => {
+      queryClient.removeQueries({
+        queryKey: platformBillingKeys.approvalDetail(variables.tenantId, variables.reviewId),
+      });
       await queryClient.invalidateQueries({
         queryKey: [...platformBillingKeys.all, "v2", "approval-queue", variables.tenantId],
+      });
+    },
+  });
+}
+
+export function useReviewPlatformPaymentSubmission() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      submissionId,
+      payload,
+    }: {
+      tenantId: string;
+      submissionId: string;
+      payload: PlatformPaymentSubmissionReview;
+    }) => reviewPlatformPaymentSubmission(tenantId, submissionId, payload),
+    onSuccess: async (_result, variables) => {
+      queryClient.removeQueries({
+        queryKey: platformBillingKeys.submissionDetail(
+          variables.tenantId,
+          variables.submissionId,
+        ),
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: [...platformBillingKeys.all, "v2", "submission-queue", variables.tenantId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [...platformBillingKeys.all, "v2", "approval-queue", variables.tenantId],
+        }),
+      ]);
+    },
+  });
+}
+
+export function useRejectPlatformPaymentSubmission() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      submissionId,
+      payload,
+    }: {
+      tenantId: string;
+      submissionId: string;
+      payload: PlatformPaymentSubmissionReject;
+    }) => rejectPlatformPaymentSubmission(tenantId, submissionId, payload),
+    onSuccess: async (_result, variables) => {
+      queryClient.removeQueries({
+        queryKey: platformBillingKeys.submissionDetail(
+          variables.tenantId,
+          variables.submissionId,
+        ),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: [...platformBillingKeys.all, "v2", "submission-queue", variables.tenantId],
       });
     },
   });

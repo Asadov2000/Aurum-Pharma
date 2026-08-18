@@ -73,7 +73,7 @@ if ($versionTableExists) {
         throw "Alembic revision ledger must contain exactly one valid revision"
     }
     $currentRevision = [int]$revisionParts[1]
-    if ($currentRevision -lt 1 -or $currentRevision -gt 69) {
+    if ($currentRevision -lt 1 -or $currentRevision -gt 102) {
         throw "Alembic revision is unknown to this release"
     }
 }
@@ -89,6 +89,10 @@ if ($currentRevision -lt 32) {
         Invoke-Checked "Applying support-role migrations through 0029" @(
             "docker", "compose", "--profile", "maintenance", "run", "--rm",
             "migrate", "python", "-m", "app.migrate", "legacy-upgrade", "0029"
+        )
+        Invoke-Checked "Normalizing extension privileges before owner hardening" @(
+            "docker", "compose", "--profile", "maintenance", "run", "--rm",
+            "db-role-bootstrap"
         )
     }
     Invoke-Checked "Applying database-owner hardening through revision 0032" @(

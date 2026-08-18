@@ -3,9 +3,22 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getFinancialAccount = vi.fn();
+const listPaymentSubmissions = vi.fn();
+const createPaymentSubmission = vi.fn();
+const withdrawPaymentSubmission = vi.fn();
+const authState = vi.hoisted(() => ({
+  user: {
+    is_developer: false,
+    support_access: null,
+    permissions: [] as string[],
+  },
+}));
 
 vi.mock("@/features/billing/api", () => ({
   getFinancialAccount: (...args: unknown[]) => getFinancialAccount(...args),
+  listPaymentSubmissions: (...args: unknown[]) => listPaymentSubmissions(...args),
+  createPaymentSubmission: (...args: unknown[]) => createPaymentSubmission(...args),
+  withdrawPaymentSubmission: (...args: unknown[]) => withdrawPaymentSubmission(...args),
   getCurrentSubscription: vi.fn(),
   listInvoices: vi.fn(),
   getInvoice: vi.fn(),
@@ -13,6 +26,10 @@ vi.mock("@/features/billing/api", () => ({
   createSubscription: vi.fn(),
   createInvoice: vi.fn(),
   recordPayment: vi.fn(),
+}));
+
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => authState,
 }));
 
 import { BillingPage } from "@/features/billing/BillingPage";
@@ -83,14 +100,35 @@ const ACCOUNT = {
   payments: [],
 };
 
+const SUBMISSION = {
+  submission_id: "submission-1",
+  tenant_id: "tenant-1",
+  target_invoice_id: INVOICE.invoice_id,
+  invoice_number: INVOICE.invoice_number,
+  amount: "1100.00",
+  currency: "TJS" as const,
+  paid_at: "2026-05-20T08:30:00Z",
+  reference_suffix: "0125",
+  status: "submitted" as const,
+  row_version: 1,
+  created_at: "2026-05-20T08:31:00Z",
+  can_withdraw: true,
+};
+
 describe("BillingPage", () => {
   beforeEach(() => {
     getFinancialAccount.mockReset();
+    listPaymentSubmissions.mockReset();
+    createPaymentSubmission.mockReset();
+    withdrawPaymentSubmission.mockReset();
+    authState.user.permissions = [];
+    listPaymentSubmissions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 10 });
     window.localStorage.clear();
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("shows a clear empty state when the subscription is not connected", async () => {
@@ -245,5 +283,98 @@ describe("BillingPage", () => {
 
     await waitFor(() => expect(getFinancialAccount).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("Aurum Pharma")).toBeInTheDocument();
+  });
+
+  it("fully hides create and withdraw actions without tenant permissions", async () => {
+    getFinancialAccount.mockResolvedValueOnce(ACCOUNT);
+    listPaymentSubmissions.mockResolvedValueOnce({
+      items: [SUBMISSION],
+      total: 1,
+      page: 1,
+      page_size: 10,
+    });
+    renderPage();
+
+    expect(await screen.findByText("Заявки об оплате")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Сообщить об оплате" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Отозвать" })).not.toBeInTheDocument();
+  });
+
+  it("submits a bank payment with one stable operation id and clears the reference", async () => {
+    authState.user.permissions = ["billing.payment_submission.create"];
+    getFinancialAccount.mockResolvedValueOnce(ACCOUNT);
+    createPaymentSubmission.mockResolvedValue({ item: SUBMISSION, applied: true });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "88888888-8888-4888-8888-888888888888",
+    );
+    renderPage();
+
+    await screen.findByText("Есть счет, ожидающий оплаты");
+    const createButton = screen.getByRole("button", { name: "Сообщить об оплате" });
+    expect(createButton).toBeEnabled();
+    fireEvent.click(createButton);
+    const reference = "TJ-2026-PRIVATE-0125";
+    const dialog = screen.getByRole("dialog", { name: "Подтверждение банковской оплаты" });
+    fireEvent.change(within(dialog).getByLabelText("Сумма, TJS"), {
+      target: { value: "0" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отправить на проверку" }));
+    expect(await within(dialog).findByText("Сумма должна быть больше нуля")).toBeInTheDocument();
+    expect(createPaymentSubmission).not.toHaveBeenCalled();
+
+    fireEvent.change(within(dialog).getByLabelText("Сумма, TJS"), {
+      target: { value: "1100.00" },
+    });
+    fireEvent.change(screen.getByLabelText("Номер банковской операции"), {
+      target: { value: reference },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Отправить на проверку" }));
+
+    await waitFor(() =>
+      expect(createPaymentSubmission).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation_id: "88888888-8888-4888-8888-888888888888",
+          target_invoice_id: INVOICE.invoice_id,
+          amount: "1100.00",
+          external_reference: reference,
+        }),
+      ),
+    );
+    expect(
+      await screen.findByText("Подтверждение оплаты отправлено в Aurum Pharma."),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(reference);
+  });
+
+  it("withdraws a submitted payment only with the dedicated permission", async () => {
+    authState.user.permissions = ["billing.payment_submission.withdraw"];
+    getFinancialAccount.mockResolvedValueOnce(ACCOUNT);
+    listPaymentSubmissions.mockResolvedValue({
+      items: [SUBMISSION],
+      total: 1,
+      page: 1,
+      page_size: 10,
+    });
+    withdrawPaymentSubmission.mockResolvedValue({
+      item: { ...SUBMISSION, status: "withdrawn", can_withdraw: false },
+      applied: true,
+    });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "99999999-9999-4999-8999-999999999999",
+    );
+    renderPage();
+
+    const withdrawButtons = await screen.findAllByRole("button", { name: "Отозвать" });
+    fireEvent.click(withdrawButtons[0]!);
+    const dialog = screen.getByRole("dialog", { name: "Отозвать заявку" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отозвать" }));
+
+    await waitFor(() =>
+      expect(withdrawPaymentSubmission).toHaveBeenCalledWith("submission-1", {
+        operation_id: "99999999-9999-4999-8999-999999999999",
+        expected_row_version: 1,
+      }),
+    );
+    expect(await screen.findByText("Заявка на подтверждение оплаты отозвана.")).toBeInTheDocument();
   });
 });

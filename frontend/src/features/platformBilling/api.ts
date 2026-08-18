@@ -12,7 +12,13 @@ import {
   type PlatformInvoiceFilters,
   type PlatformInvoiceList,
   type PlatformPaymentApprovalCommandResult,
+  type PlatformPaymentApprovalDetail,
   type PlatformPaymentApprovalQueue,
+  type PlatformPaymentSubmissionCommandResult,
+  type PlatformPaymentSubmissionDetail,
+  type PlatformPaymentSubmissionList,
+  type PlatformPaymentSubmissionReject,
+  type PlatformPaymentSubmissionReview,
   type PlatformPaymentAdjustmentApprovalCommandResult,
   type PlatformPaymentAdjustmentApprove,
   type PlatformPaymentAdjustmentCreate,
@@ -123,6 +129,67 @@ export async function listPlatformPaymentApprovalQueue(
   const { data } = await api.get<PlatformPaymentApprovalQueue>(
     `/admin/billing/tenants/${tenantId}/payment-reviews`,
     { params: { page, page_size: pageSize }, signal },
+  );
+  return data;
+}
+
+export async function getPlatformPaymentApprovalDetail(
+  tenantId: string,
+  reviewId: string,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.get<PlatformPaymentApprovalDetail>(
+    `/admin/billing/tenants/${tenantId}/payment-reviews/${reviewId}`,
+    { signal },
+  );
+  return data;
+}
+
+export async function listPlatformPaymentSubmissions(
+  tenantId: string,
+  page: number,
+  pageSize: number,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.get<PlatformPaymentSubmissionList>(
+    `/admin/billing/tenants/${tenantId}/payment-submissions`,
+    { params: { page, page_size: pageSize }, signal },
+  );
+  return data;
+}
+
+export async function getPlatformPaymentSubmission(
+  tenantId: string,
+  submissionId: string,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.get<PlatformPaymentSubmissionDetail>(
+    `/admin/billing/tenants/${tenantId}/payment-submissions/${submissionId}`,
+    { signal },
+  );
+  return data;
+}
+
+export async function reviewPlatformPaymentSubmission(
+  tenantId: string,
+  submissionId: string,
+  payload: PlatformPaymentSubmissionReview,
+) {
+  const { data } = await api.post<PlatformBankPaymentReviewCommandResult>(
+    `/admin/billing/tenants/${tenantId}/payment-submissions/${submissionId}/review`,
+    payload,
+  );
+  return data;
+}
+
+export async function rejectPlatformPaymentSubmission(
+  tenantId: string,
+  submissionId: string,
+  payload: PlatformPaymentSubmissionReject,
+) {
+  const { data } = await api.post<PlatformPaymentSubmissionCommandResult>(
+    `/admin/billing/tenants/${tenantId}/payment-submissions/${submissionId}/reject`,
+    payload,
   );
   return data;
 }

@@ -318,6 +318,22 @@ GRANT aurum_support TO aurum_migrator
 GRANT aurum_edge_cash_owner TO aurum_migrator
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
 
+-- A database added to an existing cluster does not pass through init.sh.
+-- Normalize the future schema-owner objects here as well so functions never
+-- inherit PostgreSQL's implicit PUBLIC EXECUTE privilege.
+ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
+    REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support;
+ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
+    REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support;
+ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
+    REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support;
+ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
+    REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support;
+ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
+    REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support;
+ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
+    REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support;
+
 SELECT pg_catalog.format(
     'REVOKE %I FROM %I',
     granted.rolname,
@@ -406,6 +422,7 @@ DECLARE
     current_revision TEXT;
     revision_count BIGINT;
     revision_number INTEGER;
+    requires_legacy_schema_owner BOOLEAN := FALSE;
 BEGIN
     IF pg_catalog.to_regclass('public.alembic_version') IS NULL THEN
         -- A fresh database has no revision ledger yet. Legacy migrations
@@ -414,6 +431,7 @@ BEGIN
             'GRANT ALL PRIVILEGES ON DATABASE %I TO aurum_support',
             current_database()
         );
+        requires_legacy_schema_owner := TRUE;
     ELSE
         SELECT pg_catalog.count(*), pg_catalog.min(version_num)
         INTO revision_count, current_revision
@@ -429,7 +447,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 100 THEN
+        IF revision_number < 1 OR revision_number > 102 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -443,7 +461,15 @@ BEGIN
                 'GRANT ALL PRIVILEGES ON DATABASE %I TO aurum_support',
                 current_database()
             );
+            requires_legacy_schema_owner := TRUE;
         END IF;
+    END IF;
+
+    IF requires_legacy_schema_owner THEN
+        ALTER SCHEMA public OWNER TO aurum_support;
+        REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+        GRANT USAGE ON SCHEMA public TO aurum_app;
+        GRANT ALL ON SCHEMA public TO aurum_support;
     END IF;
 END
 $$;
