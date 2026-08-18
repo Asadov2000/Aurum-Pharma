@@ -1212,6 +1212,61 @@ def _secure_table(table: str) -> None:
         """)
 
 
+def _grant_missing_reference_privileges() -> None:
+    op.execute("""
+        CREATE TEMPORARY TABLE aurum_0101_missing_reference_privilege (
+          table_name TEXT PRIMARY KEY
+        ) ON COMMIT DROP
+        """)
+    op.execute("""
+        DO $$
+        DECLARE
+          target_table TEXT;
+        BEGIN
+          FOREACH target_table IN ARRAY ARRAY[
+            'app_user', 'tenant', 'billing_invoice',
+            'billing_payment_review', 'billing_financial_operation'
+          ]
+          LOOP
+            IF NOT pg_catalog.has_table_privilege(
+              'aurum_schema_owner',
+              pg_catalog.format('public.%I', target_table),
+              'REFERENCES'
+            ) THEN
+              INSERT INTO pg_temp.aurum_0101_missing_reference_privilege(table_name)
+              VALUES (target_table);
+              EXECUTE pg_catalog.format(
+                'GRANT REFERENCES ON TABLE public.%I TO aurum_schema_owner',
+                target_table
+              );
+            END IF;
+          END LOOP;
+        END
+        $$
+        """)
+
+
+def _restore_reference_privileges() -> None:
+    op.execute("""
+        DO $$
+        DECLARE
+          target_table TEXT;
+        BEGIN
+          FOR target_table IN
+            SELECT table_name
+            FROM pg_temp.aurum_0101_missing_reference_privilege
+          LOOP
+            EXECUTE pg_catalog.format(
+              'REVOKE REFERENCES ON TABLE public.%I FROM aurum_schema_owner',
+              target_table
+            );
+          END LOOP;
+        END
+        $$
+        """)
+    op.execute("DROP TABLE pg_temp.aurum_0101_missing_reference_privilege")
+
+
 def _seed_permissions() -> None:
     for code, name, description in TENANT_PERMISSIONS:
         op.execute(f"""
@@ -1254,6 +1309,7 @@ def _seed_permissions() -> None:
 
 
 def upgrade() -> None:
+    _grant_missing_reference_privileges()
     _seed_permissions()
     op.execute("""
         ALTER TABLE public.billing_financial_operation
@@ -1596,6 +1652,7 @@ def upgrade() -> None:
     ):
         op.execute(sql)
         _secure_function(signature, grantee="aurum_support")
+    _restore_reference_privileges()
 
 
 def downgrade() -> None:
