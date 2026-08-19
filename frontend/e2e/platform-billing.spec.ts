@@ -27,6 +27,7 @@ test("platform billing workspace remains read-only and usable on desktop and tou
     await expect(
       page.getByRole("heading", { level: 1, name: "Расчёты Aurum", exact: true }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Архив прежних счетов" }).click();
     await expect(page.getByText("Только чтение")).toBeVisible();
     await expect(page.getByRole("button", { name: /подтвердить оплату/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /создать счёт/i })).toHaveCount(0);
@@ -38,6 +39,7 @@ test("platform billing workspace remains read-only and usable on desktop and tou
   });
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+  await page.getByRole("button", { name: "Архив прежних счетов" }).click();
 
   const search = page.getByRole("searchbox", { name: "Аптека или номер счёта" });
   const searchBounds = await search.boundingBox();

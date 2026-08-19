@@ -1,8 +1,6 @@
 import {
   type BillingPeriod,
   type FinancialInvoiceDisplayStatus,
-  type InvoiceStatus,
-  type PaymentMethod,
   type SubscriptionStatus,
   type TenantFinancialInvoice,
 } from "./types";
@@ -23,14 +21,6 @@ export const billingPeriodLabel: Record<BillingPeriod, string> = {
   yearly: "Ежегодно",
 };
 
-export const paymentMethodLabel: Record<PaymentMethod, string> = {
-  bank_transfer: "Банковский перевод",
-  card: "Карта",
-  cash: "Наличные",
-};
-
-export const paymentMethodOptions: PaymentMethod[] = ["bank_transfer", "card", "cash"];
-
 export const subscriptionStatusLabel: Record<SubscriptionStatus, string> = {
   trial: "Пробный",
   active: "Активна",
@@ -50,23 +40,6 @@ export const subscriptionStatusTone: Record<
   suspended: "danger",
   cancelled: "neutral",
   archived: "neutral",
-};
-
-export const invoiceStatusLabel: Record<InvoiceStatus, string> = {
-  pending: "Ожидает оплаты",
-  paid: "Оплачен",
-  overdue: "Просрочен",
-  cancelled: "Отменён",
-};
-
-export const invoiceStatusTone: Record<
-  InvoiceStatus,
-  "neutral" | "success" | "warning" | "danger" | "info"
-> = {
-  pending: "info",
-  paid: "success",
-  overdue: "danger",
-  cancelled: "neutral",
 };
 
 export const financialInvoiceStatusLabel: Record<FinancialInvoiceDisplayStatus, string> = {

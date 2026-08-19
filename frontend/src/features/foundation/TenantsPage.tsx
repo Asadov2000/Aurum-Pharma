@@ -22,7 +22,6 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPlatformCapability, PLATFORM_CAPABILITIES } from "@/features/auth/platformCapabilities";
-import { AdminBillingDrawer } from "@/features/billing/AdminBillingDrawer";
 import { SupportAccessForm } from "@/features/supportAccess/SupportAccessForm";
 
 import { describeApiError } from "./errors";
@@ -60,11 +59,9 @@ export function TenantsPage(): JSX.Element {
   const canManageBilling = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingManage);
   const canUseSupport = hasPlatformCapability(user, PLATFORM_CAPABILITIES.supportUse);
   const canCreateTenant = canManageTenants && canCreateOwner;
-  const hasTenantActions =
-    canManageTenants || canManageMembers || canManageBilling || canUseSupport;
+  const hasTenantActions = canManageTenants || canManageMembers || canUseSupport;
   const [editing, setEditing] = useState<Tenant | null>(null);
   const [creating, setCreating] = useState(false);
-  const [billingTenant, setBillingTenant] = useState<Tenant | null>(null);
   const [memberTenant, setMemberTenant] = useState<Tenant | null>(null);
   const [supportTenant, setSupportTenant] = useState<Tenant | null>(null);
   const [supportRequestPending, setSupportRequestPending] = useState(false);
@@ -162,9 +159,6 @@ export function TenantsPage(): JSX.Element {
                           ...(canManageTenants
                             ? [{ label: "Изменить", onSelect: () => setEditing(t) }]
                             : []),
-                          ...(canManageBilling
-                            ? [{ label: "Биллинг", onSelect: () => setBillingTenant(t) }]
-                            : []),
                           ...(t.status !== "archived" && canUseSupport
                             ? [
                                 {
@@ -213,13 +207,6 @@ export function TenantsPage(): JSX.Element {
           }}
         />
       </Modal>
-      {billingTenant && (
-        <AdminBillingDrawer
-          tenantId={billingTenant.id}
-          tenantName={billingTenant.name}
-          onClose={() => setBillingTenant(null)}
-        />
-      )}
       <Modal
         open={memberTenant !== null}
         onClose={() => setMemberTenant(null)}

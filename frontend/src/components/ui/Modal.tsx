@@ -120,9 +120,8 @@ export function Modal({
     >
       <div
         className={cn(
-          // max-h + flex-column lets the body scroll on tall content
-          // (e.g. AdminBillingDrawer's 3 stacked forms) while keeping
-          // the header pinned to the top.
+          // max-h + flex-column keeps long modal bodies scrollable while the
+          // header remains pinned to the top.
           "flex max-h-[calc(100dvh-1rem)] w-full max-w-lg flex-col rounded-t-lg border border-border bg-surface-raised shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-lg",
           className,
         )}

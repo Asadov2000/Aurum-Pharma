@@ -141,20 +141,6 @@ class BillingRepository:
 
     # -------- invoices --------
 
-    async def next_invoice_number(self) -> str:
-        """Sequential global counter. Total rows + 1, padded to 8 digits."""
-        stmt = select(func.count()).select_from(Invoice)
-        result = await self.session.execute(stmt)
-        n = int(result.scalar_one()) + 1
-        return f"INV-{n:08d}"
-
-    async def insert_invoice(self, **fields: Any) -> Invoice:
-        inv = Invoice(**fields)
-        self.session.add(inv)
-        await self.session.flush()
-        await self.session.refresh(inv)
-        return inv
-
     async def get_invoice(self, invoice_id: UUID) -> Invoice | None:
         return await self.session.get(Invoice, invoice_id)
 
@@ -165,30 +151,7 @@ class BillingRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def update_invoice(self, inv: Invoice, **fields: Any) -> Invoice:
-        for k, v in fields.items():
-            setattr(inv, k, v)
-        await self.session.flush()
-        await self.session.refresh(inv)
-        return inv
-
-    async def invoice_exists_for_subscription(self, subscription_id: UUID) -> bool:
-        stmt = (
-            select(func.count())
-            .select_from(Invoice)
-            .where(Invoice.subscription_id == subscription_id)
-        )
-        result = await self.session.execute(stmt)
-        return int(result.scalar_one()) > 0
-
     # -------- payments --------
-
-    async def insert_payment(self, **fields: Any) -> Payment:
-        p = Payment(**fields)
-        self.session.add(p)
-        await self.session.flush()
-        await self.session.refresh(p)
-        return p
 
     async def list_payments_for_invoice(self, invoice_id: UUID) -> list[Payment]:
         stmt = (
@@ -196,13 +159,6 @@ class BillingRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
-
-    async def sum_payments(self, invoice_id: UUID) -> Decimal:
-        stmt = select(func.coalesce(func.sum(Payment.amount), 0)).where(
-            Payment.invoice_id == invoice_id
-        )
-        result = await self.session.execute(stmt)
-        return Decimal(result.scalar_one()).quantize(Decimal("0.01"))
 
     # -------- platform read model --------
 

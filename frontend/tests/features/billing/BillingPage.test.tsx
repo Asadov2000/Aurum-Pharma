@@ -19,13 +19,6 @@ vi.mock("@/features/billing/api", () => ({
   listPaymentSubmissions: (...args: unknown[]) => listPaymentSubmissions(...args),
   createPaymentSubmission: (...args: unknown[]) => createPaymentSubmission(...args),
   withdrawPaymentSubmission: (...args: unknown[]) => withdrawPaymentSubmission(...args),
-  getCurrentSubscription: vi.fn(),
-  listInvoices: vi.fn(),
-  getInvoice: vi.fn(),
-  listPlans: vi.fn().mockResolvedValue([]),
-  createSubscription: vi.fn(),
-  createInvoice: vi.fn(),
-  recordPayment: vi.fn(),
 }));
 
 vi.mock("@/features/auth/hooks", () => ({

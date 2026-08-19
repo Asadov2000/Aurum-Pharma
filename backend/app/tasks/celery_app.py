@@ -50,10 +50,6 @@ celery_app.conf.beat_schedule = {
         "task": "foundation.auto_start_trials",
         "schedule": crontab(minute=0, hour=4),
     },
-    "billing-generate-monthly-invoices": {
-        "task": "billing.generate_monthly_invoices",
-        "schedule": crontab(minute=0, hour=5),
-    },
     "billing-process-trial-endings": {
         "task": "billing.process_trial_endings",
         "schedule": crontab(minute=0, hour=6),

@@ -48,10 +48,8 @@ from app.domains.billing.schemas import (
     BillingPaymentAdjustmentRequestRead,
     BillingPaymentApprovalCommandResult,
     BillingPaymentApprovalRead,
-    InvoiceCreate,
     InvoiceRead,
     InvoiceWithPayments,
-    PaymentCreate,
     PaymentRead,
     PaymentSubmissionCommandResult,
     PaymentSubmissionCreate,
@@ -78,11 +76,9 @@ from app.domains.billing.schemas import (
     PricingPlanCreate,
     PricingPriceDraftCreate,
     PricingSchedule,
-    SubscriptionCreate,
     SubscriptionPriceApplicationCommandResult,
     SubscriptionPriceApplicationCreate,
     SubscriptionPriceApplicationRead,
-    SubscriptionRead,
     SubscriptionWithPlan,
     TenantBillingFinancialAccountRead,
 )
@@ -615,27 +611,6 @@ async def list_platform_billing_invoices(
 
 
 @admin_router.post(
-    "/{tenant_id}/subscription",
-    response_model=SubscriptionRead,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_recent_platform_capability("platform.billing.manage"))],
-)
-async def create_subscription(
-    tenant_id: UUID,
-    payload: SubscriptionCreate,
-    service: Annotated[BillingService, Depends(_service)],
-) -> SubscriptionRead:
-    sub = await service.create_subscription(
-        tenant_id=tenant_id,
-        plan_id=payload.plan_id,
-        billing_period=payload.billing_period,
-        branches_count=payload.branches_count,
-        status="active",
-    )
-    return SubscriptionRead.model_validate(sub)
-
-
-@admin_router.post(
     "/{tenant_id}/subscriptions/{subscription_id}/price-applications/initial",
     response_model=SubscriptionPriceApplicationCommandResult,
     status_code=status.HTTP_201_CREATED,
@@ -1104,54 +1079,3 @@ async def reject_payment_adjustment(
         item=BillingPaymentAdjustmentRejectionRead.model_validate(record.result),
         applied=record.applied,
     )
-
-
-@admin_router.post(
-    "/{tenant_id}/invoices",
-    response_model=InvoiceRead,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_recent_platform_capability("platform.billing.manage"))],
-)
-async def create_invoice(
-    tenant_id: UUID,
-    payload: InvoiceCreate,
-    service: Annotated[BillingService, Depends(_service)],
-) -> InvoiceRead:
-    inv = await service.create_invoice(
-        tenant_id=tenant_id,
-        subscription_id=payload.subscription_id,
-        amount=payload.amount,
-        due_in_days=payload.due_in_days,
-        notes=payload.notes,
-        discount_amount=payload.discount_amount,
-        discount_reason=payload.discount_reason,
-    )
-    return InvoiceRead.model_validate(inv)
-
-
-@admin_router.post(
-    "/{tenant_id}/invoices/{invoice_id}/payments",
-    response_model=PaymentRead,
-    status_code=status.HTTP_201_CREATED,
-)
-async def record_payment(
-    tenant_id: UUID,
-    invoice_id: UUID,
-    payload: PaymentCreate,
-    user: Annotated[
-        CurrentUser,
-        Depends(require_recent_platform_capability("platform.billing.manage")),
-    ],
-    service: Annotated[BillingService, Depends(_service)],
-) -> PaymentRead:
-    payment = await service.record_payment(
-        tenant_id=tenant_id,
-        invoice_id=invoice_id,
-        amount=payload.amount,
-        paid_at=payload.paid_at,
-        method=payload.method,
-        reference=payload.reference,
-        notes=payload.notes,
-        recorded_by=user.user_id,
-    )
-    return PaymentRead.model_validate(payment)

@@ -24,10 +24,8 @@ CRUD_TABLES = {
     "catalog_import_job",
     "incoming_document",
     "incoming_item",
-    "invoice",
     "notification_subscription",
     "onboarding_checklist",
-    "payment",
     "pos_favorite",
     "prescription_log",
     "register",
@@ -68,9 +66,11 @@ READ_ONLY_TABLES = {
     "billing_payment_allocation",
     "billing_subscription_price_application",
     "billing_tenant_credit",
+    "invoice",
     "master_catalog",
     "notification",
     "permission",
+    "payment",
     "register_receipt_counter",
     "role_template",
     "role_template_permission",
@@ -636,6 +636,31 @@ WHERE schemas.nspname = 'public'
 ORDER BY relations.relname, checks.privilege
 """
 
+LEGACY_BILLING_SUPPORT_PRIVILEGES_SQL = """
+SELECT
+  relations.relname,
+  checks.privilege,
+  pg_catalog.has_table_privilege(
+    'aurum_support', relations.oid, checks.privilege
+  ) AS support_has_privilege
+FROM pg_catalog.pg_class AS relations
+JOIN pg_catalog.pg_namespace AS schemas
+  ON schemas.oid = relations.relnamespace
+CROSS JOIN (
+  VALUES
+    ('SELECT'),
+    ('INSERT'),
+    ('UPDATE'),
+    ('DELETE'),
+    ('TRUNCATE'),
+    ('REFERENCES'),
+    ('TRIGGER')
+) AS checks(privilege)
+WHERE schemas.nspname = 'public'
+  AND relations.relname IN ('invoice', 'payment')
+ORDER BY relations.relname, checks.privilege
+"""
+
 EXTENSION_FUNCTION_PRIVILEGES_SQL = """
 SELECT
   extensions.extname,
@@ -827,6 +852,33 @@ async def test_runtime_role_has_only_row_level_table_privileges(
     } == APP_USER_SAFE_COLUMNS
     assert all(row["can_update"] is False for row in app_user_column_privileges)
     _assert_tenant_account_support_privileges(tenant_account_privileges)
+
+
+async def test_support_role_can_only_read_legacy_billing_archive(
+    support_engine_privileges: AsyncEngine,
+) -> None:
+    async with support_engine_privileges.connect() as conn:
+        result = await conn.execute(text(LEGACY_BILLING_SUPPORT_PRIVILEGES_SQL))
+        rows = list(result.mappings())
+
+    actual = {"invoice": set(), "payment": set()}
+    for row in rows:
+        if row["support_has_privilege"]:
+            actual[str(row["relname"])].add(str(row["privilege"]))
+
+    assert actual == {"invoice": {"SELECT"}, "payment": {"SELECT"}}
+
+
+async def test_runtime_roles_cannot_mutate_legacy_billing_archive(
+    app_engine_privileges: AsyncEngine,
+    support_engine_privileges: AsyncEngine,
+) -> None:
+    for engine in (app_engine_privileges, support_engine_privileges):
+        async with engine.connect() as conn:
+            with pytest.raises(DBAPIError) as exc_info:
+                await conn.execute(text("DELETE FROM public.invoice WHERE false"))
+
+        assert getattr(exc_info.value.orig, "sqlstate", None) == "42501"
 
 
 async def test_support_cannot_delete_ownership_history_directly(

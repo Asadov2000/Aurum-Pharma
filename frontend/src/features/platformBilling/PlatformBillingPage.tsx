@@ -38,7 +38,7 @@ import {
 
 const PAGE_SIZE = 20;
 const SEARCH_DELAY_MS = 350;
-type BillingWorkspace = "invoices" | "financial" | "pricing";
+type BillingWorkspace = "financial" | "pricing" | "legacy";
 
 const FinancialWorkspace = lazy(async () => {
   const module = await import("./FinancialWorkspace");
@@ -87,7 +87,7 @@ export function PlatformBillingPage(): JSX.Element {
     PLATFORM_CAPABILITIES.billingAdjustmentApprove,
   );
   const preferenceKey = useFilterPreferenceKey("platform-billing");
-  const [workspace, setWorkspace] = useState<BillingWorkspace>("invoices");
+  const [workspace, setWorkspace] = useState<BillingWorkspace>("financial");
   const [pricingRefreshSignal, setPricingRefreshSignal] = useState(0);
   const [pricingFetching, setPricingFetching] = useState(false);
   const [financialRefreshSignal, setFinancialRefreshSignal] = useState(0);
@@ -116,8 +116,8 @@ export function PlatformBillingPage(): JSX.Element {
     }),
     [page, search, status],
   );
-  const overview = usePlatformBillingOverview(canView && workspace === "invoices");
-  const invoices = usePlatformInvoices(filters, canView && workspace === "invoices");
+  const overview = usePlatformBillingOverview(canView && workspace === "legacy");
+  const invoices = usePlatformInvoices(filters, canView && workspace === "legacy");
 
   useEffect(() => {
     const total = invoices.data?.total;
@@ -159,9 +159,9 @@ export function PlatformBillingPage(): JSX.Element {
     <div className="space-y-4">
       <PageHeader
         title="Расчёты Aurum"
-        description="Состояние подписок и счетов аптек"
+        description="Защищённый журнал, платежи и тарифы аптек"
         meta={
-          workspace === "invoices" && overview.data ? (
+          workspace === "legacy" && overview.data ? (
             <>данные на {formatDateTime(overview.data.generated_at)}</>
           ) : undefined
         }
@@ -188,9 +188,9 @@ export function PlatformBillingPage(): JSX.Element {
         onChange={setWorkspace}
         label="Раздел расчётов Aurum"
         options={[
-          { value: "invoices", label: "Сводка и счета" },
           { value: "financial", label: "Клиенты и оплаты" },
           { value: "pricing", label: "Тарифы и цены" },
+          { value: "legacy", label: "Архив прежних счетов" },
         ]}
         className="w-full sm:w-auto"
       />
@@ -259,8 +259,7 @@ function InvoiceWorkspace({
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-info/25 bg-info-subtle px-3 py-2 text-sm text-info-foreground">
         <Badge tone="info">Только чтение</Badge>
         <span>
-          Предварительная сводка текущих счетов. Финансовые решения отключены до перехода на
-          защищённый журнал.
+          Архив прежнего контура сохранён для сверки. Новые счета и оплаты здесь не создаются.
         </span>
       </div>
 
@@ -294,7 +293,7 @@ function InvoiceWorkspace({
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 id="platform-invoices-heading" className="text-base font-semibold text-foreground">
-              Реестр счетов
+              Архивный реестр счетов
             </h2>
             <p className="mt-0.5 text-xs text-foreground-muted">
               Поиск не сохраняет финансовые данные в браузере.

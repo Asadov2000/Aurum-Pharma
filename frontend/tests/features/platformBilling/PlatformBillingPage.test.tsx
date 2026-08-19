@@ -322,6 +322,7 @@ describe("PlatformBillingPage", () => {
 
   it("shows a useful read-only summary without financial mutation controls", async () => {
     renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Архив прежних счетов" }));
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Расчёты Aurum" }),
@@ -339,6 +340,7 @@ describe("PlatformBillingPage", () => {
 
   it("sends status and debounced search through the server-side filter contract", async () => {
     renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Архив прежних счетов" }));
     await screen.findByText("Только чтение");
 
     fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "paid" } });
@@ -360,6 +362,7 @@ describe("PlatformBillingPage", () => {
   it("keeps the invoice error independent from the summary and retries only the register", async () => {
     listPlatformInvoices.mockRejectedValueOnce(new Error("network unavailable"));
     renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Архив прежних счетов" }));
 
     expect(await screen.findByText("740,00 TJS")).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить счета");
