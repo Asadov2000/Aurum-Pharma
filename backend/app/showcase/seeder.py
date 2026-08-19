@@ -21,12 +21,7 @@ from sqlalchemy.sql.selectable import FromClause
 from app.core.security import hash_password
 from app.core.time import utc_now
 from app.domains.auth.models import AppUser
-from app.domains.billing.models import (
-    Invoice,
-    Payment,
-    SubscriptionPlan,
-    TenantSubscription,
-)
+from app.domains.billing.models import SubscriptionPlan, TenantSubscription
 from app.domains.catalog.models import Barcode, MasterCatalog, TenantCatalog
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
 from app.domains.foundation.repository import FoundationRepository
@@ -2011,7 +2006,6 @@ async def seed_billing(
     session: AsyncSession,
     *,
     tenant_id: UUID,
-    owner_id: UUID,
     branch_count: int,
     today: date,
 ) -> None:
@@ -2046,57 +2040,6 @@ async def seed_billing(
             }
         ],
     )
-
-    invoice_rows: list[Row] = []
-    payment_rows: list[Row] = []
-    for months_ago in range(11, -1, -1):
-        issued_month = _subtract_months(month_start, months_ago)
-        issued_at = _utc_at(issued_month, 9)
-        invoice_id = _uuid(f"billing:invoice:{issued_month:%Y-%m}")
-        is_current = months_ago == 0
-        invoice_rows.append(
-            {
-                "id": invoice_id,
-                "tenant_id": tenant_id,
-                "subscription_id": subscription_id,
-                "invoice_number": f"AP-DEMO-{issued_month:%Y%m}-0001",
-                "issued_at": issued_at,
-                "due_at": issued_at + timedelta(days=10),
-                "amount": amount,
-                "currency": "TJS",
-                "discount_amount": Decimal("0.00"),
-                "discount_reason": None,
-                "status": "overdue" if is_current else "paid",
-                "paid_at": None if is_current else issued_at + timedelta(days=3),
-                "notes": "Демонстрационный счёт Aurum Pharma",
-                "pdf_path": None,
-                "created_at": issued_at,
-                "updated_at": issued_at,
-            }
-        )
-        if not is_current:
-            payment_rows.append(
-                {
-                    "id": _uuid(f"billing:payment:{issued_month:%Y-%m}"),
-                    "tenant_id": tenant_id,
-                    "invoice_id": invoice_id,
-                    "amount": amount,
-                    "currency": "TJS",
-                    "method": "bank_transfer",
-                    "reference": f"DEMO-PAY-{issued_month:%Y%m}",
-                    "paid_at": issued_at + timedelta(days=3),
-                    "recorded_by": owner_id,
-                    "notes": "Оплата за подписку (демонстрационные данные)",
-                    "created_at": issued_at + timedelta(days=3),
-                }
-            )
-    await _bulk_insert(session, Invoice.__table__, invoice_rows)
-    await _bulk_insert(session, Payment.__table__, payment_rows)
-
-
-def _subtract_months(value: date, months: int) -> date:
-    absolute = value.year * 12 + value.month - 1 - months
-    return date(absolute // 12, absolute % 12 + 1, 1)
 
 
 async def seed_notifications(
@@ -2343,7 +2286,6 @@ async def seed_showcase_dataset(
     await seed_billing(
         session,
         tenant_id=tenant.id,
-        owner_id=owner.id,
         branch_count=len(branches),
         today=today,
     )
