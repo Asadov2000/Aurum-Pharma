@@ -41,15 +41,57 @@ def _replace_tenant_foreign_key(*, table: str, on_delete: str) -> None:
     )
 
 
+def _grant_missing_tenant_reference_privilege() -> None:
+    op.execute("""
+        CREATE TEMPORARY TABLE aurum_0103_missing_reference_privilege (
+          table_name TEXT PRIMARY KEY
+        ) ON COMMIT DROP
+        """)
+    op.execute("""
+        DO $$
+        BEGIN
+          IF NOT pg_catalog.has_table_privilege(
+            'aurum_schema_owner', 'public.tenant', 'REFERENCES'
+          ) THEN
+            INSERT INTO pg_temp.aurum_0103_missing_reference_privilege (
+              table_name
+            ) VALUES ('tenant');
+            GRANT REFERENCES ON TABLE public.tenant TO aurum_schema_owner;
+          END IF;
+        END
+        $$
+        """)
+
+
+def _restore_tenant_reference_privilege() -> None:
+    op.execute("""
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1
+            FROM pg_temp.aurum_0103_missing_reference_privilege
+            WHERE table_name = 'tenant'
+          ) THEN
+            REVOKE REFERENCES ON TABLE public.tenant FROM aurum_schema_owner;
+          END IF;
+        END
+        $$
+        """)
+    op.execute("DROP TABLE pg_temp.aurum_0103_missing_reference_privilege")
+
+
 def upgrade() -> None:
+    _grant_missing_tenant_reference_privilege()
     for table in LEGACY_BILLING_TABLES:
         op.execute(f"ALTER TABLE public.{table} OWNER TO aurum_schema_owner")
         _revoke_runtime_access(table)
         op.execute(f"GRANT SELECT ON TABLE public.{table} TO aurum_app, aurum_support")
         _replace_tenant_foreign_key(table=table, on_delete="RESTRICT")
+    _restore_tenant_reference_privilege()
 
 
 def downgrade() -> None:
+    _grant_missing_tenant_reference_privilege()
     for table in LEGACY_BILLING_TABLES:
         _replace_tenant_foreign_key(table=table, on_delete="CASCADE")
         _revoke_runtime_access(table)
@@ -57,3 +99,4 @@ def downgrade() -> None:
             f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.{table} "
             "TO aurum_app, aurum_support"
         )
+    _restore_tenant_reference_privilege()
