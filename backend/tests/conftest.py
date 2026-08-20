@@ -44,6 +44,10 @@ _LOCAL_TEST_DATABASE_URL_MIGRATION = (
 _LOCAL_TEST_DATABASE_URL_MAILER = (
     "postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@postgres-test:5432/aurum_test"
 )
+_LOCAL_TEST_DATABASE_URL_BILLING_WORKER = (
+    "postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@"
+    "postgres-test:5432/aurum_test"
+)
 
 
 def _require_disposable_test_database(url: str, variable_name: str) -> None:
@@ -60,6 +64,10 @@ _test_database_url_migration = os.getenv(
     "TEST_DATABASE_URL_MIGRATION", _LOCAL_TEST_DATABASE_URL_MIGRATION
 )
 _test_database_url_mailer = os.getenv("TEST_DATABASE_URL_MAILER", _LOCAL_TEST_DATABASE_URL_MAILER)
+_test_database_url_billing_worker = os.getenv(
+    "TEST_DATABASE_URL_BILLING_WORKER",
+    _LOCAL_TEST_DATABASE_URL_BILLING_WORKER,
+)
 _require_disposable_test_database(_test_database_url_app, "TEST_DATABASE_URL_APP")
 _require_disposable_test_database(_test_database_url_support, "TEST_DATABASE_URL_SUPPORT")
 _require_disposable_test_database(
@@ -67,6 +75,10 @@ _require_disposable_test_database(
     "TEST_DATABASE_URL_MIGRATION",
 )
 _require_disposable_test_database(_test_database_url_mailer, "TEST_DATABASE_URL_MAILER")
+_require_disposable_test_database(
+    _test_database_url_billing_worker,
+    "TEST_DATABASE_URL_BILLING_WORKER",
+)
 
 # Configure the application before importing it: every engine created during
 # test collection must point at the disposable test database, never shared dev.
@@ -74,6 +86,7 @@ os.environ["DATABASE_URL_APP"] = _test_database_url_app
 os.environ["DATABASE_URL_SUPPORT"] = _test_database_url_support
 os.environ["DATABASE_URL_MIGRATION"] = _test_database_url_migration
 os.environ["DATABASE_URL_MAILER"] = _test_database_url_mailer
+os.environ["DATABASE_URL_BILLING_WORKER"] = _test_database_url_billing_worker
 # Unit and integration tests exercise the production-grade lockout policy even
 # though the rest of the test stack uses ENVIRONMENT=development.
 os.environ["AUTH_LOCAL_TESTING_MODE"] = "false"

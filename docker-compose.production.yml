@@ -73,6 +73,7 @@ services:
       AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
+      AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -84,6 +85,8 @@ services:
         target: AURUM_MIGRATOR_PASSWORD
       - source: aurum_mailer_password
         target: AURUM_MAILER_PASSWORD
+      - source: aurum_billing_worker_password
+        target: AURUM_BILLING_WORKER_PASSWORD
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -205,6 +208,7 @@ services:
       AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
+      AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -216,6 +220,8 @@ services:
         target: AURUM_MIGRATOR_PASSWORD
       - source: aurum_mailer_password
         target: AURUM_MAILER_PASSWORD
+      - source: aurum_billing_worker_password
+        target: AURUM_BILLING_WORKER_PASSWORD
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
     networks:
@@ -322,6 +328,51 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+
+  billing-worker:
+    image: "aurum-pharma-backend:${AURUM_IMAGE_TAG:-local}"
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    environment:
+      ENVIRONMENT: production
+      AURUM_SECRETS_DIR: /run/secrets
+      BILLING_TRANSITION_BATCH_SIZE: "${AURUM_BILLING_TRANSITION_BATCH_SIZE:-100}"
+      PYTHONPATH: /app
+    secrets:
+      - source: database_url_billing_worker
+        target: DATABASE_URL_BILLING_WORKER
+      - source: redis_url
+        target: REDIS_URL
+    networks:
+      - data
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasks.billing_app",
+        "worker",
+        "--loglevel=warning",
+        "--concurrency=${AURUM_BILLING_WORKER_CONCURRENCY:-1}",
+        "--prefetch-multiplier=1",
+        "-Q",
+        "billing-worker",
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    init: true
+    restart: unless-stopped
 
   platform-mailer:
     image: "aurum-pharma-backend:${AURUM_IMAGE_TAG:-local}"
@@ -473,6 +524,8 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_MIGRATOR_PASSWORD"
   aurum_mailer_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_MAILER_PASSWORD"
+  aurum_billing_worker_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_BILLING_WORKER_PASSWORD"
   database_url_app:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_APP"
   database_url_support:
@@ -481,6 +534,8 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_MIGRATION"
   database_url_mailer:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_MAILER"
+  database_url_billing_worker:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_BILLING_WORKER"
   redis_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_PASSWORD"
   redis_url:

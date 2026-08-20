@@ -50,6 +50,7 @@ services:
       AURUM_APP_PASSWORD: "${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}"
       AURUM_SUPPORT_PASSWORD: "${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}"
       AURUM_MAILER_PASSWORD: "${AURUM_DEMO_MAILER_PASSWORD:?AURUM_DEMO_MAILER_PASSWORD is required}"
+      AURUM_BILLING_WORKER_PASSWORD: "${AURUM_DEMO_BILLING_WORKER_PASSWORD:?AURUM_DEMO_BILLING_WORKER_PASSWORD is required}"
       AURUM_MIGRATOR_PASSWORD: "${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -118,6 +119,7 @@ services:
       AURUM_APP_PASSWORD: "${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}"
       AURUM_SUPPORT_PASSWORD: "${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}"
       AURUM_MAILER_PASSWORD: "${AURUM_DEMO_MAILER_PASSWORD:?AURUM_DEMO_MAILER_PASSWORD is required}"
+      AURUM_BILLING_WORKER_PASSWORD: "${AURUM_DEMO_BILLING_WORKER_PASSWORD:?AURUM_DEMO_BILLING_WORKER_PASSWORD is required}"
       AURUM_MIGRATOR_PASSWORD: "${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}"
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
@@ -172,6 +174,36 @@ services:
       - --prefetch-multiplier=1
       - -Q
       - default
+
+  billing-worker:
+    image: aurum-pharma-demo-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aurum-demo-billing-worker
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_BILLING_WORKER: "postgresql+asyncpg://aurum_billing_worker:${AURUM_DEMO_BILLING_WORKER_PASSWORD:?AURUM_DEMO_BILLING_WORKER_PASSWORD is required}@postgres:5432/aurum_demo"
+      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      BILLING_TRANSITION_BATCH_SIZE: "100"
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - celery
+      - -A
+      - app.tasks.billing_app
+      - worker
+      - --loglevel=warning
+      - --concurrency=1
+      - --prefetch-multiplier=1
+      - -Q
+      - billing-worker
+    init: true
+    restart: unless-stopped
 
   platform-mailer:
     image: aurum-pharma-demo-backend:local

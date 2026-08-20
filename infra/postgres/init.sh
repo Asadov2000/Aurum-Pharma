@@ -33,6 +33,7 @@ load_secret() {
 load_secret AURUM_APP_PASSWORD
 load_secret AURUM_SUPPORT_PASSWORD
 load_secret AURUM_MAILER_PASSWORD
+load_secret AURUM_BILLING_WORKER_PASSWORD
 load_secret AURUM_MIGRATOR_PASSWORD
 
 role_contract_sql="${AURUM_ROLE_CONTRACT_SQL:-/docker-entrypoint-initdb.d/role-contract.inc}"
@@ -55,7 +56,8 @@ psql \
     \getenv database_name POSTGRES_DB
 
     REVOKE ALL PRIVILEGES ON DATABASE :"database_name" FROM PUBLIC;
-    GRANT CONNECT ON DATABASE :"database_name" TO aurum_app, aurum_mailer;
+    GRANT CONNECT ON DATABASE :"database_name"
+        TO aurum_app, aurum_mailer, aurum_billing_worker;
     GRANT ALL PRIVILEGES ON DATABASE :"database_name" TO aurum_support;
     GRANT CONNECT ON DATABASE :"database_name" TO aurum_migrator;
     -- Runtime code may use objects in public, but only the migration/support
@@ -81,11 +83,11 @@ psql \
     ALTER DEFAULT PRIVILEGES FOR ROLE aurum_support
         REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app;
     ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
-        REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support;
+        REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
     ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
-        REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support;
+        REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
     ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
-        REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support;
+        REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 
     -- Revision 0030 explicitly grants the minimum privileges for current
     -- objects; revision 0031 verifies future objects remain private.
@@ -104,11 +106,11 @@ psql \
     ALTER DEFAULT PRIVILEGES FOR ROLE aurum_support IN SCHEMA public
         GRANT ALL ON FUNCTIONS TO aurum_support;
     ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
-        REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support;
+        REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
     ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
-        REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support;
+        REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
     ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
-        REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support;
+        REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 
     ALTER DEFAULT PRIVILEGES
         REVOKE ALL ON TABLES FROM PUBLIC, aurum_app;
@@ -142,7 +144,7 @@ psql \
     RESET ROLE;
 
     REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public
-        FROM PUBLIC, aurum_app, aurum_support, aurum_mailer;
+        FROM PUBLIC, aurum_app, aurum_support, aurum_mailer, aurum_billing_worker;
     GRANT EXECUTE ON FUNCTION public.similarity_op(TEXT, TEXT)
         TO aurum_app, aurum_support, aurum_schema_owner;
     GRANT EXECUTE ON FUNCTION public.gen_random_uuid()
@@ -157,4 +159,5 @@ psql \
         TO aurum_support, aurum_schema_owner;
 EOSQL
 
-unset AURUM_APP_PASSWORD AURUM_SUPPORT_PASSWORD AURUM_MAILER_PASSWORD AURUM_MIGRATOR_PASSWORD
+unset AURUM_APP_PASSWORD AURUM_SUPPORT_PASSWORD AURUM_MAILER_PASSWORD \
+    AURUM_BILLING_WORKER_PASSWORD AURUM_MIGRATOR_PASSWORD

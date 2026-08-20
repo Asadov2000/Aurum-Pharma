@@ -30,10 +30,12 @@ jobs:
       DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
       DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
       DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test
+      DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test
+      TEST_DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@localhost:5432/aurum_test
       REDIS_URL: redis://localhost:6379/0
       JWT_SECRET: ci-only-secret-do-not-use-outside-tests-123456
       CORS_ORIGINS: '["http://localhost:5173"]'
@@ -169,6 +171,7 @@ jobs:
             printf %s aurum_support_pw > /tmp/aurum-support-password
             printf %s aurum_migrator_pw > /tmp/aurum-migrator-password
             printf %s aurum_mailer_pw > /tmp/aurum-mailer-password
+            printf %s aurum_billing_worker_pw > /tmp/aurum-billing-worker-password
           '
           docker exec -i \
             -e POSTGRES_HOST=127.0.0.1 \
@@ -180,13 +183,15 @@ jobs:
             -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
             -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
             -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
+            -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
             "$POSTGRES_SERVICE_ID" sh -c '
               unset \
                 POSTGRES_PASSWORD \
                 AURUM_APP_PASSWORD \
                 AURUM_SUPPORT_PASSWORD \
                 AURUM_MIGRATOR_PASSWORD \
-                AURUM_MAILER_PASSWORD
+                AURUM_MAILER_PASSWORD \
+                AURUM_BILLING_WORKER_PASSWORD
               exec sh /tmp/bootstrap-roles.sh
             '
 
@@ -217,13 +222,15 @@ jobs:
               -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
               -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
+              -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
               "$POSTGRES_SERVICE_ID" sh -c '
                 unset \
                   POSTGRES_PASSWORD \
                   AURUM_APP_PASSWORD \
                   AURUM_SUPPORT_PASSWORD \
                   AURUM_MIGRATOR_PASSWORD \
-                  AURUM_MAILER_PASSWORD
+                  AURUM_MAILER_PASSWORD \
+                  AURUM_BILLING_WORKER_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
               '
           }
@@ -604,13 +611,15 @@ jobs:
               -e AURUM_SUPPORT_PASSWORD_FILE=/tmp/aurum-support-password \
               -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
+              -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
               "$POSTGRES_SERVICE_ID" sh -c '
                 unset \
                   POSTGRES_PASSWORD \
                   AURUM_APP_PASSWORD \
                   AURUM_SUPPORT_PASSWORD \
                   AURUM_MIGRATOR_PASSWORD \
-                  AURUM_MAILER_PASSWORD
+                  AURUM_MAILER_PASSWORD \
+                  AURUM_BILLING_WORKER_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
               '
           }
@@ -634,6 +643,7 @@ jobs:
                     'aurum_app',
                     'aurum_edge_cash_executor',
                     'aurum_edge_cash_owner',
+                    'aurum_billing_worker',
                     'aurum_mailer',
                     'aurum_support',
                     'aurum_migrator',
@@ -1007,7 +1017,7 @@ jobs:
           docker compose up -d --build postgres redis minio
           docker compose run --rm db-role-bootstrap
           docker compose run --rm --build migrate
-          docker compose up -d --build backend celery-worker frontend
+          docker compose up -d --build backend celery-worker billing-worker frontend
           docker compose ps
           echo "E2E_POSTGRES_CONTAINER=$(docker compose ps --quiet postgres)" >> "$GITHUB_ENV"
           echo "E2E_REDIS_CONTAINER=$(docker compose ps --quiet redis)" >> "$GITHUB_ENV"
@@ -1049,7 +1059,7 @@ jobs:
         if: failure()
         run: >-
           docker compose logs --no-color --tail=250
-          postgres redis minio backend celery-worker frontend
+          postgres redis minio backend celery-worker billing-worker frontend
 
       - name: Upload Playwright artifacts on failure
         if: failure()
@@ -1118,7 +1128,8 @@ jobs:
               )
 
           hardened = (
-              "backend", "celery-worker", "celery-beat", "platform-mailer", "gateway"
+              "backend", "celery-worker", "billing-worker", "celery-beat",
+              "platform-mailer", "gateway"
           )
           for name in hardened:
               service = model["services"][name]
@@ -1141,10 +1152,12 @@ jobs:
               "AURUM_SUPPORT_PASSWORD",
               "AURUM_MIGRATOR_PASSWORD",
               "AURUM_MAILER_PASSWORD",
+              "AURUM_BILLING_WORKER_PASSWORD",
               "TEST_DATABASE_URL_APP",
               "TEST_DATABASE_URL_SUPPORT",
               "TEST_DATABASE_URL_MIGRATION",
               "TEST_DATABASE_URL_MAILER",
+              "TEST_DATABASE_URL_BILLING_WORKER",
               "MINIO_ROOT_USER",
               "MINIO_ROOT_PASSWORD",
           }
@@ -1157,6 +1170,25 @@ jobs:
                   assert not leaked, (
                       f"{name} receives maintenance environment: {sorted(leaked)}"
                   )
+              billing_environment = set(
+                  compose_model["services"]["billing-worker"].get("environment", {})
+              )
+              forbidden_billing_environment = {
+                  "DATABASE_URL_APP",
+                  "DATABASE_URL_SUPPORT",
+                  "DATABASE_URL_MIGRATION",
+                  "DATABASE_URL_MAILER",
+                  "JWT_SECRET",
+                  "MFA_ENCRYPTION_KEY",
+                  "MINIO_ACCESS_KEY",
+                  "MINIO_SECRET_KEY",
+                  "EMAIL_PASSWORD",
+              }
+              leaked = billing_environment & forbidden_billing_environment
+              assert not leaked, (
+                  "billing-worker receives unrelated credentials: "
+                  f"{sorted(leaked)}"
+              )
 
           forbidden_runtime_secrets = {
               "postgres_password",
@@ -1191,7 +1223,18 @@ jobs:
               "aurum_support_password",
               "aurum_migrator_password",
               "aurum_mailer_password",
+              "aurum_billing_worker_password",
           }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
+
+          billing_worker_secrets = {
+              secret["source"]
+              for secret in model["services"]["billing-worker"].get("secrets", [])
+          }
+          assert billing_worker_secrets == {
+              "database_url_billing_worker",
+              "redis_url",
+          }, f"unexpected billing worker secrets: {sorted(billing_worker_secrets)}"
+          assert set(model["services"]["billing-worker"]["networks"]) == {"data"}
 
           mailer_secrets = {
               secret["source"]

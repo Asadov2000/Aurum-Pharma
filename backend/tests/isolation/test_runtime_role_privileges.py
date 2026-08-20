@@ -278,6 +278,8 @@ CUSTOM_FUNCTIONS = {
     "platform_actor_has_recent_capability",
     "claim_platform_invitation_email",
     "platform_staff_invitation_is_usable",
+    "process_billing_grace_endings",
+    "process_billing_trial_endings",
     "read_platform_billing_financial_account",
     "read_platform_billing_payment_review",
     "read_platform_billing_payment_submission",

@@ -63,6 +63,7 @@ $postgresPassword = New-RandomHex -Bytes 32
 $appPassword = New-RandomHex -Bytes 32
 $supportPassword = New-RandomHex -Bytes 32
 $mailerPassword = New-RandomHex -Bytes 32
+$billingWorkerPassword = New-RandomHex -Bytes 32
 $migratorPassword = New-RandomHex -Bytes 32
 $redisPassword = New-RandomHex -Bytes 32
 $minioRootUser = New-RandomHex -Bytes 10
@@ -85,6 +86,7 @@ Write-Secret -Name "POSTGRES_PASSWORD" -Value $postgresPassword
 Write-Secret -Name "AURUM_APP_PASSWORD" -Value $appPassword
 Write-Secret -Name "AURUM_SUPPORT_PASSWORD" -Value $supportPassword
 Write-Secret -Name "AURUM_MAILER_PASSWORD" -Value $mailerPassword
+Write-Secret -Name "AURUM_BILLING_WORKER_PASSWORD" -Value $billingWorkerPassword
 Write-Secret -Name "AURUM_MIGRATOR_PASSWORD" -Value $migratorPassword
 Write-Secret -Name "DATABASE_URL_APP" -Value (
     "postgresql+asyncpg://aurum_app:{0}@postgres:5432/aurum" -f $appPassword
@@ -94,6 +96,10 @@ Write-Secret -Name "DATABASE_URL_SUPPORT" -Value (
 )
 Write-Secret -Name "DATABASE_URL_MAILER" -Value (
     "postgresql+asyncpg://aurum_mailer:{0}@postgres:5432/aurum" -f $mailerPassword
+)
+Write-Secret -Name "DATABASE_URL_BILLING_WORKER" -Value (
+    "postgresql+asyncpg://aurum_billing_worker:{0}@postgres:5432/aurum" -f `
+        $billingWorkerPassword
 )
 Write-Secret -Name "DATABASE_URL_MIGRATION" -Value (
     "postgresql+asyncpg://aurum_migrator:{0}@postgres:5432/aurum" -f $migratorPassword

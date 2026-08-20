@@ -31,17 +31,15 @@ from app.domains.billing.models import (
 )
 from app.domains.billing.repository import (
     BillingRepository,
+    BillingWorkerRepository,
     PlatformBillingOverview,
     PlatformBillingTenantRecord,
     PlatformInvoiceRecord,
     PlatformPricingCommandRecord,
     PlatformPricingPlanRecord,
 )
-from app.domains.foundation.models import Tenant
 
 logger = structlog.get_logger("billing.service")
-
-GRACE_DAYS = 7
 
 
 def _pricing_error(exc: DBAPIError) -> AurumError:
@@ -856,29 +854,15 @@ class BillingService:
             page_size=page_size,
         )
 
-    # -------- transitions invoked by Celery --------
 
-    async def process_trial_endings(self) -> int:
-        now = utc_now()
-        subs = await self.repo.list_subscriptions_with_period_end_before(status="trial", cutoff=now)
-        for sub in subs:
-            await self.repo.update_subscription(sub, status="grace_period")
-            logger.info("trial_to_grace", subscription_id=str(sub.id))
-        return len(subs)
+class BillingWorkerService:
+    """Runs bounded, retry-safe subscription transitions through DB commands."""
 
-    async def process_grace_endings(self) -> int:
-        """grace_period whose period_end + 7d < now → suspended,
-        and tenant.status='readonly'."""
-        now = utc_now()
-        cutoff = now - timedelta(days=GRACE_DAYS)
-        subs = await self.repo.list_subscriptions_with_period_end_before(
-            status="grace_period", cutoff=cutoff
-        )
-        for sub in subs:
-            await self.repo.update_subscription(sub, status="suspended")
-            tenant = await self.repo.session.get(Tenant, sub.tenant_id)
-            if tenant is not None:
-                tenant.status = "readonly"
-                await self.repo.session.flush()
-            logger.info("grace_to_suspended", subscription_id=str(sub.id))
-        return len(subs)
+    def __init__(self, repo: BillingWorkerRepository) -> None:
+        self.repo = repo
+
+    async def process_trial_endings(self, *, limit: int) -> int:
+        return await self.repo.process_trial_endings(limit=limit)
+
+    async def process_grace_endings(self, *, limit: int) -> int:
+        return await self.repo.process_grace_endings(limit=limit)

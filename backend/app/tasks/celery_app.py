@@ -18,7 +18,6 @@ celery_app = Celery(
         "app.tasks.foundation",
         "app.tasks.roles",
         "app.tasks.catalog",
-        "app.tasks.billing",
         "app.tasks.notifications",
     ],
 )
@@ -34,7 +33,11 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
     task_default_queue="default",
-    task_routes={"platform_accounts.process_invitation_emails": {"queue": "platform-mailer"}},
+    task_routes={
+        "platform_accounts.process_invitation_emails": {"queue": "platform-mailer"},
+        "billing.process_trial_endings": {"queue": "billing-worker"},
+        "billing.process_grace_endings": {"queue": "billing-worker"},
+    },
 )
 
 celery_app.conf.beat_schedule = {
