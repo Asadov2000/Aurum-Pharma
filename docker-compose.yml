@@ -75,6 +75,7 @@ services:
       AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:-aurum_app_pw}
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
+      AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -104,6 +105,7 @@ services:
       AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:-aurum_app_pw}
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
+      AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
     volumes:
       - postgres-test-data:/var/lib/postgresql/data
@@ -199,6 +201,7 @@ services:
       AURUM_APP_PASSWORD: ${AURUM_APP_PASSWORD:-aurum_app_pw}
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
+      AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
@@ -235,6 +238,26 @@ services:
       postgres:
         condition: service_healthy
     command: celery -A app.tasks.celery_app worker --loglevel=info -Q default
+    restart: unless-stopped
+
+  billing-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aurum-billing-worker
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_BILLING_WORKER: ${DATABASE_URL_BILLING_WORKER:-postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@postgres:5432/aurum}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      BILLING_TRANSITION_BATCH_SIZE: ${BILLING_TRANSITION_BATCH_SIZE:-100}
+      PYTHONPATH: /app
+    volumes: *backend-dev-volumes
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: celery -A app.tasks.billing_app worker --loglevel=info -Q billing-worker --concurrency=1
     restart: unless-stopped
 
   platform-mailer:

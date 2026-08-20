@@ -1,6 +1,7 @@
 \getenv app_password AURUM_APP_PASSWORD
 \getenv support_password AURUM_SUPPORT_PASSWORD
 \getenv mailer_password AURUM_MAILER_PASSWORD
+\getenv billing_worker_password AURUM_BILLING_WORKER_PASSWORD
 \getenv migrator_password AURUM_MIGRATOR_PASSWORD
 \getenv database_name POSTGRES_DB
 
@@ -122,6 +123,7 @@ BEGIN
           ON owners.oid = databases.datdba
         WHERE owners.rolname IN (
             'aurum_mailer',
+            'aurum_billing_worker',
             'aurum_edge_cash_executor',
             'aurum_edge_cash_owner'
         )
@@ -134,6 +136,7 @@ BEGIN
           ON owners.oid = tablespaces.spcowner
         WHERE owners.rolname IN (
             'aurum_mailer',
+            'aurum_billing_worker',
             'aurum_edge_cash_executor',
             'aurum_edge_cash_owner'
         )
@@ -148,6 +151,7 @@ BEGIN
           AND schemas.nspname !~ '^pg_'
           AND owners.rolname IN (
               'aurum_mailer',
+              'aurum_billing_worker',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
           )
@@ -166,6 +170,7 @@ BEGIN
           AND schemas.nspname !~ '^pg_'
           AND owners.rolname IN (
               'aurum_mailer',
+              'aurum_billing_worker',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
           )
@@ -182,6 +187,7 @@ BEGIN
           AND schemas.nspname !~ '^pg_'
           AND owners.rolname IN (
               'aurum_mailer',
+              'aurum_billing_worker',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
           )
@@ -200,6 +206,7 @@ BEGIN
           AND schemas.nspname !~ '^pg_'
           AND owners.rolname IN (
               'aurum_mailer',
+              'aurum_billing_worker',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
           )
@@ -230,6 +237,7 @@ BEGIN
       ON grantees.oid = acl.grantee
     WHERE grantees.rolname IN (
         'aurum_mailer',
+        'aurum_billing_worker',
         'aurum_edge_cash_executor',
         'aurum_edge_cash_owner'
     )
@@ -258,6 +266,12 @@ WHERE NOT EXISTS (
 SELECT 'CREATE ROLE aurum_mailer'
 WHERE NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_mailer'
+)
+\gexec
+
+SELECT 'CREATE ROLE aurum_billing_worker'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_billing_worker'
 )
 \gexec
 
@@ -295,6 +309,13 @@ ALTER ROLE aurum_mailer WITH
     LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
     CONNECTION LIMIT 4
     PASSWORD :'mailer_password';
+ALTER ROLE aurum_billing_worker WITH
+    LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    CONNECTION LIMIT 2
+    PASSWORD :'billing_worker_password';
+ALTER ROLE aurum_billing_worker SET statement_timeout = '30s';
+ALTER ROLE aurum_billing_worker SET lock_timeout = '5s';
+ALTER ROLE aurum_billing_worker SET idle_in_transaction_session_timeout = '30s';
 ALTER ROLE aurum_schema_owner WITH
     NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
 ALTER ROLE aurum_migrator WITH
@@ -322,17 +343,17 @@ GRANT aurum_edge_cash_owner TO aurum_migrator
 -- Normalize the future schema-owner objects here as well so functions never
 -- inherit PostgreSQL's implicit PUBLIC EXECUTE privilege.
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
-    REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support;
+    REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
-    REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support;
+    REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
-    REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support;
+    REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
-    REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support;
+    REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
-    REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support;
+    REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
-    REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support;
+    REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 
 SELECT pg_catalog.format(
     'REVOKE %I FROM %I',
@@ -357,9 +378,15 @@ WHERE (
     )
 ) OR (
     granted.rolname = 'aurum_support'
-    AND member.rolname IN ('aurum_app', 'aurum_mailer', 'aurum_edge_cash_executor')
+    AND member.rolname IN (
+        'aurum_app', 'aurum_mailer', 'aurum_billing_worker',
+        'aurum_edge_cash_executor'
+    )
 ) OR (
     granted.rolname = 'aurum_mailer' OR member.rolname = 'aurum_mailer'
+) OR (
+    granted.rolname = 'aurum_billing_worker'
+    OR member.rolname = 'aurum_billing_worker'
 ) OR (
     (
         granted.rolname IN (
@@ -379,9 +406,11 @@ WHERE (
 \gexec
 
 REVOKE ALL PRIVILEGES ON DATABASE :"database_name"
-    FROM PUBLIC, aurum_app, aurum_support, aurum_mailer, aurum_migrator,
+    FROM PUBLIC, aurum_app, aurum_support, aurum_mailer, aurum_billing_worker,
+         aurum_migrator,
          aurum_edge_cash_executor, aurum_edge_cash_owner;
-GRANT CONNECT ON DATABASE :"database_name" TO aurum_app, aurum_mailer, aurum_migrator;
+GRANT CONNECT ON DATABASE :"database_name"
+    TO aurum_app, aurum_mailer, aurum_billing_worker, aurum_migrator;
 
 DO $$
 DECLARE
@@ -395,22 +424,26 @@ BEGIN
     LOOP
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON SCHEMA %I '
-            'FROM aurum_mailer, aurum_edge_cash_executor, aurum_edge_cash_owner',
+            'FROM aurum_mailer, aurum_billing_worker, '
+            'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
         );
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I '
-            'FROM aurum_mailer, aurum_edge_cash_executor, aurum_edge_cash_owner',
+            'FROM aurum_mailer, aurum_billing_worker, '
+            'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
         );
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I '
-            'FROM aurum_mailer, aurum_edge_cash_executor, aurum_edge_cash_owner',
+            'FROM aurum_mailer, aurum_billing_worker, '
+            'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
         );
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA %I '
-            'FROM aurum_mailer, aurum_edge_cash_executor, aurum_edge_cash_owner',
+            'FROM aurum_mailer, aurum_billing_worker, '
+            'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
         );
     END LOOP;
@@ -447,7 +480,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 103 THEN
+        IF revision_number < 1 OR revision_number > 104 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -495,6 +528,7 @@ BEGIN
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON FUNCTION %s '
             'FROM PUBLIC, aurum_app, aurum_support, aurum_mailer, '
+            'aurum_billing_worker, '
             'aurum_edge_cash_executor, aurum_edge_cash_owner',
             extension_function
         );
@@ -517,6 +551,40 @@ BEGIN
             TO aurum_support, aurum_schema_owner;
         GRANT EXECUTE ON FUNCTION public.pgp_sym_decrypt(BYTEA, TEXT, TEXT)
             TO aurum_support, aurum_schema_owner;
+    END IF;
+END
+$$;
+
+DO $$
+DECLARE
+    current_revision TEXT;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_authid
+        WHERE rolname = 'aurum_billing_worker'
+          AND rolcanlogin
+          AND NOT rolinherit
+          AND NOT rolsuper
+          AND NOT rolcreatedb
+          AND NOT rolcreaterole
+          AND NOT rolreplication
+          AND NOT rolbypassrls
+          AND rolconnlimit = 2
+          AND rolpassword IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION 'aurum_billing_worker violates the deny-by-default contract';
+    END IF;
+
+    IF pg_catalog.to_regclass('public.alembic_version') IS NOT NULL THEN
+        SELECT version_num INTO current_revision FROM public.alembic_version;
+        IF current_revision ~ '^[0-9]{4}$' AND current_revision::INTEGER >= 104 THEN
+            GRANT USAGE ON SCHEMA public TO aurum_billing_worker;
+            GRANT EXECUTE ON FUNCTION public.process_billing_trial_endings(INTEGER)
+                TO aurum_billing_worker;
+            GRANT EXECUTE ON FUNCTION public.process_billing_grace_endings(INTEGER)
+                TO aurum_billing_worker;
+        END IF;
     END IF;
 END
 $$;

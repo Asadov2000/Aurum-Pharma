@@ -151,6 +151,7 @@ $requiredServices = @(
     "backend",
     "frontend",
     "celery-worker",
+    "billing-worker",
     "platform-mailer",
     "celery-beat",
     "prometheus"

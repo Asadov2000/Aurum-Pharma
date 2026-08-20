@@ -35,6 +35,27 @@ class PlatformBillingOverview:
     outstanding_amount: Decimal
 
 
+class BillingWorkerRepository:
+    """Only the two DB commands granted to the dedicated worker role."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def process_trial_endings(self, *, limit: int) -> int:
+        moved = await self.session.scalar(
+            text("SELECT public.process_billing_trial_endings(:limit)"),
+            {"limit": limit},
+        )
+        return int(moved or 0)
+
+    async def process_grace_endings(self, *, limit: int) -> int:
+        moved = await self.session.scalar(
+            text("SELECT public.process_billing_grace_endings(:limit)"),
+            {"limit": limit},
+        )
+        return int(moved or 0)
+
+
 @dataclass(frozen=True, slots=True)
 class PlatformInvoiceRecord:
     invoice: Invoice
@@ -123,21 +144,6 @@ class BillingRepository:
         result = await self.session.execute(stmt, {"tid": tenant_id})
         row = result.first()
         return dict(row._mapping) if row is not None else None
-
-    async def list_subscriptions_with_period_end_before(
-        self,
-        *,
-        status: str,
-        cutoff: datetime,
-    ) -> list[TenantSubscription]:
-        stmt = select(TenantSubscription).where(
-            and_(
-                TenantSubscription.status == status,
-                TenantSubscription.period_end < cutoff,
-            )
-        )
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
 
     # -------- invoices --------
 
