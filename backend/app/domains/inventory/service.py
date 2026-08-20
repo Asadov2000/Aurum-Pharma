@@ -6,12 +6,7 @@ Key rules:
   raises BusinessRuleError so the router returns a 422.
 - write_off creates BOTH a write_off row AND a matching batch_movement
   with movement_type='write_off' and qty_delta=-qty.
-- FEFO honours tenant_settings.expired_sale_mode:
-    strict   → expired batches are excluded
-    warning  → expired batches are included; service returns
-               requires_warning=True if any of the chosen batches is past
-               its expiry date
-    off      → expired batches are included like any other
+- FEFO always excludes batches that expire on or before the tenant's local date.
 """
 
 from __future__ import annotations
@@ -52,7 +47,7 @@ class FefoPick:
 class FefoSelection:
     picks: list[FefoPick]
     total_picked: Decimal
-    requires_warning: bool  # True iff any pick is past expiry under 'warning' mode
+    requires_warning: bool  # Compatibility field; always false.
 
 
 class InventoryService:
@@ -295,19 +290,16 @@ class InventoryService:
             except (ValueError, ZoneInfoNotFoundError) as exc:
                 raise AurumError("Tenant report timezone is invalid") from exc
 
-        mode = settings.expired_sale_mode if settings is not None else "strict"
-        include_expired = mode in ("warning", "off")
         candidates = await self.repo.fefo_candidates(
             tenant_id=tenant_id,
             catalog_id=catalog_id,
             branch_id=branch_id,
-            include_expired=include_expired,
+            include_expired=False,
             today=today,
         )
 
         picks: list[FefoPick] = []
         remaining = qty_needed
-        requires_warning = False
         for batch in candidates:
             if remaining <= 0:
                 break
@@ -316,13 +308,9 @@ class InventoryService:
                 continue
             picks.append(FefoPick(batch=batch, qty=take))
             remaining -= take
-            if mode == "warning" and batch.expires_at <= today:
-                requires_warning = True
 
         total_picked = sum((p.qty for p in picks), Decimal("0"))
-        return FefoSelection(
-            picks=picks, total_picked=total_picked, requires_warning=requires_warning
-        )
+        return FefoSelection(picks=picks, total_picked=total_picked, requires_warning=False)
 
     async def _expiry_context(
         self,

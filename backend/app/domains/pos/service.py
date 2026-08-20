@@ -1343,7 +1343,6 @@ class POSService:
         items: list[tuple[UUID, Decimal]],
         payments: list[NormalizedCheckoutPayment],
         prescription: Mapping[str, object] | None,
-        expired_sale_confirmed: bool,
     ) -> str:
         payload = {
             "kind": "sale_checkout_v1",
@@ -1367,7 +1366,6 @@ class POSService:
                 for payment_method, amount, metadata, payment_attempt_id in payments
             ],
             "prescription": dict(prescription) if prescription is not None else None,
-            "expired_sale_confirmed": expired_sale_confirmed,
         }
         try:
             canonical = json.dumps(
@@ -1776,7 +1774,6 @@ class POSService:
             items=aggregated_items,
             payments=normalized_payments,
             prescription=prescription,
-            expired_sale_confirmed=expired_sale_confirmed,
         )
 
         await self.repo.lock_operation_id(operation_id)
@@ -1819,7 +1816,6 @@ class POSService:
                 can_manage_tenant=can_manage_tenant,
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_manage_branch_ids=allowed_manage_branch_ids,
-                expired_sale_confirmed=expired_sale_confirmed,
             )
 
         paid_total = sum(
@@ -1868,7 +1864,6 @@ class POSService:
             can_manage_tenant=can_manage_tenant,
             allowed_branch_ids=allowed_branch_ids,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
-            expired_sale_confirmed=expired_sale_confirmed,
         )
         if (
             completed.receipt_number is None
@@ -2658,7 +2653,10 @@ class POSService:
         today: date | None = None,
         expired_sale_confirmed: bool = False,
     ) -> tuple[list[SaleItem], bool]:
-        """Returns (created items, requires_prescription_log)."""
+        """Returns (created items, requires_prescription_log).
+
+        ``expired_sale_confirmed`` is accepted only for old-client compatibility.
+        """
         sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
@@ -2670,8 +2668,13 @@ class POSService:
         self._assert_draft(sale)
 
         catalog = await self.repo.session.get(TenantCatalog, catalog_id)
-        if catalog is None or catalog.tenant_id != sale.tenant_id:
+        if catalog is None or catalog.tenant_id != sale.tenant_id or catalog.deleted_at is not None:
             raise NotFoundError("Catalog item not found")
+        if not catalog.is_active:
+            raise BusinessRuleError(
+                "Inactive catalog item cannot be sold",
+                details={"reason": "inactive_catalog_item", "catalog_id": str(catalog_id)},
+            )
         self._assert_catalog_dispensing_allowed(catalog)
 
         inventory = InventoryService(InventoryRepository(self.repo.session))
@@ -2690,12 +2693,6 @@ class POSService:
                     "available": str(selection.total_picked),
                 },
             )
-        if selection.requires_warning and not expired_sale_confirmed:
-            raise BusinessRuleError(
-                "Expired stock requires cashier confirmation",
-                details={"reason": "expired_sale_confirmation_required"},
-            )
-
         created: list[SaleItem] = []
         for pick in selection.picks:
             unit_price = pick.batch.sale_price or catalog.base_price or Decimal("0")
@@ -2796,7 +2793,6 @@ class POSService:
                 "sale_id": str(sale_id),
                 "catalog_id": str(catalog_id),
                 "qty": format(qty.normalize(), "f"),
-                "expired_sale_confirmed": expired_sale_confirmed,
             },
         )
         await self.repo.lock_operation_id(operation_id)
@@ -3174,13 +3170,30 @@ class POSService:
     # Complete — the critical path
     # =========================================================================
 
+    async def _lock_sellable_catalogs(self, sale: Sale, items: list[SaleItem]) -> None:
+        catalog_ids = {item.catalog_id for item in items}
+        locked_catalogs = await self.repo.lock_catalog_items(
+            tenant_id=sale.tenant_id,
+            catalog_ids=catalog_ids,
+        )
+        catalog_by_id = {catalog.id: catalog for catalog in locked_catalogs}
+        for catalog_id in sorted(catalog_ids, key=str):
+            catalog = catalog_by_id.get(catalog_id)
+            if catalog is None or catalog.deleted_at is not None:
+                raise NotFoundError("Catalog item disappeared mid-checkout")
+            if not catalog.is_active:
+                raise BusinessRuleError(
+                    "Inactive catalog item cannot be sold",
+                    details={"reason": "inactive_catalog_item", "catalog_id": str(catalog_id)},
+                )
+            self._assert_catalog_dispensing_allowed(catalog)
+
     async def _consume_sale_batches(
         self,
         sale: Sale,
         items: list[SaleItem],
-        *,
-        expired_sale_confirmed: bool,
     ) -> None:
+        await self._lock_sellable_catalogs(sale, items)
         settings = await FoundationRepository(self.repo.session).get_settings_for_pos(
             sale.tenant_id
         )
@@ -3208,20 +3221,11 @@ class POSService:
                     "Batch is blocked at checkout",
                     details={"batch_id": str(batch_id)},
                 )
-            if settings.expired_sale_mode == "strict" and locked.expires_at <= local_today:
+            if locked.expires_at <= local_today:
                 raise BusinessRuleError(
                     "Expired batch cannot be sold",
-                    details={"batch_id": str(batch_id), "expires_at": str(locked.expires_at)},
-                )
-            if (
-                settings.expired_sale_mode == "warning"
-                and locked.expires_at <= local_today
-                and not expired_sale_confirmed
-            ):
-                raise BusinessRuleError(
-                    "Expired stock requires cashier confirmation",
                     details={
-                        "reason": "expired_sale_confirmation_required",
+                        "reason": "expired_batch_blocked",
                         "batch_id": str(batch_id),
                         "expires_at": str(locked.expires_at),
                     },
@@ -3305,11 +3309,7 @@ class POSService:
 
         # Prescription check
         await self._assert_prescriptions_present(sale, items)
-        await self._consume_sale_batches(
-            sale,
-            items,
-            expired_sale_confirmed=expired_sale_confirmed,
-        )
+        await self._consume_sale_batches(sale, items)
 
         receipt_seq, receipt = await self._allocate_receipt(sale.register_id)
         completed_at = self._now()

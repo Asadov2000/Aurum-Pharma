@@ -1,5 +1,5 @@
-"""Foundation domain — tenant, settings, branches, registers."""
+"""Foundation domain — tenant, settings, branches, registers.
 
-from app.domains.foundation.router import admin_router, tenant_router
-
-__all__ = ["admin_router", "tenant_router"]
+The package initializer stays side-effect free so models can be reused by
+least-privilege workers without importing the HTTP application configuration.
+"""

@@ -104,23 +104,16 @@ type ExternalPaymentConfirmation = {
   amount: string;
   attempt: PaymentAttempt;
 };
-type ExpiredItemConfirmation = {
-  catalogId: string;
-  name: string;
-  qty: number;
-  fromScanner: boolean;
-};
-
 function isDefiniteRejection(error: unknown): boolean {
   if (!isAxiosError(error) || error.response === undefined) return false;
   const status = error.response.status;
   return status >= 400 && status < 500 && status !== 408 && status !== 409;
 }
 
-function isExpiryConfirmationRequired(error: unknown): boolean {
+function isExpiredSaleBlocked(error: unknown): boolean {
   if (!isAxiosError(error)) return false;
   const data = error.response?.data as { error?: { details?: { reason?: unknown } } } | undefined;
-  return data?.error?.details?.reason === "expired_sale_confirmation_required";
+  return data?.error?.details?.reason === "expired_batch_blocked";
 }
 
 type PaymentReconciliation = "pending" | "matched" | "conflict" | "settled-elsewhere";
@@ -297,9 +290,6 @@ function ActiveWorkspace({
   const [topError, setTopError] = useState<string | null>(null);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [requiresRx, setRequiresRx] = useState(init.requiresRx);
-  const [expiredSaleConfirmed, setExpiredSaleConfirmed] = useState(
-    init.expiredSaleConfirmed === true,
-  );
   const [prescription, setPrescription] = useState<PrescriptionLogPayload | null>(null);
   const [stagedPayments, setStagedPayments] = useState<StagedPayment[]>(() =>
     init.stagedPayments.map((payment, index) => ({
@@ -324,9 +314,6 @@ function ActiveWorkspace({
   );
   const [externalPaymentConfirmation, setExternalPaymentConfirmation] =
     useState<ExternalPaymentConfirmation | null>(null);
-  const [expiredItemConfirmation, setExpiredItemConfirmation] =
-    useState<ExpiredItemConfirmation | null>(null);
-  const [checkoutExpiryConfirmationOpen, setCheckoutExpiryConfirmationOpen] = useState(false);
   const [paymentPanelVisible, setPaymentPanelVisible] = useState(false);
   const [queuedScans, setQueuedScans] = useState(0);
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
@@ -341,13 +328,10 @@ function ActiveWorkspace({
   const externalPaymentConfirmationRef = useRef<ExternalPaymentConfirmation | null>(null);
   const externalPaymentMutationRef = useRef(false);
   const externalPaymentReviewRef = useRef(externalPaymentReviewRequired);
-  const expiredItemConfirmationRef = useRef<ExpiredItemConfirmation | null>(null);
-  const expiredSaleConfirmedRef = useRef(expiredSaleConfirmed);
   const saleIdRef = useRef<string | null>(saleId);
   const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
   saleIdRef.current = saleId;
   stagedPaymentsRef.current = stagedPayments;
-  expiredSaleConfirmedRef.current = expiredSaleConfirmed;
   externalPaymentReviewRef.current = externalPaymentReviewRequired;
 
   const onPosCommandApplied = useCallback((applied: AppliedPosCommand) => {
@@ -580,8 +564,6 @@ function ActiveWorkspace({
       setStagedPayments([]);
       setPrescription(null);
       setRequiresRx(false);
-      expiredSaleConfirmedRef.current = false;
-      setExpiredSaleConfirmed(false);
       await refetchSale();
       return true;
     },
@@ -634,7 +616,7 @@ function ActiveWorkspace({
         "draft",
         requiresRx,
         stagedPayments,
-        expiredSaleConfirmed,
+        false,
         externalPaymentReviewRequired,
       );
     }
@@ -644,7 +626,6 @@ function ActiveWorkspace({
     registerId,
     requiresRx,
     stagedPayments,
-    expiredSaleConfirmed,
     externalPaymentReviewRequired,
   ]);
 
@@ -767,7 +748,6 @@ function ActiveWorkspace({
     catalogId: string,
     name: string,
     qty: number,
-    expiredConfirmation = false,
     fromScanner = false,
   ): Promise<boolean> => {
     if (fromScanner ? scannerHardwareBlocked : saleEditingBlocked) return false;
@@ -782,24 +762,13 @@ function ActiveWorkspace({
         saleId: id,
         catalogId,
         qty: String(qty),
-        expiredSaleConfirmed: expiredConfirmation,
+        expiredSaleConfirmed: false,
       });
       if (outcome.rejectedError !== undefined) throw outcome.rejectedError;
       if (!outcome.applied) return false;
-      if (expiredConfirmation) {
-        expiredSaleConfirmedRef.current = true;
-        setExpiredSaleConfirmed(true);
-      }
       searchRef.current?.focus();
       return true;
     } catch (err) {
-      if (isExpiryConfirmationRequired(err)) {
-        const confirmation = { catalogId, name, qty, fromScanner };
-        expiredItemConfirmationRef.current = confirmation;
-        setExpiredItemConfirmation(confirmation);
-        setTopError(null);
-        return true;
-      }
       setTopError(describeApiError(err, "Не удалось добавить позицию"));
       return false;
     }
@@ -809,8 +778,7 @@ function ActiveWorkspace({
     setTopError(null);
     try {
       const item = await findByBarcode(code);
-      const added = await onAdd(item.id, item.brand_name, 1, false, true);
-      if (expiredItemConfirmationRef.current !== null) return;
+      const added = await onAdd(item.id, item.brand_name, 1, true);
       if (!added) {
         doFlash("danger");
         return;
@@ -919,7 +887,7 @@ function ActiveWorkspace({
         "draft",
         requiresRx,
         [],
-        expiredSaleConfirmedRef.current,
+        false,
         false,
       )
     ) {
@@ -1074,7 +1042,7 @@ function ActiveWorkspace({
         "draft",
         requiresRx,
         nextPayments,
-        expiredSaleConfirmedRef.current,
+        false,
         externalPaymentReviewRef.current,
       )
     ) {
@@ -1226,30 +1194,6 @@ function ActiveWorkspace({
     }
   };
 
-  const closeExpiredItemConfirmation = () => {
-    expiredItemConfirmationRef.current = null;
-    setExpiredItemConfirmation(null);
-    requestAnimationFrame(() => searchRef.current?.focus());
-  };
-
-  const confirmExpiredItem = async () => {
-    const confirmation = expiredItemConfirmationRef.current;
-    if (!confirmation) return;
-    expiredItemConfirmationRef.current = null;
-    setExpiredItemConfirmation(null);
-    const added = await onAdd(
-      confirmation.catalogId,
-      confirmation.name,
-      confirmation.qty,
-      true,
-      confirmation.fromScanner,
-    );
-    if (confirmation.fromScanner && expiredItemConfirmationRef.current === null) {
-      doFlash(added ? "success" : "danger");
-      if (added && soundOn) beep();
-    }
-  };
-
   const clearStagedPaymentCalculation = async () => {
     if (!saleId || stagedPaymentsRef.current.length === 0) return;
     if (checkoutSale.isPending || checkoutReconciling || pendingCheckout || checkoutUncertain) {
@@ -1287,7 +1231,7 @@ function ActiveWorkspace({
         "draft",
         requiresRx,
         [],
-        expiredSaleConfirmedRef.current,
+        false,
         false,
       )
     ) {
@@ -1394,7 +1338,7 @@ function ActiveWorkspace({
         "draft",
         requiresRx,
         [],
-        expiredSaleConfirmedRef.current,
+        false,
         false,
       )
     ) {
@@ -1419,7 +1363,7 @@ function ActiveWorkspace({
       }
       await completeSale.mutateAsync({
         saleId,
-        expiredSaleConfirmed: expiredSaleConfirmedRef.current,
+        expiredSaleConfirmed: false,
       });
       if (payments.some((payment) => payment.payment_method === "cash")) {
         requestDesktopCashDrawerOpen({
@@ -1431,12 +1375,7 @@ function ActiveWorkspace({
       persistCompletedReceipt(saleId);
       completingRef.current = false;
     } catch (err) {
-      if (isExpiryConfirmationRequired(err)) {
-        clearPendingCompletion(saleId);
-        setCompletionUncertain(false);
-        setCheckoutExpiryConfirmationOpen(true);
-        setTopError(null);
-      } else if (!isDefiniteRejection(err)) {
+      if (!isDefiniteRejection(err)) {
         const refreshed = await saleQuery.refetch();
         if (refreshed.data?.status === "completed") {
           if (payments.some((payment) => payment.payment_method === "cash")) {
@@ -1457,7 +1396,11 @@ function ActiveWorkspace({
       } else {
         clearPendingCompletion(saleId);
         setCompletionUncertain(false);
-        setTopError(describeApiError(err, "Не удалось завершить продажу"));
+        setTopError(
+          isExpiredSaleBlocked(err)
+            ? "Просроченные лекарства нельзя продавать. Удалите позицию из чека."
+            : describeApiError(err, "Не удалось завершить продажу"),
+        );
       }
       completingRef.current = false;
     }
@@ -1534,7 +1477,7 @@ function ActiveWorkspace({
         "draft",
         requiresRx,
         stagedPayments,
-        expiredSaleConfirmedRef.current,
+        false,
         externalPaymentReviewRef.current,
       )
     ) {
@@ -1577,17 +1520,10 @@ function ActiveWorkspace({
               notes: prescription.notes,
             }
           : undefined,
-        expired_sale_confirmed: expiredSaleConfirmedRef.current,
       });
       await acceptCheckoutResult(result, operation, true);
     } catch (error) {
-      if (isExpiryConfirmationRequired(error)) {
-        clearPendingCheckoutOperation(saleId, operation.operationId);
-        setPendingCheckout(null);
-        setCheckoutUncertain(false);
-        setCheckoutExpiryConfirmationOpen(true);
-        setTopError(null);
-      } else if (isDefiniteRejection(error)) {
+      if (isDefiniteRejection(error)) {
         clearPendingCheckoutOperation(saleId, operation.operationId);
         setPendingCheckout(null);
         setCheckoutUncertain(false);
@@ -1597,7 +1533,11 @@ function ActiveWorkspace({
             "Сервер отклонил продажу после подтверждения карты или QR. Не повторяйте оплату. Сверьте терминал; если операция отменена или возвращена, используйте «Сбросить расчёт».",
           );
         } else {
-          setTopError(describeApiError(error, "Не удалось оформить продажу"));
+          setTopError(
+            isExpiredSaleBlocked(error)
+              ? "Просроченные лекарства нельзя продавать. Удалите позицию из чека."
+              : describeApiError(error, "Не удалось оформить продажу"),
+          );
         }
       } else {
         setCheckoutUncertain(true);
@@ -1650,11 +1590,6 @@ function ActiveWorkspace({
     setNameById({});
     setRequiresRx(false);
     setPrescription(null);
-    expiredSaleConfirmedRef.current = false;
-    setExpiredSaleConfirmed(false);
-    expiredItemConfirmationRef.current = null;
-    setExpiredItemConfirmation(null);
-    setCheckoutExpiryConfirmationOpen(false);
     stagedPaymentsRef.current = [];
     setStagedPayments([]);
     closeExternalPaymentConfirmation();
@@ -2124,35 +2059,6 @@ function ActiveWorkspace({
           onClose={() => setPrintOpen(false)}
         />
       )}
-
-      <ConfirmDialog
-        open={expiredItemConfirmation !== null}
-        title="Просроченная партия"
-        message={
-          expiredItemConfirmation
-            ? `Срок годности партии товара «${expiredItemConfirmation.name || "Без названия"}» истёк. Продолжайте только если правила аптеки разрешают такую продажу и покупатель предупреждён.`
-            : ""
-        }
-        confirmLabel="Подтвердить и добавить"
-        variant="danger"
-        onConfirm={() => void confirmExpiredItem()}
-        onCancel={closeExpiredItemConfirmation}
-      />
-
-      <ConfirmDialog
-        open={checkoutExpiryConfirmationOpen}
-        title="Подтвердить просроченный товар"
-        message="На момент завершения в чеке обнаружена просроченная партия. Продолжайте только если продажа разрешена настройками аптеки и покупатель предупреждён."
-        confirmLabel="Подтвердить и продолжить"
-        variant="danger"
-        onConfirm={() => {
-          expiredSaleConfirmedRef.current = true;
-          setExpiredSaleConfirmed(true);
-          setCheckoutExpiryConfirmationOpen(false);
-          void onComplete();
-        }}
-        onCancel={() => setCheckoutExpiryConfirmationOpen(false)}
-      />
 
       <ConfirmDialog
         open={externalPaymentConfirmation !== null}

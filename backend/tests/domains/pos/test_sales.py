@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.domains.audit.models import AuditLog
-from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
@@ -79,6 +78,52 @@ async def test_add_item_rejects_zero_sale_price(db_session: AsyncSession, pos_sc
         )
 
 
+async def test_add_item_rejects_inactive_catalog_item(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    s = await pos_scaffold(sale_price=Decimal("10"))
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    s["item"].is_active = False
+    await db_session.flush()
+
+    with pytest.raises(BusinessRuleError, match="Inactive catalog item cannot be sold"):
+        await service.add_item(
+            sale_id=sale.id,
+            catalog_id=s["item"].id,
+            qty=Decimal("1"),
+        )
+
+
+async def test_add_item_hides_deleted_catalog_item(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    s = await pos_scaffold(sale_price=Decimal("10"))
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    s["item"].deleted_at = datetime.now(UTC)
+    await db_session.flush()
+
+    with pytest.raises(NotFoundError, match="Catalog item not found"):
+        await service.add_item(
+            sale_id=sale.id,
+            catalog_id=s["item"].id,
+            qty=Decimal("1"),
+        )
+
+
 async def test_add_item_splits_across_batches(db_session: AsyncSession, pos_scaffold) -> None:
     s = await pos_scaffold(batch_qty=3, sale_price=10)
     inv_repo = InventoryRepository(db_session)
@@ -138,6 +183,27 @@ async def test_complete_decreases_batch_qty(db_session: AsyncSession, pos_scaffo
     batch = await InventoryRepository(db_session).get_batch(s["batch"].id)
     assert batch is not None
     assert batch.qty_remaining == Decimal("96.000")
+
+
+async def test_complete_rechecks_catalog_is_active(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    s = await pos_scaffold(sale_price=10, batch_qty=5)
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    await service.add_item(sale_id=sale.id, catalog_id=s["item"].id, qty=Decimal("1"))
+    await service.add_payment(sale_id=sale.id, payment_method="cash", amount=Decimal("10"))
+    s["item"].is_active = False
+    await db_session.flush()
+
+    with pytest.raises(BusinessRuleError, match="Inactive catalog item cannot be sold"):
+        await service.complete(sale_id=sale.id)
 
 
 async def test_complete_with_insufficient_payment_fails(
@@ -446,15 +512,11 @@ async def test_complete_rechecks_batch_block_and_expiry(
         await service.complete(sale_id=expired_sale.id)
 
 
-async def test_warning_mode_requires_explicit_expired_sale_confirmation(
+async def test_expired_sale_confirmation_cannot_bypass_add_item_guard(
     db_session: AsyncSession,
     pos_scaffold,
 ) -> None:
     s = await pos_scaffold(sale_price=10, batch_qty=5)
-    foundation = FoundationRepository(db_session)
-    settings = await foundation.get_settings(s["tenant"].id)
-    assert settings is not None
-    await foundation.update_settings(settings, expired_sale_mode="warning")
     s["batch"].expires_at = date(2000, 1, 1)
     await db_session.flush()
 
@@ -466,29 +528,39 @@ async def test_warning_mode_requires_explicit_expired_sale_confirmation(
         cashier_user_id=s["cashier"].id,
     )
 
-    with pytest.raises(BusinessRuleError, match="requires cashier confirmation"):
+    with pytest.raises(BusinessRuleError, match="Insufficient stock"):
         await service.add_item(
             sale_id=sale.id,
             catalog_id=s["item"].id,
             qty=Decimal("1"),
+            expired_sale_confirmed=True,
         )
 
+
+async def test_expired_sale_confirmation_cannot_bypass_completion_guard(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    s = await pos_scaffold(sale_price=10, batch_qty=5)
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
     await service.add_item(
         sale_id=sale.id,
         catalog_id=s["item"].id,
         qty=Decimal("1"),
-        expired_sale_confirmed=True,
     )
     await service.add_payment(
         sale_id=sale.id,
         payment_method="cash",
         amount=Decimal("10"),
     )
-    with pytest.raises(BusinessRuleError, match="requires cashier confirmation"):
-        await service.complete(sale_id=sale.id)
+    s["batch"].expires_at = date(2000, 1, 1)
+    await db_session.flush()
 
-    completed = await service.complete(
-        sale_id=sale.id,
-        expired_sale_confirmed=True,
-    )
-    assert completed.status == "completed"
+    with pytest.raises(BusinessRuleError, match="Expired batch cannot be sold"):
+        await service.complete(sale_id=sale.id, expired_sale_confirmed=True)
