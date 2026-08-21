@@ -19,6 +19,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verification-tooling:
+    name: Verification tooling (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Test change classifier and verification planner
+        shell: pwsh
+        run: ./scripts/test-verification-tools.ps1
+
+      - name: Test Windows PowerShell 5.1 compatibility
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/test-verification-tools.ps1
+
   backend:
     name: Backend quality gate
     runs-on: ubuntu-latest
@@ -1322,7 +1344,7 @@ jobs:
   ci-gate:
     name: CI gate
     if: always()
-    needs: [backend, frontend, dependency-audit, e2e, production-containers]
+    needs: [verification-tooling, backend, frontend, dependency-audit, e2e, production-containers]
     runs-on: ubuntu-latest
     timeout-minutes: 2
 
@@ -1331,6 +1353,7 @@ jobs:
         shell: bash
         env:
           BACKEND_RESULT: ${{ needs.backend.result }}
+          VERIFICATION_TOOLING_RESULT: ${{ needs['verification-tooling'].result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           AUDIT_RESULT: ${{ needs['dependency-audit'].result }}
           E2E_RESULT: ${{ needs.e2e.result }}
@@ -1338,6 +1361,7 @@ jobs:
         run: |
           failed=0
           for result in \
+            "verification-tooling:$VERIFICATION_TOOLING_RESULT" \
             "backend:$BACKEND_RESULT" \
             "frontend:$FRONTEND_RESULT" \
             "dependency-audit:$AUDIT_RESULT" \
