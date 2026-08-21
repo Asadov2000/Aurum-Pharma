@@ -548,46 +548,31 @@ describe("SaleArea atomic checkout", () => {
     expect(checkoutSale).toHaveBeenCalledTimes(1);
   });
 
-  it("requires explicit confirmation when expiry is detected at checkout", async () => {
-    let operationId = "";
+  it("does not expose an expired-stock override after checkout rejection", async () => {
     seedDraftSale(SALE.id);
-    getSale
-      .mockResolvedValueOnce(SALE)
-      .mockImplementation(() => Promise.resolve(completedSale(operationId)));
-    checkoutSale
-      .mockRejectedValueOnce({
-        isAxiosError: true,
-        response: {
-          status: 422,
-          data: {
-            error: {
-              details: { reason: "expired_sale_confirmation_required" },
-            },
+    getSale.mockResolvedValue(SALE);
+    checkoutSale.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 422,
+        data: {
+          error: {
+            code: "business_rule_violation",
+            message: "Expired batch cannot be sold",
+            details: { reason: "expired_batch_blocked" },
           },
         },
-      })
-      .mockImplementation((payload: CheckoutPayload) => {
-        operationId = payload.operation_id;
-        return Promise.resolve(checkoutResult(operationId));
-      });
+      },
+    });
 
     renderArea();
     await stageCashPayment();
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
-    const confirmation = await screen.findByRole("dialog", {
-      name: "Подтвердить просроченный товар",
-    });
+    expect(await screen.findByText(/Просроченные лекарства нельзя продавать/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /просроч/i })).not.toBeInTheDocument();
     expect(checkoutSale).toHaveBeenCalledTimes(1);
-    expect((checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).expired_sale_confirmed).toBe(false);
-    fireEvent.click(
-      within(confirmation).getByRole("button", {
-        name: "Подтвердить и продолжить",
-      }),
-    );
-
-    await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(2));
-    expect((checkoutSale.mock.calls[1]?.[0] as CheckoutPayload).expired_sale_confirmed).toBe(true);
+    expect((checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).expired_sale_confirmed).toBeUndefined();
   });
 
   it("requires confirmation before F2 clears a non-empty draft", async () => {

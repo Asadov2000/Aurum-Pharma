@@ -107,7 +107,7 @@ class TenantSettingsRead(BaseModel):
 
     tenant_id: UUID
     expiry_thresholds: dict[str, int]
-    expired_sale_mode: str
+    expired_sale_mode: Literal["strict"]
     refund_reason_mode: str
     session_admin_minutes: int
     session_pos_minutes: int
@@ -132,7 +132,7 @@ class TenantSettingsRead(BaseModel):
 
 class TenantSettingsUpdate(BaseModel):
     expiry_thresholds: ExpiryThresholds | None = None
-    expired_sale_mode: str | None = None
+    expired_sale_mode: Literal["strict"] | None = None
     refund_reason_mode: str | None = None
     session_admin_minutes: int | None = Field(default=None, ge=30, le=1440)
     session_pos_minutes: int | None = Field(default=None, ge=30, le=1440)
@@ -146,13 +146,6 @@ class TenantSettingsUpdate(BaseModel):
     draft_sale_lifetime_min: int | None = Field(default=None, ge=5, le=240)
     report_timezone: str | None = Field(default=None, min_length=1, max_length=64)
     prescription_warning_text: str | None = None
-
-    @field_validator("expired_sale_mode")
-    @classmethod
-    def _check_sale_mode(cls, v: str | None) -> str | None:
-        if v is not None and v not in {"strict", "warning", "off"}:
-            raise ValueError("expired_sale_mode must be one of strict|warning|off")
-        return v
 
     @field_validator("refund_reason_mode")
     @classmethod

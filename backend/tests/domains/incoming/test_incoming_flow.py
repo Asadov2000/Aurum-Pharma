@@ -5,15 +5,18 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, NotFoundError
 from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Branch, Tenant
 from app.domains.incoming import service as incoming_service_module
+from app.domains.incoming.models import IncomingDocument
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.service import IncomingService
 from app.domains.inventory.models import Batch
@@ -145,8 +148,56 @@ async def test_add_items_recomputes_total(db_session: AsyncSession, scaffold) ->
     )
 
     fresh = await service.get_document(doc.id)
+    total = await service.repo.total_amount(doc.id)
     # 10 * 5.00 + 3 * 4.50 = 50.00 + 13.50 = 63.50
     assert fresh.total_amount == Decimal("63.50")
+    assert total == Decimal("63.50000")
+    assert isinstance(total, Decimal)
+
+
+async def test_every_draft_mutation_locks_the_document(
+    db_session: AsyncSession,
+    scaffold,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    repo = IncomingRepository(db_session)
+    service = IncomingService(repo)
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+
+    lock_calls = 0
+    original_get_for_update = repo.get_document_for_update
+
+    async def tracked_get_for_update(document_id: UUID) -> IncomingDocument | None:
+        nonlocal lock_calls
+        lock_calls += 1
+        return await original_get_for_update(document_id)
+
+    monkeypatch.setattr(repo, "get_document_for_update", tracked_get_for_update)
+
+    await service.update_document(doc.id, fields={"notes": "locked"})
+    created = await service.add_item(
+        doc.id,
+        fields={
+            "catalog_id": item.id,
+            "expires_at": date.today() + timedelta(days=180),
+            "qty": Decimal("2"),
+            "purchase_price": Decimal("1.25"),
+            "sale_price": Decimal("2.50"),
+        },
+    )
+    await service.update_item(doc.id, created.id, fields={"qty": Decimal("3")})
+    await service.delete_item(doc.id, created.id)
+    await service.reject(doc.id)
+
+    assert lock_calls == 5
 
 
 async def test_incoming_details_include_reference_names_without_extra_api_queries(
@@ -364,6 +415,47 @@ async def test_cannot_edit_accepted_document(db_session: AsyncSession, scaffold)
                 "sale_price": Decimal("1"),
             },
         )
+
+
+async def test_database_rejects_direct_changes_to_accepted_document(
+    db_session: AsyncSession,
+    scaffold,
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+    await service.add_item(
+        doc.id,
+        fields={
+            "catalog_id": item.id,
+            "expires_at": date.today() + timedelta(days=90),
+            "qty": Decimal("1"),
+            "purchase_price": Decimal("1"),
+            "sale_price": Decimal("1"),
+        },
+    )
+    await service.accept(doc.id)
+
+    with pytest.raises(DBAPIError, match="Finalized incoming document cannot be changed"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("UPDATE incoming_document SET notes = 'bypass' WHERE id = :id"),
+                {"id": doc.id},
+            )
+
+    with pytest.raises(DBAPIError, match="matching draft document"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("UPDATE incoming_item SET qty = 2 WHERE document_id = :id"),
+                {"id": doc.id},
+            )
 
 
 async def test_accept_with_past_expiry_blocked(db_session: AsyncSession, scaffold) -> None:

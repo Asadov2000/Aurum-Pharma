@@ -316,6 +316,8 @@ CUSTOM_FUNCTIONS = {
     "trg_bind_billing_plan_legacy",
     "trg_billing_subscription_row_version",
     "trg_guard_edge_cash_append_only",
+    "trg_guard_incoming_document_lifecycle",
+    "trg_guard_incoming_item_lifecycle",
     "trg_guard_pos_command_immutable",
     "trg_guard_write_off_immutability",
     "trg_guard_supplier_return_immutability",

@@ -82,7 +82,7 @@ export interface ExpiryThresholds {
   red: number;
 }
 
-export type ExpiredSaleMode = "strict" | "warning" | "off";
+export type ExpiredSaleMode = "strict";
 export type RefundReasonMode = "required" | "required_with_text" | "optional" | "off";
 
 export interface TenantSettings {

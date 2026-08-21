@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -216,9 +217,10 @@ class IncomingRepository:
         )
         return result.rowcount or 0  # type: ignore[attr-defined]
 
-    async def total_amount(self, document_id: UUID) -> float:
+    async def total_amount(self, document_id: UUID) -> Decimal:
         stmt = select(
             func.coalesce(func.sum(IncomingItem.qty * IncomingItem.purchase_price), 0)
         ).where(IncomingItem.document_id == document_id)
         result = await self.session.execute(stmt)
-        return float(result.scalar_one())
+        value = result.scalar_one()
+        return value if isinstance(value, Decimal) else Decimal(str(value))

@@ -1,7 +1,7 @@
 """harden onboarding readiness and trial activation
 
-Revision ID: 0105
-Revises: 0104
+Revision ID: 0107
+Revises: 0106
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0105"
-down_revision: str | None = "0104"
+revision: str = "0107"
+down_revision: str | None = "0106"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -21,7 +21,7 @@ REFERENCE_TABLES = ("tenant", "app_user", "tenant_subscription")
 
 def _grant_missing_reference_privileges() -> None:
     op.execute("""
-        CREATE TEMPORARY TABLE aurum_0105_missing_reference_privilege (
+        CREATE TEMPORARY TABLE aurum_0107_missing_reference_privilege (
           table_name TEXT PRIMARY KEY
         ) ON COMMIT DROP
         """)
@@ -34,7 +34,7 @@ def _grant_missing_reference_privileges() -> None:
                 'public.{table_name}',
                 'REFERENCES'
               ) THEN
-                INSERT INTO pg_temp.aurum_0105_missing_reference_privilege (
+                INSERT INTO pg_temp.aurum_0107_missing_reference_privilege (
                   table_name
                 ) VALUES ('{table_name}');
                 GRANT REFERENCES ON TABLE public.{table_name}
@@ -52,7 +52,7 @@ def _restore_reference_privileges() -> None:
             BEGIN
               IF EXISTS (
                 SELECT 1
-                FROM pg_temp.aurum_0105_missing_reference_privilege
+                FROM pg_temp.aurum_0107_missing_reference_privilege
                 WHERE table_name = '{table_name}'
               ) THEN
                 REVOKE REFERENCES ON TABLE public.{table_name}
@@ -61,7 +61,7 @@ def _restore_reference_privileges() -> None:
             END
             $$
             """)
-    op.execute("DROP TABLE pg_temp.aurum_0105_missing_reference_privilege")
+    op.execute("DROP TABLE pg_temp.aurum_0107_missing_reference_privilege")
 
 
 def upgrade() -> None:
