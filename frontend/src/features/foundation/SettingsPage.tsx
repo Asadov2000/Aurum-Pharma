@@ -25,14 +25,7 @@ import {
   type PosPaymentMethod,
 } from "./paymentSettings";
 import { useTenantSettingsQuery, useUpdateTenantSettings } from "./queries";
-import { type ExpiredSaleMode, type RefundReasonMode } from "./types";
-
-const expiredSaleModes: ExpiredSaleMode[] = ["strict", "warning", "off"];
-const expiredSaleLabel: Record<ExpiredSaleMode, string> = {
-  strict: "Запрещать",
-  warning: "Предупреждать",
-  off: "Игнорировать",
-};
+import { type RefundReasonMode } from "./types";
 
 const refundModes: RefundReasonMode[] = ["required", "required_with_text", "optional", "off"];
 const refundModeLabel: Record<RefundReasonMode, string> = {
@@ -65,7 +58,7 @@ const schema = z
     yellow: z.number().int().min(1).max(24),
     orange: z.number().int().min(1).max(24),
     red: z.number().int().min(1).max(24),
-    expired_sale_mode: z.enum(["strict", "warning", "off"]),
+    expired_sale_mode: z.literal("strict"),
     refund_reason_mode: z.enum(["required", "required_with_text", "optional", "off"]),
     session_admin_minutes: z.number().int().min(30).max(1440),
     session_pos_minutes: z.number().int().min(30).max(1440),
@@ -94,7 +87,7 @@ export function SettingsPage(): JSX.Element {
       yellow: 12,
       orange: 6,
       red: 3,
-      expired_sale_mode: "warning",
+      expired_sale_mode: "strict",
       refund_reason_mode: "optional",
       session_admin_minutes: 60,
       session_pos_minutes: 480,
@@ -140,7 +133,6 @@ export function SettingsPage(): JSX.Element {
     try {
       await updateMutation.mutateAsync({
         expiry_thresholds: { yellow: d.yellow, orange: d.orange, red: d.red },
-        expired_sale_mode: d.expired_sale_mode,
         refund_reason_mode: d.refund_reason_mode,
         session_admin_minutes: d.session_admin_minutes,
         session_pos_minutes: d.session_pos_minutes,
@@ -315,14 +307,8 @@ export function SettingsPage(): JSX.Element {
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <Label htmlFor="expired_sale_mode">Просроченные ЛС</Label>
-            <Select id="expired_sale_mode" {...form.register("expired_sale_mode")}>
-              {expiredSaleModes.map((m) => (
-                <option key={m} value={m}>
-                  {expiredSaleLabel[m]}
-                </option>
-              ))}
-            </Select>
+            <p className="text-sm font-medium text-foreground">Просроченные ЛС</p>
+            <p className="mt-1 text-sm text-danger-foreground">Продажа всегда запрещена</p>
           </div>
           <div>
             <Label htmlFor="refund_reason_mode">Причина возврата</Label>

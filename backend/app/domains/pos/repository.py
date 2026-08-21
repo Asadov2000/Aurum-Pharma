@@ -1050,6 +1050,24 @@ class POSRepository:
 
     # -------- batch lock (concurrent-safe complete) --------
 
+    async def lock_catalog_items(
+        self,
+        *,
+        tenant_id: UUID,
+        catalog_ids: set[UUID],
+    ) -> list[TenantCatalog]:
+        stmt = (
+            select(TenantCatalog)
+            .where(
+                TenantCatalog.tenant_id == tenant_id,
+                TenantCatalog.id.in_(catalog_ids),
+            )
+            .order_by(TenantCatalog.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def lock_batch(self, batch_id: UUID) -> Batch | None:
         """SELECT ... FOR UPDATE the batch row so a concurrent complete can't
         race us into a negative qty_remaining. Returns the fresh row."""

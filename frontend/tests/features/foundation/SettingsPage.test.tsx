@@ -15,7 +15,7 @@ import { SettingsPage } from "@/features/foundation/SettingsPage";
 const SETTINGS = {
   tenant_id: "tenant-1",
   expiry_thresholds: { yellow: 12, orange: 6, red: 3 },
-  expired_sale_mode: "warning" as const,
+  expired_sale_mode: "strict" as const,
   refund_reason_mode: "optional" as const,
   session_admin_minutes: 60,
   session_pos_minutes: 480,
@@ -78,5 +78,12 @@ describe("SettingsPage POS payment settings", () => {
         }),
       );
     });
+  });
+
+  it("shows expired medicine sales as an immutable safety rule", async () => {
+    renderPage();
+
+    expect(await screen.findByText("Продажа всегда запрещена")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Просроченные ЛС")).not.toBeInTheDocument();
   });
 });

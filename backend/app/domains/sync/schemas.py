@@ -125,7 +125,7 @@ class SyncActivationTenantSettingsSnapshot(BaseModel):
 
     tenant_id: UUID
     expiry_thresholds: dict[str, int]
-    expired_sale_mode: Literal["strict", "warning", "off"]
+    expired_sale_mode: Literal["strict"]
     refund_reason_mode: Literal["required", "required_with_text", "optional", "off"]
     session_admin_minutes: int = Field(ge=30, le=1440)
     session_pos_minutes: int = Field(ge=30, le=1440)

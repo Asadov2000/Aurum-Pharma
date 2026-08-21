@@ -59,6 +59,42 @@ async def test_tenant_settings_thresholds_valid(
     assert body["expiry_thresholds"] == {"yellow": 9, "orange": 4, "red": 2}
 
 
+@pytest.mark.parametrize("mode", ["warning", "off"])
+async def test_tenant_settings_reject_unsafe_expired_sale_mode(
+    auth_client: AsyncClient,
+    tenant_admin_token,
+    mode: str,
+) -> None:
+    token, _, _ = await tenant_admin_token()
+
+    response = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"expired_sale_mode": mode},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("mode", ["warning", "off"])
+async def test_tenant_settings_database_rejects_unsafe_expired_sale_mode(
+    db_session: AsyncSession,
+    make_tenant,
+    mode: str,
+) -> None:
+    tenant = await make_tenant()
+
+    with pytest.raises(IntegrityError):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE tenant_settings SET expired_sale_mode = :mode "
+                    "WHERE tenant_id = :tenant_id"
+                ),
+                {"mode": mode, "tenant_id": tenant.id},
+            )
+
+
 async def test_tenant_settings_reject_invalid_report_timezone(
     auth_client: AsyncClient,
     tenant_admin_token,

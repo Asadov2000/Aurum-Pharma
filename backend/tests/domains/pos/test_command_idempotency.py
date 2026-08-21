@@ -135,7 +135,7 @@ async def test_item_commands_replay_canonical_results_and_delete_once(
         sale_id=sale.id,
         catalog_id=scaffold["item"].id,
         qty=Decimal("2.000"),
-        expired_sale_confirmed=False,
+        expired_sale_confirmed=True,
         actor_id=scaffold["cashier"].id,
         operation_id=add_operation,
     )

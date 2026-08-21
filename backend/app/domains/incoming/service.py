@@ -149,7 +149,10 @@ class IncomingService:
         updated_by: UUID | None = None,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingDocument:
-        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
+        doc = await self._get_document_for_mutation(
+            document_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
         self._assert_draft(doc)
         await self._assert_document_refs_in_tenant(
             tenant_id=doc.tenant_id,
@@ -172,7 +175,10 @@ class IncomingService:
         fields: dict[str, Any],
         allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingItem:
-        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
+        doc = await self._get_document_for_mutation(
+            document_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
         self._assert_draft(doc)
         await self._assert_catalog_in_tenant(fields["catalog_id"], tenant_id=doc.tenant_id)
         self._assert_item_dates(
@@ -192,7 +198,10 @@ class IncomingService:
         fields: dict[str, Any],
         allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingItem:
-        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
+        doc = await self._get_document_for_mutation(
+            document_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
         self._assert_draft(doc)
         if "catalog_id" in fields:
             await self._assert_catalog_in_tenant(fields["catalog_id"], tenant_id=doc.tenant_id)
@@ -214,7 +223,10 @@ class IncomingService:
         *,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> None:
-        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
+        doc = await self._get_document_for_mutation(
+            document_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
         self._assert_draft(doc)
         rows = await self.repo.delete_item(item_id, document_id=document_id)
         if rows == 0:
@@ -306,13 +318,28 @@ class IncomingService:
         actor_id: UUID | None = None,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingDocument:
-        doc = await self.get_document(document_id, allowed_branch_ids=allowed_branch_ids)
+        doc = await self._get_document_for_mutation(
+            document_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
         self._assert_draft(doc)
         await self.repo.update_document(doc, status="rejected", updated_by=actor_id)
         logger.info("incoming_rejected", document_id=str(doc.id))
         return doc
 
     # ---- helpers ----
+
+    async def _get_document_for_mutation(
+        self,
+        document_id: UUID,
+        *,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> IncomingDocument:
+        doc = await self.repo.get_document_for_update(document_id)
+        if doc is None:
+            raise NotFoundError("Incoming document not found")
+        self._assert_branch_allowed(doc.branch_id, allowed_branch_ids=allowed_branch_ids)
+        return doc
 
     @staticmethod
     def _assert_draft(doc: IncomingDocument) -> None:
@@ -365,4 +392,4 @@ class IncomingService:
 
     async def _recompute_total(self, doc: IncomingDocument) -> None:
         total = await self.repo.total_amount(doc.id)
-        await self.repo.update_document(doc, total_amount=Decimal(str(total)))
+        await self.repo.update_document(doc, total_amount=total)

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -91,3 +96,29 @@ def test_billing_tasks_are_routed_only_to_dedicated_queue(
     assert "app.tasks.billing" not in celery_app.conf.include
     for task_name, route in expected_routes.items():
         assert celery_app.conf.task_routes[task_name] == route
+
+
+def test_billing_worker_import_needs_only_worker_configuration() -> None:
+    env = os.environ.copy()
+    for name in ("DATABASE_URL_APP", "DATABASE_URL_SUPPORT", "JWT_SECRET"):
+        env.pop(name, None)
+    env.update(
+        {
+            "ENVIRONMENT": "development",
+            "DATABASE_URL_BILLING_WORKER": (
+                "postgresql+asyncpg://aurum_billing_worker:worker-pw@db/aurum"
+            ),
+            "REDIS_URL": "redis://redis:6379/0",
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.tasks.billing"],
+        cwd=Path(__file__).parents[2],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

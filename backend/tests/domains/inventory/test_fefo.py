@@ -1,4 +1,4 @@
-"""FEFO selection across the three expired_sale_mode settings."""
+"""FEFO selection with an unconditional expired-batch exclusion."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ async def test_fefo_splits_across_batches(
     assert sel.picks[1].qty == Decimal("3")  # took 3 of 5 from the next one
 
 
-async def test_fefo_strict_excludes_expired(
+async def test_fefo_excludes_expired(
     db_session: AsyncSession, make_branch_and_item, make_batch
 ) -> None:
     tenant, branch, item = await make_branch_and_item(expired_sale_mode="strict")
@@ -98,16 +98,16 @@ async def test_fefo_strict_excludes_expired(
     assert sel.total_picked == Decimal("0")
 
 
-async def test_fefo_warning_includes_expired_with_flag(
+async def test_fefo_excludes_batch_expiring_today(
     db_session: AsyncSession, make_branch_and_item, make_batch
 ) -> None:
-    tenant, branch, item = await make_branch_and_item(expired_sale_mode="warning")
+    tenant, branch, item = await make_branch_and_item(expired_sale_mode="strict")
     await make_batch(
         tenant_id=tenant.id,
         branch_id=branch.id,
         catalog_id=item.id,
         qty=10,
-        expires_in_days=-5,
+        expires_in_days=0,
     )
     service = InventoryService(InventoryRepository(db_session))
 
@@ -115,39 +115,17 @@ async def test_fefo_warning_includes_expired_with_flag(
         tenant_id=tenant.id,
         catalog_id=item.id,
         branch_id=branch.id,
-        qty_needed=Decimal("3"),
+        qty_needed=Decimal("1"),
     )
-    assert sel.total_picked == Decimal("3")
-    assert sel.requires_warning is True
-
-
-async def test_fefo_off_mode_no_warning(
-    db_session: AsyncSession, make_branch_and_item, make_batch
-) -> None:
-    tenant, branch, item = await make_branch_and_item(expired_sale_mode="off")
-    await make_batch(
-        tenant_id=tenant.id,
-        branch_id=branch.id,
-        catalog_id=item.id,
-        qty=10,
-        expires_in_days=-5,
-    )
-    service = InventoryService(InventoryRepository(db_session))
-
-    sel = await service.find_batches_fefo(
-        tenant_id=tenant.id,
-        catalog_id=item.id,
-        branch_id=branch.id,
-        qty_needed=Decimal("3"),
-    )
-    assert sel.total_picked == Decimal("3")
+    assert sel.picks == []
+    assert sel.total_picked == Decimal("0")
     assert sel.requires_warning is False
 
 
 async def test_fefo_excludes_blocked(
     db_session: AsyncSession, make_branch_and_item, make_batch
 ) -> None:
-    tenant, branch, item = await make_branch_and_item(expired_sale_mode="off")
+    tenant, branch, item = await make_branch_and_item(expired_sale_mode="strict")
     await make_batch(
         tenant_id=tenant.id,
         branch_id=branch.id,

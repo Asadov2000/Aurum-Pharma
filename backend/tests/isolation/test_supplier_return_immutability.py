@@ -66,6 +66,12 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                     "DISABLE TRIGGER trg_incoming_document_writer_guard"
                 )
             )
+            await connection.execute(
+                text(
+                    "ALTER TABLE incoming_document "
+                    "DISABLE TRIGGER trg_guard_incoming_document_lifecycle"
+                )
+            )
             document_id = (
                 await connection.execute(
                     text(
@@ -86,6 +92,12 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                 text(
                     "ALTER TABLE incoming_document "
                     "ENABLE TRIGGER trg_incoming_document_writer_guard"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER TABLE incoming_document "
+                    "ENABLE TRIGGER trg_guard_incoming_document_lifecycle"
                 )
             )
             await connection.execute(

@@ -502,9 +502,9 @@ CREATE TABLE tenant_settings (
   tenant_id                   UUID PRIMARY KEY REFERENCES tenant(id) ON DELETE CASCADE,
   -- Пороги по срокам годности (мес.): {yellow:6, orange:3, red:1}
   expiry_thresholds           JSONB NOT NULL DEFAULT '{"yellow":6,"orange":3,"red":1}'::jsonb,
-  -- Режим продажи просроченного товара
+  -- Legacy-поле совместимости: продажа просроченного всегда запрещена
   expired_sale_mode           TEXT NOT NULL DEFAULT 'strict'
-                                CHECK (expired_sale_mode IN ('strict','warning','off')),
+                                CHECK (expired_sale_mode = 'strict'),
   -- Режим возврата: причина обязательна?
   refund_reason_mode          TEXT NOT NULL DEFAULT 'optional'
                                 CHECK (refund_reason_mode IN
