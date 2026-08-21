@@ -268,3 +268,4 @@ finally {
 }
 
 Write-Host "Verification tooling self-test passed: $script:assertions assertions." -ForegroundColor Green
+exit 0
