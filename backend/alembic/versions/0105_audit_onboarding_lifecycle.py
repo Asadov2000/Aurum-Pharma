@@ -16,7 +16,56 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+REFERENCE_TABLES = ("tenant", "app_user", "tenant_subscription")
+
+
+def _grant_missing_reference_privileges() -> None:
+    op.execute("""
+        CREATE TEMPORARY TABLE aurum_0105_missing_reference_privilege (
+          table_name TEXT PRIMARY KEY
+        ) ON COMMIT DROP
+        """)
+    for table_name in REFERENCE_TABLES:
+        op.execute(f"""
+            DO $$
+            BEGIN
+              IF NOT pg_catalog.has_table_privilege(
+                'aurum_schema_owner',
+                'public.{table_name}',
+                'REFERENCES'
+              ) THEN
+                INSERT INTO pg_temp.aurum_0105_missing_reference_privilege (
+                  table_name
+                ) VALUES ('{table_name}');
+                GRANT REFERENCES ON TABLE public.{table_name}
+                  TO aurum_schema_owner;
+              END IF;
+            END
+            $$
+            """)
+
+
+def _restore_reference_privileges() -> None:
+    for table_name in REFERENCE_TABLES:
+        op.execute(f"""
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1
+                FROM pg_temp.aurum_0105_missing_reference_privilege
+                WHERE table_name = '{table_name}'
+              ) THEN
+                REVOKE REFERENCES ON TABLE public.{table_name}
+                  FROM aurum_schema_owner;
+              END IF;
+            END
+            $$
+            """)
+    op.execute("DROP TABLE pg_temp.aurum_0105_missing_reference_privilege")
+
+
 def upgrade() -> None:
+    _grant_missing_reference_privileges()
     op.execute("""
         CREATE TABLE public.trial_activation (
           tenant_id UUID PRIMARY KEY
@@ -49,6 +98,7 @@ def upgrade() -> None:
             CHECK (trial_ends_at > started_at)
         )
         """)
+    _restore_reference_privileges()
 
     # Preserve the one-trial invariant for tenants activated before this ledger.
     op.execute("""
