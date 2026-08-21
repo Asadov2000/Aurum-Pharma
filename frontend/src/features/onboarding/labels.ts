@@ -1,72 +1,87 @@
-// Wizard steps — spec §17.1.
-export interface WizardStep {
-  step: number;
+import { type AppRoutePath } from "@/components/layout/routeAccess";
+
+import { type ReadinessStep, type ReadinessStepCode, type ReadinessTaskCode } from "./types";
+
+export interface ReadinessStepDefinition {
+  code: ReadinessStepCode;
   title: string;
   description: string;
-  linkTo?: string;
-  linkLabel?: string;
+  to?: AppRoutePath;
+  actionLabel?: string;
 }
 
-export const wizardSteps: WizardStep[] = [
+export const readinessSteps: ReadinessStepDefinition[] = [
   {
-    step: 1,
+    code: "pharmacy_profile",
     title: "Профиль аптеки",
-    description: "Название, контакты, юридические реквизиты.",
-    linkTo: "/admin/tenants",
-    linkLabel: "Заполнить в «Тенантах»",
+    description: "Название и контактный email сохранены.",
+    to: "/settings",
+    actionLabel: "Заполнить профиль",
   },
   {
-    step: 2,
-    title: "Первая точка",
-    description: "Адрес, тип (аптека / пункт / киоск), номер и срок лицензии.",
-    linkTo: "/branches",
-    linkLabel: "Создать точку",
+    code: "licensed_branch",
+    title: "Точка и лицензия",
+    description: "Нужна активная точка с адресом и действующей лицензией.",
+    to: "/branches",
+    actionLabel: "Настроить точку",
   },
   {
-    step: 3,
+    code: "receipt_details",
     title: "Реквизиты для чека",
-    description: "Шапка чека: название, адрес, ИНН/TIN, контактные данные.",
-    linkTo: "/branches",
-    linkLabel: "Открыть точку",
+    description: "Укажите название организации и данные, которые печатаются на чеке.",
+    to: "/branches",
+    actionLabel: "Заполнить реквизиты",
   },
   {
-    step: 4,
-    title: "Первый сотрудник",
-    description: "Вы уже зарегистрированы как владелец. Дополнительные сотрудники — на странице «Пользователи».",
-    linkTo: "/users",
-    linkLabel: "Пригласить сотрудников",
+    code: "tenant_owner",
+    title: "Владелец аптеки",
+    description: "Активный владелец подтверждён и может управлять настройкой.",
   },
   {
-    step: 5,
-    title: "Загрузка каталога",
-    description: "Не меньше 100 товаров. Это блокирующее условие для старта пробного периода.",
-    linkTo: "/catalog",
-    linkLabel: "Перейти в каталог",
+    code: "catalog",
+    title: "Каталог товаров",
+    description: "Добавьте не меньше 100 активных товаров для реальной работы кассы.",
+    to: "/catalog",
+    actionLabel: "Заполнить каталог",
   },
   {
-    step: 6,
+    code: "pos_settings",
     title: "Настройки кассы",
-    description: "Печать, режимы, PIN-режим для смены кассиров.",
-    linkTo: "/settings",
-    linkLabel: "Открыть настройки",
+    description: "Создайте активную кассу. Способы оплаты задаются в настройках аптеки.",
+    to: "/registers",
+    actionLabel: "Настроить кассу",
   },
   {
-    step: 7,
-    title: "Регуляторика",
-    description: "Текст напоминания о лицензии и предупреждения по рецепту.",
-    linkTo: "/settings",
-    linkLabel: "Открыть настройки",
+    code: "regulatory",
+    title: "Правила отпуска",
+    description: "Настроены предупреждения по срокам годности, возвратам и рецептам.",
+    to: "/settings",
+    actionLabel: "Проверить правила",
   },
   {
-    step: 8,
-    title: "Готово",
-    description: "Завершите визард — на этом шаге чек-лист закрепляется как пройденный.",
+    code: "ready",
+    title: "Готовность к работе",
+    description: "Все обязательные требования проверены системой.",
   },
 ];
 
-// Checklist tasks — names come from backend track_event() callers.
-// We render labels we know; unknowns fall through to the raw key.
-export const taskLabel: Record<string, string> = {
+export function readinessStepAction(
+  definition: ReadinessStepDefinition,
+  step: ReadinessStep,
+): { to: AppRoutePath; label: string } | null {
+  if (!definition.to || !definition.actionLabel) return null;
+  if (definition.code === "pos_settings") {
+    if (step.action_hint === "payment_methods_missing") {
+      return { to: "/settings", label: "Настроить оплату" };
+    }
+    if (step.action_hint === "operational_branch_missing") {
+      return { to: "/registers", label: "Связать кассу с точкой" };
+    }
+  }
+  return { to: definition.to, label: definition.actionLabel };
+}
+
+export const taskLabel: Record<ReadinessTaskCode, string> = {
   catalog_loaded: "Каталог загружен (≥100 товаров)",
   first_incoming: "Создан первый приход",
   first_sale: "Первая тестовая продажа",

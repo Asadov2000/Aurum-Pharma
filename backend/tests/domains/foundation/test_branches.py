@@ -5,10 +5,14 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import CurrentUser
 from app.core.errors import BusinessRuleError
 from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.router import update_branch as update_branch_route
+from app.domains.foundation.schemas import BranchUpdate
 from app.domains.foundation.service import FoundationService
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
@@ -37,6 +41,43 @@ async def test_branch_crud(db_session: AsyncSession, make_tenant) -> None:
     # Update
     updated = await service.update_branch(b1.id, fields={"address": "ул. Главная 1"})
     assert updated.address == "ул. Главная 1"
+
+
+async def test_branch_route_preserves_explicit_null_when_clearing_receipt_header(
+    db_session: AsyncSession,
+    make_tenant,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    actor = await make_user(home_tenant_id=tenant.id)
+    service = FoundationService(FoundationRepository(db_session))
+    branch = await service.create_branch(
+        tenant_id=tenant.id,
+        fields={"name": "Main", "receipt_header": {"line1": "Аптека Сино"}},
+    )
+    user = CurrentUser(
+        user_id=actor.id,
+        tenant_id=tenant.id,
+        is_developer=False,
+        is_administrator=False,
+        permissions={"branches.update"},
+        permission_scopes={"branches.update": None},
+    )
+
+    result = await update_branch_route(
+        branch_id=branch.id,
+        payload=BranchUpdate(receipt_header=None),
+        user=user,
+        service=service,
+    )
+
+    assert result.receipt_header is None
+
+
+@pytest.mark.parametrize("field_name", ["name", "branch_type", "is_active"])
+def test_branch_update_rejects_explicit_null_for_required_columns(field_name: str) -> None:
+    with pytest.raises(ValidationError, match=f"{field_name} cannot be null"):
+        BranchUpdate.model_validate({field_name: None})
 
 
 async def test_cannot_deactivate_last_active_branch(db_session: AsyncSession, make_tenant) -> None:

@@ -1,109 +1,163 @@
-"""auto_start_trials: tenants older than 60 days in 'setup' get promoted,
-but only if their catalogue has at least 100 items.
-
-The task opens its own session against the module-level SupportSessionLocal,
-which is bound to a single asyncio loop. We keep the test as one function
-so the engine is only ever touched from one loop.
-"""
+"""Automatic trial activation uses the canonical readiness transition."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import date, timedelta
+from uuid import UUID, uuid4
 
-import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
-from app.core.config import get_settings
 from app.core.time import utc_now
 from app.tasks.foundation import _auto_start_trials_async
 
 
-@pytest_asyncio.fixture
-async def support_engine_trials() -> AsyncIterator[AsyncEngine]:
-    settings = get_settings()
-    engine = create_async_engine(settings.DATABASE_URL_SUPPORT, poolclass=NullPool)
-    try:
-        yield engine
-    finally:
-        await engine.dispose()
-
-
-async def test_auto_start_trials_promotes_only_filled_catalogs(
-    support_engine_trials: AsyncEngine,
+async def test_auto_start_trials_promotes_only_ready_expired_setup(
+    db_connection: AsyncConnection,
 ) -> None:
-    """Three stale tenants + one young one. Stale_filled has catalog=100
-    and gets promoted; stale_empty has catalog=0 and is skipped; young_filled
-    has catalog=100 but isn't old enough."""
-    tenant_ids: list[str] = []
-    try:
-        async with support_engine_trials.begin() as conn:
-            inserted = await conn.execute(
-                text(
-                    "INSERT INTO tenant (name, contact_email, status) VALUES "
-                    "('StaleFilled','sf@aurum.tj','setup'),"
-                    "('StaleEmpty','se@aurum.tj','setup'),"
-                    "('YoungFilled','yf@aurum.tj','setup') "
-                    "RETURNING id"
-                )
-            )
-            ids = [str(r[0]) for r in inserted.fetchall()]
-            stale_filled, stale_empty, young_filled = ids
-            tenant_ids = ids
-
-            # Back-date the two stale tenants
-            await conn.execute(
-                text("UPDATE tenant SET created_at = :ts WHERE id = ANY(:ids)"),
-                {"ts": utc_now() - timedelta(days=61), "ids": [stale_filled, stale_empty]},
-            )
-
-            # Checklists for all three; only the two "Filled" have catalog=100
-            await conn.execute(
-                text(
-                    "INSERT INTO onboarding_checklist "
-                    "(tenant_id, setup_ends_at, catalog_items_count) VALUES "
-                    "(:sf, :ts, 100), (:se, :ts, 0), (:yf, :ts, 100)"
-                ),
+    session_factory = async_sessionmaker(
+        bind=db_connection,
+        expire_on_commit=False,
+        class_=AsyncSession,
+        join_transaction_mode="create_savepoint",
+    )
+    nick = uuid4().hex[:8]
+    async with session_factory() as session, session.begin():
+        inserted = await session.execute(
+            text("""
+                INSERT INTO public.tenant (name, contact_email, status)
+                VALUES
+                  ('Auto Ready', :ready_email, 'setup'),
+                  ('Auto Blocked', :blocked_email, 'setup'),
+                  ('Auto Young', :young_email, 'setup')
+                RETURNING id
+                """),
+            {
+                "ready_email": f"auto-ready-{nick}@aurum.tj",
+                "blocked_email": f"auto-blocked-{nick}@aurum.tj",
+                "young_email": f"auto-young-{nick}@aurum.tj",
+            },
+        )
+        ready_id, blocked_id, young_id = (UUID(str(row[0])) for row in inserted.fetchall())
+        await session.execute(
+            text("""
+                INSERT INTO public.tenant_settings (tenant_id)
+                VALUES (:ready), (:blocked), (:young)
+                """),
+            {"ready": ready_id, "blocked": blocked_id, "young": young_id},
+        )
+        await session.execute(
+            text("""
+                INSERT INTO public.onboarding_checklist (tenant_id, setup_ends_at)
+                VALUES
+                  (:ready, :expired),
+                  (:blocked, :expired),
+                  (:young, :future)
+                """),
+            {
+                "ready": ready_id,
+                "blocked": blocked_id,
+                "young": young_id,
+                "expired": utc_now() - timedelta(minutes=1),
+                "future": utc_now() + timedelta(days=1),
+            },
+        )
+        branch_id = (
+            await session.execute(
+                text("""
+                    INSERT INTO public.branch (
+                      tenant_id, name, address, license_number,
+                      license_expires_at, receipt_header
+                    ) VALUES (
+                      :tenant_id, 'Main', 'Dushanbe', :license_number,
+                      :license_expires_at, '{"line1":"Auto Ready"}'::jsonb
+                    )
+                    RETURNING id
+                    """),
                 {
-                    "sf": stale_filled,
-                    "se": stale_empty,
-                    "yf": young_filled,
-                    "ts": utc_now() + timedelta(days=60),
+                    "tenant_id": ready_id,
+                    "license_number": f"AUTO-{nick}",
+                    "license_expires_at": date.today() + timedelta(days=365),
                 },
             )
+        ).scalar_one()
+        await session.execute(
+            text("""
+                INSERT INTO public.register (tenant_id, branch_id, name)
+                VALUES (:tenant_id, :branch_id, 'Register 1')
+                """),
+            {"tenant_id": ready_id, "branch_id": branch_id},
+        )
+        user_id = (
+            await session.execute(
+                text("""
+                    INSERT INTO public.app_user (
+                      email, full_name, status, home_tenant_id, activated_at
+                    ) VALUES (
+                      :email, 'Auto Owner', 'active', :tenant_id,
+                      statement_timestamp()
+                    )
+                    RETURNING id
+                    """),
+                {"email": f"auto-owner-{nick}@aurum.tj", "tenant_id": ready_id},
+            )
+        ).scalar_one()
+        membership_id = (
+            await session.execute(
+                text("""
+                    INSERT INTO public.tenant_membership (
+                      tenant_id, user_id, full_name, status, activated_at
+                    ) VALUES (
+                      :tenant_id, :user_id, 'Auto Owner', 'active',
+                      statement_timestamp()
+                    )
+                    RETURNING id
+                    """),
+                {"tenant_id": ready_id, "user_id": user_id},
+            )
+        ).scalar_one()
+        await session.execute(
+            text("""
+                INSERT INTO public.tenant_ownership (
+                  tenant_id, membership_id, is_active
+                ) VALUES (:tenant_id, :membership_id, true)
+                """),
+            {"tenant_id": ready_id, "membership_id": membership_id},
+        )
+        await session.execute(
+            text("""
+                INSERT INTO public.tenant_catalog (
+                  tenant_id, brand_name, dispensing_type, storage_type, is_active
+                )
+                SELECT
+                  :tenant_id,
+                  'Auto item ' || series.item,
+                  'otc',
+                  'normal',
+                  true
+                FROM pg_catalog.generate_series(1, 100) AS series(item)
+                """),
+            {"tenant_id": ready_id},
+        )
 
-        result = await _auto_start_trials_async()
-        assert result == {"started": 1, "skipped": 1}, result
+    result = await _auto_start_trials_async(
+        session_factory=session_factory,
+        candidate_tenant_ids=frozenset({ready_id, blocked_id, young_id}),
+    )
+    assert result == {"started": 1, "skipped": 1}
 
-        async with support_engine_trials.connect() as conn:
-            rows = (
-                await conn.execute(
-                    text(
-                        "SELECT id, status, trial_started_at FROM tenant "
-                        "WHERE id = ANY(:ids) ORDER BY name"
-                    ),
-                    {"ids": tenant_ids},
-                )
-            ).fetchall()
-        by_id = {str(r[0]): (r[1], r[2]) for r in rows}
-        assert by_id[stale_filled][0] == "trial"
-        assert by_id[stale_filled][1] is not None
-        assert by_id[stale_empty][0] == "setup"
-        assert by_id[young_filled][0] == "setup"
-    finally:
-        if tenant_ids:
-            async with support_engine_trials.begin() as conn:
-                await conn.execute(
-                    text("DELETE FROM onboarding_checklist WHERE tenant_id = ANY(:ids)"),
-                    {"ids": tenant_ids},
-                )
-                await conn.execute(
-                    text("DELETE FROM tenant_settings WHERE tenant_id = ANY(:ids)"),
-                    {"ids": tenant_ids},
-                )
-                await conn.execute(
-                    text("DELETE FROM tenant WHERE id = ANY(:ids)"),
-                    {"ids": tenant_ids},
-                )
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT id, status, trial_started_at FROM public.tenant "
+                    "WHERE id = ANY(:ids) ORDER BY name"
+                ),
+                {"ids": [ready_id, blocked_id, young_id]},
+            )
+        ).fetchall()
+    by_id = {UUID(str(row[0])): (row[1], row[2]) for row in rows}
+    assert by_id[ready_id][0] == "trial"
+    assert by_id[ready_id][1] is not None
+    assert by_id[blocked_id][0] == "setup"
+    assert by_id[young_id][0] == "setup"

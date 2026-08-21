@@ -1,46 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getChecklist, getWizard, startTrial, submitWizardStep } from "./api";
+import { getOnboardingOverview, startTrial } from "./api";
 
 export const onboardingKeys = {
-  wizard: ["onboarding", "wizard"] as const,
-  checklist: ["onboarding", "checklist"] as const,
+  overview: (tenantId: string | undefined) => ["onboarding", "overview", tenantId] as const,
 };
 
-export function useWizardQuery(enabled = true) {
+export function useOnboardingOverviewQuery(tenantId: string | undefined) {
   return useQuery({
-    queryKey: onboardingKeys.wizard,
-    queryFn: getWizard,
-    enabled,
+    queryKey: onboardingKeys.overview(tenantId),
+    queryFn: getOnboardingOverview,
+    enabled: tenantId !== undefined,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 
-export function useChecklistQuery(enabled = true) {
-  return useQuery({
-    queryKey: onboardingKeys.checklist,
-    queryFn: getChecklist,
-    enabled,
-  });
-}
-
-export function useSubmitStep() {
+export function useStartTrial(tenantId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { step: number; payload: Record<string, unknown> }) =>
-      submitWizardStep(args.step, args.payload),
-    onSuccess: (data) => {
-      qc.setQueryData(onboardingKeys.wizard, data);
-    },
-  });
-}
-
-export function useStartTrial() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: startTrial,
+    mutationFn: (operationId: string) => startTrial(operationId),
+    retry: false,
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: onboardingKeys.checklist });
-      // Subscription was created — refresh billing too.
+      void qc.invalidateQueries({ queryKey: onboardingKeys.overview(tenantId) });
       void qc.invalidateQueries({ queryKey: ["billing"] });
     },
   });

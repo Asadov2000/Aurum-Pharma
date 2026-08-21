@@ -52,6 +52,7 @@ DOMAIN_READ_PATHS = [
     ("/api/v1/roles", 200),
     ("/api/v1/permissions", 200),
     ("/api/v1/onboarding/checklist", 200),
+    ("/api/v1/onboarding/overview", 200),
     (f"/api/v1/shifts/current?register_id={uuid4()}", 200),
 ]
 

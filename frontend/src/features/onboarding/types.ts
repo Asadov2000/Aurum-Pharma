@@ -1,24 +1,64 @@
-// Mirrors backend Pydantic schemas in app/domains/onboarding/schemas.py.
+export type ReadinessStepCode =
+  | "pharmacy_profile"
+  | "licensed_branch"
+  | "receipt_details"
+  | "tenant_owner"
+  | "catalog"
+  | "pos_settings"
+  | "regulatory"
+  | "ready";
 
-export interface WizardState {
-  tenant_id: string;
-  current_step: number;
-  steps_completed: number[];
-  wizard_data: Record<string, unknown>;
-  is_completed: boolean;
-  started_at: string;
-  completed_at: string | null;
-  updated_at: string;
+export type ReadinessTaskCode =
+  | "catalog_loaded"
+  | "first_incoming"
+  | "first_sale"
+  | "second_user"
+  | "shift_opened"
+  | "test_receipt_printed";
+
+export type TenantLaunchStatus =
+  | "setup"
+  | "trial"
+  | "active"
+  | "grace_period"
+  | "readonly"
+  | "archived";
+
+export interface ReadinessStep {
+  code: ReadinessStepCode;
+  is_complete: boolean;
+  required: boolean;
+  current: number | null;
+  target: number | null;
+  action_hint?:
+    | "register_missing"
+    | "payment_methods_missing"
+    | "operational_branch_missing"
+    | null;
 }
 
-export interface Checklist {
+export interface ReadinessTask {
+  code: ReadinessTaskCode;
+  is_complete: boolean;
+}
+
+export interface OnboardingOverview {
   tenant_id: string;
-  completed_tasks: string[];
-  catalog_items_count: number;
-  trial_eligible: boolean;
-  trial_started_at: string | null;
+  tenant_name: string;
+  tenant_status: TenantLaunchStatus;
   setup_ends_at: string;
-  updated_at: string;
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
+  subscription_id: string | null;
+  steps: ReadinessStep[];
+  recommended_tasks: ReadinessTask[];
+  required_completed: number;
+  required_total: number;
+  recommended_completed: number;
+  recommended_total: number;
+  is_ready: boolean;
+  can_start_trial: boolean;
+  blocker_codes: ReadinessStepCode[];
 }
 
 export interface StartTrialResponse {
