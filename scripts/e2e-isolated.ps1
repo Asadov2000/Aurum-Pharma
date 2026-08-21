@@ -1,11 +1,17 @@
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)]
+    [switch]$PlanOnly,
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
     [string[]]$PlaywrightArgs = @()
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($PlanOnly) {
+    Write-Output (ConvertTo-Json -InputObject @($PlaywrightArgs) -Compress)
+    return
+}
 
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $composeFile = Join-Path $workspace "docker-compose.e2e.yml"
