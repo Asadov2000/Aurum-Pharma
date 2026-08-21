@@ -21,6 +21,10 @@ const schema = z.object({
   address: z.string().optional(),
   license_number: z.string().optional(),
   license_expires_at: z.string().optional(),
+  receipt_line1: z.string().max(200, "Не больше 200 символов").optional(),
+  receipt_line2: z.string().max(200, "Не больше 200 символов").optional(),
+  receipt_phone: z.string().max(50, "Не больше 50 символов").optional(),
+  receipt_inn_or_tin: z.string().max(50, "Не больше 50 символов").optional(),
   is_active: z.boolean(),
 });
 
@@ -44,6 +48,10 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
       address: branch?.address ?? "",
       license_number: branch?.license_number ?? "",
       license_expires_at: branch?.license_expires_at ?? "",
+      receipt_line1: branch?.receipt_header?.line1 ?? "",
+      receipt_line2: branch?.receipt_header?.line2 ?? "",
+      receipt_phone: branch?.receipt_header?.phone ?? "",
+      receipt_inn_or_tin: branch?.receipt_header?.inn_or_tin ?? "",
       is_active: branch?.is_active ?? true,
     },
   });
@@ -55,6 +63,10 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
       address: branch?.address ?? "",
       license_number: branch?.license_number ?? "",
       license_expires_at: branch?.license_expires_at ?? "",
+      receipt_line1: branch?.receipt_header?.line1 ?? "",
+      receipt_line2: branch?.receipt_header?.line2 ?? "",
+      receipt_phone: branch?.receipt_header?.phone ?? "",
+      receipt_inn_or_tin: branch?.receipt_header?.inn_or_tin ?? "",
       is_active: branch?.is_active ?? true,
     });
   }, [branch, form]);
@@ -74,6 +86,16 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
     setTopError(null);
     const d = parsed.data;
     const trim = (v: string | undefined) => (v && v.trim() !== "" ? v.trim() : null);
+    const receiptLine1 = trim(d.receipt_line1);
+    const receiptHeader = receiptLine1
+      ? {
+          line1: receiptLine1,
+          line2: trim(d.receipt_line2),
+          phone: trim(d.receipt_phone),
+          inn_or_tin: trim(d.receipt_inn_or_tin),
+          demo_notice: branch?.receipt_header?.demo_notice ?? null,
+        }
+      : null;
     try {
       if (isEdit && branch) {
         await updateMutation.mutateAsync({
@@ -84,6 +106,7 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
             address: trim(d.address),
             license_number: trim(d.license_number),
             license_expires_at: trim(d.license_expires_at),
+            receipt_header: receiptHeader,
             is_active: d.is_active,
           },
         });
@@ -94,6 +117,7 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
           address: trim(d.address),
           license_number: trim(d.license_number),
           license_expires_at: trim(d.license_expires_at),
+          ...(receiptHeader ? { receipt_header: receiptHeader } : {}),
         });
       }
       onClose();
@@ -131,6 +155,52 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
         <div>
           <Label htmlFor="license_expires_at">Истекает</Label>
           <Input id="license_expires_at" type="date" {...form.register("license_expires_at")} />
+        </div>
+      </div>
+      <div className="space-y-4 border-t border-border pt-4">
+        <div>
+          <p className="text-sm font-medium text-foreground">Реквизиты на чеке</p>
+          <p className="mt-1 text-xs leading-5 text-foreground-muted">
+            Первая строка обязательна перед запуском пробного периода.
+          </p>
+        </div>
+        <div>
+          <Label htmlFor="receipt_line1">Название организации</Label>
+          <Input
+            id="receipt_line1"
+            invalid={Boolean(form.formState.errors.receipt_line1)}
+            {...form.register("receipt_line1")}
+          />
+          <FormError>{form.formState.errors.receipt_line1?.message}</FormError>
+        </div>
+        <div>
+          <Label htmlFor="receipt_line2">Название точки</Label>
+          <Input
+            id="receipt_line2"
+            invalid={Boolean(form.formState.errors.receipt_line2)}
+            {...form.register("receipt_line2")}
+          />
+          <FormError>{form.formState.errors.receipt_line2?.message}</FormError>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="receipt_phone">Телефон</Label>
+            <Input
+              id="receipt_phone"
+              invalid={Boolean(form.formState.errors.receipt_phone)}
+              {...form.register("receipt_phone")}
+            />
+            <FormError>{form.formState.errors.receipt_phone?.message}</FormError>
+          </div>
+          <div>
+            <Label htmlFor="receipt_inn_or_tin">ИНН / TIN</Label>
+            <Input
+              id="receipt_inn_or_tin"
+              invalid={Boolean(form.formState.errors.receipt_inn_or_tin)}
+              {...form.register("receipt_inn_or_tin")}
+            />
+            <FormError>{form.formState.errors.receipt_inn_or_tin?.message}</FormError>
+          </div>
         </div>
       </div>
       {isEdit && <Switch label="Активна" {...form.register("is_active")} />}

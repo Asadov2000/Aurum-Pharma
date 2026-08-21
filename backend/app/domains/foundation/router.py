@@ -377,7 +377,7 @@ async def update_branch(
         raise PermissionDeniedError("Branch access denied")
     branch = await service.update_branch(
         branch_id,
-        fields=payload.model_dump(exclude_none=True),
+        fields=payload.model_dump(exclude_unset=True),
         updated_by=user.user_id,
     )
     return BranchRead.model_validate(branch)

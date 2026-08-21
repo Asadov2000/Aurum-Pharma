@@ -90,6 +90,7 @@ READ_ONLY_TABLES = {
     "sync_writer_readiness",
     "tenant_membership",
     "tenant_ownership",
+    "trial_activation",
     "user_assignment",
 }
 
@@ -243,6 +244,7 @@ CUSTOM_FUNCTIONS = {
     "register_auth_session_device",
     "record_edge_writer_readiness",
     "record_auth_login_attempt",
+    "record_trial_activation",
     "record_auth_mfa_failure",
     "record_role_permission_change",
     "reserve_sync_event_position",
@@ -317,6 +319,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_pos_command_immutable",
     "trg_guard_write_off_immutability",
     "trg_guard_supplier_return_immutability",
+    "trg_guard_trial_activation_immutable",
     "trg_sync_billing_payment_submission_review_status",
     "trg_revoke_support_access_on_tenant_archive",
     "withdraw_tenant_billing_payment_submission",
@@ -414,6 +417,7 @@ APP_EXECUTABLE_FUNCTIONS = {
     "register_auth_session_device",
     "record_edge_writer_readiness",
     "record_auth_login_attempt",
+    "record_trial_activation",
     "record_role_permission_change",
     "read_tenant_billing_financial_account",
     "reserve_sync_event_position",

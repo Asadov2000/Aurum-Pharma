@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_db, require_permission
-from app.core.errors import BusinessRuleError
+from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.onboarding.repository import OnboardingRepository
 from app.domains.onboarding.schemas import (
     ChecklistRead,
+    OnboardingOverviewRead,
+    StartTrialRequest,
     StartTrialResponse,
     WizardStateRead,
     WizardStepSubmit,
@@ -27,10 +30,19 @@ async def _service(
     return OnboardingService(OnboardingRepository(db))
 
 
-def _tenant_or_400(user: CurrentUser):  # type: ignore[no-untyped-def]
+def _tenant_or_400(user: CurrentUser) -> UUID:
     if user.tenant_id is None:
         raise BusinessRuleError("Request is not scoped to a tenant")
     return user.tenant_id
+
+
+@router.get("/overview", response_model=OnboardingOverviewRead)
+async def get_overview(
+    user: Annotated[CurrentUser, Depends(require_permission("settings.update"))],
+    service: Annotated[OnboardingService, Depends(_service)],
+) -> OnboardingOverviewRead:
+    overview = await service.get_overview(_tenant_or_400(user))
+    return OnboardingOverviewRead.model_validate(overview)
 
 
 @router.get("/wizard", response_model=WizardStateRead)
@@ -68,14 +80,25 @@ async def get_checklist(
     status_code=status.HTTP_201_CREATED,
 )
 async def start_trial(
+    payload: StartTrialRequest,
     user: Annotated[CurrentUser, Depends(require_permission("settings.update"))],
     service: Annotated[OnboardingService, Depends(_service)],
 ) -> StartTrialResponse:
-    tenant, subscription = await service.start_trial(tenant_id=_tenant_or_400(user))
+    if not user.is_tenant_owner:
+        raise PermissionDeniedError("Only an active pharmacy owner can start the trial")
+    if user.session_id is None:
+        raise PermissionDeniedError("An authenticated owner session is required")
+    result = await service.start_trial(
+        tenant_id=_tenant_or_400(user),
+        source="manual",
+        operation_id=payload.operation_id,
+        actor_user_id=user.user_id,
+        actor_session_id=user.session_id,
+    )
     return StartTrialResponse(
-        tenant_id=tenant.id,
-        status=tenant.status,
-        trial_started_at=tenant.trial_started_at,
-        trial_ends_at=tenant.trial_ends_at,
-        subscription_id=subscription.id,
+        tenant_id=result.tenant_id,
+        status=result.status,
+        trial_started_at=result.trial_started_at,
+        trial_ends_at=result.trial_ends_at,
+        subscription_id=result.subscription_id,
     )

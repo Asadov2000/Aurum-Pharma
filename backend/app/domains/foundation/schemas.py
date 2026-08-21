@@ -189,6 +189,28 @@ class TenantSettingsUpdate(BaseModel):
 # -----------------------------------------------------------------------------
 
 
+class ReceiptHeader(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    line1: str = Field(min_length=1, max_length=200)
+    line2: str | None = Field(default=None, max_length=200)
+    phone: str | None = Field(default=None, max_length=50)
+    inn_or_tin: str | None = Field(default=None, max_length=50)
+    demo_notice: str | None = Field(default=None, max_length=200)
+
+
+class ReceiptHeaderRead(BaseModel):
+    """Tolerant reader for receipt data saved before validation was introduced."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    line1: str | None = None
+    line2: str | None = None
+    phone: str | None = None
+    inn_or_tin: str | None = None
+    demo_notice: str | None = None
+
+
 class BranchCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     address: str | None = None
@@ -196,7 +218,7 @@ class BranchCreate(BaseModel):
     license_number: str | None = None
     license_expires_at: date | None = None
     working_hours: dict[str, Any] | None = None
-    receipt_header: dict[str, Any] | None = None
+    receipt_header: ReceiptHeader | None = None
 
     @field_validator("branch_type")
     @classmethod
@@ -213,7 +235,7 @@ class BranchUpdate(BaseModel):
     license_number: str | None = None
     license_expires_at: date | None = None
     working_hours: dict[str, Any] | None = None
-    receipt_header: dict[str, Any] | None = None
+    receipt_header: ReceiptHeader | None = None
     is_active: bool | None = None
 
     @field_validator("branch_type")
@@ -222,6 +244,13 @@ class BranchUpdate(BaseModel):
         if v is not None and v not in {"pharmacy", "pharmacy_post", "kiosk"}:
             raise ValueError("branch_type must be one of pharmacy|pharmacy_post|kiosk")
         return v
+
+    @model_validator(mode="after")
+    def _reject_null_for_required_columns(self) -> BranchUpdate:
+        for field_name in ("name", "branch_type", "is_active"):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null")
+        return self
 
 
 class BranchRead(BaseModel):
@@ -235,7 +264,7 @@ class BranchRead(BaseModel):
     license_number: str | None
     license_expires_at: date | None
     working_hours: dict[str, Any] | None
-    receipt_header: dict[str, Any] | None
+    receipt_header: ReceiptHeaderRead | None
     is_active: bool
     created_at: datetime
     updated_at: datetime

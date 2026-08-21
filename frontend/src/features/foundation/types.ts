@@ -116,6 +116,18 @@ export interface TenantSettingsUpdatePayload {
 
 export type BranchType = "pharmacy" | "pharmacy_post" | "kiosk";
 
+export interface ReceiptHeader {
+  line1: string | null;
+  line2?: string | null;
+  phone?: string | null;
+  inn_or_tin?: string | null;
+  demo_notice?: string | null;
+}
+
+export interface ReceiptHeaderPayload extends Omit<ReceiptHeader, "line1"> {
+  line1: string;
+}
+
 export interface Branch {
   id: string;
   tenant_id: string;
@@ -125,7 +137,7 @@ export interface Branch {
   license_number: string | null;
   license_expires_at: string | null;
   working_hours: Record<string, unknown> | null;
-  receipt_header: Record<string, unknown> | null;
+  receipt_header: ReceiptHeader | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -152,6 +164,7 @@ export interface BranchCreatePayload {
   branch_type?: BranchType;
   license_number?: string | null;
   license_expires_at?: string | null;
+  receipt_header?: ReceiptHeaderPayload | null;
 }
 
 export interface BranchUpdatePayload {
@@ -160,6 +173,7 @@ export interface BranchUpdatePayload {
   branch_type?: BranchType;
   license_number?: string | null;
   license_expires_at?: string | null;
+  receipt_header?: ReceiptHeaderPayload | null;
   is_active?: boolean;
 }
 
