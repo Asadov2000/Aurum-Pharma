@@ -18,6 +18,13 @@ export default {
         border: withAlpha("--border"),
         input: withAlpha("--input"),
         ring: withAlpha("--ring"),
+        shell: {
+          sidebar: withAlpha("--shell-sidebar"),
+          "sidebar-active": withAlpha("--shell-sidebar-active"),
+          "sidebar-foreground": withAlpha("--shell-sidebar-foreground"),
+          "sidebar-muted": withAlpha("--shell-sidebar-muted"),
+          "sidebar-border": withAlpha("--shell-sidebar-border"),
+        },
         foreground: {
           DEFAULT: withAlpha("--foreground"),
           secondary: withAlpha("--foreground-secondary"),

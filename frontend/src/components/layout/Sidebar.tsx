@@ -59,8 +59,8 @@ export function Sidebar({
             ? "min-h-[var(--nav-target-size)] w-full gap-3 px-3 py-2"
             : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] justify-center p-0",
           active
-            ? "bg-primary text-primary-foreground shadow-sm"
-            : "text-foreground-secondary hover:bg-foreground/5 hover:text-foreground",
+            ? "bg-shell-sidebar-active text-shell-sidebar-foreground shadow-sm"
+            : "text-shell-sidebar-muted hover:bg-white/10 hover:text-shell-sidebar-foreground",
         )}
       >
         <NavIcon to={item.to} />
@@ -81,11 +81,11 @@ export function Sidebar({
         key={key}
         className={cn(
           "flex flex-col gap-0.5",
-          !showLabels && !first && "border-t border-border pt-2",
+          !showLabels && !first && "border-t border-shell-sidebar-border pt-2",
         )}
       >
         {showLabels && caption && (
-          <div className="px-3 pb-1 pt-2 text-[11px] font-semibold text-foreground-muted">
+          <div className="px-3 pb-1 pt-2 text-[11px] font-semibold text-shell-sidebar-muted">
             {caption}
           </div>
         )}
@@ -112,7 +112,7 @@ export function Sidebar({
       aria-label="Основная навигация"
       data-sidebar-mode={mode === "drawer" ? "drawer" : expanded ? "expanded" : "compact"}
       className={cn(
-        "flex flex-col border-r border-border bg-surface",
+        "flex flex-col border-r border-shell-sidebar-border bg-shell-sidebar text-shell-sidebar-foreground",
         mode === "desktop"
           ? "sticky top-[var(--app-header-height)] h-[calc(100dvh-var(--app-header-height))] w-full px-2 py-2.5"
           : "h-full px-3 py-3.5 shadow-xl",
@@ -120,7 +120,7 @@ export function Sidebar({
     >
       {mode === "drawer" && (
         <div className="flex shrink-0 items-center justify-between gap-3 px-2 pb-3.5">
-          <BrandMark showName />
+          <BrandMark showName tone="inverse" />
           {closeButton}
         </div>
       )}
@@ -140,7 +140,12 @@ export function Sidebar({
       </div>
 
       {(onOpenSettings || (mode === "desktop" && onToggleExpanded)) && (
-        <div className={cn("mt-2 shrink-0 border-t border-border pt-2", showLabels && "space-y-1")}>
+        <div
+          className={cn(
+            "mt-2 shrink-0 border-t border-shell-sidebar-border pt-2",
+            showLabels && "space-y-1",
+          )}
+        >
           {onOpenSettings && (
             <Button
               variant="ghost"
@@ -149,6 +154,7 @@ export function Sidebar({
                 showLabels
                   ? "min-h-[var(--nav-target-size)] w-full justify-start px-3 font-medium"
                   : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0",
+                "text-shell-sidebar-muted hover:bg-white/10 hover:text-shell-sidebar-foreground",
               )}
               aria-label="Настроить боковую панель"
               title={!showLabels ? "Настроить боковую панель" : undefined}
@@ -166,6 +172,7 @@ export function Sidebar({
                 showLabels
                   ? "min-h-[var(--nav-target-size)] w-full justify-start px-3 font-medium"
                   : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0",
+                "text-shell-sidebar-muted hover:bg-white/10 hover:text-shell-sidebar-foreground",
               )}
               aria-label={expanded ? "Свернуть боковую панель" : "Развернуть боковую панель"}
               aria-expanded={expanded}

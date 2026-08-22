@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
 import { AppearanceMenu } from "@/components/AppearanceMenu";
@@ -109,6 +109,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
     pathname === "/admin/sync"
       ? "Синхронизация"
       : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
+  const pageOwnsDesktopTitle = pathname === "/";
+  const workspaceLabel =
+    user?.support_access?.tenant_name ?? (hasTenant ? "Рабочая область аптеки" : "Платформа Aurum");
 
   // Clean identity: a recognizable name + a quiet caption. We have no role name
   // in the payload, so the caption is the support role (dev/admin) when set, or
@@ -116,10 +119,10 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const fullName = user?.full_name?.trim();
   const name = fullName || user?.email || "—";
   const caption = user?.is_developer
-      ? "Разработчик"
-      : user?.is_administrator
-        ? "Администратор"
-        : fullName
+    ? "Разработчик"
+    : user?.is_administrator
+      ? "Администратор"
+      : fullName
         ? (user?.email ?? null)
         : null;
   const initial = name.charAt(0).toUpperCase();
@@ -247,7 +250,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   }, [navigationOpen]);
 
   return (
-    <div className="min-h-screen bg-background" style={shellStyle}>
+    <div data-ui-version="2026" className="min-h-screen bg-background" style={shellStyle}>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
@@ -297,11 +300,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         className="sticky top-0 z-sticky border-b border-border bg-surface"
       >
         <div className="flex min-h-[var(--app-header-height)] items-stretch">
-          <div className="hidden w-[var(--app-sidebar-width)] shrink-0 items-center border-r border-border px-4 lg:flex">
-            <BrandMark />
+          <div className="hidden w-[var(--app-sidebar-width)] shrink-0 items-center border-r border-shell-sidebar-border bg-shell-sidebar px-4 lg:flex">
+            <BrandMark tone="inverse" />
             <span
               className={cn(
-                "ml-3 truncate font-display text-lg font-semibold text-foreground",
+                "ml-3 truncate font-display text-lg font-semibold text-shell-sidebar-foreground",
                 !sidebarExpanded && "sr-only",
               )}
             >
@@ -324,16 +327,30 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
               <span className="truncate font-display text-base font-semibold text-foreground sm:text-lg lg:hidden">
                 Aurum Pharma
               </span>
-              <h1 className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
-                {pageTitle}
-              </h1>
+              {pageOwnsDesktopTitle ? (
+                <span className="hidden min-h-9 items-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground-secondary lg:inline-flex">
+                  {workspaceLabel}
+                </span>
+              ) : (
+                <h1 className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
+                  {pageTitle}
+                </h1>
+              )}
             </div>
 
             <div className="flex shrink-0 items-center gap-2 sm:gap-3">
               <ConnectivityIndicator />
               <PwaInstallButton />
               <RuntimeSurfaceBadge />
-              <div className="hidden min-w-0 items-center gap-2 border-l border-border pl-3 2xl:flex">
+              <Link
+                to="/notifications"
+                aria-label="Открыть уведомления"
+                title="Уведомления"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground-secondary transition-colors duration-fast hover:bg-foreground/5 hover:text-foreground"
+              >
+                <NotificationIcon />
+              </Link>
+              <div className="hidden min-w-0 items-center gap-2 border-l border-border pl-3 xl:flex">
                 <span
                   aria-hidden="true"
                   className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-xs font-semibold text-primary"
@@ -491,6 +508,25 @@ function LogoutIcon(): JSX.Element {
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <path d="m16 17 5-5-5-5" />
       <path d="M21 12H9" />
+    </svg>
+  );
+}
+
+function NotificationIcon(): JSX.Element {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M10.5 21a2 2 0 0 0 3 0" />
     </svg>
   );
 }

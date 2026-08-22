@@ -45,6 +45,15 @@
     /* modal scrim */
     --overlay: 215 31% 8%;
     --overlay-opacity: 0.42;
+
+    /* Shell colors are deliberately separate from --primary. The sidebar can
+       evolve without changing buttons, focus rings, charts or dark-mode data
+       surfaces across pages that have not migrated yet. */
+    --shell-sidebar: 194 98% 22%;
+    --shell-sidebar-active: 194 95% 17%;
+    --shell-sidebar-foreground: 0 0% 100%;
+    --shell-sidebar-muted: 192 28% 82%;
+    --shell-sidebar-border: 192 68% 31%;
   }
 
   [data-theme="dark"] {
@@ -79,6 +88,12 @@
 
     --overlay: 220 20% 2%;
     --overlay-opacity: 0.62;
+
+    --shell-sidebar: 194 74% 16%;
+    --shell-sidebar-active: 194 78% 11%;
+    --shell-sidebar-foreground: 0 0% 100%;
+    --shell-sidebar-muted: 192 23% 76%;
+    --shell-sidebar-border: 194 48% 26%;
   }
 
   :root {
