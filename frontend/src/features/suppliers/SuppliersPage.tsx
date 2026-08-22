@@ -23,29 +23,46 @@ import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
+import { cn } from "@/lib/utils";
 
-import { useSupplierSearchQuery } from "./queries";
+import {
+  formatSupplierDateTime,
+  formatSupplierMoney,
+  formatSupplierQuantity,
+  supplierProductSubtitle,
+} from "./formatters";
+import { supplierReturnReasonLabel } from "./labels";
+import { useSupplierReturnsQuery, useSupplierSearchQuery } from "./queries";
 import { SupplierDetailModal } from "./SupplierDetailModal";
 import { SupplierForm } from "./SupplierForm";
-import { type Supplier, type SupplierSearchSummary } from "./types";
+import { SupplierReturnForm } from "./SupplierReturnForm";
+import { type Supplier, type SupplierReturnDetails, type SupplierSearchSummary } from "./types";
 
 const PAGE_SIZE = 25;
 
 type StatusFilter = "active" | "inactive" | "all";
+type SupplierView = "table" | "cards";
+
+const VIEW_STORAGE_KEY = "aurum:suppliers:view:v1";
 
 export function SuppliersPage(): JSX.Element {
   const { user } = useAuth();
   const filterPreferenceKey = useFilterPreferenceKey("suppliers");
   const canCreate = hasPermission(user, "suppliers.create");
   const canUpdate = hasPermission(user, "suppliers.update");
+  const canCreateReturn = hasPermission(user, "incoming.return");
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<StatusFilter>("active");
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<Supplier | null>(null);
   const [editing, setEditing] = useState<Supplier | null>(null);
+  const [returning, setReturning] = useState<Supplier | null>(null);
   const [creating, setCreating] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [view, setView] = useState<SupplierView>(readSupplierView);
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
+  const isSplitLayout = useMediaQuery("(min-width: 1280px)");
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -66,6 +83,7 @@ export function SuppliersPage(): JSX.Element {
   );
   const query = useSupplierSearchQuery(params);
   const rows = query.data?.items ?? [];
+  const selectedSupplier = rows.find((supplier) => supplier.id === selectedId) ?? rows[0] ?? null;
   const hasFilters = Boolean(qInput.trim() || status !== "active");
 
   const resetFilters = () => {
@@ -75,11 +93,25 @@ export function SuppliersPage(): JSX.Element {
     setPage(1);
   };
 
+  const changeView = (next: SupplierView) => {
+    setView(next);
+    writeSupplierView(next);
+  };
+
+  const openSupplier = (supplier: Supplier) => {
+    if (isSplitLayout && view === "table") {
+      setSelectedId(supplier.id);
+      return;
+    }
+    setDetail(supplier);
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Поставщики"
         description="Контакты, реквизиты и возвраты по каждой компании-партнёру."
+        showTitleOnDesktop
         meta={
           query.data ? (
             <span aria-live="polite">
@@ -89,7 +121,25 @@ export function SuppliersPage(): JSX.Element {
           ) : undefined
         }
         actions={
-          canCreate ? <Button onClick={() => setCreating(true)}>Новый поставщик</Button> : undefined
+          <>
+            {canCreateReturn && isSplitLayout && view === "table" && (
+              <Button
+                variant="secondary"
+                size="lg"
+                disabled={!selectedSupplier?.is_active}
+                onClick={() => selectedSupplier && setReturning(selectedSupplier)}
+              >
+                <ReturnIcon />
+                Оформить возврат
+              </Button>
+            )}
+            {canCreate && (
+              <Button size="lg" onClick={() => setCreating(true)}>
+                <PlusIcon />
+                Новый поставщик
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -151,6 +201,14 @@ export function SuppliersPage(): JSX.Element {
           },
         ]}
         onResetValues={resetFilters}
+        actions={
+          <div className="flex min-h-[var(--control-height-md)] min-w-0 items-center gap-3">
+            {isDesktopLayout && <SupplierViewControl value={view} onChange={changeView} />}
+            <span className="whitespace-nowrap text-sm text-foreground-muted" aria-live="polite">
+              Найдено: {query.data?.total ?? 0}
+            </span>
+          </div>
+        }
       />
 
       {query.isLoading ? (
@@ -192,14 +250,30 @@ export function SuppliersPage(): JSX.Element {
         </TableEmpty>
       ) : (
         <>
-          {isDesktopLayout ? (
-            <SupplierTable items={rows} onOpen={setDetail} />
-          ) : (
-            <div className="grid grid-cols-1 gap-3">
+          {view === "cards" || !isDesktopLayout ? (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
               {rows.map((supplier) => (
-                <SupplierCard key={supplier.id} supplier={supplier} onOpen={setDetail} />
+                <SupplierCard key={supplier.id} supplier={supplier} onOpen={openSupplier} />
               ))}
             </div>
+          ) : isSplitLayout ? (
+            <div className="grid min-w-0 grid-cols-[minmax(0,1.75fr)_minmax(21rem,1fr)] items-start gap-4">
+              <SupplierTable
+                items={rows}
+                selectedId={selectedSupplier?.id ?? null}
+                onOpen={openSupplier}
+              />
+              {selectedSupplier && (
+                <SupplierPreviewPanel
+                  supplier={selectedSupplier}
+                  onEdit={(supplier) => setEditing(supplier)}
+                  onReturn={(supplier) => setReturning(supplier)}
+                  onOpenFull={(supplier) => setDetail(supplier)}
+                />
+              )}
+            </div>
+          ) : (
+            <SupplierTable items={rows} selectedId={null} onOpen={openSupplier} />
           )}
           <Pagination
             page={page}
@@ -229,6 +303,19 @@ export function SuppliersPage(): JSX.Element {
         )}
       </Modal>
 
+      {canCreateReturn && (
+        <Modal
+          open={returning !== null}
+          onClose={() => setReturning(null)}
+          title={returning ? `Возврат: ${returning.name}` : "Возврат поставщику"}
+          className="max-w-3xl"
+        >
+          {returning && (
+            <SupplierReturnForm supplier={returning} onClose={() => setReturning(null)} />
+          )}
+        </Modal>
+      )}
+
       {(canCreate || canUpdate) && (
         <Modal
           open={creating || editing !== null}
@@ -248,6 +335,68 @@ export function SuppliersPage(): JSX.Element {
           />
         </Modal>
       )}
+    </div>
+  );
+}
+
+function readSupplierView(): SupplierView {
+  if (typeof window === "undefined") return "table";
+  try {
+    return window.localStorage.getItem(VIEW_STORAGE_KEY) === "cards" ? "cards" : "table";
+  } catch {
+    return "table";
+  }
+}
+
+function writeSupplierView(view: SupplierView): void {
+  try {
+    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+  } catch {
+    // View preference is optional; the supplier workflow must stay available.
+  }
+}
+
+function SupplierViewControl({
+  value,
+  onChange,
+}: {
+  value: SupplierView;
+  onChange: (value: SupplierView) => void;
+}): JSX.Element {
+  return (
+    <div
+      className="inline-flex overflow-hidden rounded-md border border-input bg-surface"
+      role="group"
+      aria-label="Вид поставщиков"
+    >
+      <button
+        type="button"
+        className={cn(
+          "grid h-[var(--control-height-md)] w-[var(--control-height-md)] place-items-center transition-colors duration-fast",
+          value === "table"
+            ? "bg-primary/10 text-primary"
+            : "text-foreground-muted hover:bg-foreground/5",
+        )}
+        aria-label="Показать таблицей"
+        aria-pressed={value === "table"}
+        onClick={() => onChange("table")}
+      >
+        <TableViewIcon />
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "grid h-[var(--control-height-md)] w-[var(--control-height-md)] place-items-center border-l border-input transition-colors duration-fast",
+          value === "cards"
+            ? "bg-primary/10 text-primary"
+            : "text-foreground-muted hover:bg-foreground/5",
+        )}
+        aria-label="Показать карточками"
+        aria-pressed={value === "cards"}
+        onClick={() => onChange("cards")}
+      >
+        <GridViewIcon />
+      </button>
     </div>
   );
 }
@@ -295,9 +444,9 @@ function SummaryMetric({
         ? "text-foreground-secondary"
         : "text-foreground";
   return (
-    <div className="min-w-0 border-b border-r border-border px-4 py-3 last:border-r-0 md:border-b-0">
-      <p className="text-xs font-medium text-foreground-muted">{label}</p>
-      <p className={`mt-1 font-mono text-lg font-semibold tabular-nums ${toneClass}`}>
+    <div className="min-w-0 border-b border-r border-border px-4 py-4 text-center last:border-r-0 md:border-b-0">
+      <p className="text-sm text-foreground-muted">{label}</p>
+      <p className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass}`}>
         {value.toLocaleString("ru-RU")}
       </p>
       {detail && <p className="mt-0.5 truncate text-xs text-foreground-muted">{detail}</p>}
@@ -307,13 +456,15 @@ function SummaryMetric({
 
 function SupplierTable({
   items,
+  selectedId,
   onOpen,
 }: {
   items: Supplier[];
+  selectedId: string | null;
   onOpen: (supplier: Supplier) => void;
 }): JSX.Element {
   return (
-    <Table>
+    <Table className="min-w-full" aria-label="Поставщики">
       <THead>
         <TR>
           <TH>Поставщик</TH>
@@ -321,16 +472,24 @@ function SupplierTable({
           <TH>Контакт</TH>
           <TH>Связь</TH>
           <TH>Статус</TH>
-          <TH className="text-right">Карточка</TH>
+          <TH className="w-12 text-right">
+            <span className="sr-only">Карточка</span>
+          </TH>
         </TR>
       </THead>
       <TBody>
         {items.map((supplier) => (
-          <TR key={supplier.id}>
+          <TR
+            key={supplier.id}
+            className={cn(
+              selectedId === supplier.id &&
+                "bg-primary/[0.055] shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-primary/[0.07]",
+            )}
+          >
             <TD>
               <button
                 type="button"
-                className="max-w-72 text-left font-medium text-foreground hover:text-primary hover:underline"
+                className="max-w-72 text-left font-semibold text-foreground hover:text-primary"
                 onClick={() => onOpen(supplier)}
               >
                 {supplier.name}
@@ -366,14 +525,196 @@ function SupplierTable({
               </Badge>
             </TD>
             <TD className="text-right">
-              <Button variant="ghost" size="sm" onClick={() => onOpen(supplier)}>
-                Открыть
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-[var(--control-height-sm)] px-0"
+                aria-label={`Открыть карточку: ${supplier.name}`}
+                onClick={() => onOpen(supplier)}
+              >
+                <ChevronRightIcon />
               </Button>
             </TD>
           </TR>
         ))}
       </TBody>
     </Table>
+  );
+}
+
+function SupplierPreviewPanel({
+  supplier,
+  onEdit,
+  onReturn,
+  onOpenFull,
+}: {
+  supplier: Supplier;
+  onEdit: (supplier: Supplier) => void;
+  onReturn: (supplier: Supplier) => void;
+  onOpenFull: (supplier: Supplier) => void;
+}): JSX.Element {
+  const { user } = useAuth();
+  const canUpdate = hasPermission(user, "suppliers.update");
+  const canViewReturns = hasPermission(user, "incoming.view");
+  const canCreateReturn = hasPermission(user, "incoming.return") && supplier.is_active;
+  const returns = useSupplierReturnsQuery(
+    { supplier_id: supplier.id, page: 1, page_size: 3 },
+    canViewReturns,
+  );
+
+  return (
+    <section
+      aria-label={`Карточка поставщика: ${supplier.name}`}
+      className="sticky top-[calc(var(--app-header-height)+1rem)] min-w-0 overflow-hidden rounded-lg border border-border bg-surface"
+    >
+      <header className="px-5 py-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h2 className="min-w-0 break-words text-xl font-semibold text-foreground">
+            {supplier.name}
+          </h2>
+          <Badge tone={supplier.is_active ? "success" : "neutral"}>
+            {supplier.is_active ? "Активен" : "Неактивен"}
+          </Badge>
+        </div>
+        <p className="mt-1 text-sm text-foreground-muted">
+          {supplier.legal_name || "Юридическое наименование не указано"}
+        </p>
+
+        {(canUpdate || canCreateReturn) && (
+          <div
+            className={cn(
+              "mt-4 grid gap-2",
+              canUpdate && canCreateReturn ? "grid-cols-2" : "grid-cols-1",
+            )}
+          >
+            {canUpdate && (
+              <Button variant="secondary" onClick={() => onEdit(supplier)}>
+                <EditIcon />
+                Изменить
+              </Button>
+            )}
+            {canCreateReturn && (
+              <Button onClick={() => onReturn(supplier)}>
+                <ReturnIcon />
+                Оформить возврат
+              </Button>
+            )}
+          </div>
+        )}
+      </header>
+
+      <section
+        aria-label="Контакты выбранного поставщика"
+        className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 border-t border-border px-5 py-4 text-sm"
+      >
+        <PreviewField label="Контактное лицо" value={supplier.contact_person || "Не указано"} />
+        <PreviewField label="Телефон" value={supplier.phone || "Не указан"} />
+        <PreviewField label="Email" value={supplier.email || "Не указан"} />
+        <PreviewField label="ИНН / TIN" value={supplier.inn_or_tin || "Не указан"} mono />
+        <PreviewField label="Адрес" value={supplier.address || "Не указан"} />
+      </section>
+
+      {canViewReturns && (
+        <section aria-labelledby="supplier-preview-returns" className="border-t border-border">
+          <div className="px-5 py-4">
+            <h3 id="supplier-preview-returns" className="font-semibold text-foreground">
+              Возвраты поставщику
+            </h3>
+            {returns.data && (
+              <p className="mt-1 text-xs text-foreground-muted">
+                {returns.data.total} операций ·{" "}
+                {formatSupplierQuantity(returns.data.summary.total_qty)} ед. ·{" "}
+                {formatSupplierMoney(returns.data.summary.total_amount)}
+              </p>
+            )}
+          </div>
+
+          {returns.isLoading ? (
+            <div className="px-5 pb-4">
+              <SkeletonRows rows={3} />
+            </div>
+          ) : returns.error ? (
+            <div className="px-5 pb-4">
+              <p className="text-sm text-danger-foreground" role="alert">
+                {describeApiError(returns.error, "Не удалось загрузить возвраты")}
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-3"
+                onClick={() => void returns.refetch()}
+              >
+                Повторить
+              </Button>
+            </div>
+          ) : returns.data?.items.length ? (
+            <div className="divide-y divide-border border-t border-border">
+              {returns.data.items.map((item) => (
+                <SupplierReturnPreview key={item.id} item={item} />
+              ))}
+            </div>
+          ) : (
+            <p className="border-t border-border px-5 py-4 text-sm text-foreground-muted">
+              Возвратов этому поставщику пока не оформляли.
+            </p>
+          )}
+        </section>
+      )}
+
+      <div className="border-t border-border px-5 py-3">
+        <Button
+          className="w-full justify-between"
+          variant="ghost"
+          onClick={() => onOpenFull(supplier)}
+        >
+          Открыть полную карточку
+          <ArrowRightIcon />
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function PreviewField({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}): JSX.Element {
+  return (
+    <>
+      <span className="text-foreground-muted">{label}</span>
+      <span className={cn("min-w-0 break-words text-foreground", mono && "tabular-nums")}>
+        {value}
+      </span>
+    </>
+  );
+}
+
+function SupplierReturnPreview({ item }: { item: SupplierReturnDetails }): JSX.Element {
+  return (
+    <article className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-5 py-3 text-xs">
+      <div className="min-w-0">
+        <p className="truncate font-medium text-foreground">{item.catalog_name}</p>
+        <p className="mt-1 truncate text-foreground-muted">
+          {formatSupplierDateTime(item.created_at, item.report_timezone)} ·{" "}
+          {supplierReturnReasonLabel[item.reason]}
+        </p>
+        <p className="mt-1 truncate text-foreground-muted">
+          {supplierProductSubtitle(item) || "Без характеристик"} · партия{" "}
+          {item.batch_number ?? "без номера"}
+        </p>
+      </div>
+      <div className="text-right tabular-nums">
+        <p className="font-medium text-foreground">{formatSupplierQuantity(item.qty)} ед.</p>
+        <p className="mt-1 text-foreground-muted">
+          {formatSupplierMoney(item.amount, item.currency)}
+        </p>
+      </div>
+    </article>
   );
 }
 
@@ -424,6 +765,116 @@ function CardField({
       <p className="text-xs text-foreground-muted">{label}</p>
       <p className={`mt-0.5 truncate ${mono ? "font-mono tabular-nums" : ""}`}>{value}</p>
     </div>
+  );
+}
+
+function PlusIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="M10 3v14M3 10h14" />
+    </svg>
+  );
+}
+
+function ReturnIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      aria-hidden="true"
+    >
+      <path d="M5 6H2V3" />
+      <path d="M2.5 6a8 8 0 1 1-.2 7" />
+    </svg>
+  );
+}
+
+function EditIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      aria-hidden="true"
+    >
+      <path d="m13.5 3.5 3 3L7 16H4v-3l9.5-9.5Z" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="m7 4 6 6-6 6" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="M4 10h12M11 5l5 5-5 5" />
+    </svg>
+  );
+}
+
+function TableViewIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3.5" width="14" height="13" rx="1" />
+      <path d="M3 8h14M7.5 3.5v13" />
+    </svg>
+  );
+}
+
+function GridViewIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="5" height="5" rx="0.5" />
+      <rect x="12" y="3" width="5" height="5" rx="0.5" />
+      <rect x="3" y="12" width="5" height="5" rx="0.5" />
+      <rect x="12" y="12" width="5" height="5" rx="0.5" />
+    </svg>
   );
 }
 

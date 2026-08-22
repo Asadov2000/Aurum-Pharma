@@ -70,6 +70,24 @@ test.describe("Interface layout", () => {
     }
   });
 
+  test("keeps the supplier workspace usable across desktop and mobile", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1024, height: 768 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/suppliers");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Поставщики", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("region", { name: "Сводка по поставщикам" })).toBeVisible();
+      await expectNoHorizontalOverflow(page, `/suppliers @ ${viewport.width}x${viewport.height}`);
+    }
+  });
+
   test("uses a customizable desktop sidebar and a contained mobile drawer", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.setViewportSize({ width: 1440, height: 900 });
