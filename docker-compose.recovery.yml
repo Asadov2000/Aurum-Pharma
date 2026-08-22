@@ -122,7 +122,15 @@ services:
     networks:
       - recovery
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d aurum_restore"]
+      test:
+        - CMD-SHELL
+        - >-
+          psql -U postgres -d aurum_restore -tAc
+          "SELECT 1 WHERE EXISTS (
+          SELECT FROM pg_roles WHERE rolname = 'aurum_backup'
+          ) AND has_function_privilege(
+          'aurum_app', to_regprocedure('public.similarity_op(text,text)'), 'EXECUTE'
+          )" | grep -qx 1
       interval: 5s
       timeout: 5s
       retries: 20
