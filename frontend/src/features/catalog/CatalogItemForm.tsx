@@ -2,37 +2,34 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import {
-  Button,
-  FormError,
-  Input,
-  Label,
-  Select,
-  Switch,
-} from "@/components/ui";
+import { Button, FormError, Input, Label, Select, Switch } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 
-import {
-  dispensingLabel,
-  dispensingOptions,
-  storageLabel,
-  storageOptions,
-} from "./labels";
+import { dispensingLabel, dispensingOptions, storageLabel, storageOptions } from "./labels";
 import { useCreateCatalogItem, useUpdateCatalogItem } from "./queries";
 import { type CatalogItem } from "./types";
 
+const optionalText = z.string().trim().max(255, "Не более 255 символов").optional();
+
 const schema = z.object({
-  brand_name: z.string().min(1, "Введите название"),
-  inn: z.string().optional(),
-  manufacturer: z.string().optional(),
-  form: z.string().optional(),
-  dosage: z.string().optional(),
-  pack_size: z.string().optional(),
-  atx_code: z.string().optional(),
+  brand_name: z.string().trim().min(1, "Введите название").max(255, "Не более 255 символов"),
+  inn: optionalText,
+  manufacturer: optionalText,
+  form: optionalText,
+  dosage: optionalText,
+  pack_size: optionalText,
+  atx_code: z.string().trim().max(32, "Не более 32 символов").optional(),
   dispensing_type: z.enum(["prescription", "otc", "special"]),
   storage_type: z.enum(["normal", "cold", "frozen"]),
-  category: z.string().optional(),
-  base_price: z.string().optional(),
+  category: optionalText,
+  base_price: z
+    .string()
+    .trim()
+    .refine(
+      (value) => value === "" || /^(?:0|[1-9]\d{0,11})(?:[.,]\d{1,2})?$/.test(value),
+      "Введите неотрицательную сумму, не более 2 знаков после запятой",
+    )
+    .optional(),
   is_active: z.boolean(),
 });
 
@@ -93,6 +90,8 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
         seen.add(p);
         form.setError(p as keyof FormValues, { message: issue.message });
       }
+      const firstIssue = parsed.error.issues[0]?.path[0];
+      if (typeof firstIssue === "string") form.setFocus(firstIssue as keyof FormValues);
       return;
     }
     setTopError(null);
@@ -103,7 +102,7 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
         await update.mutateAsync({
           id: item.id,
           payload: {
-            brand_name: d.brand_name,
+            brand_name: d.brand_name.trim(),
             inn: nullable(d.inn),
             manufacturer: nullable(d.manufacturer),
             form: nullable(d.form),
@@ -113,13 +112,13 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
             dispensing_type: d.dispensing_type,
             storage_type: d.storage_type,
             category: nullable(d.category),
-            base_price: nullable(d.base_price),
+            base_price: nullable(d.base_price)?.replace(",", ".") ?? null,
             is_active: d.is_active,
           },
         });
       } else {
         await create.mutateAsync({
-          brand_name: d.brand_name,
+          brand_name: d.brand_name.trim(),
           inn: nullable(d.inn),
           manufacturer: nullable(d.manufacturer),
           form: nullable(d.form),
@@ -129,7 +128,7 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
           dispensing_type: d.dispensing_type,
           storage_type: d.storage_type,
           category: nullable(d.category),
-          base_price: nullable(d.base_price),
+          base_price: nullable(d.base_price)?.replace(",", ".") ?? null,
         });
       }
       onClose();
@@ -140,23 +139,24 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
           <Label htmlFor="brand_name">Торговое название</Label>
           <Input
             id="brand_name"
             invalid={Boolean(form.formState.errors.brand_name)}
+            autoComplete="off"
             {...form.register("brand_name")}
           />
           <FormError>{form.formState.errors.brand_name?.message}</FormError>
         </div>
         <div>
           <Label htmlFor="inn">МНН</Label>
-          <Input id="inn" {...form.register("inn")} />
+          <Input id="inn" autoComplete="off" {...form.register("inn")} />
         </div>
         <div>
           <Label htmlFor="manufacturer">Производитель</Label>
-          <Input id="manufacturer" {...form.register("manufacturer")} />
+          <Input id="manufacturer" autoComplete="off" {...form.register("manufacturer")} />
         </div>
         <div>
           <Label htmlFor="form">Форма</Label>
@@ -205,16 +205,22 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
             type="text"
             inputMode="decimal"
             placeholder="0.00"
+            invalid={Boolean(form.formState.errors.base_price)}
             {...form.register("base_price")}
           />
+          <FormError>{form.formState.errors.base_price?.message}</FormError>
         </div>
         {isEdit && (
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Switch label="Активна" {...form.register("is_active")} />
           </div>
         )}
       </div>
-      {topError && <p className="text-sm text-danger">{topError}</p>}
+      {topError && (
+        <p className="text-sm text-danger" role="alert">
+          {topError}
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onClose}>
           Отмена

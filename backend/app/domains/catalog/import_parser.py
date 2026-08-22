@@ -18,6 +18,9 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from openpyxl import load_workbook
+from pydantic import ValidationError as PydanticValidationError
+
+from app.domains.catalog.schemas import BarcodeCreate, CatalogItemCreate
 
 EXPECTED_COLUMNS = [
     "brand_name",
@@ -35,6 +38,8 @@ EXPECTED_COLUMNS = [
 ]
 DISPENSING = {"prescription", "otc", "special"}
 STORAGE = {"normal", "cold", "frozen"}
+MAX_IMPORT_ROWS = 50_000
+MAX_IMPORT_COLUMNS = 64
 
 # Shown to the user when they upload the legacy binary .xls format. Reused by
 # the upload endpoint (HTTP 422) and the parser dispatcher so the wording stays
@@ -70,6 +75,28 @@ def _coerce(value: Any) -> str:
     if isinstance(value, str):
         return value.strip()
     return str(value).strip()
+
+
+def _validate_schema_fields(parsed: dict[str, Any], row_errors: list[str]) -> None:
+    try:
+        item = CatalogItemCreate.model_validate(
+            {key: value for key, value in parsed.items() if key != "barcode"}
+        )
+        parsed.update(item.model_dump())
+    except PydanticValidationError as exc:
+        for error in exc.errors(include_url=False):
+            field = ".".join(str(part) for part in error["loc"])
+            message = str(error["msg"])
+            rendered = f"{field}: {message}" if field else message
+            if rendered not in row_errors:
+                row_errors.append(rendered)
+
+    barcode = parsed.get("barcode")
+    if barcode:
+        try:
+            parsed["barcode"] = BarcodeCreate(code=barcode).code
+        except PydanticValidationError as exc:
+            row_errors.extend(f"barcode: {error['msg']}" for error in exc.errors(include_url=False))
 
 
 def _build_row(raw_values: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -109,6 +136,8 @@ def _build_row(raw_values: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     elif not st:
         parsed["storage_type"] = "normal"
 
+    _validate_schema_fields(parsed, row_errors)
+
     return parsed, row_errors
 
 
@@ -119,6 +148,8 @@ def parse_csv(raw: bytes) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     reader = csv.DictReader(io.StringIO(text))
     if reader.fieldnames is None:
         raise ValueError("CSV has no header row")
+    if len(reader.fieldnames) > MAX_IMPORT_COLUMNS:
+        raise ValueError(f"CSV has more than {MAX_IMPORT_COLUMNS} columns")
 
     header_map = {_normalize_header(fn): fn for fn in reader.fieldnames if fn is not None}
     if "brand_name" not in header_map:
@@ -128,6 +159,8 @@ def parse_csv(raw: bytes) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     errors: list[dict[str, Any]] = []
 
     for line_no, row in enumerate(reader, start=2):  # start=2 → 1-based, +header
+        if line_no > MAX_IMPORT_ROWS + 1:
+            raise ValueError(f"Import has more than {MAX_IMPORT_ROWS} rows")
         raw_values = {
             canonical: (row.get(header_map[canonical]) if canonical in header_map else None)
             for canonical in EXPECTED_COLUMNS
@@ -160,6 +193,8 @@ def parse_xlsx(raw: bytes) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             header = next(rows_iter)
         except StopIteration:
             raise ValueError("XLSX has no header row") from None
+        if len(header) > MAX_IMPORT_COLUMNS:
+            raise ValueError(f"XLSX has more than {MAX_IMPORT_COLUMNS} columns")
 
         col_idx: dict[str, int] = {}
         for idx, name in enumerate(header):
@@ -172,6 +207,8 @@ def parse_xlsx(raw: bytes) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         errors: list[dict[str, Any]] = []
 
         for line_no, row in enumerate(rows_iter, start=2):
+            if line_no > MAX_IMPORT_ROWS + 1:
+                raise ValueError(f"Import has more than {MAX_IMPORT_ROWS} rows")
             if row is None or all(_is_blank(c) for c in row):
                 continue  # skip the trailing empty rows XLSX files carry
             raw_values = {

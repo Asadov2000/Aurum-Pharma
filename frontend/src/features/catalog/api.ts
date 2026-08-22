@@ -17,8 +17,11 @@ export async function listCatalog(params: CatalogSearchParams): Promise<CatalogL
   const { data } = await api.get<CatalogList>("/catalog", {
     params: {
       q: params.q || undefined,
+      manufacturer: params.manufacturer || undefined,
       category: params.category || undefined,
       dispensing_type: params.dispensing_type || undefined,
+      storage_type: params.storage_type || undefined,
+      lifecycle: params.lifecycle || undefined,
       page: params.page ?? 1,
       page_size: params.page_size ?? 50,
       branch_id: params.branch_id || undefined,
@@ -47,6 +50,11 @@ export async function updateCatalogItem(
 
 export async function deleteCatalogItem(id: string): Promise<void> {
   await api.delete(`/catalog/${id}`);
+}
+
+export async function restoreCatalogItem(id: string): Promise<CatalogItem> {
+  const { data } = await api.post<CatalogItem>(`/catalog/${id}/restore`);
+  return data;
 }
 
 export async function findByBarcode(code: string): Promise<CatalogItem> {

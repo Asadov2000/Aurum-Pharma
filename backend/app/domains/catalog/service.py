@@ -13,12 +13,12 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import structlog
 
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, ValidationError
 from app.core.time import utc_now
 from app.domains.catalog.import_parser import parse_import
 from app.domains.catalog.models import (
@@ -54,14 +54,16 @@ class CatalogService:
             payload["created_by"] = created_by
         return await self.repo.create_item(**payload)
 
-    async def get_item(self, item_id: UUID) -> TenantCatalog:
-        item = await self.repo.get_item(item_id)
+    async def get_item(self, item_id: UUID, *, include_deleted: bool = False) -> TenantCatalog:
+        item = await self.repo.get_item(item_id, include_deleted=include_deleted)
         if item is None:
             raise NotFoundError("Catalog item not found")
         return item
 
-    async def get_item_with_barcodes(self, item_id: UUID) -> tuple[TenantCatalog, list[Barcode]]:
-        item = await self.get_item(item_id)
+    async def get_item_with_barcodes(
+        self, item_id: UUID, *, include_deleted: bool = False
+    ) -> tuple[TenantCatalog, list[Barcode]]:
+        item = await self.get_item(item_id, include_deleted=include_deleted)
         barcodes = await self.repo.list_barcodes_for_item(item.id)
         return item, barcodes
 
@@ -82,6 +84,12 @@ class CatalogService:
         if rows == 0:
             raise NotFoundError("Catalog item not found")
 
+    async def restore_item(self, item_id: UUID) -> TenantCatalog:
+        item = await self.repo.restore_item(item_id)
+        if item is None:
+            raise NotFoundError("Archived catalog item not found")
+        return item
+
     async def search(
         self,
         *,
@@ -91,6 +99,9 @@ class CatalogService:
         page: int,
         page_size: int,
         branch_id: UUID | None = None,
+        manufacturer: str | None = None,
+        storage_type: str | None = None,
+        lifecycle: str = "active",
     ) -> tuple[list[TenantCatalog], int, dict[UUID, Decimal]]:
         items, total = await self.repo.search(
             q=q,
@@ -98,6 +109,9 @@ class CatalogService:
             dispensing_type=dispensing_type,
             page=page,
             page_size=page_size,
+            manufacturer=manufacturer,
+            storage_type=storage_type,
+            lifecycle=lifecycle,
         )
         # Available stock per result is computed only when a branch is given
         # (POS), in one grouped query over this page — never per-item (no N+1).
@@ -182,7 +196,10 @@ class CatalogService:
                 "Cannot preview an import that is already running or finished",
                 details={"status": job.status},
             )
-        rows, errors = parse_import(raw, job.source_filename)
+        try:
+            rows, errors = parse_import(raw, job.source_filename)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
         await self.repo.update_job(
             job,
             status="validating",
@@ -251,56 +268,28 @@ class CatalogService:
         strategy = job.duplicate_strategy
 
         for row in rows:
-            barcode_code = row.pop("barcode", None)
             try:
-                duplicate = await self.repo.find_duplicate(
-                    tenant_id=job.tenant_id,
-                    brand_name=row["brand_name"],
-                    manufacturer=row.get("manufacturer"),
-                    dosage=row.get("dosage"),
-                    pack_size=row.get("pack_size"),
-                )
-                target_id: UUID | None = None
-                if duplicate is not None:
-                    if strategy == "skip":
-                        skipped += 1
-                        target_id = duplicate.id
-                    elif strategy == "update":
-                        merged = {k: v for k, v in row.items() if v is not None}
-                        await self.repo.update_item(duplicate, **merged)
-                        updated += 1
-                        target_id = duplicate.id
-                    elif strategy == "create_copy":
-                        item = await self.repo.create_item(
-                            tenant_id=job.tenant_id,
-                            import_job_id=job.id,
-                            created_by=job.user_id,
-                            **row,
-                        )
-                        created += 1
-                        target_id = item.id
-                else:
-                    item = await self.repo.create_item(
-                        tenant_id=job.tenant_id,
-                        import_job_id=job.id,
-                        created_by=job.user_id,
-                        **row,
-                    )
-                    created += 1
-                    target_id = item.id
+                async with self.repo.row_savepoint():
+                    outcome = await self._apply_import_row(job, row, strategy=strategy)
 
-                if barcode_code and target_id is not None:
-                    try:
-                        await self.repo.add_barcode(
-                            tenant_id=job.tenant_id,
-                            catalog_id=target_id,
-                            code=barcode_code,
-                            code_type="ean13",
-                        )
-                    except Exception as exc:
-                        per_row_errors.append({"row": "barcode", "messages": [str(exc)]})
-            except Exception as exc:
-                per_row_errors.append({"row": row.get("brand_name", "?"), "messages": [str(exc)]})
+                if outcome == "created":
+                    created += 1
+                elif outcome == "updated":
+                    updated += 1
+                else:
+                    skipped += 1
+            except ConflictError as exc:
+                per_row_errors.append(
+                    {"row": row.get("brand_name", "?"), "messages": [exc.message]}
+                )
+            except Exception:
+                logger.exception("catalog_import_row_failed", job_id=str(job.id))
+                per_row_errors.append(
+                    {
+                        "row": row.get("brand_name", "?"),
+                        "messages": ["Не удалось обработать строку"],
+                    }
+                )
 
         now = utc_now()
         any_progress = bool(created or updated or skipped)
@@ -315,6 +304,58 @@ class CatalogService:
             finished_at=now,
             expires_at_for_rollback=now + ROLLBACK_WINDOW,
         )
+
+    async def _apply_import_row(
+        self,
+        job: CatalogImportJob,
+        source_row: dict[str, Any],
+        *,
+        strategy: str,
+    ) -> Literal["created", "updated", "skipped"]:
+        row = dict(source_row)
+        barcode_code = row.pop("barcode", None)
+        duplicate = await self.repo.find_duplicate(
+            tenant_id=job.tenant_id,
+            brand_name=row["brand_name"],
+            manufacturer=row.get("manufacturer"),
+            dosage=row.get("dosage"),
+            pack_size=row.get("pack_size"),
+        )
+        outcome: Literal["created", "updated", "skipped"] = "skipped"
+        target_id: UUID | None = None
+        if duplicate is not None:
+            target_id = duplicate.id
+            if strategy == "update":
+                merged = {key: value for key, value in row.items() if value is not None}
+                await self.repo.update_item(duplicate, **merged)
+                outcome = "updated"
+            elif strategy == "create_copy":
+                item = await self.repo.create_item(
+                    tenant_id=job.tenant_id,
+                    import_job_id=job.id,
+                    created_by=job.user_id,
+                    **row,
+                )
+                target_id = item.id
+                outcome = "created"
+        else:
+            item = await self.repo.create_item(
+                tenant_id=job.tenant_id,
+                import_job_id=job.id,
+                created_by=job.user_id,
+                **row,
+            )
+            target_id = item.id
+            outcome = "created"
+
+        if barcode_code and target_id is not None:
+            await self.add_barcode(
+                tenant_id=job.tenant_id,
+                catalog_id=target_id,
+                code=barcode_code,
+                code_type="ean13",
+            )
+        return outcome
 
     async def rollback_import(self, job_id: UUID) -> CatalogImportJob:
         job = await self._get_job_or_404(job_id)

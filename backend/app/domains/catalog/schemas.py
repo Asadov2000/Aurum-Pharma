@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -12,20 +12,60 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 DISPENSING_TYPES = {"prescription", "otc", "special"}
 STORAGE_TYPES = {"normal", "cold", "frozen"}
 BARCODE_TYPES = {"ean13", "ean8", "gs1_128", "code128", "qr", "other"}
+CatalogLifecycle = Literal["active", "inactive", "archived", "all"]
+
+
+def _strip_required(value: Any) -> Any:
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+    return value
+
+
+def _strip_optional(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip() or None
+    return value
 
 
 class CatalogItemCreate(BaseModel):
     brand_name: str = Field(min_length=1, max_length=500)
-    inn: str | None = None
-    manufacturer: str | None = None
-    form: str | None = None
-    dosage: str | None = None
-    pack_size: str | None = None
-    atx_code: str | None = None
+    inn: str | None = Field(default=None, max_length=500)
+    manufacturer: str | None = Field(default=None, max_length=500)
+    form: str | None = Field(default=None, max_length=500)
+    dosage: str | None = Field(default=None, max_length=500)
+    pack_size: str | None = Field(default=None, max_length=500)
+    atx_code: str | None = Field(default=None, max_length=50)
     dispensing_type: str = "otc"
     storage_type: str = "normal"
-    category: str | None = None
-    base_price: Decimal | None = None
+    category: str | None = Field(default=None, max_length=500)
+    base_price: Decimal | None = Field(
+        default=None,
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        allow_inf_nan=False,
+    )
+
+    @field_validator("brand_name", mode="before")
+    @classmethod
+    def _normalize_brand_name(cls, value: Any) -> Any:
+        return _strip_required(value)
+
+    @field_validator(
+        "inn",
+        "manufacturer",
+        "form",
+        "dosage",
+        "pack_size",
+        "atx_code",
+        "category",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_text(cls, value: Any) -> Any:
+        return _strip_optional(value)
 
     @field_validator("dispensing_type")
     @classmethod
@@ -44,17 +84,44 @@ class CatalogItemCreate(BaseModel):
 
 class CatalogItemUpdate(BaseModel):
     brand_name: str | None = Field(default=None, min_length=1, max_length=500)
-    inn: str | None = None
-    manufacturer: str | None = None
-    form: str | None = None
-    dosage: str | None = None
-    pack_size: str | None = None
-    atx_code: str | None = None
+    inn: str | None = Field(default=None, max_length=500)
+    manufacturer: str | None = Field(default=None, max_length=500)
+    form: str | None = Field(default=None, max_length=500)
+    dosage: str | None = Field(default=None, max_length=500)
+    pack_size: str | None = Field(default=None, max_length=500)
+    atx_code: str | None = Field(default=None, max_length=50)
     dispensing_type: str | None = None
     storage_type: str | None = None
-    category: str | None = None
-    base_price: Decimal | None = None
+    category: str | None = Field(default=None, max_length=500)
+    base_price: Decimal | None = Field(
+        default=None,
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        allow_inf_nan=False,
+    )
     is_active: bool | None = None
+
+    @field_validator("brand_name", mode="before")
+    @classmethod
+    def _normalize_brand_name(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("brand_name cannot be null")
+        return _strip_required(value)
+
+    @field_validator(
+        "inn",
+        "manufacturer",
+        "form",
+        "dosage",
+        "pack_size",
+        "atx_code",
+        "category",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_text(cls, value: Any) -> Any:
+        return _strip_optional(value)
 
     @field_validator("dispensing_type")
     @classmethod
@@ -99,6 +166,7 @@ class CatalogItemRead(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None
     # Additive: available stock at a branch, populated only when the search is
     # called with branch_id (e.g. the POS register's branch). Null otherwise.
     stock_available: Decimal | None = None
@@ -118,6 +186,11 @@ class CatalogList(BaseModel):
 class BarcodeCreate(BaseModel):
     code: str = Field(min_length=1, max_length=200)
     code_type: str = "ean13"
+
+    @field_validator("code", mode="before")
+    @classmethod
+    def _normalize_code(cls, value: Any) -> Any:
+        return _strip_required(value)
 
     @field_validator("code_type")
     @classmethod

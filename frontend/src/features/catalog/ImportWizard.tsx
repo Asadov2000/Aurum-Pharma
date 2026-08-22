@@ -18,30 +18,58 @@ const strategyLabel: Record<DuplicateStrategy, string> = {
   create_copy: "Создать копию",
 };
 
+const statusLabel: Record<ImportJob["status"], string> = {
+  pending: "Файл загружен",
+  validating: "Превью готово",
+  importing: "Импорт выполняется",
+  success: "Импорт завершён",
+  failed: "Ошибка импорта",
+  rolled_back: "Импорт отменён",
+};
+
 const strategyOptions: DuplicateStrategy[] = ["skip", "update", "create_copy"];
 
 const statusBadgeTone = (
-  s: ImportJob["status"],
+  status: ImportJob["status"],
 ): "neutral" | "info" | "success" | "warning" | "danger" => {
-  switch (s) {
-    case "pending":
-    case "validating":
-      return "info";
-    case "importing":
-      return "warning";
-    case "success":
-      return "success";
-    case "failed":
-      return "danger";
-    case "rolled_back":
-      return "neutral";
-    default:
-      return "neutral";
-  }
+  if (status === "pending" || status === "validating") return "info";
+  if (status === "importing") return "warning";
+  if (status === "success") return "success";
+  if (status === "failed") return "danger";
+  return "neutral";
 };
 
-export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element {
-  const [jobId, setJobId] = useState<string | null>(null);
+function readStoredJob(storageKey: string): string | null {
+  try {
+    return window.sessionStorage.getItem(storageKey);
+  } catch {
+    return null;
+  }
+}
+
+function storeJob(storageKey: string, jobId: string | null): void {
+  try {
+    if (jobId) window.sessionStorage.setItem(storageKey, jobId);
+    else window.sessionStorage.removeItem(storageKey);
+  } catch {
+    // Import remains usable when browser storage is unavailable.
+  }
+}
+
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "object") return "Сложное значение";
+  return String(value);
+}
+
+interface Props {
+  onClose: () => void;
+  canRollback: boolean;
+  storageKey: string;
+}
+
+export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.Element {
+  const [jobId, setJobId] = useState<string | null>(() => readStoredJob(storageKey));
   const [strategy, setStrategy] = useState<DuplicateStrategy>("skip");
   const [topError, setTopError] = useState<string | null>(null);
   const [rollbackOpen, setRollbackOpen] = useState(false);
@@ -51,25 +79,28 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
   const preview = usePreviewImport();
   const confirm = useConfirmImport();
   const rollback = useRollbackImport();
-
-  // Poll while the job is running, otherwise stop.
-  const jobQuery = useImportJobQuery(jobId, jobId ? 2000 : undefined);
+  const jobQuery = useImportJobQuery(jobId);
   const job = jobQuery.data ?? null;
-  const isPolling = job?.status === "importing";
+
+  const resetJob = () => {
+    setJobId(null);
+    storeJob(storageKey, null);
+    setTopError(null);
+    if (fileRef.current) fileRef.current.value = "";
+  };
 
   const onPick = async (file: File | null) => {
     if (!file) return;
     setTopError(null);
-    // We accept .csv and .xlsx. The legacy binary .xls format can't be read
-    // by openpyxl — reject it upfront with the same message the backend uses.
     const lower = file.name.toLowerCase();
     if (lower.endsWith(".xls") && !lower.endsWith(".xlsx")) {
       setTopError("Поддерживаются файлы .xlsx и .csv; пересохраните файл как .xlsx");
       return;
     }
     try {
-      const j = await upload.mutateAsync(file);
-      setJobId(j.id);
+      const uploadedJob = await upload.mutateAsync(file);
+      setJobId(uploadedJob.id);
+      storeJob(storageKey, uploadedJob.id);
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось загрузить файл"));
     }
@@ -102,32 +133,56 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
       await rollback.mutateAsync(jobId);
       setRollbackOpen(false);
     } catch (err) {
-      setTopError(describeApiError(err, "Не удалось откатить"));
+      setTopError(describeApiError(err, "Не удалось откатить импорт"));
     }
   };
 
-  // ---- step 1: upload ----
+  if (jobId && jobQuery.isLoading) {
+    return <p className="py-8 text-center text-sm text-foreground-muted">Загрузка импорта…</p>;
+  }
+
+  if (jobId && jobQuery.error && !job) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-danger" role="alert">
+          {describeApiError(jobQuery.error, "Не удалось открыть сохранённый импорт")}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={() => void jobQuery.refetch()}>
+            Повторить
+          </Button>
+          <Button onClick={resetJob}>Загрузить новый файл</Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!job) {
     return (
       <div className="space-y-4">
-        <p className="text-sm text-foreground-secondary">
-          Загрузите файл с позициями каталога — CSV (UTF-8 или Windows-1251) или Excel (.xlsx). Файл
-          уйдёт в MinIO; на следующем шаге сервер построит превью.
-        </p>
-        <p className="text-xs text-foreground-muted">
-          Обязательна только колонка «brand_name». Старый формат .xls не поддерживается —
-          пересохраните как .xlsx.
-        </p>
+        <div className="space-y-1 text-sm text-foreground-secondary">
+          <p>Загрузите CSV или Excel (.xlsx). Сначала система покажет превью и ошибки.</p>
+          <p className="text-xs text-foreground-muted">
+            Обязательна колонка «brand_name». CSV поддерживает UTF-8 и Windows-1251.
+          </p>
+        </div>
         <input
           ref={fileRef}
           type="file"
           accept=".csv,.xlsx,text/csv"
-          onChange={(e) => void onPick(e.target.files?.[0] ?? null)}
+          disabled={upload.isPending}
+          aria-label="Файл каталога"
+          onChange={(event) => void onPick(event.target.files?.[0] ?? null)}
           className="block w-full text-sm"
         />
-        {topError && <p className="text-sm text-danger">{topError}</p>}
+        {upload.isPending && <p className="text-sm text-foreground-muted">Загрузка файла…</p>}
+        {topError && (
+          <p className="text-sm text-danger" role="alert">
+            {topError}
+          </p>
+        )}
         <div className="flex justify-end">
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={upload.isPending}>
             Закрыть
           </Button>
         </div>
@@ -135,70 +190,60 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
     );
   }
 
-  // ---- step 2+ : we have a job ----
   return (
     <>
       <div className="space-y-4">
-        <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-start justify-between gap-3 border-b border-border pb-3">
           <div className="min-w-0 text-sm">
             <p className="truncate font-medium text-foreground">{job.source_filename}</p>
-            <p className="text-xs text-foreground-muted">id: {job.id.slice(0, 8)}</p>
+            <p className="text-xs text-foreground-muted">Импорт {job.id.slice(0, 8)}</p>
           </div>
-          <Badge tone={statusBadgeTone(job.status)}>{job.status}</Badge>
+          <Badge tone={statusBadgeTone(job.status)}>{statusLabel[job.status]}</Badge>
         </div>
 
         {(job.total_rows ?? 0) > 0 && (
           <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
-            <Stat label="Всего" value={job.total_rows ?? 0} />
+            <Stat label="Всего строк" value={job.total_rows ?? 0} />
             <Stat label="Корректных" value={job.valid_rows ?? 0} tone="success" />
             <Stat label="С ошибками" value={job.error_rows ?? 0} tone="danger" />
           </div>
         )}
 
-        {job.preview_data && job.preview_data.length > 0 && (
-          <div className="max-h-64 overflow-auto rounded-md border border-border bg-surface p-3">
-            <p className="mb-2 text-xs font-medium text-foreground-muted">Первые строки превью</p>
-            <pre className="text-xs leading-tight">
-              {JSON.stringify(job.preview_data.slice(0, 5), null, 2)}
-            </pre>
-          </div>
-        )}
+        {job.preview_data && job.preview_data.length > 0 && <PreviewRows rows={job.preview_data} />}
+        {job.errors && job.errors.length > 0 && <ImportErrors rows={job.errors} />}
 
-        {job.errors && job.errors.length > 0 && (
-          <div className="max-h-48 overflow-auto rounded-md border border-danger/30 bg-danger-subtle p-3">
-            <p className="mb-2 text-xs font-medium text-danger">Ошибки ({job.errors.length})</p>
-            <pre className="text-xs leading-tight text-danger">
-              {JSON.stringify(job.errors.slice(0, 10), null, 2)}
-            </pre>
-          </div>
-        )}
-
-        {isPolling && (
-          <p className="text-sm text-foreground-muted">
-            Импорт выполняется… (обновление каждые 2 сек)
+        {job.status === "importing" && (
+          <p className="text-sm text-foreground-muted" aria-live="polite">
+            Файл обрабатывается в фоне. Это окно можно закрыть: при следующем открытии импорт
+            продолжится с текущего шага.
           </p>
         )}
 
-        {topError && <p className="text-sm text-danger">{topError}</p>}
+        {topError && (
+          <p className="text-sm text-danger" role="alert">
+            {topError}
+          </p>
+        )}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <Label htmlFor="strategy">Дубликаты</Label>
-            <Select
-              id="strategy"
-              value={strategy}
-              onChange={(e) => setStrategy(e.target.value as DuplicateStrategy)}
-              disabled={job.status === "importing" || job.status === "success"}
-              className="w-full sm:w-44"
-            >
-              {strategyOptions.map((s) => (
-                <option key={s} value={s}>
-                  {strategyLabel[s]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="flex flex-wrap gap-2">
+          {(job.status === "pending" || job.status === "validating") && (
+            <div>
+              <Label htmlFor="strategy">Что делать с дубликатами</Label>
+              <Select
+                id="strategy"
+                value={strategy}
+                onChange={(event) => setStrategy(event.target.value as DuplicateStrategy)}
+                className="w-full sm:w-48"
+              >
+                {strategyOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {strategyLabel[option]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+          <div className="ml-auto flex flex-wrap justify-end gap-2">
             {job.status === "pending" && (
               <Button onClick={() => void onPreview()} isLoading={preview.isPending}>
                 Подготовить превью
@@ -209,13 +254,16 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
                 Запустить импорт
               </Button>
             )}
-            {job.status === "success" && !job.rolled_back_at && (
-              <Button
-                variant="secondary"
-                onClick={() => setRollbackOpen(true)}
-                isLoading={rollback.isPending}
-              >
+            {job.status === "success" && !job.rolled_back_at && canRollback && (
+              <Button variant="secondary" onClick={() => setRollbackOpen(true)}>
                 Откатить
+              </Button>
+            )}
+            {(job.status === "success" ||
+              job.status === "failed" ||
+              job.status === "rolled_back") && (
+              <Button variant="secondary" onClick={resetJob}>
+                Новый файл
               </Button>
             )}
             <Button variant="ghost" onClick={onClose}>
@@ -227,7 +275,7 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
       <ConfirmDialog
         open={rollbackOpen}
         title="Откатить импорт"
-        message="Все добавленные этим импортом позиции будут помечены удалёнными."
+        message="Позиции, созданные этим импортом, будут перенесены в архив. Другие данные не изменятся."
         confirmLabel="Откатить"
         variant="danger"
         isLoading={rollback.isPending}
@@ -235,6 +283,57 @@ export function ImportWizard({ onClose }: { onClose: () => void }): JSX.Element 
         onCancel={() => setRollbackOpen(false)}
       />
     </>
+  );
+}
+
+function PreviewRows({ rows }: { rows: Array<Record<string, unknown>> }): JSX.Element {
+  const visibleRows = rows.slice(0, 5);
+  const columns = [...new Set(visibleRows.flatMap((row) => Object.keys(row)))].slice(0, 6);
+  return (
+    <div className="overflow-x-auto rounded-md border border-border">
+      <table className="w-full min-w-[520px] text-left text-xs">
+        <caption className="px-3 py-2 text-left font-medium text-foreground-muted">
+          Первые строки файла
+        </caption>
+        <thead className="border-y border-border bg-background">
+          <tr>
+            {columns.map((column) => (
+              <th key={column} className="px-3 py-2 font-medium text-foreground-muted">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {visibleRows.map((row, index) => (
+            <tr key={index}>
+              {columns.map((column) => (
+                <td key={column} className="max-w-56 break-words px-3 py-2 text-foreground">
+                  {displayValue(row[column])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ImportErrors({ rows }: { rows: Array<Record<string, unknown>> }): JSX.Element {
+  return (
+    <div className="max-h-48 overflow-auto rounded-md border border-danger/30 bg-danger-subtle p-3">
+      <p className="mb-2 text-xs font-medium text-danger">Ошибки ({rows.length})</p>
+      <ol className="space-y-2 text-xs text-danger">
+        {rows.slice(0, 10).map((row, index) => (
+          <li key={index} className="break-words">
+            {Object.entries(row)
+              .map(([key, value]) => `${key}: ${displayValue(value)}`)
+              .join(" · ")}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

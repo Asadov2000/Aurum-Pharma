@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select, text, update
+from sqlalchemy import and_, delete, exists, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
@@ -18,6 +20,12 @@ from app.domains.inventory.models import Batch
 class CatalogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    @asynccontextmanager
+    async def row_savepoint(self) -> AsyncIterator[None]:
+        """Keep one import row failure from aborting the whole file transaction."""
+        async with self.session.begin_nested():
+            yield
 
     async def stock_by_catalog(
         self, *, branch_id: UUID, catalog_ids: list[UUID]
@@ -32,6 +40,7 @@ class CatalogRepository:
             .where(
                 Batch.branch_id == branch_id,
                 Batch.is_blocked.is_(False),
+                Batch.expires_at > date.today(),
                 Batch.catalog_id.in_(catalog_ids),
             )
             .group_by(Batch.catalog_id)
@@ -75,6 +84,12 @@ class CatalogRepository:
         )
         return result.rowcount or 0  # type: ignore[attr-defined]
 
+    async def restore_item(self, item_id: UUID) -> TenantCatalog | None:
+        item = await self.get_item(item_id, include_deleted=True)
+        if item is None or item.deleted_at is None:
+            return None
+        return await self.update_item(item, deleted_at=None, is_active=True)
+
     async def search(
         self,
         *,
@@ -83,29 +98,58 @@ class CatalogRepository:
         dispensing_type: str | None,
         page: int,
         page_size: int,
+        manufacturer: str | None = None,
+        storage_type: str | None = None,
+        lifecycle: str = "active",
     ) -> tuple[list[TenantCatalog], int]:
         """Trigram search across brand_name, inn, and manufacturer. Filters by category and
         dispensing_type are exact-match. Tenant scoping is handled by RLS;
         we still add deleted_at IS NULL because the policy doesn't filter
         soft-deletes."""
 
-        filters: list[Any] = [TenantCatalog.deleted_at.is_(None)]
+        filters: list[Any] = []
+        if lifecycle == "active":
+            filters.extend([TenantCatalog.deleted_at.is_(None), TenantCatalog.is_active.is_(True)])
+        elif lifecycle == "inactive":
+            filters.extend([TenantCatalog.deleted_at.is_(None), TenantCatalog.is_active.is_(False)])
+        elif lifecycle == "archived":
+            filters.append(TenantCatalog.deleted_at.is_not(None))
         if category:
             filters.append(TenantCatalog.category == category)
         if dispensing_type:
             filters.append(TenantCatalog.dispensing_type == dispensing_type)
+        if manufacturer:
+            filters.append(TenantCatalog.manufacturer == manufacturer.strip())
+        if storage_type:
+            filters.append(TenantCatalog.storage_type == storage_type)
 
         base_stmt = select(TenantCatalog).where(*filters)
         if q:
             # pg_trgm `%` operator with similarity_threshold defaulting to 0.3.
             base_stmt = base_stmt.where(
-                text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q)
+                or_(
+                    text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q),
+                    exists(
+                        select(1).where(
+                            Barcode.catalog_id == TenantCatalog.id,
+                            Barcode.code == q,
+                        )
+                    ),
+                )
             )
 
         count_stmt = select(func.count()).select_from(TenantCatalog).where(*filters)
         if q:
             count_stmt = count_stmt.where(
-                text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q)
+                or_(
+                    text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q),
+                    exists(
+                        select(1).where(
+                            Barcode.catalog_id == TenantCatalog.id,
+                            Barcode.code == q,
+                        )
+                    ),
+                )
             )
 
         total = int((await self.session.execute(count_stmt)).scalar_one())

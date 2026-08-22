@@ -11,6 +11,7 @@ import {
   listCatalog,
   previewImport,
   rollbackImport,
+  restoreCatalogItem,
   updateCatalogItem,
   uploadImport,
 } from "./api";
@@ -77,6 +78,17 @@ export function useDeleteCatalogItem() {
   });
 }
 
+export function useRestoreCatalogItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreCatalogItem(id),
+    onSuccess: (_data, id) => {
+      void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
+      void qc.invalidateQueries({ queryKey: catalogKeys.item(id) });
+    },
+  });
+}
+
 export function useAddBarcode() {
   const qc = useQueryClient();
   return useMutation({
@@ -101,12 +113,12 @@ export function useDeleteBarcode() {
 
 // ---- import ----
 
-export function useImportJobQuery(jobId: string | null, refetchInterval?: number) {
+export function useImportJobQuery(jobId: string | null) {
   return useQuery({
     queryKey: catalogKeys.import(jobId ?? ""),
     queryFn: () => getImportJob(jobId as string),
     enabled: jobId !== null,
-    refetchInterval,
+    refetchInterval: (query) => (query.state.data?.status === "importing" ? 2000 : false),
   });
 }
 

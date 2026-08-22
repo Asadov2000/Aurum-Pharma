@@ -33,6 +33,7 @@ from app.domains.catalog.schemas import (
     CatalogItemRead,
     CatalogItemUpdate,
     CatalogItemWithBarcodes,
+    CatalogLifecycle,
     CatalogList,
     ImportConfirmRequest,
     ImportJobRead,
@@ -40,6 +41,17 @@ from app.domains.catalog.schemas import (
 from app.domains.catalog.service import CatalogService, new_import_object_name
 
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+async def _read_import_file(file: UploadFile, *, max_bytes: int) -> bytes:
+    data = bytearray()
+    while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+        data.extend(chunk)
+        if len(data) > max_bytes:
+            max_mb = max_bytes // (1024 * 1024)
+            raise ValidationError(f"Файл больше {max_mb} МБ — уменьшите его и попробуйте снова")
+    return bytes(data)
 
 
 async def _service(
@@ -69,6 +81,9 @@ async def list_catalog(
     q: Annotated[str | None, Query()] = None,
     category: Annotated[str | None, Query()] = None,
     dispensing_type: Annotated[str | None, Query()] = None,
+    manufacturer: Annotated[str | None, Query(max_length=500)] = None,
+    storage_type: Annotated[str | None, Query()] = None,
+    lifecycle: Annotated[CatalogLifecycle, Query()] = "active",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     branch_id: Annotated[UUID | None, Query()] = None,
@@ -77,6 +92,9 @@ async def list_catalog(
         q=q,
         category=category,
         dispensing_type=dispensing_type,
+        manufacturer=manufacturer,
+        storage_type=storage_type,
+        lifecycle=lifecycle,
         page=page,
         page_size=page_size,
         branch_id=branch_id,
@@ -124,7 +142,7 @@ async def get_catalog_item(
     _user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> CatalogItemWithBarcodes:
-    item, barcodes = await service.get_item_with_barcodes(item_id)
+    item, barcodes = await service.get_item_with_barcodes(item_id, include_deleted=True)
     return CatalogItemWithBarcodes(
         **CatalogItemRead.model_validate(item).model_dump(),
         barcodes=[BarcodeRead.model_validate(b) for b in barcodes],
@@ -140,7 +158,7 @@ async def update_catalog_item(
 ) -> CatalogItemRead:
     item = await service.update_item(
         item_id,
-        fields=payload.model_dump(exclude_none=True),
+        fields=payload.model_dump(exclude_unset=True),
         updated_by=user.user_id,
     )
     return CatalogItemRead.model_validate(item)
@@ -154,6 +172,16 @@ async def soft_delete_catalog_item(
 ) -> dict[str, str]:
     await service.soft_delete_item(item_id)
     return {"status": "deleted"}
+
+
+@router.post("/{item_id}/restore", response_model=CatalogItemRead)
+async def restore_catalog_item(
+    item_id: UUID,
+    _user: Annotated[CurrentUser, Depends(require_permission("catalog.delete"))],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> CatalogItemRead:
+    item = await service.restore_item(item_id)
+    return CatalogItemRead.model_validate(item)
 
 
 # -----------------------------------------------------------------------------
@@ -213,10 +241,8 @@ async def import_upload(
     if name.endswith(".xls"):  # legacy binary format — openpyxl can't read it
         raise ValidationError(XLS_UNSUPPORTED_MESSAGE)
 
-    data = await file.read()
     max_mb = get_settings().MAX_IMPORT_FILE_MB
-    if len(data) > max_mb * 1024 * 1024:
-        raise ValidationError(f"Файл больше {max_mb} МБ — уменьшите его и попробуйте снова")
+    data = await _read_import_file(file, max_bytes=max_mb * 1024 * 1024)
 
     object_name = new_import_object_name(tenant_id)
     source_path = put_object(
@@ -253,7 +279,8 @@ async def import_preview(
 async def import_confirm(
     job_id: UUID,
     payload: ImportConfirmRequest,
-    _user: Annotated[CurrentUser, Depends(require_permission("catalog.create"))],
+    _create_user: Annotated[CurrentUser, Depends(require_permission("catalog.create"))],
+    _update_user: Annotated[CurrentUser, Depends(require_permission("catalog.update"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> ImportJobRead:
     job = await service.confirm_import(job_id=job_id, duplicate_strategy=payload.duplicate_strategy)

@@ -47,7 +47,7 @@ function renderWizard() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={qc}>
-      <ImportWizard onClose={() => {}} />
+      <ImportWizard onClose={() => {}} canRollback storageKey="aurum:test:catalog-import" />
     </QueryClientProvider>,
   );
   const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -56,6 +56,7 @@ function renderWizard() {
 
 describe("ImportWizard", () => {
   beforeEach(() => {
+    window.sessionStorage.clear();
     uploadImport.mockReset();
     getImportJob.mockReset();
     rollbackImport.mockReset();

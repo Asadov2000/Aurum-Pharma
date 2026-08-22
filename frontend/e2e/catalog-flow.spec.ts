@@ -32,7 +32,7 @@ test.describe("Catalog flow (owner)", () => {
     // search by the unique name tail so accumulated same-prefix rows don't
     // push the new item off page 1 (the shared test DB carries many).
     await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
-    await expect(page.getByRole("cell", { name, exact: true })).toBeVisible({
+    await expect(page.getByRole("row").filter({ hasText: name })).toBeVisible({
       timeout: 15_000,
     });
   });
@@ -57,7 +57,7 @@ test.describe("Catalog flow (owner)", () => {
     // Search by the unique tail (not the shared "E2E Barcode-" prefix) so the
     // new item is the only trigram match and lands on page 1.
     await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
-    await expect(page.getByRole("cell", { name, exact: true })).toBeVisible({
+    await expect(page.getByRole("row").filter({ hasText: name })).toBeVisible({
       timeout: 15_000,
     });
 
@@ -101,7 +101,7 @@ test.describe("Catalog flow (owner)", () => {
     // distinctive suffix keeps the trigram result to this one row regardless of
     // how many similar test items the shared DB has accumulated.
     await page.getByLabel(/Поиск/).fill(catalogSearchKey(needle));
-    await expect(page.getByRole("cell", { name: needle, exact: true })).toBeVisible({
+    await expect(page.getByRole("row").filter({ hasText: needle })).toBeVisible({
       timeout: 15_000,
     });
   });

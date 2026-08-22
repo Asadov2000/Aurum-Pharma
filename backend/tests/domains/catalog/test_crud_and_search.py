@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
 from app.domains.catalog.repository import CatalogRepository
+from app.domains.catalog.schemas import CatalogItemUpdate
 from app.domains.catalog.service import CatalogService
 
 
@@ -112,6 +113,29 @@ async def test_barcode_lookup(db_session: AsyncSession, make_tenant) -> None:
     assert found.id == item.id
 
 
+async def test_catalog_search_accepts_an_exact_barcode(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    item = await service.create_item(
+        tenant_id=tenant.id, fields={"brand_name": "Barcode searchable"}
+    )
+    await service.add_barcode(
+        tenant_id=tenant.id,
+        catalog_id=item.id,
+        code="4607013192999",
+        code_type="ean13",
+    )
+
+    items, total, _ = await service.search(
+        q="4607013192999", category=None, dispensing_type=None, page=1, page_size=50
+    )
+
+    assert total == 1
+    assert [found.id for found in items] == [item.id]
+
+
 async def test_unique_barcode_per_tenant(db_session: AsyncSession, make_tenant) -> None:
     tenant = await make_tenant()
     service = CatalogService(CatalogRepository(db_session))
@@ -143,3 +167,127 @@ async def test_soft_delete_hides_from_search(db_session: AsyncSession, make_tena
 
     with pytest.raises(NotFoundError):
         await service.get_item(item.id)
+
+
+async def test_update_can_clear_nullable_fields(db_session: AsyncSession, make_tenant) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    item = await service.create_item(
+        tenant_id=tenant.id,
+        fields={
+            "brand_name": "Clear nullable",
+            "inn": "value",
+            "manufacturer": "Maker",
+            "base_price": "12.50",
+        },
+    )
+    payload = CatalogItemUpdate(inn=None, manufacturer=None, base_price=None)
+
+    updated = await service.update_item(
+        item.id,
+        fields=payload.model_dump(exclude_unset=True),
+    )
+
+    assert updated.inn is None
+    assert updated.manufacturer is None
+    assert updated.base_price is None
+
+
+async def test_lifecycle_search_archive_detail_and_restore(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    category = f"lifecycle-{tenant.id}"
+    active = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Lifecycle active", "category": category},
+    )
+    inactive = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Lifecycle inactive", "category": category, "is_active": False},
+    )
+    archived = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Lifecycle archived", "category": category},
+    )
+    await service.soft_delete_item(archived.id)
+
+    active_items, _, _ = await service.search(
+        q=None, category=category, dispensing_type=None, page=1, page_size=50
+    )
+    inactive_items, _, _ = await service.search(
+        q=None,
+        category=category,
+        dispensing_type=None,
+        page=1,
+        page_size=50,
+        lifecycle="inactive",
+    )
+    archived_items, _, _ = await service.search(
+        q=None,
+        category=category,
+        dispensing_type=None,
+        page=1,
+        page_size=50,
+        lifecycle="archived",
+    )
+    all_items, _, _ = await service.search(
+        q=None,
+        category=category,
+        dispensing_type=None,
+        page=1,
+        page_size=50,
+        lifecycle="all",
+    )
+
+    assert [item.id for item in active_items] == [active.id]
+    assert [item.id for item in inactive_items] == [inactive.id]
+    assert [item.id for item in archived_items] == [archived.id]
+    assert {item.id for item in all_items} == {active.id, inactive.id, archived.id}
+
+    detail, _barcodes = await service.get_item_with_barcodes(archived.id, include_deleted=True)
+    assert detail.deleted_at is not None
+
+    restored = await service.restore_item(archived.id)
+    assert restored.deleted_at is None
+    assert restored.is_active is True
+
+
+async def test_search_combines_manufacturer_and_storage_filters(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    category = f"filters-{tenant.id}"
+    expected = await service.create_item(
+        tenant_id=tenant.id,
+        fields={
+            "brand_name": "Cold exact",
+            "category": category,
+            "manufacturer": "Aurum Test Maker",
+            "storage_type": "cold",
+        },
+    )
+    await service.create_item(
+        tenant_id=tenant.id,
+        fields={
+            "brand_name": "Normal exact",
+            "category": category,
+            "manufacturer": "Aurum Test Maker",
+            "storage_type": "normal",
+        },
+    )
+
+    items, total, _ = await service.search(
+        q=None,
+        category=category,
+        dispensing_type=None,
+        manufacturer="Aurum Test Maker",
+        storage_type="cold",
+        page=1,
+        page_size=50,
+    )
+
+    assert total == 1
+    assert [item.id for item in items] == [expected.id]

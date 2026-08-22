@@ -4,6 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listCatalog = vi.fn();
 const createCatalogItem = vi.fn();
+const authState = vi.hoisted(() => ({
+  permissions: ["catalog.view", "catalog.create", "catalog.update", "catalog.delete"],
+}));
+
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => ({
+    user: {
+      id: "user-1",
+      active_tenant_id: "t-1",
+      is_developer: false,
+      support_access: null,
+      permissions: authState.permissions,
+    },
+  }),
+}));
 
 vi.mock("@/features/catalog/api", () => ({
   listCatalog: (...a: unknown[]) => listCatalog(...a),
@@ -11,6 +26,7 @@ vi.mock("@/features/catalog/api", () => ({
   createCatalogItem: (...a: unknown[]) => createCatalogItem(...a),
   updateCatalogItem: vi.fn(),
   deleteCatalogItem: vi.fn(),
+  restoreCatalogItem: vi.fn(),
   findByBarcode: vi.fn(),
   addBarcode: vi.fn(),
   deleteBarcode: vi.fn(),
@@ -48,12 +64,14 @@ const ITEM = {
   base_price: "5.50",
   currency: "TJS",
   is_active: true,
+  deleted_at: null,
   created_at: "2026-05-22T00:00:00Z",
   updated_at: "2026-05-22T00:00:00Z",
 };
 
 describe("CatalogPage", () => {
   beforeEach(() => {
+    authState.permissions = ["catalog.view", "catalog.create", "catalog.update", "catalog.delete"];
     listCatalog.mockReset();
     createCatalogItem.mockReset();
   });
@@ -76,10 +94,10 @@ describe("CatalogPage", () => {
       page_size: 25,
     });
     renderPage();
-    expect(await screen.findByText("Парацетамол")).toBeInTheDocument();
-    expect(screen.getByText("Paracetamol")).toBeInTheDocument();
+    expect((await screen.findAllByText("Парацетамол")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Paracetamol").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Безрецептурный/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/5\.50 TJS/)).toBeInTheDocument();
+    expect(screen.getAllByText(/5\.50 TJS/).length).toBeGreaterThan(0);
   });
 
   it("rejects empty submission of the new item form", async () => {
@@ -117,5 +135,16 @@ describe("CatalogPage", () => {
         base_price: null,
       }),
     );
+  });
+
+  it("hides mutation controls from a view-only account", async () => {
+    authState.permissions = ["catalog.view"];
+    listCatalog.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
+
+    renderPage();
+
+    expect(await screen.findByText(/Каталог пуст/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Новая позиция/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Импорт из файла/i })).not.toBeInTheDocument();
   });
 });

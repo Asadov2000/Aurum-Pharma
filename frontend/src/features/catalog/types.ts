@@ -20,6 +20,7 @@ export interface CatalogItem {
   base_price: string | null; // Decimal arrives as string from FastAPI
   currency: string;
   is_active: boolean;
+  deleted_at?: string | null;
   created_at: string;
   updated_at: string;
   // Additive: available stock at the searched branch (POS passes branch_id).
@@ -80,8 +81,11 @@ export interface BarcodeCreatePayload {
 
 export interface CatalogSearchParams {
   q?: string;
+  manufacturer?: string;
   category?: string;
   dispensing_type?: DispensingType;
+  storage_type?: StorageType;
+  lifecycle?: "active" | "inactive" | "archived" | "all";
   page?: number;
   page_size?: number;
   /** When set (POS register's branch), results carry stock_available. */

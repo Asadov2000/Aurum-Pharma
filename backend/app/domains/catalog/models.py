@@ -12,6 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Numeric,
     Text,
@@ -98,6 +99,8 @@ class TenantCatalog(Base):
             "storage_type IN ('normal','cold','frozen')",
             name="ck_tc_storage_type",
         ),
+        CheckConstraint("base_price IS NULL OR base_price >= 0", name="ck_tc_base_price"),
+        UniqueConstraint("tenant_id", "id", name="uq_tenant_catalog_tenant_id_id"),
     )
 
 
@@ -112,7 +115,6 @@ class Barcode(Base):
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     catalog_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("tenant_catalog.id", ondelete="CASCADE"),
         nullable=False,
     )
     code: Mapped[str] = mapped_column(Text, nullable=False)
@@ -123,6 +125,12 @@ class Barcode(Base):
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "code", name="uq_barcode_tenant_code"),
+        ForeignKeyConstraint(
+            ["tenant_id", "catalog_id"],
+            ["tenant_catalog.tenant_id", "tenant_catalog.id"],
+            name="fk_barcode_tenant_catalog",
+            ondelete="CASCADE",
+        ),
         CheckConstraint(
             "code_type IN ('ean13','ean8','gs1_128','code128','qr','other')",
             name="ck_barcode_code_type",
