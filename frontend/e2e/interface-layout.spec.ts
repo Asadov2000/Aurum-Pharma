@@ -278,7 +278,7 @@ test.describe("Interface layout", () => {
     await page.getByRole("button", { name: "Сенсор" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
     expect(
-      await page.getByPlaceholder("например: парацетамол").evaluate((element) => {
+      await page.getByPlaceholder("Название, МНН или штрихкод").evaluate((element) => {
         return element.getBoundingClientRect().height;
       }),
     ).toBeGreaterThanOrEqual(44);
