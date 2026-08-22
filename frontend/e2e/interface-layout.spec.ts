@@ -5,6 +5,7 @@ import { clearLoginRateLimit, expect, loginInBrowser, OWNER } from "./helpers";
 const WORKSPACES = [
   { path: "/", heading: "Главная" },
   { path: "/catalog", heading: "Каталог" },
+  { path: "/sales", heading: "Чеки" },
   { path: "/users", heading: "Сотрудники" },
   { path: "/roles", heading: "Роли" },
   { path: "/pos", heading: "Касса" },
