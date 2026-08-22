@@ -52,7 +52,9 @@ trap 'exit 143' TERM
 
 write_secret() {
     printf '%s' "$2" > "$secrets/$1"
-    chmod 600 "$secrets/$1"
+    # The parent mktemp directory is 0700. File-backed Compose secrets must
+    # remain readable through Docker's user namespace on hosted Linux runners.
+    chmod 644 "$secrets/$1"
 }
 
 random_hex() {
