@@ -3,13 +3,14 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listIncoming = vi.fn();
+const getIncoming = vi.fn();
 const listBranches = vi.fn();
 const searchSupplierOptions = vi.fn();
 
 vi.mock("@/features/incoming/api", () => ({
   listIncoming: (...a: unknown[]) => listIncoming(...a),
   createIncoming: vi.fn(),
-  getIncoming: vi.fn(),
+  getIncoming: (...a: unknown[]) => getIncoming(...a),
   updateIncoming: vi.fn(),
   addIncomingItem: vi.fn(),
   updateIncomingItem: vi.fn(),
@@ -122,30 +123,69 @@ const DOC = {
   accepted_at: null,
 };
 
+const SUMMARY = {
+  all_count: 1,
+  draft_count: 1,
+  accepted_count: 0,
+  rejected_count: 0,
+  accepted_amount: "0.00",
+  currency: "TJS",
+};
+
+function stubViewport(split = false): void {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      matches: query.includes("768px") || (split && query.includes("1280px")),
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  );
+}
+
 describe("IncomingPage", () => {
   beforeEach(() => {
     listIncoming.mockReset();
+    getIncoming.mockReset();
     listBranches.mockReset();
     searchSupplierOptions.mockReset();
     searchSupplierOptions.mockResolvedValue({
       items: [{ id: SUPPLIER.id, name: SUPPLIER.name, is_active: true }],
     });
+    window.localStorage.clear();
+    stubViewport();
   });
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("renders an empty-state hint when there are no documents", async () => {
-    listIncoming.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
+    listIncoming.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 0, draft_count: 0 },
+    });
     listBranches.mockResolvedValueOnce([BRANCH]);
     renderPage();
     expect(await screen.findByText(/Приходов пока нет/i)).toBeInTheDocument();
   });
 
   it("shows a retryable error without a misleading empty state", async () => {
-    listIncoming
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
+    listIncoming.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 0, draft_count: 0 },
+    });
     listBranches.mockResolvedValue([BRANCH]);
     renderPage();
 
@@ -158,7 +198,13 @@ describe("IncomingPage", () => {
   });
 
   it("resolves branch and supplier ids to names from the lookups", async () => {
-    listIncoming.mockResolvedValueOnce({ items: [DOC], total: 1, page: 1, page_size: 25 });
+    listIncoming.mockResolvedValueOnce({
+      items: [DOC],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
     listBranches.mockResolvedValueOnce([BRANCH]);
     renderPage();
     // Branch and supplier names appear both in filter dropdowns (as <option>)
@@ -167,11 +213,17 @@ describe("IncomingPage", () => {
     expect(within(row).getByText("Аптека центр")).toBeInTheDocument();
     expect(within(row).getByText("Прима-Фарм")).toBeInTheDocument();
     expect(within(row).getByText(/Черновик/)).toBeInTheDocument();
-    expect(within(row).getByText(/1500\.00 TJS/)).toBeInTheDocument();
+    expect(within(row).getByText(/1\s500,00 TJS/)).toBeInTheDocument();
   });
 
   it("requests only the selected page and resets pagination after filtering", async () => {
-    listIncoming.mockResolvedValue({ items: [DOC], total: 26, page: 1, page_size: 25 });
+    listIncoming.mockResolvedValue({
+      items: [DOC],
+      total: 26,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 26 },
+    });
     listBranches.mockResolvedValue([BRANCH]);
     renderPage();
 
@@ -194,5 +246,34 @@ describe("IncomingPage", () => {
         }),
       ),
     );
+  });
+
+  it("loads details only for the selected document in the wide workspace", async () => {
+    stubViewport(true);
+    const second = { ...DOC, id: "d-2", document_number: "INV-002" };
+    listIncoming.mockResolvedValueOnce({
+      items: [DOC, second],
+      total: 2,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 2, draft_count: 2 },
+    });
+    getIncoming.mockImplementation(async (id: string) => ({
+      ...(id === second.id ? second : DOC),
+      branch_name: BRANCH.name,
+      supplier_name: SUPPLIER.name,
+      items: [],
+    }));
+    listBranches.mockResolvedValueOnce([BRANCH]);
+    renderPage();
+
+    expect(
+      await screen.findByRole("region", { name: "Карточка прихода: INV-001" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть приход: INV-002" }));
+    expect(
+      await screen.findByRole("region", { name: "Карточка прихода: INV-002" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(getIncoming).toHaveBeenLastCalledWith(second.id));
   });
 });

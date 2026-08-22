@@ -110,7 +110,10 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       ? "Синхронизация"
       : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
   const pageOwnsDesktopTitle =
-    pathname === "/" || pathname === "/sales" || pathname === "/suppliers";
+    pathname === "/" ||
+    pathname === "/sales" ||
+    pathname === "/suppliers" ||
+    pathname === "/incoming";
   const workspaceLabel =
     user?.support_access?.tenant_name ?? (hasTenant ? "Рабочая область аптеки" : "Платформа Aurum");
 

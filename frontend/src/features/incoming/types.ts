@@ -49,6 +49,16 @@ export interface IncomingDocumentList {
   total: number;
   page: number;
   page_size: number;
+  summary: IncomingDocumentSummary;
+}
+
+export interface IncomingDocumentSummary {
+  all_count: number;
+  draft_count: number;
+  accepted_count: number;
+  rejected_count: number;
+  accepted_amount: string;
+  currency: string;
 }
 
 export interface IncomingDocumentCreatePayload {

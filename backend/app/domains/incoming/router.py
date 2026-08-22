@@ -16,6 +16,7 @@ from app.domains.incoming.schemas import (
     IncomingDocumentCreate,
     IncomingDocumentList,
     IncomingDocumentRead,
+    IncomingDocumentSummary,
     IncomingDocumentUpdate,
     IncomingDocumentWithItems,
     IncomingItemBase,
@@ -57,7 +58,19 @@ async def list_incoming(
 ) -> IncomingDocumentList:
     branch_scope = user.branch_scope_for("incoming.view")
     if branch_scope is not None and branch_id is not None and branch_id not in branch_scope:
-        return IncomingDocumentList(items=[], total=0, page=page, page_size=page_size)
+        return IncomingDocumentList(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            summary=IncomingDocumentSummary(
+                all_count=0,
+                draft_count=0,
+                accepted_count=0,
+                rejected_count=0,
+                accepted_amount=0,
+            ),
+        )
     docs, total = await service.list_documents(
         branch_id=branch_id,
         branch_ids=branch_scope,
@@ -69,11 +82,34 @@ async def list_incoming(
         page=page,
         page_size=page_size,
     )
+    summary = await service.summarize_documents(
+        branch_id=branch_id,
+        branch_ids=branch_scope,
+        supplier_id=supplier_id,
+        document_number=document_number,
+        date_from=date_from,
+        date_to=date_to,
+    )
     return IncomingDocumentList(
-        items=[IncomingDocumentRead.model_validate(d) for d in docs],
+        items=[
+            IncomingDocumentRead.model_validate(row.document).model_copy(
+                update={
+                    "branch_name": row.branch_name,
+                    "supplier_name": row.supplier_name,
+                }
+            )
+            for row in docs
+        ],
         total=total,
         page=page,
         page_size=page_size,
+        summary=IncomingDocumentSummary(
+            all_count=summary.all_count,
+            draft_count=summary.draft_count,
+            accepted_count=summary.accepted_count,
+            rejected_count=summary.rejected_count,
+            accepted_amount=summary.accepted_amount,
+        ),
     )
 
 

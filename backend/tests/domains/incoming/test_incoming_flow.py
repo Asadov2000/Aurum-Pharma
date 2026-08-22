@@ -45,20 +45,35 @@ async def test_create_incoming_draft(db_session: AsyncSession, scaffold) -> None
 async def test_list_incoming_is_searchable_and_paginated(
     db_session: AsyncSession, scaffold: Scaffold
 ) -> None:
-    tenant, branch, _item, supplier = await scaffold()
+    tenant, branch, item, supplier = await scaffold()
     service = IncomingService(IncomingRepository(db_session))
     today = date.today()
 
+    documents = []
     for index in range(5):
-        await service.create_document(
-            tenant_id=tenant.id,
-            fields={
-                "branch_id": branch.id,
-                "supplier_id": supplier.id,
-                "document_date": today - timedelta(days=index),
-                "document_number": f"ПР-{100 + index}",
-            },
+        documents.append(
+            await service.create_document(
+                tenant_id=tenant.id,
+                fields={
+                    "branch_id": branch.id,
+                    "supplier_id": supplier.id,
+                    "document_date": today - timedelta(days=index),
+                    "document_number": f"ПР-{100 + index}",
+                },
+            )
         )
+
+    await service.add_item(
+        documents[0].id,
+        fields={
+            "catalog_id": item.id,
+            "expires_at": today + timedelta(days=365),
+            "qty": Decimal("2"),
+            "purchase_price": Decimal("5.00"),
+            "sale_price": Decimal("8.00"),
+        },
+    )
+    await service.accept(documents[0].id)
 
     page_rows, total = await service.list_documents(page=2, page_size=2)
     search_rows, search_total = await service.list_documents(
@@ -66,11 +81,19 @@ async def test_list_incoming_is_searchable_and_paginated(
         page=1,
         page_size=2,
     )
+    summary = await service.summarize_documents()
 
     assert total == 5
-    assert [row.document_number for row in page_rows] == ["ПР-102", "ПР-103"]
+    assert [row.document.document_number for row in page_rows] == ["ПР-102", "ПР-103"]
+    assert all(row.branch_name == branch.name for row in page_rows)
+    assert all(row.supplier_name == supplier.name for row in page_rows)
     assert search_total == 1
-    assert [row.document_number for row in search_rows] == ["ПР-103"]
+    assert [row.document.document_number for row in search_rows] == ["ПР-103"]
+    assert summary.all_count == 5
+    assert summary.draft_count == 4
+    assert summary.accepted_count == 1
+    assert summary.rejected_count == 0
+    assert summary.accepted_amount == Decimal("10.00")
 
 
 async def test_incoming_document_refs_must_match_tenant(db_session: AsyncSession, scaffold) -> None:

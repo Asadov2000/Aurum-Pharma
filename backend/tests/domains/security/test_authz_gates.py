@@ -687,8 +687,19 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
 
         list_resp = await client.get("/api/v1/incoming", headers=headers)
         assert list_resp.status_code == 200
-        assert [item["id"] for item in list_resp.json()["items"]] == [own_doc_id]
-        assert list_resp.json()["total"] == 1
+        list_payload = list_resp.json()
+        assert [item["id"] for item in list_payload["items"]] == [own_doc_id]
+        assert list_payload["items"][0]["branch_name"] == branch_a.name
+        assert list_payload["items"][0]["supplier_name"] == supplier.name
+        assert list_payload["total"] == 1
+        assert list_payload["summary"] == {
+            "all_count": 1,
+            "draft_count": 1,
+            "accepted_count": 0,
+            "rejected_count": 0,
+            "accepted_amount": "0",
+            "currency": "TJS",
+        }
 
         get_other_resp = await client.get(f"/api/v1/incoming/{other_doc.id}", headers=headers)
         assert get_other_resp.status_code == 403

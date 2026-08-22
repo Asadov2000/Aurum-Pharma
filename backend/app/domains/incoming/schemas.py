@@ -111,11 +111,21 @@ class IncomingDocumentRead(BaseModel):
     supplier_name: str | None = None
 
 
+class IncomingDocumentSummary(BaseModel):
+    all_count: int
+    draft_count: int
+    accepted_count: int
+    rejected_count: int
+    accepted_amount: Decimal
+    currency: str = "TJS"
+
+
 class IncomingDocumentList(BaseModel):
     items: list[IncomingDocumentRead]
     total: int
     page: int
     page_size: int
+    summary: IncomingDocumentSummary
 
 
 class IncomingDocumentWithItems(IncomingDocumentRead):
