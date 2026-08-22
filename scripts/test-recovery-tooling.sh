@@ -95,11 +95,11 @@ export AURUM_BACKUP_MIN_FREE_BYTES=1048576
 export AURUM_IMAGE_TAG=ci
 
 # The local bind directory is writable only by the non-root backup UID.
+chmod 700 "$repository" "$scratch"
 case "$(uname -s)" in
     MINGW*|MSYS*) ;;
     *) sudo chown 10001:10001 "$repository" "$scratch" ;;
 esac
-chmod 700 "$repository" "$scratch"
 
 compose() {
     docker compose \
