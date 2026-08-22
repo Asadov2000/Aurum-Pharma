@@ -16,6 +16,19 @@ scratch="$root/scratch"
 mkdir -p "$secrets" "$repository" "$scratch"
 
 cleanup() {
+    status=$?
+    set +e
+    if [ "$status" -ne 0 ]; then
+        docker compose \
+            -p "$project" \
+            --env-file .env.production.example \
+            --file docker-compose.production.yml \
+            --file docker-compose.recovery.yml \
+            --profile backup \
+            --profile restore-drill \
+            logs --no-color --tail 200 postgres restore-postgres >&2
+    fi
+
     docker compose \
         -p "$project" \
         --env-file .env.production.example \
@@ -29,8 +42,13 @@ cleanup() {
         "${TMPDIR:-/tmp}"/aurum-recovery-ci.*) rm -rf -- "$root" ;;
         *) echo "Refusing to remove unexpected recovery test path: $root" >&2 ;;
     esac
+
+    trap - EXIT INT TERM
+    exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 write_secret() {
     printf '%s' "$2" > "$secrets/$1"
