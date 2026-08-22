@@ -2,8 +2,14 @@ node_modules/
 dist/
 .vite/
 .git/
-.env
-.env.local
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+backups/
 *.log
 test-results/
 playwright-report/

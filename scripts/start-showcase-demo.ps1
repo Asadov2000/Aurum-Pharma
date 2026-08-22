@@ -20,6 +20,7 @@ $secretHexLengths = [ordered]@{
     AURUM_DEMO_MAILER_PASSWORD = 64
     AURUM_DEMO_BILLING_WORKER_PASSWORD = 64
     AURUM_DEMO_MIGRATOR_PASSWORD = 64
+    AURUM_DEMO_BACKUP_PASSWORD = 64
     AURUM_DEMO_REDIS_PASSWORD = 64
     AURUM_DEMO_JWT_SECRET = 96
     AURUM_DEMO_MFA_ENCRYPTION_KEY = 96
@@ -263,7 +264,8 @@ function Add-MissingShowcaseSecrets {
     $missing = @(
         "AURUM_DEMO_MIGRATOR_PASSWORD",
         "AURUM_DEMO_MAILER_PASSWORD",
-        "AURUM_DEMO_BILLING_WORKER_PASSWORD"
+        "AURUM_DEMO_BILLING_WORKER_PASSWORD",
+        "AURUM_DEMO_BACKUP_PASSWORD"
     ) | Where-Object { $key = $_; -not ($existing | Where-Object { $_ -match "^$key=" }) }
     if ($missing.Count -eq 0) { return }
     if ($DryRun) { throw "$environmentFileName needs a one-time secret upgrade" }

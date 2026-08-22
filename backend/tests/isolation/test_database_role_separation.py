@@ -63,6 +63,7 @@ async def test_database_roles_have_exact_attributes_and_memberships(
                       'aurum_edge_cash_executor',
                       'aurum_edge_cash_owner',
                       'aurum_billing_worker',
+                      'aurum_backup',
                       'aurum_mailer',
                       'aurum_support',
                       'aurum_migrator',
@@ -111,6 +112,16 @@ async def test_database_roles_have_exact_attributes_and_memberships(
             "rolcreaterole": False,
             "rolreplication": False,
             "rolbypassrls": False,
+        },
+        "aurum_backup": {
+            "rolname": "aurum_backup",
+            "rolcanlogin": True,
+            "rolinherit": True,
+            "rolsuper": False,
+            "rolcreatedb": False,
+            "rolcreaterole": False,
+            "rolreplication": False,
+            "rolbypassrls": True,
         },
         "aurum_edge_cash_executor": {
             "rolname": "aurum_edge_cash_executor",
@@ -292,6 +303,38 @@ async def test_runtime_roles_have_no_transitive_elevated_membership(
     ]
 
 
+async def test_backup_role_is_cluster_read_only(
+    migration_role_engine: AsyncEngine,
+) -> None:
+    async with migration_role_engine.connect() as connection:
+        row = (await connection.execute(text("""
+                    SELECT
+                      pg_catalog.pg_has_role(
+                        'aurum_backup', 'pg_read_all_data', 'MEMBER'
+                      ) AS can_read_all,
+                      pg_catalog.pg_has_role(
+                        'aurum_backup', 'pg_write_all_data', 'MEMBER'
+                      ) AS can_write_all,
+                      pg_catalog.has_database_privilege(
+                        'aurum_backup', current_database(), 'CONNECT'
+                      ) AS can_connect,
+                      pg_catalog.has_database_privilege(
+                        'aurum_backup', current_database(), 'CREATE'
+                      ) AS can_create_database_objects,
+                      pg_catalog.has_schema_privilege(
+                        'aurum_backup', 'public', 'CREATE'
+                      ) AS can_create_schema_objects
+                """))).mappings().one()
+
+    assert dict(row) == {
+        "can_read_all": True,
+        "can_write_all": False,
+        "can_connect": True,
+        "can_create_database_objects": False,
+        "can_create_schema_objects": False,
+    }
+
+
 async def test_runtime_roles_own_no_application_objects(
     migration_role_engine: AsyncEngine,
 ) -> None:
@@ -321,6 +364,7 @@ async def test_runtime_roles_own_no_application_objects(
                             'aurum_edge_cash_executor',
                             'aurum_edge_cash_owner',
                             'aurum_billing_worker',
+                            'aurum_backup',
                             'aurum_mailer',
                             'aurum_support'
                           )
@@ -338,6 +382,7 @@ async def test_runtime_roles_own_no_application_objects(
                             'aurum_edge_cash_executor',
                             'aurum_edge_cash_owner',
                             'aurum_billing_worker',
+                            'aurum_backup',
                             'aurum_mailer',
                             'aurum_support'
                           )
