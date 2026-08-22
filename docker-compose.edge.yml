@@ -1,3 +1,5 @@
+# Development-only overlay. For hardened read-only rehearsal use
+# docker-compose.edge-shadow.hardened.yml. Neither file enables offline writer.
 services:
   backend:
     environment:
@@ -15,6 +17,7 @@ services:
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:?Set AURUM_MAILER_PASSWORD}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:?Set AURUM_BILLING_WORKER_PASSWORD}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:?Set AURUM_MIGRATOR_PASSWORD}
+      AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:?Set AURUM_BACKUP_PASSWORD}
     volumes:
       - edge-postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -40,6 +43,7 @@ services:
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:?Set AURUM_MAILER_PASSWORD}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:?Set AURUM_BILLING_WORKER_PASSWORD}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:?Set AURUM_MIGRATOR_PASSWORD}
+      AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:?Set AURUM_BACKUP_PASSWORD}
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
     depends_on:

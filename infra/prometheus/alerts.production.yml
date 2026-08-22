@@ -1,0 +1,20 @@
+groups:
+  - name: aurum-availability
+    rules:
+      - alert: AurumBackendUnavailable
+        expr: up{job="aurum-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum backend is unavailable
+          description: Prometheus cannot scrape the Aurum backend for more than two minutes.
+
+      - alert: AurumMonitoringTargetMissing
+        expr: absent(up{job="aurum-backend"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum backend monitoring target is missing
+          description: The backend target disappeared from Prometheus service discovery.

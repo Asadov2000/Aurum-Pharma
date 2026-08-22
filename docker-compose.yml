@@ -77,6 +77,7 @@ services:
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
+      AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -107,6 +108,7 @@ services:
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
+      AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
     volumes:
       - postgres-test-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -203,6 +205,7 @@ services:
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
+      AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
     depends_on:

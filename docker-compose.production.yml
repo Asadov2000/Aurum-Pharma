@@ -42,6 +42,13 @@ x-backend-secrets: &backend-secrets
   - source: minio_secret_key
     target: MINIO_SECRET_KEY
 
+x-service-logging: &service-logging
+  driver: local
+  options:
+    max-size: "${AURUM_LOG_MAX_SIZE:-10m}"
+    max-file: "${AURUM_LOG_MAX_FILES:-5}"
+    compress: "true"
+
 x-backend-service: &backend-service
   image: "aurum-pharma-backend:${AURUM_IMAGE_TAG:-local}"
   build:
@@ -59,7 +66,11 @@ x-backend-service: &backend-service
   cap_drop:
     - ALL
   pids_limit: 256
+  mem_limit: "${AURUM_BACKEND_MEMORY_LIMIT:-768m}"
+  cpus: "${AURUM_BACKEND_CPU_LIMIT:-1.0}"
   init: true
+  stop_grace_period: 30s
+  logging: *service-logging
   restart: unless-stopped
 
 services:
@@ -74,6 +85,7 @@ services:
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -87,6 +99,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_backup_password
+        target: AURUM_BACKUP_PASSWORD
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -100,18 +114,34 @@ services:
       retries: 20
       start_period: 60s
     shm_size: 256mb
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: "${AURUM_POSTGRES_MEMORY_LIMIT:-2g}"
+    cpus: "${AURUM_POSTGRES_CPU_LIMIT:-2.0}"
+    stop_grace_period: 60s
+    logging: *service-logging
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine@sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf
     entrypoint: ["/bin/sh", "-ec"]
+    environment:
+      AURUM_REDIS_MAXMEMORY: "${AURUM_REDIS_MAXMEMORY:-384mb}"
     command:
       - |
         umask 077
         password="$$(cat /run/secrets/REDIS_PASSWORD)"
         test -n "$$password"
-        printf 'user default on >%s ~* +@all\n' "$$password" > /tmp/users.acl
-        exec redis-server --appendonly yes --aclfile /tmp/users.acl --protected-mode yes --maxmemory-policy noeviction
+        printf 'user default on >%s ~* +@all -ACL -CONFIG -DEBUG -FLUSHALL -FLUSHDB -MODULE -SHUTDOWN -SLAVEOF -REPLICAOF\n' "$$password" > /tmp/users.acl
+        chown redis:redis /tmp/users.acl
+        chown -R redis:redis /data
+        exec gosu redis redis-server \
+          --appendonly yes \
+          --aclfile /tmp/users.acl \
+          --protected-mode yes \
+          --maxmemory "$$AURUM_REDIS_MAXMEMORY" \
+          --maxmemory-policy noeviction
     secrets:
       - source: redis_password
         target: REDIS_PASSWORD
@@ -130,6 +160,13 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: "${AURUM_REDIS_MEMORY_LIMIT:-512m}"
+    cpus: "${AURUM_REDIS_CPU_LIMIT:-1.0}"
+    stop_grace_period: 30s
+    logging: *service-logging
     restart: unless-stopped
 
   minio:
@@ -153,6 +190,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: "${AURUM_MINIO_MEMORY_LIMIT:-1g}"
+    cpus: "${AURUM_MINIO_CPU_LIMIT:-1.0}"
+    stop_grace_period: 60s
+    logging: *service-logging
     restart: unless-stopped
 
   minio-init:
@@ -168,6 +212,7 @@ services:
           sleep 2
         done
         mc --config-dir /tmp/.mc mb --ignore-existing local/aurum
+        mc --config-dir /tmp/.mc version enable local/aurum
         mc --config-dir /tmp/.mc admin user add local "$$app_user" "$$app_password"
         mc --config-dir /tmp/.mc admin policy create local aurum-app /config/aurum-app-policy.json
         mc --config-dir /tmp/.mc admin policy attach local aurum-app --user "$$app_user"
@@ -194,6 +239,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    pids_limit: 64
+    mem_limit: "${AURUM_MAINTENANCE_MEMORY_LIMIT:-256m}"
+    cpus: "${AURUM_MAINTENANCE_CPU_LIMIT:-0.5}"
+    init: true
+    logging: *service-logging
     restart: "no"
 
   db-role-bootstrap:
@@ -209,6 +259,7 @@ services:
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -222,6 +273,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_backup_password
+        target: AURUM_BACKUP_PASSWORD
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
     networks:
@@ -237,6 +290,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    pids_limit: 64
+    mem_limit: "${AURUM_MAINTENANCE_MEMORY_LIMIT:-256m}"
+    cpus: "${AURUM_MAINTENANCE_CPU_LIMIT:-0.5}"
+    init: true
+    logging: *service-logging
     restart: "no"
 
   migrate:
@@ -267,7 +325,10 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
+    mem_limit: "${AURUM_MIGRATION_MEMORY_LIMIT:-512m}"
+    cpus: "${AURUM_MIGRATION_CPU_LIMIT:-1.0}"
     init: true
+    logging: *service-logging
     restart: "no"
 
   backend:
@@ -309,6 +370,9 @@ services:
 
   celery-worker:
     <<: *backend-service
+    mem_limit: "${AURUM_CELERY_MEMORY_LIMIT:-1g}"
+    cpus: "${AURUM_CELERY_CPU_LIMIT:-1.5}"
+    stop_grace_period: 60s
     command:
       [
         "celery",
@@ -371,7 +435,11 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
+    mem_limit: "${AURUM_BILLING_WORKER_MEMORY_LIMIT:-512m}"
+    cpus: "${AURUM_BILLING_WORKER_CPU_LIMIT:-0.5}"
     init: true
+    stop_grace_period: 60s
+    logging: *service-logging
     restart: unless-stopped
 
   platform-mailer:
@@ -432,11 +500,18 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
+    mem_limit: "${AURUM_MAILER_MEMORY_LIMIT:-512m}"
+    cpus: "${AURUM_MAILER_CPU_LIMIT:-0.5}"
     init: true
+    stop_grace_period: 60s
+    logging: *service-logging
     restart: unless-stopped
 
   celery-beat:
     <<: *backend-service
+    mem_limit: "${AURUM_CELERY_BEAT_MEMORY_LIMIT:-384m}"
+    cpus: "${AURUM_CELERY_BEAT_CPU_LIMIT:-0.5}"
+    stop_grace_period: 30s
     command:
       [
         "celery",
@@ -482,6 +557,10 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
+    mem_limit: "${AURUM_GATEWAY_MEMORY_LIMIT:-256m}"
+    cpus: "${AURUM_GATEWAY_CPU_LIMIT:-0.5}"
+    stop_grace_period: 30s
+    logging: *service-logging
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9080/healthz"]
       interval: 10s
@@ -500,6 +579,7 @@ services:
         target: METRICS_TOKEN
     volumes:
       - ./infra/prometheus/prometheus.production.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts.production.yml:/etc/prometheus/alerts.production.yml:ro
       - prometheus-data:/prometheus
     networks:
       - monitoring
@@ -511,6 +591,10 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
+    mem_limit: "${AURUM_PROMETHEUS_MEMORY_LIMIT:-1g}"
+    cpus: "${AURUM_PROMETHEUS_CPU_LIMIT:-1.0}"
+    stop_grace_period: 30s
+    logging: *service-logging
     restart: unless-stopped
 
 secrets:
@@ -526,6 +610,8 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_MAILER_PASSWORD"
   aurum_billing_worker_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_BILLING_WORKER_PASSWORD"
+  aurum_backup_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_BACKUP_PASSWORD"
   database_url_app:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_APP"
   database_url_support:
@@ -536,6 +622,8 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_MAILER"
   database_url_billing_worker:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_BILLING_WORKER"
+  database_url_backup:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_BACKUP"
   redis_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_PASSWORD"
   redis_url:
@@ -560,6 +648,12 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MINIO_ACCESS_KEY"
   minio_secret_key:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MINIO_SECRET_KEY"
+  minio_backup_access_key:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MINIO_BACKUP_ACCESS_KEY"
+  minio_backup_secret_key:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MINIO_BACKUP_SECRET_KEY"
+  restic_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/RESTIC_PASSWORD"
   email_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/EMAIL_PASSWORD"
 

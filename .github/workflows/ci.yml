@@ -194,6 +194,7 @@ jobs:
             printf %s aurum_migrator_pw > /tmp/aurum-migrator-password
             printf %s aurum_mailer_pw > /tmp/aurum-mailer-password
             printf %s aurum_billing_worker_pw > /tmp/aurum-billing-worker-password
+            printf %s aurum_backup_pw > /tmp/aurum-backup-password
           '
           docker exec -i \
             -e POSTGRES_HOST=127.0.0.1 \
@@ -206,6 +207,7 @@ jobs:
             -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
             -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
             -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
+            -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
             "$POSTGRES_SERVICE_ID" sh -c '
               unset \
                 POSTGRES_PASSWORD \
@@ -213,7 +215,8 @@ jobs:
                 AURUM_SUPPORT_PASSWORD \
                 AURUM_MIGRATOR_PASSWORD \
                 AURUM_MAILER_PASSWORD \
-                AURUM_BILLING_WORKER_PASSWORD
+                AURUM_BILLING_WORKER_PASSWORD \
+                AURUM_BACKUP_PASSWORD
               exec sh /tmp/bootstrap-roles.sh
             '
 
@@ -245,6 +248,7 @@ jobs:
               -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
+              -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
               "$POSTGRES_SERVICE_ID" sh -c '
                 unset \
                   POSTGRES_PASSWORD \
@@ -252,7 +256,8 @@ jobs:
                   AURUM_SUPPORT_PASSWORD \
                   AURUM_MIGRATOR_PASSWORD \
                   AURUM_MAILER_PASSWORD \
-                  AURUM_BILLING_WORKER_PASSWORD
+                  AURUM_BILLING_WORKER_PASSWORD \
+                  AURUM_BACKUP_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
               '
           }
@@ -634,6 +639,7 @@ jobs:
               -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
+              -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
               "$POSTGRES_SERVICE_ID" sh -c '
                 unset \
                   POSTGRES_PASSWORD \
@@ -641,7 +647,8 @@ jobs:
                   AURUM_SUPPORT_PASSWORD \
                   AURUM_MIGRATOR_PASSWORD \
                   AURUM_MAILER_PASSWORD \
-                  AURUM_BILLING_WORKER_PASSWORD
+                  AURUM_BILLING_WORKER_PASSWORD \
+                  AURUM_BACKUP_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
               '
           }
@@ -1104,7 +1111,7 @@ jobs:
   production-containers:
     name: Production container gate
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -1118,6 +1125,40 @@ jobs:
             --file docker-compose.production.yml \
             --profile maintenance \
             config --quiet
+
+          docker compose \
+            --env-file .env.production.example \
+            --file docker-compose.production.yml \
+            --file docker-compose.recovery.yml \
+            --profile backup \
+            --profile restore-drill \
+            config --quiet
+
+          docker compose \
+            --env-file .env.edge-shadow.example \
+            --file docker-compose.edge-shadow.hardened.yml \
+            config --format json > "$RUNNER_TEMP/edge-shadow-compose.json"
+
+          python - "$RUNNER_TEMP/edge-shadow-compose.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as source:
+              edge = json.load(source)
+
+          assert not any(service.get("ports") for service in edge["services"].values())
+          assert edge["networks"]["edge-data"]["internal"] is True
+          worker = edge["services"]["edge-worker"]
+          assert worker["read_only"] is True
+          assert worker["cap_drop"] == ["ALL"]
+          assert worker["environment"]["EDGE_WRITER_ACTIVATION_ENABLED"] == "false"
+          assert worker["environment"]["EDGE_WRITER_READINESS_ENABLED"] == "false"
+          assert worker["environment"]["EDGE_SYNC_CLOUD_URL"].startswith("https://")
+          assert not worker.get("volumes"), "Edge worker must not mount source code"
+          assert edge["services"]["edge-migrate"]["build"]["dockerfile"] == (
+              "Dockerfile.production"
+          )
+          PY
 
           docker compose \
             --env-file .env.production.example \
@@ -1178,6 +1219,7 @@ jobs:
               "AURUM_MIGRATOR_PASSWORD",
               "AURUM_MAILER_PASSWORD",
               "AURUM_BILLING_WORKER_PASSWORD",
+              "AURUM_BACKUP_PASSWORD",
               "TEST_DATABASE_URL_APP",
               "TEST_DATABASE_URL_SUPPORT",
               "TEST_DATABASE_URL_MIGRATION",
@@ -1185,6 +1227,7 @@ jobs:
               "TEST_DATABASE_URL_BILLING_WORKER",
               "MINIO_ROOT_USER",
               "MINIO_ROOT_PASSWORD",
+              "DATABASE_URL_BACKUP",
           }
           for compose_model in (model, development_model):
               for name in runtime_services:
@@ -1249,7 +1292,14 @@ jobs:
               "aurum_migrator_password",
               "aurum_mailer_password",
               "aurum_billing_worker_password",
+              "aurum_backup_password",
           }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
+
+          assert model["services"]["redis"]["environment"]["AURUM_REDIS_MAXMEMORY"]
+          assert model["services"]["redis"]["logging"]["driver"] == "local"
+          for name, service in model["services"].items():
+              assert service.get("mem_limit"), f"{name} has no memory limit"
+              assert service.get("cpus"), f"{name} has no CPU limit"
 
           billing_worker_secrets = {
               secret["source"]
@@ -1278,6 +1328,12 @@ jobs:
           }
           PY
 
+      - name: Check production Dockerfiles
+        run: |
+          docker build --check --file backend/Dockerfile.production backend
+          docker build --check --file frontend/Dockerfile.production frontend
+          docker build --check --file infra/backup/Dockerfile infra/backup
+
       - name: Build production backend
         run: >-
           docker build
@@ -1293,6 +1349,86 @@ jobs:
           --file frontend/Dockerfile.production
           --tag aurum-gateway:ci
           frontend
+
+      - name: Build recovery tooling
+        run: >-
+          docker build
+          --pull
+          --file infra/backup/Dockerfile
+          --tag aurum-backup:ci
+          --tag aurum-pharma-backup:ci
+          infra/backup
+
+      - name: Test encrypted backup and isolated restore
+        run: sh ./scripts/test-recovery-tooling.sh
+
+      - name: Scan repository for committed secrets
+        run: >-
+          docker run --rm
+          --volume "$PWD:/workspace:ro"
+          --volume "$RUNNER_TEMP/trivy-cache:/root/.cache/"
+          aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+          fs --scanners secret --exit-code 1 /workspace
+
+      - name: Scan production Dockerfiles for high-risk configuration
+        shell: bash
+        run: |
+          for target in \
+            /workspace/backend/Dockerfile.production \
+            /workspace/frontend/Dockerfile.production \
+            /workspace/infra/backup/Dockerfile; do
+            docker run --rm \
+              --volume "$PWD:/workspace:ro" \
+              --volume "$RUNNER_TEMP/trivy-cache:/root/.cache/" \
+              aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+              config --severity HIGH,CRITICAL --exit-code 1 "$target"
+          done
+
+      - name: Scan production images for fixable vulnerabilities
+        shell: bash
+        run: |
+          for image in aurum-backend:ci aurum-gateway:ci aurum-backup:ci; do
+            docker run --rm \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              --volume "$RUNNER_TEMP/trivy-cache:/root/.cache/" \
+              aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+              image --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 "$image"
+          done
+
+      - name: Generate CycloneDX SBOMs
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          for component in backend gateway backup; do
+            docker run --rm \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              --volume "$RUNNER_TEMP/sbom:/reports" \
+              --volume "$RUNNER_TEMP/trivy-cache:/root/.cache/" \
+              aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+              image --format cyclonedx --output "/reports/$component.cdx.json" \
+              "aurum-$component:ci"
+            test -s "$RUNNER_TEMP/sbom/$component.cdx.json"
+          done
+
+      - name: Upload production SBOMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-sbom
+          path: ${{ runner.temp }}/sbom/*.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Validate Prometheus configuration and alert rules
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/prometheus-secrets"
+          printf '%064d' 0 > "$RUNNER_TEMP/prometheus-secrets/METRICS_TOKEN"
+          docker run --rm \
+            --entrypoint /bin/promtool \
+            --volume "$PWD/infra/prometheus:/etc/prometheus:ro" \
+            --volume "$RUNNER_TEMP/prometheus-secrets:/run/secrets:ro" \
+            prom/prometheus:v3.13.1@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893 \
+            check config /etc/prometheus/prometheus.production.yml
 
       - name: Verify hardened image metadata
         shell: bash

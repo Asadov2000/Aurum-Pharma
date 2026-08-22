@@ -3,6 +3,7 @@
 \getenv mailer_password AURUM_MAILER_PASSWORD
 \getenv billing_worker_password AURUM_BILLING_WORKER_PASSWORD
 \getenv migrator_password AURUM_MIGRATOR_PASSWORD
+\getenv backup_password AURUM_BACKUP_PASSWORD
 \getenv database_name POSTGRES_DB
 
 -- The revision ledger may be absent only before the first migration. Extension
@@ -124,6 +125,7 @@ BEGIN
         WHERE owners.rolname IN (
             'aurum_mailer',
             'aurum_billing_worker',
+            'aurum_backup',
             'aurum_edge_cash_executor',
             'aurum_edge_cash_owner'
         )
@@ -137,6 +139,7 @@ BEGIN
         WHERE owners.rolname IN (
             'aurum_mailer',
             'aurum_billing_worker',
+            'aurum_backup',
             'aurum_edge_cash_executor',
             'aurum_edge_cash_owner'
         )
@@ -152,6 +155,7 @@ BEGIN
           AND owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
+              'aurum_backup',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
           )
@@ -171,6 +175,7 @@ BEGIN
           AND owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
+              'aurum_backup',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
           )
@@ -188,6 +193,7 @@ BEGIN
           AND owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
+              'aurum_backup',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
           )
@@ -275,6 +281,12 @@ WHERE NOT EXISTS (
 )
 \gexec
 
+SELECT 'CREATE ROLE aurum_backup'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_backup'
+)
+\gexec
+
 SELECT 'CREATE ROLE aurum_schema_owner'
 WHERE NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_schema_owner'
@@ -316,6 +328,13 @@ ALTER ROLE aurum_billing_worker WITH
 ALTER ROLE aurum_billing_worker SET statement_timeout = '30s';
 ALTER ROLE aurum_billing_worker SET lock_timeout = '5s';
 ALTER ROLE aurum_billing_worker SET idle_in_transaction_session_timeout = '30s';
+ALTER ROLE aurum_backup WITH
+    LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS
+    CONNECTION LIMIT 1
+    PASSWORD :'backup_password';
+ALTER ROLE aurum_backup SET statement_timeout = '30min';
+ALTER ROLE aurum_backup SET lock_timeout = '5s';
+ALTER ROLE aurum_backup SET idle_in_transaction_session_timeout = '60s';
 ALTER ROLE aurum_schema_owner WITH
     NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
 ALTER ROLE aurum_migrator WITH
@@ -338,6 +357,8 @@ GRANT aurum_support TO aurum_migrator
     WITH ADMIN FALSE, INHERIT TRUE, SET TRUE;
 GRANT aurum_edge_cash_owner TO aurum_migrator
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT pg_read_all_data TO aurum_backup
+    WITH ADMIN FALSE, INHERIT TRUE, SET TRUE;
 
 -- A database added to an existing cluster does not pass through init.sh.
 -- Normalize the future schema-owner objects here as well so functions never
@@ -388,6 +409,12 @@ WHERE (
     granted.rolname = 'aurum_billing_worker'
     OR member.rolname = 'aurum_billing_worker'
 ) OR (
+    (granted.rolname = 'aurum_backup' OR member.rolname = 'aurum_backup')
+    AND NOT (
+        granted.rolname = 'pg_read_all_data'
+        AND member.rolname = 'aurum_backup'
+    )
+) OR (
     (
         granted.rolname IN (
             'aurum_edge_cash_executor',
@@ -407,10 +434,11 @@ WHERE (
 
 REVOKE ALL PRIVILEGES ON DATABASE :"database_name"
     FROM PUBLIC, aurum_app, aurum_support, aurum_mailer, aurum_billing_worker,
+         aurum_backup,
          aurum_migrator,
          aurum_edge_cash_executor, aurum_edge_cash_owner;
 GRANT CONNECT ON DATABASE :"database_name"
-    TO aurum_app, aurum_mailer, aurum_billing_worker, aurum_migrator;
+    TO aurum_app, aurum_mailer, aurum_billing_worker, aurum_backup, aurum_migrator;
 
 DO $$
 DECLARE
