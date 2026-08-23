@@ -46,6 +46,7 @@ CRUD_TABLES = {
 NO_DELETE_TABLES = {
     "pos_payment_attempt",
     "pos_refund_attempt",
+    "user_preferences",
 }
 
 APPEND_ONLY_TABLES = {

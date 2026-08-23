@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -68,7 +68,12 @@ class FoundationRepository:
         return s
 
     async def get_settings(self, tenant_id: UUID) -> TenantSettings | None:
-        return await self.session.get(TenantSettings, tenant_id)
+        statement = (
+            select(TenantSettings)
+            .where(TenantSettings.tenant_id == tenant_id)
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none()
 
     async def get_settings_for_pos(self, tenant_id: UUID) -> TenantSettings | None:
         stmt = (
@@ -82,9 +87,28 @@ class FoundationRepository:
     async def update_settings(self, settings: TenantSettings, **fields: Any) -> TenantSettings:
         for key, value in fields.items():
             setattr(settings, key, value)
+        settings.version += 1
         await self.session.flush()
         await self.session.refresh(settings)
         return settings
+
+    async def update_settings_if_version(
+        self,
+        *,
+        tenant_id: UUID,
+        expected_version: int,
+        fields: dict[str, object],
+    ) -> TenantSettings | None:
+        result = await self.session.execute(
+            update(TenantSettings)
+            .where(
+                TenantSettings.tenant_id == tenant_id,
+                TenantSettings.version == expected_version,
+            )
+            .values(**fields, version=TenantSettings.version + 1)
+            .returning(TenantSettings)
+        )
+        return result.scalar_one_or_none()
 
     # -------------------------------------------------------------------------
     # branch

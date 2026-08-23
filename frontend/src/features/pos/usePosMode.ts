@@ -1,9 +1,7 @@
-import { useCallback, useState } from "react";
+import { useDevicePreferences, type DevicePosMode } from "@/lib/devicePreferences";
 
 export type PosMode = "touch" | "keyboard";
-export type PosModePref = "auto" | "touch" | "keyboard";
-
-const STORAGE_KEY = "pos:mode";
+export type PosModePref = DevicePosMode;
 
 /** Hardware sniff used when the preference is "auto". */
 export function detectTouch(): boolean {
@@ -15,16 +13,6 @@ export function detectTouch(): boolean {
     return window.matchMedia("(pointer: coarse)").matches;
   }
   return false;
-}
-
-function readPref(): PosModePref {
-  try {
-    const v = window.localStorage.getItem(STORAGE_KEY);
-    if (v === "auto" || v === "touch" || v === "keyboard") return v;
-  } catch {
-    // ignore
-  }
-  return "auto";
 }
 
 export function resolveMode(pref: PosModePref): PosMode {
@@ -44,16 +32,9 @@ export function usePosMode(): {
   pref: PosModePref;
   setPref: (p: PosModePref) => void;
 } {
-  const [pref, setPrefState] = useState<PosModePref>(() => readPref());
-
-  const setPref = useCallback((p: PosModePref) => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, p);
-    } catch {
-      // ignore — just won't persist
-    }
-    setPrefState(p);
-  }, []);
+  const { preferences, updatePreferences } = useDevicePreferences();
+  const pref = preferences.posMode;
+  const setPref = (next: PosModePref) => updatePreferences({ posMode: next });
 
   return { mode: resolveMode(pref), pref, setPref };
 }

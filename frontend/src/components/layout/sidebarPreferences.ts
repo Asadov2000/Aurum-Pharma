@@ -38,6 +38,7 @@ export const SIDEBAR_SECTIONS: readonly SidebarSection[] = [
 
 const STORAGE_PREFIX = "aurum:sidebar:v1";
 const MAX_STORED_ROUTES = 64;
+export const SIDEBAR_PREFERENCES_CHANGED_EVENT = "aurum:sidebar-preferences-changed";
 
 export function defaultSidebarPreferences(): SidebarPreferences {
   return {
@@ -111,6 +112,9 @@ export function saveSidebarPreferences(scope: string, preferences: SidebarPrefer
   } catch {
     // The current session remains usable when the browser blocks preferences.
   }
+  window.dispatchEvent(
+    new CustomEvent(SIDEBAR_PREFERENCES_CHANGED_EVENT, { detail: { scope } }),
+  );
 }
 
 export function orderSidebarItems<T extends { to: string }>(

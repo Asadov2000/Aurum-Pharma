@@ -5,15 +5,17 @@ import { Button, SegmentedControl } from "@/components/ui";
 import {
   getDensityPreference,
   setDensityPreference,
-  type UiDensity,
+  type DensityPreference,
 } from "@/lib/density";
+import { applyUserPreferences } from "@/features/settings/appearance";
+import { usePreferenceAutosave } from "@/features/settings/usePreferenceAutosave";
 import {
   getThemePreference,
   setThemePreference,
   type ThemePreference,
 } from "@/lib/theme";
 
-const POPOVER_WIDTH = 320;
+const POPOVER_WIDTH = 360;
 const VIEWPORT_GUTTER = 8;
 
 const THEME_OPTIONS = [
@@ -23,6 +25,7 @@ const THEME_OPTIONS = [
 ] as const;
 
 const DENSITY_OPTIONS = [
+  { value: "auto", label: "Авто" },
   { value: "compact", label: "Плотно" },
   { value: "comfortable", label: "Обычно" },
   { value: "touch", label: "Сенсор" },
@@ -34,8 +37,24 @@ export function AppearanceMenu(): JSX.Element {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
-  const [density, setDensity] = useState<UiDensity>(() => getDensityPreference());
+  const [density, setDensity] = useState<DensityPreference>(() => getDensityPreference());
   const [position, setPosition] = useState({ left: VIEWPORT_GUTTER, top: VIEWPORT_GUTTER });
+  const autosave = usePreferenceAutosave("header-appearance");
+  const preferences = autosave.preferences;
+
+  useEffect(() => {
+    if (!preferences.data || autosave.hasPending) return;
+    applyUserPreferences(preferences.data);
+    setTheme(preferences.data.theme);
+    setDensity(preferences.data.density);
+  }, [autosave.hasPending, preferences.data]);
+
+  const syncPreference = (
+    patch: { theme: ThemePreference } | { density: DensityPreference },
+  ) => {
+    if (!preferences.data) return;
+    autosave.enqueue(patch);
+  };
 
   const close = (restoreFocus = false) => {
     setOpen(false);
@@ -130,6 +149,7 @@ export function AppearanceMenu(): JSX.Element {
                   onChange={(value) => {
                     setThemePreference(value);
                     setTheme(value);
+                    syncPreference({ theme: value });
                   }}
                 />
               </div>
@@ -139,10 +159,11 @@ export function AppearanceMenu(): JSX.Element {
                   value={density}
                   options={DENSITY_OPTIONS}
                   label="Плотность интерфейса"
-                  className="grid w-full grid-cols-3"
+                  className="grid w-full grid-cols-2"
                   onChange={(value) => {
                     setDensityPreference(value);
                     setDensity(value);
+                    syncPreference({ density: value });
                   }}
                 />
               </div>

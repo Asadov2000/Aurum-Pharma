@@ -6,7 +6,42 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import UUID4, BaseModel, ConfigDict, EmailStr, Field
+from pydantic import (
+    UUID4,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+_ALLOWED_WORKSPACE_ROUTES = {
+    "/",
+    "/admin",
+    "/admin/access",
+    "/admin/accounts",
+    "/admin/sync",
+    "/admin/billing",
+    "/admin/tenants",
+    "/onboarding",
+    "/branches",
+    "/registers",
+    "/users",
+    "/roles",
+    "/catalog",
+    "/batches",
+    "/suppliers",
+    "/incoming",
+    "/pos",
+    "/sales",
+    "/billing",
+    "/reports",
+    "/audit",
+    "/notifications",
+    "/security",
+    "/settings",
+}
 
 
 class LoginCodeRequest(BaseModel):
@@ -147,3 +182,65 @@ class MeResponse(BaseModel):
     # Global control-plane capabilities stay separate from tenant permissions.
     platform_capabilities: list[str] = []
     support_access: SupportAccessContextResponse | None = None
+
+
+class WorkspacePreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    desktop_mode: Literal["auto", "compact", "expanded"] = "auto"
+    hidden_routes: list[str] = Field(default_factory=list, max_length=64)
+    favorite_routes: list[str] = Field(default_factory=list, max_length=64)
+    route_order: list[str] = Field(default_factory=list, max_length=64)
+    start_route: str = "/"
+
+    @field_validator("hidden_routes", "favorite_routes", "route_order")
+    @classmethod
+    def _validate_routes(cls, routes: list[str]) -> list[str]:
+        if len(routes) != len(set(routes)):
+            raise ValueError("workspace routes must be unique")
+        if any(route not in _ALLOWED_WORKSPACE_ROUTES for route in routes):
+            raise ValueError("workspace contains an unknown route")
+        return routes
+
+    @field_validator("start_route")
+    @classmethod
+    def _validate_start_route(cls, route: str) -> str:
+        if route not in _ALLOWED_WORKSPACE_ROUTES:
+            raise ValueError("start_route is unknown")
+        return route
+
+    @model_validator(mode="after")
+    def _favorite_routes_must_be_visible(self) -> WorkspacePreferences:
+        if set(self.favorite_routes).intersection(self.hidden_routes):
+            raise ValueError("favorite routes cannot be hidden")
+        return self
+
+
+class UserPreferencesRead(BaseModel):
+    theme: Literal["system", "light", "dark"]
+    density: Literal["auto", "compact", "comfortable", "touch"]
+    contrast: Literal["standard", "high"]
+    reduce_motion: bool
+    accent: Literal["teal", "blue", "violet", "green", "amber", "rose"]
+    workspace: WorkspacePreferences
+    version: int = Field(ge=1)
+    updated_at: datetime
+
+
+class UserPreferencesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    theme: Literal["system", "light", "dark"] | None = None
+    density: Literal["auto", "compact", "comfortable", "touch"] | None = None
+    contrast: Literal["standard", "high"] | None = None
+    reduce_motion: bool | None = None
+    accent: Literal["teal", "blue", "violet", "green", "amber", "rose"] | None = None
+    workspace: WorkspacePreferences | None = None
+
+    @model_validator(mode="after")
+    def _require_change(self) -> UserPreferencesUpdate:
+        changed = self.model_dump(exclude={"expected_version"}, exclude_none=True)
+        if not changed:
+            raise ValueError("at least one preference must be provided")
+        return self

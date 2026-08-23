@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
 import { AppearanceMenu } from "@/components/AppearanceMenu";
@@ -17,6 +17,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { useMfaStepUpRequested } from "@/features/auth/stepUpCoordinator";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
+import { useUserPreferencesQuery } from "@/features/settings/queries";
 import { cn } from "@/lib/utils";
 
 import { BrandMark } from "./BrandMark";
@@ -29,14 +30,17 @@ import { ServerStatusBanner } from "./ServerStatusBanner";
 import { Sidebar } from "./Sidebar";
 import { buildNav, findActiveNavItem } from "./nav";
 import {
+  defaultSidebarPreferences,
   loadSidebarPreferences,
   orderSidebarItems,
   parseSidebarPreferences,
   saveSidebarPreferences,
+  SIDEBAR_PREFERENCES_CHANGED_EVENT,
   sidebarStorageKey,
   type SidebarPreferences,
   visibleSidebarItems,
 } from "./sidebarPreferences";
+import { type AppRoutePath } from "./routeAccess";
 
 const MfaStepUpDialog = lazy(async () => {
   const module = await import("@/features/auth/MfaStepUpDialog");
@@ -50,7 +54,9 @@ const SidebarSettingsModal = lazy(async () => {
 
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const preferencesQuery = useUserPreferencesQuery();
   const mfaStepUpRequested = useMfaStepUpRequested();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
@@ -87,6 +93,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const [sidebarPreferences, setSidebarPreferences] = useState<SidebarPreferences>(() =>
     loadSidebarPreferences(sidebarScope),
   );
+  const startRouteHandledScopeRef = useRef<string | null>(null);
   const [wideDesktop, setWideDesktop] = useState(
     () => window.matchMedia("(min-width: 80rem)").matches,
   );
@@ -130,6 +137,18 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         ? (user?.email ?? null)
         : null;
   const initial = name.charAt(0).toUpperCase();
+  const serverSidebarPreferences = useMemo(
+    () =>
+      preferencesQuery.data
+        ? parseSidebarPreferences({
+            desktopMode: preferencesQuery.data.workspace.desktop_mode,
+            hiddenRoutes: preferencesQuery.data.workspace.hidden_routes,
+            favoriteRoutes: preferencesQuery.data.workspace.favorite_routes,
+            routeOrder: preferencesQuery.data.workspace.route_order,
+          })
+        : null,
+    [preferencesQuery.data],
+  );
 
   const updateSidebarPreferences = useCallback(
     (next: SidebarPreferences) => {
@@ -151,6 +170,17 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   };
 
   useEffect(() => {
+    const openFromSettingsHub = () => {
+      setNavigationOpen(false);
+      setSidebarSettingsOpen(true);
+    };
+    window.addEventListener("aurum:open-sidebar-settings", openFromSettingsHub);
+    return () => {
+      window.removeEventListener("aurum:open-sidebar-settings", openFromSettingsHub);
+    };
+  }, []);
+
+  useEffect(() => {
     setSidebarPreferences(loadSidebarPreferences(sidebarScope));
 
     const key = sidebarStorageKey(sidebarScope);
@@ -166,9 +196,54 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         setSidebarPreferences(loadSidebarPreferences(sidebarScope));
       }
     };
+    const onSameTabChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ scope?: string }>).detail;
+      if (detail?.scope === sidebarScope) {
+        setSidebarPreferences(loadSidebarPreferences(sidebarScope));
+      }
+    };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener(SIDEBAR_PREFERENCES_CHANGED_EVENT, onSameTabChange);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(SIDEBAR_PREFERENCES_CHANGED_EVENT, onSameTabChange);
+    };
   }, [sidebarScope]);
+
+  useEffect(() => {
+    if (!serverSidebarPreferences) return;
+    const local = loadSidebarPreferences(sidebarScope);
+    const serverIsDefault = sameSidebarPreferences(
+      serverSidebarPreferences,
+      defaultSidebarPreferences(),
+    );
+    const localIsDefault = sameSidebarPreferences(local, defaultSidebarPreferences());
+    const alreadySynced = hasServerSidebarMarker(sidebarScope);
+
+    // Preserve one legacy local customization, then treat the account copy as
+    // authoritative on every subsequent device and session.
+    if (!alreadySynced && serverIsDefault && !localIsDefault) return;
+    markServerSidebarSynced(sidebarScope);
+    if (!sameSidebarPreferences(local, serverSidebarPreferences)) {
+      saveSidebarPreferences(sidebarScope, serverSidebarPreferences);
+    } else {
+      setSidebarPreferences(serverSidebarPreferences);
+    }
+  }, [serverSidebarPreferences, sidebarScope]);
+
+  useEffect(() => {
+    if (!preferencesQuery.data || startRouteHandledScopeRef.current === sidebarScope) return;
+    startRouteHandledScopeRef.current = sidebarScope;
+
+    const marker = startRouteSessionKey(sidebarScope);
+    if (hasSessionMarker(marker)) return;
+    setSessionMarker(marker);
+    if (pathname !== "/") return;
+
+    const requested = preferencesQuery.data.workspace.start_route;
+    const target = items.find((item) => item.to === requested)?.to as AppRoutePath | undefined;
+    if (target && target !== "/") void navigate({ to: target, replace: true });
+  }, [items, navigate, pathname, preferencesQuery.data, sidebarScope]);
 
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 64rem)");
@@ -436,6 +511,56 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       ) : null}
     </div>
   );
+}
+
+const SIDEBAR_SERVER_MARKER_PREFIX = "aurum:sidebar-server:v1";
+const START_ROUTE_SESSION_PREFIX = "aurum:start-route:v1";
+
+function sameSidebarPreferences(
+  left: SidebarPreferences,
+  right: SidebarPreferences,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sidebarServerMarkerKey(scope: string): string {
+  return `${SIDEBAR_SERVER_MARKER_PREFIX}:${encodeURIComponent(scope)}`;
+}
+
+function hasServerSidebarMarker(scope: string): boolean {
+  try {
+    return window.localStorage.getItem(sidebarServerMarkerKey(scope)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markServerSidebarSynced(scope: string): void {
+  try {
+    window.localStorage.setItem(sidebarServerMarkerKey(scope), "1");
+  } catch {
+    // The synchronized in-memory state still works when storage is blocked.
+  }
+}
+
+function startRouteSessionKey(scope: string): string {
+  return `${START_ROUTE_SESSION_PREFIX}:${encodeURIComponent(scope)}`;
+}
+
+function hasSessionMarker(key: string): boolean {
+  try {
+    return window.sessionStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setSessionMarker(key: string): void {
+  try {
+    window.sessionStorage.setItem(key, "1");
+  } catch {
+    // The component ref prevents repeated redirects for this mounted session.
+  }
 }
 
 function MfaStepUpLoading(): JSX.Element {

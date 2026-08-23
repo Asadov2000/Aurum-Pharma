@@ -9,6 +9,7 @@ import {
   deleteBranch,
   deleteRegister,
   getTenantSettings,
+  getTenantOperationalSettings,
   listBranches,
   listRegisters,
   listTenants,
@@ -37,6 +38,7 @@ export const foundationKeys = {
   tenants: ["foundation", "tenants"] as const,
   tenantMembers: (tenantId: string) => ["foundation", "tenant-members", tenantId] as const,
   settings: ["foundation", "settings"] as const,
+  operationalSettings: ["foundation", "operational-settings"] as const,
   branches: (includeInactive: boolean) => ["foundation", "branches", { includeInactive }] as const,
   branchSearch: (params: BranchSearchParams) => ["foundation", "branch-search", params] as const,
   registers: (branchId: string | null, includeInactive: boolean) =>
@@ -117,9 +119,22 @@ export function useUpdateTenantSettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: TenantSettingsUpdatePayload) => updateTenantSettings(payload),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: foundationKeys.settings });
+    onSuccess: (data) => {
+      qc.setQueryData(foundationKeys.settings, data);
+      void qc.invalidateQueries({ queryKey: foundationKeys.operationalSettings });
     },
+  });
+}
+
+export function useTenantOperationalSettingsQuery(
+  enabled = true,
+  refetchOnWindowFocus = false,
+) {
+  return useQuery({
+    queryKey: foundationKeys.operationalSettings,
+    queryFn: getTenantOperationalSettings,
+    enabled,
+    refetchOnWindowFocus,
   });
 }
 

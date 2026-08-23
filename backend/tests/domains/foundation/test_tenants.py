@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
+from tests.auth_helpers import create_support_access_token
 
 
 async def test_create_tenant_creates_default_settings(db_session: AsyncSession) -> None:
@@ -29,6 +30,7 @@ async def test_create_tenant_creates_default_settings(db_session: AsyncSession) 
     assert settings.pin_mode_enabled is False
     assert settings.pos_payment_methods == ["cash", "card", "qr"]
     assert settings.pos_mixed_payment_enabled is True
+    assert settings.version == 1
 
 
 async def test_tenant_settings_thresholds_invalid_returns_422(
@@ -39,7 +41,10 @@ async def test_tenant_settings_thresholds_invalid_returns_422(
     response = await auth_client.patch(
         "/api/v1/tenant/settings",
         headers={"Authorization": f"Bearer {token}"},
-        json={"expiry_thresholds": {"yellow": 2, "orange": 5, "red": 1}},
+        json={
+            "expected_version": 1,
+            "expiry_thresholds": {"yellow": 2, "orange": 5, "red": 1},
+        },
     )
     assert response.status_code == 422
 
@@ -52,11 +57,15 @@ async def test_tenant_settings_thresholds_valid(
     response = await auth_client.patch(
         "/api/v1/tenant/settings",
         headers={"Authorization": f"Bearer {token}"},
-        json={"expiry_thresholds": {"yellow": 9, "orange": 4, "red": 2}},
+        json={
+            "expected_version": 1,
+            "expiry_thresholds": {"yellow": 9, "orange": 4, "red": 2},
+        },
     )
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["expiry_thresholds"] == {"yellow": 9, "orange": 4, "red": 2}
+    assert body["version"] == 2
 
 
 @pytest.mark.parametrize("mode", ["warning", "off"])
@@ -70,7 +79,7 @@ async def test_tenant_settings_reject_unsafe_expired_sale_mode(
     response = await auth_client.patch(
         "/api/v1/tenant/settings",
         headers={"Authorization": f"Bearer {token}"},
-        json={"expired_sale_mode": mode},
+        json={"expected_version": 1, "expired_sale_mode": mode},
     )
 
     assert response.status_code == 422
@@ -104,7 +113,7 @@ async def test_tenant_settings_reject_invalid_report_timezone(
     response = await auth_client.patch(
         "/api/v1/tenant/settings",
         headers={"Authorization": f"Bearer {token}"},
-        json={"report_timezone": "not/a-timezone"},
+        json={"expected_version": 1, "report_timezone": "not/a-timezone"},
     )
 
     assert response.status_code == 422
@@ -129,7 +138,7 @@ async def test_tenant_settings_reject_invalid_pos_payment_methods(
     response = await auth_client.patch(
         "/api/v1/tenant/settings",
         headers={"Authorization": f"Bearer {token}"},
-        json={"pos_payment_methods": methods},
+        json={"expected_version": 1, "pos_payment_methods": methods},
     )
 
     assert response.status_code == 422
@@ -145,6 +154,7 @@ async def test_tenant_settings_update_pos_payment_configuration(
         "/api/v1/tenant/settings",
         headers={"Authorization": f"Bearer {token}"},
         json={
+            "expected_version": 1,
             "pos_payment_methods": ["cash", "qr"],
             "pos_mixed_payment_enabled": False,
         },
@@ -166,6 +176,7 @@ async def test_pos_payment_settings_are_tenant_isolated(
         "/api/v1/tenant/settings",
         headers={"Authorization": f"Bearer {first_token}"},
         json={
+            "expected_version": 1,
             "pos_payment_methods": ["qr"],
             "pos_mixed_payment_enabled": False,
         },
@@ -186,6 +197,99 @@ async def test_pos_payment_settings_are_tenant_isolated(
     assert first.json()["pos_mixed_payment_enabled"] is False
     assert second.json()["pos_payment_methods"] == ["cash", "card", "qr"]
     assert second.json()["pos_mixed_payment_enabled"] is True
+
+
+async def test_non_owner_cannot_read_or_update_pharmacy_settings(
+    auth_client: AsyncClient,
+    tenant_admin_token,
+) -> None:
+    token, _, _ = await tenant_admin_token(is_owner=False)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    read = await auth_client.get("/api/v1/tenant/settings", headers=headers)
+    updated = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers=headers,
+        json={"expected_version": 1, "refund_reason_mode": "required"},
+    )
+
+    assert read.status_code == 403
+    assert updated.status_code == 403
+
+
+async def test_platform_support_cannot_read_pharmacy_settings(
+    auth_client: AsyncClient,
+    support_token: str,
+) -> None:
+    response = await auth_client.get(
+        "/api/v1/tenant/settings",
+        headers={"Authorization": f"Bearer {support_token}"},
+    )
+
+    assert response.status_code == 403
+
+
+async def test_platform_developer_cannot_read_or_update_pharmacy_settings(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    developer = await make_user(is_developer=True)
+    token = await create_support_access_token(db_session, developer)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    read = await auth_client.get("/api/v1/tenant/settings", headers=headers)
+    updated = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers=headers,
+        json={"expected_version": 1, "refund_reason_mode": "required"},
+    )
+
+    assert read.status_code == 403
+    assert updated.status_code == 403
+
+
+async def test_operational_settings_expose_only_employee_runtime_fields(
+    auth_client: AsyncClient,
+    tenant_admin_token,
+) -> None:
+    token, _, _ = await tenant_admin_token(
+        is_owner=False,
+        permission_codes=("pos.sell",),
+    )
+
+    response = await auth_client.get(
+        "/api/v1/tenant/operational-settings",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["pos_payment_methods"] == ["cash", "card", "qr"]
+    assert "session_admin_minutes" not in response.json()
+    assert "prescription_warning_text" not in response.json()
+
+
+async def test_tenant_settings_reject_stale_version(
+    auth_client: AsyncClient,
+    tenant_admin_token,
+) -> None:
+    token, _, _ = await tenant_admin_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    first = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers=headers,
+        json={"expected_version": 1, "refund_reason_mode": "required"},
+    )
+    stale = await auth_client.patch(
+        "/api/v1/tenant/settings",
+        headers=headers,
+        json={"expected_version": 1, "refund_reason_mode": "off"},
+    )
+
+    assert first.status_code == 200, first.text
+    assert stale.status_code == 409
+    assert stale.json()["error"]["details"]["current_version"] == 2
 
 
 async def test_pos_payment_settings_database_check_rejects_duplicates(

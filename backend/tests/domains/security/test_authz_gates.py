@@ -727,7 +727,12 @@ async def test_tenant_reads_require_domain_permission(
 ) -> None:
     await _override_db(db_session)
     try:
-        owner_required = path in {"/api/v1/roles", "/api/v1/permissions"}
+        owner_required = path in {
+            "/api/v1/roles",
+            "/api/v1/permissions",
+            "/api/v1/onboarding/checklist",
+            "/api/v1/onboarding/overview",
+        }
         tenant, regular, admin = await _seed_tenant_subjects(
             db_session,
             admin_is_owner=owner_required,

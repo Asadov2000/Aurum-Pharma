@@ -145,6 +145,9 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   // Session inventory is account-scoped and deliberately independent of a
   // tenant role, so a cashier can protect their own account as well.
   if (isPath(pathname, "/security")) return true;
+  // Personal and device preferences belong to the authenticated account.
+  // Owner-only categories are filtered again inside the page and on the API.
+  if (isPath(pathname, "/settings")) return true;
   // Global audit is capability-scoped and does not require a selected tenant.
   // Scoped tenant audit still follows explicit permissions.
   if (isPath(pathname, "/audit")) {
@@ -156,8 +159,13 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
 
   if (!context.hasTenant) return false;
 
-  if (isPath(pathname, "/onboarding") || isPath(pathname, "/settings")) {
-    return hasPermission(context, "settings.update");
+  if (isPath(pathname, "/onboarding")) {
+    return (
+      context.isTenantOwner &&
+      !context.isDeveloper &&
+      !context.isAdministrator &&
+      !context.isSupportScoped
+    );
   }
   if (isPath(pathname, "/branches")) {
     return hasAnyPermission(context, BRANCH_VIEW_PERMISSIONS);

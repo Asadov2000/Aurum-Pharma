@@ -697,6 +697,18 @@ async def require_support(
     return user
 
 
+async def require_tenant_owner(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    """Require protected, active ownership rather than a delegable role grant."""
+
+    if user.tenant_id is None or not user.is_tenant_owner:
+        raise PermissionDeniedError("Active pharmacy ownership is required")
+    if user.is_developer or user.is_administrator or user.support_access_session_id is not None:
+        raise PermissionDeniedError("Platform support cannot act as a pharmacy owner")
+    return user
+
+
 async def require_recent_mfa_if_support(
     user: Annotated[CurrentUser, Depends(current_user)],
 ) -> CurrentUser:

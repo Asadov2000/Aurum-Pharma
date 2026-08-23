@@ -11,6 +11,7 @@ once the roles domain (migration 0004) is on disk.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from ipaddress import ip_address, ip_network
@@ -24,6 +25,7 @@ from redis.exceptions import RedisError
 from app.core.config import get_settings
 from app.core.errors import (
     AuthenticationError,
+    BusinessRuleError,
     ConflictError,
     NotFoundError,
     RateLimitError,
@@ -48,6 +50,7 @@ from app.core.security import (
     verify_password,
 )
 from app.core.time import utc_now
+from app.domains.auth.models import UserPreferences
 from app.domains.auth.repository import (
     ActiveSessionRecord,
     AuthRepository,
@@ -867,3 +870,48 @@ class AuthService:
         if user is None:
             raise NotFoundError("User not found")
         return user
+
+    # -------------------------------------------------------------------------
+    # 8. User-owned interface preferences
+    # -------------------------------------------------------------------------
+
+    async def get_user_preferences(self, user_id: UUID) -> UserPreferences:
+        return await self.repo.get_or_create_user_preferences(user_id)
+
+    async def update_user_preferences(
+        self,
+        *,
+        user_id: UUID,
+        workspace_scope: str,
+        expected_version: int,
+        fields: dict[str, object],
+        workspace: dict[str, object] | None,
+    ) -> UserPreferences:
+        current = await self.repo.get_or_create_user_preferences(user_id)
+        if current.version != expected_version:
+            raise ConflictError(
+                "Preferences changed in another session",
+                details={"current_version": current.version},
+            )
+
+        if workspace is not None:
+            workspaces = dict(current.workspace_preferences)
+            if workspace_scope not in workspaces and len(workspaces) >= 64:
+                raise BusinessRuleError("Too many saved workspace preferences")
+            workspaces[workspace_scope] = workspace
+            if len(json.dumps(workspaces, separators=(",", ":")).encode("utf-8")) > 65_536:
+                raise BusinessRuleError("Saved workspace preferences are too large")
+            fields = {**fields, "workspace_preferences": workspaces}
+
+        updated = await self.repo.update_user_preferences(
+            user_id=user_id,
+            expected_version=expected_version,
+            fields=fields,
+        )
+        if updated is None:
+            fresh = await self.repo.get_or_create_user_preferences(user_id)
+            raise ConflictError(
+                "Preferences changed in another session",
+                details={"current_version": fresh.version},
+            )
+        return updated

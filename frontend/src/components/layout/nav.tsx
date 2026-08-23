@@ -1,6 +1,10 @@
 import { HomeIcon, type NavItem } from "./Sidebar";
 import { canAccessPath, type AppRoutePath, type RouteAccessContext } from "./routeAccess";
 
+export interface AppNavItem extends NavItem {
+  to: AppRoutePath;
+}
+
 export function findActiveNavItem(
   items: readonly NavItem[],
   pathname: string,
@@ -23,7 +27,7 @@ export function buildNav(
   isDeveloper = false,
   isSupportScoped = false,
   platformCapabilities: readonly string[] = [],
-): NavItem[] {
+): AppNavItem[] {
   const context: RouteAccessContext = {
     isDeveloper,
     isAdministrator: isSupport && !isDeveloper,
@@ -33,7 +37,7 @@ export function buildNav(
     permissions,
     platformCapabilities,
   };
-  const candidates: Array<NavItem & { to: AppRoutePath }> = [
+  const candidates: AppNavItem[] = [
     { to: "/", label: "Главная", icon: <HomeIcon /> },
     { to: "/admin", label: "Центр управления" },
     { to: "/admin/billing", label: "Расчёты Aurum" },

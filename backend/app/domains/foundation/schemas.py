@@ -117,6 +117,7 @@ class TenantSettingsRead(BaseModel):
     draft_sale_lifetime_min: int
     report_timezone: str
     prescription_warning_text: str
+    version: int = Field(ge=1)
     updated_at: datetime
 
     @field_validator("pos_payment_methods")
@@ -131,6 +132,9 @@ class TenantSettingsRead(BaseModel):
 
 
 class TenantSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
     expiry_thresholds: ExpiryThresholds | None = None
     expired_sale_mode: Literal["strict"] | None = None
     refund_reason_mode: str | None = None
@@ -145,7 +149,14 @@ class TenantSettingsUpdate(BaseModel):
     pos_mixed_payment_enabled: bool | None = None
     draft_sale_lifetime_min: int | None = Field(default=None, ge=5, le=240)
     report_timezone: str | None = Field(default=None, min_length=1, max_length=64)
-    prescription_warning_text: str | None = None
+    prescription_warning_text: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _require_change(self) -> TenantSettingsUpdate:
+        changed = self.model_dump(exclude={"expected_version"}, exclude_none=True)
+        if not changed:
+            raise ValueError("at least one setting must be provided")
+        return self
 
     @field_validator("refund_reason_mode")
     @classmethod
@@ -173,6 +184,30 @@ class TenantSettingsUpdate(BaseModel):
         value: list[POSPaymentMethod] | None,
     ) -> list[POSPaymentMethod] | None:
         if value is not None and len(value) != len(set(value)):
+            raise ValueError("pos_payment_methods must contain unique values")
+        return value
+
+
+class TenantOperationalSettingsRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    tenant_id: UUID
+    expired_sale_mode: Literal["strict"]
+    refund_reason_mode: Literal["required", "required_with_text", "optional", "off"]
+    pos_payment_methods: list[POSPaymentMethod] = Field(min_length=1, max_length=3)
+    pos_mixed_payment_enabled: bool
+    draft_sale_lifetime_min: int
+    report_timezone: str
+    version: int = Field(ge=1)
+    updated_at: datetime
+
+    @field_validator("pos_payment_methods")
+    @classmethod
+    def _check_unique_pos_payment_methods(
+        cls,
+        value: list[POSPaymentMethod],
+    ) -> list[POSPaymentMethod]:
+        if len(value) != len(set(value)):
             raise ValueError("pos_payment_methods must contain unique values")
         return value
 

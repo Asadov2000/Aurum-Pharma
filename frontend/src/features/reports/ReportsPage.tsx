@@ -4,7 +4,10 @@ import { z } from "zod";
 
 import { Button, Input, Label, Modal, PageHeader, Select, SkeletonRows } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
-import { useBranchesQuery, useTenantSettingsQuery } from "@/features/foundation/queries";
+import {
+  useBranchesQuery,
+  useTenantOperationalSettingsQuery,
+} from "@/features/foundation/queries";
 import { getZReportXlsx } from "@/features/pos/api";
 import { downloadBlob } from "@/lib/download";
 import { cn } from "@/lib/utils";
@@ -37,7 +40,7 @@ const REPORT_VIEWS: Array<{ value: ReportView; label: string; description: strin
 export function ReportsPage(): JSX.Element {
   const [selectedShift, setSelectedShift] = useState<ShiftHistoryItem | null>(null);
   const [view, setView] = useState<ReportView>(readInitialReportView);
-  const settings = useTenantSettingsQuery();
+  const settings = useTenantOperationalSettingsQuery();
   const reportTimezone = settings.data?.report_timezone ?? DEFAULT_REPORT_TIME_ZONE;
 
   const changeView = (next: ReportView) => {

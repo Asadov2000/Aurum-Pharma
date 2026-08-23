@@ -51,7 +51,7 @@ describe("RouteAccessGuard", () => {
     expect(screen.getByText("Catalog content")).toBeInTheDocument();
   });
 
-  it("blocks a direct URL before the protected page mounts", () => {
+  it("allows account-scoped settings without a tenant permission", () => {
     state.pathname = "/settings";
 
     render(
@@ -60,7 +60,19 @@ describe("RouteAccessGuard", () => {
       </RouteAccessGuard>,
     );
 
-    expect(screen.queryByText("Settings content")).not.toBeInTheDocument();
+    expect(screen.getByText("Settings content")).toBeInTheDocument();
+  });
+
+  it("blocks an owner-only direct URL before the protected page mounts", () => {
+    state.pathname = "/onboarding";
+
+    render(
+      <RouteAccessGuard>
+        <div>Onboarding content</div>
+      </RouteAccessGuard>,
+    );
+
+    expect(screen.queryByText("Onboarding content")).not.toBeInTheDocument();
     expect(screen.getByText("Раздел недоступен")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Перейти" })).toHaveAttribute("href", "/pos");
   });

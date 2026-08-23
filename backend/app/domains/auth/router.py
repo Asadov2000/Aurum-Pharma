@@ -20,6 +20,7 @@ from app.core.deps import (
 )
 from app.core.errors import AuthenticationError
 from app.core.security import generate_device_id
+from app.domains.auth.models import UserPreferences
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
     ActiveSessionResponse,
@@ -40,6 +41,9 @@ from app.domains.auth.schemas import (
     SessionRevokeResponse,
     SupportAccessContextResponse,
     TokenResponse,
+    UserPreferencesRead,
+    UserPreferencesUpdate,
+    WorkspacePreferences,
 )
 from app.domains.auth.service import AuthService, MfaLoginChallenge
 
@@ -105,6 +109,30 @@ def _clear_refresh_cookie(response: Response) -> None:
 def _set_auth_no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
+
+
+def _workspace_scope(user: CurrentUser) -> str:
+    return str(user.tenant_id) if user.tenant_id is not None else "global"
+
+
+def _preferences_response(
+    preferences: UserPreferences,
+    user: CurrentUser,
+) -> UserPreferencesRead:
+    raw_workspace = preferences.workspace_preferences.get(_workspace_scope(user), {})
+    workspace = WorkspacePreferences.model_validate(raw_workspace)
+    return UserPreferencesRead.model_validate(
+        {
+            "theme": preferences.theme,
+            "density": preferences.density,
+            "contrast": preferences.contrast,
+            "reduce_motion": preferences.reduce_motion,
+            "accent": preferences.accent,
+            "workspace": workspace,
+            "version": preferences.version,
+            "updated_at": preferences.updated_at,
+        }
+    )
 
 
 def _refresh_token_from_request(request: Request) -> str:
@@ -446,3 +474,36 @@ async def me(
             expires_at=user.support_access_expires_at,
         )
     return me_data
+
+
+@router.get("/preferences", response_model=UserPreferencesRead)
+async def get_preferences(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_service)],
+) -> UserPreferencesRead:
+    _set_auth_no_store(response)
+    preferences = await service.get_user_preferences(user.user_id)
+    return _preferences_response(preferences, user)
+
+
+@router.patch("/preferences", response_model=UserPreferencesRead)
+async def update_preferences(
+    payload: UserPreferencesUpdate,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_service)],
+) -> UserPreferencesRead:
+    _set_auth_no_store(response)
+    raw = payload.model_dump(exclude_none=True)
+    expected_version = int(raw.pop("expected_version"))
+    workspace_value = raw.pop("workspace", None)
+    workspace = dict(workspace_value) if isinstance(workspace_value, dict) else None
+    preferences = await service.update_user_preferences(
+        user_id=user.user_id,
+        workspace_scope=_workspace_scope(user),
+        expected_version=expected_version,
+        fields=raw,
+        workspace=workspace,
+    )
+    return _preferences_response(preferences, user)

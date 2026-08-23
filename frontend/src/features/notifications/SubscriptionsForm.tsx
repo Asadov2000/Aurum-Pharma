@@ -135,15 +135,14 @@ export function SubscriptionsForm(): JSX.Element {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-4">
-                  {allChannels.map((ch) => {
-                    const available = channelAvailable[ch];
+                  {allChannels.filter((ch) => channelAvailable[ch]).map((ch) => {
                     return (
                       <Switch
                         key={ch}
-                        label={available ? channelLabel[ch] : `${channelLabel[ch]} (Этап 2)`}
+                        label={channelLabel[ch]}
                         checked={r.channels.has(ch)}
                         onChange={() => toggleChannel(key, ch)}
-                        disabled={mandatory || !available || !r.is_enabled}
+                        disabled={mandatory || !r.is_enabled}
                       />
                     );
                   })}

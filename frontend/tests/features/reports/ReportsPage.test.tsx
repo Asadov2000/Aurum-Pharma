@@ -10,7 +10,7 @@ const getStockOnDateXlsx = vi.fn();
 const getZReportXlsx = vi.fn();
 const listBranches = vi.fn();
 const listRegisters = vi.fn();
-const getTenantSettings = vi.fn();
+const getTenantOperationalSettings = vi.fn();
 
 vi.mock("@/features/reports/api", () => ({
   getZReport: (...args: unknown[]) => getZReport(...args),
@@ -27,7 +27,8 @@ vi.mock("@/features/pos/api", () => ({
 vi.mock("@/features/foundation/api", () => ({
   listBranches: (...args: unknown[]) => listBranches(...args),
   listRegisters: (...args: unknown[]) => listRegisters(...args),
-  getTenantSettings: (...args: unknown[]) => getTenantSettings(...args),
+  getTenantOperationalSettings: (...args: unknown[]) =>
+    getTenantOperationalSettings(...args),
 }));
 
 import { ReportsPage } from "@/features/reports/ReportsPage";
@@ -138,10 +139,10 @@ describe("ReportsPage", () => {
     getZReportXlsx.mockReset();
     listBranches.mockReset();
     listRegisters.mockReset();
-    getTenantSettings.mockReset();
+    getTenantOperationalSettings.mockReset();
     listBranches.mockResolvedValue([]);
     listRegisters.mockResolvedValue([]);
-    getTenantSettings.mockResolvedValue({ report_timezone: "Asia/Dushanbe" });
+    getTenantOperationalSettings.mockResolvedValue({ report_timezone: "Asia/Dushanbe" });
     listShiftHistory.mockResolvedValue(SHIFT_LIST);
     getSalesSummary.mockResolvedValue(SALES_SUMMARY);
   });

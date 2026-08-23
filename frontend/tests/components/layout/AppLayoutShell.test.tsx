@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const authMock = vi.hoisted(() => ({
@@ -13,6 +13,21 @@ const authMock = vi.hoisted(() => ({
     is_tenant_owner: false,
     permissions: ["catalog.view", "pos.sell"],
   },
+}));
+const layoutState = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  pathname: "/pos",
+  preferences: undefined as
+    | {
+        workspace: {
+          desktop_mode: "auto" | "compact" | "expanded";
+          hidden_routes: string[];
+          favorite_routes: string[];
+          route_order: string[];
+          start_route: string;
+        };
+      }
+    | undefined,
 }));
 
 vi.mock("@/features/auth/hooks", () => ({
@@ -29,16 +44,25 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useRouterState: <T,>({ select }: { select: (state: { location: { pathname: string } }) => T }) =>
-    select({ location: { pathname: "/pos" } }),
-  useNavigate: () => vi.fn(),
+    select({ location: { pathname: layoutState.pathname } }),
+  useNavigate: () => layoutState.navigate,
 }));
 
 vi.mock("@/components/layout/ServerStatusBanner", () => ({
   ServerStatusBanner: () => null,
 }));
 
+vi.mock("@/components/AppearanceMenu", () => ({
+  AppearanceMenu: () => null,
+}));
+
 vi.mock("@/features/supportAccess/SupportAccessBanner", () => ({
   SupportAccessBanner: () => null,
+}));
+
+vi.mock("@/features/settings/queries", () => ({
+  useUserPreferencesQuery: () => ({ data: layoutState.preferences }),
+  useUpdateUserPreferences: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -46,6 +70,10 @@ import { AppLayout } from "@/components/layout/AppLayout";
 describe("AppLayout shell", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
+    layoutState.navigate.mockReset();
+    layoutState.pathname = "/pos";
+    layoutState.preferences = undefined;
     setOnlineStatus(true);
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -134,6 +162,63 @@ describe("AppLayout shell", () => {
       JSON.parse(window.localStorage.getItem("aurum:sidebar:v1:user-1%3Atenant-1") ?? "{}")
         .hiddenRoutes,
     ).toEqual(["/catalog"]);
+  });
+
+  it("applies account menu preferences without opening the settings page", async () => {
+    layoutState.preferences = {
+      workspace: {
+        desktop_mode: "expanded",
+        hidden_routes: ["/catalog"],
+        favorite_routes: ["/pos"],
+        route_order: ["/pos", "/catalog"],
+        start_route: "/pos",
+      },
+    };
+
+    render(
+      <AppLayout>
+        <section>Page content</section>
+      </AppLayout>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "Каталог" })).not.toBeInTheDocument();
+      expect(
+        JSON.parse(window.localStorage.getItem("aurum:sidebar:v1:user-1%3Atenant-1") ?? "{}"),
+      ).toMatchObject({ desktopMode: "expanded", hiddenRoutes: ["/catalog"] });
+    });
+  });
+
+  it("opens the saved accessible start route only once per browser session", async () => {
+    layoutState.pathname = "/";
+    layoutState.preferences = {
+      workspace: {
+        desktop_mode: "auto",
+        hidden_routes: [],
+        favorite_routes: [],
+        route_order: [],
+        start_route: "/pos",
+      },
+    };
+
+    const view = render(
+      <AppLayout>
+        <section>Page content</section>
+      </AppLayout>,
+    );
+
+    await waitFor(() =>
+      expect(layoutState.navigate).toHaveBeenCalledWith({ to: "/pos", replace: true }),
+    );
+    layoutState.navigate.mockClear();
+    view.unmount();
+    render(
+      <AppLayout>
+        <section>Page content</section>
+      </AppLayout>,
+    );
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(layoutState.navigate).not.toHaveBeenCalled();
   });
 });
 

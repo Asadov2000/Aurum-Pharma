@@ -98,10 +98,12 @@ export interface TenantSettings {
   pos_payment_methods: PosPaymentMethod[];
   pos_mixed_payment_enabled: boolean;
   report_timezone: string;
+  version: number;
   updated_at: string;
 }
 
 export interface TenantSettingsUpdatePayload {
+  expected_version: number;
   expiry_thresholds?: ExpiryThresholds;
   expired_sale_mode?: ExpiredSaleMode;
   refund_reason_mode?: RefundReasonMode;
@@ -112,6 +114,19 @@ export interface TenantSettingsUpdatePayload {
   prescription_warning_text?: string;
   pos_payment_methods?: PosPaymentMethod[];
   pos_mixed_payment_enabled?: boolean;
+  report_timezone?: string;
+}
+
+export interface TenantOperationalSettings {
+  tenant_id: string;
+  expired_sale_mode: ExpiredSaleMode;
+  refund_reason_mode: RefundReasonMode;
+  pos_payment_methods: PosPaymentMethod[];
+  pos_mixed_payment_enabled: boolean;
+  draft_sale_lifetime_min: number;
+  report_timezone: string;
+  version: number;
+  updated_at: string;
 }
 
 export type BranchType = "pharmacy" | "pharmacy_post" | "kiosk";

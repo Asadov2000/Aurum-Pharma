@@ -52,7 +52,7 @@ function describeDevice(userAgent: string | null): string {
   return browser ? `${platform} · ${browser}` : platform;
 }
 
-export function SecurityPage(): JSX.Element {
+export function SecurityPage({ embedded = false }: { embedded?: boolean } = {}): JSX.Element {
   const sessionsQuery = useActiveSessionsQuery();
   const revokeSession = useRevokeActiveSession();
   const revokeOthers = useRevokeOtherSessions();
@@ -106,8 +106,8 @@ export function SecurityPage(): JSX.Element {
 
   if (sessionsQuery.isLoading) {
     return (
-      <div className="max-w-4xl space-y-5">
-        <PageHeader title="Безопасность" />
+      <div className={embedded ? "space-y-5" : "max-w-4xl space-y-5"}>
+        {!embedded ? <PageHeader title="Безопасность" /> : null}
         <Card>
           <CardContent>
             <SkeletonRows rows={3} />
@@ -119,8 +119,8 @@ export function SecurityPage(): JSX.Element {
 
   if (sessionsQuery.error) {
     return (
-      <div className="max-w-2xl space-y-3">
-        <PageHeader title="Безопасность" />
+      <div className={embedded ? "space-y-3" : "max-w-2xl space-y-3"}>
+        {!embedded ? <PageHeader title="Безопасность" /> : null}
         <p className="text-sm text-danger">
           {describeApiError(sessionsQuery.error, "Не удалось загрузить активные сеансы")}
         </p>
@@ -132,11 +132,13 @@ export function SecurityPage(): JSX.Element {
   }
 
   return (
-    <div className="max-w-4xl space-y-5" data-testid="security-page">
-      <PageHeader
-        title="Безопасность"
-        description="Активные сеансы аккаунта"
-        actions={
+    <div className={embedded ? "space-y-5" : "max-w-4xl space-y-5"} data-testid="security-page">
+      {embedded ? (
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="font-display text-xl font-semibold text-foreground">Безопасность</h2>
+            <p className="mt-1 text-sm text-foreground-muted">Активные сеансы аккаунта</p>
+          </div>
           <Button
             type="button"
             variant="secondary"
@@ -149,8 +151,27 @@ export function SecurityPage(): JSX.Element {
           >
             Завершить остальные
           </Button>
-        }
-      />
+        </div>
+      ) : (
+        <PageHeader
+          title="Безопасность"
+          description="Активные сеансы аккаунта"
+          actions={
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={otherSessions.length === 0}
+              onClick={() => {
+                setActionError(null);
+                setSuccessMessage(null);
+                setConfirmOthers(true);
+              }}
+            >
+              Завершить остальные
+            </Button>
+          }
+        />
+      )}
 
       {actionError && <p className="text-sm text-danger">{actionError}</p>}
       {successMessage && (

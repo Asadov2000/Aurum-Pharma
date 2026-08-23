@@ -17,6 +17,7 @@ import {
   type TenantCreatePayload,
   type TenantMemberCreatePayload,
   type TenantMembership,
+  type TenantOperationalSettings,
   type TenantSettings,
   type TenantSettingsUpdatePayload,
   type TenantUpdatePayload,
@@ -87,6 +88,14 @@ export async function updateTenantSettings(
 ): Promise<TenantSettings> {
   const { data } = await api.patch<TenantSettingsResponse>("/tenant/settings", payload);
   return normalizeTenantSettings(data);
+}
+
+export async function getTenantOperationalSettings(): Promise<TenantOperationalSettings> {
+  const { data } = await api.get<TenantOperationalSettings>("/tenant/operational-settings");
+  return {
+    ...data,
+    pos_payment_methods: normalizePosPaymentMethods(data.pos_payment_methods),
+  };
 }
 
 // ---- Branches --------------------------------------------------------------
