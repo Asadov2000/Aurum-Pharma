@@ -57,10 +57,17 @@ async def test_tenant_catalog_and_barcode_isolated(
             tenant_ids = [str(row[0]) for row in t_rows.fetchall()]
             c_rows = await conn.execute(
                 text(
-                    "INSERT INTO tenant_catalog (tenant_id, brand_name) VALUES "
-                    "(:a, 'A-Drug'), (:b, 'B-Drug') RETURNING id"
+                    "INSERT INTO tenant_catalog ("
+                    "tenant_id, brand_name, image_version, image_width, image_height, "
+                    "image_size_bytes, image_thumbnail_size_bytes, image_sha256, "
+                    "image_uploaded_at, image_uploaded_by"
+                    ") VALUES "
+                    "(:a, 'A-Drug', gen_random_uuid(), 100, 80, 1000, 200, :sha_a, now(), "
+                    "gen_random_uuid()), "
+                    "(:b, 'B-Drug', gen_random_uuid(), 100, 80, 1000, 200, :sha_b, now(), "
+                    "gen_random_uuid()) RETURNING id"
                 ),
-                {"a": tenant_ids[0], "b": tenant_ids[1]},
+                {"a": tenant_ids[0], "b": tenant_ids[1], "sha_a": "a" * 64, "sha_b": "b" * 64},
             )
             catalog_ids = [str(row[0]) for row in c_rows.fetchall()]
             await conn.execute(
@@ -81,11 +88,20 @@ async def test_tenant_catalog_and_barcode_isolated(
             await _set_tenant(app_conn, tenant_ids[0])
             rows = (
                 await app_conn.execute(
-                    text("SELECT brand_name FROM tenant_catalog " "WHERE tenant_id = ANY(:ids)"),
+                    text(
+                        "SELECT brand_name, image_sha256 FROM tenant_catalog "
+                        "WHERE tenant_id = ANY(:ids)"
+                    ),
                     {"ids": tenant_ids},
                 )
             ).fetchall()
             assert sorted(r[0] for r in rows) == ["A-Drug"]
+            assert rows[0][1] == "a" * 64
+            hidden_update = await app_conn.execute(
+                text("UPDATE tenant_catalog SET image_sha256 = :sha WHERE tenant_id = :tenant_id"),
+                {"sha": "c" * 64, "tenant_id": tenant_ids[1]},
+            )
+            assert hidden_update.rowcount == 0
 
             bc_rows = (
                 await app_conn.execute(

@@ -22,6 +22,8 @@ export async function listCatalog(params: CatalogSearchParams): Promise<CatalogL
       dispensing_type: params.dispensing_type || undefined,
       storage_type: params.storage_type || undefined,
       lifecycle: params.lifecycle || undefined,
+      image_state: params.image_state || undefined,
+      barcode_state: params.barcode_state || undefined,
       page: params.page ?? 1,
       page_size: params.page_size ?? 50,
       branch_id: params.branch_id || undefined,

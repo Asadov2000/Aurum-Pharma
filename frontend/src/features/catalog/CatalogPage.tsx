@@ -13,30 +13,55 @@ import {
   Pagination,
   Select,
   SkeletonRows,
-  Table,
   TableEmpty,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
+import { cn } from "@/lib/utils";
 
 import { BarcodesPanel } from "./BarcodesPanel";
+import { CatalogImage } from "./CatalogImage";
+import { CatalogImageManager } from "./CatalogImageManager";
 import { CatalogItemDetails } from "./CatalogItemDetails";
 import { CatalogItemForm } from "./CatalogItemForm";
 import { ImportWizard } from "./ImportWizard";
 import { dispensingLabel, dispensingOptions, storageLabel, storageOptions } from "./labels";
-import { useCatalogQuery, useDeleteCatalogItem, useRestoreCatalogItem } from "./queries";
+import {
+  useCatalogItemQuery,
+  useCatalogQuery,
+  useDeleteCatalogItem,
+  useRestoreCatalogItem,
+} from "./queries";
+import { useCatalogSummaryQuery } from "./summaryQueries";
 import { type CatalogItem, type DispensingType, type StorageType } from "./types";
 
-type LifecycleFilter = "active" | "inactive" | "archived" | "all";
+type LifecycleFilter = "active" | "inactive" | "archived" | "current" | "all";
+type ImageFilter = "any" | "with_image" | "without_image";
+type BarcodeFilter = "any" | "with_barcode" | "without_barcode";
+type ViewMode = "list" | "grid";
+type Preset = "all" | "active" | "without_image" | "without_barcode" | "inactive" | "archived";
 
 const pageSizeOptions = [25, 50, 100] as const;
+const wideCatalogQuery = "(min-width: 1536px)";
+
+function useWideCatalogLayout(): boolean {
+  const [isWide, setIsWide] = useState(
+    () => typeof window !== "undefined" && window.matchMedia?.(wideCatalogQuery).matches === true,
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mediaQuery = window.matchMedia(wideCatalogQuery);
+    const update = (event: MediaQueryListEvent): void => setIsWide(event.matches);
+    setIsWide(mediaQuery.matches);
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
+
+  return isWide;
+}
 
 function itemStatus(item: CatalogItem): {
   label: string;
@@ -48,7 +73,63 @@ function itemStatus(item: CatalogItem): {
 }
 
 function formattedPrice(item: CatalogItem): string {
-  return item.base_price ? `${Number(item.base_price).toFixed(2)} ${item.currency}` : "—";
+  return item.base_price
+    ? `${Number(item.base_price).toFixed(2)} ${item.currency}`
+    : "Цена не задана";
+}
+
+function SummaryMetric({
+  label,
+  value,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number | undefined;
+  active?: boolean;
+  onClick?: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "min-w-0 border-l-2 px-4 py-3 text-left transition-colors duration-fast hover:bg-foreground/[0.025]",
+        active ? "border-primary bg-primary/5" : "border-transparent",
+      )}
+      onClick={onClick}
+    >
+      <span className="block text-xs font-medium text-foreground-muted">{label}</span>
+      <span className="mt-1 block text-xl font-semibold tabular-nums text-foreground">
+        {value ?? "—"}
+      </span>
+    </button>
+  );
+}
+
+function CatalogDetailContent({
+  item,
+  canUpdate,
+  onEdit,
+}: {
+  item: CatalogItem;
+  canUpdate: boolean;
+  onEdit: (item: CatalogItem) => void;
+}): JSX.Element {
+  const detail = useCatalogItemQuery(item.id);
+  const current = detail.data ?? item;
+
+  return (
+    <div className="space-y-4">
+      <CatalogImageManager item={current} canManage={canUpdate} />
+      <CatalogItemDetails item={current} />
+      <BarcodesPanel itemId={current.id} canManage={canUpdate && !current.deleted_at} />
+      {canUpdate && !current.deleted_at && (
+        <div className="flex justify-end border-t border-border pt-4">
+          <Button onClick={() => onEdit(current)}>Изменить позицию</Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function CatalogPage(): JSX.Element {
@@ -58,6 +139,7 @@ export function CatalogPage(): JSX.Element {
   const canUpdate = hasPermission(user, "catalog.update");
   const canDelete = hasPermission(user, "catalog.delete");
   const canImport = canCreate && canUpdate;
+  const isWideCatalogLayout = useWideCatalogLayout();
 
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
@@ -67,9 +149,16 @@ export function CatalogPage(): JSX.Element {
   const [category, setCategory] = useState("");
   const [dispensing, setDispensing] = useState<DispensingType | "">("");
   const [storage, setStorage] = useState<StorageType | "">("");
-  const [lifecycle, setLifecycle] = useState<LifecycleFilter>("active");
+  const [lifecycle, setLifecycle] = useState<LifecycleFilter>("current");
+  const [imageState, setImageState] = useState<ImageFilter>("any");
+  const [barcodeState, setBarcodeState] = useState<BarcodeFilter>("any");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof pageSizeOptions)[number]>(25);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === "undefined") return "list";
+    return window.localStorage.getItem("aurum:catalog:view") === "grid" ? "grid" : "list";
+  });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<CatalogItem | null>(null);
   const [editing, setEditing] = useState<CatalogItem | null>(null);
@@ -95,23 +184,54 @@ export function CatalogPage(): JSX.Element {
       dispensing_type: dispensing || undefined,
       storage_type: storage || undefined,
       lifecycle,
+      image_state: imageState,
+      barcode_state: barcodeState,
       page,
       page_size: pageSize,
     }),
-    [category, dispensing, lifecycle, manufacturer, page, pageSize, q, storage],
+    [
+      barcodeState,
+      category,
+      dispensing,
+      imageState,
+      lifecycle,
+      manufacturer,
+      page,
+      pageSize,
+      q,
+      storage,
+    ],
   );
   const query = useCatalogQuery(params);
+  const summary = useCatalogSummaryQuery();
   const deleteMutation = useDeleteCatalogItem();
   const restoreMutation = useRestoreCatalogItem();
-  const rows = query.data?.items ?? [];
+  const rows = useMemo(() => query.data?.items ?? [], [query.data?.items]);
   const total = query.data?.total ?? 0;
+  const selectedItem = rows.find((item) => item.id === selectedId) ?? rows[0] ?? null;
+  const activePreset: Preset | null =
+    lifecycle === "current" && imageState === "any" && barcodeState === "any"
+      ? "all"
+      : lifecycle === "current" && imageState === "without_image" && barcodeState === "any"
+        ? "without_image"
+        : lifecycle === "current" && imageState === "any" && barcodeState === "without_barcode"
+          ? "without_barcode"
+          : lifecycle === "active" && imageState === "any" && barcodeState === "any"
+            ? "active"
+            : lifecycle === "inactive" && imageState === "any" && barcodeState === "any"
+              ? "inactive"
+              : lifecycle === "archived" && imageState === "any" && barcodeState === "any"
+                ? "archived"
+                : null;
   const hasFilters = Boolean(
     qInput.trim() ||
     manufacturerInput.trim() ||
     categoryInput.trim() ||
     dispensing ||
     storage ||
-    lifecycle !== "active",
+    lifecycle !== "current" ||
+    imageState !== "any" ||
+    barcodeState !== "any",
   );
 
   useEffect(() => {
@@ -119,6 +239,14 @@ export function CatalogPage(): JSX.Element {
     const lastPage = Math.max(1, Math.ceil(query.data.total / pageSize));
     if (page > lastPage) setPage(lastPage);
   }, [page, pageSize, query.data]);
+
+  useEffect(() => {
+    if (rows.length === 0) {
+      setSelectedId(null);
+      return;
+    }
+    if (!rows.some((item) => item.id === selectedId)) setSelectedId(rows[0]?.id ?? null);
+  }, [rows, selectedId]);
 
   const resetFilters = () => {
     setQInput("");
@@ -129,8 +257,34 @@ export function CatalogPage(): JSX.Element {
     setCategory("");
     setDispensing("");
     setStorage("");
-    setLifecycle("active");
+    setLifecycle("current");
+    setImageState("any");
+    setBarcodeState("any");
     setPage(1);
+  };
+
+  const applyPreset = (preset: Preset) => {
+    setImageState(preset === "without_image" ? "without_image" : "any");
+    setBarcodeState(preset === "without_barcode" ? "without_barcode" : "any");
+    setLifecycle(
+      preset === "active"
+        ? "active"
+        : preset === "inactive"
+          ? "inactive"
+          : preset === "archived"
+            ? "archived"
+            : "current",
+    );
+    setPage(1);
+  };
+
+  const changeViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    try {
+      window.localStorage.setItem("aurum:catalog:view", mode);
+    } catch {
+      // View preference is optional; the catalog remains usable without storage.
+    }
   };
 
   const doArchive = async () => {
@@ -178,15 +332,9 @@ export function CatalogPage(): JSX.Element {
     <div className="space-y-4">
       <PageHeader
         title="Каталог"
-        description="Лекарства, цены, условия отпуска и штрихкоды аптеки."
-        meta={
-          query.data ? (
-            <span aria-live="polite">
-              {query.data.total} найдено
-              {query.isFetching && !query.isLoading ? " · обновление" : ""}
-            </span>
-          ) : undefined
-        }
+        showTitleOnDesktop
+        description="Единый справочник лекарств, цен, условий отпуска и штрихкодов."
+        meta={query.isFetching && !query.isLoading ? "Обновление…" : undefined}
         actions={
           canCreate || canImport ? (
             <>
@@ -200,6 +348,99 @@ export function CatalogPage(): JSX.Element {
           ) : undefined
         }
       />
+
+      <section
+        className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-4"
+        aria-label="Сводка каталога"
+      >
+        <SummaryMetric
+          label="Всего позиций"
+          value={summary.data?.total}
+          active={activePreset === "all"}
+          onClick={() => applyPreset("all")}
+        />
+        <SummaryMetric
+          label="В работе"
+          value={summary.data?.active}
+          active={activePreset === "active"}
+          onClick={() => applyPreset("active")}
+        />
+        <SummaryMetric
+          label="Без штрихкода"
+          value={summary.data?.without_barcode}
+          active={activePreset === "without_barcode"}
+          onClick={() => applyPreset("without_barcode")}
+        />
+        <SummaryMetric
+          label="Без фото"
+          value={summary.data?.without_image}
+          active={activePreset === "without_image"}
+          onClick={() => applyPreset("without_image")}
+        />
+      </section>
+
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border">
+        <nav
+          className="flex min-w-0 max-w-full gap-1 overflow-x-auto"
+          aria-label="Представления каталога"
+        >
+          {(
+            [
+              ["all", "Все позиции", summary.data?.total],
+              ["without_image", "Без фото", summary.data?.without_image],
+              ["without_barcode", "Без штрихкода", summary.data?.without_barcode],
+              ["inactive", "Отключённые", summary.data?.inactive],
+              ["archived", "Архив", summary.data?.archived],
+            ] as const
+          ).map(([id, label, count]) => (
+            <button
+              key={id}
+              type="button"
+              className={cn(
+                "min-h-10 shrink-0 border-b-2 px-3 text-sm font-medium transition-colors duration-fast",
+                activePreset === id
+                  ? "border-primary text-primary"
+                  : "border-transparent text-foreground-secondary hover:text-foreground",
+              )}
+              onClick={() => applyPreset(id)}
+            >
+              {label}
+              {count !== undefined && (
+                <span className="ml-1.5 text-xs tabular-nums text-foreground-muted">{count}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+        <div
+          className="mb-2 flex rounded-md border border-border bg-surface p-0.5"
+          aria-label="Вид каталога"
+        >
+          <button
+            type="button"
+            className={cn(
+              "grid h-8 w-9 place-items-center rounded text-base",
+              viewMode === "list" ? "bg-primary text-primary-foreground" : "text-foreground-muted",
+            )}
+            aria-label="Список"
+            title="Список"
+            onClick={() => changeViewMode("list")}
+          >
+            ☰
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "grid h-8 w-9 place-items-center rounded text-base",
+              viewMode === "grid" ? "bg-primary text-primary-foreground" : "text-foreground-muted",
+            )}
+            aria-label="Плитка"
+            title="Плитка"
+            onClick={() => changeViewMode("grid")}
+          >
+            ▦
+          </button>
+        </div>
+      </div>
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -240,18 +481,19 @@ export function CatalogPage(): JSX.Element {
                     setLifecycle(event.target.value as LifecycleFilter);
                     setPage(1);
                   }}
-                  className="w-full sm:w-44"
+                  className="w-full sm:w-48"
                 >
+                  <option value="current">Все рабочие</option>
                   <option value="active">В работе</option>
                   <option value="inactive">Отключённые</option>
                   <option value="archived">Архив</option>
-                  <option value="all">Все статусы</option>
+                  <option value="all">Все, включая архив</option>
                 </Select>
               </div>
             ),
-            active: lifecycle !== "active",
+            active: lifecycle !== "current",
             onClear: () => {
-              setLifecycle("active");
+              setLifecycle("current");
               setPage(1);
             },
             defaultVisible: true,
@@ -286,6 +528,60 @@ export function CatalogPage(): JSX.Element {
               setPage(1);
             },
             defaultVisible: true,
+          },
+          {
+            id: "image",
+            label: "Фотография",
+            content: (
+              <div>
+                <Label htmlFor="catalog_image">Фотография</Label>
+                <Select
+                  id="catalog_image"
+                  value={imageState}
+                  onChange={(event) => {
+                    setImageState(event.target.value as ImageFilter);
+                    setPage(1);
+                  }}
+                  className="w-full sm:w-44"
+                >
+                  <option value="any">Любая</option>
+                  <option value="with_image">С фото</option>
+                  <option value="without_image">Без фото</option>
+                </Select>
+              </div>
+            ),
+            active: imageState !== "any",
+            onClear: () => {
+              setImageState("any");
+              setPage(1);
+            },
+          },
+          {
+            id: "barcode",
+            label: "Штрихкод",
+            content: (
+              <div>
+                <Label htmlFor="catalog_barcode">Штрихкод</Label>
+                <Select
+                  id="catalog_barcode"
+                  value={barcodeState}
+                  onChange={(event) => {
+                    setBarcodeState(event.target.value as BarcodeFilter);
+                    setPage(1);
+                  }}
+                  className="w-full sm:w-48"
+                >
+                  <option value="any">Любой</option>
+                  <option value="with_barcode">Есть</option>
+                  <option value="without_barcode">Не указан</option>
+                </Select>
+              </div>
+            ),
+            active: barcodeState !== "any",
+            onClear: () => {
+              setBarcodeState("any");
+              setPage(1);
+            },
           },
           {
             id: "manufacturer",
@@ -387,40 +683,33 @@ export function CatalogPage(): JSX.Element {
           {describeApiError(query.error, "Проверьте соединение и повторите попытку")}
         </TableEmpty>
       ) : query.isLoading ? (
-        <SkeletonRows rows={6} />
+        <SkeletonRows rows={7} />
       ) : rows.length === 0 ? (
-        hasFilters ? (
-          <TableEmpty
-            title="Ничего не найдено"
-            action={
+        <TableEmpty
+          title={hasFilters ? "Ничего не найдено" : "Каталог пуст"}
+          action={
+            hasFilters ? (
               <Button variant="secondary" onClick={resetFilters}>
                 Сбросить фильтры
               </Button>
-            }
-          >
-            Измените запрос или верните стандартные фильтры.
-          </TableEmpty>
-        ) : (
-          <TableEmpty
-            title="Каталог пуст"
-            action={
-              canCreate || canImport ? (
-                <div className="flex flex-wrap justify-center gap-2">
-                  {canImport && (
-                    <Button variant="secondary" onClick={() => setImporting(true)}>
-                      Импорт из файла
-                    </Button>
-                  )}
-                  {canCreate && <Button onClick={() => setCreating(true)}>+ Новая позиция</Button>}
-                </div>
-              ) : undefined
-            }
-          >
-            {canCreate || canImport
+            ) : canCreate || canImport ? (
+              <div className="flex flex-wrap justify-center gap-2">
+                {canImport && (
+                  <Button variant="secondary" onClick={() => setImporting(true)}>
+                    Импорт из файла
+                  </Button>
+                )}
+                {canCreate && <Button onClick={() => setCreating(true)}>+ Новая позиция</Button>}
+              </div>
+            ) : undefined
+          }
+        >
+          {hasFilters
+            ? "Измените запрос или верните стандартные фильтры."
+            : canCreate || canImport
               ? "Добавьте первую позицию вручную или импортируйте прайс из файла."
               : "В аптеке пока нет доступных позиций."}
-          </TableEmpty>
-        )
+        </TableEmpty>
       ) : (
         <>
           {query.error && (
@@ -433,93 +722,137 @@ export function CatalogPage(): JSX.Element {
               </Button>
             </div>
           )}
-
-          <div className="hidden md:block">
-            <Table className="min-w-[860px] table-fixed">
-              <THead>
-                <TR>
-                  <TH className="w-[24%]">Позиция</TH>
-                  <TH className="w-[18%]">Производитель</TH>
-                  <TH className="w-[22%]">Форма выпуска</TH>
-                  <TH className="w-[14%]">Отпуск</TH>
-                  <TH className="w-[11%]">Цена</TH>
-                  <TH className="w-[9%]">Статус</TH>
-                  <TH className="w-12 text-right">
+          <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="min-w-0" aria-label="Позиции каталога">
+              {viewMode === "list" ? (
+                <div className="overflow-hidden rounded-lg border border-border bg-surface">
+                  <div className="hidden grid-cols-[minmax(260px,1.4fr)_minmax(150px,.8fr)_130px_100px_120px_40px] gap-3 border-b border-border bg-background px-3 py-2 text-xs font-semibold text-foreground-muted md:grid">
+                    <span>Позиция</span>
+                    <span>Производитель</span>
+                    <span>Отпуск</span>
+                    <span>Статус</span>
+                    <span>Цена</span>
                     <span className="sr-only">Действия</span>
-                  </TH>
-                </TR>
-              </THead>
-              <TBody>
-                {rows.map((item) => {
-                  const status = itemStatus(item);
-                  return (
-                    <TR key={item.id}>
-                      <TD>
-                        <p className="break-words font-medium">{item.brand_name}</p>
-                        <p className="mt-0.5 break-words text-xs text-foreground-muted">
-                          {item.inn || "МНН не указано"}
-                        </p>
-                      </TD>
-                      <TD className="break-words">{item.manufacturer ?? "—"}</TD>
-                      <TD className="break-words">
-                        {[item.form, item.dosage].filter(Boolean).join(" · ") || "—"}
-                        {item.pack_size && (
-                          <span className="mt-0.5 block text-xs text-foreground-muted">
-                            {item.pack_size}
-                          </span>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {rows.map((item) => {
+                      const status = itemStatus(item);
+                      const selected = item.id === selectedItem?.id;
+                      return (
+                        <article
+                          key={item.id}
+                          className={cn(
+                            "relative flex min-w-0 items-stretch transition-colors duration-fast",
+                            selected ? "bg-primary/5" : "hover:bg-foreground/[0.02]",
+                          )}
+                        >
+                          {selected && (
+                            <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" />
+                          )}
+                          <button
+                            type="button"
+                            className="grid min-w-0 flex-1 grid-cols-[64px_minmax(0,1fr)] items-center gap-3 px-3 py-3 text-left md:grid-cols-[64px_minmax(180px,1.4fr)_minmax(150px,.8fr)_130px_100px_120px]"
+                            onClick={() => setSelectedId(item.id)}
+                            onDoubleClick={() => setViewing(item)}
+                          >
+                            <CatalogImage item={item} />
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold text-foreground">
+                                {item.brand_name}
+                              </span>
+                              <span className="mt-0.5 block truncate text-xs text-foreground-muted">
+                                {item.inn ||
+                                  [item.form, item.dosage].filter(Boolean).join(" · ") ||
+                                  "Сведения не указаны"}
+                              </span>
+                              <span className="mt-1 flex flex-wrap gap-1 md:hidden">
+                                <Badge tone={status.tone}>{status.label}</Badge>
+                                <span className="text-xs font-semibold text-foreground">
+                                  {formattedPrice(item)}
+                                </span>
+                              </span>
+                            </span>
+                            <span className="hidden truncate text-sm text-foreground-secondary md:block">
+                              {item.manufacturer || "—"}
+                            </span>
+                            <span className="hidden text-sm text-foreground-secondary md:block">
+                              {dispensingLabel[item.dispensing_type]}
+                            </span>
+                            <span className="hidden md:block">
+                              <Badge tone={status.tone}>{status.label}</Badge>
+                            </span>
+                            <span className="hidden whitespace-nowrap text-sm font-semibold text-foreground md:block">
+                              {formattedPrice(item)}
+                            </span>
+                          </button>
+                          <div className="grid w-11 shrink-0 place-items-center pr-1">
+                            <ActionMenu
+                              label={`Действия для ${item.brand_name}`}
+                              items={rowActions(item)}
+                            />
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-2">
+                  {rows.map((item) => {
+                    const status = itemStatus(item);
+                    const selected = item.id === selectedItem?.id;
+                    return (
+                      <article
+                        key={item.id}
+                        className={cn(
+                          "relative overflow-hidden rounded-lg border bg-surface",
+                          selected ? "border-primary ring-1 ring-primary/20" : "border-border",
                         )}
-                      </TD>
-                      <TD className="break-words">{dispensingLabel[item.dispensing_type]}</TD>
-                      <TD className="whitespace-nowrap">{formattedPrice(item)}</TD>
-                      <TD className="whitespace-nowrap">
-                        <Badge tone={status.tone}>{status.label}</Badge>
-                      </TD>
-                      <TD className="w-12 text-right">
-                        <ActionMenu
-                          label={`Действия для ${item.brand_name}`}
-                          items={rowActions(item)}
-                        />
-                      </TD>
-                    </TR>
-                  );
-                })}
-              </TBody>
-            </Table>
+                      >
+                        <button
+                          type="button"
+                          className="block w-full p-3 text-left"
+                          onClick={() => setSelectedId(item.id)}
+                          onDoubleClick={() => setViewing(item)}
+                        >
+                          <CatalogImage item={item} variant="detail" className="h-32" />
+                          <span className="mt-3 block truncate text-sm font-semibold text-foreground">
+                            {item.brand_name}
+                          </span>
+                          <span className="mt-1 block truncate text-xs text-foreground-muted">
+                            {item.manufacturer || item.inn || "Сведения не указаны"}
+                          </span>
+                          <span className="mt-3 flex items-center justify-between gap-2">
+                            <Badge tone={status.tone}>{status.label}</Badge>
+                            <span className="text-sm font-semibold text-foreground">
+                              {formattedPrice(item)}
+                            </span>
+                          </span>
+                        </button>
+                        <div className="absolute right-2 top-2 rounded-md bg-surface/90">
+                          <ActionMenu
+                            label={`Действия для ${item.brand_name}`}
+                            items={rowActions(item)}
+                          />
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+            {selectedItem && isWideCatalogLayout && (
+              <aside className="hidden 2xl:block" aria-label="Карточка выбранной позиции">
+                <div className="sticky top-4 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-sm">
+                  <CatalogDetailContent
+                    item={selectedItem}
+                    canUpdate={canUpdate}
+                    onEdit={setEditing}
+                  />
+                </div>
+              </aside>
+            )}
           </div>
-
-          <div className="grid grid-cols-1 gap-2 md:hidden">
-            {rows.map((item) => {
-              const status = itemStatus(item);
-              return (
-                <article key={item.id} className="rounded-lg border border-border bg-surface p-3">
-                  <div className="flex min-w-0 items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="break-words text-sm font-semibold text-foreground">
-                        {item.brand_name}
-                      </h2>
-                      <p className="mt-0.5 break-words text-xs text-foreground-muted">
-                        {item.inn || item.manufacturer || "Дополнительные сведения не указаны"}
-                      </p>
-                    </div>
-                    <ActionMenu
-                      label={`Действия для ${item.brand_name}`}
-                      items={rowActions(item)}
-                    />
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
-                    <Badge tone={status.tone}>{status.label}</Badge>
-                    <span className="text-foreground-secondary">
-                      {[item.form, item.dosage].filter(Boolean).join(" · ") || "Форма не указана"}
-                    </span>
-                    <span className="ml-auto font-semibold text-foreground">
-                      {formattedPrice(item)}
-                    </span>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="flex items-center gap-2 text-sm">
               <Label htmlFor="catalog_page_size" className="mb-0 whitespace-nowrap">
@@ -556,7 +889,6 @@ export function CatalogPage(): JSX.Element {
       >
         <CatalogItemForm item={null} onClose={() => setCreating(false)} />
       </Modal>
-
       <Modal
         open={viewing !== null}
         onClose={() => setViewing(null)}
@@ -564,28 +896,16 @@ export function CatalogPage(): JSX.Element {
         className="max-w-2xl"
       >
         {viewing && (
-          <div className="space-y-4">
-            <CatalogItemDetails item={viewing} />
-            <BarcodesPanel itemId={viewing.id} canManage={false} />
-            <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
-              <Button variant="secondary" onClick={() => setViewing(null)}>
-                Закрыть
-              </Button>
-              {canUpdate && !viewing.deleted_at && (
-                <Button
-                  onClick={() => {
-                    setViewing(null);
-                    setEditing(viewing);
-                  }}
-                >
-                  Изменить
-                </Button>
-              )}
-            </div>
-          </div>
+          <CatalogDetailContent
+            item={viewing}
+            canUpdate={canUpdate}
+            onEdit={(item) => {
+              setViewing(null);
+              setEditing(item);
+            }}
+          />
         )}
       </Modal>
-
       <Modal
         open={editing !== null}
         onClose={() => setEditing(null)}
@@ -595,11 +915,11 @@ export function CatalogPage(): JSX.Element {
         {editing && (
           <div className="space-y-4">
             <CatalogItemForm item={editing} onClose={() => setEditing(null)} />
+            <CatalogImageManager item={editing} canManage={canUpdate} />
             <BarcodesPanel itemId={editing.id} canManage={canUpdate} />
           </div>
         )}
       </Modal>
-
       <Modal
         open={importing}
         onClose={() => setImporting(false)}
@@ -612,14 +932,13 @@ export function CatalogPage(): JSX.Element {
           storageKey={importStorageKey}
         />
       </Modal>
-
       <ConfirmDialog
         open={confirmItem !== null}
         title="Архивировать позицию"
         message={
           <>
             Архивировать «{confirmItem?.brand_name}»? Она исчезнет из рабочего каталога, но её можно
-            будет восстановить через фильтр «Архив».
+            будет восстановить через представление «Архив».
             {actionError && <span className="mt-2 block text-danger">{actionError}</span>}
           </>
         }

@@ -19,6 +19,7 @@ export interface CatalogItem {
   category: string | null;
   base_price: string | null; // Decimal arrives as string from FastAPI
   currency: string;
+  image_version?: string | null;
   is_active: boolean;
   deleted_at?: string | null;
   created_at: string;
@@ -43,6 +44,15 @@ export interface CatalogList {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface CatalogSummary {
+  total: number;
+  active: number;
+  inactive: number;
+  archived: number;
+  without_barcode: number;
+  without_image: number;
 }
 
 export interface CatalogItemCreatePayload {
@@ -85,7 +95,9 @@ export interface CatalogSearchParams {
   category?: string;
   dispensing_type?: DispensingType;
   storage_type?: StorageType;
-  lifecycle?: "active" | "inactive" | "archived" | "all";
+  lifecycle?: "active" | "inactive" | "archived" | "current" | "all";
+  image_state?: "any" | "with_image" | "without_image";
+  barcode_state?: "any" | "with_barcode" | "without_barcode";
   page?: number;
   page_size?: number;
   /** When set (POS register's branch), results carry stock_available. */

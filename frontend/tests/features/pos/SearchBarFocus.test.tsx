@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const items = [{ id: "c1", brand_name: "Аспирин", dosage: "500мг", manufacturer: "Bayer" }];
 
-vi.mock("@/features/catalog/queries", () => ({
-  useCatalogQuery: () => ({ data: { items, total: items.length } }),
+vi.mock("@/features/catalog/pickerQueries", () => ({
+  useCatalogPickerQuery: () => ({ data: { items, total: items.length } }),
 }));
 
 import { SearchBar } from "@/features/pos/SearchBar";

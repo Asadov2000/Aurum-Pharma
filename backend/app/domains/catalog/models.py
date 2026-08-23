@@ -78,6 +78,14 @@ class TenantCatalog(Base):
     category: Mapped[str | None] = mapped_column(Text)
     base_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
+    image_version: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    image_width: Mapped[int | None] = mapped_column(Integer)
+    image_height: Mapped[int | None] = mapped_column(Integer)
+    image_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    image_thumbnail_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    image_sha256: Mapped[str | None] = mapped_column(Text)
+    image_uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    image_uploaded_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     import_job_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(
@@ -100,6 +108,17 @@ class TenantCatalog(Base):
             name="ck_tc_storage_type",
         ),
         CheckConstraint("base_price IS NULL OR base_price >= 0", name="ck_tc_base_price"),
+        CheckConstraint(
+            "(image_version IS NULL AND image_width IS NULL AND image_height IS NULL "
+            "AND image_size_bytes IS NULL AND image_thumbnail_size_bytes IS NULL "
+            "AND image_sha256 IS NULL AND image_uploaded_at IS NULL "
+            "AND image_uploaded_by IS NULL) OR "
+            "(image_version IS NOT NULL AND image_width > 0 AND image_height > 0 "
+            "AND image_size_bytes > 0 AND image_thumbnail_size_bytes > 0 "
+            "AND image_sha256 ~ '^[0-9a-f]{64}$' AND image_uploaded_at IS NOT NULL "
+            "AND image_uploaded_by IS NOT NULL)",
+            name="ck_tc_image_metadata",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_tenant_catalog_tenant_id_id"),
     )
 

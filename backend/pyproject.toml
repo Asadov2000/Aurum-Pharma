@@ -31,6 +31,8 @@ python-multipart = "0.0.*"
 fpdf2 = "2.8.*"
 # XLSX read+write (Z-report export now; catalog import in Phase 3 reuses it).
 openpyxl = "3.1.*"
+# Product images are decoded, stripped of metadata and re-encoded before storage.
+pillow = "12.3.*"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.0.*"

@@ -57,6 +57,13 @@ def put_object(
     return f"{bucket}/{object_name}"
 
 
+def default_object_path(object_name: str) -> str:
+    """Build the internal `bucket/key` path for a server-generated key."""
+    if not object_name or object_name.startswith("/") or ".." in object_name.split("/"):
+        raise ValueError("Invalid object name")
+    return f"{get_settings().MINIO_BUCKET}/{object_name}"
+
+
 def get_object(object_path: str) -> bytes:
     """Fetch bytes by `bucket/key` path (as returned by put_object)."""
     bucket, _, key = object_path.partition("/")
@@ -67,3 +74,11 @@ def get_object(object_path: str) -> bytes:
     finally:
         response.close()
         response.release_conn()
+
+
+def remove_object(object_path: str) -> None:
+    """Remove an object addressed by the internal `bucket/key` path."""
+    bucket, separator, key = object_path.partition("/")
+    if not separator or not bucket or not key:
+        raise ValueError("Invalid object path")
+    get_minio().remove_object(bucket, key)

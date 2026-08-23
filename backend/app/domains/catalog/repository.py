@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, exists, func, or_, select, text, update
+from sqlalchemy import and_, delete, exists, func, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
@@ -69,6 +69,13 @@ class CatalogRepository:
             return None
         return item
 
+    async def get_item_for_update(self, item_id: UUID) -> TenantCatalog | None:
+        stmt = select(TenantCatalog).where(TenantCatalog.id == item_id).with_for_update()
+        item = (await self.session.execute(stmt)).scalar_one_or_none()
+        if item is None or item.deleted_at is not None:
+            return None
+        return item
+
     async def update_item(self, item: TenantCatalog, **fields: Any) -> TenantCatalog:
         for key, value in fields.items():
             setattr(item, key, value)
@@ -90,7 +97,7 @@ class CatalogRepository:
             return None
         return await self.update_item(item, deleted_at=None, is_active=True)
 
-    async def search(
+    async def search(  # noqa: PLR0912 - each branch is an explicit catalog filter state
         self,
         *,
         q: str | None,
@@ -101,6 +108,8 @@ class CatalogRepository:
         manufacturer: str | None = None,
         storage_type: str | None = None,
         lifecycle: str = "active",
+        image_state: str = "any",
+        barcode_state: str = "any",
     ) -> tuple[list[TenantCatalog], int]:
         """Trigram search across brand_name, inn, and manufacturer. Filters by category and
         dispensing_type are exact-match. Tenant scoping is handled by RLS;
@@ -114,6 +123,8 @@ class CatalogRepository:
             filters.extend([TenantCatalog.deleted_at.is_(None), TenantCatalog.is_active.is_(False)])
         elif lifecycle == "archived":
             filters.append(TenantCatalog.deleted_at.is_not(None))
+        elif lifecycle == "current":
+            filters.append(TenantCatalog.deleted_at.is_(None))
         if category:
             filters.append(TenantCatalog.category == category)
         if dispensing_type:
@@ -122,6 +133,16 @@ class CatalogRepository:
             filters.append(TenantCatalog.manufacturer == manufacturer.strip())
         if storage_type:
             filters.append(TenantCatalog.storage_type == storage_type)
+        if image_state == "with_image":
+            filters.append(TenantCatalog.image_version.is_not(None))
+        elif image_state == "without_image":
+            filters.append(TenantCatalog.image_version.is_(None))
+
+        barcode_exists = exists(select(1).where(Barcode.catalog_id == TenantCatalog.id))
+        if barcode_state == "with_barcode":
+            filters.append(barcode_exists)
+        elif barcode_state == "without_barcode":
+            filters.append(not_(barcode_exists))
 
         base_stmt = select(TenantCatalog).where(*filters)
         if q:
@@ -161,6 +182,30 @@ class CatalogRepository:
         )
         result = await self.session.execute(list_stmt)
         return list(result.scalars().all()), total
+
+    async def summary(self) -> dict[str, int]:
+        alive = TenantCatalog.deleted_at.is_(None)
+        barcode_exists = exists(select(1).where(Barcode.catalog_id == TenantCatalog.id))
+        stmt = select(
+            func.count(TenantCatalog.id).filter(alive).label("total"),
+            func.count(TenantCatalog.id)
+            .filter(alive, TenantCatalog.is_active.is_(True))
+            .label("active"),
+            func.count(TenantCatalog.id)
+            .filter(alive, TenantCatalog.is_active.is_(False))
+            .label("inactive"),
+            func.count(TenantCatalog.id)
+            .filter(TenantCatalog.deleted_at.is_not(None))
+            .label("archived"),
+            func.count(TenantCatalog.id)
+            .filter(alive, not_(barcode_exists))
+            .label("without_barcode"),
+            func.count(TenantCatalog.id)
+            .filter(alive, TenantCatalog.image_version.is_(None))
+            .label("without_image"),
+        )
+        row = (await self.session.execute(stmt)).one()
+        return {key: int(getattr(row, key) or 0) for key in row._fields}
 
     async def find_duplicate(
         self,

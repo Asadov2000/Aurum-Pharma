@@ -14,34 +14,45 @@ Routes:
 
 from __future__ import annotations
 
-from typing import Annotated
-from uuid import UUID
+from typing import Annotated, Literal
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+import structlog
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_db, require_permission
-from app.core.errors import BusinessRuleError, ValidationError
-from app.core.storage import put_object
+from app.core.errors import BusinessRuleError, NotFoundError, ValidationError
+from app.core.storage import default_object_path, get_object, put_object, remove_object
+from app.domains.catalog.image_processing import process_catalog_image
 from app.domains.catalog.import_parser import XLS_UNSUPPORTED_MESSAGE
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.schemas import (
     BarcodeCreate,
     BarcodeRead,
+    CatalogBarcodeState,
+    CatalogImageState,
     CatalogItemCreate,
     CatalogItemRead,
     CatalogItemUpdate,
     CatalogItemWithBarcodes,
     CatalogLifecycle,
     CatalogList,
+    CatalogSummary,
     ImportConfirmRequest,
     ImportJobRead,
 )
-from app.domains.catalog.service import CatalogService, new_import_object_name
+from app.domains.catalog.service import (
+    CatalogService,
+    new_catalog_image_object_name,
+    new_import_object_name,
+)
 
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
 UPLOAD_CHUNK_BYTES = 1024 * 1024
+logger = structlog.get_logger("catalog.router")
 
 
 async def _read_import_file(file: UploadFile, *, max_bytes: int) -> bytes:
@@ -51,6 +62,18 @@ async def _read_import_file(file: UploadFile, *, max_bytes: int) -> bytes:
         if len(data) > max_bytes:
             max_mb = max_bytes // (1024 * 1024)
             raise ValidationError(f"Файл больше {max_mb} МБ — уменьшите его и попробуйте снова")
+    return bytes(data)
+
+
+async def _read_catalog_image(file: UploadFile, *, max_bytes: int) -> bytes:
+    data = bytearray()
+    while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+        data.extend(chunk)
+        if len(data) > max_bytes:
+            max_mb = max_bytes // (1024 * 1024)
+            raise ValidationError(
+                f"Изображение больше {max_mb} МБ — выберите файл меньшего размера"
+            )
     return bytes(data)
 
 
@@ -69,6 +92,22 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     return user.tenant_id
 
 
+def _remove_catalog_image_version(tenant_id: UUID, item_id: UUID, version: UUID) -> None:
+    variants: tuple[Literal["display", "thumbnail"], ...] = ("display", "thumbnail")
+    for variant in variants:
+        object_name = new_catalog_image_object_name(tenant_id, item_id, version, variant)
+        try:
+            remove_object(default_object_path(object_name))
+        except Exception as exc:
+            logger.warning(
+                "catalog_image_cleanup_failed",
+                item_id=str(item_id),
+                version=str(version),
+                variant=variant,
+                error_type=type(exc).__name__,
+            )
+
+
 # -----------------------------------------------------------------------------
 # CRUD + search
 # -----------------------------------------------------------------------------
@@ -84,6 +123,8 @@ async def list_catalog(
     manufacturer: Annotated[str | None, Query(max_length=500)] = None,
     storage_type: Annotated[str | None, Query()] = None,
     lifecycle: Annotated[CatalogLifecycle, Query()] = "active",
+    image_state: Annotated[CatalogImageState, Query()] = "any",
+    barcode_state: Annotated[CatalogBarcodeState, Query()] = "any",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     branch_id: Annotated[UUID | None, Query()] = None,
@@ -95,6 +136,8 @@ async def list_catalog(
         manufacturer=manufacturer,
         storage_type=storage_type,
         lifecycle=lifecycle,
+        image_state=image_state,
+        barcode_state=barcode_state,
         page=page,
         page_size=page_size,
         branch_id=branch_id,
@@ -110,6 +153,14 @@ async def list_catalog(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/summary", response_model=CatalogSummary)
+async def get_catalog_summary(
+    _user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> CatalogSummary:
+    return CatalogSummary.model_validate(await service.summary())
 
 
 @router.post("", response_model=CatalogItemRead, status_code=status.HTTP_201_CREATED)
@@ -147,6 +198,103 @@ async def get_catalog_item(
         **CatalogItemRead.model_validate(item).model_dump(),
         barcodes=[BarcodeRead.model_validate(b) for b in barcodes],
     )
+
+
+@router.get("/{item_id}/image/{version}/{variant}")
+async def get_catalog_image(
+    item_id: UUID,
+    version: UUID,
+    variant: Literal["display", "thumbnail"],
+    user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> Response:
+    item = await service.get_item(item_id, include_deleted=True)
+    if item.tenant_id != _current_tenant_or_400(user) or item.image_version != version:
+        raise NotFoundError("Catalog image not found")
+    object_name = new_catalog_image_object_name(item.tenant_id, item.id, version, variant)
+    raw = await run_in_threadpool(get_object, default_object_path(object_name))
+    return Response(
+        content=raw,
+        media_type="image/webp",
+        headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "Content-Disposition": "inline",
+            "ETag": f'"{version}-{variant}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.put("/{item_id}/image", response_model=CatalogItemRead)
+async def upload_catalog_image(
+    item_id: UUID,
+    background_tasks: BackgroundTasks,
+    user: Annotated[CurrentUser, Depends(require_permission("catalog.update"))],
+    service: Annotated[CatalogService, Depends(_service)],
+    file: UploadFile = File(...),  # noqa: B008 - FastAPI File() pattern
+) -> CatalogItemRead:
+    tenant_id = _current_tenant_or_400(user)
+    item = await service.get_item(item_id)
+    if item.tenant_id != tenant_id:
+        raise NotFoundError("Catalog item not found")
+
+    max_bytes = get_settings().MAX_CATALOG_IMAGE_MB * 1024 * 1024
+    raw = await _read_catalog_image(file, max_bytes=max_bytes)
+    image = await run_in_threadpool(process_catalog_image, raw, file.content_type)
+    version = uuid4()
+    uploaded_paths: list[str] = []
+    try:
+        variants: tuple[tuple[Literal["display", "thumbnail"], bytes], ...] = (
+            ("display", image.display),
+            ("thumbnail", image.thumbnail),
+        )
+        for variant, data in variants:
+            object_name = new_catalog_image_object_name(tenant_id, item.id, version, variant)
+            uploaded_paths.append(
+                await run_in_threadpool(
+                    put_object,
+                    object_name=object_name,
+                    data=data,
+                    content_type="image/webp",
+                )
+            )
+        updated, old_version = await service.set_image_metadata(
+            item.id,
+            version=version,
+            image=image,
+            updated_by=user.user_id,
+        )
+    except Exception:
+        for object_path in uploaded_paths:
+            try:
+                await run_in_threadpool(remove_object, object_path)
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "catalog_image_upload_rollback_failed",
+                    item_id=str(item.id),
+                    error_type=type(cleanup_exc).__name__,
+                )
+        raise
+    if old_version and old_version != version:
+        background_tasks.add_task(_remove_catalog_image_version, tenant_id, item.id, old_version)
+    return CatalogItemRead.model_validate(updated)
+
+
+@router.delete("/{item_id}/image", response_model=CatalogItemRead)
+async def delete_catalog_image(
+    item_id: UUID,
+    background_tasks: BackgroundTasks,
+    user: Annotated[CurrentUser, Depends(require_permission("catalog.update"))],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> CatalogItemRead:
+    tenant_id = _current_tenant_or_400(user)
+    item = await service.get_item(item_id)
+    if item.tenant_id != tenant_id:
+        raise NotFoundError("Catalog item not found")
+    updated, old_version = await service.clear_image_metadata(item_id, updated_by=user.user_id)
+    if old_version:
+        background_tasks.add_task(_remove_catalog_image_version, tenant_id, item_id, old_version)
+    return CatalogItemRead.model_validate(updated)
 
 
 @router.patch("/{item_id}", response_model=CatalogItemRead)
@@ -268,8 +416,6 @@ async def import_preview(
     job = await service.get_job(job_id)
     if not job.source_path:
         raise BusinessRuleError("Job has no uploaded file")
-    from app.core.storage import get_object
-
     raw = get_object(job.source_path)
     job = await service.preview_import(job_id=job_id, raw=raw)
     return ImportJobRead.model_validate(job)

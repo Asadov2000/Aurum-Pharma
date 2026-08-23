@@ -43,8 +43,8 @@ vi.mock("@/features/pos/api", () => ({
   voidPaymentAttempt: (...args: unknown[]) => voidPaymentAttempt(...args),
 }));
 
-vi.mock("@/features/catalog/queries", () => ({
-  useCatalogQuery: () => ({ data: undefined }),
+vi.mock("@/features/catalog/pickerQueries", () => ({
+  useCatalogPickerQuery: () => ({ data: undefined }),
 }));
 
 vi.mock("@/features/catalog/api", () => ({

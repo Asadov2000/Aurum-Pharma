@@ -45,8 +45,8 @@ vi.mock("@/features/foundation/api", () => ({
   deleteRegister: vi.fn(),
 }));
 
-vi.mock("@/features/catalog/queries", () => ({
-  useCatalogQuery: () => ({ data: undefined }),
+vi.mock("@/features/catalog/pickerQueries", () => ({
+  useCatalogPickerQuery: () => ({ data: undefined }),
 }));
 
 import { POSPage } from "@/features/pos/POSPage";

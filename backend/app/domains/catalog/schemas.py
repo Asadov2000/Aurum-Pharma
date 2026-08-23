@@ -12,7 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 DISPENSING_TYPES = {"prescription", "otc", "special"}
 STORAGE_TYPES = {"normal", "cold", "frozen"}
 BARCODE_TYPES = {"ean13", "ean8", "gs1_128", "code128", "qr", "other"}
-CatalogLifecycle = Literal["active", "inactive", "archived", "all"]
+CatalogLifecycle = Literal["active", "inactive", "archived", "current", "all"]
+CatalogImageState = Literal["any", "with_image", "without_image"]
+CatalogBarcodeState = Literal["any", "with_barcode", "without_barcode"]
 
 
 def _strip_required(value: Any) -> Any:
@@ -163,6 +165,7 @@ class CatalogItemRead(BaseModel):
     category: str | None
     base_price: Decimal | None
     currency: str
+    image_version: UUID | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -181,6 +184,15 @@ class CatalogList(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class CatalogSummary(BaseModel):
+    total: int
+    active: int
+    inactive: int
+    archived: int
+    without_barcode: int
+    without_image: int
 
 
 class BarcodeCreate(BaseModel):

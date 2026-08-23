@@ -20,6 +20,7 @@ import structlog
 
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, ValidationError
 from app.core.time import utc_now
+from app.domains.catalog.image_processing import CatalogImageVariants
 from app.domains.catalog.import_parser import parse_import
 from app.domains.catalog.models import (
     Barcode,
@@ -102,6 +103,8 @@ class CatalogService:
         manufacturer: str | None = None,
         storage_type: str | None = None,
         lifecycle: str = "active",
+        image_state: str = "any",
+        barcode_state: str = "any",
     ) -> tuple[list[TenantCatalog], int, dict[UUID, Decimal]]:
         items, total = await self.repo.search(
             q=q,
@@ -112,6 +115,8 @@ class CatalogService:
             manufacturer=manufacturer,
             storage_type=storage_type,
             lifecycle=lifecycle,
+            image_state=image_state,
+            barcode_state=barcode_state,
         )
         # Available stock per result is computed only when a branch is given
         # (POS), in one grouped query over this page — never per-item (no N+1).
@@ -121,6 +126,58 @@ class CatalogService:
                 branch_id=branch_id, catalog_ids=[i.id for i in items]
             )
         return items, total, stock
+
+    async def summary(self) -> dict[str, int]:
+        return await self.repo.summary()
+
+    async def set_image_metadata(
+        self,
+        item_id: UUID,
+        *,
+        version: UUID,
+        image: CatalogImageVariants,
+        updated_by: UUID,
+    ) -> tuple[TenantCatalog, UUID | None]:
+        item = await self.repo.get_item_for_update(item_id)
+        if item is None:
+            raise NotFoundError("Catalog item not found")
+        old_version = item.image_version
+        updated = await self.repo.update_item(
+            item,
+            image_version=version,
+            image_width=image.width,
+            image_height=image.height,
+            image_size_bytes=len(image.display),
+            image_thumbnail_size_bytes=len(image.thumbnail),
+            image_sha256=image.sha256,
+            image_uploaded_at=utc_now(),
+            image_uploaded_by=updated_by,
+            updated_by=updated_by,
+        )
+        return updated, old_version
+
+    async def clear_image_metadata(
+        self, item_id: UUID, *, updated_by: UUID
+    ) -> tuple[TenantCatalog, UUID | None]:
+        item = await self.repo.get_item_for_update(item_id)
+        if item is None:
+            raise NotFoundError("Catalog item not found")
+        old_version = item.image_version
+        if old_version is None:
+            return item, None
+        updated = await self.repo.update_item(
+            item,
+            image_version=None,
+            image_width=None,
+            image_height=None,
+            image_size_bytes=None,
+            image_thumbnail_size_bytes=None,
+            image_sha256=None,
+            image_uploaded_at=None,
+            image_uploaded_by=None,
+            updated_by=updated_by,
+        )
+        return updated, old_version
 
     # -------------------------------------------------------------------------
     # Barcodes
@@ -396,3 +453,12 @@ def _to_jsonable(row: dict[str, Any]) -> dict[str, Any]:
 # Expose the constant generator the router uses to choose its filename.
 def new_import_object_name(tenant_id: UUID) -> str:
     return f"{tenant_id}/imports/{uuid4()}.csv"
+
+
+def new_catalog_image_object_name(
+    tenant_id: UUID,
+    item_id: UUID,
+    version: UUID,
+    variant: Literal["display", "thumbnail"],
+) -> str:
+    return f"{tenant_id}/catalog/{item_id}/images/{version}/{variant}.webp"

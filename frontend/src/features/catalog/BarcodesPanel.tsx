@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -39,6 +39,9 @@ export function BarcodesPanel({
   const [topError, setTopError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const fieldId = useId();
+  const codeId = `${fieldId}-code`;
+  const typeId = `${fieldId}-type`;
 
   const form = useForm<FormValues>({
     defaultValues: { code: "", code_type: "ean13" },
@@ -132,17 +135,17 @@ export function BarcodesPanel({
           className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]"
         >
           <div>
-            <Label htmlFor="bc_code">Код</Label>
+            <Label htmlFor={codeId}>Код</Label>
             <Input
-              id="bc_code"
+              id={codeId}
               invalid={Boolean(form.formState.errors.code)}
               {...form.register("code")}
             />
             <FormError>{form.formState.errors.code?.message}</FormError>
           </div>
           <div>
-            <Label htmlFor="bc_type">Тип</Label>
-            <Select id="bc_type" {...form.register("code_type")}>
+            <Label htmlFor={typeId}>Тип</Label>
+            <Select id={typeId} {...form.register("code_type")}>
               {barcodeOptions.map((t) => (
                 <option key={t} value={t}>
                   {barcodeLabel[t]}

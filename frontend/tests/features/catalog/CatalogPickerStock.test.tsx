@@ -12,8 +12,8 @@ const items = [
   { id: "c2", brand_name: "Аскорбинка", dosage: "100мг", manufacturer: "X", stock_available: "0" },
 ];
 
-vi.mock("@/features/catalog/queries", () => ({
-  useCatalogQuery: () => ({ data: { items, total: items.length } }),
+vi.mock("@/features/catalog/pickerQueries", () => ({
+  useCatalogPickerQuery: () => ({ data: { items, total: items.length } }),
 }));
 
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
