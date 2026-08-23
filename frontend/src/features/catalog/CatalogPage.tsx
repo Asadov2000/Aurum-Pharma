@@ -69,7 +69,7 @@ function itemStatus(item: CatalogItem): {
 } {
   if (item.deleted_at) return { label: "Архив", tone: "neutral" };
   if (!item.is_active) return { label: "Отключена", tone: "warning" };
-  return { label: "В работе", tone: "success" };
+  return { label: "Активна", tone: "success" };
 }
 
 function formattedPrice(item: CatalogItem): string {
@@ -360,7 +360,7 @@ export function CatalogPage(): JSX.Element {
           onClick={() => applyPreset("all")}
         />
         <SummaryMetric
-          label="В работе"
+          label="Активные позиции"
           value={summary.data?.active}
           active={activePreset === "active"}
           onClick={() => applyPreset("active")}
@@ -483,8 +483,8 @@ export function CatalogPage(): JSX.Element {
                   }}
                   className="w-full sm:w-48"
                 >
-                  <option value="current">Все рабочие</option>
-                  <option value="active">В работе</option>
+                  <option value="current">Все текущие</option>
+                  <option value="active">Активные</option>
                   <option value="inactive">Отключённые</option>
                   <option value="archived">Архив</option>
                   <option value="all">Все, включая архив</option>

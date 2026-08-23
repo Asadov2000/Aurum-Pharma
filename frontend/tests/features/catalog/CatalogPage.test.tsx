@@ -118,6 +118,8 @@ describe("CatalogPage", () => {
     expect(screen.getAllByText("Paracetamol").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Безрецептурный/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/5\.50 TJS/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Активна").length).toBeGreaterThan(0);
+    expect(screen.getByText("Активные позиции")).toBeInTheDocument();
   });
 
   it("shows accurate summary and applies the no-photo preset", async () => {

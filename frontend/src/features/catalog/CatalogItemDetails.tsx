@@ -19,7 +19,7 @@ function Detail({
 }
 
 export function CatalogItemDetails({ item }: { item: CatalogItem }): JSX.Element {
-  const status = item.deleted_at ? "В архиве" : item.is_active ? "В работе" : "Отключена";
+  const status = item.deleted_at ? "В архиве" : item.is_active ? "Активна" : "Отключена";
   const tone = item.deleted_at ? "neutral" : item.is_active ? "success" : "warning";
 
   return (
