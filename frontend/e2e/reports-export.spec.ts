@@ -112,6 +112,7 @@ test.describe("Reports export", () => {
     const zReportDialog = page.getByRole("dialog");
     await expect(zReportDialog).toBeVisible();
     await zReportDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await page.getByRole("tab", { name: /^Продажи/ }).click();
     const overview = page.getByRole("region", { name: "Продажи за период" });
     await expect(overview.getByText("Чистая выручка")).toBeVisible();
 
@@ -119,6 +120,7 @@ test.describe("Reports export", () => {
     await overview.getByRole("button", { name: "Скачать XLSX" }).click();
     expect((await summaryDownload).suggestedFilename()).toMatch(/\.xlsx$/);
 
+    await page.getByRole("tab", { name: /^Остатки/ }).click();
     const stockReport = page.getByRole("region", { name: "Остатки на дату" });
     const stockDownload = page.waitForEvent("download");
     await stockReport.getByRole("button", { name: "Скачать остатки XLSX" }).click();
