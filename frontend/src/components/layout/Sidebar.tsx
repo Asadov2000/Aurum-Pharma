@@ -126,7 +126,10 @@ export function Sidebar({
       )}
 
       <div
-        className={cn("flex flex-1 flex-col overflow-y-auto", showLabels ? "gap-2 pr-1" : "gap-2")}
+        className={cn(
+          "aurum-scrollbar flex flex-1 flex-col overflow-y-auto overscroll-contain",
+          showLabels ? "gap-2 pr-1" : "gap-2",
+        )}
       >
         {nextGroup("favorites", "Избранное", favoriteItems)}
         {SIDEBAR_SECTIONS.map((section) =>
