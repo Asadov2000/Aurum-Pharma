@@ -37,8 +37,10 @@ test.describe("Catalog import (owner)", () => {
 
     // The imported rows are now searchable in the catalog table.
     await page.getByLabel(/Поиск/).fill("ИмпортXLSX Аспирин");
-    await expect(page.getByRole("row").filter({ hasText: "ИмпортXLSX Аспирин" })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(
+      page
+        .locator('section[aria-label="Позиции каталога"] article')
+        .filter({ hasText: "ИмпортXLSX Аспирин" }),
+    ).toBeVisible({ timeout: 15_000 });
   });
 });

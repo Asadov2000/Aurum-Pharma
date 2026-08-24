@@ -415,9 +415,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
                   {workspaceLabel}
                 </span>
               ) : (
-                <h1 className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
+                <span className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
                   {pageTitle}
-                </h1>
+                </span>
               )}
             </div>
 

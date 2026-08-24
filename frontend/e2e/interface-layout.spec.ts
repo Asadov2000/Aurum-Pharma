@@ -1,6 +1,6 @@
 import { test, type Page } from "@playwright/test";
 
-import { clearLoginRateLimit, expect, loginInBrowser, OWNER } from "./helpers";
+import { clearLoginRateLimit, expect, loginInBrowser, OWNER, selectTouchDensity } from "./helpers";
 
 const WORKSPACES = [
   { path: "/", heading: "Главная" },
@@ -198,10 +198,9 @@ test.describe("Interface layout", () => {
     });
     await loginInBrowser(page, OWNER);
     await page.goto("/roles");
+    await selectTouchDensity(page);
 
-    const createRoleButton = page
-      .locator("header")
-      .getByRole("button", { name: "Создать роль" });
+    const createRoleButton = page.locator("header").getByRole("button", { name: "Создать роль" });
     await createRoleButton.click();
     const dialog = page.getByRole("dialog", { name: "Создать роль" });
     await expect(dialog).toBeVisible();
@@ -250,6 +249,7 @@ test.describe("Interface layout", () => {
     });
     await loginInBrowser(page, OWNER);
     await page.goto("/users");
+    await selectTouchDensity(page);
 
     const directory = page.getByRole("table", { name: "Сотрудники аптеки" });
     await expect(directory).toBeVisible();
@@ -292,6 +292,7 @@ test.describe("Interface layout", () => {
     });
     await loginInBrowser(page, OWNER);
     await page.goto("/billing");
+    await selectTouchDensity(page);
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Тариф и оплата", exact: true }),

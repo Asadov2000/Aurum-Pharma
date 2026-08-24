@@ -39,7 +39,7 @@ test.describe("Incoming flow (owner)", () => {
     await page.setViewportSize({ width: 320, height: 568 });
     await loginInBrowser(page, OWNER);
     await page.goto("/incoming");
-    await page.getByRole("button", { name: /\+ Новый приход/ }).click();
+    await page.getByRole("button", { name: "Новый приход", exact: true }).click();
 
     const dialog = page.locator('div[role="dialog"]');
     await dialog.getByLabel("Точка").selectOption({ label: branch.name });

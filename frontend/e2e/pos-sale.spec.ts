@@ -295,13 +295,10 @@ test.describe("POS sale (owner)", () => {
         (sale) => sale.id === completedSale.sale_id,
       );
       expect(saleRowIndex).toBeGreaterThanOrEqual(0);
-      const saleRow = page.locator("tbody").getByRole("row").nth(saleRowIndex);
-      await expect(
-        saleRow.getByRole("cell", {
-          name: completedSale.receipt_number,
-          exact: true,
-        }),
-      ).toBeVisible();
+      const saleRow = page.getByRole("button", {
+        name: `Открыть чек № ${completedSale.receipt_number}`,
+      });
+      await expect(saleRow).toBeVisible();
       await saleRow.click();
       const saleDialog = page.getByRole("dialog", {
         name: `Чек № ${completedSale.receipt_number}`,

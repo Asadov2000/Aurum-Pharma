@@ -85,6 +85,7 @@ test.describe("Shift close → Z-report", () => {
     // ---- /reports: choose the closed shift from readable history ----
     await page.evaluate(() => window.localStorage.removeItem("pos:lastClosedShiftId"));
     await page.goto("/reports");
+    await page.getByRole("tab", { name: /^Смены/ }).click();
     const shiftRow = page.locator("tbody tr").filter({ hasText: register.name });
     await expect(shiftRow).toContainText(branch.name);
     await shiftRow.getByRole("button", { name: "Открыть" }).click();
