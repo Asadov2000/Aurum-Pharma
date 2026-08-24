@@ -1,4 +1,8 @@
 import { type ReceiptWidth } from "./types";
+import {
+  currentDevicePreferencesScope,
+  loadDevicePreferences,
+} from "@/lib/devicePreferences";
 
 /**
  * Receipt width templates. 58/80 mm are thermal ribbon (borderless, narrow);
@@ -24,7 +28,7 @@ export function loadReceiptWidth(registerId: string): ReceiptWidth {
   } catch {
     // ignore
   }
-  return "80";
+  return loadDevicePreferences(currentDevicePreferencesScope()).receiptWidth;
 }
 
 export function saveReceiptWidth(registerId: string, width: ReceiptWidth): void {

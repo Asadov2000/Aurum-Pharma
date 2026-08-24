@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, require_permission
+from app.core.deps import CurrentUser, get_db, require_tenant_owner
 from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.onboarding.repository import OnboardingRepository
 from app.domains.onboarding.schemas import (
@@ -38,7 +38,7 @@ def _tenant_or_400(user: CurrentUser) -> UUID:
 
 @router.get("/overview", response_model=OnboardingOverviewRead)
 async def get_overview(
-    user: Annotated[CurrentUser, Depends(require_permission("settings.update"))],
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
     service: Annotated[OnboardingService, Depends(_service)],
 ) -> OnboardingOverviewRead:
     overview = await service.get_overview(_tenant_or_400(user))
@@ -47,7 +47,7 @@ async def get_overview(
 
 @router.get("/wizard", response_model=WizardStateRead)
 async def get_wizard(
-    user: Annotated[CurrentUser, Depends(require_permission("settings.update"))],
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
     service: Annotated[OnboardingService, Depends(_service)],
 ) -> WizardStateRead:
     wizard = await service.get_wizard(_tenant_or_400(user))
@@ -58,7 +58,7 @@ async def get_wizard(
 async def submit_step(
     step: int,
     payload: WizardStepSubmit,
-    user: Annotated[CurrentUser, Depends(require_permission("settings.update"))],
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
     service: Annotated[OnboardingService, Depends(_service)],
 ) -> WizardStateRead:
     wizard = await service.submit_step(tenant_id=_tenant_or_400(user), step=step, data=payload.data)
@@ -67,7 +67,7 @@ async def submit_step(
 
 @router.get("/checklist", response_model=ChecklistRead)
 async def get_checklist(
-    user: Annotated[CurrentUser, Depends(require_permission("settings.update"))],
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
     service: Annotated[OnboardingService, Depends(_service)],
 ) -> ChecklistRead:
     checklist = await service.get_checklist(_tenant_or_400(user))
@@ -81,7 +81,7 @@ async def get_checklist(
 )
 async def start_trial(
     payload: StartTrialRequest,
-    user: Annotated[CurrentUser, Depends(require_permission("settings.update"))],
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
     service: Annotated[OnboardingService, Depends(_service)],
 ) -> StartTrialResponse:
     if not user.is_tenant_owner:

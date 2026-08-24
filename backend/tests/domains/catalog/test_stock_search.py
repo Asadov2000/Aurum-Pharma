@@ -24,7 +24,13 @@ async def _branch_id(db: AsyncSession, tenant_id: UUID) -> UUID:
 
 
 async def _stocked_item(
-    db: AsyncSession, *, tenant_id: UUID, branch_id: UUID, brand: str, qty: int
+    db: AsyncSession,
+    *,
+    tenant_id: UUID,
+    branch_id: UUID,
+    brand: str,
+    qty: int,
+    expires_in_days: int = 90,
 ) -> UUID:
     catalog = CatalogService(CatalogRepository(db))
     inv = InventoryRepository(db)
@@ -33,7 +39,7 @@ async def _stocked_item(
         tenant_id=tenant_id,
         branch_id=branch_id,
         catalog_id=item.id,
-        expires_at=date.today() + timedelta(days=90),
+        expires_at=date.today() + timedelta(days=expires_in_days),
         purchase_price=Decimal("1.00"),
         sale_price=Decimal("2.00"),
         qty_initial=Decimal(str(qty)),
@@ -111,3 +117,30 @@ async def test_stock_by_catalog_is_a_single_grouped_query(
     assert stock[ids[0]] == Decimal("10")
     assert stock[ids[1]] == Decimal("7")
     assert stock[ids[2]] == Decimal("7")
+
+
+async def test_stock_available_excludes_expired_batches(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    tenant = await make_tenant()
+    branch_id = await _branch_id(db_session, tenant.id)
+    brand = f"Expired stock {tenant.id}"
+    item_id = await _stocked_item(
+        db_session,
+        tenant_id=tenant.id,
+        branch_id=branch_id,
+        brand=brand,
+        qty=12,
+        expires_in_days=-1,
+    )
+
+    _items, _total, stock = await CatalogService(CatalogRepository(db_session)).search(
+        q=brand,
+        category=None,
+        dispensing_type=None,
+        page=1,
+        page_size=50,
+        branch_id=branch_id,
+    )
+
+    assert item_id not in stock

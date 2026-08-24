@@ -19,7 +19,9 @@ vi.mock("@/lib/download", () => ({
 vi.mock("@/features/foundation/queries", () => ({
   useBranchesQuery: () => ({ data: [] }),
   useRegistersQuery: () => ({ data: [] }),
-  useTenantSettingsQuery: () => ({ data: { report_timezone: "Asia/Dushanbe" } }),
+  useTenantOperationalSettingsQuery: () => ({
+    data: { report_timezone: "Asia/Dushanbe" },
+  }),
 }));
 
 import { StockOnDateCard } from "@/features/reports/ReportsPage";

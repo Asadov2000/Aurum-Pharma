@@ -15,6 +15,7 @@ import {
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
+import { cn } from "@/lib/utils";
 
 import {
   expiryHint,
@@ -32,15 +33,20 @@ import { WriteOffForm } from "./WriteOffForm";
 export function BatchDetailModal({
   batchId,
   onClose,
+  mode = "modal",
+  onOpenFull,
 }: {
   batchId: string;
   onClose: () => void;
+  mode?: "modal" | "preview";
+  onOpenFull?: () => void;
 }): JSX.Element {
   const { user } = useAuth();
   const canWriteOff = hasPermission(user, "batches.write_off");
   const batchQuery = useBatchQuery(batchId);
   const [writeOffOpen, setWriteOffOpen] = useState(false);
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
+  const isPreview = mode === "preview";
 
   if (batchQuery.isLoading) {
     return (
@@ -80,7 +86,12 @@ export function BatchDetailModal({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="min-w-0 break-words text-xl font-semibold text-foreground">
+              <h2
+                className={cn(
+                  "min-w-0 break-words font-semibold text-foreground",
+                  isPreview ? "text-lg" : "text-xl",
+                )}
+              >
                 {batch.catalog_name}
               </h2>
               <Badge tone={expiryTone[batch.expiry_status]}>
@@ -103,7 +114,10 @@ export function BatchDetailModal({
 
       <section
         aria-label="Остаток и стоимость партии"
-        className="grid grid-cols-2 border-b border-border bg-background/60 md:grid-cols-4"
+        className={cn(
+          "grid grid-cols-2 border-b border-border bg-background/60",
+          !isPreview && "md:grid-cols-4",
+        )}
       >
         <Metric
           label="Остаток"
@@ -140,7 +154,12 @@ export function BatchDetailModal({
           <h3 id="batch-properties-heading" className="text-sm font-semibold text-foreground">
             Реквизиты партии
           </h3>
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm md:grid-cols-4">
+          <dl
+            className={cn(
+              "mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm",
+              !isPreview && "md:grid-cols-4",
+            )}
+          >
             <Field label="Номер партии" value={batch.batch_number ?? "Без номера"} mono />
             <Field
               label="Дата производства"
@@ -179,7 +198,7 @@ export function BatchDetailModal({
           </div>
           {batch.recent_movements.length === 0 ? (
             <p className="mt-3 text-sm italic text-foreground-muted">Движений пока нет</p>
-          ) : isDesktopLayout ? (
+          ) : isDesktopLayout && !isPreview ? (
             <MovementTable
               movements={batch.recent_movements}
               reportTimezone={batch.report_timezone}
@@ -192,11 +211,22 @@ export function BatchDetailModal({
           )}
         </section>
 
-        <div className="flex justify-end border-t border-border pt-4">
-          <Button className="min-h-11" variant="ghost" onClick={onClose}>
-            Закрыть
-          </Button>
-        </div>
+        {isPreview ? (
+          onOpenFull && (
+            <div className="border-t border-border pt-4">
+              <Button className="w-full justify-between" variant="secondary" onClick={onOpenFull}>
+                Открыть полную карточку
+                <ArrowRightIcon />
+              </Button>
+            </div>
+          )
+        ) : (
+          <div className="flex justify-end border-t border-border pt-4">
+            <Button className="min-h-11" variant="ghost" onClick={onClose}>
+              Закрыть
+            </Button>
+          </div>
+        )}
       </div>
 
       <Modal
@@ -306,6 +336,21 @@ function MovementDelta({ value }: { value: string }): JSX.Element {
       {positive ? "+" : ""}
       {formatInventoryQuantity(value)}
     </span>
+  );
+}
+
+function ArrowRightIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="M4 10h12M11 5l5 5-5 5" />
+    </svg>
   );
 }
 

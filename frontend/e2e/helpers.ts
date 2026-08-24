@@ -171,6 +171,12 @@ export async function loginInBrowser(page: Page, creds: Creds): Promise<TokenPai
   }
 }
 
+export async function selectTouchDensity(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Вид интерфейса" }).click();
+  await page.getByRole("button", { name: "Сенсор", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+}
+
 export async function installBrowserSession(page: Page, tokens: TokenPair): Promise<void> {
   const value = refreshCookieValue(tokens.refresh_cookie);
   const deviceValue = optionalCookieValue(tokens.refresh_cookie, DEVICE_COOKIE_NAME);

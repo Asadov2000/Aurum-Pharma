@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import AsyncIterator
 from datetime import date, timedelta
 from decimal import Decimal
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db
 from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
+from app.domains.catalog.image_processing import CatalogImageVariants
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
 from app.domains.foundation.models import Tenant
@@ -46,6 +48,8 @@ SENSITIVE_READ_PATHS = [
 
 DOMAIN_READ_PATHS = [
     ("/api/v1/catalog", 200),
+    ("/api/v1/catalog/summary", 200),
+    (f"/api/v1/catalog/{uuid4()}/image/{uuid4()}/thumbnail", 404),
     (f"/api/v1/catalog/import/{uuid4()}", 404),
     ("/api/v1/branches", 200),
     ("/api/v1/registers", 200),
@@ -687,8 +691,19 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
 
         list_resp = await client.get("/api/v1/incoming", headers=headers)
         assert list_resp.status_code == 200
-        assert [item["id"] for item in list_resp.json()["items"]] == [own_doc_id]
-        assert list_resp.json()["total"] == 1
+        list_payload = list_resp.json()
+        assert [item["id"] for item in list_payload["items"]] == [own_doc_id]
+        assert list_payload["items"][0]["branch_name"] == branch_a.name
+        assert list_payload["items"][0]["supplier_name"] == supplier.name
+        assert list_payload["total"] == 1
+        assert list_payload["summary"] == {
+            "all_count": 1,
+            "draft_count": 1,
+            "accepted_count": 0,
+            "rejected_count": 0,
+            "accepted_amount": "0",
+            "currency": "TJS",
+        }
 
         get_other_resp = await client.get(f"/api/v1/incoming/{other_doc.id}", headers=headers)
         assert get_other_resp.status_code == 403
@@ -712,7 +727,12 @@ async def test_tenant_reads_require_domain_permission(
 ) -> None:
     await _override_db(db_session)
     try:
-        owner_required = path in {"/api/v1/roles", "/api/v1/permissions"}
+        owner_required = path in {
+            "/api/v1/roles",
+            "/api/v1/permissions",
+            "/api/v1/onboarding/checklist",
+            "/api/v1/onboarding/overview",
+        }
         tenant, regular, admin = await _seed_tenant_subjects(
             db_session,
             admin_is_owner=owner_required,
@@ -740,6 +760,112 @@ async def test_tenant_reads_require_domain_permission(
 
         admin_resp = await client.get(path, headers={"Authorization": f"Bearer {admin_token}"})
         assert admin_resp.status_code == allowed_status, path
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_catalog_images_require_exact_permissions_and_tenant_scope(
+    db_session: AsyncSession,
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _override_db(db_session)
+    try:
+        tenant, viewer, editor = await _seed_tenant_subjects(db_session)
+        other_tenant, other_viewer, _other_admin = await _seed_tenant_subjects(db_session)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=viewer.id,
+            permission_codes={"catalog.view"},
+        )
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=editor.id,
+            permission_codes={"catalog.view", "catalog.update"},
+        )
+        await _assign_permissions(
+            db_session,
+            tenant_id=other_tenant.id,
+            user_id=other_viewer.id,
+            permission_codes={"catalog.view"},
+        )
+        item = await CatalogService(CatalogRepository(db_session)).create_item(
+            tenant_id=tenant.id,
+            fields={"brand_name": "Protected image"},
+        )
+        processed = CatalogImageVariants(
+            display=b"display-webp",
+            thumbnail=b"thumbnail-webp",
+            width=100,
+            height=80,
+            sha256="a" * 64,
+        )
+        catalog_router_module = importlib.import_module("app.domains.catalog.router")
+        monkeypatch.setattr(
+            catalog_router_module,
+            "process_catalog_image",
+            lambda _raw, _content_type: processed,
+        )
+        monkeypatch.setattr(
+            catalog_router_module,
+            "put_object",
+            lambda *, object_name, data, content_type: f"aurum/{object_name}",
+        )
+        monkeypatch.setattr(
+            catalog_router_module,
+            "get_object",
+            lambda _object_path: b"webp",
+        )
+        monkeypatch.setattr(
+            catalog_router_module,
+            "remove_object",
+            lambda _object_path: None,
+        )
+
+        viewer_headers = {"Authorization": f"Bearer {_token(viewer)}"}
+        editor_headers = {"Authorization": f"Bearer {_token(editor)}"}
+        other_headers = {"Authorization": f"Bearer {_token(other_viewer)}"}
+        forbidden_upload = await client.put(
+            f"/api/v1/catalog/{item.id}/image",
+            headers=viewer_headers,
+            files={"file": ("medicine.png", b"raw", "image/png")},
+        )
+        assert forbidden_upload.status_code == 403
+
+        uploaded = await client.put(
+            f"/api/v1/catalog/{item.id}/image",
+            headers=editor_headers,
+            files={"file": ("medicine.png", b"raw", "image/png")},
+        )
+        assert uploaded.status_code == 200
+        version = uploaded.json()["image_version"]
+
+        visible = await client.get(
+            f"/api/v1/catalog/{item.id}/image/{version}/thumbnail",
+            headers=viewer_headers,
+        )
+        assert visible.status_code == 200
+        assert visible.headers["content-type"] == "image/webp"
+        assert visible.headers["x-content-type-options"] == "nosniff"
+
+        hidden = await client.get(
+            f"/api/v1/catalog/{item.id}/image/{version}/thumbnail",
+            headers=other_headers,
+        )
+        assert hidden.status_code == 404
+        forbidden_delete = await client.delete(
+            f"/api/v1/catalog/{item.id}/image",
+            headers=viewer_headers,
+        )
+        assert forbidden_delete.status_code == 403
+        deleted = await client.delete(
+            f"/api/v1/catalog/{item.id}/image",
+            headers=editor_headers,
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["image_version"] is None
     finally:
         app.dependency_overrides.pop(get_db, None)
 

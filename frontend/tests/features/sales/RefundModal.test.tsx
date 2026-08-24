@@ -38,7 +38,7 @@ vi.mock("@/features/sales/api", () => ({
 }));
 
 vi.mock("@/features/foundation/queries", () => ({
-  useTenantSettingsQuery: () => settingsResult,
+  useTenantOperationalSettingsQuery: () => settingsResult,
 }));
 
 import { type SaleDetails } from "@/features/pos/types";

@@ -41,7 +41,7 @@ const RegistersPage = lazyRouteComponent(
   "RegistersPage",
 );
 const SettingsPage = lazyRouteComponent(
-  () => import("@/features/foundation/SettingsPage"),
+  () => import("@/features/settings/SettingsPage"),
   "SettingsPage",
 );
 const UsersPage = lazyRouteComponent(() => import("@/features/roles/UsersPage"), "UsersPage");

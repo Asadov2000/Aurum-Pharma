@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from io import BytesIO
 from uuid import UUID
 
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import UploadFile
 
-from app.core.errors import BusinessRuleError
+from app.core.errors import BusinessRuleError, ValidationError
 from app.core.time import utc_now
+from app.domains.catalog import import_parser
 from app.domains.catalog.models import TenantCatalog
 from app.domains.catalog.repository import CatalogRepository
+from app.domains.catalog.router import _read_import_file
 from app.domains.catalog.service import CatalogService
 
 SAMPLE_CSV = (
@@ -21,6 +25,21 @@ SAMPLE_CSV = (
     b"Paracetamol,paracetamol,GSK,500mg,20 tablets,otc,8.75,2222222222222\n"
     b"Amiksin,tilorone,Lekko,125mg,6 tablets,otc,99.00,\n"
 )
+
+
+def test_import_parser_rejects_excessive_row_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(import_parser, "MAX_IMPORT_ROWS", 2)
+    raw = b"brand_name\nFirst\nSecond\nThird\n"
+
+    with pytest.raises(ValueError, match="more than 2 rows"):
+        import_parser.parse_csv(raw)
+
+
+async def test_import_upload_stops_reading_after_size_limit() -> None:
+    upload = UploadFile(filename="oversized.csv", file=BytesIO(b"123"))
+
+    with pytest.raises(ValidationError, match="Файл больше"):
+        await _read_import_file(upload, max_bytes=2)
 
 
 async def _count_items(
@@ -83,6 +102,23 @@ async def test_import_preview_collects_errors(
     updated = await service.preview_import(job_id=job.id, raw=bad_csv)
     assert updated.error_rows == 3
     assert updated.valid_rows == 0
+
+
+async def test_import_preview_maps_parser_failure_to_validation_error(
+    db_session: AsyncSession, make_tenant, make_user
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    service = CatalogService(CatalogRepository(db_session))
+    job = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="broken.csv",
+        source_path="aurum/test/broken.csv",
+    )
+
+    with pytest.raises(ValidationError, match="brand_name"):
+        await service.preview_import(job_id=job.id, raw=b"wrong_header\nvalue\n")
 
 
 async def test_import_process_creates_items(
@@ -202,4 +238,34 @@ async def test_import_duplicate_skip_strategy(
     # Existing Aspirin + 2 new (Paracetamol, Amiksin); the dup is skipped.
     assert await _count_items(db_session, tenant.id) == 3
     # Only the 2 non-duplicate rows are tagged with this import job.
+    assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 2
+
+
+async def test_import_row_conflict_does_not_abort_following_rows(
+    db_session: AsyncSession, make_tenant, make_user
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    service = CatalogService(CatalogRepository(db_session))
+    csv_with_duplicate_barcode = (
+        b"brand_name,barcode\n"
+        b"Savepoint first,3333333333333\n"
+        b"Savepoint conflict,3333333333333\n"
+        b"Savepoint after,4444444444444\n"
+    )
+    job = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="savepoints.csv",
+        source_path="aurum/test/savepoints.csv",
+    )
+    await service.repo.update_job(
+        job, status="importing", duplicate_strategy="skip", started_at=utc_now()
+    )
+
+    result = await service.process_import(job_id=job.id, raw=csv_with_duplicate_barcode)
+
+    assert result.status == "success"
+    assert result.valid_rows == 2
+    assert result.error_rows == 1
     assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 2

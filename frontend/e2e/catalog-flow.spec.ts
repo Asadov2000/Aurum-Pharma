@@ -1,4 +1,4 @@
-import { test, request } from "@playwright/test";
+import { test, request, type Page } from "@playwright/test";
 
 import {
   apiContext,
@@ -11,6 +11,12 @@ import {
   selectActionMenuItem,
   uniqueName,
 } from "./helpers";
+
+function catalogItem(page: Page, name: string) {
+  return page
+    .locator('section[aria-label="Позиции каталога"] article')
+    .filter({ hasText: name });
+}
 
 test.describe("Catalog flow (owner)", () => {
   test.beforeEach(() => {
@@ -32,7 +38,7 @@ test.describe("Catalog flow (owner)", () => {
     // search by the unique name tail so accumulated same-prefix rows don't
     // push the new item off page 1 (the shared test DB carries many).
     await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
-    await expect(page.getByRole("cell", { name, exact: true })).toBeVisible({
+    await expect(catalogItem(page, name)).toBeVisible({
       timeout: 15_000,
     });
   });
@@ -57,7 +63,7 @@ test.describe("Catalog flow (owner)", () => {
     // Search by the unique tail (not the shared "E2E Barcode-" prefix) so the
     // new item is the only trigram match and lands on page 1.
     await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
-    await expect(page.getByRole("cell", { name, exact: true })).toBeVisible({
+    await expect(catalogItem(page, name)).toBeVisible({
       timeout: 15_000,
     });
 
@@ -74,7 +80,7 @@ test.describe("Catalog flow (owner)", () => {
         response.ok(),
     );
     await dialog.getByLabel("Код", { exact: true }).fill(code);
-    await dialog.getByRole("button", { name: /\+ Добавить/ }).click();
+    await dialog.getByRole("button", { name: "+ Добавить", exact: true }).click();
 
     // Newly added barcode shows up in the per-item list.
     await addBarcodeResponse;
@@ -101,8 +107,60 @@ test.describe("Catalog flow (owner)", () => {
     // distinctive suffix keeps the trigram result to this one row regardless of
     // how many similar test items the shared DB has accumulated.
     await page.getByLabel(/Поиск/).fill(catalogSearchKey(needle));
-    await expect(page.getByRole("cell", { name: needle, exact: true })).toBeVisible({
+    await expect(catalogItem(page, needle)).toBeVisible({
       timeout: 15_000,
     });
+  });
+
+  test("upload and remove an optional product photo", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+    const name = uniqueName("E2E Photo");
+    const createRes = await api.post("catalog", {
+      data: { brand_name: name, dispensing_type: "otc", storage_type: "normal" },
+    });
+    expect(createRes.ok()).toBeTruthy();
+    await apiAnon.dispose();
+    await api.dispose();
+
+    await loginInBrowser(page, OWNER);
+    await page.goto("/catalog");
+    await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
+
+    const item = catalogItem(page, name);
+    await expect(item).toBeVisible({ timeout: 15_000 });
+    await item.locator("button").first().click();
+
+    const details = page.locator('aside[aria-label="Карточка выбранной позиции"]');
+    await expect(details).toBeVisible();
+
+    const uploadResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        /\/api\/v1\/catalog\/[^/]+\/image$/.test(response.url()) &&
+        response.ok(),
+    );
+    await details
+      .getByLabel("Выбрать фотографию товара")
+      .setInputFiles("public/icons/icon-192.png");
+    await uploadResponse;
+
+    await expect(details.getByText("Фотография товара", { exact: true })).toBeVisible();
+    await expect(details.getByRole("img", { name: `Упаковка ${name}` })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await details.getByRole("button", { name: "Удалить", exact: true }).click();
+    const deleteResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        /\/api\/v1\/catalog\/[^/]+\/image$/.test(response.url()) &&
+        response.ok(),
+    );
+    await page.getByRole("dialog").getByRole("button", { name: "Удалить фото" }).click();
+    await deleteResponse;
+    await expect(details.getByText("Фото не добавлено", { exact: true })).toBeVisible();
   });
 });

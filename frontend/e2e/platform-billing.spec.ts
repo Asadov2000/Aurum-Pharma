@@ -1,6 +1,6 @@
 import { test, type Page } from "@playwright/test";
 
-import { clearLoginRateLimit, DEV, expect, loginInBrowser } from "./helpers";
+import { clearLoginRateLimit, DEV, expect, loginInBrowser, selectTouchDensity } from "./helpers";
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   const width = await page.evaluate(() => ({
@@ -34,11 +34,7 @@ test("platform billing workspace remains read-only and usable on desktop and tou
     await expectNoHorizontalOverflow(page);
   }
 
-  await page.addInitScript(() => {
-    window.localStorage.setItem("ui:density", "touch");
-  });
-  await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+  await selectTouchDensity(page);
   await page.getByRole("button", { name: "Архив прежних счетов" }).click();
 
   const search = page.getByRole("searchbox", { name: "Аптека или номер счёта" });

@@ -30,6 +30,7 @@ from app.domains.incoming.models import IncomingDocument, IncomingItem
 from app.domains.incoming.repository import (
     IncomingDocumentDetails,
     IncomingItemDetails,
+    IncomingListSummaryData,
     IncomingRepository,
 )
 from app.domains.inventory.repository import InventoryRepository
@@ -77,7 +78,7 @@ class IncomingService:
         date_to: date | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> tuple[list[IncomingDocument], int]:
+    ) -> tuple[list[IncomingDocumentDetails], int]:
         return await self.repo.list_documents(
             branch_id=branch_id,
             branch_ids=branch_ids,
@@ -88,6 +89,25 @@ class IncomingService:
             date_to=date_to,
             page=page,
             page_size=page_size,
+        )
+
+    async def summarize_documents(
+        self,
+        *,
+        branch_id: UUID | None = None,
+        branch_ids: set[UUID] | None = None,
+        supplier_id: UUID | None = None,
+        document_number: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> IncomingListSummaryData:
+        return await self.repo.summarize_documents(
+            branch_id=branch_id,
+            branch_ids=branch_ids,
+            supplier_id=supplier_id,
+            document_number=document_number,
+            date_from=date_from,
+            date_to=date_to,
         )
 
     async def get_document(

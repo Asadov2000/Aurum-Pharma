@@ -280,7 +280,7 @@ function OverviewContent({ data }: { data: SalesSummaryOverview }): JSX.Element 
   const hasSales = data.sales_count > 0 || data.returns_count > 0;
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="grid grid-cols-2 border-b border-border lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px border-b border-border bg-border lg:grid-cols-4">
         <Metric label="Чистая выручка" value={formatMoney(data.net, data.currency)} emphasis />
         <Metric label="Продажи" value={formatMoney(data.gross_sales, data.currency)} />
         <Metric label="Средний чек" value={formatMoney(data.average_sale, data.currency)} />
@@ -325,10 +325,10 @@ function Metric({
   tone?: "default" | "danger";
 }): JSX.Element {
   return (
-    <div className="min-w-0 border-b border-r border-border px-4 py-3 last:border-r-0 lg:border-b-0">
-      <p className="text-xs font-medium text-foreground-muted">{label}</p>
+    <div className="min-w-0 bg-surface px-4 py-4 text-center">
+      <p className="text-sm text-foreground-muted">{label}</p>
       <p
-        className={`mt-1 truncate font-mono text-lg font-semibold tabular-nums ${
+        className={`mt-1 truncate text-2xl font-semibold tabular-nums ${
           emphasis
             ? "text-success-foreground"
             : tone === "danger"
@@ -349,6 +349,7 @@ function PaymentBreakdown({ data }: { data: SalesSummaryOverview }): JSX.Element
     amount: Number(data.payment_breakdown[key]),
   }));
   const max = Math.max(...rows.map((row) => row.amount), 1);
+  const total = rows.reduce((sum, row) => sum + row.amount, 0);
   return (
     <section className="min-w-0 border-b border-border p-4 lg:border-b-0 lg:border-r">
       <h3 className="text-sm font-semibold text-foreground">Способы оплаты</h3>
@@ -357,8 +358,13 @@ function PaymentBreakdown({ data }: { data: SalesSummaryOverview }): JSX.Element
           <div key={row.key}>
             <div className="flex items-baseline justify-between gap-3 text-sm">
               <span className="truncate text-foreground-secondary">{row.label}</span>
-              <span className="shrink-0 font-mono tabular-nums">
-                {formatMoney(String(row.amount), data.currency)}
+              <span className="shrink-0 text-right tabular-nums">
+                <span className="font-medium">
+                  {formatMoney(String(row.amount), data.currency)}
+                </span>
+                <span className="ml-2 text-xs text-foreground-muted">
+                  {total > 0 ? `${Math.round((row.amount / total) * 100)}%` : "0%"}
+                </span>
               </span>
             </div>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-foreground/10">

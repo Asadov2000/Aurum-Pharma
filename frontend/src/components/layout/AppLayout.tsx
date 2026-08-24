@@ -9,14 +9,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
-import { AppearanceMenu } from "@/components/AppearanceMenu";
 import { useAuth } from "@/features/auth/hooks";
 import { useMfaStepUpRequested } from "@/features/auth/stepUpCoordinator";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
+import { useUserPreferencesQuery } from "@/features/settings/queries";
 import { cn } from "@/lib/utils";
 
 import { BrandMark } from "./BrandMark";
@@ -29,14 +29,22 @@ import { ServerStatusBanner } from "./ServerStatusBanner";
 import { Sidebar } from "./Sidebar";
 import { buildNav, findActiveNavItem } from "./nav";
 import {
+  defaultSidebarPreferences,
   loadSidebarPreferences,
   orderSidebarItems,
   parseSidebarPreferences,
   saveSidebarPreferences,
+  SIDEBAR_PREFERENCES_CHANGED_EVENT,
   sidebarStorageKey,
   type SidebarPreferences,
   visibleSidebarItems,
 } from "./sidebarPreferences";
+import { type AppRoutePath } from "./routeAccess";
+
+const AppearanceMenu = lazy(async () => {
+  const module = await import("@/components/AppearanceMenu");
+  return { default: module.AppearanceMenu };
+});
 
 const MfaStepUpDialog = lazy(async () => {
   const module = await import("@/features/auth/MfaStepUpDialog");
@@ -50,7 +58,9 @@ const SidebarSettingsModal = lazy(async () => {
 
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const preferencesQuery = useUserPreferencesQuery();
   const mfaStepUpRequested = useMfaStepUpRequested();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
@@ -87,6 +97,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const [sidebarPreferences, setSidebarPreferences] = useState<SidebarPreferences>(() =>
     loadSidebarPreferences(sidebarScope),
   );
+  const startRouteHandledScopeRef = useRef<string | null>(null);
   const [wideDesktop, setWideDesktop] = useState(
     () => window.matchMedia("(min-width: 80rem)").matches,
   );
@@ -109,6 +120,17 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
     pathname === "/admin/sync"
       ? "Синхронизация"
       : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
+  const pageOwnsDesktopTitle =
+    pathname === "/" ||
+    pathname === "/catalog" ||
+    pathname === "/sales" ||
+    pathname === "/suppliers" ||
+    pathname === "/incoming" ||
+    pathname === "/batches" ||
+    pathname === "/onboarding" ||
+    pathname === "/reports";
+  const workspaceLabel =
+    user?.support_access?.tenant_name ?? (hasTenant ? "Рабочая область аптеки" : "Платформа Aurum");
 
   // Clean identity: a recognizable name + a quiet caption. We have no role name
   // in the payload, so the caption is the support role (dev/admin) when set, or
@@ -116,13 +138,25 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const fullName = user?.full_name?.trim();
   const name = fullName || user?.email || "—";
   const caption = user?.is_developer
-      ? "Разработчик"
-      : user?.is_administrator
-        ? "Администратор"
-        : fullName
+    ? "Разработчик"
+    : user?.is_administrator
+      ? "Администратор"
+      : fullName
         ? (user?.email ?? null)
         : null;
   const initial = name.charAt(0).toUpperCase();
+  const serverSidebarPreferences = useMemo(
+    () =>
+      preferencesQuery.data
+        ? parseSidebarPreferences({
+            desktopMode: preferencesQuery.data.workspace.desktop_mode,
+            hiddenRoutes: preferencesQuery.data.workspace.hidden_routes,
+            favoriteRoutes: preferencesQuery.data.workspace.favorite_routes,
+            routeOrder: preferencesQuery.data.workspace.route_order,
+          })
+        : null,
+    [preferencesQuery.data],
+  );
 
   const updateSidebarPreferences = useCallback(
     (next: SidebarPreferences) => {
@@ -144,6 +178,17 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   };
 
   useEffect(() => {
+    const openFromSettingsHub = () => {
+      setNavigationOpen(false);
+      setSidebarSettingsOpen(true);
+    };
+    window.addEventListener("aurum:open-sidebar-settings", openFromSettingsHub);
+    return () => {
+      window.removeEventListener("aurum:open-sidebar-settings", openFromSettingsHub);
+    };
+  }, []);
+
+  useEffect(() => {
     setSidebarPreferences(loadSidebarPreferences(sidebarScope));
 
     const key = sidebarStorageKey(sidebarScope);
@@ -159,9 +204,54 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         setSidebarPreferences(loadSidebarPreferences(sidebarScope));
       }
     };
+    const onSameTabChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ scope?: string }>).detail;
+      if (detail?.scope === sidebarScope) {
+        setSidebarPreferences(loadSidebarPreferences(sidebarScope));
+      }
+    };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener(SIDEBAR_PREFERENCES_CHANGED_EVENT, onSameTabChange);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(SIDEBAR_PREFERENCES_CHANGED_EVENT, onSameTabChange);
+    };
   }, [sidebarScope]);
+
+  useEffect(() => {
+    if (!serverSidebarPreferences) return;
+    const local = loadSidebarPreferences(sidebarScope);
+    const serverIsDefault = sameSidebarPreferences(
+      serverSidebarPreferences,
+      defaultSidebarPreferences(),
+    );
+    const localIsDefault = sameSidebarPreferences(local, defaultSidebarPreferences());
+    const alreadySynced = hasServerSidebarMarker(sidebarScope);
+
+    // Preserve one legacy local customization, then treat the account copy as
+    // authoritative on every subsequent device and session.
+    if (!alreadySynced && serverIsDefault && !localIsDefault) return;
+    markServerSidebarSynced(sidebarScope);
+    if (!sameSidebarPreferences(local, serverSidebarPreferences)) {
+      saveSidebarPreferences(sidebarScope, serverSidebarPreferences);
+    } else {
+      setSidebarPreferences(serverSidebarPreferences);
+    }
+  }, [serverSidebarPreferences, sidebarScope]);
+
+  useEffect(() => {
+    if (!preferencesQuery.data || startRouteHandledScopeRef.current === sidebarScope) return;
+    startRouteHandledScopeRef.current = sidebarScope;
+
+    const marker = startRouteSessionKey(sidebarScope);
+    if (hasSessionMarker(marker)) return;
+    setSessionMarker(marker);
+    if (pathname !== "/") return;
+
+    const requested = preferencesQuery.data.workspace.start_route;
+    const target = items.find((item) => item.to === requested)?.to as AppRoutePath | undefined;
+    if (target && target !== "/") void navigate({ to: target, replace: true });
+  }, [items, navigate, pathname, preferencesQuery.data, sidebarScope]);
 
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 64rem)");
@@ -247,7 +337,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   }, [navigationOpen]);
 
   return (
-    <div className="min-h-screen bg-background" style={shellStyle}>
+    <div data-ui-version="2026" className="min-h-screen bg-background" style={shellStyle}>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
@@ -297,11 +387,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         className="sticky top-0 z-sticky border-b border-border bg-surface"
       >
         <div className="flex min-h-[var(--app-header-height)] items-stretch">
-          <div className="hidden w-[var(--app-sidebar-width)] shrink-0 items-center border-r border-border px-4 lg:flex">
-            <BrandMark />
+          <div className="hidden w-[var(--app-sidebar-width)] shrink-0 items-center border-r border-shell-sidebar-border bg-shell-sidebar px-4 lg:flex">
+            <BrandMark tone="inverse" />
             <span
               className={cn(
-                "ml-3 truncate font-display text-lg font-semibold text-foreground",
+                "ml-3 truncate font-display text-lg font-semibold text-shell-sidebar-foreground",
                 !sidebarExpanded && "sr-only",
               )}
             >
@@ -324,16 +414,30 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
               <span className="truncate font-display text-base font-semibold text-foreground sm:text-lg lg:hidden">
                 Aurum Pharma
               </span>
-              <h1 className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
-                {pageTitle}
-              </h1>
+              {pageOwnsDesktopTitle ? (
+                <span className="hidden min-h-9 items-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground-secondary lg:inline-flex">
+                  {workspaceLabel}
+                </span>
+              ) : (
+                <h1 className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
+                  {pageTitle}
+                </h1>
+              )}
             </div>
 
             <div className="flex shrink-0 items-center gap-2 sm:gap-3">
               <ConnectivityIndicator />
               <PwaInstallButton />
               <RuntimeSurfaceBadge />
-              <div className="hidden min-w-0 items-center gap-2 border-l border-border pl-3 2xl:flex">
+              <Link
+                to="/notifications"
+                aria-label="Открыть уведомления"
+                title="Уведомления"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground-secondary transition-colors duration-fast hover:bg-foreground/5 hover:text-foreground"
+              >
+                <NotificationIcon />
+              </Link>
+              <div className="hidden min-w-0 items-center gap-2 border-l border-border pl-3 xl:flex">
                 <span
                   aria-hidden="true"
                   className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-xs font-semibold text-primary"
@@ -349,7 +453,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
                   )}
                 </span>
               </div>
-              <AppearanceMenu />
+              <Suspense fallback={<div aria-hidden="true" className="h-9 w-9 shrink-0" />}>
+                <AppearanceMenu />
+              </Suspense>
               <Button
                 variant="secondary"
                 size="sm"
@@ -415,6 +521,53 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       ) : null}
     </div>
   );
+}
+
+const SIDEBAR_SERVER_MARKER_PREFIX = "aurum:sidebar-server:v1";
+const START_ROUTE_SESSION_PREFIX = "aurum:start-route:v1";
+
+function sameSidebarPreferences(left: SidebarPreferences, right: SidebarPreferences): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sidebarServerMarkerKey(scope: string): string {
+  return `${SIDEBAR_SERVER_MARKER_PREFIX}:${encodeURIComponent(scope)}`;
+}
+
+function hasServerSidebarMarker(scope: string): boolean {
+  try {
+    return window.localStorage.getItem(sidebarServerMarkerKey(scope)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markServerSidebarSynced(scope: string): void {
+  try {
+    window.localStorage.setItem(sidebarServerMarkerKey(scope), "1");
+  } catch {
+    // The synchronized in-memory state still works when storage is blocked.
+  }
+}
+
+function startRouteSessionKey(scope: string): string {
+  return `${START_ROUTE_SESSION_PREFIX}:${encodeURIComponent(scope)}`;
+}
+
+function hasSessionMarker(key: string): boolean {
+  try {
+    return window.sessionStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setSessionMarker(key: string): void {
+  try {
+    window.sessionStorage.setItem(key, "1");
+  } catch {
+    // The component ref prevents repeated redirects for this mounted session.
+  }
 }
 
 function MfaStepUpLoading(): JSX.Element {
@@ -491,6 +644,25 @@ function LogoutIcon(): JSX.Element {
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <path d="m16 17 5-5-5-5" />
       <path d="M21 12H9" />
+    </svg>
+  );
+}
+
+function NotificationIcon(): JSX.Element {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M10.5 21a2 2 0 0 0 3 0" />
     </svg>
   );
 }

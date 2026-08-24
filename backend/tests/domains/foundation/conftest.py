@@ -21,6 +21,8 @@ from app.domains.roles.models import (
     TenantMembership,
     UserAssignment,
 )
+from app.domains.roles.repository import RolesRepository
+from app.domains.roles.service import RolesService
 from app.main import app
 from tests.auth_helpers import create_support_access_token
 from tests.platform_access_helpers import create_test_platform_user
@@ -120,10 +122,31 @@ async def tenant_admin_token(
     make_tenant,
     make_user,
 ):  # type: ignore[no-untyped-def]
-    """Create a tenant-scoped administrator with explicit settings access."""
+    """Create a tenant user; owners are the default for settings tests."""
 
-    async def _factory(tenant: Tenant | None = None) -> tuple[str, Tenant, AppUser]:
+    async def _factory(
+        tenant: Tenant | None = None,
+        *,
+        is_owner: bool = True,
+        permission_codes: tuple[str, ...] = ("settings.update",),
+    ) -> tuple[str, Tenant, AppUser]:
         t = tenant if tenant is not None else await make_tenant()
+        if is_owner:
+            owner, _membership, _ownership, _role = await RolesService(
+                RolesRepository(db_session)
+            ).provision_owner(
+                tenant_id=t.id,
+                email=f"settings-owner-{uuid4().hex[:8]}@aurum.tj",
+                full_name="Settings Owner",
+            )
+            token = create_access_token(
+                owner.id,
+                tenant_id=t.id,
+                is_developer=False,
+                is_administrator=False,
+            )
+            return token, t, owner
+
         user = await make_user(home_tenant_id=t.id)
         membership = TenantMembership(
             tenant_id=t.id,
@@ -141,7 +164,12 @@ async def tenant_admin_token(
         await db_session.flush()
         await db_session.refresh(membership)
         await db_session.refresh(role)
-        db_session.add(RolePermission(role_id=role.id, permission_code="settings.update"))
+        db_session.add_all(
+            [
+                RolePermission(role_id=role.id, permission_code=permission_code)
+                for permission_code in permission_codes
+            ]
+        )
         db_session.add(
             UserAssignment(
                 user_id=user.id,

@@ -8,6 +8,7 @@ export function PageHeader({
   meta,
   actions,
   compact = false,
+  showTitleOnDesktop = false,
   className,
 }: {
   title: ReactNode;
@@ -15,6 +16,7 @@ export function PageHeader({
   meta?: ReactNode;
   actions?: ReactNode;
   compact?: boolean;
+  showTitleOnDesktop?: boolean;
   className?: string;
 }): JSX.Element {
   const hasDesktopSupportingContent =
@@ -26,15 +28,22 @@ export function PageHeader({
       className={cn(
         "flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-3",
         compact ? "py-0.5" : "py-1",
-        !hasDesktopSupportingContent && "lg:hidden",
+        !hasDesktopSupportingContent && !showTitleOnDesktop && "lg:hidden",
         className,
       )}
     >
-      <div className={cn("min-w-0", !hasDesktopText && "lg:hidden")}>
+      <div
+        className={cn(
+          "min-w-0",
+          !hasDesktopText && !showTitleOnDesktop && "lg:hidden",
+          showTitleOnDesktop && "lg:block",
+        )}
+      >
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
           <h1
             className={cn(
-              "min-w-0 break-words font-display font-semibold leading-tight text-foreground lg:hidden",
+              "min-w-0 break-words font-display font-semibold leading-tight text-foreground",
+              !showTitleOnDesktop && "lg:hidden",
               compact ? "text-xl" : "text-2xl",
             )}
           >

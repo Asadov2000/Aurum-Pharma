@@ -8,12 +8,13 @@ from enum import StrEnum
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.auth.models import EmailCode, Session
+from app.domains.auth.models import EmailCode, Session, UserPreferences
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,39 @@ def _mfa_session_from_row(row: RowMapping) -> MfaSessionRecord:
 class AuthRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_or_create_user_preferences(self, user_id: UUID) -> UserPreferences:
+        await self.session.execute(
+            insert(UserPreferences)
+            .values(user_id=user_id)
+            .on_conflict_do_nothing(index_elements=[UserPreferences.user_id])
+        )
+        preferences = await self.session.scalar(
+            select(UserPreferences)
+            .where(UserPreferences.user_id == user_id)
+            .execution_options(populate_existing=True)
+        )
+        if preferences is None:
+            raise RuntimeError("User preferences are unavailable")
+        return preferences
+
+    async def update_user_preferences(
+        self,
+        *,
+        user_id: UUID,
+        expected_version: int,
+        fields: dict[str, object],
+    ) -> UserPreferences | None:
+        result = await self.session.execute(
+            update(UserPreferences)
+            .where(
+                UserPreferences.user_id == user_id,
+                UserPreferences.version == expected_version,
+            )
+            .values(**fields, version=UserPreferences.version + 1)
+            .returning(UserPreferences)
+        )
+        return result.scalar_one_or_none()
 
     # -------------------------------------------------------------------------
     # app_user

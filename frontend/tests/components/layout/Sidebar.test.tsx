@@ -35,10 +35,9 @@ describe("Sidebar", () => {
       <Sidebar items={ITEMS} onToggleExpanded={onToggleExpanded} onOpenSettings={onOpenSettings} />,
     );
 
-    expect(screen.getByRole("navigation", { name: "Основная навигация" })).toHaveAttribute(
-      "data-sidebar-mode",
-      "expanded",
-    );
+    const navigation = screen.getByRole("navigation", { name: "Основная навигация" });
+    expect(navigation).toHaveAttribute("data-sidebar-mode", "expanded");
+    expect(navigation.querySelector(".aurum-scrollbar")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Главная" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Касса" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Роли" })).not.toHaveAttribute("aria-current");

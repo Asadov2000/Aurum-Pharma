@@ -19,13 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
     CurrentUser,
-    current_user,
     ensure_platform_capability,
     get_db,
     require_any_permission,
     require_permission,
     require_platform_capability,
     require_recent_platform_capability,
+    require_tenant_owner,
 )
 from app.core.errors import AuthenticationError, BusinessRuleError, PermissionDeniedError
 from app.domains.foundation.repository import FoundationRepository
@@ -43,6 +43,7 @@ from app.domains.foundation.schemas import (
     RegisterSearchResponse,
     RegisterUpdate,
     TenantCreate,
+    TenantOperationalSettingsRead,
     TenantRead,
     TenantSettingsRead,
     TenantSettingsUpdate,
@@ -71,6 +72,15 @@ REGISTER_DISCOVERY_PERMISSIONS = (
     "pos.shift_open",
     "pos.shift_close",
     "pos.sell",
+    "reports.view",
+)
+OPERATIONAL_SETTINGS_PERMISSIONS = (
+    "pos.shift_open",
+    "pos.shift_close",
+    "pos.sell",
+    "pos.refund",
+    "sales.view.own",
+    "sales.view.tenant",
     "reports.view",
 )
 
@@ -260,25 +270,50 @@ tenant_router = APIRouter(prefix="/api/v1", tags=["tenant"])
 
 @tenant_router.get("/tenant/settings", response_model=TenantSettingsRead)
 async def get_tenant_settings(
-    user: Annotated[CurrentUser, Depends(current_user)],
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> TenantSettingsRead:
+    _set_search_no_store(response)
     settings = await service.get_settings(_current_tenant_or_400(user))
     return TenantSettingsRead.model_validate(settings)
+
+
+@tenant_router.get(
+    "/tenant/operational-settings",
+    response_model=TenantOperationalSettingsRead,
+)
+async def get_tenant_operational_settings(
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission(*OPERATIONAL_SETTINGS_PERMISSIONS)),
+    ],
+    service: Annotated[FoundationService, Depends(_service)],
+) -> TenantOperationalSettingsRead:
+    _set_search_no_store(response)
+    settings = await service.get_settings(_current_tenant_or_400(user))
+    return TenantOperationalSettingsRead.model_validate(settings)
 
 
 @tenant_router.patch("/tenant/settings", response_model=TenantSettingsRead)
 async def update_tenant_settings(
     payload: TenantSettingsUpdate,
-    user: Annotated[CurrentUser, Depends(require_permission("settings.update"))],
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> TenantSettingsRead:
+    _set_search_no_store(response)
     raw = payload.model_dump(exclude_none=True)
+    expected_version = int(raw.pop("expected_version"))
     # Pydantic returned ExpiryThresholds as a nested dict — flatten to plain JSON.
     if "expiry_thresholds" in raw:
         raw["expiry_thresholds"] = dict(raw["expiry_thresholds"])
     settings = await service.update_settings(
-        _current_tenant_or_400(user), fields=raw, updated_by=user.user_id
+        _current_tenant_or_400(user),
+        fields=raw,
+        updated_by=user.user_id,
+        expected_version=expected_version,
     )
     return TenantSettingsRead.model_validate(settings)
 

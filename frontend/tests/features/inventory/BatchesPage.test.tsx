@@ -3,10 +3,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listBatches = vi.fn();
+const getBatch = vi.fn();
 
 vi.mock("@/features/inventory/api", () => ({
   listBatches: (...args: unknown[]) => listBatches(...args),
-  getBatch: vi.fn(),
+  getBatch: (...args: unknown[]) => getBatch(...args),
   listMovements: vi.fn(),
   writeOff: vi.fn(),
 }));
@@ -95,6 +96,12 @@ function renderPage() {
 describe("BatchesPage", () => {
   beforeEach(() => {
     listBatches.mockReset();
+    getBatch.mockReset();
+    getBatch.mockResolvedValue({
+      ...BATCH,
+      report_timezone: "Asia/Dushanbe",
+      recent_movements: [],
+    });
     setDesktop(true);
   });
 
@@ -133,6 +140,12 @@ describe("BatchesPage", () => {
     expect(screen.getByText("Требуют внимания")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Открыть партию LOT-2026-001 товара Парацетамол/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Карточка партии LOT-2026-001" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Открыть полную карточку" }),
     ).toBeInTheDocument();
   });
 

@@ -10,7 +10,7 @@ const getStockOnDateXlsx = vi.fn();
 const getZReportXlsx = vi.fn();
 const listBranches = vi.fn();
 const listRegisters = vi.fn();
-const getTenantSettings = vi.fn();
+const getTenantOperationalSettings = vi.fn();
 
 vi.mock("@/features/reports/api", () => ({
   getZReport: (...args: unknown[]) => getZReport(...args),
@@ -27,7 +27,8 @@ vi.mock("@/features/pos/api", () => ({
 vi.mock("@/features/foundation/api", () => ({
   listBranches: (...args: unknown[]) => listBranches(...args),
   listRegisters: (...args: unknown[]) => listRegisters(...args),
-  getTenantSettings: (...args: unknown[]) => getTenantSettings(...args),
+  getTenantOperationalSettings: (...args: unknown[]) =>
+    getTenantOperationalSettings(...args),
 }));
 
 import { ReportsPage } from "@/features/reports/ReportsPage";
@@ -41,6 +42,10 @@ function renderPage() {
       <ReportsPage />
     </QueryClientProvider>,
   );
+}
+
+function openReportTab(name: RegExp): void {
+  fireEvent.click(screen.getByRole("tab", { name }));
 }
 
 const SHIFT = {
@@ -134,10 +139,10 @@ describe("ReportsPage", () => {
     getZReportXlsx.mockReset();
     listBranches.mockReset();
     listRegisters.mockReset();
-    getTenantSettings.mockReset();
+    getTenantOperationalSettings.mockReset();
     listBranches.mockResolvedValue([]);
     listRegisters.mockResolvedValue([]);
-    getTenantSettings.mockResolvedValue({ report_timezone: "Asia/Dushanbe" });
+    getTenantOperationalSettings.mockResolvedValue({ report_timezone: "Asia/Dushanbe" });
     listShiftHistory.mockResolvedValue(SHIFT_LIST);
     getSalesSummary.mockResolvedValue(SALES_SUMMARY);
   });
@@ -149,6 +154,7 @@ describe("ReportsPage", () => {
   it("shows resolved shift history and opens a Z-report without a UUID field", async () => {
     getZReport.mockResolvedValueOnce(Z_REPORT);
     renderPage();
+    openReportTab(/^Смены/);
 
     expect(await screen.findByText("Аптека Рудаки")).toBeInTheDocument();
     expect(screen.getByText("Касса 01")).toBeInTheDocument();
@@ -214,6 +220,7 @@ describe("ReportsPage", () => {
 
   it("applies cashier search only after submitting filters", async () => {
     renderPage();
+    openReportTab(/^Смены/);
     await screen.findByText("Малика Саидова");
     expect(listShiftHistory).toHaveBeenCalledTimes(1);
 
@@ -240,7 +247,38 @@ describe("ReportsPage", () => {
     });
 
     renderPage();
+    openReportTab(/^Смены/);
 
     expect(await screen.findByText("Закрытых смен не найдено")).toBeInTheDocument();
+  });
+
+  it("loads only the active report and remembers the selected view", async () => {
+    renderPage();
+
+    await screen.findByText("Чистая выручка");
+    expect(getSalesSummary).toHaveBeenCalledTimes(1);
+    expect(listShiftHistory).not.toHaveBeenCalled();
+
+    openReportTab(/^Смены/);
+    expect(await screen.findByText("Малика Саидова")).toBeInTheDocument();
+    expect(listShiftHistory).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem("aurum:reports:view:v1")).toBe("shifts");
+
+    openReportTab(/^Остатки/);
+    expect(screen.getByRole("region", { name: "Остатки на дату" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("aurum:reports:view:v1")).toBe("stock");
+  });
+
+  it("supports keyboard navigation between report tabs", async () => {
+    renderPage();
+    await screen.findByText("Чистая выручка");
+
+    const salesTab = screen.getByRole("tab", { name: /^Продажи/ });
+    salesTab.focus();
+    fireEvent.keyDown(salesTab, { key: "ArrowRight" });
+
+    const shiftsTab = screen.getByRole("tab", { name: /^Смены/ });
+    expect(shiftsTab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("Малика Саидова")).toBeInTheDocument();
   });
 });

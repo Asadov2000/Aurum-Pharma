@@ -33,6 +33,15 @@ class IncomingItemDetails:
     catalog_pack_size: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class IncomingListSummaryData:
+    all_count: int
+    draft_count: int
+    accepted_count: int
+    rejected_count: int
+    accepted_amount: Decimal
+
+
 class IncomingRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -99,10 +108,128 @@ class IncomingRepository:
         date_to: date | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> tuple[list[IncomingDocument], int]:
+    ) -> tuple[list[IncomingDocumentDetails], int]:
         if branch_ids is not None and not branch_ids:
             return [], 0
 
+        clauses = self._document_filter_clauses(
+            branch_id=branch_id,
+            branch_ids=branch_ids,
+            supplier_id=supplier_id,
+            status=status,
+            document_number=document_number,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        count_stmt = select(func.count()).select_from(IncomingDocument)
+        stmt = (
+            select(IncomingDocument, Branch.name, Supplier.name)
+            .join(
+                Branch,
+                and_(
+                    Branch.id == IncomingDocument.branch_id,
+                    Branch.tenant_id == IncomingDocument.tenant_id,
+                ),
+            )
+            .join(
+                Supplier,
+                and_(
+                    Supplier.id == IncomingDocument.supplier_id,
+                    Supplier.tenant_id == IncomingDocument.tenant_id,
+                ),
+            )
+        )
+        if clauses:
+            count_stmt = count_stmt.where(and_(*clauses))
+            stmt = stmt.where(and_(*clauses))
+
+        total = int((await self.session.execute(count_stmt)).scalar_one())
+        stmt = (
+            stmt.order_by(
+                IncomingDocument.document_date.desc(),
+                IncomingDocument.created_at.desc(),
+                IncomingDocument.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return (
+            [
+                IncomingDocumentDetails(
+                    document=document,
+                    branch_name=branch_name,
+                    supplier_name=supplier_name,
+                )
+                for document, branch_name, supplier_name in rows
+            ],
+            total,
+        )
+
+    async def summarize_documents(
+        self,
+        *,
+        branch_id: UUID | None = None,
+        branch_ids: set[UUID] | None = None,
+        supplier_id: UUID | None = None,
+        document_number: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> IncomingListSummaryData:
+        if branch_ids is not None and not branch_ids:
+            return IncomingListSummaryData(0, 0, 0, 0, Decimal("0"))
+
+        clauses = self._document_filter_clauses(
+            branch_id=branch_id,
+            branch_ids=branch_ids,
+            supplier_id=supplier_id,
+            status=None,
+            document_number=document_number,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        row = (
+            await self.session.execute(
+                select(
+                    func.count().label("all_count"),
+                    func.count().filter(IncomingDocument.status == "draft").label("draft_count"),
+                    func.count()
+                    .filter(IncomingDocument.status == "accepted")
+                    .label("accepted_count"),
+                    func.count()
+                    .filter(IncomingDocument.status == "rejected")
+                    .label("rejected_count"),
+                    func.coalesce(
+                        func.sum(IncomingDocument.total_amount).filter(
+                            IncomingDocument.status == "accepted"
+                        ),
+                        Decimal("0"),
+                    ).label("accepted_amount"),
+                )
+                .select_from(IncomingDocument)
+                .where(*clauses)
+            )
+        ).one()
+        return IncomingListSummaryData(
+            all_count=int(row.all_count),
+            draft_count=int(row.draft_count),
+            accepted_count=int(row.accepted_count),
+            rejected_count=int(row.rejected_count),
+            accepted_amount=Decimal(str(row.accepted_amount)),
+        )
+
+    @staticmethod
+    def _document_filter_clauses(
+        *,
+        branch_id: UUID | None,
+        branch_ids: set[UUID] | None,
+        supplier_id: UUID | None,
+        status: str | None,
+        document_number: str | None,
+        date_from: date | None,
+        date_to: date | None,
+    ) -> list[Any]:
         clauses: list[Any] = []
         if branch_id is not None:
             clauses.append(IncomingDocument.branch_id == branch_id)
@@ -123,25 +250,7 @@ class IncomingRepository:
             clauses.append(IncomingDocument.document_date >= date_from)
         if date_to is not None:
             clauses.append(IncomingDocument.document_date <= date_to)
-
-        count_stmt = select(func.count()).select_from(IncomingDocument)
-        stmt = select(IncomingDocument)
-        if clauses:
-            count_stmt = count_stmt.where(and_(*clauses))
-            stmt = stmt.where(and_(*clauses))
-
-        total = int((await self.session.execute(count_stmt)).scalar_one())
-        stmt = (
-            stmt.order_by(
-                IncomingDocument.document_date.desc(),
-                IncomingDocument.created_at.desc(),
-                IncomingDocument.id.desc(),
-            )
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        )
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all()), total
+        return clauses
 
     async def update_document(self, doc: IncomingDocument, **fields: Any) -> IncomingDocument:
         for k, v in fields.items():

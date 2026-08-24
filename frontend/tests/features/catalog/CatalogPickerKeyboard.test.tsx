@@ -7,8 +7,8 @@ const items = [
   { id: "c3", brand_name: "Ибупрофен", dosage: "200мг", manufacturer: "Borisov" },
 ];
 
-vi.mock("@/features/catalog/queries", () => ({
-  useCatalogQuery: () => ({ data: { items, total: items.length } }),
+vi.mock("@/features/catalog/pickerQueries", () => ({
+  useCatalogPickerQuery: () => ({ data: { items, total: items.length } }),
 }));
 
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";

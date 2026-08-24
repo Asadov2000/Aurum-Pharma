@@ -15,7 +15,7 @@ from uuid import UUID
 
 import structlog
 
-from app.core.errors import BusinessRuleError, NotFoundError
+from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.core.time import utc_now
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
 from app.domains.foundation.repository import FoundationRepository
@@ -86,10 +86,24 @@ class FoundationService:
         *,
         fields: dict[str, object],
         updated_by: UUID | None = None,
+        expected_version: int | None = None,
     ) -> TenantSettings:
-        settings = await self.get_settings(tenant_id)
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
+        if expected_version is not None:
+            updated = await self.repo.update_settings_if_version(
+                tenant_id=tenant_id,
+                expected_version=expected_version,
+                fields=fields,
+            )
+            if updated is None:
+                current = await self.get_settings(tenant_id)
+                raise ConflictError(
+                    "Settings changed in another session",
+                    details={"current_version": current.version},
+                )
+            return updated
+        settings = await self.get_settings(tenant_id)
         return await self.repo.update_settings(settings, **fields)
 
     # -------------------------------------------------------------------------

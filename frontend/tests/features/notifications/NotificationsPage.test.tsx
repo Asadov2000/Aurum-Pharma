@@ -146,7 +146,7 @@ describe("NotificationsPage", () => {
     expect(screen.getByText(/Заканчивается пробный период/i)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Обязательное" })).toBeDisabled();
     expect(screen.getAllByRole("checkbox", { name: "В системе" })[0]).toBeDisabled();
-    // Telegram label appears on every event card (5×), so just assert ≥1.
-    expect(screen.getAllByText(/Telegram \(Этап 2\)/i).length).toBeGreaterThanOrEqual(1);
+    // Phase-two channels are not rendered as misleading controls before they exist.
+    expect(screen.queryByText(/Telegram/i)).not.toBeInTheDocument();
   });
 });

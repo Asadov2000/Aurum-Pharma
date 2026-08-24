@@ -3,7 +3,7 @@ import { forwardRef, useEffect, useId, useRef, useState } from "react";
 import { Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
-import { useCatalogQuery } from "./queries";
+import { useCatalogPickerQuery } from "./pickerQueries";
 import { type CatalogItem } from "./types";
 
 interface Props {
@@ -77,7 +77,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     isFetching = false,
     isPlaceholderData = false,
     error = null,
-  } = useCatalogQuery(
+  } = useCatalogPickerQuery(
     { q: debounced, page: 1, page_size: 10, branch_id: branchId },
     debounced.length >= 2,
   );

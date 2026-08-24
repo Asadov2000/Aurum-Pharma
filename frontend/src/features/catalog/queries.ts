@@ -11,6 +11,7 @@ import {
   listCatalog,
   previewImport,
   rollbackImport,
+  restoreCatalogItem,
   updateCatalogItem,
   uploadImport,
 } from "./api";
@@ -51,6 +52,7 @@ export function useCreateCatalogItem() {
     mutationFn: (payload: CatalogItemCreatePayload) => createCatalogItem(payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
+      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
     },
   });
 }
@@ -63,6 +65,7 @@ export function useUpdateCatalogItem() {
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
       void qc.invalidateQueries({ queryKey: catalogKeys.item(vars.id) });
+      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
     },
   });
 }
@@ -73,6 +76,19 @@ export function useDeleteCatalogItem() {
     mutationFn: (id: string) => deleteCatalogItem(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
+      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
+    },
+  });
+}
+
+export function useRestoreCatalogItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreCatalogItem(id),
+    onSuccess: (_data, id) => {
+      void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
+      void qc.invalidateQueries({ queryKey: catalogKeys.item(id) });
+      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
     },
   });
 }
@@ -84,6 +100,7 @@ export function useAddBarcode() {
       addBarcode(args.itemId, args.payload),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: catalogKeys.item(vars.itemId) });
+      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
     },
   });
 }
@@ -95,18 +112,19 @@ export function useDeleteBarcode() {
       deleteBarcode(args.itemId, args.barcodeId),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: catalogKeys.item(vars.itemId) });
+      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
     },
   });
 }
 
 // ---- import ----
 
-export function useImportJobQuery(jobId: string | null, refetchInterval?: number) {
+export function useImportJobQuery(jobId: string | null) {
   return useQuery({
     queryKey: catalogKeys.import(jobId ?? ""),
     queryFn: () => getImportJob(jobId as string),
     enabled: jobId !== null,
-    refetchInterval,
+    refetchInterval: (query) => (query.state.data?.status === "importing" ? 2000 : false),
   });
 }
 
@@ -134,6 +152,7 @@ export function useConfirmImport() {
     onSuccess: (data) => {
       qc.setQueryData(catalogKeys.import(data.id), data);
       void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
+      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
     },
   });
 }
@@ -145,6 +164,7 @@ export function useRollbackImport() {
     onSuccess: (data) => {
       qc.setQueryData(catalogKeys.import(data.id), data);
       void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
+      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
     },
   });
 }

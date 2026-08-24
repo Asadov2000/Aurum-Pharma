@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getDashboardSummary = vi.fn();
@@ -83,7 +83,15 @@ describe("DashboardPage", () => {
       home_tenant_id: "t-1",
       full_name: "Owner",
       email: "owner@aurum.tj",
-      permissions: ["reports.view"],
+      permissions: [
+        "reports.view",
+        "pos.sell",
+        "incoming.view",
+        "incoming.create",
+        "catalog.view",
+        "batches.view",
+        "branches.view",
+      ],
     };
   });
   afterEach(() => {
@@ -101,14 +109,34 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Чек-лист")).toBeInTheDocument();
 
     // Today numbers
-    expect(screen.getByText("1500.00 TJS")).toBeInTheDocument();
+    expect(screen.getByText(/1\s500,00 TJS/)).toBeInTheDocument();
     // Expiring batch + license
-    expect(screen.getByText("LOT-7")).toBeInTheDocument();
+    expect(screen.getByText(/LOT-7/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Лицензии/ }));
     expect(screen.getByText("Аптека №1")).toBeInTheDocument();
     // Finance overdue badge
     expect(screen.getByText(/Есть просрочка/)).toBeInTheDocument();
     // Checklist counts
     expect(screen.getByText("Черновики приходов")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Обновить сводку" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Открыть кассу|Новая продажа/ }).length).toBe(2);
+  });
+
+  it("does not expose quick mutation actions without their permissions", async () => {
+    mockUser = {
+      home_tenant_id: "t-1",
+      full_name: "Auditor",
+      email: "auditor@aurum.tj",
+      permissions: ["reports.view"],
+    };
+    getDashboardSummary.mockResolvedValueOnce(SUMMARY);
+    renderPage();
+
+    expect(await screen.findByText("Сегодня")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Открыть кассу" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Новый приход" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Партия LOT-7/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Открыть партии" })).not.toBeInTheDocument();
   });
 
   it("shows the profile fallback for a support user without a tenant", () => {

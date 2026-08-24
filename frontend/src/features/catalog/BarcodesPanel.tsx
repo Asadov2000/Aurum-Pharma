@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -8,20 +8,40 @@ import { describeApiError } from "@/features/foundation/errors";
 import { barcodeLabel, barcodeOptions } from "./labels";
 import { useAddBarcode, useCatalogItemQuery, useDeleteBarcode } from "./queries";
 
-const schema = z.object({
-  code: z.string().min(1, "Введите код"),
-  code_type: z.enum(["ean13", "ean8", "gs1_128", "code128", "qr", "other"]),
-});
+const schema = z
+  .object({
+    code: z.string().trim().min(1, "Введите код").max(255, "Код слишком длинный"),
+    code_type: z.enum(["ean13", "ean8", "gs1_128", "code128", "qr", "other"]),
+  })
+  .superRefine((value, ctx) => {
+    const expectedLength = value.code_type === "ean13" ? 13 : value.code_type === "ean8" ? 8 : null;
+    if (expectedLength !== null && !new RegExp(`^\\d{${expectedLength}}$`).test(value.code)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["code"],
+        message: `Введите ${expectedLength} цифр`,
+      });
+    }
+  });
 
 type FormValues = z.infer<typeof schema>;
 
-export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
+export function BarcodesPanel({
+  itemId,
+  canManage,
+}: {
+  itemId: string;
+  canManage: boolean;
+}): JSX.Element {
   const detail = useCatalogItemQuery(itemId);
   const addMutation = useAddBarcode();
   const deleteMutation = useDeleteBarcode();
   const [topError, setTopError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const fieldId = useId();
+  const codeId = `${fieldId}-code`;
+  const typeId = `${fieldId}-type`;
 
   const form = useForm<FormValues>({
     defaultValues: { code: "", code_type: "ean13" },
@@ -37,6 +57,7 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
         seen.add(p);
         form.setError(p as keyof FormValues, { message: issue.message });
       }
+      form.setFocus("code");
       return;
     }
     setTopError(null);
@@ -67,6 +88,15 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
       <p className="text-sm font-medium text-foreground-secondary">Штрихкоды</p>
       {detail.isLoading ? (
         <p className="text-sm text-foreground-muted">Загрузка…</p>
+      ) : detail.error && !detail.data ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-danger/30 bg-danger-subtle px-3 py-2">
+          <p className="text-sm text-danger" role="alert">
+            {describeApiError(detail.error, "Не удалось загрузить штрихкоды")}
+          </p>
+          <Button variant="secondary" size="sm" onClick={() => void detail.refetch()}>
+            Повторить
+          </Button>
+        </div>
       ) : detail.data?.barcodes.length === 0 ? (
         <p className="text-sm italic text-foreground-muted">Пока нет штрихкодов</p>
       ) : (
@@ -80,51 +110,59 @@ export function BarcodesPanel({ itemId }: { itemId: string }): JSX.Element {
                 <code className="break-all font-mono text-sm">{b.code}</code>
                 <Badge tone="neutral">{barcodeLabel[b.code_type]}</Badge>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setDeleteError(null);
-                  setPendingDeleteId(b.id);
-                }}
-                isLoading={deleteMutation.isPending}
-              >
-                Удалить
-              </Button>
+              {canManage && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setDeleteError(null);
+                    setPendingDeleteId(b.id);
+                  }}
+                  isLoading={deleteMutation.isPending}
+                >
+                  Удалить
+                </Button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <form
-        onSubmit={onAdd}
-        noValidate
-        className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]"
-      >
-        <div>
-          <Label htmlFor="bc_code">Код</Label>
-          <Input
-            id="bc_code"
-            invalid={Boolean(form.formState.errors.code)}
-            {...form.register("code")}
-          />
-          <FormError>{form.formState.errors.code?.message}</FormError>
-        </div>
-        <div>
-          <Label htmlFor="bc_type">Тип</Label>
-          <Select id="bc_type" {...form.register("code_type")}>
-            {barcodeOptions.map((t) => (
-              <option key={t} value={t}>
-                {barcodeLabel[t]}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <Button type="submit" isLoading={form.formState.isSubmitting}>
-          + Добавить
-        </Button>
-      </form>
-      {topError && <p className="text-sm text-danger">{topError}</p>}
+      {canManage && (
+        <form
+          onSubmit={onAdd}
+          noValidate
+          className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]"
+        >
+          <div>
+            <Label htmlFor={codeId}>Код</Label>
+            <Input
+              id={codeId}
+              invalid={Boolean(form.formState.errors.code)}
+              {...form.register("code")}
+            />
+            <FormError>{form.formState.errors.code?.message}</FormError>
+          </div>
+          <div>
+            <Label htmlFor={typeId}>Тип</Label>
+            <Select id={typeId} {...form.register("code_type")}>
+              {barcodeOptions.map((t) => (
+                <option key={t} value={t}>
+                  {barcodeLabel[t]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <Button type="submit" isLoading={form.formState.isSubmitting}>
+            + Добавить
+          </Button>
+        </form>
+      )}
+      {topError && (
+        <p className="text-sm text-danger" role="alert">
+          {topError}
+        </p>
+      )}
       <ConfirmDialog
         open={pendingDeleteId !== null}
         title="Удалить штрихкод"

@@ -24,6 +24,7 @@ import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
+import { cn } from "@/lib/utils";
 
 import { BatchDetailModal } from "./BatchDetailModal";
 import {
@@ -40,6 +41,9 @@ import { type BatchWithExpiry, type ExpiryStatus } from "./types";
 const PAGE_SIZE = 25;
 
 type BlockedFilter = "" | "active" | "blocked";
+type BatchView = "table" | "cards";
+
+const VIEW_STORAGE_KEY = "aurum:batches:view:v1";
 
 export function BatchesPage(): JSX.Element {
   const filterPreferenceKey = useFilterPreferenceKey("batches");
@@ -51,8 +55,11 @@ export function BatchesPage(): JSX.Element {
   const [blockedFilter, setBlockedFilter] = useState<BlockedFilter>("");
   const [showEmpty, setShowEmpty] = useState(false);
   const [page, setPage] = useState(1);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [openBatchId, setOpenBatchId] = useState<string | null>(null);
+  const [view, setView] = useState<BatchView>(readBatchView);
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
+  const isSplitLayout = useMediaQuery("(min-width: 1280px)");
 
   const branches = useBranchesQuery(true);
 
@@ -82,7 +89,10 @@ export function BatchesPage(): JSX.Element {
   const filtersActive = Boolean(
     batchNumberInput || branchId || catalogId || expiry || blockedFilter || showEmpty,
   );
-  const selectedBatch = data?.items.find((item) => item.id === openBatchId);
+  const rows = data?.items ?? [];
+  const selectedBatch = rows.find((item) => item.id === selectedBatchId) ?? rows[0] ?? null;
+  const modalBatch = rows.find((item) => item.id === openBatchId);
+  const showSplitWorkspace = isSplitLayout && view === "table";
 
   const resetFilters = () => {
     setBatchNumberInput("");
@@ -95,11 +105,25 @@ export function BatchesPage(): JSX.Element {
     setPage(1);
   };
 
+  const changeView = (next: BatchView) => {
+    setView(next);
+    writeBatchView(next);
+  };
+
+  const openBatch = (batch: BatchWithExpiry) => {
+    if (showSplitWorkspace) {
+      setSelectedBatchId(batch.id);
+      return;
+    }
+    setOpenBatchId(batch.id);
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Партии"
         description="Остатки, сроки годности и движения товара по аптечным точкам."
+        showTitleOnDesktop
         meta={
           data ? (
             <span aria-live="polite">
@@ -275,6 +299,14 @@ export function BatchesPage(): JSX.Element {
           },
         ]}
         onResetValues={resetFilters}
+        actions={
+          <div className="flex min-h-[var(--control-height-md)] min-w-0 items-center gap-3">
+            {isDesktopLayout && <BatchViewControl value={view} onChange={changeView} />}
+            <span className="whitespace-nowrap text-sm text-foreground-muted" aria-live="polite">
+              Найдено: {data?.total ?? 0}
+            </span>
+          </div>
+        }
       />
 
       {isLoading ? (
@@ -312,10 +344,31 @@ export function BatchesPage(): JSX.Element {
         </TableEmpty>
       ) : (
         <>
-          {isDesktopLayout ? (
-            <BatchTable items={data.items} onOpen={setOpenBatchId} />
+          {view === "cards" || !isDesktopLayout ? (
+            <BatchCards items={data.items} onOpen={openBatch} />
+          ) : showSplitWorkspace ? (
+            <div className="grid min-w-0 grid-cols-[minmax(0,1.65fr)_minmax(23rem,1fr)] items-start gap-4">
+              <BatchTable
+                items={data.items}
+                selectedId={selectedBatch?.id ?? null}
+                onOpen={openBatch}
+              />
+              {selectedBatch && (
+                <section
+                  aria-label={`Карточка партии ${selectedBatch.batch_number ?? "без номера"}`}
+                  className="sticky top-[calc(var(--app-header-height)+1rem)] max-h-[calc(100vh-var(--app-header-height)-2rem)] min-w-0 overflow-y-auto rounded-lg border border-border bg-surface"
+                >
+                  <BatchDetailModal
+                    batchId={selectedBatch.id}
+                    onClose={() => setSelectedBatchId(null)}
+                    mode="preview"
+                    onOpenFull={() => setOpenBatchId(selectedBatch.id)}
+                  />
+                </section>
+              )}
+            </div>
           ) : (
-            <BatchCards items={data.items} onOpen={setOpenBatchId} />
+            <BatchTable items={data.items} selectedId={null} onOpen={openBatch} />
           )}
           <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onPage={setPage} />
         </>
@@ -324,9 +377,7 @@ export function BatchesPage(): JSX.Element {
       <Modal
         open={openBatchId !== null}
         onClose={() => setOpenBatchId(null)}
-        title={
-          selectedBatch?.batch_number ? `Партия ${selectedBatch.batch_number}` : "Карточка партии"
-        }
+        title={modalBatch?.batch_number ? `Партия ${modalBatch.batch_number}` : "Карточка партии"}
         className="max-w-5xl"
         bodyClassName="p-0 sm:p-0"
       >
@@ -355,27 +406,29 @@ function InventorySummary({
   return (
     <section
       aria-label="Сводка по партиям"
-      className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface md:grid-cols-4"
+      className="overflow-hidden rounded-lg border border-border bg-surface"
     >
-      <SummaryMetric label="Найдено партий" value={total.toLocaleString("ru-RU")} />
-      <SummaryMetric label="Остаток" value={formatInventoryQuantity(summary.total_qty)} />
-      <SummaryMetric
-        label="Требуют внимания"
-        value={summary.attention_count.toLocaleString("ru-RU")}
-        detail={
-          summary.expired_count > 0
-            ? `просрочено: ${summary.expired_count}`
-            : summary.blocked_count > 0
-              ? `заблокировано: ${summary.blocked_count}`
-              : "критичных нет"
-        }
-        tone={summary.attention_count > 0 ? "danger" : "success"}
-      />
-      <SummaryMetric
-        label="Стоимость остатка"
-        value={formatInventoryMoney(summary.purchase_value)}
-        detail={`в рознице: ${formatInventoryMoney(summary.sale_value)}`}
-      />
+      <div className="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
+        <SummaryMetric label="Найдено партий" value={total.toLocaleString("ru-RU")} />
+        <SummaryMetric label="Остаток" value={formatInventoryQuantity(summary.total_qty)} />
+        <SummaryMetric
+          label="Требуют внимания"
+          value={summary.attention_count.toLocaleString("ru-RU")}
+          detail={
+            summary.expired_count > 0 || summary.blocked_count > 0
+              ? `просрочено: ${summary.expired_count} · заблокировано: ${summary.blocked_count}`
+              : summary.attention_count > 0
+                ? `скоро истекают: ${summary.attention_count}`
+                : "критичных нет"
+          }
+          tone={summary.attention_count > 0 ? "danger" : "success"}
+        />
+        <SummaryMetric
+          label="Стоимость остатка"
+          value={formatInventoryMoney(summary.purchase_value)}
+          detail={`в рознице: ${formatInventoryMoney(summary.sale_value)}`}
+        />
+      </div>
     </section>
   );
 }
@@ -398,11 +451,9 @@ function SummaryMetric({
         ? "text-success-foreground"
         : "text-foreground";
   return (
-    <div className="min-w-0 border-b border-r border-border px-4 py-3 last:border-r-0 md:border-b-0">
-      <p className="text-xs font-medium text-foreground-muted">{label}</p>
-      <p className={`mt-1 truncate font-mono text-lg font-semibold tabular-nums ${valueTone}`}>
-        {value}
-      </p>
+    <div className="min-w-0 bg-surface px-4 py-4 text-center">
+      <p className="text-sm text-foreground-muted">{label}</p>
+      <p className={`mt-1 truncate text-2xl font-semibold tabular-nums ${valueTone}`}>{value}</p>
       {detail && <p className="mt-0.5 truncate text-xs text-foreground-muted">{detail}</p>}
     </div>
   );
@@ -410,73 +461,89 @@ function SummaryMetric({
 
 function BatchTable({
   items,
+  selectedId,
   onOpen,
 }: {
   items: BatchWithExpiry[];
-  onOpen: (id: string) => void;
+  selectedId: string | null;
+  onOpen: (batch: BatchWithExpiry) => void;
 }): JSX.Element {
   return (
-    <Table>
+    <Table className="min-w-full" aria-label="Партии товаров">
       <THead>
         <TR>
           <TH>Товар</TH>
-          <TH>Партия</TH>
           <TH>Точка</TH>
           <TH>Срок годности</TH>
           <TH className="text-right">Остаток</TH>
-          <TH className="text-right">Цены</TH>
-          <TH className="text-right">Действие</TH>
+          <TH className="text-right">Цена продажи</TH>
+          <TH className="w-12 text-right">
+            <span className="sr-only">Карточка</span>
+          </TH>
         </TR>
       </THead>
       <TBody>
         {items.map((batch) => (
-          <TR key={batch.id}>
+          <TR
+            key={batch.id}
+            className={cn(
+              selectedId === batch.id &&
+                "bg-primary/[0.055] shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-primary/[0.07]",
+            )}
+          >
             <TD className="max-w-64">
-              <p className="truncate font-medium">{batch.catalog_name}</p>
+              <button
+                type="button"
+                className="max-w-64 truncate text-left font-semibold text-foreground hover:text-primary"
+                onClick={() => onOpen(batch)}
+              >
+                {batch.catalog_name}
+              </button>
               {productSubtitle(batch) && (
                 <p className="truncate text-xs text-foreground-muted">{productSubtitle(batch)}</p>
               )}
+              <p className="mt-1 font-mono text-xs text-foreground-muted">
+                {batch.batch_number ?? "Без номера"}
+              </p>
             </TD>
-            <TD>
-              <p className="font-mono text-xs">{batch.batch_number ?? "Без номера"}</p>
+            <TD className="max-w-52">
+              <p className="truncate">{batch.branch_name}</p>
               {batch.is_blocked && (
                 <Badge tone="danger" className="mt-1">
                   Заблокирована
                 </Badge>
               )}
             </TD>
-            <TD className="max-w-52 truncate">{batch.branch_name}</TD>
             <TD className="whitespace-nowrap">
-              <div className="flex items-center gap-2">
-                <Badge tone={expiryTone[batch.expiry_status]}>
-                  {expiryLabel[batch.expiry_status]}
-                </Badge>
-                <span>{formatInventoryDate(batch.expires_at)}</span>
-              </div>
+              <span>{formatInventoryDate(batch.expires_at)}</span>
               <p className="mt-1 text-xs text-foreground-muted">
                 {expiryHint(batch.days_to_expiry)}
               </p>
+              <Badge tone={expiryTone[batch.expiry_status]} className="mt-1">
+                {expiryLabel[batch.expiry_status]}
+              </Badge>
             </TD>
             <TD className="min-w-32 text-right">
               <p className="font-mono font-medium tabular-nums">
-                {formatInventoryQuantity(batch.qty_remaining)}
+                {formatInventoryQuantity(batch.qty_remaining)} из{" "}
+                {formatInventoryQuantity(batch.qty_initial)}
               </p>
               <StockBar batch={batch} />
             </TD>
-            <TD className="whitespace-nowrap text-right text-xs">
-              <p className="font-mono">{formatInventoryMoney(batch.sale_price, batch.currency)}</p>
-              <p className="text-foreground-muted">
-                закупка {formatInventoryMoney(batch.purchase_price, batch.currency)}
+            <TD className="whitespace-nowrap text-right">
+              <p className="font-mono font-medium tabular-nums">
+                {formatInventoryMoney(batch.sale_price, batch.currency)}
               </p>
             </TD>
             <TD className="text-right">
               <Button
                 variant="ghost"
                 size="sm"
+                className="w-[var(--control-height-sm)] px-0"
                 aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
-                onClick={() => onOpen(batch.id)}
+                onClick={() => onOpen(batch)}
               >
-                Открыть
+                <ChevronRightIcon />
               </Button>
             </TD>
           </TR>
@@ -491,7 +558,7 @@ function BatchCards({
   onOpen,
 }: {
   items: BatchWithExpiry[];
-  onOpen: (id: string) => void;
+  onOpen: (batch: BatchWithExpiry) => void;
 }): JSX.Element {
   return (
     <div className="space-y-2">
@@ -548,7 +615,7 @@ function BatchCards({
               className="min-h-11 shrink-0"
               variant="secondary"
               aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
-              onClick={() => onOpen(batch.id)}
+              onClick={() => onOpen(batch)}
             >
               Открыть
             </Button>
@@ -597,6 +664,68 @@ function CompactField({
   );
 }
 
+function BatchViewControl({
+  value,
+  onChange,
+}: {
+  value: BatchView;
+  onChange: (value: BatchView) => void;
+}): JSX.Element {
+  return (
+    <div
+      className="inline-flex overflow-hidden rounded-md border border-input bg-surface"
+      role="group"
+      aria-label="Вид партий"
+    >
+      <button
+        type="button"
+        className={cn(
+          "grid h-[var(--control-height-md)] w-[var(--control-height-md)] place-items-center transition-colors duration-fast",
+          value === "table"
+            ? "bg-primary/10 text-primary"
+            : "text-foreground-muted hover:bg-foreground/5",
+        )}
+        aria-label="Показать таблицей"
+        aria-pressed={value === "table"}
+        onClick={() => onChange("table")}
+      >
+        <TableViewIcon />
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "grid h-[var(--control-height-md)] w-[var(--control-height-md)] place-items-center border-l border-input transition-colors duration-fast",
+          value === "cards"
+            ? "bg-primary/10 text-primary"
+            : "text-foreground-muted hover:bg-foreground/5",
+        )}
+        aria-label="Показать карточками"
+        aria-pressed={value === "cards"}
+        onClick={() => onChange("cards")}
+      >
+        <GridViewIcon />
+      </button>
+    </div>
+  );
+}
+
+function readBatchView(): BatchView {
+  if (typeof window === "undefined") return "table";
+  try {
+    return window.localStorage.getItem(VIEW_STORAGE_KEY) === "cards" ? "cards" : "table";
+  } catch {
+    return "table";
+  }
+}
+
+function writeBatchView(view: BatchView): void {
+  try {
+    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+  } catch {
+    // The view preference is optional; inventory workflows must remain available.
+  }
+}
+
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() =>
     typeof window === "undefined" || typeof window.matchMedia !== "function"
@@ -614,4 +743,53 @@ function useMediaQuery(query: string): boolean {
   }, [query]);
 
   return matches;
+}
+
+function ChevronRightIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="m7 4 6 6-6 6" />
+    </svg>
+  );
+}
+
+function TableViewIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3.5" width="14" height="13" rx="1" />
+      <path d="M3 8h14M7.5 3.5v13" />
+    </svg>
+  );
+}
+
+function GridViewIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="5" height="5" rx="0.5" />
+      <rect x="12" y="3" width="5" height="5" rx="0.5" />
+      <rect x="3" y="12" width="5" height="5" rx="0.5" />
+      <rect x="12" y="12" width="5" height="5" rx="0.5" />
+    </svg>
+  );
 }

@@ -27,14 +27,24 @@ describe("route access", () => {
     expect(canAccessPath("/sales", SELLER)).toBe(true);
     expect(canAccessPath("/audit", SELLER)).toBe(true);
     expect(canAccessPath("/security", SELLER)).toBe(true);
+    expect(canAccessPath("/settings", SELLER)).toBe(true);
     expect(canAccessPath("/branches", SELLER)).toBe(false);
     expect(canAccessPath("/registers", SELLER)).toBe(false);
-    expect(canAccessPath("/settings", SELLER)).toBe(false);
+    expect(canAccessPath("/onboarding", SELLER)).toBe(false);
     expect(canAccessPath("/incoming/document-1", SELLER)).toBe(false);
   });
 
   it("uses the POS as the primary fallback for a cashier", () => {
     expect(firstAccessiblePath(SELLER)).toBe("/pos");
+  });
+
+  it("keeps owner onboarding unavailable to platform and support identities", () => {
+    const owner = { ...SELLER, isTenantOwner: true };
+
+    expect(canAccessPath("/onboarding", owner)).toBe(true);
+    expect(canAccessPath("/onboarding", { ...owner, isDeveloper: true })).toBe(false);
+    expect(canAccessPath("/onboarding", { ...owner, isAdministrator: true })).toBe(false);
+    expect(canAccessPath("/onboarding", { ...owner, isSupportScoped: true })).toBe(false);
   });
 
   it("shows tenant billing only with both dedicated read permissions", () => {

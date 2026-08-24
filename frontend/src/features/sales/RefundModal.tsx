@@ -16,7 +16,7 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
-import { useTenantSettingsQuery } from "@/features/foundation/queries";
+import { useTenantOperationalSettingsQuery } from "@/features/foundation/queries";
 import { type Sale, type SaleDetails } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
 
@@ -109,7 +109,7 @@ export function RefundModal({
   const { user } = useAuth();
   const canConfirmExternal = hasPermission(user, "pos.refund_external_confirm");
   const refund = useRefundSale();
-  const settings = useTenantSettingsQuery();
+  const settings = useTenantOperationalSettingsQuery();
   const reasonMode = settings.data?.refund_reason_mode;
   const [topError, setTopError] = useState<string | null>(null);
   const [reason, setReason] = useState("");

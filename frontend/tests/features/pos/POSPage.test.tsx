@@ -35,7 +35,11 @@ vi.mock("@/features/foundation/api", () => ({
   listTenants: vi.fn(),
   createTenant: vi.fn(),
   updateTenant: vi.fn(),
-  getTenantSettings: vi.fn().mockResolvedValue({ draft_sale_lifetime_min: 60 }),
+  getTenantOperationalSettings: vi.fn().mockResolvedValue({
+    draft_sale_lifetime_min: 60,
+    pos_payment_methods: ["cash", "card", "qr"],
+    pos_mixed_payment_enabled: true,
+  }),
   updateTenantSettings: vi.fn(),
   createBranch: vi.fn(),
   updateBranch: vi.fn(),
@@ -45,12 +49,13 @@ vi.mock("@/features/foundation/api", () => ({
   deleteRegister: vi.fn(),
 }));
 
-vi.mock("@/features/catalog/queries", () => ({
-  useCatalogQuery: () => ({ data: undefined }),
+vi.mock("@/features/catalog/pickerQueries", () => ({
+  useCatalogPickerQuery: () => ({ data: undefined }),
 }));
 
 import { POSPage } from "@/features/pos/POSPage";
 import { draftKey } from "@/features/pos/draftStorage";
+import { devicePreferencesScope, loadDevicePreferences } from "@/lib/devicePreferences";
 import { useAuthStore } from "@/stores/auth";
 
 async function renderPage() {
@@ -151,7 +156,10 @@ describe("POSPage", () => {
     // No dropdown to choose from — the single register is shown in a disabled field.
     expect(screen.queryByText("— выберите —")).not.toBeInTheDocument();
     expect(screen.getByDisplayValue(REGISTER.name)).toBeInTheDocument();
-    expect(window.localStorage.getItem("pos:lastRegisterId")).toBe(REGISTER.id);
+    expect(
+      loadDevicePreferences(devicePreferencesScope(POS_USER.id, POS_USER.active_tenant_id))
+        .lastRegisterId,
+    ).toBe(REGISTER.id);
   });
 
   it("requires a manual choice when two or more registers exist", async () => {
@@ -168,7 +176,10 @@ describe("POSPage", () => {
     // Choosing a register proceeds to the shift form.
     fireEvent.change(screen.getByLabelText("Касса"), { target: { value: second.id } });
     expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
-    expect(window.localStorage.getItem("pos:lastRegisterId")).toBe(second.id);
+    expect(
+      loadDevicePreferences(devicePreferencesScope(POS_USER.id, POS_USER.active_tenant_id))
+        .lastRegisterId,
+    ).toBe(second.id);
   });
 
   it("preserves a non-empty draft before switching to another register", async () => {

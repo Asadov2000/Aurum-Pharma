@@ -86,6 +86,55 @@ class AppUser(Base):
     )
 
 
+class UserPreferences(Base):
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    theme: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'system'"))
+    density: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'comfortable'"))
+    contrast: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'standard'"))
+    reduce_motion: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    accent: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'teal'"))
+    workspace_preferences: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        CheckConstraint("theme IN ('system','light','dark')", name="ck_user_preferences_theme"),
+        CheckConstraint(
+            "density IN ('auto','compact','comfortable','touch')",
+            name="ck_user_preferences_density",
+        ),
+        CheckConstraint("contrast IN ('standard','high')", name="ck_user_preferences_contrast"),
+        CheckConstraint(
+            "accent IN ('teal','blue','violet','green','amber','rose')",
+            name="ck_user_preferences_accent",
+        ),
+        CheckConstraint("version >= 1", name="ck_user_preferences_version"),
+        CheckConstraint(
+            "jsonb_typeof(workspace_preferences) = 'object'",
+            name="ck_user_preferences_workspaces_object",
+        ),
+        CheckConstraint(
+            "pg_column_size(workspace_preferences) <= 65536",
+            name="ck_user_preferences_workspaces_size",
+        ),
+    )
+
+
 class PlatformAccessGrant(Base):
     """Protected Developer/Administrator grant history.
 

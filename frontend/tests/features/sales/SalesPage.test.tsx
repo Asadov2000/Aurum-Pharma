@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listSales = vi.fn();
@@ -70,11 +70,36 @@ describe("SalesPage", () => {
   it("renders a receipt row with resolved cashier name and refund badge", async () => {
     listSales.mockResolvedValueOnce({ items: [SALE], total: 1, page: 1, page_size: 50 });
     renderPage();
-    expect(await screen.findByText("000142")).toBeInTheDocument();
-    expect(screen.getByText("Иван Кассиров")).toBeInTheDocument();
-    expect(screen.getByText("Наличные")).toBeInTheDocument();
-    expect(screen.getByText(/Есть возврат/)).toBeInTheDocument();
-    expect(screen.getByText(/всего: 1/)).toBeInTheDocument();
+    const receipt = await screen.findByRole("button", { name: "Открыть чек № 000142" });
+    expect(within(receipt).getAllByText("Иван Кассиров").length).toBeGreaterThan(0);
+    expect(within(receipt).getAllByText("Наличные").length).toBeGreaterThan(0);
+    expect(within(receipt).getAllByText(/Возврат №000143/).length).toBeGreaterThan(0);
+    expect(screen.getByText("Найдено: 1")).toBeInTheDocument();
+  });
+
+  it("applies the verified has_refund quick view without inventing other counters", async () => {
+    listSales.mockResolvedValue({ items: [SALE], total: 1, page: 1, page_size: 50 });
+    renderPage();
+
+    await screen.findByRole("button", { name: "Открыть чек № 000142" });
+    fireEvent.click(screen.getByRole("button", { name: "С возвратом" }));
+
+    await waitFor(() => {
+      expect(listSales).toHaveBeenLastCalledWith(expect.objectContaining({ has_refund: true }));
+    });
+    expect(screen.getByRole("button", { name: /С возвратом/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Без возврата" }));
+    await waitFor(() => {
+      expect(listSales).toHaveBeenLastCalledWith(expect.objectContaining({ has_refund: false }));
+    });
+    expect(screen.getByRole("button", { name: /Без возврата/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("re-queries with the receipt_number filter typed in", async () => {
@@ -119,7 +144,7 @@ describe("SalesPage", () => {
       ],
     });
     renderPage();
-    fireEvent.click(await screen.findByText("000142"));
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть чек № 000142" }));
     expect(await screen.findByText(/Чек № 000142/)).toBeInTheDocument();
     await waitFor(() => {
       expect(getSaleDetails).toHaveBeenCalledWith("s-1");

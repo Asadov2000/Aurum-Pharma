@@ -119,6 +119,7 @@ class TenantSettings(Base):
         Text, nullable=False, server_default=text("'Asia/Dushanbe'")
     )
     prescription_warning_text: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -130,6 +131,7 @@ class TenantSettings(Base):
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
     __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_tenant_settings_version"),
         CheckConstraint(
             """
             jsonb_typeof(pos_payment_methods) = 'array'

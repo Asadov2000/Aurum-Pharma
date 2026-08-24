@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   Button,
@@ -14,43 +14,34 @@ import {
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { normalizePosPaymentMethods } from "@/features/foundation/paymentSettings";
-import { useRegistersQuery, useTenantSettingsQuery } from "@/features/foundation/queries";
+import {
+  useRegistersQuery,
+  useTenantOperationalSettingsQuery,
+} from "@/features/foundation/queries";
 import { cn } from "@/lib/utils";
+import { useDevicePreferences } from "@/lib/devicePreferences";
 
 import { DRAFT_TTL_MIN } from "./draftStorage";
-import { ModeToggle } from "./ModeToggle";
 import { type RegisterSwitchState, SaleArea } from "./SaleArea";
 import { usePosMode } from "./usePosMode";
 
-const STORAGE_KEY = "pos:lastRegisterId";
-const SOUND_KEY = "pos:beep";
-
-function readLocalPreference(key: string): string | null {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLocalPreference(key: string, value: string): void {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // POS remains usable when browser privacy settings block preferences.
-  }
-}
+const ModeToggle = lazy(async () => {
+  const module = await import("./ModeToggle");
+  return { default: module.ModeToggle };
+});
 
 export function POSPage(): JSX.Element {
   const { user } = useAuth();
   const { mode, pref, setPref } = usePosMode();
+  const { preferences: devicePreferences, updatePreferences: updateDevicePreferences } =
+    useDevicePreferences();
   const canOpenShift = hasPermission(user, "pos.shift_open");
   const canCloseShift = hasPermission(user, "pos.shift_close");
   const canSell = hasPermission(user, "pos.sell");
   const registers = useRegistersQuery(null, false);
   // POS draft TTL comes from tenant settings; fall back until they load (or if
   // the user can't read them).
-  const settings = useTenantSettingsQuery(true, true);
+  const settings = useTenantOperationalSettingsQuery(true, true);
   const draftTtlMin = settings.data?.draft_sale_lifetime_min ?? DRAFT_TTL_MIN;
   const configuredPaymentMethods = settings.data?.pos_payment_methods;
   const paymentMethods = useMemo(
@@ -61,11 +52,9 @@ export function POSPage(): JSX.Element {
   const paymentSettingsLoading = settings.isLoading && settings.data === undefined;
   const paymentSettingsUnavailable = !settings.isLoading && settings.data === undefined;
   const [registerId, setRegisterId] = useState<string>(() => {
-    return readLocalPreference(STORAGE_KEY) ?? "";
+    return devicePreferences.lastRegisterId ?? "";
   });
-  const [soundOn, setSoundOn] = useState<boolean>(() => {
-    return readLocalPreference(SOUND_KEY) === "1";
-  });
+  const soundOn = devicePreferences.scannerSound;
   const [registerSwitchState, setRegisterSwitchState] = useState<RegisterSwitchState>({
     blocked: false,
     hasDraft: false,
@@ -92,8 +81,7 @@ export function POSPage(): JSX.Element {
   };
 
   const toggleSound = (on: boolean) => {
-    setSoundOn(on);
-    writeLocalPreference(SOUND_KEY, on ? "1" : "0");
+    updateDevicePreferences({ scannerSound: on });
   };
 
   // Register auto-selection:
@@ -113,8 +101,8 @@ export function POSPage(): JSX.Element {
   }, [registers.data, registerId]);
 
   useEffect(() => {
-    if (registerId) writeLocalPreference(STORAGE_KEY, registerId);
-  }, [registerId]);
+    if (registerId) updateDevicePreferences({ lastRegisterId: registerId });
+  }, [registerId, updateDevicePreferences]);
 
   const registerList = registers.data;
   const onlyRegister = registerList?.length === 1 ? registerList[0] : undefined;
@@ -163,7 +151,16 @@ export function POSPage(): JSX.Element {
         </div>
       ) : null}
       <div className="w-full sm:w-auto">
-        <ModeToggle pref={pref} setPref={setPref} touch={mode === "touch"} />
+        <Suspense
+          fallback={
+            <div
+              aria-hidden="true"
+              className={cn("w-full sm:w-56", mode === "touch" ? "h-12" : "h-9")}
+            />
+          }
+        >
+          <ModeToggle pref={pref} setPref={setPref} touch={mode === "touch"} />
+        </Suspense>
       </div>
       <Switch
         label="Звук сканера"

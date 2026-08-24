@@ -39,6 +39,7 @@ describe("buildNav — dashboard visibility", () => {
     // The seller still gets the sections explicitly granted to the role.
     expect(items.some((i) => i.to === "/pos")).toBe(true);
     expect(items.some((i) => i.to === "/security")).toBe(true);
+    expect(items.some((i) => i.to === "/settings")).toBe(true);
   });
 
   it("shows «Главная» to a tenant user with reports.view (owner)", () => {
@@ -123,7 +124,7 @@ describe("buildNav — team management visibility", () => {
     expect(items.some((item) => item.to === "/roles")).toBe(true);
     expect(items.some((item) => item.to === "/users")).toBe(true);
     expect(items.some((item) => item.to === "/catalog")).toBe(false);
-    expect(items.some((item) => item.to === "/settings")).toBe(false);
+    expect(items.some((item) => item.to === "/settings")).toBe(true);
   });
 });
 
@@ -133,7 +134,7 @@ describe("buildNav — owner-only pages", () => {
     expect(labels(items)).not.toContain("Партии");
     expect(labels(items)).not.toContain("Тариф и оплата");
     expect(labels(items)).not.toContain("Отчёты");
-    expect(labels(items)).not.toContain("Настройки");
+    expect(labels(items)).toContain("Настройки");
   });
 
   it("shows financial/reporting pages to an owner", () => {

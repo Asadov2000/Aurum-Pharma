@@ -1,16 +1,37 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listCatalog = vi.fn();
+const getCatalogSummary = vi.fn();
+const getCatalogItem = vi.fn();
 const createCatalogItem = vi.fn();
+const authState = vi.hoisted(() => ({
+  permissions: ["catalog.view", "catalog.create", "catalog.update", "catalog.delete"],
+}));
+
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => ({
+    user: {
+      id: "user-1",
+      active_tenant_id: "t-1",
+      is_developer: false,
+      support_access: null,
+      permissions: authState.permissions,
+    },
+  }),
+}));
 
 vi.mock("@/features/catalog/api", () => ({
   listCatalog: (...a: unknown[]) => listCatalog(...a),
-  getCatalogItem: vi.fn(),
+  getCatalogImage: vi.fn(),
+  uploadCatalogImage: vi.fn(),
+  deleteCatalogImage: vi.fn(),
+  getCatalogItem: (...a: unknown[]) => getCatalogItem(...a),
   createCatalogItem: (...a: unknown[]) => createCatalogItem(...a),
   updateCatalogItem: vi.fn(),
   deleteCatalogItem: vi.fn(),
+  restoreCatalogItem: vi.fn(),
   findByBarcode: vi.fn(),
   addBarcode: vi.fn(),
   deleteBarcode: vi.fn(),
@@ -19,6 +40,10 @@ vi.mock("@/features/catalog/api", () => ({
   confirmImport: vi.fn(),
   getImportJob: vi.fn(),
   rollbackImport: vi.fn(),
+}));
+
+vi.mock("@/features/catalog/summaryApi", () => ({
+  getCatalogSummary: (...a: unknown[]) => getCatalogSummary(...a),
 }));
 
 import { CatalogPage } from "@/features/catalog/CatalogPage";
@@ -48,14 +73,27 @@ const ITEM = {
   base_price: "5.50",
   currency: "TJS",
   is_active: true,
+  deleted_at: null,
   created_at: "2026-05-22T00:00:00Z",
   updated_at: "2026-05-22T00:00:00Z",
 };
 
 describe("CatalogPage", () => {
   beforeEach(() => {
+    authState.permissions = ["catalog.view", "catalog.create", "catalog.update", "catalog.delete"];
     listCatalog.mockReset();
     createCatalogItem.mockReset();
+    getCatalogSummary.mockReset();
+    getCatalogItem.mockReset();
+    getCatalogItem.mockResolvedValue({ ...ITEM, barcodes: [] });
+    getCatalogSummary.mockResolvedValue({
+      total: 0,
+      active: 0,
+      inactive: 0,
+      archived: 0,
+      without_barcode: 0,
+      without_image: 0,
+    });
   });
 
   afterEach(() => {
@@ -76,10 +114,35 @@ describe("CatalogPage", () => {
       page_size: 25,
     });
     renderPage();
-    expect(await screen.findByText("Парацетамол")).toBeInTheDocument();
-    expect(screen.getByText("Paracetamol")).toBeInTheDocument();
+    expect((await screen.findAllByText("Парацетамол")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Paracetamol").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Безрецептурный/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/5\.50 TJS/)).toBeInTheDocument();
+    expect(screen.getAllByText(/5\.50 TJS/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Активна").length).toBeGreaterThan(0);
+    expect(screen.getByText("Активные позиции")).toBeInTheDocument();
+  });
+
+  it("shows accurate summary and applies the no-photo preset", async () => {
+    getCatalogSummary.mockResolvedValueOnce({
+      total: 12,
+      active: 10,
+      inactive: 2,
+      archived: 3,
+      without_barcode: 4,
+      without_image: 5,
+    });
+    listCatalog.mockResolvedValue({ items: [ITEM], total: 1, page: 1, page_size: 25 });
+    renderPage();
+
+    expect((await screen.findAllByText("12")).length).toBeGreaterThan(0);
+    const presets = screen.getByRole("navigation", { name: "Представления каталога" });
+    fireEvent.click(within(presets).getByRole("button", { name: /Без фото 5/i }));
+
+    await waitFor(() => {
+      expect(listCatalog).toHaveBeenLastCalledWith(
+        expect.objectContaining({ image_state: "without_image", lifecycle: "current" }),
+      );
+    });
   });
 
   it("rejects empty submission of the new item form", async () => {
@@ -117,5 +180,16 @@ describe("CatalogPage", () => {
         base_price: null,
       }),
     );
+  });
+
+  it("hides mutation controls from a view-only account", async () => {
+    authState.permissions = ["catalog.view"];
+    listCatalog.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
+
+    renderPage();
+
+    expect(await screen.findByText(/Каталог пуст/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Новая позиция/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Импорт из файла/i })).not.toBeInTheDocument();
   });
 });

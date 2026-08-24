@@ -13,12 +13,13 @@ test.describe("Catalog import (owner)", () => {
 
     // Open the import wizard (the button also appears in the empty state — take
     // the first match, which is the header action).
-    await page.getByRole("button", { name: /Импорт из файла/ }).first().click();
+    await page
+      .getByRole("button", { name: /Импорт из файла/ })
+      .first()
+      .click();
 
     // Upload the sample workbook (3 rows); the wizard advances to the job step.
-    await page
-      .locator('input[type="file"]')
-      .setInputFiles("e2e/fixtures/import-sample.xlsx");
+    await page.locator('input[type="file"]').setInputFiles("e2e/fixtures/import-sample.xlsx");
 
     await page.getByRole("button", { name: /Подготовить превью/ }).click();
     await expect(page.getByText("Корректных")).toBeVisible({ timeout: 15_000 });
@@ -37,7 +38,9 @@ test.describe("Catalog import (owner)", () => {
     // The imported rows are now searchable in the catalog table.
     await page.getByLabel(/Поиск/).fill("ИмпортXLSX Аспирин");
     await expect(
-      page.getByRole("cell", { name: "ИмпортXLSX Аспирин", exact: true }),
+      page
+        .locator('section[aria-label="Позиции каталога"] article')
+        .filter({ hasText: "ИмпортXLSX Аспирин" }),
     ).toBeVisible({ timeout: 15_000 });
   });
 });

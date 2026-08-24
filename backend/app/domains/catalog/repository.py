@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select, text, update
+from sqlalchemy import and_, delete, exists, func, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
@@ -18,6 +20,12 @@ from app.domains.inventory.models import Batch
 class CatalogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    @asynccontextmanager
+    async def row_savepoint(self) -> AsyncIterator[None]:
+        """Keep one import row failure from aborting the whole file transaction."""
+        async with self.session.begin_nested():
+            yield
 
     async def stock_by_catalog(
         self, *, branch_id: UUID, catalog_ids: list[UUID]
@@ -32,6 +40,7 @@ class CatalogRepository:
             .where(
                 Batch.branch_id == branch_id,
                 Batch.is_blocked.is_(False),
+                Batch.expires_at > date.today(),
                 Batch.catalog_id.in_(catalog_ids),
             )
             .group_by(Batch.catalog_id)
@@ -60,6 +69,13 @@ class CatalogRepository:
             return None
         return item
 
+    async def get_item_for_update(self, item_id: UUID) -> TenantCatalog | None:
+        stmt = select(TenantCatalog).where(TenantCatalog.id == item_id).with_for_update()
+        item = (await self.session.execute(stmt)).scalar_one_or_none()
+        if item is None or item.deleted_at is not None:
+            return None
+        return item
+
     async def update_item(self, item: TenantCatalog, **fields: Any) -> TenantCatalog:
         for key, value in fields.items():
             setattr(item, key, value)
@@ -75,7 +91,13 @@ class CatalogRepository:
         )
         return result.rowcount or 0  # type: ignore[attr-defined]
 
-    async def search(
+    async def restore_item(self, item_id: UUID) -> TenantCatalog | None:
+        item = await self.get_item(item_id, include_deleted=True)
+        if item is None or item.deleted_at is None:
+            return None
+        return await self.update_item(item, deleted_at=None, is_active=True)
+
+    async def search(  # noqa: PLR0912 - each branch is an explicit catalog filter state
         self,
         *,
         q: str | None,
@@ -83,29 +105,72 @@ class CatalogRepository:
         dispensing_type: str | None,
         page: int,
         page_size: int,
+        manufacturer: str | None = None,
+        storage_type: str | None = None,
+        lifecycle: str = "active",
+        image_state: str = "any",
+        barcode_state: str = "any",
     ) -> tuple[list[TenantCatalog], int]:
         """Trigram search across brand_name, inn, and manufacturer. Filters by category and
         dispensing_type are exact-match. Tenant scoping is handled by RLS;
         we still add deleted_at IS NULL because the policy doesn't filter
         soft-deletes."""
 
-        filters: list[Any] = [TenantCatalog.deleted_at.is_(None)]
+        filters: list[Any] = []
+        if lifecycle == "active":
+            filters.extend([TenantCatalog.deleted_at.is_(None), TenantCatalog.is_active.is_(True)])
+        elif lifecycle == "inactive":
+            filters.extend([TenantCatalog.deleted_at.is_(None), TenantCatalog.is_active.is_(False)])
+        elif lifecycle == "archived":
+            filters.append(TenantCatalog.deleted_at.is_not(None))
+        elif lifecycle == "current":
+            filters.append(TenantCatalog.deleted_at.is_(None))
         if category:
             filters.append(TenantCatalog.category == category)
         if dispensing_type:
             filters.append(TenantCatalog.dispensing_type == dispensing_type)
+        if manufacturer:
+            filters.append(TenantCatalog.manufacturer == manufacturer.strip())
+        if storage_type:
+            filters.append(TenantCatalog.storage_type == storage_type)
+        if image_state == "with_image":
+            filters.append(TenantCatalog.image_version.is_not(None))
+        elif image_state == "without_image":
+            filters.append(TenantCatalog.image_version.is_(None))
+
+        barcode_exists = exists(select(1).where(Barcode.catalog_id == TenantCatalog.id))
+        if barcode_state == "with_barcode":
+            filters.append(barcode_exists)
+        elif barcode_state == "without_barcode":
+            filters.append(not_(barcode_exists))
 
         base_stmt = select(TenantCatalog).where(*filters)
         if q:
             # pg_trgm `%` operator with similarity_threshold defaulting to 0.3.
             base_stmt = base_stmt.where(
-                text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q)
+                or_(
+                    text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q),
+                    exists(
+                        select(1).where(
+                            Barcode.catalog_id == TenantCatalog.id,
+                            Barcode.code == q,
+                        )
+                    ),
+                )
             )
 
         count_stmt = select(func.count()).select_from(TenantCatalog).where(*filters)
         if q:
             count_stmt = count_stmt.where(
-                text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q)
+                or_(
+                    text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q),
+                    exists(
+                        select(1).where(
+                            Barcode.catalog_id == TenantCatalog.id,
+                            Barcode.code == q,
+                        )
+                    ),
+                )
             )
 
         total = int((await self.session.execute(count_stmt)).scalar_one())
@@ -117,6 +182,30 @@ class CatalogRepository:
         )
         result = await self.session.execute(list_stmt)
         return list(result.scalars().all()), total
+
+    async def summary(self) -> dict[str, int]:
+        alive = TenantCatalog.deleted_at.is_(None)
+        barcode_exists = exists(select(1).where(Barcode.catalog_id == TenantCatalog.id))
+        stmt = select(
+            func.count(TenantCatalog.id).filter(alive).label("total"),
+            func.count(TenantCatalog.id)
+            .filter(alive, TenantCatalog.is_active.is_(True))
+            .label("active"),
+            func.count(TenantCatalog.id)
+            .filter(alive, TenantCatalog.is_active.is_(False))
+            .label("inactive"),
+            func.count(TenantCatalog.id)
+            .filter(TenantCatalog.deleted_at.is_not(None))
+            .label("archived"),
+            func.count(TenantCatalog.id)
+            .filter(alive, not_(barcode_exists))
+            .label("without_barcode"),
+            func.count(TenantCatalog.id)
+            .filter(alive, TenantCatalog.image_version.is_(None))
+            .label("without_image"),
+        )
+        row = (await self.session.execute(stmt)).one()
+        return {key: int(getattr(row, key) or 0) for key in row._fields}
 
     async def find_duplicate(
         self,

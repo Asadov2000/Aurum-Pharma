@@ -1,6 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/features/settings/queries", () => ({
+  useUserPreferencesQuery: () => ({ data: undefined }),
+  useUpdateUserPreferences: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
 import { AppearanceMenu } from "@/components/AppearanceMenu";
 
 describe("AppearanceMenu", () => {

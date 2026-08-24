@@ -1,10 +1,11 @@
 import { test, type Page } from "@playwright/test";
 
-import { clearLoginRateLimit, expect, loginInBrowser, OWNER } from "./helpers";
+import { clearLoginRateLimit, expect, loginInBrowser, OWNER, selectTouchDensity } from "./helpers";
 
 const WORKSPACES = [
   { path: "/", heading: "Главная" },
   { path: "/catalog", heading: "Каталог" },
+  { path: "/sales", heading: "Чеки" },
   { path: "/users", heading: "Сотрудники" },
   { path: "/roles", heading: "Роли" },
   { path: "/pos", heading: "Касса" },
@@ -47,6 +48,61 @@ test.describe("Interface layout", () => {
           `${workspace.path} @ ${viewport.width}x${viewport.height}`,
         );
       }
+    }
+  });
+
+  test("keeps the launch workspace clear across desktop and mobile", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1024, height: 768 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/onboarding");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Старт", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Готовность системы" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Пробный период" })).toBeVisible();
+      await expectNoHorizontalOverflow(page, `/onboarding @ ${viewport.width}x${viewport.height}`);
+    }
+  });
+
+  test("keeps the supplier workspace usable across desktop and mobile", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1024, height: 768 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/suppliers");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Поставщики", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("region", { name: "Сводка по поставщикам" })).toBeVisible();
+      await expectNoHorizontalOverflow(page, `/suppliers @ ${viewport.width}x${viewport.height}`);
+    }
+  });
+
+  test("keeps the incoming workspace usable across desktop and mobile", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1024, height: 768 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/incoming");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Приходы", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("region", { name: "Сводка по приходам" })).toBeVisible();
+      await expectNoHorizontalOverflow(page, `/incoming @ ${viewport.width}x${viewport.height}`);
     }
   });
 
@@ -142,10 +198,9 @@ test.describe("Interface layout", () => {
     });
     await loginInBrowser(page, OWNER);
     await page.goto("/roles");
+    await selectTouchDensity(page);
 
-    const createRoleButton = page
-      .locator("header")
-      .getByRole("button", { name: "Создать роль" });
+    const createRoleButton = page.locator("header").getByRole("button", { name: "Создать роль" });
     await createRoleButton.click();
     const dialog = page.getByRole("dialog", { name: "Создать роль" });
     await expect(dialog).toBeVisible();
@@ -194,6 +249,7 @@ test.describe("Interface layout", () => {
     });
     await loginInBrowser(page, OWNER);
     await page.goto("/users");
+    await selectTouchDensity(page);
 
     const directory = page.getByRole("table", { name: "Сотрудники аптеки" });
     await expect(directory).toBeVisible();
@@ -236,6 +292,7 @@ test.describe("Interface layout", () => {
     });
     await loginInBrowser(page, OWNER);
     await page.goto("/billing");
+    await selectTouchDensity(page);
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Тариф и оплата", exact: true }),
@@ -278,7 +335,7 @@ test.describe("Interface layout", () => {
     await page.getByRole("button", { name: "Сенсор" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
     expect(
-      await page.getByPlaceholder("например: парацетамол").evaluate((element) => {
+      await page.getByPlaceholder("Название, МНН или штрихкод").evaluate((element) => {
         return element.getBoundingClientRect().height;
       }),
     ).toBeGreaterThanOrEqual(44);

@@ -45,6 +45,21 @@
     /* modal scrim */
     --overlay: 215 31% 8%;
     --overlay-opacity: 0.42;
+
+    /* Shell colors are deliberately separate from --primary. The sidebar can
+       evolve without changing buttons, focus rings, charts or dark-mode data
+       surfaces across pages that have not migrated yet. */
+    --shell-sidebar: 194 98% 22%;
+    --shell-sidebar-active: 194 95% 17%;
+    --shell-sidebar-foreground: 0 0% 100%;
+    --shell-sidebar-muted: 192 28% 82%;
+    --shell-sidebar-border: 192 68% 31%;
+
+    /* Aurum B2 scrollbar: integrated into the sidebar instead of a white rail. */
+    --scrollbar-track: 193 64% 26%;
+    --scrollbar-thumb: 183 43% 66%;
+    --scrollbar-thumb-hover: 183 49% 78%;
+    --scrollbar-thumb-active: 181 63% 70%;
   }
 
   [data-theme="dark"] {
@@ -79,6 +94,79 @@
 
     --overlay: 220 20% 2%;
     --overlay-opacity: 0.62;
+
+    --shell-sidebar: 194 74% 16%;
+    --shell-sidebar-active: 194 78% 11%;
+    --shell-sidebar-foreground: 0 0% 100%;
+    --shell-sidebar-muted: 192 23% 76%;
+    --shell-sidebar-border: 194 48% 26%;
+
+    --scrollbar-track: 194 58% 20%;
+    --scrollbar-thumb: 183 38% 62%;
+    --scrollbar-thumb-hover: 183 48% 76%;
+    --scrollbar-thumb-active: 181 58% 68%;
+  }
+
+  [data-theme="light"][data-accent="blue"] {
+    --primary: 214 78% 43%;
+    --ring: 214 78% 43%;
+  }
+
+  [data-theme="light"][data-accent="violet"] {
+    --primary: 265 60% 47%;
+    --ring: 265 60% 47%;
+  }
+
+  [data-theme="light"][data-accent="green"] {
+    --primary: 149 63% 31%;
+    --ring: 149 63% 31%;
+  }
+
+  [data-theme="light"][data-accent="amber"] {
+    --primary: 31 88% 38%;
+    --ring: 31 88% 38%;
+  }
+
+  [data-theme="light"][data-accent="rose"] {
+    --primary: 348 67% 44%;
+    --ring: 348 67% 44%;
+  }
+
+  [data-theme="dark"][data-accent="blue"] {
+    --primary: 211 85% 63%;
+    --ring: 211 85% 63%;
+  }
+
+  [data-theme="dark"][data-accent="violet"] {
+    --primary: 266 78% 70%;
+    --ring: 266 78% 70%;
+  }
+
+  [data-theme="dark"][data-accent="green"] {
+    --primary: 149 55% 54%;
+    --ring: 149 55% 54%;
+  }
+
+  [data-theme="dark"][data-accent="amber"] {
+    --primary: 38 92% 57%;
+    --ring: 38 92% 57%;
+  }
+
+  [data-theme="dark"][data-accent="rose"] {
+    --primary: 350 82% 68%;
+    --ring: 350 82% 68%;
+  }
+
+  [data-contrast="high"] {
+    --border: 215 18% 58%;
+    --input: 215 20% 43%;
+    --foreground-muted: 215 15% 31%;
+  }
+
+  [data-theme="dark"][data-contrast="high"] {
+    --border: 216 13% 55%;
+    --input: 216 15% 66%;
+    --foreground-muted: 216 15% 78%;
   }
 
   :root {
@@ -229,6 +317,72 @@
     @apply rounded-md bg-foreground/10;
   }
 
+  /* Aurum B2 keeps a generous target while rendering a quiet 4px thumb. */
+  .aurum-scrollbar {
+    scrollbar-color: hsl(var(--scrollbar-thumb)) hsl(var(--scrollbar-track));
+    scrollbar-width: thin;
+  }
+
+  .aurum-scrollbar::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  .aurum-scrollbar::-webkit-scrollbar-track {
+    background: hsl(var(--scrollbar-track));
+    margin-block: 10px;
+  }
+
+  .aurum-scrollbar::-webkit-scrollbar-thumb {
+    min-height: 3.5rem;
+    border: 4px solid transparent;
+    border-radius: 6px;
+    background: hsl(var(--scrollbar-thumb));
+    background-clip: padding-box;
+    transition:
+      border-width 120ms ease-out,
+      background-color 120ms ease-out;
+  }
+
+  .aurum-scrollbar::-webkit-scrollbar-thumb:hover {
+    border-width: 3px;
+    background-color: hsl(var(--scrollbar-thumb-hover));
+  }
+
+  .aurum-scrollbar::-webkit-scrollbar-thumb:active {
+    border-width: 3px;
+    background-color: hsl(var(--scrollbar-thumb-active));
+  }
+
+  .aurum-scrollbar::-webkit-scrollbar-button,
+  .aurum-scrollbar::-webkit-scrollbar-button:single-button,
+  .aurum-scrollbar::-webkit-scrollbar-button:vertical:start:decrement,
+  .aurum-scrollbar::-webkit-scrollbar-button:vertical:end:increment {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    -webkit-appearance: none;
+  }
+
+  .aurum-scrollbar::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  [data-density="touch"] .aurum-scrollbar::-webkit-scrollbar {
+    width: 16px;
+    height: 16px;
+  }
+
+  [data-density="touch"] .aurum-scrollbar::-webkit-scrollbar-thumb {
+    border-width: 4px;
+    border-radius: 8px;
+  }
+
+  [data-density="touch"] .aurum-scrollbar::-webkit-scrollbar-thumb:hover,
+  [data-density="touch"] .aurum-scrollbar::-webkit-scrollbar-thumb:active {
+    border-width: 4px;
+  }
+
   /* Cheap windowing for long POS carts: the browser skips rendering rows that
      are scrolled out of view. The intrinsic size keeps the scrollbar honest. */
   @supports (content-visibility: auto) {
@@ -250,4 +404,13 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+[data-reduce-motion="true"] *,
+[data-reduce-motion="true"] *::before,
+[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }

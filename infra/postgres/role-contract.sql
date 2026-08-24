@@ -480,7 +480,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 107 THEN
+        IF revision_number < 1 OR revision_number > 110 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;

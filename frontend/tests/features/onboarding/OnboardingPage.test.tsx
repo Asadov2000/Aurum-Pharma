@@ -129,7 +129,7 @@ describe("OnboardingPage", () => {
       "/branches",
     );
     expect(screen.getByText("42 из 100")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Начать пробный период/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Начать пробный период/i })).toBeDisabled();
   });
 
   it("confirms the irreversible trial activation with one operation id", async () => {
@@ -205,9 +205,7 @@ describe("OnboardingPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Начать пробный период/i }));
     fireEvent.click(screen.getByRole("button", { name: "Начать период" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Не удалось начать пробный период",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось начать пробный период");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 

@@ -40,7 +40,11 @@ test.describe("Configurable filters", () => {
     }, FILTER_LAYOUT_PREFIX);
 
     expect(storedPreferences).toHaveLength(1);
-    expect(JSON.parse(storedPreferences[0]!.value)).toEqual(["search", "dispensing"]);
+    expect(JSON.parse(storedPreferences[0]!.value)).toEqual([
+      "search",
+      "lifecycle",
+      "dispensing",
+    ]);
     expect(storedPreferences[0]!.value).not.toContain("prescription");
 
     await page.reload();

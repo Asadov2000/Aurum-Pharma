@@ -93,6 +93,7 @@ describe("SuppliersPage", () => {
   });
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("renders the empty state when no suppliers exist", async () => {
@@ -184,6 +185,48 @@ describe("SuppliersPage", () => {
         }),
         expect.any(AbortSignal),
       ),
+    );
+  });
+
+  it("shows the selected supplier beside the table on a wide screen", async () => {
+    const second = {
+      ...SAMPLE,
+      id: "s-2",
+      name: "ООО Фарма Сино",
+      contact_person: "Мехродж Саидов",
+    };
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("768px") || query.includes("1280px"),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    searchSuppliers.mockResolvedValueOnce({
+      items: [SAMPLE, second],
+      total: 2,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 2, active_count: 2, with_contact_count: 2 },
+    });
+    renderPage();
+
+    expect(
+      await screen.findByRole("region", { name: `Карточка поставщика: ${SAMPLE.name}` }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `Открыть карточку: ${second.name}` }));
+    expect(
+      screen.getByRole("region", { name: `Карточка поставщика: ${second.name}` }),
+    ).toBeInTheDocument();
+    expect(searchSupplierReturns).toHaveBeenCalledWith(
+      expect.objectContaining({ supplier_id: second.id, page: 1, page_size: 3 }),
+      expect.any(AbortSignal),
     );
   });
 });

@@ -168,6 +168,9 @@ class Settings(BaseSettings):
     # Upper bound for catalog import uploads (CSV/XLSX). Bigger files are
     # rejected at the upload endpoint with a friendly 422.
     MAX_IMPORT_FILE_MB: int = 10
+    # Product images are optional. The API also validates the real file format,
+    # dimensions and structure before anything reaches object storage.
+    MAX_CATALOG_IMAGE_MB: int = Field(default=5, ge=1, le=10)
 
     APP_NAME: str = "Aurum Pharma"
     LOG_LEVEL: str = "INFO"
