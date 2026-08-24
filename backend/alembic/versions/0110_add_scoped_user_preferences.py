@@ -18,29 +18,47 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute("""
-        CREATE TABLE public.user_preferences (
-          user_id UUID PRIMARY KEY REFERENCES public.app_user(id) ON DELETE CASCADE,
-          theme TEXT NOT NULL DEFAULT 'system'
-            CONSTRAINT ck_user_preferences_theme CHECK (theme IN ('system','light','dark')),
-          density TEXT NOT NULL DEFAULT 'comfortable'
-            CONSTRAINT ck_user_preferences_density
-              CHECK (density IN ('auto','compact','comfortable','touch')),
-          contrast TEXT NOT NULL DEFAULT 'standard'
-            CONSTRAINT ck_user_preferences_contrast CHECK (contrast IN ('standard','high')),
-          reduce_motion BOOLEAN NOT NULL DEFAULT false,
-          accent TEXT NOT NULL DEFAULT 'teal'
-            CONSTRAINT ck_user_preferences_accent
-              CHECK (accent IN ('teal','blue','violet','green','amber','rose')),
-          workspace_preferences JSONB NOT NULL DEFAULT '{}'::jsonb
-            CONSTRAINT ck_user_preferences_workspaces_object
-              CHECK (jsonb_typeof(workspace_preferences) = 'object')
-            CONSTRAINT ck_user_preferences_workspaces_size
-              CHECK (pg_column_size(workspace_preferences) <= 65536),
-          version INTEGER NOT NULL DEFAULT 1
-            CONSTRAINT ck_user_preferences_version CHECK (version >= 1),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
+        DO $$
+        DECLARE
+          v_user_had_references BOOLEAN := pg_catalog.has_table_privilege(
+            'aurum_schema_owner',
+            'public.app_user',
+            'REFERENCES'
+          );
+        BEGIN
+          IF NOT v_user_had_references THEN
+            GRANT REFERENCES ON TABLE public.app_user TO aurum_schema_owner;
+          END IF;
+
+          CREATE TABLE public.user_preferences (
+            user_id UUID PRIMARY KEY REFERENCES public.app_user(id) ON DELETE CASCADE,
+            theme TEXT NOT NULL DEFAULT 'system'
+              CONSTRAINT ck_user_preferences_theme CHECK (theme IN ('system','light','dark')),
+            density TEXT NOT NULL DEFAULT 'comfortable'
+              CONSTRAINT ck_user_preferences_density
+                CHECK (density IN ('auto','compact','comfortable','touch')),
+            contrast TEXT NOT NULL DEFAULT 'standard'
+              CONSTRAINT ck_user_preferences_contrast CHECK (contrast IN ('standard','high')),
+            reduce_motion BOOLEAN NOT NULL DEFAULT false,
+            accent TEXT NOT NULL DEFAULT 'teal'
+              CONSTRAINT ck_user_preferences_accent
+                CHECK (accent IN ('teal','blue','violet','green','amber','rose')),
+            workspace_preferences JSONB NOT NULL DEFAULT '{}'::jsonb
+              CONSTRAINT ck_user_preferences_workspaces_object
+                CHECK (jsonb_typeof(workspace_preferences) = 'object')
+              CONSTRAINT ck_user_preferences_workspaces_size
+                CHECK (pg_column_size(workspace_preferences) <= 65536),
+            version INTEGER NOT NULL DEFAULT 1
+              CONSTRAINT ck_user_preferences_version CHECK (version >= 1),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          );
+
+          IF NOT v_user_had_references THEN
+            REVOKE REFERENCES ON TABLE public.app_user FROM aurum_schema_owner;
+          END IF;
+        END
+        $$
         """)
     op.execute("""
         CREATE TRIGGER trg_user_preferences_updated
