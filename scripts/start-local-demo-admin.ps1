@@ -1,102 +1,121 @@
+[CmdletBinding()]
 param(
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$SkipBuild,
+    [switch]$Rebuild,
+    [switch]$SkipSeed,
+    [switch]$NoBrowser,
+    [switch]$PauseOnError
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Test-AurumAdministrator {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-if (-not $DryRun -and -not (Test-AurumAdministrator)) {
-    $arguments = @(
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "`"$PSCommandPath`""
-    )
-    Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -Verb RunAs
-    exit 0
-}
-
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$showcaseLauncher = Join-Path $PSScriptRoot "start-showcase-demo.ps1"
 $failed = $false
 
-function Invoke-AurumStep {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Title,
+function Test-DockerReady {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & docker version --format "{{.Server.Version}}" *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
 
-        [Parameter(Mandatory = $true)]
-        [string]$FilePath,
-
-        [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
-    )
-
-    Write-Host ""
-    Write-Host "==> $Title"
-    Write-Host "$FilePath $($Arguments -join ' ')"
-
-    if ($DryRun) {
+function Start-DockerDesktopIfNeeded {
+    if (Test-DockerReady) {
         return
     }
 
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Step failed: $Title. Exit code: $LASTEXITCODE"
+    $dockerDesktopCandidates = @(
+        (Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path $env:LOCALAPPDATA "Docker\Docker Desktop.exe")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $dockerDesktop = $dockerDesktopCandidates | Where-Object {
+        Test-Path -LiteralPath $_ -PathType Leaf
+    } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($dockerDesktop)) {
+        throw "Docker is unavailable. Install or start Docker Desktop and try again."
     }
+
+    Write-Host "Docker Desktop is not ready. Starting it..."
+    Start-Process -FilePath $dockerDesktop -WindowStyle Hidden | Out-Null
+    for ($attempt = 1; $attempt -le 60; $attempt++) {
+        Start-Sleep -Seconds 2
+        if (Test-DockerReady) {
+            Write-Host "Docker Desktop is ready."
+            return
+        }
+    }
+
+    throw "Docker Desktop did not become ready within two minutes."
+}
+
+function Test-ShowcaseImagesAvailable {
+    $requiredImages = @(
+        "aurum-pharma-demo-backend:local",
+        "aurum-pharma-demo-frontend:local"
+    )
+    foreach ($image in $requiredImages) {
+        & docker image inspect $image *> $null
+        if ($LASTEXITCODE -ne 0) {
+            return $false
+        }
+    }
+    return $true
 }
 
 try {
     Set-Location $projectRoot
-    Write-Host "Aurum Pharma local demo launcher"
+    Write-Host "Aurum Pharma safe local launcher"
     Write-Host "Project: $projectRoot"
-    Write-Host "Admin:   $(Test-AurumAdministrator)"
 
-    Invoke-AurumStep "Check Docker" "docker" @("version")
-    Invoke-AurumStep "Start Docker Compose services" "docker" @("compose", "up", "-d")
-    Invoke-AurumStep "Apply database migrations" "powershell.exe" @(
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        ".\scripts\migrate-local.ps1"
-    )
-    Invoke-AurumStep "Seed demo data" "docker" @(
-        "compose",
-        "exec",
-        "-T",
-        "backend",
-        "python",
-        "-m",
-        "app.seed_demo"
-    )
-    Invoke-AurumStep "Run demo smoke check" "powershell.exe" @(
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        ".\scripts\demo-smoke.ps1"
-    )
+    if (-not (Test-Path -LiteralPath $showcaseLauncher -PathType Leaf)) {
+        throw "Showcase launcher not found: $showcaseLauncher"
+    }
+
+    if (-not $DryRun) {
+        Start-DockerDesktopIfNeeded
+    }
+
+    if ($SkipBuild -and $Rebuild) {
+        throw "Use either -SkipBuild or -Rebuild, not both."
+    }
+
+    $showcaseArguments = @{}
+    if ($DryRun) { $showcaseArguments["DryRun"] = $true }
+    $useCachedImages = $SkipBuild
+    if (-not $DryRun -and -not $Rebuild -and (Test-ShowcaseImagesAvailable)) {
+        $useCachedImages = $true
+        Write-Host "Using local application images for a fast, offline-friendly start."
+        Write-Host "Use -Rebuild after application code changes."
+    }
+    if ($useCachedImages) { $showcaseArguments["SkipBuild"] = $true }
+    if ($SkipSeed) { $showcaseArguments["SkipSeed"] = $true }
+    & $showcaseLauncher @showcaseArguments
 
     Write-Host ""
-    Write-Host "Done."
+    Write-Host "Aurum Pharma is ready."
     Write-Host "Frontend: http://localhost:5173"
     Write-Host "API docs: http://localhost:8000/docs"
+
+    if (-not $DryRun -and -not $NoBrowser) {
+        Start-Process "http://localhost:5173" | Out-Null
+    }
 } catch {
     $failed = $true
     Write-Host ""
     Write-Host "FAILED:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
 } finally {
-    if (-not $DryRun) {
+    if ($failed -and $PauseOnError -and -not $DryRun) {
         Write-Host ""
-        Read-Host "Press Enter to close"
+        Read-Host "Press Enter to close this window"
     }
 }
 

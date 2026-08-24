@@ -8,6 +8,8 @@ $scopeScript = Join-Path $PSScriptRoot "task-scope.ps1"
 $verifyScript = Join-Path $PSScriptRoot "verify-change.ps1"
 $e2eScript = Join-Path $PSScriptRoot "e2e-isolated.ps1"
 $whitespaceScript = Join-Path $PSScriptRoot "check-untracked-whitespace.ps1"
+$localLauncherScript = Join-Path $PSScriptRoot "start-local-demo-admin.ps1"
+$cmdLauncher = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) "Start-Aurum-Pharma-Admin.cmd"
 $powershellExecutable = (Get-Process -Id $PID).Path
 $script:assertions = 0
 
@@ -224,6 +226,32 @@ $fullDocs = Get-Plan -Mode "Full" -Paths @("docs/adr/9999-example.md")
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "backend-tests" -Because "Full always runs backend tests"
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "frontend-tests" -Because "Full always runs frontend tests"
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "e2e" -Because "Full always runs E2E"
+
+$launcherArguments = @("-NoProfile")
+if ($env:OS -eq "Windows_NT") {
+    $launcherArguments += @("-ExecutionPolicy", "Bypass")
+}
+$launcherArguments += @("-File", $localLauncherScript, "-DryRun", "-NoBrowser")
+$launcherOutput = & $powershellExecutable @launcherArguments
+Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the local launcher dry run succeeds"
+$launcherText = $launcherOutput -join [Environment]::NewLine
+Assert-Equal `
+    -Actual ($launcherText -match "Dry run complete") `
+    -Expected $true `
+    -Because "the local launcher delegates to the isolated showcase stack"
+Assert-Equal `
+    -Actual ($launcherText -match "billing-worker") `
+    -Expected $true `
+    -Because "the local launcher starts the billing worker"
+
+if ($env:OS -eq "Windows_NT") {
+    $cmdLauncherOutput = & cmd.exe /d /c "`"$cmdLauncher`" -DryRun -NoBrowser"
+    Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the desktop CMD launcher succeeds"
+    Assert-Equal `
+        -Actual (($cmdLauncherOutput -join [Environment]::NewLine) -match "Dry run complete") `
+        -Expected $true `
+        -Because "the desktop CMD launcher forwards safe dry-run arguments"
+}
 
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("aurum-whitespace-test-" + [Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null

@@ -261,10 +261,12 @@ function Add-MissingShowcaseSecrets {
 
     $existing = [System.IO.File]::ReadAllLines($Path)
     $missing = @(
-        "AURUM_DEMO_MIGRATOR_PASSWORD",
-        "AURUM_DEMO_MAILER_PASSWORD",
-        "AURUM_DEMO_BILLING_WORKER_PASSWORD"
-    ) | Where-Object { $key = $_; -not ($existing | Where-Object { $_ -match "^$key=" }) }
+        @(
+            "AURUM_DEMO_MIGRATOR_PASSWORD",
+            "AURUM_DEMO_MAILER_PASSWORD",
+            "AURUM_DEMO_BILLING_WORKER_PASSWORD"
+        ) | Where-Object { $key = $_; -not ($existing | Where-Object { $_ -match "^$key=" }) }
+    )
     if ($missing.Count -eq 0) { return }
     if ($DryRun) { throw "$environmentFileName needs a one-time secret upgrade" }
 
@@ -429,7 +431,9 @@ if (-not $SkipSeed -and -not $DryRun -and -not (Test-Path -LiteralPath $seedModu
 
 Set-Location $workspace
 
-Invoke-DockerCommand -Title "Check Docker" -Arguments @("version")
+Invoke-DockerCommand `
+    -Title "Check Docker" `
+    -Arguments @("version", "--format", "Docker Engine {{.Server.Version}}")
 Ensure-ShowcaseEnvironment
 Invoke-DemoCompose `
     -Title "Validate fail-closed showcase configuration" `
@@ -480,7 +484,15 @@ if (-not $SkipSeed) {
 
 Invoke-DemoCompose `
     -Title "Start showcase workers and frontend" `
-    -Arguments @("up", "--detach", "celery-worker", "platform-mailer", "celery-beat", "frontend")
+    -Arguments @(
+        "up",
+        "--detach",
+        "celery-worker",
+        "billing-worker",
+        "platform-mailer",
+        "celery-beat",
+        "frontend"
+    )
 
 Wait-HttpOk -Name "Showcase frontend" -Url "http://localhost:5173"
 
