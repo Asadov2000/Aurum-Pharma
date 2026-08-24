@@ -263,6 +263,32 @@ services:
     init: true
     restart: unless-stopped
 
+  share-gateway:
+    image: aurum-pharma-demo-share-gateway:local
+    build:
+      context: ./infra/share
+      dockerfile: Dockerfile
+    container_name: aurum-demo-share-gateway
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    volumes:
+      - ./infra/share/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "127.0.0.1:18080:8080"
+    read_only: true
+    tmpfs:
+      - /config:uid=10001,gid=10001,mode=0700
+      - /data:uid=10001,gid=10001,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    init: true
+    restart: unless-stopped
+
 volumes:
   postgres-data:
     name: aurum-demo-postgres-data

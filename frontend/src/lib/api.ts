@@ -15,9 +15,38 @@ interface ApiBaseUrlEnv {
   readonly VITE_API_URL?: string;
 }
 
-export function resolveApiBaseUrl(env: ApiBaseUrlEnv): string {
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
+
+function isLoopbackUrl(value: string): boolean {
+  try {
+    return LOOPBACK_HOSTS.has(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isRemotePage(origin: string | undefined): boolean {
+  if (!origin) return false;
+  try {
+    return !LOOPBACK_HOSTS.has(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function getWindowOrigin(): string | undefined {
+  return typeof window === "undefined" ? undefined : window.location.origin;
+}
+
+export function resolveApiBaseUrl(
+  env: ApiBaseUrlEnv,
+  pageOrigin: string | undefined = getWindowOrigin(),
+): string {
   const configuredUrl = env.VITE_API_URL?.trim();
   if (configuredUrl) {
+    if (isLoopbackUrl(configuredUrl) && isRemotePage(pageOrigin)) {
+      return SAME_ORIGIN_API_BASE_URL;
+    }
     return configuredUrl;
   }
 
