@@ -108,8 +108,9 @@ describe("AppLayout shell", () => {
     const main = screen.getByRole("main");
 
     expect(header).not.toBeNull();
-    expect(within(header as HTMLElement).getByText("Касса")).toBeInTheDocument();
-    expect(within(header as HTMLElement).queryByRole("heading")).not.toBeInTheDocument();
+    expect(
+      within(header as HTMLElement).getByRole("heading", { name: "Касса" }),
+    ).toBeInTheDocument();
     expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(badge);
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
     expect(within(main).getByText("Page content")).toBeInTheDocument();

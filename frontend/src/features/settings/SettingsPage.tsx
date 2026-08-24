@@ -198,7 +198,7 @@ export function SettingsPage(): JSX.Element {
         />
       </div>
 
-      <div className="lg:hidden">
+      <div className="xl:hidden">
         <Select
           aria-label="Раздел настроек"
           value={
@@ -216,8 +216,8 @@ export function SettingsPage(): JSX.Element {
         </Select>
       </div>
 
-      <div className="overflow-hidden rounded-md border border-border bg-surface lg:grid lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <nav aria-label="Разделы настроек" className="hidden border-r border-border p-3 lg:block">
+      <div className="overflow-hidden rounded-md border border-border bg-surface xl:grid xl:grid-cols-[20rem_minmax(0,1fr)]">
+        <nav aria-label="Разделы настроек" className="hidden border-r border-border p-3 xl:block">
           {filtered.length === 0 ? (
             <p className="px-3 py-6 text-sm text-foreground-muted">Настройки не найдены.</p>
           ) : (

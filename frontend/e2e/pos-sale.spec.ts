@@ -295,9 +295,11 @@ test.describe("POS sale (owner)", () => {
         (sale) => sale.id === completedSale.sale_id,
       );
       expect(saleRowIndex).toBeGreaterThanOrEqual(0);
-      const saleRow = page.getByRole("button", {
-        name: `Открыть чек № ${completedSale.receipt_number}`,
-      });
+      const saleRow = page
+        .getByRole("button", {
+          name: `Открыть чек № ${completedSale.receipt_number}`,
+        })
+        .nth(saleRowIndex);
       await expect(saleRow).toBeVisible();
       await saleRow.click();
       const saleDialog = page.getByRole("dialog", {

@@ -122,9 +122,13 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
   const pageOwnsDesktopTitle =
     pathname === "/" ||
+    pathname === "/catalog" ||
     pathname === "/sales" ||
     pathname === "/suppliers" ||
-    pathname === "/incoming";
+    pathname === "/incoming" ||
+    pathname === "/batches" ||
+    pathname === "/onboarding" ||
+    pathname === "/reports";
   const workspaceLabel =
     user?.support_access?.tenant_name ?? (hasTenant ? "Рабочая область аптеки" : "Платформа Aurum");
 
@@ -415,9 +419,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
                   {workspaceLabel}
                 </span>
               ) : (
-                <span className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
+                <h1 className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
                   {pageTitle}
-                </span>
+                </h1>
               )}
             </div>
 
