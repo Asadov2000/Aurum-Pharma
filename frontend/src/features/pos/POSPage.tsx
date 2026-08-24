@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   Button,
@@ -22,9 +22,13 @@ import { cn } from "@/lib/utils";
 import { useDevicePreferences } from "@/lib/devicePreferences";
 
 import { DRAFT_TTL_MIN } from "./draftStorage";
-import { ModeToggle } from "./ModeToggle";
 import { type RegisterSwitchState, SaleArea } from "./SaleArea";
 import { usePosMode } from "./usePosMode";
+
+const ModeToggle = lazy(async () => {
+  const module = await import("./ModeToggle");
+  return { default: module.ModeToggle };
+});
 
 export function POSPage(): JSX.Element {
   const { user } = useAuth();
@@ -147,7 +151,16 @@ export function POSPage(): JSX.Element {
         </div>
       ) : null}
       <div className="w-full sm:w-auto">
-        <ModeToggle pref={pref} setPref={setPref} touch={mode === "touch"} />
+        <Suspense
+          fallback={
+            <div
+              aria-hidden="true"
+              className={cn("w-full sm:w-56", mode === "touch" ? "h-12" : "h-9")}
+            />
+          }
+        >
+          <ModeToggle pref={pref} setPref={setPref} touch={mode === "touch"} />
+        </Suspense>
       </div>
       <Switch
         label="Звук сканера"

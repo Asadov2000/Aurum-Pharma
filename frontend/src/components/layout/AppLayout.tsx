@@ -12,7 +12,6 @@ import {
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
-import { AppearanceMenu } from "@/components/AppearanceMenu";
 import { useAuth } from "@/features/auth/hooks";
 import { useMfaStepUpRequested } from "@/features/auth/stepUpCoordinator";
 import { activeTenantId } from "@/features/auth/tenantContext";
@@ -41,6 +40,11 @@ import {
   visibleSidebarItems,
 } from "./sidebarPreferences";
 import { type AppRoutePath } from "./routeAccess";
+
+const AppearanceMenu = lazy(async () => {
+  const module = await import("@/components/AppearanceMenu");
+  return { default: module.AppearanceMenu };
+});
 
 const MfaStepUpDialog = lazy(async () => {
   const module = await import("@/features/auth/MfaStepUpDialog");
@@ -445,7 +449,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
                   )}
                 </span>
               </div>
-              <AppearanceMenu />
+              <Suspense fallback={<div aria-hidden="true" className="h-9 w-9 shrink-0" />}>
+                <AppearanceMenu />
+              </Suspense>
               <Button
                 variant="secondary"
                 size="sm"
@@ -516,10 +522,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
 const SIDEBAR_SERVER_MARKER_PREFIX = "aurum:sidebar-server:v1";
 const START_ROUTE_SESSION_PREFIX = "aurum:start-route:v1";
 
-function sameSidebarPreferences(
-  left: SidebarPreferences,
-  right: SidebarPreferences,
-): boolean {
+function sameSidebarPreferences(left: SidebarPreferences, right: SidebarPreferences): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 

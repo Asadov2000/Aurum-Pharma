@@ -1,19 +1,11 @@
 import { createPortal } from "react-dom";
 import { useEffect, useId, useRef, useState } from "react";
 
-import { Button, SegmentedControl } from "@/components/ui";
-import {
-  getDensityPreference,
-  setDensityPreference,
-  type DensityPreference,
-} from "@/lib/density";
+import { Button } from "@/components/ui";
+import { getDensityPreference, setDensityPreference, type DensityPreference } from "@/lib/density";
 import { applyUserPreferences } from "@/features/settings/appearance";
 import { usePreferenceAutosave } from "@/features/settings/usePreferenceAutosave";
-import {
-  getThemePreference,
-  setThemePreference,
-  type ThemePreference,
-} from "@/lib/theme";
+import { getThemePreference, setThemePreference, type ThemePreference } from "@/lib/theme";
 
 const POPOVER_WIDTH = 360;
 const VIEWPORT_GUTTER = 8;
@@ -49,9 +41,7 @@ export function AppearanceMenu(): JSX.Element {
     setDensity(preferences.data.density);
   }, [autosave.hasPending, preferences.data]);
 
-  const syncPreference = (
-    patch: { theme: ThemePreference } | { density: DensityPreference },
-  ) => {
+  const syncPreference = (patch: { theme: ThemePreference } | { density: DensityPreference }) => {
     if (!preferences.data) return;
     autosave.enqueue(patch);
   };
@@ -141,11 +131,11 @@ export function AppearanceMenu(): JSX.Element {
             <div className="mt-4 space-y-4">
               <div>
                 <p className="mb-1.5 text-xs font-medium text-foreground-muted">Тема</p>
-                <SegmentedControl
+                <AppearanceOptions
                   value={theme}
                   options={THEME_OPTIONS}
                   label="Тема оформления"
-                  className="grid w-full grid-cols-3"
+                  columns="grid-cols-3"
                   onChange={(value) => {
                     setThemePreference(value);
                     setTheme(value);
@@ -155,11 +145,11 @@ export function AppearanceMenu(): JSX.Element {
               </div>
               <div>
                 <p className="mb-1.5 text-xs font-medium text-foreground-muted">Размер элементов</p>
-                <SegmentedControl
+                <AppearanceOptions
                   value={density}
                   options={DENSITY_OPTIONS}
                   label="Плотность интерфейса"
-                  className="grid w-full grid-cols-2"
+                  columns="grid-cols-2"
                   onChange={(value) => {
                     setDensityPreference(value);
                     setDensity(value);
@@ -172,6 +162,40 @@ export function AppearanceMenu(): JSX.Element {
           document.body,
         )}
     </>
+  );
+}
+
+function AppearanceOptions<T extends string>({
+  value,
+  options,
+  label,
+  columns,
+  onChange,
+}: {
+  value: T;
+  options: readonly { value: T; label: string }[];
+  label: string;
+  columns: "grid-cols-2" | "grid-cols-3";
+  onChange: (value: T) => void;
+}): JSX.Element {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className={`grid ${columns} overflow-hidden rounded-md border border-border bg-surface`}
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={value === option.value}
+          className="min-h-9 border-r border-border px-2 text-xs font-medium text-foreground transition-colors last:border-r-0 hover:bg-surface-subtle aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

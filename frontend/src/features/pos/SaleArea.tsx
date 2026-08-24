@@ -23,7 +23,6 @@ import { CartList } from "./CartList";
 import { PaymentPanel } from "./PaymentPanel";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { QuickProducts } from "./QuickProducts";
-import { ReceiptPrintModal } from "./ReceiptPrintModal";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
 import { getCheckoutResult } from "./api";
@@ -84,6 +83,11 @@ import {
   type SaleDetails,
 } from "./types";
 import { type PosMode } from "./usePosMode";
+
+const ReceiptPrintModal = lazy(async () => {
+  const module = await import("./ReceiptPrintModal");
+  return { default: module.ReceiptPrintModal };
+});
 
 // Lazy so the on-screen keypad chunk only loads when a cashier taps a field.
 const NumPad = lazy(() => import("./NumPad"));
@@ -620,14 +624,7 @@ function ActiveWorkspace({
         externalPaymentReviewRequired,
       );
     }
-  }, [
-    sale,
-    nameById,
-    registerId,
-    requiresRx,
-    stagedPayments,
-    externalPaymentReviewRequired,
-  ]);
+  }, [sale, nameById, registerId, requiresRx, stagedPayments, externalPaymentReviewRequired]);
 
   // Keep the completed receipt addressable until the cashier explicitly starts
   // another sale. This makes printer/browser recovery deterministic.
@@ -879,18 +876,7 @@ function ActiveWorkspace({
       return;
     }
 
-    if (
-      !saveDraft(
-        registerId,
-        saleId,
-        nameById,
-        "draft",
-        requiresRx,
-        [],
-        false,
-        false,
-      )
-    ) {
+    if (!saveDraft(registerId, saleId, nameById, "draft", requiresRx, [], false, false)) {
       setTopError(
         "Локальное хранилище кассы недоступно. Оплата не отправлена; освободите место или перезапустите приложение.",
       );
@@ -1223,18 +1209,7 @@ function ActiveWorkspace({
       );
       return;
     }
-    if (
-      !saveDraft(
-        registerId,
-        saleId,
-        nameById,
-        "draft",
-        requiresRx,
-        [],
-        false,
-        false,
-      )
-    ) {
+    if (!saveDraft(registerId, saleId, nameById, "draft", requiresRx, [], false, false)) {
       setTopError(
         "Не удалось сохранить сброс расчёта оплаты. Освободите место или перезапустите приложение.",
       );
@@ -1330,18 +1305,7 @@ function ActiveWorkspace({
       setTopError(`Оплата превышает сумму чека на ${Math.abs(remaining).toFixed(2)} ${currency}.`);
       return;
     }
-    if (
-      !saveDraft(
-        registerId,
-        saleId,
-        nameById,
-        "draft",
-        requiresRx,
-        [],
-        false,
-        false,
-      )
-    ) {
+    if (!saveDraft(registerId, saleId, nameById, "draft", requiresRx, [], false, false)) {
       setTopError(
         "Локальное хранилище кассы недоступно. Завершение не отправлено; освободите место или перезапустите приложение.",
       );
@@ -2053,11 +2017,13 @@ function ActiveWorkspace({
       )}
 
       {printOpen && saleId && (
-        <ReceiptPrintModal
-          saleId={saleId}
-          registerId={registerId}
-          onClose={() => setPrintOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <ReceiptPrintModal
+            saleId={saleId}
+            registerId={registerId}
+            onClose={() => setPrintOpen(false)}
+          />
+        </Suspense>
       )}
 
       <ConfirmDialog

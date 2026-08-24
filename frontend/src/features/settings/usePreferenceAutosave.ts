@@ -1,33 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { z } from "zod";
 
 import { useAuth } from "@/features/auth/hooks";
 
 import { useUpdateUserPreferences, useUserPreferencesQuery } from "./queries";
-import { type UserPreferencesUpdate } from "./types";
+import {
+  type AccentPreference,
+  type ContrastPreference,
+  type DensityPreference,
+  type ThemePreference,
+  type UserPreferencesUpdate,
+  type WorkspacePreferences,
+} from "./types";
 
 type PreferencePatch = Omit<UserPreferencesUpdate, "expected_version">;
 
-const workspaceSchema = z.object({
-  desktop_mode: z.enum(["auto", "compact", "expanded"]),
-  hidden_routes: z.array(z.string()).max(64),
-  favorite_routes: z.array(z.string()).max(64),
-  route_order: z.array(z.string()).max(64),
-  start_route: z.string().max(128),
-});
-
-const pendingPatchSchema = z
-  .object({
-    theme: z.enum(["system", "light", "dark"]).optional(),
-    density: z.enum(["auto", "compact", "comfortable", "touch"]).optional(),
-    contrast: z.enum(["standard", "high"]).optional(),
-    reduce_motion: z.boolean().optional(),
-    accent: z.enum(["teal", "blue", "violet", "green", "amber", "rose"]).optional(),
-    workspace: workspaceSchema.optional(),
-  })
-  .strict();
-
 const STORAGE_PREFIX = "aurum:preferences-pending:v1";
+const PATCH_KEYS = new Set([
+  "theme",
+  "density",
+  "contrast",
+  "reduce_motion",
+  "accent",
+  "workspace",
+]);
+const THEMES = new Set<ThemePreference>(["system", "light", "dark"]);
+const DENSITIES = new Set<DensityPreference>(["auto", "compact", "comfortable", "touch"]);
+const CONTRASTS = new Set<ContrastPreference>(["standard", "high"]);
+const ACCENTS = new Set<AccentPreference>(["teal", "blue", "violet", "green", "amber", "rose"]);
+const DESKTOP_MODES = new Set<WorkspacePreferences["desktop_mode"]>([
+  "auto",
+  "compact",
+  "expanded",
+]);
 
 export function usePreferenceAutosave(channel: string) {
   const { user } = useAuth();
@@ -136,11 +140,81 @@ function readPatch(scope: string, channel: string): PreferencePatch {
   try {
     const raw = window.localStorage.getItem(storageKey(scope, channel));
     if (raw === null) return {};
-    const parsed = pendingPatchSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : {};
+    return parsePendingPatch(JSON.parse(raw)) ?? {};
   } catch {
     return {};
   }
+}
+
+function parsePendingPatch(value: unknown): PreferencePatch | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => !PATCH_KEYS.has(key))) return null;
+
+  const patch: PreferencePatch = {};
+  if ("theme" in value) {
+    if (!isSetMember(THEMES, value.theme)) return null;
+    patch.theme = value.theme;
+  }
+  if ("density" in value) {
+    if (!isSetMember(DENSITIES, value.density)) return null;
+    patch.density = value.density;
+  }
+  if ("contrast" in value) {
+    if (!isSetMember(CONTRASTS, value.contrast)) return null;
+    patch.contrast = value.contrast;
+  }
+  if ("reduce_motion" in value) {
+    if (typeof value.reduce_motion !== "boolean") return null;
+    patch.reduce_motion = value.reduce_motion;
+  }
+  if ("accent" in value) {
+    if (!isSetMember(ACCENTS, value.accent)) return null;
+    patch.accent = value.accent;
+  }
+  if ("workspace" in value) {
+    const workspace = parseWorkspace(value.workspace);
+    if (workspace === null) return null;
+    patch.workspace = workspace;
+  }
+  return patch;
+}
+
+function parseWorkspace(value: unknown): WorkspacePreferences | null {
+  if (!isRecord(value) || !isSetMember(DESKTOP_MODES, value.desktop_mode)) return null;
+  const hiddenRoutes = parseRouteList(value.hidden_routes);
+  const favoriteRoutes = parseRouteList(value.favorite_routes);
+  const routeOrder = parseRouteList(value.route_order);
+  if (
+    hiddenRoutes === null ||
+    favoriteRoutes === null ||
+    routeOrder === null ||
+    typeof value.start_route !== "string" ||
+    value.start_route.length > 128
+  ) {
+    return null;
+  }
+  return {
+    desktop_mode: value.desktop_mode,
+    hidden_routes: hiddenRoutes,
+    favorite_routes: favoriteRoutes,
+    route_order: routeOrder,
+    start_route: value.start_route,
+  };
+}
+
+function parseRouteList(value: unknown): string[] | null {
+  return Array.isArray(value) &&
+    value.length <= 64 &&
+    value.every((item) => typeof item === "string")
+    ? value
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSetMember<T extends string>(values: ReadonlySet<T>, value: unknown): value is T {
+  return typeof value === "string" && values.has(value as T);
 }
 
 function persistPatch(scope: string, channel: string, patch: PreferencePatch): void {

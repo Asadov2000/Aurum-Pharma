@@ -53,7 +53,7 @@ vi.mock("@/components/layout/ServerStatusBanner", () => ({
 }));
 
 vi.mock("@/components/AppearanceMenu", () => ({
-  AppearanceMenu: () => null,
+  AppearanceMenu: () => <span data-testid="appearance-menu-ready" />,
 }));
 
 vi.mock("@/features/supportAccess/SupportAccessBanner", () => ({
@@ -95,12 +95,13 @@ describe("AppLayout shell", () => {
     window.localStorage.clear();
   });
 
-  it("renders the runtime badge in the header instead of page content", () => {
+  it("renders the runtime badge in the header instead of page content", async () => {
     render(
       <AppLayout>
         <section>Page content</section>
       </AppLayout>,
     );
+    await waitFor(() => expect(screen.getByTestId("appearance-menu-ready")).toBeInTheDocument());
 
     const badge = screen.getByTestId("runtime-surface-badge");
     const header = badge.closest("header");

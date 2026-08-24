@@ -91,6 +91,32 @@ describe("usePreferenceAutosave", () => {
     await waitFor(() => expect(result.current.hasPending).toBe(false));
     expect(window.localStorage.getItem(storageKey)).toBeNull();
   });
+
+  it("restores only a strictly valid pending patch", async () => {
+    const storageKey = "aurum:preferences-pending:v1:user-1%3Atenant-1:test-channel";
+    window.localStorage.setItem(storageKey, JSON.stringify({ theme: "dark", unexpected: true }));
+
+    const { unmount } = renderHook(() => usePreferenceAutosave("test-channel"));
+    await waitFor(() => expect(state.mutateAsync).not.toHaveBeenCalled());
+    unmount();
+
+    window.localStorage.setItem(storageKey, JSON.stringify({ theme: "dark", density: "touch" }));
+    state.mutateAsync.mockResolvedValue({
+      ...state.preferences,
+      theme: "dark",
+      density: "touch",
+      version: 2,
+    });
+    renderHook(() => usePreferenceAutosave("test-channel"));
+
+    await waitFor(() =>
+      expect(state.mutateAsync).toHaveBeenCalledWith({
+        expected_version: 1,
+        theme: "dark",
+        density: "touch",
+      }),
+    );
+  });
 });
 
 function deferred<T>(): Deferred<T> {
