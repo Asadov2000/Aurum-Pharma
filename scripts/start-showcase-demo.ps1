@@ -40,7 +40,8 @@ $showcaseContainers = @(
     "aurum-demo-billing-worker",
     "aurum-demo-platform-mailer",
     "aurum-demo-celery-beat",
-    "aurum-demo-frontend"
+    "aurum-demo-frontend",
+    "aurum-demo-share-gateway"
 )
 $composeArgs = @(
     "compose",
@@ -59,7 +60,8 @@ $conflictingDevContainers = @(
     "aurum-celery-beat",
     "aurum-postgres",
     "aurum-redis",
-    "aurum-minio"
+    "aurum-minio",
+    "aurum-share-gateway"
 )
 
 function New-CryptographicHex {
@@ -419,6 +421,29 @@ function Wait-HttpOk {
     throw "$Name did not become ready: $Url"
 }
 
+function Assert-SharedFrontendCurrent {
+    Write-Host ""
+    Write-Host "==> Verify shared frontend matches local frontend"
+    if ($DryRun) {
+        Write-Host "Compare http://localhost:5173 with http://localhost:18080"
+        return
+    }
+
+    $localResponse = Invoke-WebRequest `
+        -UseBasicParsing `
+        -Uri "http://localhost:5173" `
+        -TimeoutSec 10
+    $sharedResponse = Invoke-WebRequest `
+        -UseBasicParsing `
+        -Uri "http://localhost:18080" `
+        -TimeoutSec 10
+    if ($localResponse.Content -cne $sharedResponse.Content) {
+        throw "The shared gateway is serving a stale frontend build"
+    }
+
+    Write-Host "Shared frontend is current"
+}
+
 if (-not (Test-Path -LiteralPath $composeFile)) {
     throw "Showcase Compose file not found: $composeFile"
 }
@@ -443,7 +468,7 @@ Stop-ConflictingDevContainers
 if (-not $SkipBuild) {
     Invoke-DemoCompose `
         -Title "Build showcase application images" `
-        -Arguments @("build", "backend", "frontend")
+        -Arguments @("build", "backend", "frontend", "share-gateway")
 }
 
 Invoke-DemoCompose `
@@ -491,10 +516,17 @@ Invoke-DemoCompose `
         "billing-worker",
         "platform-mailer",
         "celery-beat",
-        "frontend"
+        "frontend",
+        "share-gateway"
     )
 
+Invoke-DemoCompose `
+    -Title "Refresh shared gateway routes" `
+    -Arguments @("restart", "--timeout", "10", "share-gateway")
+
 Wait-HttpOk -Name "Showcase frontend" -Url "http://localhost:5173"
+Wait-HttpOk -Name "Shared gateway" -Url "http://localhost:18080"
+Assert-SharedFrontendCurrent
 
 Invoke-DemoCompose -Title "Show showcase service status" -Arguments @("ps")
 
@@ -506,5 +538,6 @@ if ($DryRun) {
 
 Write-Host "Aurum Pharma showcase is ready."
 Write-Host "Frontend:      http://localhost:5173"
+Write-Host "Shared:        http://localhost:18080"
 Write-Host "API docs:      http://localhost:8000/docs"
 Write-Host "MinIO console: http://localhost:9001"

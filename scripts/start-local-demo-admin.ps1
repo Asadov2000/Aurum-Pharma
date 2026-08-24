@@ -59,7 +59,8 @@ function Start-DockerDesktopIfNeeded {
 function Test-ShowcaseImagesAvailable {
     $requiredImages = @(
         "aurum-pharma-demo-backend:local",
-        "aurum-pharma-demo-frontend:local"
+        "aurum-pharma-demo-frontend:local",
+        "aurum-pharma-demo-share-gateway:local"
     )
     foreach ($image in $requiredImages) {
         & docker image inspect $image *> $null

@@ -243,6 +243,10 @@ Assert-Equal `
     -Actual ($launcherText -match "billing-worker") `
     -Expected $true `
     -Because "the local launcher starts the billing worker"
+Assert-Equal `
+    -Actual ($launcherText -match "Verify shared frontend matches local frontend") `
+    -Expected $true `
+    -Because "the local launcher rejects a stale shared frontend"
 
 if ($env:OS -eq "Windows_NT") {
     $cmdLauncherOutput = & cmd.exe /d /c "`"$cmdLauncher`" -DryRun -NoBrowser"

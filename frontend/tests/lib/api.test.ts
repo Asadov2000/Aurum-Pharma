@@ -44,9 +44,27 @@ describe("resolveApiBaseUrl", () => {
   });
 
   it("keeps the local backend fallback in development", () => {
-    expect(resolveApiBaseUrl({ DEV: true, VITE_API_URL: undefined })).toBe(
+    expect(resolveApiBaseUrl({ DEV: true, VITE_API_URL: undefined }, "http://localhost:5173")).toBe(
       "http://localhost:8000/api/v1",
     );
+  });
+
+  it("uses the same-origin gateway when a localhost build is opened remotely", () => {
+    expect(
+      resolveApiBaseUrl(
+        { DEV: false, VITE_API_URL: "http://localhost:8000/api/v1" },
+        "https://asadov.tail135d54.ts.net",
+      ),
+    ).toBe("/api/v1");
+  });
+
+  it("keeps the configured localhost API for a local browser", () => {
+    expect(
+      resolveApiBaseUrl(
+        { DEV: false, VITE_API_URL: "http://localhost:8000/api/v1" },
+        "http://127.0.0.1:5173",
+      ),
+    ).toBe("http://localhost:8000/api/v1");
   });
 
   it("uses same-origin API fallback in production", () => {
