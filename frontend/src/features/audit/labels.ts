@@ -1,9 +1,19 @@
-// Action labels — backend writes lowercase verbs through Postgres triggers.
+// Trigger actions are uppercase; older explicit events can be lowercase.
 // Anything unknown falls back to the raw string.
 export const actionLabel: Record<string, string> = {
   insert: "Создание",
+  INSERT: "Создание",
   update: "Обновление",
+  UPDATE: "Обновление",
   delete: "Удаление",
+  DELETE: "Удаление",
+  VIEW: "Просмотр",
+  EXPORT: "Экспорт",
+  IMPERSONATE: "Служебный доступ",
+  MEMBERSHIP_CREATED: "Сотрудник добавлен",
+  MEMBERSHIP_ACTIVATED: "Доступ сотрудника активирован",
+  OWNERSHIP_GRANTED: "Владелец назначен",
+  ROLE_PERMISSIONS_CHANGED: "Права роли изменены",
   login: "Вход",
   logout: "Выход",
   login_failed: "Ошибка входа",
@@ -14,12 +24,20 @@ export const actionLabel: Record<string, string> = {
   shift_close: "Закрытие смены",
 };
 
-export const actionTone = (action: string): "neutral" | "success" | "warning" | "danger" | "info" => {
-  if (action === "insert") return "success";
-  if (action === "update") return "info";
-  if (action === "delete") return "danger";
-  if (action.includes("login_failed") || action.includes("failed")) return "danger";
-  if (action.startsWith("login") || action.startsWith("logout")) return "neutral";
+export const actionTone = (
+  action: string,
+): "neutral" | "success" | "warning" | "danger" | "info" => {
+  const normalizedAction = action.toLowerCase();
+  if (normalizedAction === "insert") return "success";
+  if (normalizedAction === "update") return "info";
+  if (normalizedAction === "delete" || normalizedAction === "impersonate") return "danger";
+  if (normalizedAction.includes("failed") || normalizedAction.includes("revoke")) return "danger";
+  if (normalizedAction.includes("ownership") || normalizedAction.includes("permissions")) {
+    return "warning";
+  }
+  if (normalizedAction === "export" || normalizedAction === "view") return "info";
+  if (normalizedAction.startsWith("login") || normalizedAction.startsWith("logout"))
+    return "neutral";
   return "neutral";
 };
 
@@ -32,6 +50,8 @@ export const tableLabel: Record<string, string> = {
   register: "Касса",
   role: "Роль",
   user_assignment: "Назначение роли",
+  tenant_membership: "Сотрудник аптеки",
+  tenant_ownership: "Владелец аптеки",
   tenant_catalog: "Каталог",
   barcode: "Штрихкод",
   batch: "Партия",
@@ -42,11 +62,16 @@ export const tableLabel: Record<string, string> = {
   incoming_item: "Позиция прихода",
   supplier_return: "Возврат поставщику",
   shift: "Смена",
+  session: "Сеанс пользователя",
+  sync_writer_epoch: "Синхронизация кассы",
+  pos_command: "Команда кассы",
   sale: "Продажа",
   sale_item: "Позиция продажи",
   sale_payment: "Оплата",
   prescription_log: "Журнал рецепта",
   invoice: "Счёт",
   invoice_payment: "Платёж по счёту",
+  payment: "Платёж",
   tenant_subscription: "Подписка",
+  platform_access_grant_permission: "Служебный доступ",
 };

@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { type KeyboardEvent, useState } from "react";
 
 import {
   Badge,
+  Button,
   ConfigurableFilterBar,
   Input,
   Label,
   PageHeader,
   Pagination,
   Select,
+  SkeletonRows,
   Table,
   TableEmpty,
   TBody,
@@ -28,10 +30,26 @@ import { type AuditEntry, type AuditScope } from "./types";
 
 const PAGE_SIZE = 50;
 
+const WRITE_ACTIONS = new Set(["INSERT", "UPDATE", "DELETE"]);
+const ATTENTION_ACTIONS = new Set(["DELETE", "IMPERSONATE", "ROLE_REVOKE"]);
+
+const actionOptions = [
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "VIEW",
+  "EXPORT",
+  "IMPERSONATE",
+  "MEMBERSHIP_CREATED",
+  "MEMBERSHIP_ACTIVATED",
+  "OWNERSHIP_GRANTED",
+  "ROLE_PERMISSIONS_CHANGED",
+] as const;
+
 const scopeLabel: Record<AuditScope, string> = {
   my: "Мои действия",
-  tenant: "Все по тенанту",
-  global: "Глобально",
+  tenant: "Вся аптека",
+  global: "Вся платформа",
 };
 
 export function AuditPage(): JSX.Element {
@@ -50,7 +68,7 @@ export function AuditPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const [opened, setOpened] = useState<AuditEntry | null>(null);
 
-  const { data, isLoading, error } = useAuditQuery({
+  const { data, isLoading, isFetching, error, refetch } = useAuditQuery({
     scope,
     action: action || undefined,
     table_name: tableName || undefined,
@@ -66,10 +84,31 @@ export function AuditPage(): JSX.Element {
   });
 
   const total = data?.total ?? 0;
+  const items = data?.items ?? [];
+  const hasFilters = Boolean(
+    scope !== defaultScope || action || tableName || userId || tenantId || dateFrom || dateTo,
+  );
+  const writeCount = items.filter((entry) => WRITE_ACTIONS.has(entry.action.toUpperCase())).length;
+  const attentionCount = items.filter((entry) =>
+    ATTENTION_ACTIONS.has(entry.action.toUpperCase()),
+  ).length;
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Журнал аудита" meta={<>всего: {total}</>} />
+      <PageHeader
+        title="Журнал аудита"
+        description="История действий пользователей и изменений критичных данных аптеки."
+        meta={<>Найдено: {total}</>}
+        showTitleOnDesktop
+      />
+
+      <AuditSummary
+        total={total}
+        visible={items.length}
+        writeCount={writeCount}
+        attentionCount={attentionCount}
+        loading={isLoading}
+      />
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -113,16 +152,22 @@ export function AuditPage(): JSX.Element {
             content: (
               <div>
                 <Label htmlFor="action">Действие</Label>
-                <Input
+                <Select
                   id="action"
-                  placeholder="insert / update / …"
                   value={action}
                   onChange={(e) => {
                     setAction(e.target.value);
                     setPage(1);
                   }}
-                  className="w-full sm:w-44"
-                />
+                  className="w-full sm:w-48"
+                >
+                  <option value="">Все действия</option>
+                  {actionOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {actionLabel[value] ?? value}
+                    </option>
+                  ))}
+                </Select>
               </div>
             ),
             active: Boolean(action),
@@ -137,17 +182,23 @@ export function AuditPage(): JSX.Element {
             label: "Раздел данных",
             content: (
               <div>
-                <Label htmlFor="table_name">Таблица</Label>
-                <Input
+                <Label htmlFor="table_name">Раздел данных</Label>
+                <Select
                   id="table_name"
-                  placeholder="batch / sale / …"
                   value={tableName}
                   onChange={(e) => {
                     setTableName(e.target.value);
                     setPage(1);
                   }}
-                  className="w-full sm:w-44"
-                />
+                  className="w-full sm:w-52"
+                >
+                  <option value="">Все разделы</option>
+                  {Object.entries(tableLabel).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
               </div>
             ),
             active: Boolean(tableName),
@@ -161,7 +212,7 @@ export function AuditPage(): JSX.Element {
             label: "Пользователь",
             content: (
               <div>
-                <Label htmlFor="user_id">User ID</Label>
+                <Label htmlFor="user_id">ID пользователя</Label>
                 <Input
                   id="user_id"
                   placeholder="UUID"
@@ -186,7 +237,7 @@ export function AuditPage(): JSX.Element {
             label: "Аптека",
             content: (
               <div>
-                <Label htmlFor="tenant_id">Tenant ID</Label>
+                <Label htmlFor="tenant_id">ID аптеки</Label>
                 <Input
                   id="tenant_id"
                   placeholder="UUID"
@@ -261,47 +312,92 @@ export function AuditPage(): JSX.Element {
       />
 
       {error && (
-        <p className="text-sm text-danger">
-          {describeApiError(error, "Не удалось загрузить журнал")}
-        </p>
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3"
+          role="alert"
+        >
+          <p className="text-sm text-danger-foreground">
+            {describeApiError(error, "Не удалось загрузить журнал")}
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            isLoading={isFetching}
+            onClick={() => void refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-foreground-muted">Загрузка…</p>
-      ) : !data || data.items.length === 0 ? (
-        <TableEmpty>
-          {action || tableName || userId || tenantId || dateFrom || dateTo
-            ? "По текущим фильтрам ничего не найдено"
-            : "События пока не записаны"}
+        <SkeletonRows rows={8} />
+      ) : !data || items.length === 0 ? (
+        <TableEmpty title={hasFilters ? "События не найдены" : "События пока не записаны"}>
+          {hasFilters
+            ? "Измените или сбросьте текущие фильтры."
+            : "События появятся после действий пользователей."}
         </TableEmpty>
       ) : (
         <>
-          <Table>
+          <div className="flex min-w-0 flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">События</h2>
+              <p className="mt-0.5 text-xs text-foreground-muted">{scopeLabel[scope]}</p>
+            </div>
+            {isFetching && !isLoading ? (
+              <span className="text-xs text-foreground-muted" role="status">
+                Обновление…
+              </span>
+            ) : null}
+          </div>
+
+          <Table aria-label="События журнала аудита">
             <THead>
               <TR>
-                <TH>Когда</TH>
+                <TH>Дата и время</TH>
                 <TH>Действие</TH>
-                <TH>Таблица</TH>
-                <TH>Запись</TH>
+                <TH>Раздел данных</TH>
+                <TH>Объект</TH>
                 <TH>Пользователь</TH>
                 <TH>IP</TH>
               </TR>
             </THead>
             <TBody>
-              {data.items.map((e) => (
-                <TR key={e.id} className="cursor-pointer" onClick={() => setOpened(e)}>
+              {items.map((entry) => (
+                <TR
+                  key={entry.id}
+                  className="cursor-pointer focus-visible:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                  tabIndex={0}
+                  aria-label={`Открыть событие: ${actionLabel[entry.action] ?? entry.action}, ${tableLabel[entry.table_name] ?? entry.table_name}`}
+                  onClick={() => setOpened(entry)}
+                  onKeyDown={(event) => openEntryFromKeyboard(event, entry, setOpened)}
+                >
                   <TD className="whitespace-nowrap">
-                    {new Date(e.created_at).toLocaleString("ru-RU")}
+                    <AuditTimestamp value={entry.created_at} />
                   </TD>
                   <TD>
-                    <Badge tone={actionTone(e.action)}>{actionLabel[e.action] ?? e.action}</Badge>
+                    <Badge tone={actionTone(entry.action)}>
+                      {actionLabel[entry.action] ?? entry.action}
+                    </Badge>
                   </TD>
-                  <TD>{tableLabel[e.table_name] ?? e.table_name}</TD>
+                  <TD>
+                    <span className="font-medium">
+                      {tableLabel[entry.table_name] ?? entry.table_name}
+                    </span>
+                    <span className="mt-0.5 block font-mono text-[11px] text-foreground-muted">
+                      {entry.table_name}
+                    </span>
+                  </TD>
                   <TD className="font-mono text-xs">
-                    {e.record_id ? e.record_id.slice(0, 8) : "—"}
+                    {entry.record_id ? entry.record_id.slice(0, 8) : "—"}
                   </TD>
-                  <TD className="font-mono text-xs">{e.user_id ? e.user_id.slice(0, 8) : "—"}</TD>
-                  <TD className="font-mono text-xs">{e.ip_address ?? "—"}</TD>
+                  <TD className="font-mono text-xs">
+                    {entry.user_id ? entry.user_id.slice(0, 8) : "Система"}
+                  </TD>
+                  <TD className="font-mono text-xs text-foreground-secondary">
+                    {entry.ip_address ?? "—"}
+                  </TD>
                 </TR>
               ))}
             </TBody>
@@ -314,4 +410,84 @@ export function AuditPage(): JSX.Element {
       <AuditEntryModal entry={opened} onClose={() => setOpened(null)} />
     </div>
   );
+}
+
+function AuditSummary({
+  total,
+  visible,
+  writeCount,
+  attentionCount,
+  loading,
+}: {
+  total: number;
+  visible: number;
+  writeCount: number;
+  attentionCount: number;
+  loading: boolean;
+}): JSX.Element {
+  const metrics = [
+    { label: "Всего по фильтру", value: total },
+    { label: "На странице", value: visible },
+    { label: "Изменения на странице", value: writeCount },
+    { label: "Требуют внимания", value: attentionCount, danger: attentionCount > 0 },
+  ];
+
+  return (
+    <section
+      className="grid overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-2 xl:grid-cols-4"
+      aria-label="Сводка журнала аудита"
+    >
+      {metrics.map((metric, index) => (
+        <div
+          key={metric.label}
+          className={`min-w-0 px-5 py-4 ${
+            index > 0 ? "border-t border-border sm:border-l" : ""
+          } ${index === 1 ? "sm:border-t-0" : ""} ${
+            index === 2 ? "sm:border-l-0 xl:border-l" : ""
+          } ${index >= 2 ? "xl:border-t-0" : ""}`}
+        >
+          <p className="text-xs font-medium text-foreground-muted">{metric.label}</p>
+          {loading ? (
+            <div className="mt-2 h-7 w-16 animate-pulse rounded bg-foreground/10" />
+          ) : (
+            <p
+              className={`mt-1 font-display text-2xl font-semibold tabular-nums ${
+                metric.danger ? "text-danger" : "text-foreground"
+              }`}
+            >
+              {metric.value.toLocaleString("ru-RU")}
+            </p>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function AuditTimestamp({ value }: { value: string }): JSX.Element {
+  const date = new Date(value);
+  return (
+    <time dateTime={value}>
+      <span className="block font-medium">
+        {date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })}
+      </span>
+      <span className="mt-0.5 block text-xs tabular-nums text-foreground-muted">
+        {date.toLocaleTimeString("ru-RU", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })}
+      </span>
+    </time>
+  );
+}
+
+function openEntryFromKeyboard(
+  event: KeyboardEvent<HTMLTableRowElement>,
+  entry: AuditEntry,
+  open: (entry: AuditEntry) => void,
+): void {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  open(entry);
 }
