@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const searchAudit = vi.fn();
@@ -35,7 +35,7 @@ const ENTRY = {
   id: "a-1",
   tenant_id: "t-1",
   user_id: "u-1",
-  action: "update",
+  action: "UPDATE",
   table_name: "branch",
   record_id: "b-1",
   old_values: { name: "Old", is_active: true },
@@ -95,9 +95,11 @@ describe("AuditPage", () => {
       page_size: 50,
     });
     renderPage();
-    expect(await screen.findByText("Обновление")).toBeInTheDocument();
-    expect(screen.getByText("Точка")).toBeInTheDocument();
-    expect(screen.getByText(/всего: 1/i)).toBeInTheDocument();
+    const row = await screen.findByRole("row", { name: /Открыть событие: Обновление, Точка/i });
+    expect(within(row).getByText("Обновление")).toBeInTheDocument();
+    expect(within(row).getByText("Точка")).toBeInTheDocument();
+    expect(screen.getByText(/Найдено: 1/i)).toBeInTheDocument();
+    expect(screen.getByText("Изменения на странице")).toBeInTheDocument();
   });
 
   it("opens the entry modal with a colored diff on row click", async () => {
@@ -108,11 +110,28 @@ describe("AuditPage", () => {
       page_size: 50,
     });
     renderPage();
-    fireEvent.click(await screen.findByText("Обновление"));
+    fireEvent.click(
+      await screen.findByRole("row", { name: /Открыть событие: Обновление, Точка/i }),
+    );
     expect(await screen.findByText(/Точка · Обновление/i)).toBeInTheDocument();
     // The diff shows the old and new value of the changed field.
     expect(screen.getByText("Old")).toBeInTheDocument();
     expect(screen.getByText("New")).toBeInTheDocument();
+  });
+
+  it("opens the entry modal from the keyboard", async () => {
+    searchAudit.mockResolvedValueOnce({
+      items: [ENTRY],
+      total: 1,
+      page: 1,
+      page_size: 50,
+    });
+    renderPage();
+
+    const row = await screen.findByRole("row", { name: /Открыть событие: Обновление, Точка/i });
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(await screen.findByText(/Точка · Обновление/i)).toBeInTheDocument();
   });
 
   it("re-queries with action filter typed in", async () => {
@@ -125,10 +144,10 @@ describe("AuditPage", () => {
     renderPage();
     await screen.findByText(/События пока не записаны/i);
     fireEvent.change(screen.getByLabelText(/^Действие$/), {
-      target: { value: "delete" },
+      target: { value: "DELETE" },
     });
     await waitFor(() => {
-      expect(searchAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "delete" }));
+      expect(searchAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "DELETE" }));
     });
   });
 
@@ -171,7 +190,7 @@ describe("AuditPage", () => {
     renderPage();
 
     await screen.findByText(/События пока не записаны/i);
-    expect(screen.queryByRole("option", { name: "Глобально" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Вся платформа" })).not.toBeInTheDocument();
   });
 
   it("exposes global audit only with the exact platform capability", async () => {
@@ -186,6 +205,6 @@ describe("AuditPage", () => {
     renderPage();
 
     await screen.findByText(/События пока не записаны/i);
-    expect(screen.getByRole("option", { name: "Глобально" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Вся платформа" })).toBeInTheDocument();
   });
 });
