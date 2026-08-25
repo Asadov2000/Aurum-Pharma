@@ -45,6 +45,7 @@
 | Архитектурное решение | `docs/adr/` | код и тесты имеют приоритет для текущего поведения |
 | Продуктовые границы | `docs/spec-v3.md` | сверять с реализацией |
 | Схема данных | `docs/db-schema-v2.md` | миграции являются текущей истиной |
+| Текущее состояние и риски | `docs/development-state.md`, `docs/known-issues.md` | обновлять после широкого аудита или релизного gate |
 
 Точные версии зависимостей находятся только в `backend/pyproject.toml`,
 `backend/poetry.lock`, `frontend/package.json` и `frontend/pnpm-lock.yaml`.
