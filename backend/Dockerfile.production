@@ -19,8 +19,13 @@ RUN apt-get update \
     && python -m pip install --upgrade "pip==${PIP_VERSION}" "poetry==${POETRY_VERSION}"
 
 COPY pyproject.toml poetry.lock ./
+# Package-management tooling is build-only and must not expand the runtime attack surface.
 RUN poetry install --only main --no-root --sync \
-    && /app/.venv/bin/python -m pip install --upgrade "pip==${PIP_VERSION}"
+    && rm -rf \
+        /app/.venv/bin/pip* \
+        /app/.venv/lib/python3.12/site-packages/pip \
+        /app/.venv/lib/python3.12/site-packages/pip-*.dist-info \
+        /app/.venv/lib/python3.12/site-packages/pip-*.virtualenv
 
 
 FROM ${PYTHON_IMAGE} AS runtime
@@ -34,6 +39,9 @@ RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
+        /usr/local/bin/pip* \
+        /usr/local/lib/python3.12/site-packages/pip \
+        /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
     && groupadd --gid 10001 aurum \
     && useradd --uid 10001 --gid aurum --no-create-home --shell /usr/sbin/nologin aurum
 
