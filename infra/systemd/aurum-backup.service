@@ -1,0 +1,16 @@
+[Unit]
+Description=Aurum Pharma encrypted backup
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/aurum-pharma
+ExecStart=/usr/bin/docker compose --env-file /etc/aurum/production.env --file docker-compose.production.yml --file docker-compose.recovery.yml --profile backup run --rm backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

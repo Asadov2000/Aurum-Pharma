@@ -68,8 +68,11 @@
 - [ ] Production/staging fail-closed: HTTPS для CORS origins, secure cookies,
       trusted Host/proxy и отсутствие default credentials уже enforced;
       encrypted Redis/MinIO/DB transport ещё не реализован.
-- [ ] PostgreSQL backup с WAL/PITR, версионирование MinIO, шифрование,
-      off-site-копия, retention и регулярный restore-test с измеренными RPO/RTO.
+- [x] Зашифрованный logical backup PostgreSQL + MinIO, отдельные read-only
+      credentials, retention и изолированный restore drill реализованы и локально
+      проверены на полной схеме и повторным тестом владельцев, ACL и RLS.
+- [ ] WAL/PITR, независимая off-site WORM-копия в разрешённой юрисдикции,
+      автоматическое расписание drill и измеренные на production-объёме RPO/RTO.
 
 ### P0: identity и authorization
 
@@ -114,14 +117,18 @@
 
 ## P1 после закрытия P0
 
-- [ ] Образы закреплены по digest, генерируется SBOM и выполняется image scan.
+- [x] Base images закреплены по digest; CI выполняет Dockerfile/secret/image scan
+      и сохраняет CycloneDX SBOM для трёх production images.
+- [ ] Release images публикуются по digest в registry и подписываются Cosign через
+      OIDC; подпись проверяется перед deployment.
 - [ ] Enforcing CSP и Permissions-Policy установлены на production Caddy;
       inline theme script вынесен во внешний файл. HSTS включается только после
       staging-проверки восстановления TLS.
 - [ ] Логи используют allowlist и redaction; в логах/трейсах нет cookies,
       Authorization, email пациентов, рецептов и закупочных цен.
-- [ ] Prometheus получает token через secret file, порт 9090 закрыт извне,
-      добавлены alerts на доступность, backup и истечение сертификатов.
+- [ ] Prometheus получает token через secret file, порт 9090 закрыт извне и
+      availability alerts добавлены; backup freshness, TLS expiry и Alertmanager
+      ещё требуют exporter/канала доставки.
 - [ ] Windows-клиент выпускается как подписанный MSIX/AppInstaller с
       проверкой publisher, anti-rollback и безопасным WebView2 allowlist.
 - [ ] SAST/DAST, ручной threat model и внешний penetration test до пилота.
@@ -130,7 +137,7 @@
 
 1. Scoped authorization, account/membership/ownership и безопасный конструктор
    из ADR-0007.
-2. Backup/restore job с одноразовой проверкой восстановления.
+2. WAL/PITR, off-site WORM и автоматический контроль свежести backup/drill.
 3. DB-инварианты POS и полный refund/void sync-контур.
 4. Внутренний TLS для PostgreSQL, Redis и MinIO.
 5. mTLS/device identity, зашифрованная локальная БД и trusted time для Edge.

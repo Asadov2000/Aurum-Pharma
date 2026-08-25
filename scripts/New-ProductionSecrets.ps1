@@ -65,11 +65,14 @@ $supportPassword = New-RandomHex -Bytes 32
 $mailerPassword = New-RandomHex -Bytes 32
 $billingWorkerPassword = New-RandomHex -Bytes 32
 $migratorPassword = New-RandomHex -Bytes 32
+$backupPassword = New-RandomHex -Bytes 32
 $redisPassword = New-RandomHex -Bytes 32
 $minioRootUser = New-RandomHex -Bytes 10
 $minioRootPassword = New-RandomHex -Bytes 32
 $minioAccessKey = New-RandomHex -Bytes 10
 $minioSecretKey = New-RandomHex -Bytes 32
+$minioBackupAccessKey = New-RandomHex -Bytes 10
+$minioBackupSecretKey = New-RandomHex -Bytes 32
 
 $emailPasswordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($EmailPassword)
 try {
@@ -88,6 +91,7 @@ Write-Secret -Name "AURUM_SUPPORT_PASSWORD" -Value $supportPassword
 Write-Secret -Name "AURUM_MAILER_PASSWORD" -Value $mailerPassword
 Write-Secret -Name "AURUM_BILLING_WORKER_PASSWORD" -Value $billingWorkerPassword
 Write-Secret -Name "AURUM_MIGRATOR_PASSWORD" -Value $migratorPassword
+Write-Secret -Name "AURUM_BACKUP_PASSWORD" -Value $backupPassword
 Write-Secret -Name "DATABASE_URL_APP" -Value (
     "postgresql+asyncpg://aurum_app:{0}@postgres:5432/aurum" -f $appPassword
 )
@@ -104,6 +108,9 @@ Write-Secret -Name "DATABASE_URL_BILLING_WORKER" -Value (
 Write-Secret -Name "DATABASE_URL_MIGRATION" -Value (
     "postgresql+asyncpg://aurum_migrator:{0}@postgres:5432/aurum" -f $migratorPassword
 )
+Write-Secret -Name "DATABASE_URL_BACKUP" -Value (
+    "postgresql://aurum_backup:{0}@postgres:5432/aurum" -f $backupPassword
+)
 Write-Secret -Name "REDIS_PASSWORD" -Value $redisPassword
 Write-Secret -Name "REDIS_URL" -Value ("redis://:{0}@redis:6379/0" -f $redisPassword)
 Write-Secret -Name "JWT_SECRET" -Value (New-RandomHex -Bytes 48)
@@ -116,6 +123,9 @@ Write-Secret -Name "MINIO_ROOT_USER" -Value $minioRootUser
 Write-Secret -Name "MINIO_ROOT_PASSWORD" -Value $minioRootPassword
 Write-Secret -Name "MINIO_ACCESS_KEY" -Value $minioAccessKey
 Write-Secret -Name "MINIO_SECRET_KEY" -Value $minioSecretKey
+Write-Secret -Name "MINIO_BACKUP_ACCESS_KEY" -Value $minioBackupAccessKey
+Write-Secret -Name "MINIO_BACKUP_SECRET_KEY" -Value $minioBackupSecretKey
+Write-Secret -Name "RESTIC_PASSWORD" -Value (New-RandomHex -Bytes 48)
 
 if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -133,7 +143,7 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
             [Security.AccessControl.AccessControlType]::Allow
         )
     )
-    [IO.Directory]::SetAccessControl($output, $acl)
+    Set-Acl -LiteralPath $output -AclObject $acl
 } else {
     & chmod 700 -- $output
     Get-ChildItem -LiteralPath $output -File | ForEach-Object {
@@ -141,4 +151,4 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     }
 }
 
-Write-Host "Created 22 production secret files in a protected external directory."
+Write-Host "Created 27 production secret files in a protected external directory."

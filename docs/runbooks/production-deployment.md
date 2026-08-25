@@ -47,6 +47,7 @@ pwsh ./scripts/New-ProductionSecrets.ps1 `
 
 Не копируйте секреты в `.env`, Compose arguments, shell history, issue или чат.
 Сделайте зашифрованную резервную копию MFA-ключа отдельно от основной БД.
+Ключ `RESTIC_PASSWORD` храните отдельно и от сервера, и от backup repository.
 
 ## 4. Проверка конфигурации
 
@@ -144,12 +145,84 @@ ss -lntup
 обратно-совместимой схеме. Production-БД не откатывается миграцией вниз. Если
 изменение схемы несовместимо, используется заранее отрепетированный restore.
 
-## 8. Оставшиеся блокеры
+## 8. Backup и restore drill
+
+Подготовьте отдельный host filesystem. UID `10001` принадлежит непривилегированному
+backup-контейнеру:
+
+```bash
+sudo install -d -m 700 -o 10001 -g 10001 /srv/aurum-backups/restic
+sudo install -d -m 700 -o 10001 -g 10001 /srv/aurum-backups/scratch
+```
+
+`AURUM_BACKUP_REPOSITORY` хранит зашифрованные snapshots, а
+`AURUM_BACKUP_SCRATCH` является очищаемым дисковым рабочим каталогом. Не
+размещайте scratch в RAM (`tmpfs`). До запуска убедитесь, что свободного места
+не меньше `AURUM_BACKUP_MIN_FREE_BYTES`; для production задайте запас выше
+максимального ожидаемого размера БД и MinIO.
+
+Создать зашифрованный combined snapshot PostgreSQL + текущих MinIO-объектов:
+
+```bash
+docker compose \
+  --env-file /etc/aurum/production.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile backup run --rm backup
+```
+
+После первой ручной проверки установите `infra/systemd/aurum-backup.service` и
+`aurum-backup.timer`, скорректировав `WorkingDirectory`. Проверяйте
+`systemctl status aurum-backup.timer` и журнал каждого запуска.
+
+Не реже раза в месяц запускайте restore в отдельном Compose project. Уникальное
+имя гарантирует, что drill не использует production volumes:
+
+```bash
+drill="aurum-restore-$(date -u +%Y%m%dT%H%M%SZ)"
+docker compose -p "$drill" \
+  --env-file /etc/aurum/production.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile restore-drill run --rm restore-drill
+
+docker compose -p "$drill" \
+  --env-file /etc/aurum/production.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile restore-drill down --volumes --remove-orphans
+```
+
+Успех содержит `Restore drill passed`, фактическую Alembic revision и число
+объектов, их SHA-256, RLS и доступ runtime-ролей. PostgreSQL dump и текущий
+снимок объектов MinIO создаются последовательно, поэтому межсистемная
+транзакционная согласованность не гарантируется без окна запрета записей. Этот
+backup пока логический: он не заменяет WAL/PITR и независимую
+off-site копию.
+
+## 9. Edge shadow rehearsal
+
+Старый `docker-compose.edge.yml` остаётся только dev overlay. Для защищённой
+read-only проверки используйте `docker-compose.edge-shadow.hardened.yml` и
+`.env.edge-shadow.example`. Генератор секретов требует уже выданный Cloud token:
+
+```powershell
+$token = Read-Host "Enrolled Edge credential" -AsSecureString
+pwsh ./scripts/New-EdgeShadowSecrets.ps1 `
+  -OutputDirectory /etc/aurum-edge/secrets `
+  -EdgeCredential $token
+```
+
+Этот профиль не является offline POS: writer readiness и activation принудительно
+выключены. Устанавливать его как production Edge до mTLS/device PKI запрещено.
+
+## 10. Оставшиеся блокеры
 
 До реального пилота ещё обязательны:
 
 - TLS и проверка сертификатов для PostgreSQL, Redis и MinIO внутри сети;
-- WAL/PITR, off-site backup, MinIO versioning и автоматический restore-test;
+- WAL/PITR, независимая off-site копия и юридически допустимое WORM-хранилище;
+- автоматическое оповещение о backup/restore freshness и измеренные RPO/RTO;
 - HSTS после проверки восстановления TLS на staging;
-- image scan, SBOM, SAST/DAST и внешний penetration test;
+- подписанные release images, SAST/DAST и внешний penetration test;
 - общий rate limit/DDoS-контроль на доверенном edge/WAF.

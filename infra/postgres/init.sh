@@ -35,6 +35,7 @@ load_secret AURUM_SUPPORT_PASSWORD
 load_secret AURUM_MAILER_PASSWORD
 load_secret AURUM_BILLING_WORKER_PASSWORD
 load_secret AURUM_MIGRATOR_PASSWORD
+load_secret AURUM_BACKUP_PASSWORD
 
 role_contract_sql="${AURUM_ROLE_CONTRACT_SQL:-/docker-entrypoint-initdb.d/role-contract.inc}"
 [ -r "$role_contract_sql" ] || {
@@ -57,7 +58,7 @@ psql \
 
     REVOKE ALL PRIVILEGES ON DATABASE :"database_name" FROM PUBLIC;
     GRANT CONNECT ON DATABASE :"database_name"
-        TO aurum_app, aurum_mailer, aurum_billing_worker;
+        TO aurum_app, aurum_mailer, aurum_billing_worker, aurum_backup;
     GRANT ALL PRIVILEGES ON DATABASE :"database_name" TO aurum_support;
     GRANT CONNECT ON DATABASE :"database_name" TO aurum_migrator;
     -- Runtime code may use objects in public, but only the migration/support
@@ -160,4 +161,4 @@ psql \
 EOSQL
 
 unset AURUM_APP_PASSWORD AURUM_SUPPORT_PASSWORD AURUM_MAILER_PASSWORD \
-    AURUM_BILLING_WORKER_PASSWORD AURUM_MIGRATOR_PASSWORD
+    AURUM_BILLING_WORKER_PASSWORD AURUM_MIGRATOR_PASSWORD AURUM_BACKUP_PASSWORD

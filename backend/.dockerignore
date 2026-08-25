@@ -9,6 +9,12 @@ __pycache__/
 htmlcov/
 dist/
 build/
-.env
-.env.local
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+backups/
 .git/

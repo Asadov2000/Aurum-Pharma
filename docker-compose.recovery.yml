@@ -1,0 +1,232 @@
+# Manual encrypted backup and isolated restore drill. Always combine this file
+# with docker-compose.production.yml. No recovery service publishes host ports.
+services:
+  minio-backup-init:
+    profiles: ["backup"]
+    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        root_user="$$(cat /run/secrets/MINIO_ROOT_USER)"
+        root_password="$$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
+        backup_user="$$(cat /run/secrets/MINIO_BACKUP_ACCESS_KEY)"
+        backup_password="$$(cat /run/secrets/MINIO_BACKUP_SECRET_KEY)"
+        mc --config-dir /tmp/.mc alias set local http://minio:9000 "$$root_user" "$$root_password"
+        mc --config-dir /tmp/.mc admin user add local "$$backup_user" "$$backup_password"
+        mc --config-dir /tmp/.mc admin policy create local aurum-backup /config/aurum-backup-policy.json
+        mc --config-dir /tmp/.mc admin policy attach local aurum-backup --user "$$backup_user"
+    secrets:
+      - source: minio_root_user
+        target: MINIO_ROOT_USER
+      - source: minio_root_password
+        target: MINIO_ROOT_PASSWORD
+      - source: minio_backup_access_key
+        target: MINIO_BACKUP_ACCESS_KEY
+      - source: minio_backup_secret_key
+        target: MINIO_BACKUP_SECRET_KEY
+    volumes:
+      - ./infra/minio/aurum-backup-policy.json:/config/aurum-backup-policy.json:ro
+    networks:
+      - data
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: "0.25"
+    restart: "no"
+
+  backup:
+    profiles: ["backup"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    environment:
+      AURUM_BACKUP_MIN_FREE_BYTES: "${AURUM_BACKUP_MIN_FREE_BYTES:-5368709120}"
+    secrets:
+      - source: database_url_backup
+        target: DATABASE_URL_BACKUP
+      - source: minio_backup_access_key
+        target: MINIO_BACKUP_ACCESS_KEY
+      - source: minio_backup_secret_key
+        target: MINIO_BACKUP_SECRET_KEY
+      - source: restic_password
+        target: RESTIC_PASSWORD
+    volumes:
+      - type: bind
+        source: "${AURUM_BACKUP_REPOSITORY:?AURUM_BACKUP_REPOSITORY is required}"
+        target: /repository
+      - type: bind
+        source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
+        target: /scratch
+    networks:
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-backup-init:
+        condition: service_completed_successfully
+    command: ["/bin/sh", "/opt/aurum/backup.sh"]
+    read_only: true
+    tmpfs:
+      - /workspace:size=64m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_BACKUP_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
+    restart: "no"
+
+  restore-postgres:
+    profiles: ["restore-drill"]
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
+    environment:
+      POSTGRES_DB: aurum_restore
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
+      AURUM_APP_PASSWORD_FILE: /run/secrets/AURUM_APP_PASSWORD
+      AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
+      AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
+      AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
+      AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
+    secrets:
+      - source: postgres_password
+        target: POSTGRES_PASSWORD
+      - source: aurum_app_password
+        target: AURUM_APP_PASSWORD
+      - source: aurum_support_password
+        target: AURUM_SUPPORT_PASSWORD
+      - source: aurum_migrator_password
+        target: AURUM_MIGRATOR_PASSWORD
+      - source: aurum_mailer_password
+        target: AURUM_MAILER_PASSWORD
+      - source: aurum_billing_worker_password
+        target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_backup_password
+        target: AURUM_BACKUP_PASSWORD
+    volumes:
+      - restore-postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
+    networks:
+      - recovery
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          psql -U postgres -d aurum_restore -tAc
+          "SELECT 1 WHERE EXISTS (
+          SELECT FROM pg_roles WHERE rolname = 'aurum_backup'
+          ) AND has_function_privilege(
+          'aurum_app', to_regprocedure('public.similarity_op(text,text)'), 'EXECUTE'
+          )" | grep -qx 1
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: "1.0"
+    restart: "no"
+
+  restore-minio:
+    profiles: ["restore-drill"]
+    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data
+    environment:
+      MINIO_BROWSER: "off"
+      MINIO_ROOT_USER_FILE: /run/secrets/MINIO_ROOT_USER
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/MINIO_ROOT_PASSWORD
+    secrets:
+      - source: minio_root_user
+        target: MINIO_ROOT_USER
+      - source: minio_root_password
+        target: MINIO_ROOT_PASSWORD
+    volumes:
+      - restore-minio-data:/data
+    networks:
+      - recovery
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: "0.5"
+    restart: "no"
+
+  restore-drill:
+    profiles: ["restore-drill"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    environment:
+      AURUM_BACKUP_MIN_FREE_BYTES: "${AURUM_BACKUP_MIN_FREE_BYTES:-5368709120}"
+    secrets:
+      - source: postgres_password
+        target: POSTGRES_PASSWORD
+      - source: aurum_app_password
+        target: AURUM_APP_PASSWORD
+      - source: aurum_support_password
+        target: AURUM_SUPPORT_PASSWORD
+      - source: aurum_backup_password
+        target: AURUM_BACKUP_PASSWORD
+      - source: minio_root_user
+        target: MINIO_ROOT_USER
+      - source: minio_root_password
+        target: MINIO_ROOT_PASSWORD
+      - source: restic_password
+        target: RESTIC_PASSWORD
+    volumes:
+      - type: bind
+        source: "${AURUM_BACKUP_REPOSITORY:?AURUM_BACKUP_REPOSITORY is required}"
+        target: /repository
+        read_only: true
+      - type: bind
+        source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
+        target: /scratch
+    networks:
+      - recovery
+    depends_on:
+      restore-postgres:
+        condition: service_healthy
+      restore-minio:
+        condition: service_healthy
+    command: ["/bin/sh", "/opt/aurum/restore-drill.sh"]
+    read_only: true
+    tmpfs:
+      - /workspace:size=64m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_BACKUP_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
+    restart: "no"
+
+volumes:
+  restore-postgres-data:
+  restore-minio-data:
+
+networks:
+  recovery:
+    internal: true

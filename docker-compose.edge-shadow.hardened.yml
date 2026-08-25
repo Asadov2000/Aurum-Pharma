@@ -1,0 +1,223 @@
+# Hardened Cloud-to-Edge read-only shadow rehearsal. Writer activation remains
+# fail-closed until mTLS, hardware-backed identity and signed bootstrap exist.
+name: aurum-edge-shadow
+
+x-edge-logging: &edge-logging
+  driver: local
+  options:
+    max-size: "${AURUM_EDGE_LOG_MAX_SIZE:-10m}"
+    max-file: "${AURUM_EDGE_LOG_MAX_FILES:-5}"
+    compress: "true"
+
+x-edge-maintenance: &edge-maintenance
+  image: aurum-pharma-edge:${AURUM_IMAGE_TAG:-local}
+  build:
+    context: ./backend
+    dockerfile: Dockerfile.production
+  networks:
+    - edge-data
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 128
+  mem_limit: "${AURUM_EDGE_MAINTENANCE_MEMORY_LIMIT:-512m}"
+  cpus: "${AURUM_EDGE_MAINTENANCE_CPU_LIMIT:-0.5}"
+  init: true
+  logging: *edge-logging
+  restart: "no"
+
+services:
+  edge-postgres:
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
+    environment:
+      POSTGRES_DB: aurum_edge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
+      AURUM_APP_PASSWORD_FILE: /run/secrets/AURUM_APP_PASSWORD
+      AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
+      AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
+      AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
+      AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
+    secrets:
+      - source: postgres_password
+        target: POSTGRES_PASSWORD
+      - source: aurum_app_password
+        target: AURUM_APP_PASSWORD
+      - source: aurum_support_password
+        target: AURUM_SUPPORT_PASSWORD
+      - source: aurum_migrator_password
+        target: AURUM_MIGRATOR_PASSWORD
+      - source: aurum_mailer_password
+        target: AURUM_MAILER_PASSWORD
+      - source: aurum_billing_worker_password
+        target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_backup_password
+        target: AURUM_BACKUP_PASSWORD
+    volumes:
+      - edge-postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
+    networks:
+      - edge-data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aurum_edge"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 192
+    mem_limit: "${AURUM_EDGE_POSTGRES_MEMORY_LIMIT:-1g}"
+    cpus: "${AURUM_EDGE_POSTGRES_CPU_LIMIT:-1.0}"
+    stop_grace_period: 60s
+    logging: *edge-logging
+    restart: unless-stopped
+
+  edge-db-role-bootstrap:
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
+    environment:
+      POSTGRES_HOST: edge-postgres
+      POSTGRES_DB: aurum_edge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
+      AURUM_APP_PASSWORD_FILE: /run/secrets/AURUM_APP_PASSWORD
+      AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
+      AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
+      AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
+      AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
+    secrets:
+      - source: postgres_password
+        target: POSTGRES_PASSWORD
+      - source: aurum_app_password
+        target: AURUM_APP_PASSWORD
+      - source: aurum_support_password
+        target: AURUM_SUPPORT_PASSWORD
+      - source: aurum_migrator_password
+        target: AURUM_MIGRATOR_PASSWORD
+      - source: aurum_mailer_password
+        target: AURUM_MAILER_PASSWORD
+      - source: aurum_billing_worker_password
+        target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_backup_password
+        target: AURUM_BACKUP_PASSWORD
+    volumes:
+      - ./infra/postgres:/opt/aurum/postgres:ro
+    networks:
+      - edge-data
+    depends_on:
+      edge-postgres:
+        condition: service_healthy
+    command: ["sh", "/opt/aurum/postgres/bootstrap-roles.sh"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: "${AURUM_EDGE_MAINTENANCE_MEMORY_LIMIT:-512m}"
+    cpus: "${AURUM_EDGE_MAINTENANCE_CPU_LIMIT:-0.5}"
+    restart: "no"
+
+  edge-migrate:
+    <<: *edge-maintenance
+    environment:
+      AURUM_SECRETS_DIR: /run/secrets
+      PYTHONPATH: /app
+    secrets:
+      - source: database_url_support
+        target: DATABASE_URL_SUPPORT
+      - source: database_url_migration
+        target: DATABASE_URL_MIGRATION
+    depends_on:
+      edge-db-role-bootstrap:
+        condition: service_completed_successfully
+    command: ["python", "-m", "app.migrate", "upgrade", "head"]
+
+  edge-worker:
+    image: aurum-pharma-edge:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    environment:
+      ENVIRONMENT: development
+      DEPLOYMENT_PROFILE: edge_shadow
+      AURUM_SECRETS_DIR: /run/secrets
+      EDGE_SYNC_CLOUD_URL: "${AURUM_EDGE_CLOUD_URL:?AURUM_EDGE_CLOUD_URL is required}"
+      EDGE_SYNC_POLL_SECONDS: "${AURUM_EDGE_POLL_SECONDS:-5}"
+      EDGE_SYNC_BATCH_SIZE: "${AURUM_EDGE_BATCH_SIZE:-100}"
+      EDGE_WRITER_READINESS_ENABLED: "false"
+      EDGE_WRITER_ACTIVATION_ENABLED: "false"
+      PYTHONPATH: /app
+    secrets:
+      - source: database_url_app
+        target: DATABASE_URL_APP
+      - source: database_url_app
+        target: DATABASE_URL_SUPPORT
+      - source: jwt_secret
+        target: JWT_SECRET
+      - source: edge_sync_credential
+        target: EDGE_SYNC_CREDENTIAL
+    networks:
+      - edge-data
+      - cloud-egress
+    depends_on:
+      edge-migrate:
+        condition: service_completed_successfully
+    command: ["python", "-m", "app.domains.sync.worker"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_EDGE_WORKER_MEMORY_LIMIT:-512m}"
+    cpus: "${AURUM_EDGE_WORKER_CPU_LIMIT:-0.5}"
+    init: true
+    stop_grace_period: 30s
+    logging: *edge-logging
+    restart: unless-stopped
+
+secrets:
+  postgres_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/POSTGRES_PASSWORD"
+  aurum_app_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_APP_PASSWORD"
+  aurum_support_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_SUPPORT_PASSWORD"
+  aurum_migrator_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_MIGRATOR_PASSWORD"
+  aurum_mailer_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_MAILER_PASSWORD"
+  aurum_billing_worker_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_BILLING_WORKER_PASSWORD"
+  aurum_backup_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_BACKUP_PASSWORD"
+  database_url_app:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/DATABASE_URL_APP"
+  database_url_support:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/DATABASE_URL_SUPPORT"
+  database_url_migration:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/DATABASE_URL_MIGRATION"
+  jwt_secret:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/JWT_SECRET"
+  edge_sync_credential:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/EDGE_SYNC_CREDENTIAL"
+
+volumes:
+  edge-postgres-data:
+
+networks:
+  edge-data:
+    internal: true
+  cloud-egress:

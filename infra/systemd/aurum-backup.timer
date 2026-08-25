@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Aurum Pharma encrypted backup daily
+
+[Timer]
+OnCalendar=*-*-* 01:15:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=aurum-backup.service
+
+[Install]
+WantedBy=timers.target
