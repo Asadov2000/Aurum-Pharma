@@ -6,6 +6,7 @@ FROM ${PYTHON_IMAGE} AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
+    PIP_VERSION=26.2.1 \
     POETRY_VERSION=2.3.4 \
     POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_IN_PROJECT=true
@@ -15,10 +16,11 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/* \
-    && python -m pip install "poetry==${POETRY_VERSION}"
+    && python -m pip install --upgrade "pip==${PIP_VERSION}" "poetry==${POETRY_VERSION}"
 
 COPY pyproject.toml poetry.lock ./
-RUN poetry install --only main --no-root --sync
+RUN poetry install --only main --no-root --sync \
+    && /app/.venv/bin/python -m pip install --upgrade "pip==${PIP_VERSION}"
 
 
 FROM ${PYTHON_IMAGE} AS runtime
