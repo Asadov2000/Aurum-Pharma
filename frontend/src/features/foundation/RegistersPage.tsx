@@ -8,7 +8,6 @@ import {
   Input,
   Label,
   Modal,
-  PageHeader,
   Pagination,
   Select,
   SkeletonRows,
@@ -25,6 +24,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 
 import { describeApiError } from "./errors";
+import { LocationsSummary, LocationsWorkspaceHeader } from "./LocationsWorkspace";
 import { useBranchesQuery, useDeleteRegister, useRegisterSearchQuery } from "./queries";
 import { RegisterForm } from "./RegisterForm";
 import { type PrinterType, type Register } from "./types";
@@ -68,7 +68,7 @@ export function RegistersPage(): JSX.Element {
   }, [qInput]);
 
   const branches = useBranchesQuery(true, canViewBranches);
-  const { data, isLoading, isFetching, error } = useRegisterSearchQuery({
+  const { data, isLoading, isFetching, error, refetch } = useRegisterSearchQuery({
     q,
     branch_id: branchFilter || undefined,
     printer_type: printerType || undefined,
@@ -79,6 +79,9 @@ export function RegistersPage(): JSX.Element {
   const deleteMutation = useDeleteRegister();
   const rows = data?.items ?? [];
   const hasFilters = Boolean(q || branchFilter || printerType || status !== "active");
+  const activeOnPage = rows.filter((register) => register.is_active).length;
+  const printersOnPage = rows.filter((register) => register.printer_type !== null).length;
+  const loadError = error ?? branches.error;
 
   const branchNameById = (id: string): string =>
     branches.data?.find((branch) => branch.id === id)?.name ?? id.slice(0, 8);
@@ -96,11 +99,23 @@ export function RegistersPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Кассы"
+      <LocationsWorkspaceHeader
+        active="registers"
+        meta={isFetching && !isLoading ? "Обновление…" : undefined}
         actions={
           canCreate ? <Button onClick={() => setCreating(true)}>+ Новая касса</Button> : undefined
         }
+      />
+
+      <LocationsSummary
+        label="Сводка касс"
+        loading={isLoading}
+        metrics={[
+          { label: "Найдено", value: data?.total ?? 0 },
+          { label: "На странице", value: rows.length },
+          { label: "Активны на странице", value: activeOnPage, tone: "success" },
+          { label: "Печать настроена", value: printersOnPage },
+        ]}
       />
 
       <ConfigurableFilterBar
@@ -229,12 +244,22 @@ export function RegistersPage(): JSX.Element {
         }}
       />
 
-      {error && (
+      {loadError && (
         <div
           role="alert"
-          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm leading-5 text-danger-foreground"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm leading-5 text-danger-foreground"
         >
-          {describeApiError(error, "Не удалось загрузить список")}
+          <span>{describeApiError(loadError, "Не удалось загрузить список касс")}</span>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              void refetch();
+              if (branches.error) void branches.refetch();
+            }}
+          >
+            Повторить
+          </Button>
         </div>
       )}
       {isLoading ? (
@@ -243,7 +268,16 @@ export function RegistersPage(): JSX.Element {
         hasFilters ? (
           <TableEmpty title="Ничего не найдено">Измените запрос или выбранные фильтры.</TableEmpty>
         ) : (
-          <TableEmpty>Пока нет ни одной кассы</TableEmpty>
+          <TableEmpty
+            title="Касс пока нет"
+            action={
+              canCreate ? (
+                <Button onClick={() => setCreating(true)}>+ Новая касса</Button>
+              ) : undefined
+            }
+          >
+            Добавьте рабочее место продаж и привяжите его к торговой точке.
+          </TableEmpty>
         )
       ) : (
         <>
@@ -260,9 +294,20 @@ export function RegistersPage(): JSX.Element {
             <TBody>
               {rows.map((register) => (
                 <TR key={register.id}>
-                  <TD className="font-medium">{register.name}</TD>
-                  <TD>{branchNameById(register.branch_id)}</TD>
-                  <TD>{register.printer_type ? printerLabel[register.printer_type] : "—"}</TD>
+                  <TD>
+                    <span className="block font-semibold">{register.name}</span>
+                    <span className="mt-0.5 block text-xs text-foreground-muted">
+                      Создана {new Date(register.created_at).toLocaleDateString("ru-RU")}
+                    </span>
+                  </TD>
+                  <TD className="font-medium">{branchNameById(register.branch_id)}</TD>
+                  <TD>
+                    {register.printer_type ? (
+                      printerLabel[register.printer_type]
+                    ) : (
+                      <span className="text-foreground-muted">Не настроен</span>
+                    )}
+                  </TD>
                   <TD>
                     {register.is_active ? (
                       <Badge tone="success">Активна</Badge>
@@ -279,7 +324,7 @@ export function RegistersPage(): JSX.Element {
                           disabled={isFetching}
                           onClick={() => setEditing(register)}
                         >
-                          Изменить
+                          Открыть
                         </Button>
                       )}
                       {canDelete && register.is_active && (
@@ -293,7 +338,7 @@ export function RegistersPage(): JSX.Element {
                           }}
                           isLoading={deleteMutation.isPending}
                         >
-                          Удалить
+                          Деактивировать
                         </Button>
                       )}
                     </TD>

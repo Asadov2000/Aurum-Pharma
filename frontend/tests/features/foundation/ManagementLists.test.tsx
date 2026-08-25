@@ -1,10 +1,23 @@
+import { type AnchorHTMLAttributes, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listBranches = vi.fn();
 const searchBranches = vi.fn();
 const searchRegisters = vi.fn();
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    to,
+    children,
+    ...props
+  }: AnchorHTMLAttributes<HTMLAnchorElement> & { to: string; children: ReactNode }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
 
 vi.mock("@/features/foundation/api", () => ({
   listTenants: vi.fn(),
@@ -106,6 +119,12 @@ describe("management list filters", () => {
   it("searches and filters branches through the paginated contract", async () => {
     renderPage(<BranchesPage />);
     expect(await screen.findByText("Аптека Рудаки")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Точки" })).toHaveAttribute("aria-current", "page");
+    expect(
+      within(screen.getByRole("region", { name: "Сводка торговых точек" })).getByText(
+        "Лицензии требуют внимания",
+      ),
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Поиск"), {
       target: { value: "  Рудаки  " },
@@ -131,6 +150,10 @@ describe("management list filters", () => {
   it("filters registers by an allowed branch and keeps printer optional", async () => {
     renderPage(<RegistersPage />);
     expect(await screen.findByText("Касса 01")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Кассы" })).toHaveAttribute("aria-current", "page");
+    expect(
+      within(screen.getByRole("region", { name: "Сводка касс" })).getByText("Печать настроена"),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("Тип принтера")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Точка"), {
