@@ -266,6 +266,20 @@ services:
     command: celery -A app.tasks.billing_app worker --loglevel=info -Q billing-worker --concurrency=1
     restart: unless-stopped
 
+  mailpit:
+    image: axllent/mailpit:v1.31.0
+    container_name: aurum-mailpit
+    environment:
+      MP_MAX_MESSAGES: 200
+    ports:
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   platform-mailer:
     build:
       context: ./backend
@@ -278,14 +292,15 @@ services:
       EMAIL_OUTBOX_ENCRYPTION_KEY: ${EMAIL_OUTBOX_ENCRYPTION_KEY:-}
       EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION: ${EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION:-1}
       EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS: ${EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS:-{}}
-      EMAIL_HOST: ${EMAIL_HOST:-localhost}
-      EMAIL_PORT: ${EMAIL_PORT:-587}
-      EMAIL_USER: ${EMAIL_USER:-}
-      EMAIL_PASSWORD: ${EMAIL_PASSWORD:-}
-      EMAIL_FROM: ${EMAIL_FROM:-no-reply@aurum-pharma.tj}
-      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+      EMAIL_HOST: ${AURUM_DEV_EMAIL_HOST:-mailpit}
+      EMAIL_PORT: ${AURUM_DEV_EMAIL_PORT:-1025}
+      EMAIL_USER: ${AURUM_DEV_EMAIL_USER:-}
+      EMAIL_PASSWORD: ${AURUM_DEV_EMAIL_PASSWORD:-}
+      EMAIL_FROM: ${AURUM_DEV_EMAIL_FROM:-no-reply@aurum-pharma.local}
+      EMAIL_USE_TLS: ${AURUM_DEV_EMAIL_USE_TLS:-false}
       EMAIL_SMTP_TIMEOUT_SECONDS: ${EMAIL_SMTP_TIMEOUT_SECONDS:-10}
       EMAIL_OUTBOX_BATCH_SIZE: ${EMAIL_OUTBOX_BATCH_SIZE:-25}
+      EMAIL_OUTBOX_CLAIM_TIMEOUT_SECONDS: ${EMAIL_OUTBOX_CLAIM_TIMEOUT_SECONDS:-300}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:5173}
       PYTHONPATH: /app
     volumes: *backend-dev-volumes
@@ -293,6 +308,8 @@ services:
       redis:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
     command: celery -A app.tasks.mailer_app worker --loglevel=info -Q platform-mailer --concurrency=1
     restart: unless-stopped

@@ -34,6 +34,7 @@ from app.core.errors import (
 from app.core.security import (
     build_totp_uri,
     create_access_token,
+    derive_email_outbox_encryption_key,
     derive_mfa_encryption_key,
     derive_rotated_refresh_token,
     generate_code_salt,
@@ -227,6 +228,9 @@ class AuthService:
             email_lower=email_lower,
             code_hash=hash_code(code, salt),
             code_salt=salt,
+            plaintext_code=code,
+            encryption_key_version=settings.EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION,
+            encryption_key=derive_email_outbox_encryption_key(),
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -235,14 +239,10 @@ class AuthService:
         if issue_status is EmailCodeIssueStatus.RATE_LIMIT_HOUR:
             raise RateLimitError("Too many code requests. Try again in an hour.")
 
-        # Anti-enumeration: dispatch the email even when the user does not
-        # exist (the worker will silently drop it; clients see no difference).
-        # In phase 1 there is no real SMTP yet; the router returns dev_code in
-        # development only. Lazy import avoids a circular dependency through
-        # app.tasks.celery_app on first module load.
-        from app.tasks.auth import send_email_code
-
-        send_email_code.delay(email_lower, code)
+        # The database function atomically stores the code hash and an
+        # encrypted, short-lived delivery payload. The isolated mailer is the
+        # only runtime role allowed to decrypt it. Unknown addresses follow the
+        # same path so callers cannot enumerate accounts.
         logger.info("login_code_issued")
         return code
 

@@ -1,4 +1,4 @@
-"""Secure SMTP delivery for platform account invitations."""
+"""Isolated delivery of short-lived authentication email codes."""
 
 from __future__ import annotations
 
@@ -6,66 +6,54 @@ import asyncio
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import format_datetime
-from urllib.parse import quote
 
 import structlog
 
+from app.core.auth_mailer_repository import AuthMailerRepository, LoginEmailClaim
 from app.core.mailer_config import get_mailer_settings
 from app.core.mailer_db import MailerSessionLocal
 from app.core.smtp_delivery import DeliveryResult, send_smtp_message
-from app.domains.platform_accounts.repository import (
-    PlatformAccountsRepository,
-    PlatformInvitationEmailClaim,
-)
 from app.tasks.mailer_app import mailer_app
 
-logger = structlog.get_logger("tasks.platform_accounts")
+logger = structlog.get_logger("tasks.auth_mailer")
 settings = get_mailer_settings()
 
 
-def _activation_url(token: str) -> str:
-    base_url = str(settings.PUBLIC_APP_URL).rstrip("/")
-    return f"{base_url}/activate-platform#token={quote(token, safe='')}"
-
-
-def _message(claim: PlatformInvitationEmailClaim) -> EmailMessage:
+def _message(claim: LoginEmailClaim) -> EmailMessage:
     message = EmailMessage()
-    message["Subject"] = "Приглашение в команду Aurum Pharma"
+    message["Subject"] = "Код входа в Aurum Pharma"
     message["From"] = settings.EMAIL_FROM
     message["To"] = claim.recipient_email
     message["Date"] = format_datetime(datetime.now(UTC))
     sender_domain = settings.EMAIL_FROM.rsplit("@", maxsplit=1)[-1]
-    message["Message-ID"] = f"<platform-invitation-{claim.outbox_id}@{sender_domain}>"
-    expiry = claim.invitation_expires_at.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
+    message["Message-ID"] = f"<auth-login-{claim.outbox_id}@{sender_domain}>"
+    expiry = claim.code_expires_at.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
     message.set_content(
         "Здравствуйте!\n\n"
-        "Вас пригласили в команду Aurum Pharma. Для создания пароля откройте ссылку:\n"
-        f"{_activation_url(claim.activation_token)}\n\n"
-        f"Ссылка действует до {expiry}. Если вы не ожидали это письмо, проигнорируйте его.\n"
+        f"Код входа в Aurum Pharma: {claim.login_code}\n\n"
+        f"Код действует до {expiry} и может быть использован только один раз. "
+        "Если вы не запрашивали вход, проигнорируйте это письмо.\n"
     )
     return message
 
 
-def _send_smtp(claim: PlatformInvitationEmailClaim) -> DeliveryResult:
+def _send_smtp(claim: LoginEmailClaim) -> DeliveryResult:
     return send_smtp_message(_message(claim), settings)
 
 
-async def _claim() -> PlatformInvitationEmailClaim | None:
+async def _claim() -> LoginEmailClaim | None:
     async with MailerSessionLocal() as db:
         async with db.begin():
-            return await PlatformAccountsRepository(db).claim_invitation_email(
+            return await AuthMailerRepository(db).claim_login_email(
                 encryption_keyring=settings.encryption_keyring_json(),
                 lease_seconds=settings.EMAIL_OUTBOX_CLAIM_TIMEOUT_SECONDS,
             )
 
 
-async def _complete(
-    claim: PlatformInvitationEmailClaim,
-    result: DeliveryResult,
-) -> str | None:
+async def _complete(claim: LoginEmailClaim, result: DeliveryResult) -> str | None:
     async with MailerSessionLocal() as db:
         async with db.begin():
-            return await PlatformAccountsRepository(db).complete_invitation_email(
+            return await AuthMailerRepository(db).complete_login_email(
                 outbox_id=claim.outbox_id,
                 claim_token=claim.claim_token,
                 outcome=result.outcome,
@@ -82,7 +70,7 @@ async def _process_pending() -> int:
         result = await asyncio.to_thread(_send_smtp, claim)
         status = await _complete(claim, result)
         logger.info(
-            "platform_invitation_delivery_completed",
+            "auth_email_delivery_completed",
             outbox_id=str(claim.outbox_id),
             attempt=claim.attempt_count,
             status=status or "stale_claim",
@@ -92,6 +80,6 @@ async def _process_pending() -> int:
     return processed
 
 
-@mailer_app.task(name="platform_accounts.process_invitation_emails")  # type: ignore[misc]
-def process_invitation_emails() -> int:
+@mailer_app.task(name="auth.process_login_emails")  # type: ignore[misc]
+def process_login_emails() -> int:
     return asyncio.run(_process_pending())

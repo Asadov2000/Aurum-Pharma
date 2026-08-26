@@ -5,8 +5,7 @@ conftest by overriding FastAPI's `get_db` dependency — that way the HTTP
 handler sees the same in-flight transaction as the test, and nothing leaks
 between tests.
 
-We also force Celery into eager mode so `send_email_code.delay(...)` runs
-inline instead of trying to talk to the broker.
+Celery remains eager for auth-domain maintenance tasks used by tests.
 """
 
 from __future__ import annotations

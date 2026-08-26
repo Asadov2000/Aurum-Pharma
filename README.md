@@ -29,6 +29,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1
 
 - Backend API: <http://localhost:8000> (`/healthz`, `/docs`)
 - Frontend: <http://localhost:5173>
+- Local email inbox: <http://localhost:8025>
 - MinIO console: <http://localhost:9001>
 - Prometheus: <http://localhost:9090>
 - Postgres (основной): `localhost:5432`, БД `aurum`
