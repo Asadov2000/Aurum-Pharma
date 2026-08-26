@@ -56,6 +56,11 @@ class AppUser(Base):
     full_name: Mapped[str] = mapped_column(Text, nullable=False)
     phone: Mapped[str | None] = mapped_column(Text)
     password_hash: Mapped[str | None] = mapped_column(Text)
+    password_configured: Mapped[bool] = mapped_column(
+        Boolean,
+        Computed("password_hash IS NOT NULL", persisted=True),
+        nullable=False,
+    )
     is_developer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )

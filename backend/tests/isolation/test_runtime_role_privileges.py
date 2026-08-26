@@ -148,6 +148,7 @@ APP_USER_SAFE_COLUMNS = {
     "home_tenant_id",
     "status",
     "last_login_at",
+    "password_configured",
 }
 
 SYNC_OUTBOX_INSERT_COLUMNS = {
@@ -322,6 +323,8 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_billing_payment_submission_update",
     "trg_guard_billing_price_version",
     "trg_enforce_global_billing_operation_id",
+    "trg_enforce_account_password_requirement",
+    "trg_enforce_assignment_password_requirement",
     "trg_bind_billing_plan_legacy",
     "trg_billing_subscription_row_version",
     "trg_guard_edge_cash_append_only",

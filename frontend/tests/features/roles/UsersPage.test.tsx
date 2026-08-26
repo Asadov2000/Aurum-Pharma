@@ -100,6 +100,7 @@ const USER_ACTIVE = {
   phone: null,
   status: "active" as const,
   last_login_at: null,
+  can_require_password: false,
   assignments: [
     {
       id: "assignment-1",
@@ -269,6 +270,55 @@ describe("UsersPage", () => {
       role_id: MANAGED_ROLE.id,
       branch_id: null,
       password_required: false,
+    });
+  });
+
+  it("does not offer password enforcement before the employee configures a password", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
+
+    expect(screen.queryByLabelText("Требовать пароль при входе")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Обязательный пароль станет доступен после настройки пароля сотрудником."),
+    ).toBeInTheDocument();
+  });
+
+  it("allows password enforcement after the employee configures a password", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(
+      usersResponse([{ ...USER_ACTIVE, can_require_password: true, assignments: [] }]),
+    );
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
+    fireEvent.change(screen.getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
+    fireEvent.click(screen.getByLabelText("Требовать пароль при входе"));
+    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
+
+    await waitFor(() => expect(createAssignment).toHaveBeenCalledTimes(1));
+    expect(createAssignment).toHaveBeenCalledWith("member-1", {
+      role_id: MANAGED_ROLE.id,
+      branch_id: null,
+      password_required: true,
     });
   });
 

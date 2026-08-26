@@ -37,6 +37,7 @@ class DirectoryUser:
     home_tenant_id: UUID | None
     status: str
     last_login_at: datetime | None
+    can_require_password: bool
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ _DIRECTORY_COLUMNS = (
     AppUser.home_tenant_id,
     TenantMembership.status,
     AppUser.last_login_at,
+    AppUser.password_configured.label("can_require_password"),
 )
 
 
@@ -88,6 +90,7 @@ def _directory_user_from_row(row: RowMapping) -> DirectoryUser:
         home_tenant_id=cast(UUID | None, row["home_tenant_id"]),
         status=cast(str, row["status"]),
         last_login_at=cast(datetime | None, row["last_login_at"]),
+        can_require_password=bool(row["can_require_password"]),
     )
 
 

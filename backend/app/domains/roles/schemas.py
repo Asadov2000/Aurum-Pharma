@@ -108,6 +108,7 @@ class UserInfo(BaseModel):
     phone: str | None
     status: str
     last_login_at: datetime | None
+    can_require_password: bool
 
 
 class UserWithAssignments(UserInfo):

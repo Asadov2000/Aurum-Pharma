@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
-from app.core.security import derive_email_outbox_encryption_key, hash_code, hash_token
+from app.core.security import (
+    derive_email_outbox_encryption_key,
+    hash_code,
+    hash_password,
+    hash_token,
+)
 from app.domains.notifications.repository import NotificationsRepository
 from app.domains.notifications.service import NotificationsService
 
@@ -232,13 +237,17 @@ async def indirect_scope_rows(
                     await conn.execute(
                         text(
                             "INSERT INTO app_user "
-                            "(email, full_name, home_tenant_id) "
-                            "VALUES (:email, :full_name, :tenant_id) RETURNING id"
+                            "(email, full_name, home_tenant_id, password_hash) "
+                            "VALUES (:email, :full_name, :tenant_id, :password_hash) "
+                            "RETURNING id"
                         ),
                         {
                             "email": f"rls-user-{label}-{token}@example.invalid",
                             "full_name": f"RLS user {label}",
                             "tenant_id": tenant_ids[index],
+                            "password_hash": (
+                                hash_password("RlsFixture1234") if label == "a" else None
+                            ),
                         },
                     )
                 ).scalar_one()

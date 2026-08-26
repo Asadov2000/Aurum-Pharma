@@ -7,6 +7,7 @@ from uuid import UUID
 
 import structlog
 from redis.asyncio import Redis
+from sqlalchemy.exc import DBAPIError
 
 from app.core.errors import (
     BusinessRuleError,
@@ -42,6 +43,12 @@ RESERVED_ROLE_NAMES = {
     "владелец",
     "разработчик",
 }
+PASSWORD_CONFIGURATION_REQUIRED = "Password must be configured before it can be required at login"
+
+
+def _is_password_requirement_guard_error(exc: DBAPIError) -> bool:
+    sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    return sqlstate == "P2001"
 
 
 def perms_cache_key(user_id: UUID, tenant_id: UUID) -> str:
@@ -813,6 +820,54 @@ class RolesService:
             raise NotFoundError("Membership not found")
         return user, assignment, False
 
+    async def _reactivate_assignment_with_password_guard(
+        self,
+        *,
+        assignment_id: UUID,
+        tenant_id: UUID,
+        role_id: UUID,
+        password_required: bool,
+    ) -> UserAssignment | None:
+        try:
+            return await self.repo.reactivate_assignment(
+                assignment_id,
+                tenant_id=tenant_id,
+                role_id=role_id,
+                password_required=password_required,
+            )
+        except DBAPIError as exc:
+            if _is_password_requirement_guard_error(exc):
+                raise BusinessRuleError(
+                    PASSWORD_CONFIGURATION_REQUIRED,
+                    details={"reason": "password_not_configured"},
+                ) from exc
+            raise
+
+    async def _insert_assignment_with_password_guard(
+        self,
+        *,
+        user_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID | None,
+        role_id: UUID,
+        password_required: bool,
+    ) -> UserAssignment:
+        try:
+            return await self.repo.insert_assignment(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                role_id=role_id,
+                password_required=password_required,
+            )
+        except DBAPIError as exc:
+            if _is_password_requirement_guard_error(exc):
+                raise BusinessRuleError(
+                    PASSWORD_CONFIGURATION_REQUIRED,
+                    details={"reason": "password_not_configured"},
+                ) from exc
+            raise
+
     async def assign_role(
         self,
         *,
@@ -860,6 +915,14 @@ class RolesService:
             tenant_id=tenant_id,
             membership_id=membership.id,
         )
+        target_user = await self.repo.get_user(target_user_id, tenant_id=tenant_id)
+        if target_user is None:
+            raise NotFoundError("Tenant membership not found")
+        if password_required and not target_user.can_require_password:
+            raise BusinessRuleError(
+                PASSWORD_CONFIGURATION_REQUIRED,
+                details={"reason": "password_not_configured"},
+            )
 
         self._assert_assignment_scope(
             branch_id=branch_id,
@@ -885,8 +948,8 @@ class RolesService:
                 continue
             if assignment.is_active:
                 raise ConflictError("User already has an active assignment for this branch")
-            reactivated = await self.repo.reactivate_assignment(
-                assignment.id,
+            reactivated = await self._reactivate_assignment_with_password_guard(
+                assignment_id=assignment.id,
                 tenant_id=tenant_id,
                 role_id=role_id,
                 password_required=password_required,
@@ -896,7 +959,7 @@ class RolesService:
             await self.invalidate_user_perms(target_user_id, tenant_id)
             return reactivated
 
-        assignment = await self.repo.insert_assignment(
+        assignment = await self._insert_assignment_with_password_guard(
             user_id=target_user_id,
             tenant_id=tenant_id,
             branch_id=branch_id,
