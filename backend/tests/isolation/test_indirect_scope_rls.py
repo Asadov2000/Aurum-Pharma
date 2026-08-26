@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
-from app.core.security import hash_code, hash_token
+from app.core.security import derive_email_outbox_encryption_key, hash_code, hash_token
 from app.domains.notifications.repository import NotificationsRepository
 from app.domains.notifications.service import NotificationsService
 
@@ -771,12 +771,16 @@ async def test_auth_lookup_resolves_password_requirement_without_tenant_context(
             await conn.execute(
                 text(
                     "SELECT public.issue_auth_email_code("
-                    ":email, :candidate_hash, :salt, '127.0.0.1', NULL)"
+                    ":email, :candidate_hash, :salt, '127.0.0.1', NULL, "
+                    ":plaintext_code, CAST(:key_version AS SMALLINT), :encryption_key)"
                 ),
                 {
                     "email": email,
                     "candidate_hash": candidate_hash,
                     "salt": salt,
+                    "plaintext_code": "123456",
+                    "key_version": 1,
+                    "encryption_key": derive_email_outbox_encryption_key(),
                 },
             )
             code_id = (

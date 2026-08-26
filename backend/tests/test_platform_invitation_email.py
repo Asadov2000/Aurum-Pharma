@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from pydantic import SecretStr
 
+from app.core import smtp_delivery
 from app.domains.platform_accounts.repository import PlatformInvitationEmailClaim
 from app.tasks import platform_accounts as email_task
 
@@ -71,8 +72,8 @@ def test_smtp_transport_requires_tls_and_uses_fragment_link(
     monkeypatch.setattr(email_task.settings, "EMAIL_USE_TLS", True)
     monkeypatch.setattr(email_task.settings, "EMAIL_SMTP_TIMEOUT_SECONDS", 10)
     monkeypatch.setattr(email_task.settings, "PUBLIC_APP_URL", "https://app.example.com")
-    monkeypatch.setattr(email_task.ssl, "create_default_context", lambda: tls_context)
-    monkeypatch.setattr(email_task.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtp_delivery.ssl, "create_default_context", lambda: tls_context)
+    monkeypatch.setattr(smtp_delivery.smtplib, "SMTP", FakeSMTP)
 
     claim = _claim()
     assert email_task._send_smtp(claim) == email_task.DeliveryResult("sent")
@@ -87,9 +88,10 @@ def test_smtp_transport_requires_tls_and_uses_fragment_link(
 def test_smtp_transport_fails_closed_when_tls_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(email_task.settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(email_task.settings, "EMAIL_USE_TLS", False)
     monkeypatch.setattr(
-        email_task.smtplib,
+        smtp_delivery.smtplib,
         "SMTP",
         lambda *_args, **_kwargs: pytest.fail("SMTP must not be contacted without TLS"),
     )
@@ -130,7 +132,7 @@ def test_smtp_errors_are_classified_without_persisting_exception_text(
         def __init__(self, host: str, port: int, *, timeout: int) -> None:
             raise error
 
-    monkeypatch.setattr(email_task.smtplib, "SMTP", FailingSMTP)
+    monkeypatch.setattr(smtp_delivery.smtplib, "SMTP", FailingSMTP)
 
     result = email_task._send_smtp(_claim())
     assert result == expected

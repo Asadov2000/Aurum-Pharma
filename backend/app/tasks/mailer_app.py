@@ -9,11 +9,14 @@ mailer_app = Celery(
     "aurum-mailer",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.platform_accounts"],
+    include=["app.tasks.auth_mailer", "app.tasks.platform_accounts"],
 )
 mailer_app.conf.update(
     task_default_queue="platform-mailer",
-    task_routes={"platform_accounts.process_invitation_emails": {"queue": "platform-mailer"}},
+    task_routes={
+        "auth.process_login_emails": {"queue": "platform-mailer"},
+        "platform_accounts.process_invitation_emails": {"queue": "platform-mailer"},
+    },
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",

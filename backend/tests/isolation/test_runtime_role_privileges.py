@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
-from app.core.security import hash_code, hash_password, hash_token
+from app.core.security import (
+    derive_email_outbox_encryption_key,
+    hash_code,
+    hash_password,
+    hash_token,
+)
 
 CRUD_TABLES = {
     "barcode",
@@ -98,6 +103,7 @@ READ_ONLY_TABLES = {
 NO_ACCESS_TABLES = {
     "alembic_version",
     "app_user",
+    "auth_email_outbox",
     "auth_mfa_challenge",
     "billing_contract_override",
     "billing_financial_operation",
@@ -207,6 +213,7 @@ CUSTOM_FUNCTIONS = {
     "create_tenant_user_assignment",
     "consume_auth_email_code",
     "complete_auth_mfa_enrollment",
+    "complete_auth_login_email",
     "complete_auth_mfa_verification",
     "complete_support_mfa_step_up",
     "complete_platform_invitation_email",
@@ -280,6 +287,7 @@ CUSTOM_FUNCTIONS = {
     "platform_actor_has_capability",
     "platform_actor_has_recent_capability",
     "claim_platform_invitation_email",
+    "claim_auth_login_email",
     "platform_staff_invitation_is_usable",
     "process_billing_grace_endings",
     "process_billing_trial_endings",
@@ -1046,12 +1054,15 @@ async def test_auth_functions_hide_secrets_and_reject_replay(
                 await conn.execute(
                     text(
                         "SELECT public.issue_auth_email_code("
-                        ":email, :candidate_hash, :salt, '127.0.0.1', NULL)"
+                        ":email, :candidate_hash, :salt, '127.0.0.1', NULL, "
+                        ":code, CAST(1 AS SMALLINT), :encryption_key)"
                     ),
                     {
                         "email": email,
                         "candidate_hash": candidate_hash,
                         "salt": salt,
+                        "code": code,
+                        "encryption_key": derive_email_outbox_encryption_key(),
                     },
                 )
             ).scalar_one()
@@ -1203,8 +1214,9 @@ async def test_auth_code_and_refresh_are_single_use_under_concurrency(
 ) -> None:
     suffix = uuid4().hex
     email = f"auth-race-{suffix}@example.invalid"
+    code = "135790"
     salt = uuid4().hex
-    candidate_hash = hash_code("135790", salt)
+    candidate_hash = hash_code(code, salt)
     refresh_hashes = [hash_token(f"login-{suffix}-{index}") for index in range(2)]
 
     async def create_session(refresh_hash: str) -> str | None:
@@ -1258,12 +1270,15 @@ async def test_auth_code_and_refresh_are_single_use_under_concurrency(
             await conn.execute(
                 text(
                     "SELECT public.issue_auth_email_code("
-                    ":email, :candidate_hash, :salt, '127.0.0.1', NULL)"
+                    ":email, :candidate_hash, :salt, '127.0.0.1', NULL, "
+                    ":code, CAST(1 AS SMALLINT), :encryption_key)"
                 ),
                 {
                     "email": email,
                     "candidate_hash": candidate_hash,
                     "salt": salt,
+                    "code": code,
+                    "encryption_key": derive_email_outbox_encryption_key(),
                 },
             )
             code_id = (

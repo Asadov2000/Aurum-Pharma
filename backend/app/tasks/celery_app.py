@@ -34,6 +34,7 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     task_default_queue="default",
     task_routes={
+        "auth.process_login_emails": {"queue": "platform-mailer"},
         "platform_accounts.process_invitation_emails": {"queue": "platform-mailer"},
         "billing.process_trial_endings": {"queue": "billing-worker"},
         "billing.process_grace_endings": {"queue": "billing-worker"},
@@ -68,6 +69,10 @@ celery_app.conf.beat_schedule = {
     "platform-accounts-process-invitation-emails": {
         "task": "platform_accounts.process_invitation_emails",
         "schedule": crontab(minute="*"),
+    },
+    "auth-process-login-emails": {
+        "task": "auth.process_login_emails",
+        "schedule": 5.0,
     },
     "notifications-check-expiring-licenses": {
         "task": "notifications.check_expiring_licenses",

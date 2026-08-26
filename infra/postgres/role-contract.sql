@@ -530,7 +530,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 110 THEN
+        IF revision_number < 1 OR revision_number > 111 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -666,6 +666,13 @@ BEGIN
             GRANT EXECUTE ON FUNCTION public.claim_platform_invitation_email(JSONB, INTEGER)
                 TO aurum_mailer;
             GRANT EXECUTE ON FUNCTION public.complete_platform_invitation_email(
+                UUID, UUID, TEXT, TEXT
+            ) TO aurum_mailer;
+        END IF;
+        IF current_revision ~ '^[0-9]{4}$' AND current_revision::INTEGER >= 111 THEN
+            GRANT EXECUTE ON FUNCTION public.claim_auth_login_email(JSONB, INTEGER)
+                TO aurum_mailer;
+            GRANT EXECUTE ON FUNCTION public.complete_auth_login_email(
                 UUID, UUID, TEXT, TEXT
             ) TO aurum_mailer;
         END IF;

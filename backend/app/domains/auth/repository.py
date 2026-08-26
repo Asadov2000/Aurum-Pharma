@@ -282,13 +282,18 @@ class AuthRepository:
         email_lower: str,
         code_hash: str,
         code_salt: str,
+        plaintext_code: str,
+        encryption_key_version: int,
+        encryption_key: str,
         ip_address: str,
         user_agent: str | None,
     ) -> EmailCodeIssueStatus:
         result = await self.session.execute(
             text(
                 "SELECT public.issue_auth_email_code("
-                ":email, :code_hash, :code_salt, :ip_address, :user_agent)"
+                ":email, :code_hash, :code_salt, :ip_address, :user_agent, "
+                ":plaintext_code, CAST(:encryption_key_version AS SMALLINT), "
+                ":encryption_key)"
             ),
             {
                 "email": email_lower,
@@ -296,6 +301,9 @@ class AuthRepository:
                 "code_salt": code_salt,
                 "ip_address": ip_address,
                 "user_agent": user_agent,
+                "plaintext_code": plaintext_code,
+                "encryption_key_version": encryption_key_version,
+                "encryption_key": encryption_key,
             },
         )
         return EmailCodeIssueStatus(result.scalar_one())
