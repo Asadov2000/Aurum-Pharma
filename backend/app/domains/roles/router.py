@@ -82,6 +82,7 @@ async def _serialize_user_list(
             phone=user.phone,
             status=user.status,
             last_login_at=user.last_login_at,
+            can_require_password=user.can_require_password,
             assignments=[
                 AssignmentRead.model_validate(assignment).model_copy(
                     update={

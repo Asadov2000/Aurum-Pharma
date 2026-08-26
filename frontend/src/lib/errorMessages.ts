@@ -76,6 +76,8 @@ const MESSAGE_MAP: Record<string, string> = {
   "User does not exist": "Пользователь не существует.",
   "User already has an active assignment for this branch":
     "У пользователя уже есть роль на этой точке.",
+  "Password must be configured before it can be required at login":
+    "Сотрудник ещё не настроил пароль. Пока оставьте вход по коду.",
   "Support privileges required": "Требуются права поддержки.",
   "Invalid authentication code": "Неверный или устаревший код подтверждения.",
   "Invalid or replayed authentication code":

@@ -266,7 +266,13 @@ export function AssignmentsPanel({
               ))}
             </Select>
           </div>
-          <Switch label="Требовать пароль при входе" {...form.register("password_required")} />
+          {user.can_require_password ? (
+            <Switch label="Требовать пароль при входе" {...form.register("password_required")} />
+          ) : (
+            <p className="rounded-lg border border-border bg-surface-subtle px-3 py-2 text-sm text-foreground-muted">
+              Обязательный пароль станет доступен после настройки пароля сотрудником.
+            </p>
+          )}
           {topError && (
             <p
               className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"

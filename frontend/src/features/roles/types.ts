@@ -74,6 +74,7 @@ export interface UserWithAssignments {
   phone: string | null;
   status: UserStatus;
   last_login_at: string | null;
+  can_require_password: boolean;
   assignments: Assignment[];
 }
 

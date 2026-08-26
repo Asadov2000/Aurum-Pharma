@@ -11,7 +11,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
-from app.core.security import generate_code_salt, hash_code
+from app.core.security import generate_code_salt, hash_code, hash_password
 from app.core.time import utc_now
 from app.domains.auth.models import AppUser, EmailCode
 from app.domains.auth.repository import AuthRepository
@@ -283,6 +283,134 @@ async def test_assignment_rejects_foreign_membership(
             branch_id=None,
             password_required=False,
         )
+
+
+async def test_password_requirement_needs_a_configured_password_at_every_layer(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    account, _membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="password-guard@aurum.tj",
+        full_name="Password Guard",
+    )
+
+    with pytest.raises(BusinessRuleError, match="Password must be configured"):
+        await service.assign_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=account.id,
+            role_id=role.id,
+            branch_id=None,
+            password_required=True,
+        )
+
+    with pytest.raises(DBAPIError) as direct_write:
+        async with db_session.begin_nested():
+            await service.repo.insert_assignment(
+                user_id=account.id,
+                tenant_id=tenant.id,
+                branch_id=None,
+                role_id=role.id,
+                password_required=True,
+            )
+    assert getattr(direct_write.value.orig, "sqlstate", None) == "P2001"
+
+    account.password_hash = hash_password("Configured1234")
+    await db_session.flush()
+    assignment = await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=role.id,
+        branch_id=None,
+        password_required=True,
+    )
+    assert assignment.password_required is True
+
+    with pytest.raises(DBAPIError) as password_removal:
+        async with db_session.begin_nested():
+            account.password_hash = None
+            await db_session.flush()
+    assert getattr(password_removal.value.orig, "sqlstate", None) == "P2001"
+    await db_session.refresh(account)
+    assert account.password_configured is True
+
+
+async def test_password_requirement_cannot_reactivate_a_passwordless_assignment(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    account, _membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="password-reactivation@aurum.tj",
+        full_name="Password Reactivation",
+    )
+    assignment = await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=role.id,
+        branch_id=None,
+        password_required=False,
+    )
+    await service.repo.deactivate_assignment(assignment.id, tenant_id=tenant.id)
+
+    with pytest.raises(BusinessRuleError, match="Password must be configured"):
+        await service.assign_role(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=account.id,
+            role_id=role.id,
+            branch_id=None,
+            password_required=True,
+        )
+
+    await db_session.refresh(assignment)
+    assert assignment.is_active is False
+    assert assignment.password_required is False
 
 
 @pytest.mark.parametrize("status", ["suspended", "offboarded"])
