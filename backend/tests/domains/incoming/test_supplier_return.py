@@ -241,6 +241,37 @@ async def test_supplier_return_retry_is_idempotent(
     assert return_count == 1
     assert movement_count == 1
 
+    revoked_scope = {uuid4()}
+    with pytest.raises(PermissionDeniedError, match="Branch access denied"):
+        await service.create_return(
+            operation_id=operation_id,
+            tenant_id=tenant.id,
+            supplier_id=supplier.id,
+            batch_id=batch_id,
+            qty=Decimal("2"),
+            reason="damaged",
+            comment="Повреждена упаковка",
+            source_document_id=None,
+            actor_id=None,
+            allowed_branch_ids=revoked_scope,
+        )
+
+    # Check the current scope before payload comparison so a caller cannot use
+    # validation differences to discover details of a return from another branch.
+    with pytest.raises(PermissionDeniedError, match="Branch access denied"):
+        await service.create_return(
+            operation_id=operation_id,
+            tenant_id=tenant.id,
+            supplier_id=supplier.id,
+            batch_id=batch_id,
+            qty=Decimal("1"),
+            reason="damaged",
+            comment="Повреждена упаковка",
+            source_document_id=None,
+            actor_id=None,
+            allowed_branch_ids=revoked_scope,
+        )
+
     with pytest.raises(BusinessRuleError, match="reused with different data"):
         await service.create_return(
             operation_id=operation_id,

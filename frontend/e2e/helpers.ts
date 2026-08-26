@@ -53,6 +53,7 @@ export const DEV: Creds = {
   totpSecret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
 };
 export const OWNER: Creds = { email: "owner@aurum.tj", password: "Owner1234" };
+export const CASHIER: Creds = { email: "cashier@aurum.tj", password: "Cashier1234" };
 
 export interface TokenPair {
   access_token: string;

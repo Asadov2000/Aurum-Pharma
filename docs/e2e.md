@@ -1,26 +1,37 @@
 # E2E-тесты (Playwright)
 
 Сквозные тесты гоняют **настоящий браузер (Chromium)** против **живого
-docker-стека** — без моков. Это safety-net перед деплоем: проверяем, что
-критические пользовательские сценарии работают целиком, от UI до БД.
+docker-стека**. Критические сценарии проходят целиком от UI до БД; только
+явно обозначенные границы внешних устройств и интеграций могут имитироваться.
 
 ## Что покрыто
 
 | Файл | Сценарий | Роль |
 |---|---|---|
-| `auth.spec.ts` | вход dev/owner, неверный код, выход | оба |
-| `tenant-setup.spec.ts` | создание тенанта, смена статуса, billing-drawer (подписка→счёт→платёж) | dev |
-| `catalog-flow.spec.ts` | создание позиции, штрихкод, trigram-поиск | owner |
-| `catalog-import.spec.ts` | импорт `.xlsx` через wizard и проверка строк в каталоге | owner |
-| `incoming-flow.spec.ts` | приход draft → позиция → приёмка → партия в `/batches` | owner |
-| `owner-onboarding.spec.ts` | создание аптеки и владельца, вход нового владельца по коду | dev |
-| `pos-sale.spec.ts` | desktop barcode scanner → корзина, смена → продажа → **FEFO split 5+2** → оплата → desktop cash-drawer → чек → списание партий | owner |
-| `pwa.spec.ts` | manifest, install-иконки, service worker без кеширования API/HTML | public |
-| `reports-export.spec.ts` | чек PDF, Z-report XLSX, продажи XLSX, остатки XLSX, desktop file-export metadata | owner |
-| `runtime-surface.spec.ts` | browser-режим, Windows desktop bridge/user-agent detection, ready-handshake, offline-warning | owner |
-| `shift-close-z-report.spec.ts` | смена → продажа → закрытие → `/reports` → бейдж «недостача» | owner |
+| `auth.spec.ts` | вход, MFA, refresh, сессии, новый вход, доступность, выход | dev/owner |
+| `cashier-pos.spec.ts` | филиальная изоляция кассира, смена, продажа и чек | cashier |
+| `catalog-flow.spec.ts` | позиция, штрихкод, поиск и необязательное фото | owner |
+| `catalog-import.spec.ts` | импорт `.xlsx` через мастер | owner |
+| `configurable-filters.spec.ts` | настройка фильтров и приватность значений | owner |
+| `incoming-flow.spec.ts` | приход → приёмка → партия | owner |
+| `interface-layout.spec.ts` | desktop/mobile/touch layout ключевых экранов | owner |
+| `owner-onboarding.spec.ts` | создание аптеки и вход владельца | dev/owner |
+| `payment-settings.spec.ts` | способы оплаты, выбранные владельцем | owner |
+| `platform-account-activation.spec.ts` | одноразовая активация приглашения сотрудника | platform |
+| `platform-account-lifecycle.spec.ts` | перевыпуск приглашения и жизненный цикл аккаунта | platform |
+| `platform-billing.spec.ts` | цены, финансы и защищённые команды биллинга | platform |
+| `pos-sale.spec.ts` | сканеры, FEFO, карта, возврат, чек и списание | owner |
+| `pwa.spec.ts` | manifest, иконки и безопасное кеширование | public |
+| `reports-export.spec.ts` | PDF/XLSX и передача скачивания desktop-host | owner |
+| `runtime-surface.spec.ts` | web/Windows bridge и online-only предупреждение | owner |
+| `shift-close-z-report.spec.ts` | закрытие смены и Z-отчёт | owner |
+| `startup-performance.spec.ts` | состав стартовой загрузки приложения | owner |
+| `support-access.spec.ts` | ограниченная support-сессия и её отзыв | platform |
+| `sync-center.spec.ts` | управление sync-учётными данными | platform |
+| `tenant-setup.spec.ts` | создание и изменение статуса аптеки | dev |
+| `user-session-revocation.spec.ts` | отзыв сессий сотрудника владельцем | owner |
 
-Всего **11 spec-файлов / 28 тестов**.
+Всего **22 spec-файла / 58 тестов**.
 
 ## Предусловия
 
@@ -41,7 +52,7 @@ pnpm e2e:isolated
 ```
 
 Команда поднимает отдельный Docker Compose проект `aurum-e2e-local`, применяет
-миграции, создаёт seed-данные, запускает 28 тестов и в любом случае удаляет его
+миграции, создаёт seed-данные, запускает 58 тестов и в любом случае удаляет его
 контейнеры и тома. Используются отдельные порты: frontend `15173`, backend
 `18000`; общая dev-БД и dev-Redis не затрагиваются.
 
@@ -88,8 +99,8 @@ pnpm exec playwright test e2e/pos-sale.spec.ts --reporter=list
   проверяют глобальное состояние БД. Скриншот + видео + trace сохраняются
   **только при падении**.
 - **`e2e/global-setup.ts`** — один раз перед всеми тестами:
-  1. проверяет активное назначение tenant-роли **«Владелец»** для
-     `owner@aurum.tj` в Demo Pharmacy;
+  1. проверяет активные аккаунты владельца и кассира с паролями в одной
+     демонстрационной аптеке;
   2. кэширует UUID тенанта в `E2E_TENANT_ID`;
   3. **сбрасывает Redis** (`auth:perms:*`) — иначе owner может войти в
      устаревший пустой permission-кэш с TTL 5 мин и получать 403;

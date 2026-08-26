@@ -187,6 +187,14 @@ async def main() -> None:
             )
             owner.password_hash = hash_password("Owner1234")
             owner.activated_at = now
+
+            cashier, _cashier_membership = await RolesService(roles_repo).create_tenant_account(
+                tenant_id=tenant.id,
+                email="cashier@aurum.tj",
+                full_name="Demo Cashier",
+                actor_id=developer.id,
+            )
+            cashier.password_hash = hash_password("Cashier1234")
             await session.flush()
 
     print("E2E base seed completed on the disposable database.")

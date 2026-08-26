@@ -123,6 +123,11 @@ class SuppliersService:
     ) -> SupplierReturn:
         existing = await self.repo.get_return(operation_id, tenant_id=tenant_id)
         if existing is not None:
+            await self._assert_return_branch_allowed(
+                existing,
+                tenant_id=tenant_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
             self._assert_return_retry_matches(
                 existing,
                 supplier_id=supplier_id,
@@ -170,6 +175,11 @@ class SuppliersService:
             existing = await self.repo.get_return(operation_id, tenant_id=tenant_id)
             if existing is None:
                 raise
+            await self._assert_return_branch_allowed(
+                existing,
+                tenant_id=tenant_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
             self._assert_return_retry_matches(
                 existing,
                 supplier_id=supplier_id,
@@ -283,6 +293,21 @@ class SuppliersService:
     ) -> None:
         if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
             raise PermissionDeniedError("Branch access denied")
+
+    async def _assert_return_branch_allowed(
+        self,
+        existing: SupplierReturn,
+        *,
+        tenant_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> None:
+        branch_id = await self.repo.get_batch_branch_id(
+            existing.batch_id,
+            tenant_id=tenant_id,
+        )
+        if branch_id is None:
+            raise NotFoundError("Batch not found")
+        self._assert_branch_allowed(branch_id, allowed_branch_ids=allowed_branch_ids)
 
     @staticmethod
     def _assert_return_retry_matches(

@@ -31,7 +31,7 @@ export default async function globalSetup(): Promise<void> {
   // can become unstable when the suite shells out repeatedly during startup.
   const tenantId = psql(`
     DELETE FROM email_code
-    WHERE email_lower IN ('dev@aurum.tj', 'owner@aurum.tj')
+    WHERE email_lower IN ('dev@aurum.tj', 'owner@aurum.tj', 'cashier@aurum.tj')
       AND created_at > now() - interval '1 minute';
 
     SELECT u.home_tenant_id
@@ -58,6 +58,17 @@ export default async function globalSetup(): Promise<void> {
      AND r.is_system = false
     WHERE lower(u.email) = 'owner@aurum.tj'
       AND u.home_tenant_id IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM app_user cashier
+        JOIN tenant_membership cashier_membership
+          ON cashier_membership.tenant_id = u.home_tenant_id
+         AND cashier_membership.user_id = cashier.id
+         AND cashier_membership.status IN ('pending', 'active')
+        WHERE lower(cashier.email) = 'cashier@aurum.tj'
+          AND cashier.home_tenant_id = u.home_tenant_id
+          AND cashier.password_hash IS NOT NULL
+      )
     LIMIT 1;
   `);
   if (!tenantId) {
