@@ -23,8 +23,13 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.deps import CurrentUser, get_db, require_permission
-from app.core.errors import BusinessRuleError, NotFoundError, ValidationError
+from app.core.deps import CurrentUser, get_db, require_any_permission, require_permission
+from app.core.errors import (
+    BusinessRuleError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from app.core.storage import default_object_path, get_object, put_object, remove_object
 from app.domains.catalog.image_processing import process_catalog_image
 from app.domains.catalog.import_parser import XLS_UNSUPPORTED_MESSAGE
@@ -92,6 +97,15 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
     return user.tenant_id
 
 
+def _authorize_catalog_search(user: CurrentUser, branch_id: UUID | None) -> None:
+    if user.has_tenant_scope("catalog.view"):
+        return
+    if branch_id is None:
+        raise BusinessRuleError("branch_id is required for branch-scoped POS catalog search")
+    if not user.can_access_branch("pos.sell", branch_id):
+        raise PermissionDeniedError("Branch access denied")
+
+
 def _remove_catalog_image_version(tenant_id: UUID, item_id: UUID, version: UUID) -> None:
     variants: tuple[Literal["display", "thumbnail"], ...] = ("display", "thumbnail")
     for variant in variants:
@@ -115,7 +129,10 @@ def _remove_catalog_image_version(tenant_id: UUID, item_id: UUID, version: UUID)
 
 @router.get("", response_model=CatalogList)
 async def list_catalog(
-    _user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_permission("catalog.view", "pos.sell")),
+    ],
     service: Annotated[CatalogService, Depends(_service)],
     q: Annotated[str | None, Query()] = None,
     category: Annotated[str | None, Query()] = None,
@@ -129,6 +146,7 @@ async def list_catalog(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     branch_id: Annotated[UUID | None, Query()] = None,
 ) -> CatalogList:
+    _authorize_catalog_search(user, branch_id)
     items, total, stock = await service.search(
         q=q,
         category=category,

@@ -116,6 +116,52 @@ async def _assert_batch_scope(
     assert other_batch_resp.status_code == 403
 
 
+async def _assert_pos_catalog_scope(
+    client: AsyncClient,
+    *,
+    headers: dict[str, str],
+    visible_branch_id: UUID,
+    forbidden_branch_id: UUID,
+) -> None:
+    own_catalog_resp = await client.get(
+        f"/api/v1/catalog?branch_id={visible_branch_id}",
+        headers=headers,
+    )
+    assert own_catalog_resp.status_code == 200
+    assert own_catalog_resp.json()["total"] == 1
+
+    unscoped_catalog_resp = await client.get("/api/v1/catalog", headers=headers)
+    assert unscoped_catalog_resp.status_code == 422
+
+    other_catalog_resp = await client.get(
+        f"/api/v1/catalog?branch_id={forbidden_branch_id}",
+        headers=headers,
+    )
+    assert other_catalog_resp.status_code == 403
+
+    catalog_summary_resp = await client.get("/api/v1/catalog/summary", headers=headers)
+    assert catalog_summary_resp.status_code == 403
+
+
+async def _assert_register_scope(
+    client: AsyncClient,
+    *,
+    headers: dict[str, str],
+    visible_register_id: UUID,
+    forbidden_branch_id: UUID,
+) -> None:
+    registers_resp = await client.get("/api/v1/registers", headers=headers)
+    assert registers_resp.status_code == 200
+    assert [item["id"] for item in registers_resp.json()] == [str(visible_register_id)]
+
+    other_registers_resp = await client.get(
+        f"/api/v1/registers?branch_id={forbidden_branch_id}",
+        headers=headers,
+    )
+    assert other_registers_resp.status_code == 200
+    assert other_registers_resp.json() == []
+
+
 async def _assert_reporting_is_forbidden(
     client: AsyncClient,
     *,
@@ -535,16 +581,19 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
         other_branch_resp = await client.get(f"/api/v1/branches/{branch_b.id}", headers=headers)
         assert other_branch_resp.status_code == 403
 
-        registers_resp = await client.get("/api/v1/registers", headers=headers)
-        assert registers_resp.status_code == 200
-        assert [item["id"] for item in registers_resp.json()] == [str(register_a.id)]
-
-        other_registers_resp = await client.get(
-            f"/api/v1/registers?branch_id={branch_b.id}",
+        await _assert_register_scope(
+            client,
             headers=headers,
+            visible_register_id=register_a.id,
+            forbidden_branch_id=branch_b.id,
         )
-        assert other_registers_resp.status_code == 200
-        assert other_registers_resp.json() == []
+
+        await _assert_pos_catalog_scope(
+            client,
+            headers=headers,
+            visible_branch_id=branch_a.id,
+            forbidden_branch_id=branch_b.id,
+        )
 
         await _assert_reporting_is_forbidden(client, headers=headers)
 
