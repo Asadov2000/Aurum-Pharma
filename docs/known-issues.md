@@ -9,9 +9,10 @@
 
 ## Открытые проблемы
 
-1. **P0:** зашифрованный logical backup и изолированный restore drill работают,
-   но до production еще нужны PostgreSQL WAL/PITR, независимая off-site WORM-копия,
-   контроль свежести и измеренные RPO/RTO.
+1. **P0:** WAL/PITR, off-site WORM export и восстановление из независимой копии
+   реализованы, но до production нужно создать внешний bucket в допустимом
+   регионе, подключить freshness/free-space alerts и измерить RPO/RTO на объёме
+   пилота.
 2. **P0:** внутренние соединения с PostgreSQL, Redis и MinIO еще не переведены
    на production TLS.
 3. **P0:** production-секреты еще не выданы через внешний secret storage, а

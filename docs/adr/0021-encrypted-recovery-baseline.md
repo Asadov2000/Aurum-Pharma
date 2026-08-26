@@ -47,3 +47,10 @@ Manifest прямо указывает режим согласованности
 Обычный runtime не получает backup credentials. Потеря `RESTIC_PASSWORD` делает
 копию невосстановимой, поэтому ключ хранится отдельно от сервера и репозитория.
 Restore drill никогда не направляется на production volumes или production DB.
+
+## Развитие решения
+
+ADR-0023 добавляет WAL archive, physical base backup, PITR drill и независимый
+off-site WORM export. Из перечисленных выше ограничений открытыми остаются
+внешний выбор региона и провайдера, мониторинг свежести, расписание off-site
+drill и измерение RPO/RTO на production-подобном объёме.

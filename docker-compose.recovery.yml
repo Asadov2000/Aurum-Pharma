@@ -87,6 +87,222 @@ services:
     cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
     restart: "no"
 
+  pitr-basebackup:
+    profiles: ["backup"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    environment:
+      AURUM_BACKUP_MIN_FREE_BYTES: "${AURUM_BACKUP_MIN_FREE_BYTES:-5368709120}"
+    secrets:
+      - source: database_url_pitr
+        target: DATABASE_URL_PITR
+      - source: restic_password
+        target: RESTIC_PASSWORD
+    volumes:
+      - type: bind
+        source: "${AURUM_BACKUP_REPOSITORY:?AURUM_BACKUP_REPOSITORY is required}"
+        target: /repository
+      - type: bind
+        source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
+        target: /scratch
+    networks:
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["/bin/sh", "/opt/aurum/pitr-basebackup.sh"]
+    read_only: true
+    tmpfs:
+      - /workspace:size=64m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_BACKUP_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
+    restart: "no"
+
+  wal-snapshot:
+    profiles: ["backup"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    secrets:
+      - source: restic_password
+        target: RESTIC_PASSWORD
+    volumes:
+      - type: bind
+        source: "${AURUM_BACKUP_REPOSITORY:?AURUM_BACKUP_REPOSITORY is required}"
+        target: /repository
+      - type: bind
+        source: "${AURUM_WAL_ARCHIVE:?AURUM_WAL_ARCHIVE is required}"
+        target: /wal-archive
+        read_only: true
+    command: ["/bin/sh", "/opt/aurum/wal-snapshot.sh"]
+    group_add:
+      - "70"
+    read_only: true
+    tmpfs:
+      - /workspace:size=64m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_BACKUP_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
+    restart: "no"
+
+  offsite-sync:
+    profiles: ["offsite"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    environment:
+      AURUM_OFFSITE_ENDPOINT: "${AURUM_OFFSITE_ENDPOINT:?AURUM_OFFSITE_ENDPOINT is required}"
+      AURUM_OFFSITE_BUCKET: "${AURUM_OFFSITE_BUCKET:?AURUM_OFFSITE_BUCKET is required}"
+      AURUM_OFFSITE_PREFIX: "${AURUM_OFFSITE_PREFIX:-aurum-production}"
+      AURUM_OFFSITE_ALLOW_INSECURE: "${AURUM_OFFSITE_ALLOW_INSECURE:-false}"
+    secrets:
+      - source: aurum_offsite_access_key
+        target: AURUM_OFFSITE_ACCESS_KEY
+      - source: aurum_offsite_secret_key
+        target: AURUM_OFFSITE_SECRET_KEY
+    volumes:
+      - type: bind
+        source: "${AURUM_BACKUP_REPOSITORY:?AURUM_BACKUP_REPOSITORY is required}"
+        target: /repository
+        read_only: true
+    networks:
+      - backup-egress
+    command: ["/bin/sh", "/opt/aurum/offsite-sync.sh"]
+    read_only: true
+    tmpfs:
+      - /workspace:size=128m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_BACKUP_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
+    restart: "no"
+
+  offsite-test-minio:
+    profiles: ["offsite-test"]
+    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data
+    environment:
+      MINIO_BROWSER: "off"
+      MINIO_ROOT_USER_FILE: /run/secrets/MINIO_ROOT_USER
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/MINIO_ROOT_PASSWORD
+    secrets:
+      - source: minio_root_user
+        target: MINIO_ROOT_USER
+      - source: minio_root_password
+        target: MINIO_ROOT_PASSWORD
+    volumes:
+      - offsite-test-data:/data
+    networks:
+      - backup-egress
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: "0.5"
+    restart: "no"
+
+  offsite-test-init:
+    profiles: ["offsite-test"]
+    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        root_user="$$(cat /run/secrets/MINIO_ROOT_USER)"
+        root_password="$$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
+        append_user="$$(cat /run/secrets/AURUM_OFFSITE_ACCESS_KEY)"
+        append_password="$$(cat /run/secrets/AURUM_OFFSITE_SECRET_KEY)"
+        mc --config-dir /tmp/.mc alias set test http://offsite-test-minio:9000 "$$root_user" "$$root_password"
+        mc --config-dir /tmp/.mc mb --with-lock --ignore-existing test/aurum-offsite-test
+        mc --config-dir /tmp/.mc version enable test/aurum-offsite-test
+        mc --config-dir /tmp/.mc retention set --default COMPLIANCE 30d test/aurum-offsite-test
+        mc --config-dir /tmp/.mc admin user add test "$$append_user" "$$append_password"
+        mc --config-dir /tmp/.mc admin policy create test aurum-offsite-append /config/policy.json
+        mc --config-dir /tmp/.mc admin policy attach test aurum-offsite-append --user "$$append_user"
+    secrets:
+      - source: minio_root_user
+        target: MINIO_ROOT_USER
+      - source: minio_root_password
+        target: MINIO_ROOT_PASSWORD
+      - source: aurum_offsite_access_key
+        target: AURUM_OFFSITE_ACCESS_KEY
+      - source: aurum_offsite_secret_key
+        target: AURUM_OFFSITE_SECRET_KEY
+    volumes:
+      - ./infra/minio/aurum-offsite-append-policy.json:/config/policy.json:ro
+    networks:
+      - backup-egress
+    depends_on:
+      offsite-test-minio:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: "0.25"
+    restart: "no"
+
+  offsite-test-restore:
+    profiles: ["offsite-test"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    secrets:
+      - source: minio_root_user
+        target: MINIO_ROOT_USER
+      - source: minio_root_password
+        target: MINIO_ROOT_PASSWORD
+      - source: restic_password
+        target: RESTIC_PASSWORD
+    volumes:
+      - type: bind
+        source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
+        target: /scratch
+    networks:
+      - backup-egress
+    depends_on:
+      offsite-test-minio:
+        condition: service_healthy
+    command: ["/bin/sh", "/opt/aurum/offsite-test-restore.sh"]
+    read_only: true
+    tmpfs:
+      - /workspace:size=64m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_BACKUP_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
+    restart: "no"
+
   restore-postgres:
     profiles: ["restore-drill"]
     image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
@@ -100,6 +316,7 @@ services:
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
+      AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -115,6 +332,8 @@ services:
         target: AURUM_BILLING_WORKER_PASSWORD
       - source: aurum_backup_password
         target: AURUM_BACKUP_PASSWORD
+      - source: aurum_pitr_password
+        target: AURUM_PITR_PASSWORD
     volumes:
       - restore-postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -223,10 +442,52 @@ services:
     cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
     restart: "no"
 
+  pitr-restore-drill:
+    profiles: ["restore-drill"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    environment:
+      AURUM_PITR_TARGET_NAME: "${AURUM_PITR_TARGET_NAME:-}"
+    secrets:
+      - source: restic_password
+        target: RESTIC_PASSWORD
+    volumes:
+      - type: bind
+        source: "${AURUM_BACKUP_REPOSITORY:?AURUM_BACKUP_REPOSITORY is required}"
+        target: /repository
+        read_only: true
+      - type: bind
+        source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
+        target: /scratch
+    networks:
+      - recovery
+    command: ["/bin/sh", "/opt/aurum/pitr-restore-drill.sh"]
+    read_only: true
+    tmpfs:
+      - /workspace:size=64m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_BACKUP_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
+    restart: "no"
+
+secrets:
+  aurum_offsite_access_key:
+    file: "${AURUM_OFFSITE_SECRET_FILES_DIR:?AURUM_OFFSITE_SECRET_FILES_DIR is required}/AURUM_OFFSITE_ACCESS_KEY"
+  aurum_offsite_secret_key:
+    file: "${AURUM_OFFSITE_SECRET_FILES_DIR:?AURUM_OFFSITE_SECRET_FILES_DIR is required}/AURUM_OFFSITE_SECRET_KEY"
+
 volumes:
   restore-postgres-data:
   restore-minio-data:
+  offsite-test-data:
 
 networks:
   recovery:
     internal: true
+  backup-egress:

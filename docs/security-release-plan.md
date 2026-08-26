@@ -71,8 +71,11 @@
 - [x] Зашифрованный logical backup PostgreSQL + MinIO, отдельные read-only
       credentials, retention и изолированный restore drill реализованы и локально
       проверены на полной схеме и повторным тестом владельцев, ACL и RLS.
-- [ ] WAL/PITR, независимая off-site WORM-копия в разрешённой юрисдикции,
-      автоматическое расписание drill и измеренные на production-объёме RPO/RTO.
+- [x] WAL archive, проверяемый physical base backup, PITR drill и независимый
+      off-site WORM export с append-only credentials реализованы в коде и CI.
+- [ ] Production bucket создан в разрешённой юрисдикции; настроены внешние
+      уведомления о freshness/free-space, ежемесячный off-site drill и измерены
+      RPO/RTO на production-подобном объёме.
 
 ### P0: identity и authorization
 
@@ -137,7 +140,8 @@
 
 1. Scoped authorization, account/membership/ownership и безопасный конструктор
    из ADR-0007.
-2. WAL/PITR, off-site WORM и автоматический контроль свежести backup/drill.
+2. Внешний WORM storage, автоматический контроль свежести backup/drill и
+   измерение RPO/RTO на staging.
 3. DB-инварианты POS и полный refund/void sync-контур.
 4. Внутренний TLS для PostgreSQL, Redis и MinIO.
 5. mTLS/device identity, зашифрованная локальная БД и trusted time для Edge.

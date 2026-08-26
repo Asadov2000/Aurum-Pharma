@@ -1,7 +1,7 @@
 # Текущее состояние разработки
 
-Дата проверки: 2026-08-25. Проверено относительно `origin/main` на commit
-`82d76d3` с актуализированным production hardening.
+Дата проверки: 2026-08-26. Проверено относительно `origin/main` на commit
+`ce16aa3` и ветки production recovery hardening.
 
 Этот файл хранит только оперативное состояние проекта. Код, миграции, тесты и
 принятые ADR имеют приоритет. После крупного слияния или релизной проверки файл
@@ -26,6 +26,10 @@
 - Реализован зашифрованный logical backup PostgreSQL и MinIO через Restic с
   отдельными read-only credentials, retention и изолированным restore drill.
   Интеграционный тест подтвердил данные, объекты, SHA-256, владельцев, ACL и RLS.
+- Реализованы PostgreSQL WAL archive, проверяемый physical base backup, точный
+  PITR drill и экспорт зашифрованного Restic repository в независимый WORM bucket.
+  Uploader не получает ключ расшифрования или право удаления; COMPLIANCE lock и
+  восстановление непосредственно из off-site копии проверяются интеграционно.
 - Base images закреплены по digest; CI проверяет production-образы и формирует
   CycloneDX SBOM. Публикация и подпись release images остаются отдельной задачей.
 - В проверенной БД tenant-таблицы покрыты RLS. Это не отменяет обязательные
@@ -35,9 +39,10 @@
 
 ### P0 - блокирует безопасный production
 
-1. Дополнить уже проверенный logical backup PostgreSQL механизмом WAL/PITR,
-   независимой off-site WORM-копией, контролем свежести и измеренными RPO/RTO.
-   MinIO versioning и локальный restore drill уже работают.
+1. Создать внешний WORM bucket в юридически допустимом регионе, независимо
+   сохранить ключ Restic и root/provider credentials, подключить оповещения о
+   свежести/free-space и измерить RPO/RTO на production-подобном объёме. Кодовые
+   механизмы WAL/PITR, off-site export и restore drill уже реализованы.
 2. Завершить production transport security между приложением и PostgreSQL,
    Redis и MinIO. Внешний TLS уже не заменяет внутреннее шифрование.
 3. Выдать production-секреты во внешнем secret storage, выполнить staging
@@ -65,7 +70,8 @@
 ## Порядок наведения порядка
 
 1. Влить актуализированный production hardening только после полного зеленого CI.
-2. Реализовать WAL/PITR, off-site WORM и контроль свежести backup/drill.
+2. Подключить выбранный внешний WORM storage, мониторинг свежести backup/drill и
+   измерить фактические RPO/RTO на staging.
 3. Добавить внутренний TLS для PostgreSQL, Redis и MinIO.
 4. Закрыть PR `#77`-`#85`, если повторная проверка подтверждает нулевой diff с
    текущим `main`.

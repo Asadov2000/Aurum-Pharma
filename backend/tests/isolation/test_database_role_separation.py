@@ -64,6 +64,7 @@ async def test_database_roles_have_exact_attributes_and_memberships(
                       'aurum_edge_cash_owner',
                       'aurum_billing_worker',
                       'aurum_backup',
+                      'aurum_pitr',
                       'aurum_mailer',
                       'aurum_support',
                       'aurum_migrator',
@@ -122,6 +123,16 @@ async def test_database_roles_have_exact_attributes_and_memberships(
             "rolcreaterole": False,
             "rolreplication": False,
             "rolbypassrls": True,
+        },
+        "aurum_pitr": {
+            "rolname": "aurum_pitr",
+            "rolcanlogin": True,
+            "rolinherit": False,
+            "rolsuper": False,
+            "rolcreatedb": False,
+            "rolcreaterole": False,
+            "rolreplication": True,
+            "rolbypassrls": False,
         },
         "aurum_edge_cash_executor": {
             "rolname": "aurum_edge_cash_executor",
@@ -335,6 +346,49 @@ async def test_backup_role_is_cluster_read_only(
     }
 
 
+async def test_pitr_role_has_only_physical_replication_surface(
+    migration_role_engine: AsyncEngine,
+) -> None:
+    async with migration_role_engine.connect() as connection:
+        row = (await connection.execute(text("""
+                    SELECT
+                      pg_catalog.pg_has_role(
+                        'aurum_pitr', 'pg_read_all_data', 'MEMBER'
+                      ) AS can_read_all,
+                      pg_catalog.pg_has_role(
+                        'aurum_pitr', 'pg_write_all_data', 'MEMBER'
+                      ) AS can_write_all,
+                      pg_catalog.has_database_privilege(
+                        'aurum_pitr', current_database(), 'CONNECT'
+                      ) AS can_connect,
+                      pg_catalog.has_database_privilege(
+                        'aurum_pitr', current_database(), 'CREATE'
+                      ) AS can_create_database_objects,
+                      pg_catalog.has_schema_privilege(
+                        'aurum_pitr', 'public', 'USAGE'
+                      ) AS can_use_application_schema,
+                      NOT EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_auth_members AS membership
+                        JOIN pg_catalog.pg_roles AS granted
+                          ON granted.oid = membership.roleid
+                        JOIN pg_catalog.pg_roles AS member
+                          ON member.oid = membership.member
+                        WHERE granted.rolname = 'aurum_pitr'
+                           OR member.rolname = 'aurum_pitr'
+                      ) AS has_no_memberships
+                """))).mappings().one()
+
+    assert dict(row) == {
+        "can_read_all": False,
+        "can_write_all": False,
+        "can_connect": False,
+        "can_create_database_objects": False,
+        "can_use_application_schema": False,
+        "has_no_memberships": True,
+    }
+
+
 async def test_runtime_roles_own_no_application_objects(
     migration_role_engine: AsyncEngine,
 ) -> None:
@@ -365,6 +419,7 @@ async def test_runtime_roles_own_no_application_objects(
                             'aurum_edge_cash_owner',
                             'aurum_billing_worker',
                             'aurum_backup',
+                            'aurum_pitr',
                             'aurum_mailer',
                             'aurum_support'
                           )
@@ -383,6 +438,7 @@ async def test_runtime_roles_own_no_application_objects(
                             'aurum_edge_cash_owner',
                             'aurum_billing_worker',
                             'aurum_backup',
+                            'aurum_pitr',
                             'aurum_mailer',
                             'aurum_support'
                           )

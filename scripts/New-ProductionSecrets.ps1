@@ -66,6 +66,7 @@ $mailerPassword = New-RandomHex -Bytes 32
 $billingWorkerPassword = New-RandomHex -Bytes 32
 $migratorPassword = New-RandomHex -Bytes 32
 $backupPassword = New-RandomHex -Bytes 32
+$pitrPassword = New-RandomHex -Bytes 32
 $redisPassword = New-RandomHex -Bytes 32
 $minioRootUser = New-RandomHex -Bytes 10
 $minioRootPassword = New-RandomHex -Bytes 32
@@ -92,6 +93,7 @@ Write-Secret -Name "AURUM_MAILER_PASSWORD" -Value $mailerPassword
 Write-Secret -Name "AURUM_BILLING_WORKER_PASSWORD" -Value $billingWorkerPassword
 Write-Secret -Name "AURUM_MIGRATOR_PASSWORD" -Value $migratorPassword
 Write-Secret -Name "AURUM_BACKUP_PASSWORD" -Value $backupPassword
+Write-Secret -Name "AURUM_PITR_PASSWORD" -Value $pitrPassword
 Write-Secret -Name "DATABASE_URL_APP" -Value (
     "postgresql+asyncpg://aurum_app:{0}@postgres:5432/aurum" -f $appPassword
 )
@@ -110,6 +112,9 @@ Write-Secret -Name "DATABASE_URL_MIGRATION" -Value (
 )
 Write-Secret -Name "DATABASE_URL_BACKUP" -Value (
     "postgresql://aurum_backup:{0}@postgres:5432/aurum" -f $backupPassword
+)
+Write-Secret -Name "DATABASE_URL_PITR" -Value (
+    "postgresql://aurum_pitr:{0}@postgres:5432/aurum" -f $pitrPassword
 )
 Write-Secret -Name "REDIS_PASSWORD" -Value $redisPassword
 Write-Secret -Name "REDIS_URL" -Value ("redis://:{0}@redis:6379/0" -f $redisPassword)
@@ -151,4 +156,4 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     }
 }
 
-Write-Host "Created 27 production secret files in a protected external directory."
+Write-Host "Created 29 production secret files in a protected external directory."
