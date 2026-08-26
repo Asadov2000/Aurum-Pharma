@@ -219,6 +219,13 @@ class SuppliersRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_batch_branch_id(self, batch_id: UUID, *, tenant_id: UUID) -> UUID | None:
+        stmt = select(Batch.branch_id).where(
+            Batch.id == batch_id,
+            Batch.tenant_id == tenant_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def get_batch_for_update(self, batch_id: UUID, *, tenant_id: UUID) -> Batch | None:
         stmt = (
             select(Batch)
