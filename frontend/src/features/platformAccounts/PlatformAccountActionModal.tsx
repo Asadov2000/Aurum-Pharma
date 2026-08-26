@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { isAxiosError } from "axios";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -118,7 +118,9 @@ export function PlatformAccountActionModal({
     defaultValues: { reason_code: config.defaultReason, reason: "" },
   });
 
-  useEffect(() => {
+  // Reset before paint so a fast keyboard user cannot type into a form that
+  // a deferred opening effect clears immediately afterwards.
+  useLayoutEffect(() => {
     if (!open) return;
     setTopError(null);
     setActivationUrl(null);
