@@ -84,7 +84,12 @@ restic snapshots >/dev/null
         --tag "$backup_id" \
         .
 )
-restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune
+restic forget \
+    --tag aurum-combined \
+    --keep-daily 7 \
+    --keep-weekly 4 \
+    --keep-monthly 12 \
+    --prune
 restic check --read-data-subset=5%
 
 printf 'Backup completed: %s (objects: %s, revision: %s)\n' \

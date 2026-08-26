@@ -1,0 +1,12 @@
+[Unit]
+Description=Export encrypted Aurum WAL off-site every five minutes
+
+[Timer]
+OnBootSec=3m
+OnUnitActiveSec=5m
+AccuracySec=30s
+Persistent=true
+Unit=aurum-wal-offsite.service
+
+[Install]
+WantedBy=timers.target

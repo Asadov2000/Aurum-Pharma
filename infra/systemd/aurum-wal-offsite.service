@@ -1,5 +1,5 @@
 [Unit]
-Description=Aurum Pharma encrypted backup
+Description=Aurum Pharma encrypted WAL and off-site WORM export
 Requires=docker.service
 After=docker.service network-online.target
 
@@ -7,7 +7,7 @@ After=docker.service network-online.target
 Type=oneshot
 User=root
 WorkingDirectory=/opt/aurum-pharma
-ExecStart=/bin/sh ./scripts/run-production-recovery-cycle.sh full
+ExecStart=/bin/sh ./scripts/run-production-recovery-cycle.sh wal
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

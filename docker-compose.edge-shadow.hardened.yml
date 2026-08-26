@@ -43,6 +43,7 @@ services:
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
+      AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -58,6 +59,8 @@ services:
         target: AURUM_BILLING_WORKER_PASSWORD
       - source: aurum_backup_password
         target: AURUM_BACKUP_PASSWORD
+      - source: aurum_pitr_password
+        target: AURUM_PITR_PASSWORD
     volumes:
       - edge-postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -92,6 +95,7 @@ services:
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
+      AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
       - source: postgres_password
         target: POSTGRES_PASSWORD
@@ -107,6 +111,8 @@ services:
         target: AURUM_BILLING_WORKER_PASSWORD
       - source: aurum_backup_password
         target: AURUM_BACKUP_PASSWORD
+      - source: aurum_pitr_password
+        target: AURUM_PITR_PASSWORD
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
     networks:
@@ -203,6 +209,8 @@ secrets:
     file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_BILLING_WORKER_PASSWORD"
   aurum_backup_password:
     file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_BACKUP_PASSWORD"
+  aurum_pitr_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_PITR_PASSWORD"
   database_url_app:
     file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/DATABASE_URL_APP"
   database_url_support:

@@ -26,6 +26,7 @@ services:
       AURUM_BILLING_WORKER_PASSWORD: aurum_billing_worker_pw
       AURUM_MIGRATOR_PASSWORD: aurum_migrator_pw
       AURUM_BACKUP_PASSWORD: aurum_backup_pw
+      AURUM_PITR_PASSWORD: aurum_pitr_pw
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
@@ -77,6 +78,7 @@ services:
       AURUM_BILLING_WORKER_PASSWORD: aurum_billing_worker_pw
       AURUM_MIGRATOR_PASSWORD: aurum_migrator_pw
       AURUM_BACKUP_PASSWORD: aurum_backup_pw
+      AURUM_PITR_PASSWORD: aurum_pitr_pw
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
     depends_on:

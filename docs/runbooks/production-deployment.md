@@ -5,7 +5,7 @@
 
 ## 1. Требования
 
-- Linux-сервер с Docker Engine и Docker Compose v2.
+- Linux-сервер с Docker Engine, Docker Compose v2 и `flock` (`util-linux`).
 - DNS `A/AAAA` production-домена указывает на сервер.
 - Firewall публикует только `80/tcp`, `443/tcp`, `443/udp` и ограниченный SSH.
 - Каталоги конфигурации и секретов находятся вне Git checkout.
@@ -48,6 +48,18 @@ pwsh ./scripts/New-ProductionSecrets.ps1 `
 Не копируйте секреты в `.env`, Compose arguments, shell history, issue или чат.
 Сделайте зашифрованную резервную копию MFA-ключа отдельно от основной БД.
 Ключ `RESTIC_PASSWORD` храните отдельно и от сервера, и от backup repository.
+
+Off-site access key выдаёт внешний S3-compatible провайдер. Не передавайте его
+PostgreSQL или приложению. Запишите пару в отдельный каталог:
+
+```powershell
+$access = Read-Host "Off-site access key" -AsSecureString
+$secret = Read-Host "Off-site secret key" -AsSecureString
+pwsh ./scripts/New-OffsiteBackupSecrets.ps1 `
+  -OutputDirectory /etc/aurum/offsite-secrets `
+  -AccessKey $access `
+  -SecretKey $secret
+```
 
 ## 4. Проверка конфигурации
 
@@ -153,6 +165,7 @@ backup-контейнеру:
 ```bash
 sudo install -d -m 700 -o 10001 -g 10001 /srv/aurum-backups/restic
 sudo install -d -m 700 -o 10001 -g 10001 /srv/aurum-backups/scratch
+sudo install -d -m 750 -o 70 -g 70 /srv/aurum-backups/wal-archive
 ```
 
 `AURUM_BACKUP_REPOSITORY` хранит зашифрованные snapshots, а
@@ -171,9 +184,44 @@ docker compose \
   --profile backup run --rm backup
 ```
 
-После первой ручной проверки установите `infra/systemd/aurum-backup.service` и
-`aurum-backup.timer`, скорректировав `WorkingDirectory`. Проверяйте
-`systemctl status aurum-backup.timer` и журнал каждого запуска.
+Создать и проверить физический base backup, затем зашифровать текущую цепочку
+WAL:
+
+```bash
+docker compose \
+  --env-file /etc/aurum/production.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile backup run --rm pitr-basebackup
+
+docker compose \
+  --env-file /etc/aurum/production.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile backup run --rm wal-snapshot
+```
+
+Перед off-site запуском внешний bucket создаётся в отдельном аккаунте/регионе с
+Versioning и default Object Lock `COMPLIANCE`. Ключ uploader получает только
+List/Get/Put и не получает Delete, изменение retention или bypass. Затем:
+
+```bash
+docker compose \
+  --env-file /etc/aurum/production.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile offsite run --rm offsite-sync
+```
+
+Uploader экспортирует только зашифрованные Restic-объекты и не получает
+`RESTIC_PASSWORD`. Успех подтверждается неизменяемым checksum manifest,
+загруженным последним.
+
+После первой ручной проверки установите обе пары unit-файлов из
+`infra/systemd`: full backup выполняется ежедневно, WAL snapshot и WORM export -
+каждые пять минут. Все операции сериализуются одним host lock. Скорректируйте
+`WorkingDirectory`, затем проверяйте `systemctl status aurum-backup.timer
+aurum-wal-offsite.timer` и журнал каждого запуска.
 
 Не реже раза в месяц запускайте restore в отдельном Compose project. Уникальное
 имя гарантирует, что drill не использует production volumes:
@@ -197,8 +245,22 @@ docker compose -p "$drill" \
 объектов, их SHA-256, RLS и доступ runtime-ролей. PostgreSQL dump и текущий
 снимок объектов MinIO создаются последовательно, поэтому межсистемная
 транзакционная согласованность не гарантируется без окна запрета записей. Этот
-backup пока логический: он не заменяет WAL/PITR и независимую
-off-site копию.
+backup остаётся логическим и дополняет физический PITR-контур.
+
+PITR всегда репетируется только в пустом scratch. Для именованной контрольной
+точки задайте `AURUM_PITR_TARGET_NAME` во внешнем env и выполните:
+
+```bash
+docker compose -p "$drill" \
+  --env-file /etc/aurum/production.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile restore-drill run --rm pitr-restore-drill
+```
+
+Никогда не удаляйте WAL только по возрасту. Очистка разрешена лишь после
+подтверждённого off-site manifest и проверенного base backup, который начинается
+раньше самого старого сохраняемого момента восстановления.
 
 ## 9. Edge shadow rehearsal
 
@@ -221,7 +283,8 @@ pwsh ./scripts/New-EdgeShadowSecrets.ps1 `
 До реального пилота ещё обязательны:
 
 - TLS и проверка сертификатов для PostgreSQL, Redis и MinIO внутри сети;
-- WAL/PITR, независимая off-site копия и юридически допустимое WORM-хранилище;
+- внешний WORM bucket в юридически допустимом регионе, независимое хранение
+  ключей и drill непосредственно из выбранной off-site версии;
 - автоматическое оповещение о backup/restore freshness и измеренные RPO/RTO;
 - HSTS после проверки восстановления TLS на staging;
 - подписанные release images, SAST/DAST и внешний penetration test;

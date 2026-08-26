@@ -36,6 +36,7 @@ load_secret AURUM_MAILER_PASSWORD
 load_secret AURUM_BILLING_WORKER_PASSWORD
 load_secret AURUM_MIGRATOR_PASSWORD
 load_secret AURUM_BACKUP_PASSWORD
+load_secret AURUM_PITR_PASSWORD
 
 role_contract_sql="${AURUM_ROLE_CONTRACT_SQL:-/docker-entrypoint-initdb.d/role-contract.inc}"
 [ -r "$role_contract_sql" ] || {

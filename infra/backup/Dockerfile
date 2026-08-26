@@ -36,9 +36,13 @@ COPY --from=tools-builder /out/restic /usr/local/bin/restic
 RUN apk upgrade --no-cache \
     && rm -f /usr/local/bin/gosu /usr/local/bin/docker-entrypoint.sh \
     && addgroup -S -g 10001 aurum \
-    && adduser -S -D -H -u 10001 -G aurum aurum
+    && adduser -S -D -H -u 10001 -G aurum aurum \
+    && addgroup aurum postgres
 
-COPY --chown=10001:10001 backup.sh restore-drill.sh /opt/aurum/
+COPY --chown=10001:10001 \
+    backup.sh offsite-sync.sh offsite-test-restore.sh pitr-basebackup.sh \
+    pitr-restore-drill.sh restore-drill.sh wal-snapshot.sh \
+    /opt/aurum/
 
 USER 10001:10001
 WORKDIR /workspace

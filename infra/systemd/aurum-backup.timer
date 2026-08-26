@@ -1,5 +1,5 @@
 [Unit]
-Description=Run Aurum Pharma encrypted backup daily
+Description=Run Aurum Pharma full encrypted recovery cycle daily
 
 [Timer]
 OnCalendar=*-*-* 01:15:00

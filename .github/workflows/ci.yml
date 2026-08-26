@@ -195,6 +195,7 @@ jobs:
             printf %s aurum_mailer_pw > /tmp/aurum-mailer-password
             printf %s aurum_billing_worker_pw > /tmp/aurum-billing-worker-password
             printf %s aurum_backup_pw > /tmp/aurum-backup-password
+            printf %s aurum_pitr_pw > /tmp/aurum-pitr-password
           '
           docker exec -i \
             -e POSTGRES_HOST=127.0.0.1 \
@@ -208,6 +209,7 @@ jobs:
             -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
             -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
             -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
+            -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
             "$POSTGRES_SERVICE_ID" sh -c '
               unset \
                 POSTGRES_PASSWORD \
@@ -216,7 +218,8 @@ jobs:
                 AURUM_MIGRATOR_PASSWORD \
                 AURUM_MAILER_PASSWORD \
                 AURUM_BILLING_WORKER_PASSWORD \
-                AURUM_BACKUP_PASSWORD
+                AURUM_BACKUP_PASSWORD \
+                AURUM_PITR_PASSWORD
               exec sh /tmp/bootstrap-roles.sh
             '
 
@@ -249,6 +252,7 @@ jobs:
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
               -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
+              -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
               "$POSTGRES_SERVICE_ID" sh -c '
                 unset \
                   POSTGRES_PASSWORD \
@@ -257,7 +261,8 @@ jobs:
                   AURUM_MIGRATOR_PASSWORD \
                   AURUM_MAILER_PASSWORD \
                   AURUM_BILLING_WORKER_PASSWORD \
-                  AURUM_BACKUP_PASSWORD
+                  AURUM_BACKUP_PASSWORD \
+                  AURUM_PITR_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
               '
           }
@@ -640,6 +645,7 @@ jobs:
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
               -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
+              -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
               "$POSTGRES_SERVICE_ID" sh -c '
                 unset \
                   POSTGRES_PASSWORD \
@@ -648,7 +654,8 @@ jobs:
                   AURUM_MIGRATOR_PASSWORD \
                   AURUM_MAILER_PASSWORD \
                   AURUM_BILLING_WORKER_PASSWORD \
-                  AURUM_BACKUP_PASSWORD
+                  AURUM_BACKUP_PASSWORD \
+                  AURUM_PITR_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
               '
           }
@@ -1132,6 +1139,8 @@ jobs:
             --file docker-compose.recovery.yml \
             --profile backup \
             --profile restore-drill \
+            --profile offsite \
+            --profile offsite-test \
             config --quiet
 
           docker compose \
@@ -1167,6 +1176,16 @@ jobs:
             config --format json > "$RUNNER_TEMP/production-compose.json"
 
           docker compose \
+            --env-file .env.production.example \
+            --file docker-compose.production.yml \
+            --file docker-compose.recovery.yml \
+            --profile backup \
+            --profile restore-drill \
+            --profile offsite \
+            --profile offsite-test \
+            config --format json > "$RUNNER_TEMP/recovery-compose.json"
+
+          docker compose \
             --env-file .env.example \
             --file docker-compose.yml \
             --profile maintenance \
@@ -1174,7 +1193,8 @@ jobs:
 
           python - \
             "$RUNNER_TEMP/production-compose.json" \
-            "$RUNNER_TEMP/development-compose.json" <<'PY'
+            "$RUNNER_TEMP/development-compose.json" \
+            "$RUNNER_TEMP/recovery-compose.json" <<'PY'
           import json
           import sys
 
@@ -1182,6 +1202,8 @@ jobs:
               model = json.load(source)
           with open(sys.argv[2], encoding="utf-8") as source:
               development_model = json.load(source)
+          with open(sys.argv[3], encoding="utf-8") as source:
+              recovery_model = json.load(source)
 
           published = sorted(
               name for name, service in model["services"].items() if service.get("ports")
@@ -1220,6 +1242,9 @@ jobs:
               "AURUM_MAILER_PASSWORD",
               "AURUM_BILLING_WORKER_PASSWORD",
               "AURUM_BACKUP_PASSWORD",
+              "AURUM_PITR_PASSWORD",
+              "AURUM_OFFSITE_ACCESS_KEY",
+              "AURUM_OFFSITE_SECRET_KEY",
               "TEST_DATABASE_URL_APP",
               "TEST_DATABASE_URL_SUPPORT",
               "TEST_DATABASE_URL_MIGRATION",
@@ -1228,6 +1253,7 @@ jobs:
               "MINIO_ROOT_USER",
               "MINIO_ROOT_PASSWORD",
               "DATABASE_URL_BACKUP",
+              "DATABASE_URL_PITR",
           }
           for compose_model in (model, development_model):
               for name in runtime_services:
@@ -1293,7 +1319,45 @@ jobs:
               "aurum_mailer_password",
               "aurum_billing_worker_password",
               "aurum_backup_password",
+              "aurum_pitr_password",
           }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
+
+          postgres_command = " ".join(model["services"]["postgres"]["command"])
+          assert "archive_mode=on" in postgres_command
+          assert "archive_timeout=60s" in postgres_command
+          assert "archive-wal.sh" in postgres_command
+          postgres_targets = {
+              volume["target"] for volume in model["services"]["postgres"]["volumes"]
+          }
+          assert "/wal-archive" in postgres_targets
+
+          assert recovery_model["networks"]["recovery"]["internal"] is True
+          assert not any(
+              service.get("ports")
+              for service in recovery_model["services"].values()
+              if service.get("profiles")
+          )
+          offsite = recovery_model["services"]["offsite-sync"]
+          assert {
+              secret["source"] for secret in offsite["secrets"]
+          } == {"aurum_offsite_access_key", "aurum_offsite_secret_key"}
+          assert set(offsite["networks"]) == {"backup-egress"}
+          assert all(
+              volume.get("read_only") is True
+              for volume in offsite["volumes"]
+              if volume["target"] == "/repository"
+          )
+          pitr_secrets = {
+              secret["source"]
+              for secret in recovery_model["services"]["pitr-basebackup"]["secrets"]
+          }
+          assert pitr_secrets == {"database_url_pitr", "restic_password"}
+          wal_mount = next(
+              volume
+              for volume in recovery_model["services"]["wal-snapshot"]["volumes"]
+              if volume["target"] == "/wal-archive"
+          )
+          assert wal_mount["read_only"] is True
 
           assert model["services"]["redis"]["environment"]["AURUM_REDIS_MAXMEMORY"]
           assert model["services"]["redis"]["logging"]["driver"] == "local"
