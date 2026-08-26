@@ -669,6 +669,13 @@ BEGIN
                 UUID, UUID, TEXT, TEXT
             ) TO aurum_mailer;
         END IF;
+        IF current_revision ~ '^[0-9]{4}$' AND current_revision::INTEGER >= 111 THEN
+            GRANT EXECUTE ON FUNCTION public.claim_auth_login_email(JSONB, INTEGER)
+                TO aurum_mailer;
+            GRANT EXECUTE ON FUNCTION public.complete_auth_login_email(
+                UUID, UUID, TEXT, TEXT
+            ) TO aurum_mailer;
+        END IF;
     END IF;
 END
 $$;
