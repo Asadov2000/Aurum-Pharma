@@ -1460,30 +1460,43 @@ jobs:
           docker build --check --file frontend/Dockerfile.production frontend
           docker build --check --file infra/backup/Dockerfile infra/backup
 
+      - name: Set up cached production builder
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
       - name: Build production backend
-        run: >-
-          docker build
-          --pull
-          --file backend/Dockerfile.production
-          --tag aurum-backend:ci
-          backend
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: backend
+          file: backend/Dockerfile.production
+          pull: true
+          load: true
+          tags: aurum-backend:ci
+          cache-from: type=gha,scope=aurum-production-backend
+          cache-to: type=gha,mode=max,scope=aurum-production-backend,ignore-error=true
 
       - name: Build production gateway
-        run: >-
-          docker build
-          --pull
-          --file frontend/Dockerfile.production
-          --tag aurum-gateway:ci
-          frontend
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: frontend
+          file: frontend/Dockerfile.production
+          pull: true
+          load: true
+          tags: aurum-gateway:ci
+          cache-from: type=gha,scope=aurum-production-gateway
+          cache-to: type=gha,mode=max,scope=aurum-production-gateway,ignore-error=true
 
       - name: Build recovery tooling
-        run: >-
-          docker build
-          --pull
-          --file infra/backup/Dockerfile
-          --tag aurum-backup:ci
-          --tag aurum-pharma-backup:ci
-          infra/backup
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: infra/backup
+          file: infra/backup/Dockerfile
+          pull: true
+          load: true
+          tags: |
+            aurum-backup:ci
+            aurum-pharma-backup:ci
+          cache-from: type=gha,scope=aurum-production-backup
+          cache-to: type=gha,mode=max,scope=aurum-production-backup,ignore-error=true
 
       - name: Test encrypted backup and isolated restore
         run: sh ./scripts/test-recovery-tooling.sh
