@@ -41,12 +41,18 @@ tenant_id=""
 cashier_id=""
 
 cleanup() {
-    [ -n "$edge_role" ] || return 0
+    original_status=$?
+    cleanup_status=0
+    trap - EXIT HUP INT TERM
 
-    psql_super \
+    if [ -z "$edge_role" ]; then
+        exit "$original_status"
+    fi
+
+    if ! psql_super \
         -v edge_role="$edge_role" \
         -v tenant_id="$tenant_id" \
-        -v cashier_id="$cashier_id" <<'SQL' || true
+        -v cashier_id="$cashier_id" <<'SQL'
 BEGIN;
 DO $cleanup$
 DECLARE
@@ -97,8 +103,20 @@ ALTER ROLE :"edge_role" NOLOGIN PASSWORD NULL;
 DROP OWNED BY :"edge_role";
 DROP ROLE :"edge_role";
 SQL
+    then
+        echo "Failed to clean up Edge dispatcher test identity" >&2
+        cleanup_status=1
+    fi
+
+    if [ "$original_status" -ne 0 ]; then
+        exit "$original_status"
+    fi
+    exit "$cleanup_status"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 scaffold="$(psql_super <<'SQL'
 BEGIN;
@@ -523,4 +541,3 @@ SQL
 )" = "t"
 
 echo "Edge cash dispatcher security and atomicity checks passed."
-unset PGPASSWORD edge_password
