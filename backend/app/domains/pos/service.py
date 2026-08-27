@@ -76,6 +76,8 @@ from app.domains.pos.schemas import (
     SaleItemDeleted,
     SaleItemRead,
     SaleRead,
+    SaleRefundItemResult,
+    SaleRefundResult,
     SalesSummaryData,
     SalesSummaryDay,
     SalesSummaryOverview,
@@ -3498,7 +3500,49 @@ class POSService:
             or existing.operation_hash != operation_hash
         ):
             raise ConflictError("Operation ID was already used for another refund")
+        outbox_event = await SyncOutboxRepository(self.repo.session).get_by_operation_id(
+            tenant_id=parent.tenant_id,
+            operation_id=operation_id,
+        )
+        if outbox_event is not None:
+            self._validate_refund_snapshot(
+                sale=existing,
+                outbox_event=outbox_event,
+                tenant_id=parent.tenant_id,
+                operation_id=operation_id,
+            )
         return existing
+
+    def _validate_refund_snapshot(
+        self,
+        *,
+        sale: Sale,
+        outbox_event: SyncOutboxEvent,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> SaleRefundResult:
+        if (
+            outbox_event.aggregate_type != "sale"
+            or outbox_event.aggregate_id != sale.id
+            or outbox_event.event_type != "pos.sale.refunded.v1"
+            or outbox_event.schema_version != 1
+        ):
+            raise AurumError("Refund result snapshot is unavailable")
+        if outbox_event.payload_hash != self._checkout_result_hash(outbox_event.payload):
+            raise AurumError("Refund result snapshot failed integrity validation")
+        try:
+            result = SaleRefundResult.model_validate(outbox_event.payload)
+        except PydanticValidationError as exc:
+            raise AurumError("Refund result snapshot is invalid") from exc
+        if (
+            result.event_id != outbox_event.event_id
+            or result.sale_id != sale.id
+            or result.parent_sale_id != sale.parent_sale_id
+            or result.operation_id != operation_id
+            or result.tenant_id != tenant_id
+        ):
+            raise AurumError("Refund result snapshot does not match the sale")
+        return result
 
     async def get_refund_result(
         self,
@@ -3532,7 +3576,119 @@ class POSService:
             or sale.completed_at is None
         ):
             raise AurumError("Refund sale aggregate is incomplete")
+        outbox_event = await SyncOutboxRepository(self.repo.session).get_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if outbox_event is not None:
+            self._validate_refund_snapshot(
+                sale=sale,
+                outbox_event=outbox_event,
+                tenant_id=tenant_id,
+                operation_id=operation_id,
+            )
         return sale
+
+    async def _enqueue_refund_event(
+        self,
+        *,
+        parent: Sale,
+        return_sale: Sale,
+        operation_id: UUID,
+        parent_fully_refunded: bool,
+    ) -> SaleRefundResult:
+        if (
+            return_sale.receipt_number is None
+            or return_sale.receipt_seq is None
+            or return_sale.completed_at is None
+            or return_sale.parent_sale_id != parent.id
+        ):
+            raise AurumError("Completed refund has no receipt snapshot")
+
+        return_items = await self.repo.list_items(return_sale.id)
+        return_payments = await self.repo.list_payments(return_sale.id)
+        event_id = uuid4()
+        result = SaleRefundResult(
+            event_id=event_id,
+            sale_id=return_sale.id,
+            parent_sale_id=parent.id,
+            parent_fully_refunded=parent_fully_refunded,
+            operation_id=operation_id,
+            tenant_id=return_sale.tenant_id,
+            branch_id=return_sale.branch_id,
+            register_id=return_sale.register_id,
+            shift_id=return_sale.shift_id,
+            cashier_user_id=return_sale.cashier_user_id,
+            receipt_number=return_sale.receipt_number,
+            receipt_seq=return_sale.receipt_seq,
+            created_at=return_sale.created_at,
+            completed_at=return_sale.completed_at,
+            total_amount=return_sale.total_amount,
+            currency="TJS",
+            is_test=return_sale.is_test,
+            items=[SaleRefundItemResult.model_validate(item) for item in return_items],
+            payments=[
+                SaleCheckoutPaymentResult.model_validate(payment) for payment in return_payments
+            ],
+        )
+        event_payload = result.model_dump(mode="json")
+        outbox = SyncOutboxRepository(self.repo.session)
+        position = await outbox.reserve_position(
+            tenant_id=return_sale.tenant_id,
+            branch_id=return_sale.branch_id,
+        )
+        event_payload_hash = self._checkout_result_hash(event_payload)
+        event_projection_hash = sale_projection_hash(event_payload)
+        stream_checksum = source_stream_checksum(
+            previous_checksum=position.previous_checksum,
+            event_id=event_id,
+            tenant_id=return_sale.tenant_id,
+            branch_id=return_sale.branch_id,
+            origin_node_id=position.origin_node_id,
+            writer_epoch=position.writer_epoch,
+            sequence=position.sequence,
+            operation_id=operation_id,
+            aggregate_type="sale",
+            aggregate_id=return_sale.id,
+            event_type="pos.sale.refunded.v1",
+            schema_version=1,
+            occurred_at=return_sale.completed_at,
+            payload_hash=event_payload_hash,
+        )
+        projection_checksum = projection_stream_checksum(
+            previous_checksum=position.previous_projection_checksum,
+            origin_node_id=position.origin_node_id,
+            writer_epoch=position.writer_epoch,
+            sequence=position.sequence,
+            sale_id=return_sale.id,
+            projection_hash=event_projection_hash,
+        )
+        await outbox.enqueue(
+            event_id=event_id,
+            tenant_id=return_sale.tenant_id,
+            branch_id=return_sale.branch_id,
+            origin_node_id=position.origin_node_id,
+            writer_epoch=position.writer_epoch,
+            sequence=position.sequence,
+            operation_id=operation_id,
+            aggregate_type="sale",
+            aggregate_id=return_sale.id,
+            event_type="pos.sale.refunded.v1",
+            schema_version=1,
+            occurred_at=return_sale.completed_at,
+            payload=event_payload,
+            payload_hash=event_payload_hash,
+            stream_checksum=stream_checksum,
+            projection_hash=event_projection_hash,
+            projection_checksum=projection_checksum,
+        )
+        await outbox.finalize_position(
+            stream_id=position.stream_id,
+            sequence=position.sequence,
+            stream_checksum=stream_checksum,
+            projection_checksum=projection_checksum,
+        )
+        return result
 
     async def _validate_refund_items(
         self,
@@ -3844,7 +4000,7 @@ class POSService:
             receipt_datetime=completed_at,
             total_amount=total,
         )
-        await self.repo.update_sale(
+        return_sale = await self.repo.update_sale(
             return_sale,
             status="completed",
             completed_at=completed_at,
@@ -3864,6 +4020,12 @@ class POSService:
         # Keep the finalized parent row unchanged. The read model derives the
         # "voided" state once completed returns cover every original line.
         full = self._is_fully_refunded(parent_items, already_refunded, per_item)
+        await self._enqueue_refund_event(
+            parent=parent,
+            return_sale=return_sale,
+            operation_id=effective_operation_id,
+            parent_fully_refunded=full,
+        )
 
         logger.info(
             "refund_completed",

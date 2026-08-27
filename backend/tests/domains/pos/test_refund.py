@@ -14,6 +14,7 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from app.domains.sync.repository import SyncOutboxRepository
 
 
 async def _open_shift_and_sell(  # type: ignore[no-untyped-def]
@@ -214,6 +215,16 @@ async def test_refund_retry_and_result_recovery_are_idempotent_and_scoped(
     assert retried.id == returned.id
     assert recovered.id == returned.id
     assert await service.get_refunded_quantities(parent.id) == {item.id: Decimal("1.000")}
+    outbox = SyncOutboxRepository(db_session)
+    refund_event = await outbox.get_by_operation_id(
+        tenant_id=s["tenant"].id,
+        operation_id=operation_id,
+    )
+    assert refund_event is not None
+    assert refund_event.event_type == "pos.sale.refunded.v1"
+    assert refund_event.aggregate_id == returned.id
+    assert refund_event.payload["parent_sale_id"] == str(parent.id)
+    assert refund_event.payload["parent_fully_refunded"] is False
 
     retried_with_reentered_metadata = await service.refund(
         parent_sale_id=parent.id,
@@ -224,6 +235,12 @@ async def test_refund_retry_and_result_recovery_are_idempotent_and_scoped(
         operation_id=operation_id,
     )
     assert retried_with_reentered_metadata.id == returned.id
+    replayed_event = await outbox.get_by_operation_id(
+        tenant_id=s["tenant"].id,
+        operation_id=operation_id,
+    )
+    assert replayed_event is not None
+    assert replayed_event.event_id == refund_event.event_id
     with pytest.raises(ConflictError):
         await service.refund(
             parent_sale_id=parent.id,

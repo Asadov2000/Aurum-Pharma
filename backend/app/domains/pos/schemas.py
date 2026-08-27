@@ -391,6 +391,8 @@ class SaleCheckoutPaymentResult(BaseModel):
 class SaleCheckoutResult(BaseModel):
     """Immutable response snapshot also stored as the outbox event payload."""
 
+    model_config = ConfigDict(extra="forbid")
+
     event_id: UUID
     sale_id: UUID
     operation_id: UUID
@@ -408,6 +410,61 @@ class SaleCheckoutResult(BaseModel):
     is_test: bool
     items: list[SaleCheckoutItemResult]
     payments: list[SaleCheckoutPaymentResult]
+
+
+class SaleRefundItemResult(SaleCheckoutItemResult):
+    """Immutable return line linked to its original sale line."""
+
+    parent_sale_item_id: UUID
+
+
+class SaleRefundResult(BaseModel):
+    """Immutable refund snapshot stored in the sync outbox."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: UUID
+    sale_id: UUID
+    parent_sale_id: UUID
+    parent_fully_refunded: bool
+    operation_id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    register_id: UUID
+    shift_id: UUID
+    cashier_user_id: UUID
+    receipt_number: str
+    receipt_seq: int
+    created_at: datetime
+    completed_at: datetime
+    total_amount: Decimal
+    currency: Literal["TJS"]
+    is_test: bool
+    items: list[SaleRefundItemResult] = Field(min_length=1, max_length=200)
+    payments: list[SaleCheckoutPaymentResult] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def _validate_financial_snapshot(self) -> Self:
+        item_ids = [item.id for item in self.items]
+        parent_item_ids = [item.parent_sale_item_id for item in self.items]
+        payment_ids = [payment.id for payment in self.payments]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("refund item ids must be unique")
+        if len(parent_item_ids) != len(set(parent_item_ids)):
+            raise ValueError("original sale item ids must be unique")
+        if len(payment_ids) != len(set(payment_ids)):
+            raise ValueError("refund payment ids must be unique")
+        if self.total_amount <= 0:
+            raise ValueError("refund total must be positive")
+        if sum((item.total_price for item in self.items), Decimal("0")) != self.total_amount:
+            raise ValueError("refund item total does not match refund total")
+        if sum((payment.amount for payment in self.payments), Decimal("0")) != self.total_amount:
+            raise ValueError("refund payment total does not match refund total")
+        if any(item.currency != self.currency for item in self.items):
+            raise ValueError("refund item currency does not match refund currency")
+        if any(payment.currency != self.currency for payment in self.payments):
+            raise ValueError("refund payment currency does not match refund currency")
+        return self
 
 
 class SaleItemRead(BaseModel):
