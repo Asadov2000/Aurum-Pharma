@@ -832,6 +832,26 @@ jobs:
           mkdir -p test-results
           poetry run pytest tests/ -q --durations=25 --junitxml=test-results/pytest.xml
 
+      - name: Verify Edge cash dispatcher boundary
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+        run: |
+          test -n "$POSTGRES_SERVICE_ID"
+          docker cp \
+            ../scripts/test-edge-cash-dispatcher.sh \
+            "$POSTGRES_SERVICE_ID:/tmp/test-edge-cash-dispatcher.sh"
+          docker exec -i \
+            -e POSTGRES_HOST=127.0.0.1 \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_DB=aurum_test \
+            -e POSTGRES_PASSWORD_FILE=/tmp/aurum-postgres-password \
+            -e CI=true \
+            -e GITHUB_ACTIONS=true \
+            -e AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
+            "$POSTGRES_SERVICE_ID" \
+            sh /tmp/test-edge-cash-dispatcher.sh
+
       - name: Verify inactive Edge database identity lifecycle
         env:
           POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}

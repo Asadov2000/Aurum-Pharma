@@ -223,6 +223,8 @@ CUSTOM_FUNCTIONS = {
     "change_platform_staff_account_status",
     "deactivate_tenant_user_assignment",
     "decrypt_support_mfa_secret",
+    "edge_canonical_jsonb",
+    "edge_normalize_numeric",
     "enforce_auth_login_guard",
     "enqueue_notification_delivery",
     "enqueue_platform_invitation_email",

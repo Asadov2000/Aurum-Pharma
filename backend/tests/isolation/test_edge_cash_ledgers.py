@@ -1,4 +1,4 @@
-"""Isolation contract for the pre-dispatch Edge cash security ledgers."""
+"""Isolation contract for the Edge cash security ledgers."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ async def _assert_command_constraints(
         assert getattr(scope_error.value.orig, "sqlstate", None) == "23503"
 
 
-async def test_edge_cash_ledgers_are_deny_all_and_force_rls(
+async def test_edge_cash_ledgers_are_dispatcher_scoped_and_force_rls(
     maintenance_engine: AsyncEngine,
 ) -> None:
     async with maintenance_engine.connect() as connection:
@@ -199,17 +199,30 @@ async def test_edge_cash_ledgers_are_deny_all_and_force_rls(
             "relrowsecurity": True,
             "relforcerowsecurity": True,
             "owner": "aurum_schema_owner",
-            "policy_count": 0,
+            "policy_count": 1,
         },
         {
             "relname": "edge_cash_node_identity",
             "relrowsecurity": True,
             "relforcerowsecurity": True,
             "owner": "aurum_schema_owner",
-            "policy_count": 0,
+            "policy_count": 2,
         },
     ]
-    assert all(not bool(row["has_privilege"]) for row in privileges)
+    privilege_map = {
+        (str(row["role_name"]), str(row["table_name"])): bool(row["has_privilege"])
+        for row in privileges
+    }
+    assert privilege_map == {
+        ("aurum_app", "edge_cash_command"): False,
+        ("aurum_app", "edge_cash_node_identity"): False,
+        ("aurum_edge_cash_executor", "edge_cash_command"): False,
+        ("aurum_edge_cash_executor", "edge_cash_node_identity"): False,
+        ("aurum_edge_cash_owner", "edge_cash_command"): True,
+        ("aurum_edge_cash_owner", "edge_cash_node_identity"): True,
+        ("aurum_support", "edge_cash_command"): False,
+        ("aurum_support", "edge_cash_node_identity"): False,
+    }
     assert public_privileges == []
     assert [dict(row) for row in triggers] == [
         {
