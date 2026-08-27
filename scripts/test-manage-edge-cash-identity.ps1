@@ -59,3 +59,5 @@ finally {
     Remove-Item -LiteralPath $dockerMock, $outputFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $temporaryDirectory -Force -ErrorAction SilentlyContinue
 }
+
+exit 0
