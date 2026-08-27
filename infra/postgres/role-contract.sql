@@ -130,7 +130,7 @@ BEGIN
             'aurum_pitr',
             'aurum_edge_cash_executor',
             'aurum_edge_cash_owner'
-        )
+        ) OR owners.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
 
         UNION ALL
 
@@ -145,7 +145,7 @@ BEGIN
             'aurum_pitr',
             'aurum_edge_cash_executor',
             'aurum_edge_cash_owner'
-        )
+        ) OR owners.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
 
         UNION ALL
 
@@ -155,13 +155,15 @@ BEGIN
           ON owners.oid = schemas.nspowner
         WHERE schemas.nspname <> 'information_schema'
           AND schemas.nspname !~ '^pg_'
-          AND owners.rolname IN (
+          AND (
+            owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
               'aurum_backup',
               'aurum_pitr',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
+            ) OR owners.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
           )
 
         UNION ALL
@@ -176,13 +178,15 @@ BEGIN
           ON owners.oid = relations.relowner
         WHERE schemas.nspname <> 'information_schema'
           AND schemas.nspname !~ '^pg_'
-          AND owners.rolname IN (
+          AND (
+            owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
               'aurum_backup',
               'aurum_pitr',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
+            ) OR owners.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
           )
 
         UNION ALL
@@ -195,13 +199,15 @@ BEGIN
           ON owners.oid = routines.proowner
         WHERE schemas.nspname <> 'information_schema'
           AND schemas.nspname !~ '^pg_'
-          AND owners.rolname IN (
+          AND (
+            owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
               'aurum_backup',
               'aurum_pitr',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
+            ) OR owners.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
           )
 
         UNION ALL
@@ -216,11 +222,13 @@ BEGIN
           ON owners.oid = types.typowner
         WHERE schemas.nspname <> 'information_schema'
           AND schemas.nspname !~ '^pg_'
-          AND owners.rolname IN (
+          AND (
+            owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
+            ) OR owners.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
           )
     ) AS unsafe_owned_objects
     LIMIT 1;
@@ -252,7 +260,7 @@ BEGIN
         'aurum_billing_worker',
         'aurum_edge_cash_executor',
         'aurum_edge_cash_owner'
-    )
+    ) OR grantees.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
     LIMIT 1;
 
     IF unsafe_default_acl IS NOT NULL THEN
@@ -395,6 +403,71 @@ ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
     REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 
+CREATE TEMP TABLE allowed_edge_node_role (
+    role_name TEXT PRIMARY KEY,
+    role_oid OID NOT NULL UNIQUE
+) ON COMMIT DROP;
+
+DO $$
+BEGIN
+    IF pg_catalog.to_regclass('public.edge_cash_node_identity') IS NOT NULL THEN
+        EXECUTE 'LOCK TABLE public.sync_node IN SHARE MODE';
+        EXECUTE 'LOCK TABLE public.edge_cash_node_identity IN SHARE MODE';
+        EXECUTE $query$
+            INSERT INTO pg_temp.allowed_edge_node_role (role_name, role_oid)
+            SELECT identity.database_role, identity.database_role_oid
+            FROM public.edge_cash_node_identity AS identity
+            JOIN public.sync_node AS node
+              ON node.id = identity.edge_node_id
+             AND node.tenant_id = identity.tenant_id
+             AND node.branch_id = identity.branch_id
+             AND node.register_id = identity.register_id
+            JOIN pg_catalog.pg_roles AS roles
+              ON roles.rolname = identity.database_role
+             AND roles.oid = identity.database_role_oid
+            WHERE node.status = 'active'
+              AND node.node_kind = 'edge'
+              AND node.mode = 'edge_writer'
+              AND node.register_id IS NOT NULL
+              AND identity.database_role = 'aurum_edge_node_'
+                  || pg_catalog.replace(node.id::TEXT, '-', '')
+        $query$;
+    END IF;
+END
+$$;
+
+SELECT pg_catalog.format(
+    'ALTER ROLE %I WITH NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE '
+    'NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 1 PASSWORD NULL',
+    roles.rolname
+)
+FROM pg_catalog.pg_roles AS roles
+JOIN pg_temp.allowed_edge_node_role AS allowed
+  ON allowed.role_name = roles.rolname
+ AND allowed.role_oid = roles.oid
+\gexec
+
+SELECT pg_catalog.format(
+    'GRANT aurum_edge_cash_executor TO %I '
+    'WITH ADMIN FALSE, INHERIT TRUE, SET FALSE',
+    allowed.role_name
+)
+FROM pg_temp.allowed_edge_node_role AS allowed
+\gexec
+
+SELECT pg_catalog.format(
+    'ALTER ROLE %I WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE '
+    'NOREPLICATION NOBYPASSRLS PASSWORD NULL',
+    roles.rolname
+)
+FROM pg_catalog.pg_roles AS roles
+LEFT JOIN pg_temp.allowed_edge_node_role AS allowed
+  ON allowed.role_name = roles.rolname
+ AND allowed.role_oid = roles.oid
+WHERE roles.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+  AND allowed.role_name IS NULL
+\gexec
+
 SELECT pg_catalog.format(
     'REVOKE %I FROM %I',
     granted.rolname,
@@ -450,6 +523,29 @@ WHERE (
         granted.rolname = 'aurum_edge_cash_owner'
         AND member.rolname = 'aurum_migrator'
     )
+    AND NOT (
+        granted.rolname = 'aurum_edge_cash_executor'
+        AND EXISTS (
+            SELECT 1
+            FROM pg_temp.allowed_edge_node_role AS allowed
+            WHERE allowed.role_name = member.rolname
+              AND allowed.role_oid = member.oid
+        )
+    )
+) OR (
+    (
+        member.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+        OR granted.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+    )
+    AND NOT (
+        granted.rolname = 'aurum_edge_cash_executor'
+        AND EXISTS (
+            SELECT 1
+            FROM pg_temp.allowed_edge_node_role AS allowed
+            WHERE allowed.role_name = member.rolname
+              AND allowed.role_oid = member.oid
+        )
+    )
 )
 \gexec
 
@@ -461,6 +557,15 @@ REVOKE ALL PRIVILEGES ON DATABASE :"database_name"
          aurum_edge_cash_executor, aurum_edge_cash_owner;
 GRANT CONNECT ON DATABASE :"database_name"
     TO aurum_app, aurum_mailer, aurum_billing_worker, aurum_backup, aurum_migrator;
+
+SELECT pg_catalog.format(
+    'REVOKE ALL PRIVILEGES ON DATABASE %I FROM %I',
+    :'database_name',
+    roles.rolname
+)
+FROM pg_catalog.pg_roles AS roles
+WHERE roles.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+\gexec
 
 DO $$
 DECLARE
@@ -496,6 +601,127 @@ BEGIN
             'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
         );
+    END LOOP;
+END
+$$;
+
+DO $$
+DECLARE
+    application_schema TEXT;
+    edge_role TEXT;
+    object_name TEXT;
+    object_oid OID;
+BEGIN
+    FOR edge_role IN
+        SELECT roles.rolname
+        FROM pg_catalog.pg_roles AS roles
+        WHERE roles.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+    LOOP
+        FOR object_name IN
+            SELECT databases.datname
+            FROM pg_catalog.pg_database AS databases
+        LOOP
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON DATABASE %I FROM %I',
+                object_name,
+                edge_role
+            );
+        END LOOP;
+        FOR object_name IN
+            SELECT tablespaces.spcname
+            FROM pg_catalog.pg_tablespace AS tablespaces
+        LOOP
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON TABLESPACE %I FROM %I',
+                object_name,
+                edge_role
+            );
+        END LOOP;
+        FOR application_schema IN
+            SELECT schemas.nspname
+            FROM pg_catalog.pg_namespace AS schemas
+            WHERE schemas.nspname <> 'information_schema'
+              AND schemas.nspname !~ '^pg_'
+        LOOP
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON SCHEMA %I FROM %I',
+                application_schema,
+                edge_role
+            );
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I FROM %I',
+                application_schema,
+                edge_role
+            );
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I FROM %I',
+                application_schema,
+                edge_role
+            );
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA %I FROM %I',
+                application_schema,
+                edge_role
+            );
+        END LOOP;
+        FOR object_name IN
+            SELECT types.oid::REGTYPE::TEXT
+            FROM pg_catalog.pg_type AS types
+            CROSS JOIN LATERAL pg_catalog.aclexplode(types.typacl) AS acl
+            JOIN pg_catalog.pg_roles AS grantees
+              ON grantees.oid = acl.grantee
+            WHERE grantees.rolname = edge_role
+        LOOP
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON TYPE %s FROM %I',
+                object_name,
+                edge_role
+            );
+        END LOOP;
+        FOR object_name IN
+            SELECT wrappers.fdwname
+            FROM pg_catalog.pg_foreign_data_wrapper AS wrappers
+        LOOP
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON FOREIGN DATA WRAPPER %I FROM %I',
+                object_name,
+                edge_role
+            );
+        END LOOP;
+        FOR object_name IN
+            SELECT servers.srvname
+            FROM pg_catalog.pg_foreign_server AS servers
+        LOOP
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON FOREIGN SERVER %I FROM %I',
+                object_name,
+                edge_role
+            );
+        END LOOP;
+        FOR object_oid IN
+            SELECT metadata.oid
+            FROM pg_catalog.pg_largeobject_metadata AS metadata
+        LOOP
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON LARGE OBJECT %s FROM %I',
+                object_oid,
+                edge_role
+            );
+        END LOOP;
+        FOR object_name IN
+            SELECT DISTINCT parameters.parname
+            FROM pg_catalog.pg_parameter_acl AS parameters
+            CROSS JOIN LATERAL pg_catalog.aclexplode(parameters.paracl) AS acl
+            JOIN pg_catalog.pg_roles AS grantees
+              ON grantees.oid = acl.grantee
+            WHERE grantees.rolname = edge_role
+        LOOP
+            EXECUTE pg_catalog.format(
+                'REVOKE ALL PRIVILEGES ON PARAMETER %I FROM %I',
+                object_name,
+                edge_role
+            );
+        END LOOP;
     END LOOP;
 END
 $$;
@@ -710,6 +936,92 @@ BEGIN
           AND rolpassword IS NULL
     ) THEN
         RAISE EXCEPTION 'Edge cash roles violate the deny-by-default contract';
+    END IF;
+
+    SELECT roles.rolname
+    INTO unsafe_object
+    FROM pg_catalog.pg_authid AS roles
+    JOIN pg_temp.allowed_edge_node_role AS allowed
+      ON allowed.role_name = roles.rolname
+     AND allowed.role_oid = roles.oid
+    WHERE roles.rolcanlogin
+       OR NOT roles.rolinherit
+       OR roles.rolsuper
+       OR roles.rolcreatedb
+       OR roles.rolcreaterole
+       OR roles.rolreplication
+       OR roles.rolbypassrls
+       OR roles.rolconnlimit <> 1
+       OR roles.rolpassword IS NOT NULL
+    LIMIT 1;
+
+    IF unsafe_object IS NOT NULL THEN
+        RAISE EXCEPTION 'Active Edge node role has unsafe attributes: %', unsafe_object;
+    END IF;
+
+    SELECT roles.rolname
+    INTO unsafe_object
+    FROM pg_catalog.pg_authid AS roles
+    LEFT JOIN pg_temp.allowed_edge_node_role AS allowed
+      ON allowed.role_name = roles.rolname
+     AND allowed.role_oid = roles.oid
+    WHERE roles.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+      AND allowed.role_name IS NULL
+      AND (
+        roles.rolcanlogin
+        OR roles.rolsuper
+        OR roles.rolcreatedb
+        OR roles.rolcreaterole
+        OR roles.rolreplication
+        OR roles.rolbypassrls
+        OR roles.rolpassword IS NOT NULL
+      )
+    LIMIT 1;
+
+    IF unsafe_object IS NOT NULL THEN
+        RAISE EXCEPTION 'Unbound Edge node role remains active: %', unsafe_object;
+    END IF;
+
+    SELECT roles.rolname
+    INTO unsafe_object
+    FROM pg_catalog.pg_roles AS roles
+    LEFT JOIN pg_temp.allowed_edge_node_role AS allowed
+      ON allowed.role_name = roles.rolname
+     AND allowed.role_oid = roles.oid
+    WHERE roles.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+      AND (
+        (
+          allowed.role_name IS NOT NULL
+          AND (
+            (SELECT pg_catalog.count(*)
+             FROM pg_catalog.pg_auth_members AS memberships
+             WHERE memberships.member = roles.oid) <> 1
+            OR NOT EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_auth_members AS memberships
+              JOIN pg_catalog.pg_roles AS granted
+                ON granted.oid = memberships.roleid
+              WHERE memberships.member = roles.oid
+                AND granted.rolname = 'aurum_edge_cash_executor'
+                AND NOT memberships.admin_option
+                AND memberships.inherit_option
+                AND NOT memberships.set_option
+            )
+          )
+        ) OR (
+          allowed.role_name IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_auth_members AS memberships
+            WHERE memberships.member = roles.oid
+               OR memberships.roleid = roles.oid
+          )
+        )
+      )
+    LIMIT 1;
+
+    IF unsafe_object IS NOT NULL THEN
+        RAISE EXCEPTION 'Edge node role membership is unsafe: %', unsafe_object;
     END IF;
 
     SELECT pg_catalog.quote_ident(schemas.nspname)

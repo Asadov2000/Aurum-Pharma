@@ -216,6 +216,21 @@ services:
         condition: service_healthy
     command: ["sh", "/opt/aurum/postgres/bootstrap-roles.sh"]
 
+  edge-cash-identity:
+    profiles: ["maintenance"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: aurum
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./infra/postgres:/opt/aurum/postgres:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "/opt/aurum/postgres/manage-edge-cash-identity.sh"]
+
   migrate:
     profiles: ["maintenance"]
     build:
