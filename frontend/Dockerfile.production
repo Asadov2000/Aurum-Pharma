@@ -21,13 +21,24 @@ FROM ${GO_IMAGE} AS caddy-builder
 
 WORKDIR /src
 
-RUN go mod init aurum.local/caddy \
-    && go get github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4 \
-    && go get golang.org/x/net@v0.56.0 \
-        golang.org/x/text@v0.39.0 \
-        google.golang.org/grpc@v1.82.1 \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-        -o /usr/local/bin/caddy github.com/caddyserver/caddy/v2/cmd/caddy
+RUN set -eu; \
+    go mod init aurum.local/caddy; \
+    attempt=1; \
+    while true; do \
+        if GODEBUG=http2client=0 go get github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4 \
+            && GODEBUG=http2client=0 go get golang.org/x/net@v0.56.0 \
+                golang.org/x/text@v0.39.0 \
+                google.golang.org/grpc@v1.82.1 \
+            && GODEBUG=http2client=0 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+                -o /usr/local/bin/caddy github.com/caddyserver/caddy/v2/cmd/caddy; then \
+            break; \
+        fi; \
+        if [ "$attempt" -ge 3 ]; then \
+            exit 1; \
+        fi; \
+        attempt=$((attempt + 1)); \
+        sleep $((attempt * 2)); \
+    done
 
 
 FROM ${CADDY_IMAGE} AS runtime
