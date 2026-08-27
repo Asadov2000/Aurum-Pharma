@@ -79,15 +79,16 @@
 
 ### P0: identity и authorization
 
-- [ ] Реализовать ADR-0007: отделить глобальный account от tenant membership,
-      защищённого ownership и обычных рабочих ролей.
-- [ ] Убрать общий bypass permissions для Aurum Administrator; Developer-only,
+- [x] Глобальный account отделён от tenant membership, защищённого ownership и
+      обычных рабочих ролей. До полного ADR-0007 остаются ownership transfer и
+      неизменяемые публикации версий ролей.
+- [x] Убран общий bypass permissions для Aurum Administrator; Developer-only,
       platform, tenant и branch capabilities проверяются раздельно.
-- [ ] Запретить tenant-пользователю создавать или прикреплять глобальный account;
+- [x] Tenant-пользователю запрещено создавать или прикреплять глобальный account;
       владелец назначает роли только заранее созданным membership своего tenant.
-- [ ] Конструктор получает с сервера только delegable capabilities текущего
+- [x] Конструктор получает с сервера только delegable capabilities текущего
       пользователя и scope; шаблон и прямой API-запрос не обходят этот каталог.
-- [ ] Запретить self-assignment, изменение собственной границы полномочий,
+- [x] Запрещены self-assignment, изменение собственной границы полномочий,
       назначение protected-ролей и удаление последнего владельца.
 - [x] TOTP для support-уровней 1–2, защищённое восстановление и аудит recovery.
 - [x] Self-service session inventory и ручной отзыв своих активных сеансов с
@@ -97,11 +98,12 @@
 - [x] Обязательное in-app предупреждение о входе из нового браузера или
       приложения: случайный device ID хранится только в HttpOnly cookie, в БД
       записывается SHA-256; смена IP не вызывает ложное предупреждение.
-- [ ] Проверить branch-scoped permissions во всех доменах, не только в roles;
-      permission должен действовать только в филиале, где выдана роль.
-- [ ] Изменения membership, ownership, role capabilities, assignments и support
+- [ ] Основные branch-scoped домены проверены, но нужен fail-closed route gate
+      для каждого нового branch-ресурса; permission должен действовать только в
+      филиале, где выдана роль.
+- [x] Изменения membership, ownership, role capabilities, assignments и support
       sessions записываются в неизменяемый аудит с точным before/after diff.
-- [ ] Доступ support к tenant выполняется только через короткую support session
+- [x] Доступ support к tenant выполняется только через короткую support session
       с причиной, явным scope и step-up MFA.
 - [x] Trusted-proxy allowlist для client IP; forwarded headers принимаются
       только от фиксированного адреса Caddy.
@@ -141,8 +143,8 @@
 
 ## Порядок следующей разработки
 
-1. Scoped authorization, account/membership/ownership и безопасный конструктор
-   из ADR-0007.
+1. Завершить ADR-0007: ownership transfer, immutable role publication и полный
+   fail-closed branch route gate.
 2. Внешний WORM storage, автоматический контроль свежести backup/drill и
    измерение RPO/RTO на staging.
 3. DB-инварианты POS и полный refund/void sync-контур.
