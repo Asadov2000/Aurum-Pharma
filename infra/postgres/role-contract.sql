@@ -1035,23 +1035,27 @@ BEGIN
         'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)'
     );
 
+    IF dispatcher_oid IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc AS routine
+        JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+        JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+        WHERE routine.oid = dispatcher_oid
+          AND owner.rolname = 'aurum_edge_cash_owner'
+          AND language.lanname = 'plpgsql'
+          AND routine.prosecdef
+          AND routine.provolatile = 'v'
+          AND routine.proconfig @> ARRAY[
+            'search_path=pg_catalog, pg_temp',
+            'row_security=on'
+          ]::TEXT[]
+    ) THEN
+        RAISE EXCEPTION 'Edge cash dispatcher definition is unsafe';
+    END IF;
+
     IF current_revision ~ '^[0-9]{4}$' AND current_revision::INTEGER >= 113 THEN
-        IF dispatcher_oid IS NULL OR NOT EXISTS (
-            SELECT 1
-            FROM pg_catalog.pg_proc AS routine
-            JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
-            JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
-            WHERE routine.oid = dispatcher_oid
-              AND owner.rolname = 'aurum_edge_cash_owner'
-              AND language.lanname = 'plpgsql'
-              AND routine.prosecdef
-              AND routine.provolatile = 'v'
-              AND routine.proconfig @> ARRAY[
-                'search_path=pg_catalog, pg_temp',
-                'row_security=on'
-              ]::TEXT[]
-        ) THEN
-            RAISE EXCEPTION 'Edge cash dispatcher definition is unsafe';
+        IF dispatcher_oid IS NULL THEN
+            RAISE EXCEPTION 'Edge cash dispatcher is missing';
         END IF;
 
         GRANT USAGE ON SCHEMA public
@@ -1141,8 +1145,6 @@ BEGIN
             public.sync_writer_activation,
             public.sync_writer_epoch
             TO aurum_edge_cash_owner;
-    ELSIF dispatcher_oid IS NOT NULL THEN
-        RAISE EXCEPTION 'Edge cash dispatcher exists before its migration';
     END IF;
 
     SELECT pg_catalog.quote_ident(schemas.nspname)
