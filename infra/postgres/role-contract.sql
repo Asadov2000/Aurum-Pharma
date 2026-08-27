@@ -199,6 +199,9 @@ BEGIN
           ON owners.oid = routines.proowner
         WHERE schemas.nspname <> 'information_schema'
           AND schemas.nspname !~ '^pg_'
+          AND routines.oid IS DISTINCT FROM pg_catalog.to_regprocedure(
+            'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+          )
           AND (
             owners.rolname IN (
               'aurum_mailer',
@@ -402,7 +405,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
     REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support, aurum_billing_worker;
-
 CREATE TEMP TABLE allowed_edge_node_role (
     role_name TEXT PRIMARY KEY,
     role_oid OID NOT NULL UNIQUE
@@ -756,7 +758,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 112 THEN
+        IF revision_number < 1 OR revision_number > 113 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -909,6 +911,8 @@ $$;
 DO $$
 DECLARE
     unsafe_object TEXT;
+    current_revision TEXT;
+    dispatcher_oid OID;
 BEGIN
     IF NOT EXISTS (
         SELECT 1
@@ -1024,6 +1028,125 @@ BEGIN
         RAISE EXCEPTION 'Edge node role membership is unsafe: %', unsafe_object;
     END IF;
 
+    IF pg_catalog.to_regclass('public.alembic_version') IS NOT NULL THEN
+        SELECT version_num INTO current_revision FROM public.alembic_version;
+    END IF;
+    dispatcher_oid := pg_catalog.to_regprocedure(
+        'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+    );
+
+    IF dispatcher_oid IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc AS routine
+        JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+        JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+        WHERE routine.oid = dispatcher_oid
+          AND owner.rolname = 'aurum_edge_cash_owner'
+          AND language.lanname = 'plpgsql'
+          AND routine.prosecdef
+          AND routine.provolatile = 'v'
+          AND routine.proconfig @> ARRAY[
+            'search_path=pg_catalog, pg_temp',
+            'row_security=on'
+          ]::TEXT[]
+    ) THEN
+        RAISE EXCEPTION 'Edge cash dispatcher definition is unsafe';
+    END IF;
+
+    IF current_revision ~ '^[0-9]{4}$' AND current_revision::INTEGER >= 113 THEN
+        IF dispatcher_oid IS NULL THEN
+            RAISE EXCEPTION 'Edge cash dispatcher is missing';
+        END IF;
+
+        GRANT USAGE ON SCHEMA public
+            TO aurum_edge_cash_executor, aurum_edge_cash_owner;
+        REVOKE ALL PRIVILEGES ON FUNCTION public.dispatch_edge_cash_sale_v1(
+            UUID, UUID, BIGINT, UUID, JSONB, TEXT
+        ) FROM PUBLIC, aurum_app, aurum_support, aurum_edge_cash_executor;
+        GRANT EXECUTE ON FUNCTION public.dispatch_edge_cash_sale_v1(
+            UUID, UUID, BIGINT, UUID, JSONB, TEXT
+        ) TO aurum_edge_cash_executor;
+        IF pg_catalog.has_function_privilege(
+            'aurum_app', dispatcher_oid, 'EXECUTE'
+        ) OR pg_catalog.has_function_privilege(
+            'aurum_support', dispatcher_oid, 'EXECUTE'
+        ) OR NOT pg_catalog.has_function_privilege(
+            'aurum_edge_cash_executor', dispatcher_oid, 'EXECUTE'
+        ) OR EXISTS (
+            SELECT 1
+            FROM pg_catalog.aclexplode(
+                COALESCE(
+                    (SELECT routine.proacl
+                     FROM pg_catalog.pg_proc AS routine
+                     WHERE routine.oid = dispatcher_oid),
+                    pg_catalog.acldefault(
+                        'f'::"char", 'aurum_edge_cash_owner'::REGROLE
+                    )
+                )
+            ) AS acl
+            WHERE acl.grantee = 0
+              AND acl.privilege_type = 'EXECUTE'
+        ) THEN
+            RAISE EXCEPTION 'Edge cash dispatcher ACL is unsafe';
+        END IF;
+        GRANT EXECUTE ON FUNCTION public.edge_canonical_jsonb(JSONB),
+            public.edge_normalize_numeric(NUMERIC),
+            public.current_tenant_id(),
+            public.current_app_user_id(),
+            public.is_tenant_support_session(),
+            public.tenant_actor_is_owner(UUID)
+            TO aurum_edge_cash_owner;
+        GRANT SELECT ON TABLE
+            public.app_user,
+            public.batch,
+            public.branch,
+            public.edge_cash_command,
+            public.edge_cash_node_identity,
+            public.permission,
+            public.pos_command,
+            public.pos_payment_attempt,
+            public.pos_refund_attempt,
+            public.prescription_log,
+            public.register,
+            public.register_receipt_counter,
+            public.role,
+            public.role_permission,
+            public.sale,
+            public.sale_item,
+            public.sale_payment,
+            public.shift,
+            public.sync_node,
+            public.sync_outbox,
+            public.sync_stream,
+            public.sync_writer_activation,
+            public.sync_writer_epoch,
+            public.tenant,
+            public.tenant_catalog,
+            public.tenant_membership,
+            public.tenant_settings,
+            public.user_assignment
+            TO aurum_edge_cash_owner;
+        GRANT INSERT ON TABLE
+            public.sale,
+            public.sale_item,
+            public.sale_payment,
+            public.batch_movement,
+            public.register_receipt_counter,
+            public.sync_outbox,
+            public.edge_cash_command
+            TO aurum_edge_cash_owner;
+        GRANT UPDATE ON TABLE
+            public.sale,
+            public.batch,
+            public.shift,
+            public.register_receipt_counter,
+            public.sync_stream,
+            public.sync_node,
+            public.sync_writer_activation,
+            public.sync_writer_epoch
+            TO aurum_edge_cash_owner;
+    END IF;
+
     SELECT pg_catalog.quote_ident(schemas.nspname)
     INTO unsafe_object
     FROM pg_catalog.pg_namespace AS schemas
@@ -1069,6 +1192,7 @@ BEGIN
       ON owners.oid = routines.proowner
     WHERE schemas.nspname <> 'information_schema'
       AND schemas.nspname !~ '^pg_'
+      AND routines.oid IS DISTINCT FROM dispatcher_oid
       AND owners.rolname IN (
         'aurum_edge_cash_executor',
         'aurum_edge_cash_owner'

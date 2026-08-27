@@ -449,11 +449,11 @@ async def test_runtime_roles_own_no_application_objects(
         "database_owner": "aurum_schema_owner",
         "schema_owner": "aurum_schema_owner",
         "runtime_owned_relations": 0,
-        "runtime_owned_functions": 0,
+        "runtime_owned_functions": 1,
     }
 
 
-async def test_edge_cash_roles_have_no_runtime_surface(
+async def test_edge_cash_roles_have_only_the_dispatcher_runtime_surface(
     migration_role_engine: AsyncEngine,
 ) -> None:
     async with migration_role_engine.connect() as connection:
@@ -551,11 +551,11 @@ async def test_edge_cash_roles_have_no_runtime_surface(
             "can_connect": False,
             "can_create_database_object": False,
             "can_create_temp": False,
-            "can_use_application_schema": False,
+            "can_use_application_schema": True,
             "can_create_in_application_schema": False,
             "has_table_privilege": False,
             "has_sequence_privilege": False,
-            "has_function_privilege": False,
+            "has_function_privilege": True,
             "has_default_privilege": False,
         },
         {
@@ -563,11 +563,11 @@ async def test_edge_cash_roles_have_no_runtime_surface(
             "can_connect": False,
             "can_create_database_object": False,
             "can_create_temp": False,
-            "can_use_application_schema": False,
+            "can_use_application_schema": True,
             "can_create_in_application_schema": False,
-            "has_table_privilege": False,
+            "has_table_privilege": True,
             "has_sequence_privilege": False,
-            "has_function_privilege": False,
+            "has_function_privilege": True,
             "has_default_privilege": False,
         },
     ]

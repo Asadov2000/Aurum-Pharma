@@ -234,6 +234,8 @@ test "$(psql_super -c "
     JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
     WHERE member.rolname = '$edge_role'
 ")" = "1"
+# Schema USAGE is inherited from the executor solely to call the dispatcher;
+# the device role must not retain any direct schema or table grant.
 test "$(psql_super -c "
     SELECT (
         SELECT count(*)
@@ -241,7 +243,16 @@ test "$(psql_super -c "
         CROSS JOIN LATERAL pg_catalog.aclexplode(databases.datacl) AS acl
         WHERE acl.grantee = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '$edge_role')
     ) = 0
-    AND NOT pg_catalog.has_schema_privilege('$edge_role', 'public', 'USAGE')
+    AND pg_catalog.has_schema_privilege('$edge_role', 'public', 'USAGE')
+    AND NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_namespace AS schemas
+        CROSS JOIN LATERAL pg_catalog.aclexplode(schemas.nspacl) AS acl
+        WHERE schemas.nspname = 'public'
+          AND acl.grantee = (
+            SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '$edge_role'
+          )
+    )
     AND NOT pg_catalog.has_table_privilege('$edge_role', 'public.tenant', 'SELECT')
 ")" = "t"
 
