@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Literal, cast
 from uuid import UUID
 
@@ -19,7 +20,7 @@ from app.core.errors import (
     PermissionDeniedError,
 )
 from app.core.time import utc_now
-from app.domains.pos.schemas import SaleCheckoutResult
+from app.domains.pos.schemas import SaleCheckoutResult, SaleRefundResult
 from app.domains.sync.activation_bootstrap import (
     ActivationBootstrapValidationError,
     ActivationSnapshotScope,
@@ -1095,8 +1096,8 @@ class SyncEdgeApplyService:
         *,
         previous_source_checksum: str,
         previous_projection_checksum: str,
-    ) -> SaleCheckoutResult:
-        if envelope.event_type != "pos.sale.completed.v1" or envelope.schema_version != 1:
+    ) -> SaleCheckoutResult | SaleRefundResult:
+        if envelope.schema_version != 1:
             raise _EnvelopeError("unsupported_event")
         if envelope.aggregate_type != "sale":
             raise _EnvelopeError("invalid_aggregate")
@@ -1107,7 +1108,14 @@ class SyncEdgeApplyService:
         if calculated_payload_hash != envelope.payload_hash:
             raise _EnvelopeError("payload_hash_mismatch")
         try:
-            sale = SaleCheckoutResult.model_validate(envelope.payload)
+            if envelope.event_type == "pos.sale.completed.v1":
+                sale: SaleCheckoutResult | SaleRefundResult = SaleCheckoutResult.model_validate(
+                    envelope.payload
+                )
+            elif envelope.event_type == "pos.sale.refunded.v1":
+                sale = SaleRefundResult.model_validate(envelope.payload)
+            else:
+                raise _EnvelopeError("unsupported_event")
         except PydanticValidationError as exc:
             raise _EnvelopeError("invalid_sale_projection") from exc
         if (
@@ -1154,6 +1162,68 @@ class SyncEdgeApplyService:
         if calculated_projection != envelope.projection_checksum:
             raise _EnvelopeError("projection_checksum_mismatch")
         return sale
+
+    async def _validate_refund_parent(
+        self,
+        refund: SaleRefundResult,
+    ) -> None:
+        parent = await self.repo.get_sale_projection(refund.parent_sale_id)
+        if parent is None:
+            raise _EnvelopeError("refund_parent_missing")
+        if (
+            parent.sale_type != "sale"
+            or parent.tenant_id != refund.tenant_id
+            or parent.branch_id != refund.branch_id
+            or parent.completed_at > refund.completed_at
+        ):
+            raise _EnvelopeError("refund_parent_scope_mismatch")
+        if (
+            parent.register_id != refund.register_id
+            or parent.currency != refund.currency
+            or parent.is_test != refund.is_test
+        ):
+            raise _EnvelopeError("refund_parent_scope_mismatch")
+
+        try:
+            parent_sale = SaleCheckoutResult.model_validate(self._projection_payload(parent))
+            prior_refunds = [
+                SaleRefundResult.model_validate(self._projection_payload(row))
+                for row in await self.repo.list_refund_projections(
+                    parent_sale_id=refund.parent_sale_id
+                )
+            ]
+        except (PydanticValidationError, ValueError) as exc:
+            raise _EnvelopeError("refund_history_invalid") from exc
+
+        parent_items = {item.id: item for item in parent_sale.items}
+        refunded_qty: dict[UUID, Decimal] = {}
+        for prior in prior_refunds:
+            for item in prior.items:
+                refunded_qty[item.parent_sale_item_id] = (
+                    refunded_qty.get(item.parent_sale_item_id, Decimal("0")) + item.qty
+                )
+
+        for item in refund.items:
+            parent_item = parent_items.get(item.parent_sale_item_id)
+            if parent_item is None:
+                raise _EnvelopeError("refund_item_parent_missing")
+            if (
+                item.catalog_id != parent_item.catalog_id
+                or item.batch_id != parent_item.batch_id
+                or item.unit_price != parent_item.unit_price
+                or item.currency != parent_item.currency
+            ):
+                raise _EnvelopeError("refund_item_parent_mismatch")
+            new_total = refunded_qty.get(item.parent_sale_item_id, Decimal("0")) + item.qty
+            if new_total > parent_item.qty:
+                raise _EnvelopeError("refund_quantity_exceeded")
+            refunded_qty[item.parent_sale_item_id] = new_total
+
+        fully_refunded = all(
+            refunded_qty.get(item.id, Decimal("0")) == item.qty for item in parent_sale.items
+        )
+        if refund.parent_fully_refunded != fully_refunded:
+            raise _EnvelopeError("refund_lifecycle_mismatch")
 
     async def _prepare_cursor(
         self, pull: SyncPullResponse
@@ -1304,6 +1374,18 @@ class SyncEdgeApplyService:
                 applied=applied,
                 duplicates=duplicates,
             )
+        if isinstance(sale, SaleRefundResult):
+            try:
+                await self._validate_refund_parent(sale)
+            except _EnvelopeError as exc:
+                return await self._stop(
+                    cursor=cursor,
+                    envelope=envelope,
+                    cursor_status="quarantined",
+                    reason_code=exc.reason_code,
+                    applied=applied,
+                    duplicates=duplicates,
+                )
 
         inbox = await self.repo.insert_inbox(envelope, status="received")
         await self.repo.insert_sale_projection(
@@ -1315,6 +1397,11 @@ class SyncEdgeApplyService:
             sequence=envelope.sequence,
             source_event_id=envelope.event_id,
             operation_id=sale.operation_id,
+            sale_type=("return" if isinstance(sale, SaleRefundResult) else "sale"),
+            parent_sale_id=(sale.parent_sale_id if isinstance(sale, SaleRefundResult) else None),
+            parent_fully_refunded=(
+                sale.parent_fully_refunded if isinstance(sale, SaleRefundResult) else None
+            ),
             register_id=sale.register_id,
             shift_id=sale.shift_id,
             cashier_user_id=sale.cashier_user_id,
@@ -1382,27 +1469,37 @@ class SyncEdgeApplyService:
 
     @staticmethod
     def _projection_payload(row: SyncSaleProjection) -> dict[str, object]:
-        sale = SaleCheckoutResult.model_validate(
-            {
-                "event_id": row.source_event_id,
-                "sale_id": row.sale_id,
-                "operation_id": row.operation_id,
-                "tenant_id": row.tenant_id,
-                "branch_id": row.branch_id,
-                "register_id": row.register_id,
-                "shift_id": row.shift_id,
-                "cashier_user_id": row.cashier_user_id,
-                "receipt_number": row.receipt_number,
-                "receipt_seq": row.receipt_seq,
-                "created_at": row.sale_created_at,
-                "completed_at": row.completed_at,
-                "total_amount": row.total_amount,
-                "currency": row.currency,
-                "is_test": row.is_test,
-                "items": row.items,
-                "payments": row.payments,
-            }
-        )
+        payload: dict[str, object] = {
+            "event_id": row.source_event_id,
+            "sale_id": row.sale_id,
+            "operation_id": row.operation_id,
+            "tenant_id": row.tenant_id,
+            "branch_id": row.branch_id,
+            "register_id": row.register_id,
+            "shift_id": row.shift_id,
+            "cashier_user_id": row.cashier_user_id,
+            "receipt_number": row.receipt_number,
+            "receipt_seq": row.receipt_seq,
+            "created_at": row.sale_created_at,
+            "completed_at": row.completed_at,
+            "total_amount": row.total_amount,
+            "currency": row.currency,
+            "is_test": row.is_test,
+            "items": row.items,
+            "payments": row.payments,
+        }
+        if row.sale_type == "return":
+            payload.update(
+                {
+                    "parent_sale_id": row.parent_sale_id,
+                    "parent_fully_refunded": row.parent_fully_refunded,
+                }
+            )
+            sale: SaleCheckoutResult | SaleRefundResult = SaleRefundResult.model_validate(payload)
+        elif row.sale_type == "sale":
+            sale = SaleCheckoutResult.model_validate(payload)
+        else:
+            raise ValueError("unsupported sale projection type")
         return cast(dict[str, object], sale.model_dump(mode="json"))
 
     async def verify_projection(

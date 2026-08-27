@@ -125,6 +125,81 @@ async def test_shadow_sale_matches_cloud_checkpoint(
     assert report.expected_checksum == pull.events[0].projection_checksum
 
 
+async def test_shadow_refund_is_linked_and_projection_chain_verifies(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold(batch_qty=10)
+    pos = POSService(POSRepository(db_session))
+    await _open_shift(pos, scaffold)
+    node = await _enroll(db_session, scaffold)
+    parent = await _checkout(pos, scaffold)
+    returned = await pos.refund(
+        parent_sale_id=parent.sale_id,
+        items=[(parent.items[0].id, parent.items[0].qty)],
+        reason="customer_return",
+        comment=None,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+    )
+
+    pull = await _pull(db_session, node)
+
+    assert [event.event_type for event in pull.events] == [
+        "pos.sale.completed.v1",
+        "pos.sale.refunded.v1",
+    ]
+    assert pull.events[1].payload["parent_sale_id"] == str(parent.sale_id)
+    assert pull.events[1].payload["parent_fully_refunded"] is True
+
+    edge = SyncEdgeApplyService(SyncEdgeRepository(db_session))
+    applied = await edge.apply(pull)
+    assert applied.status == "synced"
+    assert applied.applied == 2
+
+    projection = await db_session.get(SyncSaleProjection, returned.id)
+    assert projection is not None
+    assert projection.sale_type == "return"
+    assert projection.parent_sale_id == parent.sale_id
+    assert projection.parent_fully_refunded is True
+    verified = await edge.verify_projection(
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        origin_node_id=pull.origin_node_id,
+        writer_epoch=pull.writer_epoch,
+    )
+    assert verified.status == "synced"
+
+
+async def test_refund_without_bootstrapped_parent_is_quarantined(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold(batch_qty=10)
+    pos = POSService(POSRepository(db_session))
+    await _open_shift(pos, scaffold)
+    parent = await _checkout(pos, scaffold)
+    node = await _enroll(db_session, scaffold)
+    returned = await pos.refund(
+        parent_sale_id=parent.sale_id,
+        items=[(parent.items[0].id, parent.items[0].qty)],
+        reason="customer_return",
+        comment=None,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+    )
+    pull = await _pull(db_session, node)
+
+    assert [event.event_type for event in pull.events] == ["pos.sale.refunded.v1"]
+    result = await SyncEdgeApplyService(SyncEdgeRepository(db_session)).apply(pull)
+
+    assert result.status == "quarantined"
+    inbox = await db_session.get(SyncInboxEvent, pull.events[0].event_id)
+    assert inbox is not None
+    assert inbox.reason_code == "refund_parent_missing"
+    assert await db_session.get(SyncSaleProjection, returned.id) is None
+
+
 async def test_shadow_report_rejects_source_chain_mismatch(
     db_session: AsyncSession,
     pos_scaffold,

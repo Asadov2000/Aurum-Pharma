@@ -1358,6 +1358,9 @@ class SyncEdgeRepository:
         sequence: int,
         source_event_id: UUID,
         operation_id: UUID,
+        sale_type: str,
+        parent_sale_id: UUID | None,
+        parent_fully_refunded: bool | None,
         register_id: UUID,
         shift_id: UUID,
         cashier_user_id: UUID,
@@ -1384,6 +1387,9 @@ class SyncEdgeRepository:
                 sequence=sequence,
                 source_event_id=source_event_id,
                 operation_id=operation_id,
+                sale_type=sale_type,
+                parent_sale_id=parent_sale_id,
+                parent_fully_refunded=parent_fully_refunded,
                 register_id=register_id,
                 shift_id=shift_id,
                 cashier_user_id=cashier_user_id,
@@ -1402,6 +1408,21 @@ class SyncEdgeRepository:
             .returning(SyncSaleProjection)
         )
         return result.scalar_one()
+
+    async def list_refund_projections(
+        self,
+        *,
+        parent_sale_id: UUID,
+    ) -> list[SyncSaleProjection]:
+        result = await self.session.execute(
+            select(SyncSaleProjection)
+            .where(
+                SyncSaleProjection.parent_sale_id == parent_sale_id,
+                SyncSaleProjection.sale_type == "return",
+            )
+            .order_by(SyncSaleProjection.sequence)
+        )
+        return list(result.scalars().all())
 
     async def list_sale_projections(
         self,
