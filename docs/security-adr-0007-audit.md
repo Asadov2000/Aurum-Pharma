@@ -1,7 +1,8 @@
 # Аудит реализации ADR-0007
 
-- Дата: 2026-08-27
-- Проверенный baseline: `main` на commit `119e2a9`
+- Дата: 2026-08-28
+- Проверенный baseline: `main` на commit `d814d03` и реализация ownership
+  transfer в ветке `codex/co-owner-workflow`
 - Область: platform account, tenant membership/ownership, роли, назначения,
   branch scope, support access и аудит
 
@@ -12,11 +13,11 @@
 критического обхода tenant isolation или конструктора ролей в проверенном контуре
 не обнаружено.
 
-До полного выполнения ADR остаются три самостоятельных этапа: защищенная
-передача владения, неизменяемые версии опубликованных ролей и исчерпывающая
-матрица branch-scope проверок для каждого доменного маршрута. Устаревшие
-числовые `level` сохранены только для совместимости и отображения; источником
-решения о доступе служит scoped authorization snapshot.
+До полного выполнения ADR остаются два самостоятельных этапа: неизменяемые
+версии опубликованных ролей и исчерпывающая матрица branch-scope проверок для
+каждого доменного маршрута. Устаревшие числовые `level` сохранены только для
+совместимости и отображения; источником решения о доступе служит scoped
+authorization snapshot.
 
 ## Подтверждено кодом и тестами
 
@@ -58,18 +59,14 @@
    `before_permissions` и `after_permissions`
    (`backend/alembic/versions/0053_add_scoped_delegated_authorization.py:1337`,
    `backend/alembic/versions/0053_add_scoped_delegated_authorization.py:1453`).
+9. Передача владения выполняется защищенной DB-командой: действующий владелец
+   создаёт запрос после recent MFA, целевой участник подтверждает его после
+   собственной recent MFA, а смена ownership, protected-роли, revisions, сессий
+   и audit фиксируется одной транзакцией. RLS раскрывает запрос только его
+   участникам (`backend/alembic/versions/0116_add_ownership_transfer.py`,
+   `backend/tests/isolation/test_ownership_transfer.py`).
 
 ## Оставшиеся разрывы
-
-### AUTHZ-001: нет завершенного ownership-transfer workflow
-
-- Приоритет: P0, до пилота.
-- Состояние: небезопасное изменение закрыто, но безопасного маршрута передачи
-  владения нет. Код только направляет в будущий protected workflow
-  (`backend/app/domains/roles/service.py:270`).
-- Требуется: отдельная команда БД, recent MFA, причина, optimistic lock,
-  подтверждение второго подходящего субъекта при его наличии, атомарная смена
-  ownership/assignment/revisions, отзыв сессий и точный audit before/after.
 
 ### AUTHZ-002: роль версионируется счетчиком, но не неизменяемыми публикациями
 

@@ -621,11 +621,7 @@ async def current_user(
     )
 
 
-async def require_recent_support_mfa(
-    user: Annotated[CurrentUser, Depends(current_user)],
-) -> CurrentUser:
-    if not (user.is_developer or user.is_administrator):
-        raise PermissionDeniedError("Support privileges required")
+def _ensure_recent_mfa(user: CurrentUser) -> None:
     verified_at = user.mfa_verified_at
     if verified_at is None:
         raise PermissionDeniedError(
@@ -639,6 +635,21 @@ async def require_recent_support_mfa(
             "Recent MFA verification required",
             details={"reason": "mfa_step_up_required"},
         )
+
+
+async def require_recent_account_mfa(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    _ensure_recent_mfa(user)
+    return user
+
+
+async def require_recent_support_mfa(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    if not (user.is_developer or user.is_administrator):
+        raise PermissionDeniedError("Support privileges required")
+    _ensure_recent_mfa(user)
     return user
 
 
@@ -712,19 +723,7 @@ async def require_tenant_owner(
 async def require_recent_owner_mfa(
     user: Annotated[CurrentUser, Depends(require_tenant_owner)],
 ) -> CurrentUser:
-    verified_at = user.mfa_verified_at
-    if verified_at is None:
-        raise PermissionDeniedError(
-            "Recent MFA verification required",
-            details={"reason": "mfa_step_up_required"},
-        )
-    now = datetime.now(UTC)
-    max_age = timedelta(minutes=get_settings().MFA_STEP_UP_MINUTES)
-    if verified_at > now + timedelta(minutes=1) or now - verified_at > max_age:
-        raise PermissionDeniedError(
-            "Recent MFA verification required",
-            details={"reason": "mfa_step_up_required"},
-        )
+    _ensure_recent_mfa(user)
     return user
 
 

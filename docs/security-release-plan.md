@@ -80,8 +80,11 @@
 ### P0: identity и authorization
 
 - [x] Глобальный account отделён от tenant membership, защищённого ownership и
-      обычных рабочих ролей. До полного ADR-0007 остаются ownership transfer и
-      неизменяемые публикации версий ролей.
+      обычных рабочих ролей. До полного ADR-0007 остаются неизменяемые
+      публикации версий ролей и полный branch route gate.
+- [x] Передача владения требует recent MFA у действующего и нового владельца,
+      атомарно меняет protected ownership/role, отзывает сессии и записывает
+      неизменяемый audit; запрос видят только его участники.
 - [x] Убран общий bypass permissions для Aurum Administrator; Developer-only,
       platform, tenant и branch capabilities проверяются раздельно.
 - [x] Tenant-пользователю запрещено создавать или прикреплять глобальный account;
@@ -143,8 +146,8 @@
 
 ## Порядок следующей разработки
 
-1. Завершить ADR-0007: ownership transfer, immutable role publication и полный
-   fail-closed branch route gate.
+1. Завершить ADR-0007: immutable role publication и полный fail-closed branch
+   route gate.
 2. Внешний WORM storage, автоматический контроль свежести backup/drill и
    измерение RPO/RTO на staging.
 3. DB-инварианты POS и полный refund/void sync-контур.

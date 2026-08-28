@@ -1,9 +1,13 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  acceptOwnershipTransfer,
+  cancelOwnershipTransfer,
   createAssignment,
+  createOwnershipTransfer,
   createRole,
   listPermissions,
+  listOwnershipTransfers,
   listRoles,
   listTemplates,
   listUsers,
@@ -16,6 +20,7 @@ import {
 } from "./api";
 import {
   type AssignmentCreatePayload,
+  type OwnershipTransferCreatePayload,
   type RoleCreatePayload,
   type RoleUpdatePayload,
   type UserSearchParams,
@@ -27,6 +32,7 @@ export const rolesKeys = {
   roles: ["roles", "roles"] as const,
   permissions: ["roles", "permissions"] as const,
   templates: ["roles", "templates"] as const,
+  ownershipTransfers: ["roles", "ownership-transfers"] as const,
 };
 
 export function useUsersQuery(params: UserSearchParams, enabled = true) {
@@ -59,6 +65,47 @@ export function useTemplatesQuery(enabled = true) {
     queryKey: rolesKeys.templates,
     queryFn: listTemplates,
     enabled,
+  });
+}
+
+export function useOwnershipTransfersQuery(enabled = true) {
+  return useQuery({
+    queryKey: rolesKeys.ownershipTransfers,
+    queryFn: listOwnershipTransfers,
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useCreateOwnershipTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: OwnershipTransferCreatePayload) => createOwnershipTransfer(payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.ownershipTransfers });
+    },
+  });
+}
+
+export function useCancelOwnershipTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (requestId: string) => cancelOwnershipTransfer(requestId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.ownershipTransfers });
+    },
+  });
+}
+
+export function useAcceptOwnershipTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (requestId: string) => acceptOwnershipTransfer(requestId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.ownershipTransfers });
+      void qc.invalidateQueries({ queryKey: rolesKeys.users });
+      void qc.invalidateQueries({ queryKey: rolesKeys.roles });
+    },
   });
 }
 

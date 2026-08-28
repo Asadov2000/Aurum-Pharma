@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import timedelta
 from uuid import UUID
 
 import structlog
@@ -26,7 +27,12 @@ from app.domains.roles.models import (
     TenantOwnership,
     UserAssignment,
 )
-from app.domains.roles.repository import AuthorizationSnapshot, DirectoryUser, RolesRepository
+from app.domains.roles.repository import (
+    AuthorizationSnapshot,
+    DirectoryUser,
+    OwnershipTransferRecord,
+    RolesRepository,
+)
 
 logger = structlog.get_logger("roles.service")
 
@@ -44,11 +50,24 @@ RESERVED_ROLE_NAMES = {
     "разработчик",
 }
 PASSWORD_CONFIGURATION_REQUIRED = "Password must be configured before it can be required at login"
+OWNERSHIP_TRANSFER_TTL = timedelta(hours=72)
 
 
 def _is_password_requirement_guard_error(exc: DBAPIError) -> bool:
     sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
     return sqlstate == "P2001"
+
+
+def _ownership_transfer_error(exc: DBAPIError) -> Exception:
+    sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    if sqlstate == "42501":
+        return PermissionDeniedError("Передача владения недоступна для этого аккаунта")
+    if sqlstate in {"22023", "23514", "P0001"}:
+        return BusinessRuleError("Запрос передачи владения недействителен или истёк")
+    if sqlstate in {"23505", "40001", "40P01"}:
+        return ConflictError("Состояние владения изменилось; обновите страницу и повторите")
+    logger.error("ownership_transfer_database_guard_failed", sqlstate=sqlstate)
+    return RuntimeError("Unexpected ownership transfer database failure")
 
 
 def perms_cache_key(user_id: UUID, tenant_id: UUID) -> str:
@@ -314,6 +333,74 @@ class RolesService:
             user_id=str(user.id),
         )
         return user, membership, ownership, role
+
+    async def create_ownership_transfer(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+        target_membership_id: UUID,
+    ) -> OwnershipTransferRecord:
+        try:
+            transfer = await self.repo.create_ownership_transfer(
+                operation_id=operation_id,
+                target_membership_id=target_membership_id,
+                expires_at=utc_now() + OWNERSHIP_TRANSFER_TTL,
+            )
+        except DBAPIError as exc:
+            raise _ownership_transfer_error(exc) from exc
+        if transfer is None or transfer.tenant_id != tenant_id:
+            raise RuntimeError("Ownership transfer was not visible after creation")
+        logger.info(
+            "ownership_transfer_created",
+            tenant_id=str(tenant_id),
+            transfer_id=str(transfer.id),
+            target_user_id=str(transfer.target_user_id),
+        )
+        return transfer
+
+    async def list_ownership_transfers(self) -> list[OwnershipTransferRecord]:
+        return await self.repo.list_ownership_transfers()
+
+    async def cancel_ownership_transfer(
+        self,
+        *,
+        tenant_id: UUID,
+        request_id: UUID,
+    ) -> OwnershipTransferRecord:
+        try:
+            transfer = await self.repo.cancel_ownership_transfer(request_id=request_id)
+        except DBAPIError as exc:
+            raise _ownership_transfer_error(exc) from exc
+        if transfer is None or transfer.tenant_id != tenant_id:
+            raise NotFoundError("Запрос передачи владения не найден")
+        logger.info(
+            "ownership_transfer_cancelled",
+            tenant_id=str(tenant_id),
+            transfer_id=str(transfer.id),
+        )
+        return transfer
+
+    async def accept_ownership_transfer(
+        self,
+        *,
+        tenant_id: UUID,
+        request_id: UUID,
+    ) -> OwnershipTransferRecord:
+        try:
+            transfer = await self.repo.accept_ownership_transfer(request_id=request_id)
+        except DBAPIError as exc:
+            raise _ownership_transfer_error(exc) from exc
+        if transfer is None or transfer.tenant_id != tenant_id:
+            raise NotFoundError("Запрос передачи владения не найден")
+        await self.invalidate_user_perms(transfer.initiator_user_id, tenant_id)
+        await self.invalidate_user_perms(transfer.target_user_id, tenant_id)
+        logger.info(
+            "ownership_transfer_completed",
+            tenant_id=str(tenant_id),
+            transfer_id=str(transfer.id),
+        )
+        return transfer
 
     async def _ensure_tenant_owner_role(
         self,

@@ -3,6 +3,9 @@ import { api } from "@/lib/api";
 import {
   type Assignment,
   type AssignmentCreatePayload,
+  type OwnershipTransfer,
+  type OwnershipTransferActionResponse,
+  type OwnershipTransferCreatePayload,
   type Permission,
   type Role,
   type RoleCreatePayload,
@@ -95,4 +98,37 @@ export async function createAssignment(
 
 export async function revokeAssignment(userId: string, assignmentId: string): Promise<void> {
   await api.delete(`/users/${userId}/assignments/${assignmentId}`);
+}
+
+export async function listOwnershipTransfers(): Promise<OwnershipTransfer[]> {
+  const { data } = await api.get<{ items: OwnershipTransfer[] }>("/ownership-transfers");
+  return data.items;
+}
+
+export async function createOwnershipTransfer(
+  payload: OwnershipTransferCreatePayload,
+): Promise<OwnershipTransferActionResponse> {
+  const { data } = await api.post<OwnershipTransferActionResponse>(
+    "/ownership-transfers",
+    payload,
+  );
+  return data;
+}
+
+export async function cancelOwnershipTransfer(
+  requestId: string,
+): Promise<OwnershipTransferActionResponse> {
+  const { data } = await api.post<OwnershipTransferActionResponse>(
+    `/ownership-transfers/${requestId}/cancel`,
+  );
+  return data;
+}
+
+export async function acceptOwnershipTransfer(
+  requestId: string,
+): Promise<OwnershipTransferActionResponse> {
+  const { data } = await api.post<OwnershipTransferActionResponse>(
+    `/ownership-transfers/${requestId}/accept`,
+  );
+  return data;
 }

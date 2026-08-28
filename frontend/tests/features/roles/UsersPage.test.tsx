@@ -9,6 +9,7 @@ const suspendUser = vi.fn();
 const offboardUser = vi.fn();
 const revokeUserSessions = vi.fn();
 const createAssignment = vi.fn();
+const createOwnershipTransfer = vi.fn();
 const listBranches = vi.fn();
 const LAZY_PANEL_WAIT = { timeout: 5_000 };
 
@@ -24,6 +25,10 @@ vi.mock("@/features/roles/api", () => ({
   offboardUser: (...args: unknown[]) => offboardUser(...args),
   revokeUserSessions: (...args: unknown[]) => revokeUserSessions(...args),
   createAssignment: (...args: unknown[]) => createAssignment(...args),
+  createOwnershipTransfer: (...args: unknown[]) => createOwnershipTransfer(...args),
+  listOwnershipTransfers: vi.fn().mockResolvedValue([]),
+  cancelOwnershipTransfer: vi.fn(),
+  acceptOwnershipTransfer: vi.fn(),
   revokeAssignment: vi.fn(),
 }));
 
@@ -139,6 +144,7 @@ describe("UsersPage", () => {
     offboardUser.mockReset();
     revokeUserSessions.mockReset();
     createAssignment.mockReset();
+    createOwnershipTransfer.mockReset();
     listBranches.mockReset();
     listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE]);
     listBranches.mockResolvedValue([]);
@@ -147,6 +153,10 @@ describe("UsersPage", () => {
     offboardUser.mockResolvedValue(undefined);
     revokeUserSessions.mockResolvedValue({ status: "ok", revoked_count: 1 });
     createAssignment.mockResolvedValue({ id: "assignment-new" });
+    createOwnershipTransfer.mockResolvedValue({
+      transfer: { id: "transfer-1" },
+      sessions_revoked: false,
+    });
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -171,6 +181,12 @@ describe("UsersPage", () => {
   });
 
   it("does not derive update, suspend, offboard or assignment actions from users.view", async () => {
+    mockUser = {
+      id: "regular-user",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: false,
+      permissions: ["users.view"],
+    };
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
 
@@ -181,6 +197,27 @@ describe("UsersPage", () => {
     expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Завершить сеансы" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Действия для/ })).not.toBeInTheDocument();
+  });
+
+  it("lets only the owner request ownership transfer after explicit confirmation", async () => {
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Передать владение" }));
+    expect(screen.getByText("Передать владение аптекой?")).toBeInTheDocument();
+    expect(screen.getByText(/при следующем входе потребуется настроить MFA/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Отправить запрос" }));
+
+    await waitFor(() => expect(createOwnershipTransfer).toHaveBeenCalledTimes(1));
+    expect(createOwnershipTransfer).toHaveBeenCalledWith({
+      operation_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      target_membership_id: USER_ACTIVE.membership_id,
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "До подтверждения вы остаётесь владельцем",
+    );
   });
 
   it("gates profile and assignment actions independently", async () => {

@@ -22,12 +22,14 @@ interface EmployeeDirectoryProps {
   canRevokeSessions: boolean;
   canOffboard: boolean;
   canAssign: boolean;
+  canTransferOwnership: boolean;
   showActions: boolean;
   activatingUserId: string | null;
   registerActionTrigger: (userId: string, element: HTMLButtonElement | null) => void;
   onProfile: (member: Row) => void;
   onActivate: (member: Row) => void;
   onAssignments: (member: Row) => void;
+  onTransferOwnership: (member: Row) => void;
   onRevokeSessions: (member: Row) => void;
   onSuspend: (member: Row) => void;
   onOffboard: (member: Row) => void;
@@ -42,12 +44,14 @@ export function EmployeeDirectory({
   canRevokeSessions,
   canOffboard,
   canAssign,
+  canTransferOwnership,
   showActions,
   activatingUserId,
   registerActionTrigger,
   onProfile,
   onActivate,
   onAssignments,
+  onTransferOwnership,
   onRevokeSessions,
   onSuspend,
   onOffboard,
@@ -92,6 +96,7 @@ export function EmployeeDirectory({
             canRevokeSessions={canRevokeSessions}
             canOffboard={canOffboard}
             canAssign={canAssign}
+            canTransferOwnership={canTransferOwnership}
             showActions={showActions}
             columns={columns}
             activating={activatingUserId === member.id}
@@ -99,6 +104,7 @@ export function EmployeeDirectory({
             onProfile={() => onProfile(member)}
             onActivate={() => onActivate(member)}
             onAssignments={() => onAssignments(member)}
+            onTransferOwnership={() => onTransferOwnership(member)}
             onRevokeSessions={() => onRevokeSessions(member)}
             onSuspend={() => onSuspend(member)}
             onOffboard={() => onOffboard(member)}
@@ -118,6 +124,7 @@ function EmployeeDirectoryRow({
   canRevokeSessions,
   canOffboard,
   canAssign,
+  canTransferOwnership,
   showActions,
   columns,
   activating,
@@ -125,6 +132,7 @@ function EmployeeDirectoryRow({
   onProfile,
   onActivate,
   onAssignments,
+  onTransferOwnership,
   onRevokeSessions,
   onSuspend,
   onOffboard,
@@ -137,6 +145,7 @@ function EmployeeDirectoryRow({
   canRevokeSessions: boolean;
   canOffboard: boolean;
   canAssign: boolean;
+  canTransferOwnership: boolean;
   showActions: boolean;
   columns: string;
   activating: boolean;
@@ -144,6 +153,7 @@ function EmployeeDirectoryRow({
   onProfile: () => void;
   onActivate: () => void;
   onAssignments: () => void;
+  onTransferOwnership: () => void;
   onRevokeSessions: () => void;
   onSuspend: () => void;
   onOffboard: () => void;
@@ -166,6 +176,8 @@ function EmployeeDirectoryRow({
     member.status === "active" &&
     (!isOwnerMembership || currentUserIsDeveloper);
   const canOffboardMember = canOffboard && !protectsLifecycle && member.status !== "offboarded";
+  const canTransferToMember =
+    canTransferOwnership && member.status === "active" && !protectsLifecycle;
   const actions: ActionMenuItem[] = [];
 
   if (canEditMember) actions.push({ label: "Профиль", onSelect: onProfile });
@@ -178,6 +190,9 @@ function EmployeeDirectoryRow({
   if (canAssignMember) actions.push({ label: "Роли", onSelect: onAssignments });
   if (canRevokeMemberSessions) {
     actions.push({ label: "Завершить сеансы", onSelect: onRevokeSessions });
+  }
+  if (canTransferToMember) {
+    actions.push({ label: "Передать владение", tone: "danger", onSelect: onTransferOwnership });
   }
   if (canSuspendMember) actions.push({ label: "Приостановить", onSelect: onSuspend });
   if (canOffboardMember) {
