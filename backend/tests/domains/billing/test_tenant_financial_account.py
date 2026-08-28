@@ -17,11 +17,14 @@ from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Tenant
 from app.domains.roles.models import (
+    AccessRoleVersion,
+    AccessRoleVersionPermission,
     Role,
     RolePermission,
     TenantMembership,
     UserAssignment,
 )
+from tests.role_version_helpers import create_published_test_role
 
 
 @dataclass(frozen=True)
@@ -73,30 +76,24 @@ async def _seed_committed_subjects(
             full_name=seller.full_name,
             status="active",
         )
-        owner_role = Role(
+        owner_role = await create_published_test_role(
+            session,
             tenant_id=tenant.id,
             name=f"Billing owner {suffix}",
+            permission_codes=["billing.overview.view", "billing.invoice.view"],
             level=3,
-            is_system=False,
         )
-        seller_role = Role(
+        seller_role = await create_published_test_role(
+            session,
             tenant_id=tenant.id,
             name=f"Billing seller {suffix}",
+            permission_codes=[],
             level=4,
-            is_system=False,
         )
-        session.add_all([owner_membership, seller_membership, owner_role, seller_role])
+        session.add_all([owner_membership, seller_membership])
         await session.flush()
         session.add_all(
             [
-                RolePermission(
-                    role_id=owner_role.id,
-                    permission_code="billing.overview.view",
-                ),
-                RolePermission(
-                    role_id=owner_role.id,
-                    permission_code="billing.invoice.view",
-                ),
                 UserAssignment(
                     tenant_id=tenant.id,
                     user_id=owner.id,
@@ -133,6 +130,20 @@ async def _cleanup_committed_subjects(
             await session.scalars(select(Role.id).where(Role.tenant_id == subjects.tenant_id))
         )
         if role_ids:
+            version_ids = list(
+                await session.scalars(
+                    select(AccessRoleVersion.id).where(AccessRoleVersion.role_id.in_(role_ids))
+                )
+            )
+            if version_ids:
+                await session.execute(
+                    delete(AccessRoleVersionPermission).where(
+                        AccessRoleVersionPermission.role_version_id.in_(version_ids)
+                    )
+                )
+                await session.execute(
+                    delete(AccessRoleVersion).where(AccessRoleVersion.id.in_(version_ids))
+                )
             await session.execute(
                 delete(RolePermission).where(RolePermission.role_id.in_(role_ids))
             )

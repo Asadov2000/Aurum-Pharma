@@ -165,6 +165,7 @@ async def test_assignment_and_ownership_activation_are_serialized(
     user_id = uuid4()
     membership_id = uuid4()
     role_id = uuid4()
+    role_version_id = uuid4()
 
     async with db_engine.begin() as connection:
         await connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
@@ -216,6 +217,25 @@ async def test_assignment_and_ownership_activation_are_serialized(
                 )
                 """),
             {"tenant_id": tenant_id, "role_id": role_id},
+        )
+
+    async with maintenance_engine.begin() as connection:
+        await connection.execute(
+            text("""
+                INSERT INTO public.access_role_version (
+                  id, role_id, tenant_id, version, name, status,
+                  creation_xid, published_at, created_by
+                ) VALUES (
+                  :version_id, :role_id, :tenant_id, 1, 'Regular role', 'published',
+                  txid_current(), statement_timestamp(), :user_id
+                )
+                """),
+            {
+                "version_id": role_version_id,
+                "role_id": role_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            },
         )
 
     sessions = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -274,16 +294,24 @@ async def test_assignment_and_ownership_activation_are_serialized(
         await assignment_session.close()
         await ownership_session.close()
 
+        async with maintenance_engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM public.user_assignment WHERE tenant_id = :tenant_id"),
+                {"tenant_id": tenant_id},
+            )
+            await connection.execute(
+                text("DELETE FROM public.access_role_version WHERE tenant_id = :tenant_id"),
+                {"tenant_id": tenant_id},
+            )
+            await connection.execute(
+                text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
+                {"tenant_id": tenant_id},
+            )
+
         async with db_engine.begin() as connection:
             await connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
             await connection.execute(
                 text("DELETE FROM public.tenant WHERE id = :tenant_id"),
-                {"tenant_id": tenant_id},
-            )
-
-        async with maintenance_engine.begin() as connection:
-            await connection.execute(
-                text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
                 {"tenant_id": tenant_id},
             )
 

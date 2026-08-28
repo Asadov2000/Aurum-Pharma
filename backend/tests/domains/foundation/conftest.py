@@ -7,25 +7,24 @@ from uuid import UUID, uuid4
 
 import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
-from app.core.deps import get_db
+from app.core.deps import _seed_request_db_context, get_db
 from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Tenant
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.roles.models import (
-    Role,
-    RolePermission,
     TenantMembership,
     UserAssignment,
 )
-from app.domains.roles.repository import RolesRepository
-from app.domains.roles.service import RolesService
 from app.main import app
 from tests.auth_helpers import create_support_access_token
 from tests.platform_access_helpers import create_test_platform_user
+from tests.role_version_helpers import create_published_test_role, provision_test_owner
 
 
 @pytest_asyncio.fixture
@@ -33,7 +32,20 @@ async def auth_client(
     db_session: AsyncSession,
     client: AsyncClient,
 ) -> AsyncIterator[AsyncClient]:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        for key in (
+            "app.user_id",
+            "app.tenant_id",
+            "app.support_access_session_id",
+            "app.auth_session_id",
+            "app.mfa_verified_at",
+        ):
+            await db_session.execute(
+                text("SELECT set_config(:key, '', true)"),
+                {"key": key},
+            )
+        await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override
@@ -128,13 +140,12 @@ async def tenant_admin_token(
         tenant: Tenant | None = None,
         *,
         is_owner: bool = True,
-        permission_codes: tuple[str, ...] = ("settings.update",),
+        permission_codes: tuple[str, ...] = (),
     ) -> tuple[str, Tenant, AppUser]:
         t = tenant if tenant is not None else await make_tenant()
         if is_owner:
-            owner, _membership, _ownership, _role = await RolesService(
-                RolesRepository(db_session)
-            ).provision_owner(
+            owner, _membership, _ownership, _role = await provision_test_owner(
+                db_session,
                 tenant_id=t.id,
                 email=f"settings-owner-{uuid4().hex[:8]}@aurum.tj",
                 full_name="Settings Owner",
@@ -145,6 +156,21 @@ async def tenant_admin_token(
                 is_developer=False,
                 is_administrator=False,
             )
+            await db_session.execute(
+                text("SELECT set_config('app.support_session', 'false', true)")
+            )
+            await db_session.execute(
+                text("SELECT set_config('app.support_access_session_id', '', true)")
+            )
+            await db_session.execute(text("SELECT set_config('app.auth_session_id', '', true)"))
+            await db_session.execute(
+                text("SELECT set_config('app.user_id', :user_id, true)"),
+                {"user_id": str(owner.id)},
+            )
+            await db_session.execute(
+                text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+                {"tenant_id": str(t.id)},
+            )
             return token, t, owner
 
         user = await make_user(home_tenant_id=t.id)
@@ -154,22 +180,16 @@ async def tenant_admin_token(
             full_name=user.full_name,
             status="active",
         )
-        role = Role(
+        role = await create_published_test_role(
+            db_session,
             tenant_id=t.id,
             name=f"Settings administrator {uuid4().hex[:8]}",
+            permission_codes=permission_codes,
             level=2,
-            is_system=False,
         )
-        db_session.add_all([membership, role])
+        db_session.add(membership)
         await db_session.flush()
         await db_session.refresh(membership)
-        await db_session.refresh(role)
-        db_session.add_all(
-            [
-                RolePermission(role_id=role.id, permission_code=permission_code)
-                for permission_code in permission_codes
-            ]
-        )
         db_session.add(
             UserAssignment(
                 user_id=user.id,
@@ -179,6 +199,15 @@ async def tenant_admin_token(
             )
         )
         await db_session.flush()
+        await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
+        await db_session.execute(
+            text("SELECT set_config('app.support_access_session_id', '', true)")
+        )
+        await db_session.execute(text("SELECT set_config('app.auth_session_id', '', true)"))
+        await db_session.execute(
+            text("SELECT set_config('app.user_id', :user_id, true)"),
+            {"user_id": str(user.id)},
+        )
         token = create_access_token(
             user.id,
             tenant_id=t.id,

@@ -380,7 +380,7 @@ describe("RoleBuilderModal", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("audit.view.global")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Название")).toBeDisabled();
-    const save = screen.getByRole("button", { name: "Сохранить" });
+    const save = screen.getByRole("button", { name: "Проверить и опубликовать" });
     expect(save).toBeDisabled();
     fireEvent.click(save);
     expect(updateRole).not.toHaveBeenCalled();
@@ -410,7 +410,11 @@ describe("RoleBuilderModal", () => {
     fireEvent.change(screen.getByLabelText(/Описание/), {
       target: { value: "Обновлённое описание" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и опубликовать" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Опубликовать версию 8?" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Опубликовать версию" }));
 
     await waitFor(() => expect(updateRole).toHaveBeenCalledTimes(1));
     expect(updateRole).toHaveBeenCalledWith("role-1", {

@@ -14,6 +14,8 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.domains.auth.models import AppUser
 from app.domains.roles.models import (
+    AccessRoleVersion,
+    AccessRoleVersionPermission,
     Permission,
     Role,
     RolePermission,
@@ -72,6 +74,35 @@ class AuthorizationSnapshot:
     subject_revision: int
     permissions: frozenset[str]
     permission_scopes: dict[str, frozenset[UUID] | None]
+
+
+@dataclass(frozen=True)
+class RoleVersionRecord:
+    id: UUID
+    role_id: UUID
+    version: int
+    name: str
+    description: str | None
+    status: str
+    permissions: tuple[str, ...]
+    published_at: datetime | None
+    archived_at: datetime | None
+    created_at: datetime
+    created_by: UUID | None
+    created_by_name: str | None
+
+
+@dataclass(frozen=True)
+class RolePublicationResult:
+    role_version_id: UUID
+    published_version: int
+    affected_memberships: int
+
+
+@dataclass(frozen=True)
+class RoleArchiveResult:
+    archived_version: int
+    affected_memberships: int
 
 
 _DIRECTORY_COLUMNS = (
@@ -291,6 +322,147 @@ class RolesRepository:
             ),
             {"role_id": role_id, "before": before, "after": after},
         )
+
+    async def initialize_role_version(self, role_id: UUID) -> UUID:
+        result = await self.session.execute(
+            text("SELECT public.initialize_tenant_role_version(:role_id)"),
+            {"role_id": role_id},
+        )
+        return cast(UUID, result.scalar_one())
+
+    async def get_published_role_version_id(self, role_id: UUID) -> UUID | None:
+        stmt = select(AccessRoleVersion.id).where(
+            AccessRoleVersion.role_id == role_id,
+            AccessRoleVersion.status == "published",
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def publish_role_version(
+        self,
+        *,
+        role_id: UUID,
+        expected_version: int,
+        name: str,
+        description: str | None,
+        permission_codes: list[str],
+    ) -> RolePublicationResult:
+        result = await self.session.execute(
+            text("""
+                SELECT role_version_id, published_version, affected_memberships
+                FROM public.publish_tenant_role_version(
+                  :role_id,
+                  :expected_version,
+                  :name,
+                  :description,
+                  CAST(:permission_codes AS TEXT[])
+                )
+                """),
+            {
+                "role_id": role_id,
+                "expected_version": expected_version,
+                "name": name,
+                "description": description,
+                "permission_codes": permission_codes,
+            },
+        )
+        row = result.mappings().one()
+        return RolePublicationResult(
+            role_version_id=cast(UUID, row["role_version_id"]),
+            published_version=int(row["published_version"]),
+            affected_memberships=int(row["affected_memberships"]),
+        )
+
+    async def archive_role_with_replacement(
+        self,
+        *,
+        role_id: UUID,
+        expected_version: int,
+        replacement_role_id: UUID,
+    ) -> RoleArchiveResult:
+        result = await self.session.execute(
+            text("""
+                SELECT archived_version, affected_memberships
+                FROM public.archive_tenant_role_with_replacement(
+                  :role_id,
+                  :expected_version,
+                  :replacement_role_id
+                )
+                """),
+            {
+                "role_id": role_id,
+                "expected_version": expected_version,
+                "replacement_role_id": replacement_role_id,
+            },
+        )
+        row = result.mappings().one()
+        return RoleArchiveResult(
+            archived_version=int(row["archived_version"]),
+            affected_memberships=int(row["affected_memberships"]),
+        )
+
+    async def list_role_versions(self, role_id: UUID) -> list[RoleVersionRecord]:
+        stmt = (
+            select(
+                AccessRoleVersion,
+                AppUser.full_name.label("created_by_name"),
+                func.coalesce(
+                    func.array_agg(AccessRoleVersionPermission.permission_code).filter(
+                        AccessRoleVersionPermission.permission_code.is_not(None)
+                    ),
+                    [],
+                ).label("permissions"),
+            )
+            .outerjoin(
+                AccessRoleVersionPermission,
+                AccessRoleVersionPermission.role_version_id == AccessRoleVersion.id,
+            )
+            .outerjoin(AppUser, AppUser.id == AccessRoleVersion.created_by)
+            .where(AccessRoleVersion.role_id == role_id)
+            .group_by(AccessRoleVersion.id, AppUser.full_name)
+            .order_by(AccessRoleVersion.version.desc())
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            RoleVersionRecord(
+                id=version.id,
+                role_id=version.role_id,
+                version=version.version,
+                name=version.name,
+                description=version.description,
+                status=version.status,
+                permissions=tuple(sorted(cast(list[str], permissions))),
+                published_at=version.published_at,
+                archived_at=version.archived_at,
+                created_at=version.created_at,
+                created_by=version.created_by,
+                created_by_name=created_by_name,
+            )
+            for version, created_by_name, permissions in rows
+        ]
+
+    async def active_assignment_count(self, role_id: UUID, *, tenant_id: UUID) -> int:
+        stmt = select(func.count(UserAssignment.id)).where(
+            UserAssignment.role_id == role_id,
+            UserAssignment.tenant_id == tenant_id,
+            UserAssignment.is_active.is_(True),
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def active_assignment_counts(
+        self, role_ids: list[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, int]:
+        if not role_ids:
+            return {}
+        stmt = (
+            select(UserAssignment.role_id, func.count(UserAssignment.id))
+            .where(
+                UserAssignment.role_id.in_(role_ids),
+                UserAssignment.tenant_id == tenant_id,
+                UserAssignment.is_active.is_(True),
+            )
+            .group_by(UserAssignment.role_id)
+        )
+        return {role_id: int(count) for role_id, count in (await self.session.execute(stmt)).all()}
 
     async def active_user_ids_for_role(self, role_id: UUID, *, tenant_id: UUID) -> list[UUID]:
         stmt = (
@@ -1001,8 +1173,12 @@ class RolesRepository:
                    assigned_role.tenant_id IS NULL
                    OR assigned_role.tenant_id = :tenant_id
                  )
-                LEFT JOIN public.role_permission AS role_permission
-                  ON role_permission.role_id = assigned_role.id
+                LEFT JOIN public.access_role_version AS role_version
+                  ON role_version.id = assignment.role_version_id
+                 AND role_version.role_id = assigned_role.id
+                 AND role_version.status = 'published'
+                LEFT JOIN public.access_role_version_permission AS role_permission
+                  ON role_permission.role_version_id = role_version.id
                 LEFT JOIN public.permission AS granted_permission
                   ON granted_permission.code = role_permission.permission_code
                  AND granted_permission.is_active

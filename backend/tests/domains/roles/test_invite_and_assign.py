@@ -527,6 +527,7 @@ async def test_support_cannot_assign_regular_role_to_active_owner(
     make_user,
 ) -> None:
     tenant = await make_tenant()
+    developer = await make_user(is_developer=True)
     owner, _owner_role, owner_permissions, service = await _owner_context(
         db_session,
         tenant_id=tenant.id,
@@ -543,7 +544,6 @@ async def test_support_cannot_assign_regular_role_to_active_owner(
         home_tenant_id=tenant.id,
         is_owner=True,
     )
-    developer = await make_user(is_developer=True)
 
     with pytest.raises(PermissionDeniedError, match="protected ownership workflow"):
         await service.assign_role(
@@ -583,6 +583,7 @@ async def test_support_cannot_revoke_existing_assignment_from_active_owner(
     make_user,
 ) -> None:
     tenant = await make_tenant()
+    developer = await make_user(is_developer=True)
     _owner, owner_role, _owner_permissions, service = await _owner_context(
         db_session,
         tenant_id=tenant.id,
@@ -600,7 +601,6 @@ async def test_support_cannot_revoke_existing_assignment_from_active_owner(
         role_id=owner_role.id,
         password_required=False,
     )
-    developer = await make_user(is_developer=True)
 
     with pytest.raises(PermissionDeniedError, match="protected ownership workflow"):
         await service.revoke_assignment(

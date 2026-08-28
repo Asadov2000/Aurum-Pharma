@@ -2,6 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 
 import {
   acceptOwnershipTransfer,
+  archiveRole,
   cancelOwnershipTransfer,
   createAssignment,
   createOwnershipTransfer,
@@ -9,6 +10,7 @@ import {
   listPermissions,
   listOwnershipTransfers,
   listRoles,
+  listRoleVersions,
   listTemplates,
   listUsers,
   offboardUser,
@@ -22,6 +24,7 @@ import {
   type AssignmentCreatePayload,
   type OwnershipTransferCreatePayload,
   type RoleCreatePayload,
+  type RoleArchivePayload,
   type RoleUpdatePayload,
   type UserSearchParams,
   type UserUpdatePayload,
@@ -33,6 +36,7 @@ export const rolesKeys = {
   permissions: ["roles", "permissions"] as const,
   templates: ["roles", "templates"] as const,
   ownershipTransfers: ["roles", "ownership-transfers"] as const,
+  versions: (roleId: string) => ["roles", "versions", roleId] as const,
 };
 
 export function useUsersQuery(params: UserSearchParams, enabled = true) {
@@ -49,6 +53,14 @@ export function useRolesQuery(enabled = true) {
     queryKey: rolesKeys.roles,
     queryFn: listRoles,
     enabled,
+  });
+}
+
+export function useRoleVersionsQuery(roleId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: rolesKeys.versions(roleId ?? "none"),
+    queryFn: () => listRoleVersions(roleId ?? ""),
+    enabled: enabled && roleId !== null,
   });
 }
 
@@ -124,8 +136,22 @@ export function useUpdateRole() {
   return useMutation({
     mutationFn: (args: { id: string; payload: RoleUpdatePayload }) =>
       updateRole(args.id, args.payload),
-    onSuccess: () => {
+    onSuccess: (_data, args) => {
       void qc.invalidateQueries({ queryKey: rolesKeys.roles });
+      void qc.invalidateQueries({ queryKey: rolesKeys.versions(args.id) });
+    },
+  });
+}
+
+export function useArchiveRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; payload: RoleArchivePayload }) =>
+      archiveRole(args.id, args.payload),
+    onSuccess: (_data, args) => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.roles });
+      void qc.invalidateQueries({ queryKey: rolesKeys.users });
+      void qc.invalidateQueries({ queryKey: rolesKeys.versions(args.id) });
     },
   });
 }

@@ -191,6 +191,45 @@ async def test_aurum_app_cannot_assign_generic_role_to_active_owner(
                 "target_membership_id": target_membership_id,
             },
         )
+
+    async with maintenance_engine.begin() as connection:
+        await connection.execute(
+            text("""
+                INSERT INTO public.access_role_version (
+                  id, role_id, tenant_id, version, name, description, status,
+                  creation_xid, published_at, created_by
+                )
+                SELECT
+                  gen_random_uuid(), role.id, role.tenant_id, role.version,
+                  role.name, role.description, 'published', txid_current(),
+                  statement_timestamp(), role.created_by
+                FROM public.role AS role
+                WHERE role.id IN (:owner_role_id, :delegated_role_id)
+                """),
+            {
+                "owner_role_id": owner_role_id,
+                "delegated_role_id": delegated_role_id,
+            },
+        )
+        await connection.execute(
+            text("""
+                INSERT INTO public.access_role_version_permission (
+                  role_version_id, permission_code
+                )
+                SELECT version.id, permission.permission_code
+                FROM public.access_role_version AS version
+                JOIN public.role_permission AS permission
+                  ON permission.role_id = version.role_id
+                WHERE version.role_id IN (:owner_role_id, :delegated_role_id)
+                """),
+            {
+                "owner_role_id": owner_role_id,
+                "delegated_role_id": delegated_role_id,
+            },
+        )
+
+    async with db_engine.begin() as support:
+        await support.execute(text("SELECT set_config('app.support_session', 'true', true)"))
         await support.execute(
             text("""
                 INSERT INTO public.user_assignment (
@@ -278,6 +317,34 @@ async def test_aurum_app_cannot_assign_generic_role_to_active_owner(
             text("DELETE FROM public.user_assignment WHERE tenant_id = :tenant_id"),
             {"tenant_id": tenant_id},
         )
+
+    async with maintenance_engine.begin() as connection:
+        await connection.execute(
+            text("""
+                DELETE FROM public.access_role_version_permission
+                WHERE role_version_id IN (
+                  SELECT id FROM public.access_role_version
+                  WHERE role_id IN (:owner_role_id, :delegated_role_id)
+                )
+                """),
+            {
+                "owner_role_id": owner_role_id,
+                "delegated_role_id": delegated_role_id,
+            },
+        )
+        await connection.execute(
+            text("""
+                DELETE FROM public.access_role_version
+                WHERE role_id IN (:owner_role_id, :delegated_role_id)
+                """),
+            {
+                "owner_role_id": owner_role_id,
+                "delegated_role_id": delegated_role_id,
+            },
+        )
+
+    async with db_engine.begin() as support:
+        await support.execute(text("SELECT set_config('app.support_session', 'true', true)"))
         await support.execute(
             text("""
                 DELETE FROM public.role_permission

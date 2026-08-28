@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
@@ -324,7 +326,7 @@ async def test_role_update_increments_version_and_records_before_after(
     }
 
 
-async def test_role_with_hidden_capability_cannot_be_modified_by_forged_request(
+async def test_hidden_capability_cannot_be_injected_into_published_role(
     db_session: AsyncSession,
     make_tenant,
     make_owner,
@@ -344,32 +346,19 @@ async def test_role_with_hidden_capability_cannot_be_modified_by_forged_request(
         description=None,
         permission_codes=["pos.sell"],
     )
-    db_session.add(
-        RolePermission(
-            role_id=role.id,
-            permission_code="audit.view.global",
+    savepoint = await db_session.begin_nested()
+    with pytest.raises(DBAPIError, match="publication workflow"):
+        db_session.add(
+            RolePermission(
+                role_id=role.id,
+                permission_code="audit.view.global",
+            )
         )
-    )
-    await db_session.flush()
-
-    with pytest.raises(
-        PermissionDeniedError,
-        match="outside the delegation envelope",
-    ):
-        await service.update_role(
-            actor_id=owner.id,
-            actor_permissions=owner_permissions,
-            actor_is_developer=False,
-            actor_is_administrator=False,
-            tenant_id=tenant.id,
-            role_id=role.id,
-            expected_version=role.version,
-            name=None,
-            description="Forged update",
-            permission_codes=["pos.sell"],
-        )
+        await db_session.flush()
+    await savepoint.rollback()
 
     assert role.description is None
+    assert await repo.get_role_permissions(role.id) == ["pos.sell"]
 
 
 async def test_public_role_contract_rejects_numeric_level(
@@ -390,6 +379,7 @@ async def test_public_role_contract_rejects_numeric_level(
             tenant_id=tenant.id,
             is_developer=False,
             is_administrator=False,
+            mfa_verified_at=datetime.now(UTC),
         )
 
         response = await client.post(
@@ -412,6 +402,7 @@ async def test_role_update_rejects_stale_expected_version_with_409(
     client: AsyncClient,
     make_tenant,
     make_owner,
+    make_user,
 ) -> None:
     async def _override() -> AsyncIterator[AsyncSession]:
         yield db_session
@@ -431,11 +422,20 @@ async def test_role_update_rejects_stale_expected_version_with_409(
             description=None,
             permission_codes=["pos.sell"],
         )
+        assigned_user = await make_user(home_tenant_id=tenant.id)
+        await repo.insert_assignment(
+            user_id=assigned_user.id,
+            tenant_id=tenant.id,
+            branch_id=None,
+            role_id=role.id,
+            password_required=False,
+        )
         token = create_access_token(
             owner.id,
             tenant_id=tenant.id,
             is_developer=False,
             is_administrator=False,
+            mfa_verified_at=datetime.now(UTC),
         )
         headers = {"Authorization": f"Bearer {token}"}
         initial_version = role.version
@@ -453,6 +453,7 @@ async def test_role_update_rejects_stale_expected_version_with_409(
 
         assert first.status_code == 200
         assert first.json()["version"] == 2
+        assert first.json()["active_assignment_count"] == 1
         assert stale.status_code == 409
         assert stale.json()["error"] == {
             "code": "conflict",
@@ -474,7 +475,15 @@ async def test_developer_can_create_tenant_role_but_not_platform_grant(
     tenant = await make_tenant()
     developer = await make_user(
         email="developer-builder@aurum.tj",
-        home_tenant_id=tenant.id,
+        is_developer=True,
+    )
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(developer.id)},
+    )
+    await db_session.execute(
+        text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(tenant.id)},
     )
     service = RolesService(RolesRepository(db_session))
 
@@ -486,10 +495,10 @@ async def test_developer_can_create_tenant_role_but_not_platform_grant(
         tenant_id=tenant.id,
         name="Менеджер",
         description=None,
-        permission_codes=["tenant.export.full"],
+        permission_codes=["catalog.view"],
     )
     assert role.tenant_id == tenant.id
-    assert codes == ["tenant.export.full"]
+    assert codes == ["catalog.view"]
 
     with pytest.raises(PermissionDeniedError):
         await service.create_role(

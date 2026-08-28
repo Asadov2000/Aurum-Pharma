@@ -102,6 +102,7 @@ export function RoleBuilderModal({
   const [topError, setTopError] = useState<string | null>(null);
   const [pendingDangerousSubmission, setPendingDangerousSubmission] =
     useState<PendingDangerousSubmission | null>(null);
+  const [pendingPublication, setPendingPublication] = useState<RoleSubmission | null>(null);
   const deferredPermissionSearch = useDeferredValue(permissionSearch);
 
   // The server catalogue is authoritative. The extra client-side filter keeps
@@ -208,9 +209,11 @@ export function RoleBuilderModal({
         await createRole.mutateAsync(values);
       }
       setPendingDangerousSubmission(null);
+      setPendingPublication(null);
       onClose();
     } catch (error) {
       setPendingDangerousSubmission(null);
+      setPendingPublication(null);
       setTopError(describeApiError(error, "Не удалось сохранить роль"));
     }
   };
@@ -266,6 +269,10 @@ export function RoleBuilderModal({
         values: submission,
         permissions: newlyAddedDangerousPermissions,
       });
+      return;
+    }
+    if (mode === "edit") {
+      setPendingPublication(submission);
       return;
     }
     await saveRole(submission);
@@ -683,7 +690,6 @@ export function RoleBuilderModal({
             )}
           </section>
         </div>
-
       </div>
 
       {topError ? (
@@ -713,7 +719,7 @@ export function RoleBuilderModal({
           Отмена
         </Button>
         <Button type="submit" isLoading={submitting} disabled={saveDisabled}>
-          {mode === "edit" ? "Сохранить" : "Создать роль"}
+          {mode === "edit" ? "Проверить и опубликовать" : "Создать роль"}
         </Button>
       </div>
 
@@ -752,7 +758,43 @@ export function RoleBuilderModal({
         onCancel={() => setPendingDangerousSubmission(null)}
         onConfirm={() => {
           if (!pendingDangerousSubmission) return;
-          void saveRole(pendingDangerousSubmission.values);
+          const submission = pendingDangerousSubmission.values;
+          setPendingDangerousSubmission(null);
+          if (mode === "edit") {
+            setPendingPublication(submission);
+            return;
+          }
+          void saveRole(submission);
+        }}
+      />
+      <ConfirmDialog
+        open={pendingPublication !== null}
+        title={`Опубликовать версию ${(role?.version ?? 0) + 1}?`}
+        message={
+          pendingPublication ? (
+            <div className="space-y-2">
+              <p>
+                Изменения станут активны сразу после публикации. Предыдущая версия останется в
+                истории и не будет изменена.
+              </p>
+              <div className="rounded-md border border-border bg-surface-muted px-3 py-2 text-foreground">
+                <p>
+                  Права: <strong className="text-success">+{addedCount}</strong> /{" "}
+                  <strong className="text-danger">−{removedCount}</strong>
+                </p>
+                <p className="mt-1">
+                  Затронуто активных назначений: {role?.active_assignment_count ?? 0}
+                </p>
+              </div>
+            </div>
+          ) : null
+        }
+        confirmLabel="Опубликовать версию"
+        isLoading={updateRole.isPending}
+        onCancel={() => setPendingPublication(null)}
+        onConfirm={() => {
+          if (!pendingPublication) return;
+          void saveRole(pendingPublication);
         }}
       />
     </form>
@@ -841,9 +883,7 @@ function isRiskPermission(permission: Permission): boolean {
 }
 
 function requiresExplicitConfirmation(permission: Permission): boolean {
-  return (
-    permission.is_dangerous || permission.requires_confirmation || permission.requires_step_up
-  );
+  return permission.is_dangerous || permission.requires_confirmation || permission.requires_step_up;
 }
 
 function permissionRiskLabel(permission: Permission): string {

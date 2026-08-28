@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Text,
     UniqueConstraint,
@@ -167,6 +168,43 @@ class Role(Base):
         ),
         UniqueConstraint("tenant_id", "name", name="uq_role_tenant_name"),
     )
+
+
+class AccessRoleVersion(Base):
+    """Immutable role definition published through protected database commands."""
+
+    __tablename__ = "access_role_version"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    role_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("role.id", ondelete="RESTRICT"), nullable=False
+    )
+    tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    creation_xid: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class AccessRoleVersionPermission(Base):
+    __tablename__ = "access_role_version_permission"
+
+    role_version_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("access_role_version.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    permission_code: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("permission.code", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class TenantMembership(Base):
@@ -366,6 +404,7 @@ class UserAssignment(Base):
     role_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("role.id"), nullable=False
     )
+    role_version_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     password_required: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
@@ -380,6 +419,12 @@ class UserAssignment(Base):
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["role_version_id", "role_id"],
+            ["access_role_version.id", "access_role_version.role_id"],
+            name="fk_user_assignment_role_version_role",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "user_id", "tenant_id", "branch_id", name="uq_user_assignment_user_tenant_branch"
         ),

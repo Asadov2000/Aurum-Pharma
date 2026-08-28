@@ -107,6 +107,30 @@ async def _cleanup_indirect_scope_rows(
     async with support_engine.begin() as conn:
         if tenant_ids:
             await conn.execute(
+                text("DELETE FROM user_assignment " "WHERE tenant_id = ANY(CAST(:ids AS UUID[]))"),
+                {"ids": tenant_ids},
+            )
+    if tenant_ids:
+        async with maintenance_engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    DELETE FROM access_role_version_permission
+                    WHERE role_version_id IN (
+                      SELECT id FROM access_role_version
+                      WHERE tenant_id = ANY(CAST(:ids AS UUID[]))
+                    )
+                    """),
+                {"ids": tenant_ids},
+            )
+            await conn.execute(
+                text(
+                    "DELETE FROM access_role_version " "WHERE tenant_id = ANY(CAST(:ids AS UUID[]))"
+                ),
+                {"ids": tenant_ids},
+            )
+    async with support_engine.begin() as conn:
+        if tenant_ids:
+            await conn.execute(
                 text("DELETE FROM tenant WHERE id = ANY(CAST(:ids AS UUID[]))"),
                 {"ids": tenant_ids},
             )
@@ -199,6 +223,41 @@ class IndirectScopeRows:
     notification_ids: tuple[str, ...]
     delivery_ids: tuple[str, ...]
     permission_codes: tuple[str, ...]
+
+
+async def _publish_role_versions(
+    maintenance_engine: AsyncEngine,
+    role_ids: list[str],
+) -> None:
+    async with maintenance_engine.begin() as conn:
+        await conn.execute(
+            text("""
+                INSERT INTO access_role_version (
+                  id, role_id, tenant_id, version, name, description, status,
+                  creation_xid, published_at, created_by
+                )
+                SELECT
+                  gen_random_uuid(), role.id, role.tenant_id, role.version,
+                  role.name, role.description, 'published', txid_current(),
+                  statement_timestamp(), NULL
+                FROM role
+                WHERE id = ANY(CAST(:role_ids AS UUID[]))
+                """),
+            {"role_ids": role_ids},
+        )
+        await conn.execute(
+            text("""
+                INSERT INTO access_role_version_permission (
+                  role_version_id, permission_code
+                )
+                SELECT version.id, role_permission.permission_code
+                FROM access_role_version AS version
+                JOIN role_permission
+                  ON role_permission.role_id = version.role_id
+                WHERE version.role_id = ANY(CAST(:role_ids AS UUID[]))
+                """),
+            {"role_ids": role_ids},
+        )
 
 
 @pytest_asyncio.fixture
@@ -417,22 +476,6 @@ async def indirect_scope_rows(
                     },
                 )
 
-            for user_index, tenant_index in ((0, 0), (1, 1), (2, 0)):
-                role_id = role_ids[2] if user_index == 2 else owner_role_ids[tenant_index]
-                await conn.execute(
-                    text(
-                        "INSERT INTO user_assignment "
-                        "(user_id, tenant_id, role_id, password_required) "
-                        "VALUES (:user_id, :tenant_id, :role_id, :password_required)"
-                    ),
-                    {
-                        "user_id": user_ids[user_index],
-                        "tenant_id": tenant_ids[tenant_index],
-                        "role_id": role_id,
-                        "password_required": user_index == 0,
-                    },
-                )
-
             for index in range(2):
                 await conn.execute(
                     text(
@@ -501,6 +544,25 @@ async def indirect_scope_rows(
                     "event_type": "security.rls.recipient",
                 },
             )
+
+        await _publish_role_versions(maintenance_engine, [*role_ids, *owner_role_ids])
+
+        async with support_engine_iso.begin() as conn:
+            for user_index, tenant_index in ((0, 0), (1, 1), (2, 0)):
+                role_id = role_ids[2] if user_index == 2 else owner_role_ids[tenant_index]
+                await conn.execute(
+                    text(
+                        "INSERT INTO user_assignment "
+                        "(user_id, tenant_id, role_id, password_required) "
+                        "VALUES (:user_id, :tenant_id, :role_id, :password_required)"
+                    ),
+                    {
+                        "user_id": user_ids[user_index],
+                        "tenant_id": tenant_ids[tenant_index],
+                        "role_id": role_id,
+                        "password_required": user_index == 0,
+                    },
+                )
 
         yield IndirectScopeRows(
             token=token,
@@ -1251,13 +1313,6 @@ async def test_role_and_subscription_writes_are_isolated(
         )
         await conn.execute(
             text(
-                "INSERT INTO role_permission (role_id, permission_code) "
-                "VALUES (:role_id, :permission_code)"
-            ),
-            {"role_id": rows.role_ids[2], "permission_code": rows.permission_codes[1]},
-        )
-        await conn.execute(
-            text(
                 "INSERT INTO notification_subscription "
                 "(user_id, event_type) VALUES (:user_id, 'security.rls.own')"
             ),
@@ -1265,6 +1320,11 @@ async def test_role_and_subscription_writes_are_isolated(
         )
 
     denied_statements = (
+        (
+            "INSERT INTO role_permission (role_id, permission_code) "
+            "VALUES (:role_id, :permission_code)",
+            {"role_id": rows.role_ids[2], "permission_code": rows.permission_codes[1]},
+        ),
         (
             "INSERT INTO role_permission (role_id, permission_code) "
             "VALUES (:role_id, :permission_code)",
@@ -1340,24 +1400,11 @@ async def test_role_and_subscription_writes_are_isolated(
         assert cross_subscription_delete.rowcount == 0
 
 
-async def test_role_mutations_recheck_live_owner_scope(
-    support_engine_iso: AsyncEngine,
+async def test_published_role_mutations_require_publication_workflow(
     app_engine_iso: AsyncEngine,
     indirect_scope_rows: IndirectScopeRows,
 ) -> None:
     rows = indirect_scope_rows
-
-    async with support_engine_iso.begin() as conn:
-        await conn.execute(
-            text(
-                "DELETE FROM role_permission "
-                "WHERE role_id = :role_id AND permission_code = :permission_code"
-            ),
-            {
-                "role_id": rows.owner_role_ids[0],
-                "permission_code": "roles.update",
-            },
-        )
 
     await _assert_rls_denied(
         app_engine_iso,

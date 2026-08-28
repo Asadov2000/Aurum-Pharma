@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.models import AppUser
@@ -102,12 +102,37 @@ async def make_user(db_session: AsyncSession):  # type: ignore[no-untyped-def]
 
 @pytest_asyncio.fixture
 async def make_owner(db_session: AsyncSession):  # type: ignore[no-untyped-def]
+    actor: AppUser | None = None
+
     async def _make(*, tenant_id, email: str | None = None, full_name: str = "Owner"):
-        return await RolesService(RolesRepository(db_session)).provision_owner(
+        nonlocal actor
+        if actor is None:
+            actor = await create_test_platform_user(
+                db_session,
+                access_kind="developer",
+                email=f"owner-actor-{uuid4().hex[:8]}@aurum.tj",
+                full_name="Owner provisioning actor",
+            )
+        await db_session.execute(
+            text("SELECT set_config('app.user_id', :user_id, true)"),
+            {"user_id": str(actor.id)},
+        )
+        provisioned = await RolesService(RolesRepository(db_session)).provision_owner(
             tenant_id=tenant_id,
             email=email or f"owner-{uuid4().hex[:8]}@aurum.tj",
             full_name=full_name,
+            actor_id=actor.id,
         )
+        owner, _membership, _ownership, _role = provisioned
+        await db_session.execute(
+            text("SELECT set_config('app.user_id', :user_id, true)"),
+            {"user_id": str(owner.id)},
+        )
+        await db_session.execute(
+            text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+            {"tenant_id": str(tenant_id)},
+        )
+        return provisioned
 
     return _make
 
@@ -133,7 +158,22 @@ async def make_tenant_role(db_session: AsyncSession):  # type: ignore[no-untyped
     «Кассир» templates seeded in migration 0019.
     """
 
+    support_actor = await create_test_platform_user(
+        db_session,
+        access_kind="developer",
+        email=f"role-actor-{uuid4().hex[:8]}@aurum.tj",
+        full_name="Role fixture actor",
+    )
+
     async def _make(*, tenant_id, template_name: str, level: int, name: str | None = None) -> Role:
+        await db_session.execute(
+            text("SELECT set_config('app.user_id', :user_id, true)"),
+            {"user_id": str(support_actor.id)},
+        )
+        await db_session.execute(
+            text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+            {"tenant_id": str(tenant_id)},
+        )
         tpl = (
             await db_session.execute(select(RoleTemplate).where(RoleTemplate.name == template_name))
         ).scalar_one()
@@ -162,6 +202,7 @@ async def make_tenant_role(db_session: AsyncSession):  # type: ignore[no-untyped
         for code in codes:
             db_session.add(RolePermission(role_id=role.id, permission_code=code))
         await db_session.flush()
+        await RolesRepository(db_session).initialize_role_version(role.id)
         return role
 
     return _make

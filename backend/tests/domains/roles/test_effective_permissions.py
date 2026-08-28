@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.roles.models import Permission, TenantMembership, UserAssignment
 from app.domains.roles.repository import RolesRepository
+from app.domains.roles.service import RolesService
 
 
 async def _assign(
@@ -27,30 +28,56 @@ async def _assign(
     return assignment
 
 
-async def test_effective_permissions_exclude_inactive_role(
-    db_session: AsyncSession, make_tenant, make_tenant_role, make_user
+async def test_effective_permissions_follow_archived_role_replacement(
+    db_session: AsyncSession, make_owner, make_tenant, make_user
 ) -> None:
     tenant = await make_tenant()
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
     user = await make_user(home_tenant_id=tenant.id)
-    role = await make_tenant_role(
+    repository = RolesRepository(db_session)
+    service = RolesService(repository)
+    owner_permissions = set(await repository.get_role_permissions(owner_role.id))
+    role, _permissions = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
         tenant_id=tenant.id,
-        template_name="Кассир",
-        level=4,
+        name="Role to archive",
+        description=None,
+        permission_codes=["pos.sell"],
     )
-    await _assign(
-        db_session,
+    replacement, _permissions = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        name="Archive replacement",
+        description=None,
+        permission_codes=["catalog.view"],
+    )
+    await repository.insert_assignment(
         user_id=user.id,
         tenant_id=tenant.id,
+        branch_id=None,
         role_id=role.id,
+        password_required=False,
     )
-    repository = RolesRepository(db_session)
 
     assert "pos.sell" in await repository.effective_permissions(user.id, tenant.id)
 
-    role.is_active = False
-    await db_session.flush()
+    await service.archive_role_with_replacement(
+        actor_id=owner.id,
+        tenant_id=tenant.id,
+        role_id=role.id,
+        expected_version=role.version,
+        replacement_role_id=replacement.id,
+    )
 
-    assert await repository.effective_permissions(user.id, tenant.id) == set()
+    permissions = await repository.effective_permissions(user.id, tenant.id)
+    assert "pos.sell" not in permissions
+    assert "catalog.view" in permissions
 
 
 async def test_effective_permissions_exclude_inactive_permission(

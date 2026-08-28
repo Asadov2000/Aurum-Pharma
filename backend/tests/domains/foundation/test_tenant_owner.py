@@ -8,8 +8,9 @@ from uuid import uuid4
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
-from app.core.deps import get_db
+from app.core.deps import _seed_request_db_context, get_db
 from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.foundation.repository import FoundationRepository
@@ -55,7 +56,8 @@ async def _make_user(db: AsyncSession, **flags: bool) -> AppUser:
 
 
 async def test_developer_provisions_owner(db_session: AsyncSession, client: AsyncClient) -> None:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override
@@ -112,7 +114,8 @@ async def test_support_creates_pending_member_at_frontend_contract_path(
     db_session: AsyncSession,
     client: AsyncClient,
 ) -> None:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override
@@ -167,7 +170,8 @@ async def test_support_creates_pending_member_at_frontend_contract_path(
 async def test_owner_role_matches_template_permissions(
     db_session: AsyncSession, client: AsyncClient
 ) -> None:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override
@@ -196,7 +200,8 @@ async def test_owner_role_matches_template_permissions(
 
 
 async def test_non_support_actor_forbidden(db_session: AsyncSession, client: AsyncClient) -> None:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override
@@ -228,7 +233,8 @@ async def test_non_support_actor_forbidden(db_session: AsyncSession, client: Asy
 
 
 async def test_duplicate_email_conflict(db_session: AsyncSession, client: AsyncClient) -> None:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override
@@ -258,7 +264,8 @@ async def test_duplicate_email_conflict(db_session: AsyncSession, client: AsyncC
 async def test_bootstrap_endpoint_rejects_second_active_owner(
     db_session: AsyncSession, client: AsyncClient
 ) -> None:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override

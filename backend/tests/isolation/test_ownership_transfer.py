@@ -149,6 +149,28 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
                 "now": now,
             },
         )
+    async with maintenance_engine.begin() as connection:
+        await connection.execute(
+            text("""
+                INSERT INTO public.access_role_version (
+                  id, role_id, tenant_id, version, name, description, status,
+                  creation_xid, published_at, created_by
+                )
+                SELECT
+                  gen_random_uuid(), role.id, role.tenant_id, role.version,
+                  role.name, role.description, 'published', txid_current(),
+                  statement_timestamp(), NULL
+                FROM public.role AS role
+                WHERE role.id IN (:owner_role_id, :employee_role_id)
+                """),
+            {
+                "owner_role_id": owner_role_id,
+                "employee_role_id": employee_role_id,
+            },
+        )
+
+    async with db_engine.begin() as connection:
+        await connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
         await connection.execute(
             text("""
                 INSERT INTO public.user_assignment (
@@ -407,6 +429,24 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
     async with maintenance_engine.begin() as connection:
         await connection.execute(
             text("DELETE FROM public.tenant_ownership_transfer WHERE tenant_id = :tenant_id"),
+            {"tenant_id": tenant_id},
+        )
+        await connection.execute(
+            text("DELETE FROM public.user_assignment WHERE tenant_id = :tenant_id"),
+            {"tenant_id": tenant_id},
+        )
+        await connection.execute(
+            text("""
+                DELETE FROM public.access_role_version_permission
+                WHERE role_version_id IN (
+                  SELECT id FROM public.access_role_version
+                  WHERE tenant_id = :tenant_id
+                )
+                """),
+            {"tenant_id": tenant_id},
+        )
+        await connection.execute(
+            text("DELETE FROM public.access_role_version WHERE tenant_id = :tenant_id"),
             {"tenant_id": tenant_id},
         )
         await connection.execute(

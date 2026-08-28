@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import timedelta
 from uuid import UUID
 
@@ -31,7 +32,9 @@ from app.domains.roles.repository import (
     AuthorizationSnapshot,
     DirectoryUser,
     OwnershipTransferRecord,
+    RoleArchiveResult,
     RolesRepository,
+    RoleVersionRecord,
 )
 
 logger = structlog.get_logger("roles.service")
@@ -68,6 +71,18 @@ def _ownership_transfer_error(exc: DBAPIError) -> Exception:
         return ConflictError("Состояние владения изменилось; обновите страницу и повторите")
     logger.error("ownership_transfer_database_guard_failed", sqlstate=sqlstate)
     return RuntimeError("Unexpected ownership transfer database failure")
+
+
+def _role_publication_error(exc: DBAPIError) -> Exception:
+    sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    if sqlstate == "42501":
+        return PermissionDeniedError("Публикация этой роли недоступна")
+    if sqlstate in {"23505", "40001", "40P01"}:
+        return ConflictError("Роль изменилась; обновите страницу и повторите")
+    if sqlstate in {"22023", "23514", "P0001"}:
+        return BusinessRuleError("Версия роли не прошла проверку безопасности")
+    logger.error("role_publication_database_guard_failed", sqlstate=sqlstate)
+    return RuntimeError("Unexpected role publication database failure")
 
 
 def perms_cache_key(user_id: UUID, tenant_id: UUID) -> str:
@@ -108,7 +123,7 @@ class RolesService:
         actor_permissions: set[str],
         actor_is_developer: bool,
         actor_is_administrator: bool,
-    ) -> list[tuple[Role, list[str], bool]]:
+    ) -> list[tuple[Role, list[str], bool, int]]:
         roles = [
             role
             for role in await self.repo.list_roles(tenant_id=tenant_id)
@@ -123,11 +138,21 @@ class RolesService:
             actor_is_administrator=actor_is_administrator,
         )
         allowed = {permission.code for permission in catalog}
-        result: list[tuple[Role, list[str], bool]] = []
+        assignment_counts = await self.repo.active_assignment_counts(
+            [role.id for role in roles], tenant_id=tenant_id
+        )
+        result: list[tuple[Role, list[str], bool, int]] = []
         for role in roles:
             role_codes = set(permissions.get(role.id, []))
             visible_codes = sorted(role_codes & allowed)
-            result.append((role, visible_codes, bool(role_codes - allowed)))
+            result.append(
+                (
+                    role,
+                    visible_codes,
+                    bool(role_codes - allowed),
+                    assignment_counts.get(role.id, 0),
+                )
+            )
         return result
 
     async def list_templates_with_permissions(
@@ -276,7 +301,7 @@ class RolesService:
         tenant_id: UUID,
         email: str,
         full_name: str,
-        actor_id: UUID | None = None,
+        actor_id: UUID,
     ) -> tuple[AppUser, TenantMembership, TenantOwnership, Role]:
         """Atomically create the account, active membership, ownership and
         protected owner assignment. The request transaction is the atomic
@@ -432,6 +457,11 @@ class RolesService:
                 details={"role_id": str(role.id)},
             )
         await self.repo.set_role_permissions(role.id, codes)
+        if await self.repo.get_published_role_version_id(role.id) is None:
+            try:
+                await self.repo.initialize_role_version(role.id)
+            except DBAPIError as exc:
+                raise _role_publication_error(exc) from exc
         return role
 
     # -------------------------------------------------------------------------
@@ -475,6 +505,10 @@ class RolesService:
             updated_by=actor_id,
         )
         await self.repo.set_role_permissions(role.id, codes)
+        try:
+            await self.repo.initialize_role_version(role.id)
+        except DBAPIError as exc:
+            raise _role_publication_error(exc) from exc
         return role, codes
 
     async def update_role(
@@ -534,32 +568,103 @@ class RolesService:
             requested=requested_codes,
         )
 
-        fields: dict[str, object] = {}
+        next_name = role.name
+        next_description = role.description
         if name is not None and name != role.name:
             self._assert_role_name_available(name)
             clash = await self.repo.get_role_by_name(name, tenant_id=tenant_id)
             if clash is not None and clash.id != role.id:
                 raise ConflictError("A role with this name already exists")
-            fields["name"] = name.strip()
+            next_name = name.strip()
         if description is not None and description != role.description:
-            fields["description"] = description
+            next_description = description
 
         permissions_changed = codes != current_codes
-        if fields or permissions_changed:
-            fields["version"] = role.version + 1
-            fields["updated_by"] = actor_id
-            role = await self.repo.update_role(role, **fields)
-
-        affected_user_ids = (
-            await self.repo.active_user_ids_for_role(role.id, tenant_id=tenant_id)
-            if permissions_changed
-            else []
+        definition_changed = (
+            next_name != role.name or next_description != role.description or permissions_changed
         )
-        if permissions_changed:
-            await self.repo.set_role_permissions(role.id, codes)
+        if not definition_changed:
+            return role, codes
+
+        affected_user_ids = await self.repo.active_user_ids_for_role(role.id, tenant_id=tenant_id)
+        try:
+            await self.repo.publish_role_version(
+                role_id=role.id,
+                expected_version=expected_version,
+                name=next_name,
+                description=next_description,
+                permission_codes=codes,
+            )
+        except DBAPIError as exc:
+            raise _role_publication_error(exc) from exc
+        refreshed = await self.repo.get_role_for_update(role.id)
+        if refreshed is None:
+            raise RuntimeError("Published role is unavailable")
+        role = refreshed
         if affected_user_ids:
             await self.invalidate_users_perms(affected_user_ids, tenant_id)
         return role, codes
+
+    async def list_role_versions(
+        self,
+        *,
+        actor_id: UUID,
+        actor_permissions: set[str],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+        tenant_id: UUID,
+        role_id: UUID,
+    ) -> list[RoleVersionRecord]:
+        role = await self.repo.get_role(role_id)
+        if role is None or role.tenant_id != tenant_id or role.is_system:
+            raise NotFoundError("Role not found")
+        catalog = await self._delegation_catalog(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            actor_permissions=actor_permissions,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+        )
+        allowed = {permission.code for permission in catalog}
+        return [
+            replace(
+                version,
+                permissions=tuple(code for code in version.permissions if code in allowed),
+            )
+            for version in await self.repo.list_role_versions(role_id)
+        ]
+
+    async def archive_role_with_replacement(
+        self,
+        *,
+        actor_id: UUID,
+        tenant_id: UUID,
+        role_id: UUID,
+        expected_version: int,
+        replacement_role_id: UUID,
+    ) -> RoleArchiveResult:
+        role = await self.repo.get_role(role_id)
+        if role is None or role.tenant_id != tenant_id:
+            raise NotFoundError("Role not found")
+        affected_user_ids = await self.repo.active_user_ids_for_role(role_id, tenant_id=tenant_id)
+        try:
+            result = await self.repo.archive_role_with_replacement(
+                role_id=role_id,
+                expected_version=expected_version,
+                replacement_role_id=replacement_role_id,
+            )
+        except DBAPIError as exc:
+            raise _role_publication_error(exc) from exc
+        if affected_user_ids:
+            await self.invalidate_users_perms(affected_user_ids, tenant_id)
+        logger.info(
+            "role_archived_with_replacement",
+            tenant_id=str(tenant_id),
+            role_id=str(role_id),
+            actor_id=str(actor_id),
+            affected_memberships=result.affected_memberships,
+        )
+        return result
 
     @staticmethod
     def _assert_role_name_available(name: str) -> None:

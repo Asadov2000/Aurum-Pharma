@@ -31,8 +31,6 @@ from app.domains.billing.service import BillingService
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.roles.models import (
-    Role,
-    RolePermission,
     TenantMembership,
     UserAssignment,
 )
@@ -43,6 +41,7 @@ from tests.domains.billing.test_subscription_pricing import (
     _prepare_trial_context,
     _publish_new_customer_price,
 )
+from tests.role_version_helpers import create_published_test_role
 
 
 @pytest_asyncio.fixture
@@ -98,27 +97,22 @@ async def _tenant_token(
         full_name=user.full_name,
         status="active",
     )
-    role = Role(
+    role = await create_published_test_role(
+        db_session,
         tenant_id=tenant_id,
         name=f"Payment submission role {suffix}",
+        permission_codes=permissions,
         level=3,
-        is_system=False,
     )
-    db_session.add_all([membership, role])
+    db_session.add(membership)
     await db_session.flush()
-    db_session.add_all(
-        [
-            *[
-                RolePermission(role_id=role.id, permission_code=permission)
-                for permission in permissions
-            ],
-            UserAssignment(
-                tenant_id=tenant_id,
-                user_id=user.id,
-                membership_id=membership.id,
-                role_id=role.id,
-            ),
-        ]
+    db_session.add(
+        UserAssignment(
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_id=membership.id,
+            role_id=role.id,
+        )
     )
     session = Session(
         user_id=user.id,
@@ -127,6 +121,9 @@ async def _tenant_token(
     )
     db_session.add(session)
     await db_session.flush()
+    await db_session.execute(text("SELECT set_config('app.support_access_session_id', '', true)"))
+    await db_session.execute(text("SELECT set_config('app.auth_session_id', '', true)"))
+    await db_session.execute(text("SELECT set_config('app.tenant_id', '', true)"))
     return create_access_token(
         user.id,
         tenant_id=tenant_id,
