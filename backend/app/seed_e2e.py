@@ -32,6 +32,7 @@ from app.domains.roles.service import RolesService
 CONFIRMATION_ENV = "AURUM_E2E_SEED"
 DEV_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 ADMIN_TOTP_SECRET = "KRUGS4ZANFZSAYJAMNXW2L3ON5XCA5DF"
+OWNER_TOTP_SECRET = "MFRGGZDFMZTWQ2LKMFRGGZDFMZTWQ2LK"
 
 
 def require_e2e_seed_confirmation(*, environment: str, confirmation: str | None) -> None:
@@ -187,6 +188,36 @@ async def main() -> None:
             )
             owner.password_hash = hash_password("Owner1234")
             owner.activated_at = now
+            await session.execute(
+                text("""
+                    INSERT INTO public.support_mfa (
+                      user_id,
+                      active_secret_ciphertext,
+                      active_key_version,
+                      status,
+                      active_generation,
+                      confirmed_at
+                    ) VALUES (
+                      :user_id,
+                      public.pgp_sym_encrypt(
+                        :secret,
+                        :encryption_key,
+                        'cipher-algo=aes256, compress-algo=0'
+                      ),
+                      :key_version,
+                      'active',
+                      1,
+                      :confirmed_at
+                    )
+                    """),
+                {
+                    "user_id": owner.id,
+                    "secret": OWNER_TOTP_SECRET,
+                    "encryption_key": derive_mfa_encryption_key(),
+                    "key_version": settings.MFA_ENCRYPTION_KEY_VERSION,
+                    "confirmed_at": now,
+                },
+            )
 
             cashier, _cashier_membership = await RolesService(roles_repo).create_tenant_account(
                 tenant_id=tenant.id,

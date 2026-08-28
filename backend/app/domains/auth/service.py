@@ -337,7 +337,7 @@ class AuthService:
                 )
                 raise AuthenticationError("Invalid credentials")
 
-        if is_support:
+        if user.mfa_required:
             challenge_token = generate_refresh_token()
             challenge = await self.repo.create_mfa_challenge_from_email_code(
                 email_lower=email_lower,
@@ -402,7 +402,7 @@ class AuthService:
         )
 
     # -------------------------------------------------------------------------
-    # 3. Support MFA
+    # 3. Account MFA
     # -------------------------------------------------------------------------
 
     async def _get_mfa_challenge(
@@ -480,9 +480,23 @@ class AuthService:
             refresh_token=refresh_token,
             device_id=device_id,
         )
+        identity = await self.repo.get_user_by_id(
+            session_record.user_id,
+            session_id=session_record.session_id,
+        )
+        membership_is_active = identity is not None and (
+            identity.home_tenant_id is None or identity.membership_status == "active"
+        )
+        if identity is None or not membership_is_active or not identity.mfa_required:
+            raise AuthenticationError("Account MFA session is invalid")
+
         access_token = create_access_token(
             session_record.user_id,
-            tenant_id=None,
+            tenant_id=(
+                None
+                if session_record.is_developer or session_record.is_administrator
+                else identity.home_tenant_id
+            ),
             is_developer=session_record.is_developer,
             is_administrator=session_record.is_administrator,
             session_id=session_record.session_id,
@@ -500,7 +514,7 @@ class AuthService:
             outcome="success",
         )
         logger.info(
-            "support_login_success",
+            "mfa_login_success",
             user_id=str(session_record.user_id),
             session_id=str(session_record.session_id),
         )
@@ -659,15 +673,13 @@ class AuthService:
         ip_address: str,
         user_agent: str | None = None,
     ) -> tuple[str, int]:
-        if not (is_developer or is_administrator):
-            raise AuthenticationError("Support MFA is required")
         record = await self.repo.get_step_up_mfa(
             user_id=user_id,
             session_id=session_id,
             encryption_keyring=mfa_encryption_keyring_json(),
         )
         if record is None:
-            raise AuthenticationError("Support MFA is unavailable")
+            raise AuthenticationError("Account MFA is unavailable")
         if await self._login_is_blocked(
             email_lower=record.email.lower(),
             ip_address=ip_address,
@@ -702,9 +714,12 @@ class AuthService:
         if verified_at is None:
             raise AuthenticationError("Invalid or replayed authentication code")
         await self._clear_mfa_attempts(user_id)
+        identity = await self.repo.get_user_by_id(user_id, session_id=session_id)
+        if identity is None or not identity.mfa_required:
+            raise AuthenticationError("Account MFA session is invalid")
         access_token = create_access_token(
             user_id,
-            tenant_id=None,
+            tenant_id=(None if is_developer or is_administrator else identity.home_tenant_id),
             is_developer=is_developer,
             is_administrator=is_administrator,
             session_id=session_id,
@@ -753,10 +768,8 @@ class AuthService:
             session_id=rotated.id,
             user_id=user.id,
         )
-        if (user.is_developer or user.is_administrator) and (
-            user.mfa_status != "active" or mfa_verified_at is None
-        ):
-            raise AuthenticationError("Support MFA is required")
+        if user.mfa_required and (user.mfa_status != "active" or mfa_verified_at is None):
+            raise AuthenticationError("Account MFA is required")
 
         access_token = create_access_token(
             user.id,

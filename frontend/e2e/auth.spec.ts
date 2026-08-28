@@ -26,6 +26,22 @@ test.describe("Auth", () => {
     await expect(page.getByRole("link", { name: "Центр управления" })).toBeVisible();
   });
 
+  test("owner completes MFA in the UI and keeps tenant access", async ({ page }) => {
+    clearLoginRateLimit(OWNER.email);
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
+    await page.getByLabel("Email").fill(OWNER.email);
+    await page.getByRole("button", { name: /Получить код/ }).click();
+
+    await expect(page.getByText(/Dev-режим/)).toBeVisible();
+    await page.getByLabel(/Пароль/).fill(OWNER.password);
+    await page.getByRole("button", { name: /^Войти$/ }).click();
+    await page.getByLabel("Код подтверждения").fill(currentTotp(OWNER.totpSecret!));
+    await page.getByRole("button", { name: "Подтвердить" }).click();
+
+    await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Центр управления" })).toHaveCount(0);
+  });
+
   test("retries a protected request after global MFA step-up", async ({ page }) => {
     await loginInBrowser(page, DEV);
     makeSupportSessionRequireStepUp(DEV.email);

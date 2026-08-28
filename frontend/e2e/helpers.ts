@@ -52,7 +52,11 @@ export const DEV: Creds = {
   password: "Devdev1234",
   totpSecret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
 };
-export const OWNER: Creds = { email: "owner@aurum.tj", password: "Owner1234" };
+export const OWNER: Creds = {
+  email: "owner@aurum.tj",
+  password: "Owner1234",
+  totpSecret: "MFRGGZDFMZTWQ2LKMFRGGZDFMZTWQ2LK",
+};
 export const CASHIER: Creds = { email: "cashier@aurum.tj", password: "Cashier1234" };
 
 export interface TokenPair {
@@ -139,7 +143,7 @@ export async function apiLogin(api: APIRequestContext, creds: Creds): Promise<To
       return { ...body, refresh_cookie: verifyRes.headers()["set-cookie"] };
     }
     if (!creds.totpSecret || body.status !== "mfa_required") {
-      throw new Error(`Unexpected support MFA response: ${body.status}`);
+      throw new Error(`Unexpected MFA response: ${body.status}`);
     }
     const mfaRes = await api.post(`${API}/auth/mfa/verify`, {
       data: {
