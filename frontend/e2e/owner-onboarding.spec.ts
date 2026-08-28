@@ -3,6 +3,7 @@ import { expect, request, test } from "@playwright/test";
 import {
   API,
   clearLoginRateLimit,
+  currentTotp,
   DEV,
   installBrowserSession,
   loginInBrowser,
@@ -58,9 +59,28 @@ test.describe("Owner onboarding (dev)", () => {
         data: { email: ownerEmail, code: dev_code }, // no password — owner has none
       });
       expect(verifyRes.ok()).toBeTruthy();
+      const challenge = (await verifyRes.json()) as {
+        status: "mfa_enrollment_required";
+        challenge_token: string;
+      };
+      expect(challenge.status).toBe("mfa_enrollment_required");
+
+      const enrollmentRes = await api.post(`${API}/auth/mfa/enroll/start`, {
+        data: { challenge_token: challenge.challenge_token },
+      });
+      expect(enrollmentRes.ok()).toBeTruthy();
+      const enrollment = (await enrollmentRes.json()) as { secret: string };
+
+      const confirmRes = await api.post(`${API}/auth/mfa/enroll/confirm`, {
+        data: {
+          challenge_token: challenge.challenge_token,
+          code: currentTotp(enrollment.secret),
+        },
+      });
+      expect(confirmRes.ok()).toBeTruthy();
       tokens = {
-        ...((await verifyRes.json()) as TokenPair),
-        refresh_cookie: verifyRes.headers()["set-cookie"],
+        ...((await confirmRes.json()) as TokenPair),
+        refresh_cookie: confirmRes.headers()["set-cookie"],
       };
     } finally {
       await api.dispose();
