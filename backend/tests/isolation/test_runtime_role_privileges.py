@@ -193,6 +193,7 @@ CUSTOM_FUNCTIONS = {
     "assert_tenant_billing_payment_submission_context",
     "assert_current_branch_writer",
     "authenticate_edge_node",
+    "auth_account_requires_mfa",
     "auth_email_code_matches",
     "audit_redact_jsonb",
     "bump_all_authorization_policy_revisions",

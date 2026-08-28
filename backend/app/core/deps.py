@@ -415,7 +415,7 @@ class CurrentUser:
         return branch_scope is None or branch_id in branch_scope
 
 
-async def _validate_support_session(
+async def _validate_mfa_session(
     *,
     repository: AuthRepository,
     identity: AuthUserRecord,
@@ -424,7 +424,7 @@ async def _validate_support_session(
     mfa_verified_at: datetime | None,
 ) -> None:
     if session_id is None or mfa_verified_at is None or identity.mfa_status != "active":
-        raise AuthenticationError("Support MFA is required")
+        raise AuthenticationError("Account MFA is required")
     session_mfa_verified_at = await repository.get_session_mfa_verified_at(
         session_id=session_id,
         user_id=user_id,
@@ -435,7 +435,7 @@ async def _validate_support_session(
     if session_mfa_verified_at is None or mfa_verified_at > datetime.now(UTC) + timedelta(
         minutes=1
     ):
-        raise AuthenticationError("Support session is inactive")
+        raise AuthenticationError("MFA session is inactive")
 
 
 @dataclass
@@ -549,7 +549,7 @@ async def current_user(
     if identity.is_developer is not is_dev or identity.is_administrator is not is_admin:
         raise AuthenticationError("Session claims are outdated")
     if is_dev or is_admin:
-        await _validate_support_session(
+        await _validate_mfa_session(
             repository=auth_repo,
             identity=identity,
             user_id=user_id,
@@ -706,6 +706,25 @@ async def require_tenant_owner(
         raise PermissionDeniedError("Active pharmacy ownership is required")
     if user.is_developer or user.is_administrator or user.support_access_session_id is not None:
         raise PermissionDeniedError("Platform support cannot act as a pharmacy owner")
+    return user
+
+
+async def require_recent_owner_mfa(
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
+) -> CurrentUser:
+    verified_at = user.mfa_verified_at
+    if verified_at is None:
+        raise PermissionDeniedError(
+            "Recent MFA verification required",
+            details={"reason": "mfa_step_up_required"},
+        )
+    now = datetime.now(UTC)
+    max_age = timedelta(minutes=get_settings().MFA_STEP_UP_MINUTES)
+    if verified_at > now + timedelta(minutes=1) or now - verified_at > max_age:
+        raise PermissionDeniedError(
+            "Recent MFA verification required",
+            details={"reason": "mfa_step_up_required"},
+        )
     return user
 
 

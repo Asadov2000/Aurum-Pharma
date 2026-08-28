@@ -31,6 +31,7 @@ class AuthUserRecord:
     last_login_at: datetime | None
     password_required: bool
     mfa_status: str | None
+    mfa_required: bool
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,14 @@ def _auth_user_from_row(row: RowMapping) -> AuthUserRecord:
         last_login_at=cast(datetime | None, row["last_login_at"]),
         password_required=bool(row["password_required"]),
         mfa_status=cast(str | None, row["mfa_status"]),
+        mfa_required=bool(
+            row.get(
+                "mfa_required",
+                bool(row["is_developer"])
+                or bool(row["is_administrator"])
+                or row["mfa_status"] is not None,
+            )
+        ),
     )
 
 

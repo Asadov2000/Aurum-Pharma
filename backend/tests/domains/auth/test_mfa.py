@@ -37,6 +37,10 @@ from app.domains.auth.models import (
     SupportMfa,
     SupportMfaRecoveryCode,
 )
+from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.service import FoundationService
+from app.domains.roles.repository import RolesRepository
+from app.domains.roles.service import RolesService
 from app.main import app
 from tests.domains.auth.test_login import _seed_code
 from tests.platform_access_helpers import (
@@ -192,6 +196,92 @@ async def test_support_login_requires_password_before_mfa_challenge(
     assert "aurum_refresh_token=" not in accepted.headers.get("set-cookie", "")
     assert accepted.headers["cache-control"] == "no-store"
     assert accepted.headers["pragma"] == "no-cache"
+
+
+async def test_active_owner_enrolls_mfa_and_keeps_tenant_context(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = await FoundationService(FoundationRepository(db_session)).create_tenant(
+        payload={
+            "name": "Owner MFA Tenant",
+            "contact_email": "owner-mfa-tenant@aurum.tj",
+        }
+    )
+    owner, _membership, _ownership, _role = await RolesService(
+        RolesRepository(db_session)
+    ).provision_owner(
+        tenant_id=tenant.id,
+        email="mfa-owner@aurum.tj",
+        full_name="MFA Owner",
+    )
+    base_time = utc_now() - timedelta(seconds=90)
+    monkeypatch.setattr(security_module, "utc_now", lambda: base_time)
+
+    await _seed_code(db_session, owner.email, code="123456")
+    login = await auth_client.post(
+        "/api/v1/auth/login/verify",
+        json={"email": owner.email, "code": "123456"},
+    )
+    assert login.status_code == 200
+    assert login.json()["status"] == "mfa_enrollment_required"
+    challenge_token = str(login.json()["challenge_token"])
+
+    start = await auth_client.post(
+        "/api/v1/auth/mfa/enroll/start",
+        json={"challenge_token": challenge_token},
+    )
+    assert start.status_code == 200
+    secret = str(start.json()["secret"])
+    first_totp = _totp_code(secret, base_time)
+
+    confirm = await auth_client.post(
+        "/api/v1/auth/mfa/enroll/confirm",
+        json={"challenge_token": challenge_token, "code": first_totp},
+    )
+    assert confirm.status_code == 200
+    access_token = str(confirm.json()["access_token"])
+    claims = decode_access_token(access_token)
+    assert claims["tenant_id"] == str(tenant.id)
+    assert claims["mfa_at"] is not None
+
+    me = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert me.status_code == 200
+    assert me.json()["is_tenant_owner"] is True
+
+    refreshed = await auth_client.post(
+        "/api/v1/auth/refresh",
+        json={},
+        headers={"Origin": "http://localhost:5173"},
+    )
+    assert refreshed.status_code == 200
+    access_token = str(refreshed.json()["access_token"])
+    refreshed_claims = decode_access_token(access_token)
+    assert refreshed_claims["tenant_id"] == str(tenant.id)
+    assert refreshed_claims["mfa_at"] == claims["mfa_at"]
+    assert refreshed_claims["sid"] != claims["sid"]
+
+    # auth_client shares a transaction instead of running get_support_auth_db,
+    # so seed the GUC that production middleware supplies for step-up requests.
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(owner.id)},
+    )
+    step_up_time = base_time + timedelta(seconds=30)
+    monkeypatch.setattr(security_module, "utc_now", lambda: step_up_time)
+    step_up = await auth_client.post(
+        "/api/v1/auth/mfa/step-up",
+        json={"code": _totp_code(secret, step_up_time)},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert step_up.status_code == 200
+    step_up_claims = decode_access_token(str(step_up.json()["access_token"]))
+    assert step_up_claims["tenant_id"] == str(tenant.id)
+    assert step_up_claims["mfa_at"] is not None
 
 
 async def test_mfa_enrollment_encrypts_secret_and_activates_recovery_codes(
@@ -451,6 +541,9 @@ async def test_mfa_encryption_key_rotation_keeps_existing_factor_usable(
     make_user,  # type: ignore[no-untyped-def]
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Global key rotation must be tested against one controlled keyring. The
+    # outer test transaction restores any pre-existing account factors.
+    await db_session.execute(text("DELETE FROM public.support_mfa"))
     old_root = "old-mfa-root-" + "o" * 40
     new_root = "new-mfa-root-" + "n" * 40
     monkeypatch.setattr(
