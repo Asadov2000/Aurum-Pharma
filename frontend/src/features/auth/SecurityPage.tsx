@@ -12,6 +12,7 @@ import {
   SkeletonRows,
 } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
+import { OwnershipTransferPanel } from "@/features/roles/OwnershipTransferPanel";
 
 import { useActiveSessionsQuery, useRevokeActiveSession, useRevokeOtherSessions } from "./queries";
 import { type ActiveSession } from "./types";
@@ -179,6 +180,8 @@ export function SecurityPage({ embedded = false }: { embedded?: boolean } = {}):
           {successMessage}
         </p>
       )}
+
+      <OwnershipTransferPanel />
 
       <Card>
         <CardHeader>

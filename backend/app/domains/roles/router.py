@@ -15,15 +15,21 @@ from app.core.deps import (
     get_db,
     get_redis,
     require_permission,
+    require_recent_account_mfa,
     require_recent_mfa_if_support,
+    require_recent_owner_mfa,
 )
 from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.roles.models import Role, UserAssignment
-from app.domains.roles.repository import DirectoryUser, RolesRepository
+from app.domains.roles.repository import DirectoryUser, OwnershipTransferRecord, RolesRepository
 from app.domains.roles.schemas import (
     AssignmentCreate,
     AssignmentRead,
     InviteUserRequest,
+    OwnershipTransferActionResponse,
+    OwnershipTransferCreate,
+    OwnershipTransferListResponse,
+    OwnershipTransferRead,
     PermissionRead,
     RoleCreate,
     RoleUpdate,
@@ -59,6 +65,80 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
 def _set_search_no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Pragma"] = "no-cache"
+
+
+def _ownership_transfer_read(record: OwnershipTransferRecord) -> OwnershipTransferRead:
+    return OwnershipTransferRead.model_validate(record)
+
+
+@router.get(
+    "/ownership-transfers",
+    response_model=OwnershipTransferListResponse,
+)
+async def list_ownership_transfers(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> OwnershipTransferListResponse:
+    _current_tenant_or_400(user)
+    _set_search_no_store(response)
+    records = await service.list_ownership_transfers()
+    return OwnershipTransferListResponse(
+        items=[_ownership_transfer_read(record) for record in records]
+    )
+
+
+@router.post(
+    "/ownership-transfers",
+    response_model=OwnershipTransferActionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ownership_transfer(
+    payload: OwnershipTransferCreate,
+    user: Annotated[CurrentUser, Depends(require_recent_owner_mfa)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> OwnershipTransferActionResponse:
+    transfer = await service.create_ownership_transfer(
+        tenant_id=_current_tenant_or_400(user),
+        operation_id=payload.operation_id,
+        target_membership_id=payload.target_membership_id,
+    )
+    return OwnershipTransferActionResponse(transfer=_ownership_transfer_read(transfer))
+
+
+@router.post(
+    "/ownership-transfers/{request_id}/cancel",
+    response_model=OwnershipTransferActionResponse,
+)
+async def cancel_ownership_transfer(
+    request_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_recent_owner_mfa)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> OwnershipTransferActionResponse:
+    transfer = await service.cancel_ownership_transfer(
+        tenant_id=_current_tenant_or_400(user),
+        request_id=request_id,
+    )
+    return OwnershipTransferActionResponse(transfer=_ownership_transfer_read(transfer))
+
+
+@router.post(
+    "/ownership-transfers/{request_id}/accept",
+    response_model=OwnershipTransferActionResponse,
+)
+async def accept_ownership_transfer(
+    request_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> OwnershipTransferActionResponse:
+    transfer = await service.accept_ownership_transfer(
+        tenant_id=_current_tenant_or_400(user),
+        request_id=request_id,
+    )
+    return OwnershipTransferActionResponse(
+        transfer=_ownership_transfer_read(transfer),
+        sessions_revoked=True,
+    )
 
 
 async def _serialize_user_list(

@@ -105,3 +105,32 @@ export interface UserUpdatePayload {
   phone?: string | null;
   status?: "active";
 }
+
+export type OwnershipTransferStatus = "pending" | "completed" | "cancelled" | "expired";
+
+export interface OwnershipTransfer {
+  id: string;
+  tenant_id: string;
+  initiator_membership_id: string;
+  initiator_user_id: string;
+  initiator_full_name: string;
+  target_membership_id: string;
+  target_user_id: string;
+  target_full_name: string;
+  status: OwnershipTransferStatus;
+  expires_at: string;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OwnershipTransferActionResponse {
+  transfer: OwnershipTransfer;
+  sessions_revoked: boolean;
+}
+
+export interface OwnershipTransferCreatePayload {
+  operation_id: string;
+  target_membership_id: string;
+}

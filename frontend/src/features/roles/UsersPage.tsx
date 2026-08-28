@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 
 import { EmployeeDirectory } from "./EmployeeDirectory";
 import {
+  useCreateOwnershipTransfer,
   useOffboardUser,
   useRevokeUserSessions,
   useRolesQuery,
@@ -46,6 +47,7 @@ import { employeeCountLabel, userStatusLabel } from "./userPresentation";
 
 type Row = UserWithAssignments;
 type PendingAction = { type: "sessions" | "suspend" | "offboard"; user: Row };
+type OwnershipTransferDraft = { user: Row; operationId: string };
 
 const PAGE_SIZE = 25;
 const AssignmentsPanel = lazy(async () => {
@@ -117,7 +119,9 @@ export function UsersPage(): JSX.Element {
   const canAssign = (isTenantOwner || isSupportScoped) && permissions.includes("roles.assign");
   const canViewRoles = permissions.includes("roles.view");
   const canViewBranches = permissions.includes("branches.view");
-  const showActions = canUpdate || canSuspend || canOffboard || canAssign;
+  const canTransferOwnership = isTenantOwner && !isSupportScoped;
+  const showActions =
+    canUpdate || canSuspend || canOffboard || canAssign || canTransferOwnership;
 
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
@@ -129,6 +133,7 @@ export function UsersPage(): JSX.Element {
   const [profileDirty, setProfileDirty] = useState(false);
   const [profileDiscardOpen, setProfileDiscardOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [ownershipTransfer, setOwnershipTransfer] = useState<OwnershipTransferDraft | null>(null);
   const [activatingUserId, setActivatingUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -161,6 +166,7 @@ export function UsersPage(): JSX.Element {
   const offboardMutation = useOffboardUser();
   const revokeSessionsMutation = useRevokeUserSessions();
   const activateMutation = useUpdateUser();
+  const ownershipTransferMutation = useCreateOwnershipTransfer();
 
   const rows = users.data?.items ?? [];
   const total = users.data?.total ?? 0;
@@ -223,6 +229,31 @@ export function UsersPage(): JSX.Element {
     setActionError(null);
     setActionNotice(null);
     setPending({ type, user: target });
+  };
+
+  const askOwnershipTransfer = (target: Row) => {
+    actionFocusUserId.current = target.id;
+    setActionError(null);
+    setActionNotice(null);
+    setOwnershipTransfer({ user: target, operationId: crypto.randomUUID() });
+  };
+
+  const runOwnershipTransfer = async () => {
+    if (!ownershipTransfer) return;
+    setActionError(null);
+    try {
+      await ownershipTransferMutation.mutateAsync({
+        operation_id: ownershipTransfer.operationId,
+        target_membership_id: ownershipTransfer.user.membership_id,
+      });
+      setActionNotice(
+        `Запрос отправлен сотруднику «${ownershipTransfer.user.full_name}». До подтверждения вы остаётесь владельцем.`,
+      );
+      setOwnershipTransfer(null);
+      restoreActionFocus();
+    } catch (error) {
+      setActionError(describeApiError(error, "Не удалось создать запрос передачи владения"));
+    }
   };
 
   const runPending = async () => {
@@ -549,6 +580,7 @@ export function UsersPage(): JSX.Element {
               canRevokeSessions={canRevokeSessions}
               canOffboard={canOffboard}
               canAssign={canAssign}
+              canTransferOwnership={canTransferOwnership}
               showActions={showActions}
               activatingUserId={activateMutation.isPending ? activatingUserId : null}
               registerActionTrigger={(userId, element) => {
@@ -558,6 +590,7 @@ export function UsersPage(): JSX.Element {
               onProfile={openProfile}
               onActivate={(member) => void activateMembership(member)}
               onAssignments={openAssignments}
+              onTransferOwnership={askOwnershipTransfer}
               onRevokeSessions={(member) => ask("sessions", member)}
               onSuspend={(member) => ask("suspend", member)}
               onOffboard={(member) => ask("offboard", member)}
@@ -616,6 +649,36 @@ export function UsersPage(): JSX.Element {
         variant="danger"
         onCancel={() => setProfileDiscardOpen(false)}
         onConfirm={closeProfile}
+      />
+
+      <ConfirmDialog
+        open={ownershipTransfer !== null}
+        title="Передать владение аптекой?"
+        message={
+          <>
+            Сотрудник «{ownershipTransfer?.user.full_name}» получит запрос на подтверждение. Его
+            текущие сеансы завершатся, а при следующем входе потребуется настроить MFA. До
+            подтверждения ваш доступ не изменится.
+            {actionError ? (
+              <span
+                role="alert"
+                className="mt-2 block rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-danger-foreground"
+              >
+                {actionError}
+              </span>
+            ) : null}
+          </>
+        }
+        confirmLabel="Отправить запрос"
+        variant="danger"
+        isLoading={ownershipTransferMutation.isPending}
+        onConfirm={() => void runOwnershipTransfer()}
+        onCancel={() => {
+          if (ownershipTransferMutation.isPending) return;
+          setOwnershipTransfer(null);
+          setActionError(null);
+          restoreActionFocus();
+        }}
       />
 
       <ConfirmDialog

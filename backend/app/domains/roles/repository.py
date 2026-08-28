@@ -47,6 +47,24 @@ class UserSessionRevocationResult:
 
 
 @dataclass(frozen=True)
+class OwnershipTransferRecord:
+    id: UUID
+    tenant_id: UUID
+    initiator_membership_id: UUID
+    initiator_user_id: UUID
+    initiator_full_name: str
+    target_membership_id: UUID
+    target_user_id: UUID
+    target_full_name: str
+    status: str
+    expires_at: datetime
+    completed_at: datetime | None
+    cancelled_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class AuthorizationSnapshot:
     """One statement-level authorization view with its revision coordinates."""
 
@@ -92,6 +110,56 @@ def _directory_user_from_row(row: RowMapping) -> DirectoryUser:
         last_login_at=cast(datetime | None, row["last_login_at"]),
         can_require_password=bool(row["can_require_password"]),
     )
+
+
+def _ownership_transfer_from_row(row: RowMapping) -> OwnershipTransferRecord:
+    return OwnershipTransferRecord(
+        id=cast(UUID, row["id"]),
+        tenant_id=cast(UUID, row["tenant_id"]),
+        initiator_membership_id=cast(UUID, row["initiator_membership_id"]),
+        initiator_user_id=cast(UUID, row["initiator_user_id"]),
+        initiator_full_name=cast(str, row["initiator_full_name"]),
+        target_membership_id=cast(UUID, row["target_membership_id"]),
+        target_user_id=cast(UUID, row["target_user_id"]),
+        target_full_name=cast(str, row["target_full_name"]),
+        status=cast(str, row["effective_status"]),
+        expires_at=cast(datetime, row["expires_at"]),
+        completed_at=cast(datetime | None, row["completed_at"]),
+        cancelled_at=cast(datetime | None, row["cancelled_at"]),
+        created_at=cast(datetime, row["created_at"]),
+        updated_at=cast(datetime, row["updated_at"]),
+    )
+
+
+_OWNERSHIP_TRANSFER_SELECT = """
+SELECT
+  transfer.id,
+  transfer.tenant_id,
+  transfer.initiator_membership_id,
+  initiator.user_id AS initiator_user_id,
+  initiator.full_name AS initiator_full_name,
+  transfer.target_membership_id,
+  target.user_id AS target_user_id,
+  target.full_name AS target_full_name,
+  CASE
+    WHEN transfer.status = 'pending'
+      AND transfer.expires_at <= pg_catalog.statement_timestamp()
+    THEN 'expired'
+    ELSE transfer.status
+  END AS effective_status,
+  transfer.expires_at,
+  transfer.completed_at,
+  transfer.cancelled_at,
+  transfer.created_at,
+  transfer.updated_at
+FROM public.tenant_ownership_transfer AS transfer
+JOIN public.tenant_membership AS initiator
+  ON initiator.id = transfer.initiator_membership_id
+ AND initiator.tenant_id = transfer.tenant_id
+JOIN public.tenant_membership AS target
+  ON target.id = transfer.target_membership_id
+ AND target.tenant_id = transfer.tenant_id
+"""
 
 
 class RolesRepository:
@@ -355,6 +423,83 @@ class RolesRepository:
             .execution_options(populate_existing=True)
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def create_ownership_transfer(
+        self,
+        *,
+        operation_id: UUID,
+        target_membership_id: UUID,
+        expires_at: datetime,
+    ) -> OwnershipTransferRecord | None:
+        await self.session.execute(
+            text(
+                "SELECT public.create_tenant_ownership_transfer("
+                ":operation_id, :target_membership_id, :expires_at)"
+            ),
+            {
+                "operation_id": operation_id,
+                "target_membership_id": target_membership_id,
+                "expires_at": expires_at,
+            },
+        )
+        return await self.get_ownership_transfer(operation_id)
+
+    async def cancel_ownership_transfer(
+        self,
+        *,
+        request_id: UUID,
+    ) -> OwnershipTransferRecord | None:
+        await self.session.execute(
+            text("SELECT public.cancel_tenant_ownership_transfer(:request_id)"),
+            {"request_id": request_id},
+        )
+        return await self.get_ownership_transfer(request_id)
+
+    async def accept_ownership_transfer(
+        self,
+        *,
+        request_id: UUID,
+    ) -> OwnershipTransferRecord | None:
+        await self.session.execute(
+            text("SELECT public.accept_tenant_ownership_transfer(:request_id)"),
+            {"request_id": request_id},
+        )
+        return await self.get_ownership_transfer(request_id)
+
+    async def get_ownership_transfer(
+        self,
+        request_id: UUID,
+    ) -> OwnershipTransferRecord | None:
+        row = (
+            (
+                await self.session.execute(
+                    text(
+                        _OWNERSHIP_TRANSFER_SELECT + " WHERE transfer.id = :request_id "
+                        "AND transfer.tenant_id = public.current_tenant_id()"
+                    ),
+                    {"request_id": request_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return _ownership_transfer_from_row(row) if row is not None else None
+
+    async def list_ownership_transfers(self) -> list[OwnershipTransferRecord]:
+        rows = (
+            (
+                await self.session.execute(
+                    text(
+                        _OWNERSHIP_TRANSFER_SELECT
+                        + " WHERE transfer.tenant_id = public.current_tenant_id() "
+                        "ORDER BY transfer.created_at DESC, transfer.id DESC"
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [_ownership_transfer_from_row(row) for row in rows]
 
     async def revoke_user_sessions(
         self,

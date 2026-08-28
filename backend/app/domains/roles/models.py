@@ -243,6 +243,47 @@ class TenantOwnership(Base):
     )
 
 
+class TenantOwnershipTransfer(Base):
+    __tablename__ = "tenant_ownership_transfer"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    initiator_membership_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenant_membership.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    target_membership_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenant_membership.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completion_xid: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "initiator_membership_id <> target_membership_id",
+            name="ck_tenant_ownership_transfer_distinct_memberships",
+        ),
+        CheckConstraint(
+            "status IN ('pending','completed','cancelled','expired')",
+            name="ck_tenant_ownership_transfer_status",
+        ),
+    )
+
+
 class RolePermission(Base):
     __tablename__ = "role_permission"
 

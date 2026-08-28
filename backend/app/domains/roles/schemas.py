@@ -186,3 +186,38 @@ class TenantMembershipRead(BaseModel):
     full_name: str
     phone: str | None
     status: Literal["pending", "active", "suspended", "offboarded"]
+
+
+class OwnershipTransferCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: UUID
+    target_membership_id: UUID
+
+
+class OwnershipTransferRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    initiator_membership_id: UUID
+    initiator_user_id: UUID
+    initiator_full_name: str
+    target_membership_id: UUID
+    target_user_id: UUID
+    target_full_name: str
+    status: Literal["pending", "completed", "cancelled", "expired"]
+    expires_at: datetime
+    completed_at: datetime | None
+    cancelled_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class OwnershipTransferListResponse(BaseModel):
+    items: list[OwnershipTransferRead]
+
+
+class OwnershipTransferActionResponse(BaseModel):
+    transfer: OwnershipTransferRead
+    sessions_revoked: bool = False
