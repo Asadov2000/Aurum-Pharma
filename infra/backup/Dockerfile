@@ -34,13 +34,15 @@ COPY --from=tools-builder /out/mc /usr/local/bin/mc
 COPY --from=tools-builder /out/restic /usr/local/bin/restic
 
 RUN apk upgrade --no-cache \
+    && apk add --no-cache jq openssl \
     && rm -f /usr/local/bin/gosu /usr/local/bin/docker-entrypoint.sh \
     && addgroup -S -g 10001 aurum \
     && adduser -S -D -H -u 10001 -G aurum aurum \
     && addgroup aurum postgres
 
 COPY --chown=10001:10001 \
-    backup.sh offsite-sync.sh offsite-test-restore.sh pitr-basebackup.sh \
+    backup.sh offsite-common.sh offsite-sync.sh offsite-trust-verify.sh \
+    offsite-trust-sign.sh offsite-trusted-restore.sh pitr-basebackup.sh \
     pitr-restore-drill.sh restore-drill.sh wal-snapshot.sh \
     /opt/aurum/
 

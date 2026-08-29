@@ -168,6 +168,7 @@ services:
       AURUM_OFFSITE_BUCKET: "${AURUM_OFFSITE_BUCKET:?AURUM_OFFSITE_BUCKET is required}"
       AURUM_OFFSITE_PREFIX: "${AURUM_OFFSITE_PREFIX:-aurum-production}"
       AURUM_OFFSITE_ALLOW_INSECURE: "${AURUM_OFFSITE_ALLOW_INSECURE:-false}"
+      AURUM_OFFSITE_CANDIDATE_DIR: /candidate
     secrets:
       - source: aurum_offsite_access_key
         target: AURUM_OFFSITE_ACCESS_KEY
@@ -178,6 +179,9 @@ services:
         source: "${AURUM_BACKUP_REPOSITORY:?AURUM_BACKUP_REPOSITORY is required}"
         target: /repository
         read_only: true
+      - type: bind
+        source: "${AURUM_OFFSITE_CANDIDATE_DIR:?AURUM_OFFSITE_CANDIDATE_DIR is required}"
+        target: /candidate
     networks:
       - backup-egress
     command: ["/bin/sh", "/opt/aurum/offsite-sync.sh"]
@@ -226,6 +230,7 @@ services:
   offsite-test-init:
     profiles: ["offsite-test"]
     image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    user: "10001:10001"
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -233,6 +238,8 @@ services:
         root_password="$$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
         append_user="$$(cat /run/secrets/AURUM_OFFSITE_ACCESS_KEY)"
         append_password="$$(cat /run/secrets/AURUM_OFFSITE_SECRET_KEY)"
+        restore_user="$$(cat /run/secrets/AURUM_OFFSITE_RESTORE_ACCESS_KEY)"
+        restore_password="$$(cat /run/secrets/AURUM_OFFSITE_RESTORE_SECRET_KEY)"
         mc --config-dir /tmp/.mc alias set test http://offsite-test-minio:9000 "$$root_user" "$$root_password"
         mc --config-dir /tmp/.mc mb --with-lock --ignore-existing test/aurum-offsite-test
         mc --config-dir /tmp/.mc version enable test/aurum-offsite-test
@@ -240,6 +247,9 @@ services:
         mc --config-dir /tmp/.mc admin user add test "$$append_user" "$$append_password"
         mc --config-dir /tmp/.mc admin policy create test aurum-offsite-append /config/policy.json
         mc --config-dir /tmp/.mc admin policy attach test aurum-offsite-append --user "$$append_user"
+        mc --config-dir /tmp/.mc admin user add test "$$restore_user" "$$restore_password"
+        mc --config-dir /tmp/.mc admin policy create test aurum-offsite-restore /config/restore-policy.json
+        mc --config-dir /tmp/.mc admin policy attach test aurum-offsite-restore --user "$$restore_user"
     secrets:
       - source: minio_root_user
         target: MINIO_ROOT_USER
@@ -249,8 +259,13 @@ services:
         target: AURUM_OFFSITE_ACCESS_KEY
       - source: aurum_offsite_secret_key
         target: AURUM_OFFSITE_SECRET_KEY
+      - source: aurum_offsite_restore_access_key
+        target: AURUM_OFFSITE_RESTORE_ACCESS_KEY
+      - source: aurum_offsite_restore_secret_key
+        target: AURUM_OFFSITE_RESTORE_SECRET_KEY
     volumes:
       - ./infra/minio/aurum-offsite-append-policy.json:/config/policy.json:ro
+      - ./infra/minio/aurum-offsite-restore-policy.json:/config/restore-policy.json:ro
     networks:
       - backup-egress
     depends_on:
@@ -268,29 +283,183 @@ services:
     cpus: "0.25"
     restart: "no"
 
-  offsite-test-restore:
+  offsite-test-approve:
     profiles: ["offsite-test"]
     image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
-    build:
-      context: ./infra/backup
-      dockerfile: Dockerfile
+    environment:
+      AURUM_OFFSITE_EXPORT_ID: "${AURUM_OFFSITE_EXPORT_ID:-explicit-export-id-required}"
+      AURUM_OFFSITE_BUCKET: "${AURUM_OFFSITE_BUCKET:?AURUM_OFFSITE_BUCKET is required}"
+      AURUM_OFFSITE_PREFIX: "${AURUM_OFFSITE_PREFIX:-aurum-production}"
     secrets:
       - source: minio_root_user
         target: MINIO_ROOT_USER
       - source: minio_root_password
         target: MINIO_ROOT_PASSWORD
+    volumes:
+      - type: bind
+        source: "${AURUM_OFFSITE_APPROVAL_DIR:?AURUM_OFFSITE_APPROVAL_DIR is required}"
+        target: /approval
+    networks:
+      - backup-egress
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        export_id="$$AURUM_OFFSITE_EXPORT_ID"
+        manifest_key="$$AURUM_OFFSITE_PREFIX/manifests/$$export_id.json"
+        root_user="$$(cat /run/secrets/MINIO_ROOT_USER)"
+        root_password="$$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
+        mc --config-dir /workspace/mc alias set provider \
+          http://offsite-test-minio:9000 "$$root_user" "$$root_password" >/dev/null
+        version_id="$$(mc --json --config-dir /workspace/mc stat \
+          "provider/$$AURUM_OFFSITE_BUCKET/$$manifest_key" | \
+          jq -er 'select(.status == "success") | .versionID // .versionId')"
+        mc --config-dir /workspace/mc cp --version-id "$$version_id" \
+          "provider/$$AURUM_OFFSITE_BUCKET/$$manifest_key" \
+          /workspace/manifest.json >/dev/null
+        manifest_sha256="$$(sha256sum /workspace/manifest.json | awk '{print $$1}')"
+        jq -S -n \
+          --arg export_id "$$export_id" \
+          --arg manifest_key "$$manifest_key" \
+          --arg manifest_version_id "$$version_id" \
+          --arg manifest_sha256 "$$manifest_sha256" \
+          '{schema_version: 1, export_id: $$export_id, manifest_key: $$manifest_key,
+            manifest_version_id: $$manifest_version_id,
+            manifest_sha256: $$manifest_sha256}' \
+          > "/approval/$$export_id.approval.json"
+    read_only: true
+    tmpfs:
+      - /workspace:size=16m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: "0.25"
+    restart: "no"
+
+  offsite-trust-verify:
+    profiles: ["offsite-trust-verify", "offsite-test"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    environment:
+      AURUM_OFFSITE_ENDPOINT: "${AURUM_OFFSITE_ENDPOINT:?AURUM_OFFSITE_ENDPOINT is required}"
+      AURUM_OFFSITE_BUCKET: "${AURUM_OFFSITE_BUCKET:?AURUM_OFFSITE_BUCKET is required}"
+      AURUM_OFFSITE_PREFIX: "${AURUM_OFFSITE_PREFIX:-aurum-production}"
+      AURUM_OFFSITE_ALLOW_INSECURE: "${AURUM_OFFSITE_ALLOW_INSECURE:-false}"
+      AURUM_OFFSITE_EXPORT_ID: "${AURUM_OFFSITE_EXPORT_ID:-explicit-export-id-required}"
+      AURUM_OFFSITE_APPROVAL_DIR: /approval
+      AURUM_VERIFIED_CHECKPOINT_DIR: /verified
+    secrets:
+      - source: aurum_offsite_restore_access_key
+        target: AURUM_OFFSITE_RESTORE_ACCESS_KEY
+      - source: aurum_offsite_restore_secret_key
+        target: AURUM_OFFSITE_RESTORE_SECRET_KEY
       - source: restic_password
         target: RESTIC_PASSWORD
+      - source: aurum_recovery_signing_public_key
+        target: AURUM_RECOVERY_SIGNING_PUBLIC_KEY
     volumes:
       - type: bind
         source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
         target: /scratch
+      - type: bind
+        source: "${AURUM_OFFSITE_APPROVAL_DIR:?AURUM_OFFSITE_APPROVAL_DIR is required}"
+        target: /approval
+        read_only: true
+      - type: bind
+        source: "${AURUM_VERIFIED_CHECKPOINT_DIR:?AURUM_VERIFIED_CHECKPOINT_DIR is required}"
+        target: /verified
     networks:
       - backup-egress
-    depends_on:
-      offsite-test-minio:
-        condition: service_healthy
-    command: ["/bin/sh", "/opt/aurum/offsite-test-restore.sh"]
+    command: ["/bin/sh", "/opt/aurum/offsite-trust-verify.sh"]
+    read_only: true
+    tmpfs:
+      - /workspace:size=64m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: "${AURUM_BACKUP_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_BACKUP_CPU_LIMIT:-1.0}"
+    restart: "no"
+
+  offsite-trust-sign:
+    profiles: ["offsite-trust-sign", "offsite-test"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    environment:
+      AURUM_OFFSITE_EXPORT_ID: "${AURUM_OFFSITE_EXPORT_ID:-explicit-export-id-required}"
+      AURUM_VERIFIED_CHECKPOINT_DIR: /verified
+      AURUM_SIGNING_AUTHORIZATION_DIR: /authorization
+      AURUM_TRUSTED_CHECKPOINT_DIR: /trusted
+    secrets:
+      - source: aurum_recovery_signing_private_key
+        target: AURUM_RECOVERY_SIGNING_PRIVATE_KEY
+    volumes:
+      - type: bind
+        source: "${AURUM_VERIFIED_CHECKPOINT_DIR:?AURUM_VERIFIED_CHECKPOINT_DIR is required}"
+        target: /verified
+        read_only: true
+      - type: bind
+        source: "${AURUM_SIGNING_AUTHORIZATION_DIR:?AURUM_SIGNING_AUTHORIZATION_DIR is required}"
+        target: /authorization
+        read_only: true
+      - type: bind
+        source: "${AURUM_TRUSTED_CHECKPOINT_DIR:?AURUM_TRUSTED_CHECKPOINT_DIR is required}"
+        target: /trusted
+    network_mode: none
+    command: ["/bin/sh", "/opt/aurum/offsite-trust-sign.sh"]
+    read_only: true
+    tmpfs:
+      - /workspace:size=16m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: "0.25"
+    restart: "no"
+
+  offsite-trusted-restore:
+    profiles: ["offsite-restore", "offsite-test"]
+    image: aurum-pharma-backup:${AURUM_IMAGE_TAG:-local}
+    build:
+      context: ./infra/backup
+      dockerfile: Dockerfile
+    environment:
+      AURUM_OFFSITE_ENDPOINT: "${AURUM_OFFSITE_ENDPOINT:?AURUM_OFFSITE_ENDPOINT is required}"
+      AURUM_OFFSITE_BUCKET: "${AURUM_OFFSITE_BUCKET:?AURUM_OFFSITE_BUCKET is required}"
+      AURUM_OFFSITE_PREFIX: "${AURUM_OFFSITE_PREFIX:-aurum-production}"
+      AURUM_OFFSITE_ALLOW_INSECURE: "${AURUM_OFFSITE_ALLOW_INSECURE:-false}"
+      AURUM_OFFSITE_EXPORT_ID: "${AURUM_OFFSITE_EXPORT_ID:-explicit-export-id-required}"
+      AURUM_TRUSTED_CHECKPOINT_DIR: /trusted
+    secrets:
+      - source: aurum_offsite_restore_access_key
+        target: AURUM_OFFSITE_RESTORE_ACCESS_KEY
+      - source: aurum_offsite_restore_secret_key
+        target: AURUM_OFFSITE_RESTORE_SECRET_KEY
+      - source: restic_password
+        target: RESTIC_PASSWORD
+      - source: aurum_recovery_signing_public_key
+        target: AURUM_RECOVERY_SIGNING_PUBLIC_KEY
+    volumes:
+      - type: bind
+        source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
+        target: /scratch
+      - type: bind
+        source: "${AURUM_TRUSTED_CHECKPOINT_DIR:?AURUM_TRUSTED_CHECKPOINT_DIR is required}"
+        target: /trusted
+        read_only: true
+    networks:
+      - backup-egress
+    command: ["/bin/sh", "/opt/aurum/offsite-trusted-restore.sh"]
     read_only: true
     tmpfs:
       - /workspace:size=64m,mode=0700,uid=10001,gid=10001
@@ -481,6 +650,14 @@ secrets:
     file: "${AURUM_OFFSITE_SECRET_FILES_DIR:?AURUM_OFFSITE_SECRET_FILES_DIR is required}/AURUM_OFFSITE_ACCESS_KEY"
   aurum_offsite_secret_key:
     file: "${AURUM_OFFSITE_SECRET_FILES_DIR:?AURUM_OFFSITE_SECRET_FILES_DIR is required}/AURUM_OFFSITE_SECRET_KEY"
+  aurum_offsite_restore_access_key:
+    file: "${AURUM_OFFSITE_RESTORE_SECRET_FILES_DIR:?AURUM_OFFSITE_RESTORE_SECRET_FILES_DIR is required}/AURUM_OFFSITE_RESTORE_ACCESS_KEY"
+  aurum_offsite_restore_secret_key:
+    file: "${AURUM_OFFSITE_RESTORE_SECRET_FILES_DIR:?AURUM_OFFSITE_RESTORE_SECRET_FILES_DIR is required}/AURUM_OFFSITE_RESTORE_SECRET_KEY"
+  aurum_recovery_signing_private_key:
+    file: "${AURUM_RECOVERY_TRUST_SECRET_FILES_DIR:?AURUM_RECOVERY_TRUST_SECRET_FILES_DIR is required}/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem"
+  aurum_recovery_signing_public_key:
+    file: "${AURUM_RECOVERY_TRUST_SECRET_FILES_DIR:?AURUM_RECOVERY_TRUST_SECRET_FILES_DIR is required}/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem"
 
 volumes:
   restore-postgres-data:

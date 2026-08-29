@@ -7,7 +7,10 @@ param(
     [Security.SecureString]$AccessKey,
 
     [Parameter(Mandatory = $true)]
-    [Security.SecureString]$SecretKey
+    [Security.SecureString]$SecretKey,
+
+    [ValidateSet("Uploader", "Restore")]
+    [string]$Role = "Uploader"
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,8 +67,19 @@ function Write-SecureSecret {
     }
 }
 
-Write-SecureSecret -Name "AURUM_OFFSITE_ACCESS_KEY" -Value $AccessKey
-Write-SecureSecret -Name "AURUM_OFFSITE_SECRET_KEY" -Value $SecretKey
+$accessName = if ($Role -eq "Restore") {
+    "AURUM_OFFSITE_RESTORE_ACCESS_KEY"
+} else {
+    "AURUM_OFFSITE_ACCESS_KEY"
+}
+$secretName = if ($Role -eq "Restore") {
+    "AURUM_OFFSITE_RESTORE_SECRET_KEY"
+} else {
+    "AURUM_OFFSITE_SECRET_KEY"
+}
+
+Write-SecureSecret -Name $accessName -Value $AccessKey
+Write-SecureSecret -Name $secretName -Value $SecretKey
 
 if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -84,10 +98,24 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     )
     Set-Acl -LiteralPath $output -AclObject $acl
 } else {
+    & chown 10001:10001 -- $output
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to assign the secret directory to container UID/GID 10001. Run this command with sufficient privileges."
+    }
     & chmod 700 -- $output
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to protect the secret directory."
+    }
     Get-ChildItem -LiteralPath $output -File | ForEach-Object {
+        & chown 10001:10001 -- $_.FullName
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to assign secret file $($_.Name) to container UID/GID 10001."
+        }
         & chmod 600 -- $_.FullName
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to protect secret file $($_.Name)."
+        }
     }
 }
 
-Write-Host "Created 2 off-site credential files in a protected external directory."
+Write-Host "Created 2 $Role off-site credential files in a protected external directory."

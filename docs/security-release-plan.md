@@ -75,9 +75,13 @@
       off-site WORM export с append-only credentials реализованы в коде и CI.
 - [x] WAL/off-site запускаются каждые пять минут, restore drill - ежемесячно;
       Prometheus контролирует статус, freshness и длительность recovery jobs.
-- [ ] Production bucket создан в разрешённой юрисдикции; настроены внешние
-      уведомления о free-space, доверенный restore из конкретной WORM-версии и
-      измерены RPO/RTO на production-подобном объёме.
+- [x] Provider-approved Ed25519 checkpoint фиксирует точные WORM version IDs;
+      online verifier, offline signer без сети, read-only restore credentials и
+      отдельный операторский authorization digest проверяются в CI. Fail-closed
+      restore отклоняет подмену manifest и игнорирует новую версию после подписи.
+- [ ] Production bucket создан в разрешённой юрисдикции; настроены внешний
+      recovery-host, уведомления о free-space и измерены RPO/RTO на
+      production-подобном объёме.
 
 ### P0: identity и authorization
 
@@ -153,8 +157,7 @@
 
 ## Порядок следующей разработки
 
-1. Доверенный manifest и restore из конкретной внешней WORM-версии, затем
-   измерение и утверждение RPO/RTO на staging.
+1. Развернуть внешний WORM/recovery-host и измерить RPO/RTO на staging.
 2. DB-инварианты POS и полный refund/void sync-контур.
 3. Внутренний TLS для PostgreSQL, Redis и MinIO.
 4. mTLS/device identity, зашифрованная локальная БД и trusted time для Edge.

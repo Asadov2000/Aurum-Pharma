@@ -5,94 +5,108 @@ umask 077
 export HOME=/workspace/home
 export TMPDIR=/workspace/tmp
 
-read_secret() {
-    value="$(cat "/run/secrets/$1")"
-    [ -n "$value" ] || {
-        echo "Required off-site secret is empty: $1" >&2
-        exit 1
-    }
-    printf '%s' "$value"
-}
+. /opt/aurum/offsite-common.sh
 
 endpoint="${AURUM_OFFSITE_ENDPOINT:?AURUM_OFFSITE_ENDPOINT is required}"
 bucket="${AURUM_OFFSITE_BUCKET:?AURUM_OFFSITE_BUCKET is required}"
 prefix="${AURUM_OFFSITE_PREFIX:-aurum-production}"
+candidate_dir="${AURUM_OFFSITE_CANDIDATE_DIR:-/candidate}"
+allow_insecure="${AURUM_OFFSITE_ALLOW_INSECURE:-false}"
 
-case "$endpoint" in
-    https://*) ;;
-    http://*)
-        [ "${AURUM_OFFSITE_ALLOW_INSECURE:-false}" = "true" ] || {
-            echo "Off-site endpoint must use HTTPS" >&2
-            exit 1
-        }
-        ;;
-    *) echo "Off-site endpoint must be an HTTP(S) URL" >&2; exit 1 ;;
-esac
-case "$bucket" in
-    ""|*[!a-z0-9.-]*) echo "Invalid off-site bucket name" >&2; exit 1 ;;
-esac
-case "$prefix" in
-    ""|/*|*/|*..*|*[!A-Za-z0-9._/-]*)
-        echo "Invalid off-site prefix" >&2
-        exit 1
-        ;;
-esac
+aurum_validate_offsite_config "$endpoint" "$bucket" "$prefix" "$allow_insecure"
 
-access_key="$(read_secret AURUM_OFFSITE_ACCESS_KEY)"
-secret_key="$(read_secret AURUM_OFFSITE_SECRET_KEY)"
-mkdir -p "$HOME" "$TMPDIR" /workspace/export
+access_key="$(aurum_read_secret AURUM_OFFSITE_ACCESS_KEY)"
+secret_key="$(aurum_read_secret AURUM_OFFSITE_SECRET_KEY)"
+mkdir -p "$HOME" "$TMPDIR" /workspace/export "$candidate_dir"
 
-mc --config-dir /workspace/mc alias set \
-    offsite "$endpoint" "$access_key" "$secret_key" >/dev/null
-retention="$(mc --config-dir /workspace/mc retention info "offsite/$bucket")"
-printf '%s\n' "$retention" | grep -q 'COMPLIANCE' || {
-    echo "Off-site bucket must have default COMPLIANCE Object Lock" >&2
-    exit 1
-}
-versioning="$(mc --config-dir /workspace/mc version info "offsite/$bucket")"
-printf '%s\n' "$versioning" | grep -qi 'enabled' || {
-    echo "Off-site bucket versioning must be enabled" >&2
-    exit 1
-}
+aurum_configure_offsite_alias /workspace/mc "$endpoint" "$access_key" "$secret_key"
+aurum_require_worm_bucket /workspace/mc "$bucket"
 
 export_id="$(date -u +%Y%m%dT%H%M%SZ)-$PPID"
-checksum_file="/workspace/export/$export_id.sha256"
+object_map="/workspace/export/$export_id.objects.tsv"
 manifest_file="/workspace/export/$export_id.json"
-(
-    cd /repository
-    find . -type f ! -path './locks/*' -exec sha256sum '{}' \; | sort > "$checksum_file"
-)
-object_count="$(wc -l < "$checksum_file" | tr -d ' ')"
-[ "$object_count" -gt 0 ] || {
-    echo "Local encrypted repository is empty" >&2
-    exit 1
-}
+pointer_file="$candidate_dir/$export_id.candidate.json"
 
 mc --config-dir /workspace/mc mirror \
     --exclude 'locks/*' \
     /repository "offsite/$bucket/$prefix/repository" >/dev/null
-checksum_sha256="$(sha256sum "$checksum_file" | awk '{print $1}')"
+
+(
+    cd /repository
+    find . -type f ! -path './locks/*' -print | LC_ALL=C sort
+) | while IFS= read -r relative_path; do
+    object_path="${relative_path#./}"
+    case "$object_path" in
+        ""|/*|*/|*//*|..|../*|*/../*|*/..|*\\*|*[!A-Za-z0-9._/-]*)
+            aurum_fail "Unsafe local Restic repository path"
+            ;;
+    esac
+    source_file="/repository/$object_path"
+    version_id="$(aurum_latest_version_id \
+        /workspace/mc "offsite/$bucket/$prefix/repository/$object_path")"
+    sha256="$(sha256sum "$source_file" | awk '{print $1}')"
+    size="$(wc -c < "$source_file" | tr -d ' ')"
+    printf '%s\t%s\t%s\t%s\n' "$sha256" "$size" "$version_id" "$object_path"
+done > "$object_map"
+
+object_count="$(wc -l < "$object_map" | tr -d ' ')"
+[ "$object_count" -gt 0 ] || aurum_fail "Local encrypted repository is empty"
+object_map_sha256="$(sha256sum "$object_map" | awk '{print $1}')"
+object_map_key="$prefix/manifests/$export_id.objects.tsv"
+mc --config-dir /workspace/mc cp \
+    "$object_map" "offsite/$bucket/$object_map_key" >/dev/null
+object_map_version_id="$(aurum_latest_version_id \
+    /workspace/mc "offsite/$bucket/$object_map_key")"
+
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-cat > "$manifest_file" <<EOF
-{
-  "schema_version": 1,
-  "export_id": "$export_id",
-  "created_at_utc": "$created_at",
-  "repository_object_count": $object_count,
-  "repository_checksum_manifest": "$export_id.sha256",
-  "repository_checksum_manifest_sha256": "$checksum_sha256",
-  "retention_mode": "COMPLIANCE"
-}
-EOF
+jq -S -n \
+    --arg export_id "$export_id" \
+    --arg created_at "$created_at" \
+    --arg bucket "$bucket" \
+    --arg prefix "$prefix" \
+    --arg object_map_key "$object_map_key" \
+    --arg object_map_version_id "$object_map_version_id" \
+    --arg object_map_sha256 "$object_map_sha256" \
+    --argjson object_count "$object_count" \
+    '{
+        schema_version: 2,
+        export_id: $export_id,
+        created_at_utc: $created_at,
+        bucket: $bucket,
+        prefix: $prefix,
+        repository_object_count: $object_count,
+        repository_object_map_key: $object_map_key,
+        repository_object_map_version_id: $object_map_version_id,
+        repository_object_map_sha256: $object_map_sha256,
+        retention_mode: "COMPLIANCE"
+    }' > "$manifest_file"
 
 mc --config-dir /workspace/mc cp \
-    "$checksum_file" "offsite/$bucket/$prefix/manifests/$export_id.sha256" >/dev/null
-mc --config-dir /workspace/mc cp \
     "$manifest_file" "offsite/$bucket/$prefix/manifests/$export_id.json" >/dev/null
+manifest_version_id="$(aurum_latest_version_id \
+    /workspace/mc "offsite/$bucket/$prefix/manifests/$export_id.json")"
+manifest_sha256="$(sha256sum "$manifest_file" | awk '{print $1}')"
 mc --config-dir /workspace/mc cp \
+    --version-id "$manifest_version_id" \
     "offsite/$bucket/$prefix/manifests/$export_id.json" \
     /workspace/export/verified.json >/dev/null
 cmp "$manifest_file" /workspace/export/verified.json
 
-printf 'Off-site WORM export completed: %s (encrypted objects: %s)\n' \
+pointer_tmp="$candidate_dir/.$export_id.candidate.json.tmp"
+jq -S -n \
+    --arg export_id "$export_id" \
+    --arg manifest_key "$prefix/manifests/$export_id.json" \
+    --arg manifest_version_id "$manifest_version_id" \
+    --arg manifest_sha256 "$manifest_sha256" \
+    '{
+        schema_version: 1,
+        export_id: $export_id,
+        manifest_key: $manifest_key,
+        manifest_version_id: $manifest_version_id,
+        manifest_sha256: $manifest_sha256
+    }' > "$pointer_tmp"
+chmod 600 "$pointer_tmp"
+mv "$pointer_tmp" "$pointer_file"
+
+printf 'Off-site WORM candidate completed: %s (encrypted objects: %s)\n' \
     "$export_id" "$object_count"
