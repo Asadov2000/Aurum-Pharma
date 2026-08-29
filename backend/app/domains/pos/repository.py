@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.time import local_day_range
 from app.domains.auth.models import AppUser
 from app.domains.catalog.models import TenantCatalog
-from app.domains.foundation.models import Register
+from app.domains.foundation.models import Branch, Register
 from app.domains.inventory.models import Batch
 from app.domains.pos.models import (
     POSCommand,
@@ -55,6 +55,18 @@ class FavoriteCatalogRow:
     favorite: POSFavorite
     catalog: TenantCatalog
     stock_available: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentReconciliationRow:
+    attempt: POSPaymentAttempt
+    branch_id: UUID
+    branch_name: str
+    register_id: UUID
+    register_name: str
+    cashier_name: str | None
+    sale_total_amount: Decimal
+    item_count: int
 
 
 _FULL_REFUND_SQL = """
@@ -659,6 +671,115 @@ class POSRepository:
 
     async def get_payment_attempt(self, attempt_id: UUID) -> POSPaymentAttempt | None:
         return await self.session.get(POSPaymentAttempt, attempt_id)
+
+    async def list_payment_reconciliation(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_ids: set[UUID] | None,
+        branch_id: UUID | None,
+        payment_method: str | None,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[
+        list[PaymentReconciliationRow],
+        int,
+        dict[str, tuple[int, Decimal]],
+        list[tuple[UUID, str]],
+    ]:
+        active_statuses = ("requires_reconciliation", "confirmed")
+        base_clauses = [
+            POSPaymentAttempt.tenant_id == tenant_id,
+            POSPaymentAttempt.status.in_(active_statuses),
+        ]
+        if branch_ids is not None:
+            base_clauses.append(Sale.branch_id.in_(branch_ids))
+        if branch_id is not None:
+            base_clauses.append(Sale.branch_id == branch_id)
+        if payment_method is not None:
+            base_clauses.append(POSPaymentAttempt.payment_method == payment_method)
+
+        filtered_clauses = list(base_clauses)
+        if status is not None:
+            filtered_clauses.append(POSPaymentAttempt.status == status)
+
+        count_stmt = (
+            select(func.count(POSPaymentAttempt.id))
+            .join(Sale, Sale.id == POSPaymentAttempt.sale_id)
+            .where(*filtered_clauses)
+        )
+        total = int((await self.session.execute(count_stmt)).scalar_one())
+
+        item_count = (
+            select(func.count(SaleItem.id))
+            .where(SaleItem.sale_id == POSPaymentAttempt.sale_id)
+            .correlate(POSPaymentAttempt)
+            .scalar_subquery()
+        )
+        rows_stmt = (
+            select(
+                POSPaymentAttempt,
+                Sale.branch_id,
+                Branch.name.label("branch_name"),
+                Sale.register_id,
+                Register.name.label("register_name"),
+                AppUser.full_name.label("cashier_name"),
+                Sale.total_amount.label("sale_total_amount"),
+                item_count.label("item_count"),
+            )
+            .join(Sale, Sale.id == POSPaymentAttempt.sale_id)
+            .join(Branch, Branch.id == Sale.branch_id)
+            .join(Register, Register.id == Sale.register_id)
+            .outerjoin(AppUser, AppUser.id == POSPaymentAttempt.cashier_user_id)
+            .where(*filtered_clauses)
+            .order_by(
+                POSPaymentAttempt.reconciliation_started_at.asc(),
+                POSPaymentAttempt.id.asc(),
+            )
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        )
+        rows = (await self.session.execute(rows_stmt)).all()
+        items = [
+            PaymentReconciliationRow(
+                attempt=row[0],
+                branch_id=row.branch_id,
+                branch_name=row.branch_name,
+                register_id=row.register_id,
+                register_name=row.register_name,
+                cashier_name=row.cashier_name,
+                sale_total_amount=row.sale_total_amount,
+                item_count=int(row.item_count),
+            )
+            for row in rows
+        ]
+
+        summary_stmt = (
+            select(
+                POSPaymentAttempt.status,
+                func.count(POSPaymentAttempt.id),
+                func.coalesce(func.sum(POSPaymentAttempt.amount), 0),
+            )
+            .join(Sale, Sale.id == POSPaymentAttempt.sale_id)
+            .where(*base_clauses)
+            .group_by(POSPaymentAttempt.status)
+        )
+        summary = {
+            row[0]: (int(row[1]), Decimal(row[2]))
+            for row in (await self.session.execute(summary_stmt)).all()
+        }
+
+        branches_stmt = (
+            select(Branch.id, Branch.name)
+            .where(
+                Branch.tenant_id == tenant_id,
+                *([Branch.id.in_(branch_ids)] if branch_ids is not None else []),
+            )
+            .order_by(Branch.name, Branch.id)
+        )
+        branches = [(row.id, row.name) for row in (await self.session.execute(branches_stmt)).all()]
+        return items, total, summary, branches
 
     async def lock_payment_attempt(self, attempt_id: UUID) -> POSPaymentAttempt | None:
         stmt = (

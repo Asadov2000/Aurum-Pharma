@@ -18,6 +18,7 @@ export const ROLE_MANAGEMENT_PERMISSIONS = [
 ] as const;
 export const POS_PERMISSIONS = ["pos.shift_open", "pos.shift_close", "pos.sell"] as const;
 export const SALES_VIEW_PERMISSIONS = ["sales.view.own", "sales.view.tenant"] as const;
+export const PAYMENT_RECONCILIATION_PERMISSIONS = ["pos.manage_sales"] as const;
 export const TENANT_BILLING_VIEW_PERMISSIONS = [
   "billing.overview.view",
   "billing.invoice.view",
@@ -47,6 +48,7 @@ export type AppRoutePath =
   | "/incoming"
   | "/pos"
   | "/sales"
+  | "/payment-reconciliation"
   | "/billing"
   | "/reports"
   | "/audit"
@@ -83,6 +85,7 @@ const KNOWN_APP_ROUTES: readonly AppRoutePath[] = [
   "/incoming",
   "/pos",
   "/sales",
+  "/payment-reconciliation",
   "/billing",
   "/reports",
   "/audit",
@@ -227,6 +230,9 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   }
   if (isPath(pathname, "/sales")) {
     return hasAnyPermission(context, SALES_VIEW_PERMISSIONS);
+  }
+  if (isPath(pathname, "/payment-reconciliation")) {
+    return hasAnyPermission(context, PAYMENT_RECONCILIATION_PERMISSIONS);
   }
   if (isPath(pathname, "/billing")) {
     return TENANT_BILLING_VIEW_PERMISSIONS.every((permission) =>

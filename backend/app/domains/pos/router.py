@@ -7,9 +7,9 @@ Two routers under one prefix file:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Query, Response, status
@@ -36,6 +36,10 @@ from app.domains.pos.schemas import (
     POSPaymentAttemptCreate,
     POSPaymentAttemptRead,
     POSPaymentAttemptVoid,
+    POSPaymentReconciliationBranch,
+    POSPaymentReconciliationItem,
+    POSPaymentReconciliationList,
+    POSPaymentReconciliationSummary,
     POSRefundAttemptConfirm,
     POSRefundAttemptCreate,
     POSRefundAttemptRead,
@@ -211,6 +215,76 @@ async def remove_pos_favorite(
 # =============================================================================
 
 
+@router.get(
+    "/pos/payment-reconciliation",
+    response_model=POSPaymentReconciliationList,
+)
+async def list_pos_payment_reconciliation(
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("pos.manage_sales", policy="filter")),
+    ],
+    service: Annotated[POSService, Depends(_service)],
+    branch_id: Annotated[UUID | None, Query()] = None,
+    payment_method: Annotated[Literal["card", "qr"] | None, Query()] = None,
+    reconciliation_status: Annotated[
+        Literal["requires_reconciliation", "confirmed"] | None,
+        Query(alias="status"),
+    ] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> POSPaymentReconciliationList:
+    rows, total, raw_summary, branches = await service.list_payment_reconciliation(
+        tenant_id=_current_tenant_or_400(user),
+        branch_ids=_sale_manage_branch_scope(user),
+        branch_id=branch_id,
+        payment_method=payment_method,
+        status=reconciliation_status,
+        page=page,
+        page_size=page_size,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    zero = (0, Decimal("0.00"))
+    requires_count, requires_amount = raw_summary.get("requires_reconciliation", zero)
+    confirmed_count, confirmed_amount = raw_summary.get("confirmed", zero)
+    return POSPaymentReconciliationList(
+        items=[
+            POSPaymentReconciliationItem(
+                id=row.attempt.id,
+                sale_id=row.attempt.sale_id,
+                branch_id=row.branch_id,
+                branch_name=row.branch_name,
+                register_id=row.register_id,
+                register_name=row.register_name,
+                cashier_name=row.cashier_name,
+                payment_method=cast(Literal["card", "qr"], row.attempt.payment_method),
+                amount=row.attempt.amount,
+                sale_total_amount=row.sale_total_amount,
+                currency=cast(Literal["TJS"], row.attempt.currency),
+                status=cast(Literal["requires_reconciliation", "confirmed"], row.attempt.status),
+                item_count=row.item_count,
+                created_at=row.attempt.created_at,
+                reconciliation_started_at=cast(datetime, row.attempt.reconciliation_started_at),
+                confirmed_at=row.attempt.confirmed_at,
+            )
+            for row in rows
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+        summary=POSPaymentReconciliationSummary(
+            requires_reconciliation_count=requires_count,
+            requires_reconciliation_amount=requires_amount,
+            confirmed_count=confirmed_count,
+            confirmed_amount=confirmed_amount,
+        ),
+        branches=[
+            POSPaymentReconciliationBranch(id=item_id, name=name) for item_id, name in branches
+        ],
+    )
+
+
 @router.post(
     "/pos/payment-attempts",
     response_model=POSPaymentAttemptRead,
@@ -243,7 +317,10 @@ async def create_pos_payment_attempt(
 )
 async def get_pos_payment_attempt(
     attempt_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_branch_permission("pos.sell", "pos.manage_sales", policy="resource")),
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
     attempt = await service.get_payment_attempt(
@@ -251,7 +328,7 @@ async def get_pos_payment_attempt(
         attempt_id=attempt_id,
         actor_id=user.user_id,
         can_manage_tenant=_can_manage_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_branch_ids=user.branch_scope_for_any("pos.sell", "pos.manage_sales"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return POSPaymentAttemptRead.model_validate(attempt)
@@ -286,7 +363,10 @@ async def begin_pos_payment_attempt_reconciliation(
 async def confirm_pos_payment_attempt(
     attempt_id: UUID,
     payload: POSPaymentAttemptConfirm,
-    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_branch_permission("pos.sell", "pos.manage_sales", policy="resource")),
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
     attempt = await service.confirm_payment_attempt(
@@ -296,7 +376,7 @@ async def confirm_pos_payment_attempt(
         terminal_id=payload.terminal_id,
         external_reference=payload.external_reference,
         can_manage_tenant=_can_manage_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_branch_ids=user.branch_scope_for_any("pos.sell", "pos.manage_sales"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return POSPaymentAttemptRead.model_validate(attempt)
@@ -310,7 +390,10 @@ async def confirm_pos_payment_attempt(
 async def void_pos_payment_attempt(
     attempt_id: UUID,
     payload: POSPaymentAttemptVoid,
-    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_branch_permission("pos.sell", "pos.manage_sales", policy="resource")),
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
     attempt = await service.void_payment_attempt(
@@ -322,7 +405,7 @@ async def void_pos_payment_attempt(
         terminal_id=payload.terminal_id,
         external_reference=payload.external_reference,
         can_manage_tenant=_can_manage_tenant_sales(user),
-        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_branch_ids=user.branch_scope_for_any("pos.sell", "pos.manage_sales"),
         allowed_manage_branch_ids=_sale_manage_branch_scope(user),
     )
     return POSPaymentAttemptRead.model_validate(attempt)

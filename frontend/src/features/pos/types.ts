@@ -58,7 +58,14 @@ export interface PaymentAttemptConfirmPayload {
 }
 
 export interface PaymentAttemptVoidPayload {
-  reason: "cashier_cancelled" | "checkout_failed" | "terminal_declined";
+  reason:
+    | "cashier_cancelled"
+    | "customer_cancelled"
+    | "terminal_declined"
+    | "timeout"
+    | "duplicate"
+    | "checkout_failed"
+    | "manager_override";
   operator_note?: string | null;
   terminal_id?: string | null;
   external_reference?: string | null;

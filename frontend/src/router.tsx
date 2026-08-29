@@ -68,6 +68,9 @@ const IncomingDetailPage = lazyRouteComponent(
 );
 const POSPage = lazyRouteComponent(() => import("@/features/pos/POSPage"), "POSPage");
 const SalesPage = lazyRouteComponent(() => import("@/features/sales/SalesPage"), "SalesPage");
+const PaymentReconciliationPage = lazyRouteComponent(
+  () => import("@/features/paymentReconciliation/PaymentReconciliationPage"),
+);
 const BillingPage = lazyRouteComponent(
   () => import("@/features/billing/BillingPage"),
   "BillingPage",
@@ -213,6 +216,12 @@ const salesRoute = createRoute({
   component: SalesPage,
 });
 
+const paymentReconciliationRoute = createRoute({
+  getParentRoute,
+  path: "/payment-reconciliation",
+  component: PaymentReconciliationPage,
+});
+
 const billingRoute = createRoute({
   getParentRoute,
   path: "/billing",
@@ -291,6 +300,7 @@ const routeTree = rootRoute.addChildren([
   incomingDetailRoute,
   posRoute,
   salesRoute,
+  paymentReconciliationRoute,
   billingRoute,
   auditRoute,
   onboardingRoute,

@@ -623,6 +623,14 @@ class POSPaymentAttempt(Base):
             unique=True,
             postgresql_where=text("terminal_id IS NOT NULL AND external_reference IS NOT NULL"),
         ),
+        Index(
+            "ix_pos_payment_attempt_reconciliation_queue",
+            "tenant_id",
+            "status",
+            "reconciliation_started_at",
+            "id",
+            postgresql_where=text("status IN ('requires_reconciliation','confirmed')"),
+        ),
     )
 
 

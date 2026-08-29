@@ -59,7 +59,7 @@ from app.domains.pos.models import (
     Shift,
 )
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
-from app.domains.pos.repository import FavoriteCatalogRow, POSRepository
+from app.domains.pos.repository import FavoriteCatalogRow, PaymentReconciliationRow, POSRepository
 from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.schemas import (
     PAYMENT_METHODS,
@@ -344,6 +344,36 @@ class POSService:
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         return attempt
+
+    async def list_payment_reconciliation(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_ids: set[UUID] | None,
+        branch_id: UUID | None,
+        payment_method: str | None,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[
+        list[PaymentReconciliationRow],
+        int,
+        dict[str, tuple[int, Decimal]],
+        list[tuple[UUID, str]],
+    ]:
+        if branch_ids == set():
+            raise PermissionDeniedError("Branch access denied")
+        if branch_id is not None and branch_ids is not None and branch_id not in branch_ids:
+            raise PermissionDeniedError("Branch access denied")
+        return await self.repo.list_payment_reconciliation(
+            tenant_id=tenant_id,
+            branch_ids=branch_ids,
+            branch_id=branch_id,
+            payment_method=payment_method,
+            status=status,
+            page=page,
+            page_size=page_size,
+        )
 
     async def begin_payment_attempt_reconciliation(
         self,

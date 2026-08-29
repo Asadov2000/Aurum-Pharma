@@ -16,7 +16,11 @@ export interface SidebarSection {
 export const SIDEBAR_SECTIONS: readonly SidebarSection[] = [
   { id: "home", routes: ["/"] },
   { id: "launch", caption: "Запуск", routes: ["/onboarding"] },
-  { id: "sales", caption: "Продажи", routes: ["/pos", "/sales"] },
+  {
+    id: "sales",
+    caption: "Продажи",
+    routes: ["/pos", "/sales", "/payment-reconciliation"],
+  },
   {
     id: "stock",
     caption: "Склад",
