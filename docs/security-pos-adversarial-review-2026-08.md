@@ -16,9 +16,10 @@ found.
 
 Release readiness is nevertheless blocked by four business-safety gaps. The
 first implementation package should close AP-POS-001 through AP-POS-004 before
-new POS features are added. AP-POS-005 and AP-POS-006 should follow in the
-receipt and privacy package. AP-POS-007 is a separate Edge milestone, not a
-small web-POS patch.
+new POS features are added. AP-POS-005 is now covered by the confirmed-payment
+grandfathering flow, and AP-POS-006 is closed by the controlled refund evidence
+and receipt package. AP-POS-007 is a separate Edge milestone, not a small
+web-POS patch.
 
 ## Findings
 
@@ -142,6 +143,7 @@ returned unit is selected by FEFO before release.
 
 Severity: Medium
 Affected roles: seller, pharmacy owner
+Status: Resolved and covered by backend and frontend regression tests.
 
 Evidence:
 
@@ -156,10 +158,15 @@ Required fix: bind the attempt to the accepted settings revision, or allow an
 already confirmed attempt to finish under its immutable creation snapshot while
 preventing new attempts with the disabled method.
 
+Resolution: checkout grandfathers only methods backed by already confirmed
+attempts. New attempts still use the current pharmacy settings. Backend and UI
+tests cover a settings change between terminal confirmation and checkout.
+
 ### AP-POS-006 - Refund evidence and printed return receipt need safer semantics
 
 Severity: Medium
 Affected roles: seller, pharmacy owner, customer
+Status: Resolved by migration `0124` and the matching backend/frontend package.
 
 Evidence:
 
@@ -175,6 +182,11 @@ Required fix: use controlled reason codes, redact free text from audit
 snapshots, and make browser/PDF return receipts explicitly say "Возврат",
 "Возвращено" and show the original receipt number. Do not show sale change or
 "Спасибо за покупку" on a return.
+
+Resolution: the API and database enforce controlled reason codes; payment and
+audit metadata carry the code without the service comment, while the restricted
+quarantine record keeps that optional comment. Browser and PDF receipts
+identify the original receipt and use refund-specific totals and footer text.
 
 ### AP-POS-007 - Offline cash core is not yet an executable branch runtime
 

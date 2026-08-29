@@ -29,6 +29,7 @@ import { hasPermission } from "@/features/auth/permissions";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { formatInventoryDate, formatInventoryQuantity } from "@/features/inventory/formatters";
 import { describeApiError } from "@/lib/errorMessages";
+import { refundReasonLabel } from "@/lib/refundReasons";
 
 import { useCustomerReturnsQuery, useResolveCustomerReturn } from "./queries";
 import {
@@ -315,7 +316,7 @@ function ReturnTable({
                 <p className="text-xs text-foreground-muted">{formatDateTime(item.received_at)}</p>
               </TD>
               <TD className="max-w-56">
-                <p className="truncate">{item.refund_reason || "Не указана"}</p>
+                <p className="truncate">{refundReasonLabel(item.refund_reason)}</p>
                 {item.refund_comment ? (
                   <p className="truncate text-xs text-foreground-muted">{item.refund_comment}</p>
                 ) : null}
@@ -370,7 +371,7 @@ function ReturnCards({
           </dl>
           <p className="mt-3 text-sm">
             <span className="text-foreground-muted">Причина: </span>
-            {item.refund_reason || "не указана"}
+            {refundReasonLabel(item.refund_reason)}
           </p>
           {canResolve && item.status === "pending" ? (
             <Button className="mt-4 w-full" onClick={() => onResolve(item)}>

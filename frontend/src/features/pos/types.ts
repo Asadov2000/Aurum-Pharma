@@ -310,6 +310,7 @@ export interface ReceiptData {
   branch_address: string | null;
   branch_license: string | null;
   receipt_number: string | null;
+  original_receipt_number: string | null;
   datetime: string | null;
   cashier_name: string | null;
   items: ReceiptLine[];

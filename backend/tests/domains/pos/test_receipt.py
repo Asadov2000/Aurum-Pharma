@@ -142,6 +142,9 @@ async def test_return_receipt_keeps_the_product_name_from_original_receipt(
     return_receipt = await service.build_receipt(returned.id)
 
     assert return_receipt.items[0].name == original.items[0].name
+    assert return_receipt.is_refund is True
+    assert return_receipt.original_receipt_number == original.receipt_number
+    assert return_receipt.change == Decimal("0")
 
 
 async def test_completed_receipt_snapshot_is_redacted_from_audit(

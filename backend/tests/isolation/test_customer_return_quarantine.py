@@ -114,3 +114,14 @@ async def test_customer_return_journals_are_tenant_scoped_and_append_only(
             "trg_validate_customer_return_disposition_insert",
             "trg_require_return_quarantine_before_completion",
         } <= trigger_names
+
+        reason_constraint = (await connection.execute(text("""
+                    SELECT constraints.convalidated
+                    FROM pg_catalog.pg_constraint AS constraints
+                    JOIN pg_catalog.pg_class AS relations
+                      ON relations.oid = constraints.conrelid
+                    WHERE relations.relname = 'customer_return_quarantine_item'
+                      AND constraints.conname =
+                        'ck_customer_return_quarantine_refund_reason_code'
+                    """))).scalar_one()
+        assert reason_constraint is False

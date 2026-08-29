@@ -42,7 +42,7 @@ const RETURN_ITEM = {
   batch_number: "LOT-2026-01",
   expires_at: "2027-06-30",
   qty: "1.000",
-  refund_reason: "Повреждена упаковка",
+  refund_reason: "damaged_package",
   refund_comment: null,
   received_at: "2026-08-29T10:00:00Z",
   status: "pending" as const,
@@ -86,7 +86,9 @@ describe("CustomerReturnsPanel", () => {
   it("records an irreversible physical disposition with an idempotency key", async () => {
     renderPanel();
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Принять решение" }))[0]!);
+    expect((await screen.findAllByText("Повреждена упаковка")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Принять решение" })[0]!);
     fireEvent.click(screen.getByRole("radio", { name: "Утилизировано" }));
     fireEvent.change(screen.getByLabelText("Причина"), {
       target: { value: "damaged" },

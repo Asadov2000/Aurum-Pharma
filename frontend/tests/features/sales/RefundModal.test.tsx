@@ -175,6 +175,10 @@ describe("RefundModal", () => {
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
 
     expect(screen.getByRole("note")).toHaveTextContent("Возвращённый товар не поступит в продажу");
+    expect(screen.getByRole("option", { name: "Подозрение на качество" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Причина"), {
+      target: { value: "quality_issue" },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
     await waitFor(() => expect(createRefundAttempt).toHaveBeenCalledTimes(1));
@@ -207,7 +211,7 @@ describe("RefundModal", () => {
       payload: {
         operation_id: expect.any(String),
         items: [{ sale_item_id: "item-1", qty: "1" }],
-        reason: null,
+        reason: "quality_issue",
         comment: null,
         refund_attempt_id: "attempt-1",
       },

@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domains.catalog.schemas import CatalogItemRead
+from app.domains.customer_returns.reasons import RefundReasonCode
 
 PAYMENT_METHODS = frozenset({"cash", "card", "qr"})
 # Legacy clients can retry an operation created before QR became a distinct
@@ -735,9 +736,17 @@ class RefundCreate(BaseModel):
 
     operation_id: UUID4
     items: list[RefundItem] = Field(min_length=1, max_length=200)
-    reason: str | None = Field(default=None, max_length=500)
-    comment: str | None = Field(default=None, max_length=2000)
+    reason: RefundReasonCode | None = None
+    comment: str | None = Field(default=None, max_length=500)
     refund_attempt_id: UUID4 | None = None
+
+    @field_validator("comment", mode="before")
+    @classmethod
+    def _strip_comment(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return stripped or None
 
 
 # ---- sales listing (receipt search) ----
@@ -808,6 +817,7 @@ class ReceiptData(BaseModel):
     branch_license: str | None
     # meta
     receipt_number: str | None
+    original_receipt_number: str | None = None
     datetime: datetime | None
     cashier_name: str | None
     # body

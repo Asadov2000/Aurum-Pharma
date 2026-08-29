@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import Path
+from typing import Protocol
 
 from fpdf import FPDF
 from fpdf.enums import Align, XPos, YPos
@@ -28,8 +29,41 @@ _FONT_BOLD = _FONT_DIR / "DejaVuSans-Bold.ttf"
 _FONT = "DejaVu"
 
 
+class _LineWriter(Protocol):
+    def __call__(
+        self,
+        txt: str,
+        *,
+        h: float = 5,
+        size: int = 9,
+        bold: bool = False,
+        align: str = "L",
+    ) -> None: ...
+
+
 def _money(value: Decimal) -> str:
     return f"{value:.2f}"
+
+
+def _write_receipt_summary(data: ReceiptData, line: _LineWriter) -> None:
+    cur = data.currency
+    if data.discount_total > 0:
+        line(f"Скидка: {_money(data.discount_total)} {cur}", align="R")
+    total_label = "ВОЗВРАЩЕНО" if data.is_refund else "ИТОГО"
+    line(f"{total_label}: {_money(data.total)} {cur}", h=7, size=13, bold=True, align="R")
+
+    for payment in data.payments:
+        line(f"{_method_label(payment.method)}: {_money(payment.amount)} {cur}", align="R")
+    if not data.is_refund:
+        line(f"Принято: {_money(data.paid_total)} {cur}", align="R")
+        line(f"Сдача: {_money(data.change)} {cur}", align="R")
+
+    line("", h=4)
+    line(
+        "Средства возвращены по исходному чеку." if data.is_refund else "Спасибо за покупку!",
+        size=8,
+        align="C",
+    )
 
 
 def render_receipt_pdf(data: ReceiptData) -> bytes:
@@ -59,6 +93,8 @@ def render_receipt_pdf(data: ReceiptData) -> bytes:
 
     line("ВОЗВРАТ" if data.is_refund else "КАССОВЫЙ ЧЕК", h=6, size=12, bold=True, align="C")
     line(f"Чек № {data.receipt_number or '—'}")
+    if data.is_refund:
+        line(f"Исходный чек № {data.original_receipt_number or '—'}")
     if data.datetime is not None:
         line(f"Дата: {data.datetime:%d.%m.%Y %H:%M}")
     if data.cashier_name:
@@ -89,19 +125,7 @@ def render_receipt_pdf(data: ReceiptData) -> bytes:
     pdf.ln(2)
 
     # ---- totals ----
-    cur = data.currency
-    if data.discount_total > 0:
-        line(f"Скидка: {_money(data.discount_total)} {cur}", align="R")
-    line(f"ИТОГО: {_money(data.total)} {cur}", h=7, size=13, bold=True, align="R")
-    pdf.ln(1)
-
-    for p in data.payments:
-        line(f"{_method_label(p.method)}: {_money(p.amount)} {cur}", align="R")
-    line(f"Принято: {_money(data.paid_total)} {cur}", align="R")
-    line(f"Сдача: {_money(data.change)} {cur}", align="R")
-    pdf.ln(4)
-
-    line("Спасибо за покупку!", size=8, align="C")
+    _write_receipt_summary(data, line)
 
     out = pdf.output()
     return bytes(out)

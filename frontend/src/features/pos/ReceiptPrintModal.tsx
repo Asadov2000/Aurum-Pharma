@@ -53,7 +53,7 @@ export function ReceiptPrintModal({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `receipt-${data?.receipt_number ?? saleId}.pdf`;
+      a.download = `${data?.is_refund ? "return" : "receipt"}-${data?.receipt_number ?? saleId}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -78,7 +78,7 @@ export function ReceiptPrintModal({
         className="receipt-no-print mb-3 flex w-full max-w-md flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-raised p-3 shadow-lg"
         role="dialog"
         aria-modal="true"
-        aria-label="Печать чека"
+        aria-label={data?.is_refund ? "Печать возврата" : "Печать чека"}
         onClick={(e) => e.stopPropagation()}
       >
         <Select
@@ -94,7 +94,7 @@ export function ReceiptPrintModal({
           ))}
         </Select>
         <Button onClick={() => window.print()} disabled={!data}>
-          Печать чека
+          {data?.is_refund ? "Печать возврата" : "Печать чека"}
         </Button>
         <Button
           variant="secondary"
@@ -126,7 +126,7 @@ export function ReceiptPrintModal({
 }
 
 /** The receipt itself — white paper, black ink, monospace (thermal look). */
-function ReceiptDocument({
+export function ReceiptDocument({
   data,
   contentWidth,
 }: {
@@ -150,6 +150,7 @@ function ReceiptDocument({
         <Divider />
         <p className="text-center font-bold">{data.is_refund ? "ВОЗВРАТ" : "КАССОВЫЙ ЧЕК"}</p>
         <p>Чек № {data.receipt_number ?? "—"}</p>
+        {data.is_refund && <p>Исходный чек № {data.original_receipt_number ?? "—"}</p>}
         <p>Дата: {dt}</p>
         {data.cashier_name && <p>Кассир: {data.cashier_name}</p>}
         <Divider />
@@ -173,7 +174,7 @@ function ReceiptDocument({
           <Row label="Скидка" value={`${money(data.discount_total)} ${data.currency}`} />
         )}
         <div className="flex justify-between text-sm font-bold tabular-nums">
-          <span>ИТОГО</span>
+          <span>{data.is_refund ? "ВОЗВРАЩЕНО" : "ИТОГО"}</span>
           <span>
             {money(data.total)} {data.currency}
           </span>
@@ -187,11 +188,17 @@ function ReceiptDocument({
             value={`${money(p.amount)} ${data.currency}`}
           />
         ))}
-        <Row label="Принято" value={`${money(data.paid_total)} ${data.currency}`} />
-        <Row label="Сдача" value={`${money(data.change)} ${data.currency}`} />
+        {!data.is_refund && (
+          <>
+            <Row label="Принято" value={`${money(data.paid_total)} ${data.currency}`} />
+            <Row label="Сдача" value={`${money(data.change)} ${data.currency}`} />
+          </>
+        )}
 
         <Divider />
-        <p className="text-center text-[11px]">Спасибо за покупку!</p>
+        <p className="text-center text-[11px]">
+          {data.is_refund ? "Средства возвращены по исходному чеку." : "Спасибо за покупку!"}
+        </p>
       </div>
     </div>
   );

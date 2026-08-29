@@ -8,6 +8,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,14 +19,37 @@ from app.core.errors import (
     NotFoundError,
     PermissionDeniedError,
 )
+from app.domains.audit.models import AuditLog
 from app.domains.auth.models import AppUser
 from app.domains.customer_returns.models import CustomerReturnQuarantineItem
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
+from app.domains.pos.schemas import RefundCreate
 from app.domains.pos.service import POSService
 from app.domains.sync.models import SyncOutboxEvent
 from app.domains.sync.repository import SyncOutboxRepository
+
+
+def test_refund_schema_accepts_only_controlled_reason_and_normalizes_comment() -> None:
+    item_id = uuid4()
+    operation_id = uuid4()
+
+    valid = RefundCreate(
+        operation_id=operation_id,
+        items=[{"sale_item_id": item_id, "qty": "1"}],
+        reason="quality_issue",
+        comment="  Упаковка повреждена при передаче  ",
+    )
+    assert valid.reason == "quality_issue"
+    assert valid.comment == "Упаковка повреждена при передаче"
+
+    with pytest.raises(ValidationError, match="Input should be"):
+        RefundCreate(
+            operation_id=operation_id,
+            items=[{"sale_item_id": item_id, "qty": "1"}],
+            reason="произвольный текст",
+        )
 
 
 async def _open_shift_and_sell(  # type: ignore[no-untyped-def]
@@ -116,7 +140,7 @@ async def test_partial_refund_does_not_void_parent(db_session: AsyncSession, pos
     ret = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("2"))],
-        reason="defect",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
@@ -153,7 +177,7 @@ async def test_full_refund_derives_voided_state_without_mutating_parent(
     ret = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, item.qty)],
-        reason="not_needed",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
@@ -176,7 +200,7 @@ async def test_voided_sale_receipt_number_is_never_reused(
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, item.qty)],
-        reason="full return",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
@@ -216,7 +240,7 @@ async def test_refund_retry_and_result_recovery_are_idempotent_and_scoped(
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="customer_return",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
         operation_id=operation_id,
@@ -224,7 +248,7 @@ async def test_refund_retry_and_result_recovery_are_idempotent_and_scoped(
     retried = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="customer_return",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
         operation_id=operation_id,
@@ -252,7 +276,7 @@ async def test_refund_retry_and_result_recovery_are_idempotent_and_scoped(
     retried_with_reentered_metadata = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="different_reason",
+        reason="other",
         comment="re-entered after reconnect",
         cashier_user_id=s["cashier"].id,
         operation_id=operation_id,
@@ -268,7 +292,7 @@ async def test_refund_retry_and_result_recovery_are_idempotent_and_scoped(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("2"))],
-            reason="customer_return",
+            reason="other",
             comment=None,
             cashier_user_id=s["cashier"].id,
             operation_id=operation_id,
@@ -308,7 +332,7 @@ async def test_electronic_refund_recovery_rejects_missing_outbox_snapshot(
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="customer return",
+        reason="other",
         comment=None,
         cashier_user_id=scaffold["cashier"].id,
         operation_id=operation_id,
@@ -328,7 +352,7 @@ async def test_electronic_refund_recovery_rejects_missing_outbox_snapshot(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="customer return",
+            reason="other",
             comment=None,
             cashier_user_id=scaffold["cashier"].id,
             operation_id=operation_id,
@@ -381,7 +405,7 @@ async def test_electronic_refund_outbox_failure_rolls_back_and_remains_retryable
             await service.refund(
                 parent_sale_id=parent_id,
                 items=[(item_id, Decimal("1"))],
-                reason="customer return",
+                reason="other",
                 comment=None,
                 cashier_user_id=cashier_id,
                 operation_id=operation_id,
@@ -409,7 +433,7 @@ async def test_electronic_refund_outbox_failure_rolls_back_and_remains_retryable
     returned = await service.refund(
         parent_sale_id=parent_id,
         items=[(item_id, Decimal("1"))],
-        reason="customer return",
+        reason="other",
         comment=None,
         cashier_user_id=cashier_id,
         operation_id=operation_id,
@@ -455,7 +479,7 @@ async def test_consumed_attempt_without_completed_refund_blocks_recovery_and_rep
     await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="customer return",
+        reason="other",
         comment=None,
         cashier_user_id=scaffold["cashier"].id,
         operation_id=uuid4(),
@@ -542,7 +566,7 @@ async def test_confirmed_refund_attempt_requires_all_terminal_references_at_fina
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="customer return",
+            reason="other",
             comment=None,
             cashier_user_id=scaffold["cashier"].id,
             operation_id=operation_id,
@@ -579,7 +603,7 @@ async def test_refund_recovery_rejects_outbox_snapshot_that_differs_from_sale(
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="customer return",
+        reason="other",
         comment=None,
         cashier_user_id=scaffold["cashier"].id,
         operation_id=operation_id,
@@ -622,7 +646,7 @@ async def test_refund_recovery_rejects_outbox_snapshot_that_differs_from_sale(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="customer return",
+            reason="other",
             comment=None,
             cashier_user_id=scaffold["cashier"].id,
             operation_id=operation_id,
@@ -637,7 +661,7 @@ async def test_refund_more_than_sold_blocked(db_session: AsyncSession, pos_scaff
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("99"))],
-            reason="bug",
+            reason="other",
             comment=None,
             cashier_user_id=s["cashier"].id,
         )
@@ -651,7 +675,7 @@ async def test_duplicate_refund_lines_are_validated_as_one_quantity(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("2")), (item.id, Decimal("2"))],
-            reason="duplicate input",
+            reason="other",
             comment=None,
             cashier_user_id=s["cashier"].id,
         )
@@ -665,7 +689,7 @@ async def test_double_refund_tracks_already_refunded(
     await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("2"))],
-        reason="one",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
@@ -673,7 +697,7 @@ async def test_double_refund_tracks_already_refunded(
     await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("2"))],
-        reason="two",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
@@ -688,7 +712,7 @@ async def test_double_refund_tracks_already_refunded(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="three",
+            reason="other",
             comment=None,
             cashier_user_id=s["cashier"].id,
         )
@@ -733,14 +757,14 @@ async def test_discounted_line_refunds_never_exceed_original_net_total(
     first = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="partial one",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
     second = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("2"))],
-        reason="partial two",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
@@ -789,7 +813,7 @@ async def test_refund_uses_current_shift_after_original_shift_closed(
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="customer return",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )
@@ -812,7 +836,7 @@ async def test_non_cash_refund_requires_external_terminal_confirmation(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="customer return",
+            reason="other",
             comment=None,
             cashier_user_id=s["cashier"].id,
         )
@@ -827,7 +851,7 @@ async def test_non_cash_refund_requires_external_terminal_confirmation(
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="customer return",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
         refund_attempt_id=attempt.id,
@@ -837,8 +861,7 @@ async def test_non_cash_refund_requires_external_terminal_confirmation(
         ("card", Decimal("10.00"))
     ]
     assert payments[0].metadata_json == {
-        "reason": "customer return",
-        "comment": None,
+        "reason_code": "other",
         "refund_attempt_id": str(attempt.id),
     }
     assert returned.refund_attempt_id == attempt.id
@@ -951,7 +974,7 @@ async def test_refund_attempt_operation_id_cannot_be_reused_for_payment_attempt(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="customer return",
+            reason="other",
             comment=None,
             cashier_user_id=scaffold["cashier"].id,
             operation_id=operation_id,
@@ -1185,7 +1208,7 @@ async def test_partial_refund_preserves_original_mixed_tender_ratio(
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("3"))],
-        reason="partial",
+        reason="other",
         comment=None,
         cashier_user_id=s["cashier"].id,
         refund_attempt_id=attempt.id,
@@ -1244,7 +1267,7 @@ async def test_repeated_mixed_refunds_reconcile_to_original_tender_totals(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(items[0].id, Decimal("1"))],
-            reason=f"partial {index + 1}",
+            reason="other",
             comment=None,
             cashier_user_id=s["cashier"].id,
             refund_attempt_id=attempt.id,
@@ -1277,7 +1300,7 @@ async def test_refund_cannot_use_another_cashiers_shift_without_manage_permissio
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="approved",
+            reason="other",
             comment=None,
             cashier_user_id=manager.id,
         )
@@ -1285,7 +1308,7 @@ async def test_refund_cannot_use_another_cashiers_shift_without_manage_permissio
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
-        reason="approved",
+        reason="other",
         comment=None,
         cashier_user_id=manager.id,
         can_manage_tenant=True,
@@ -1306,6 +1329,15 @@ async def test_refund_reason_policy_is_enforced_by_service(
     assert settings is not None
     await foundation.update_settings(settings, refund_reason_mode="required_with_text")
 
+    with pytest.raises(BusinessRuleError, match="Unsupported refund reason code"):
+        await service.refund(
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            reason="free text is not a controlled code",
+            comment="Internal explanation",
+            cashier_user_id=s["cashier"].id,
+        )
+
     with pytest.raises(BusinessRuleError, match="reason is required"):
         await service.refund(
             parent_sale_id=parent.id,
@@ -1318,7 +1350,7 @@ async def test_refund_reason_policy_is_enforced_by_service(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="defect",
+            reason="other",
             comment="  ",
             cashier_user_id=s["cashier"].id,
         )
@@ -1328,7 +1360,7 @@ async def test_refund_reason_policy_is_enforced_by_service(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(item.id, Decimal("1"))],
-            reason="not allowed",
+            reason="other",
             comment=None,
             cashier_user_id=s["cashier"].id,
         )
@@ -1341,3 +1373,52 @@ async def test_refund_reason_policy_is_enforced_by_service(
         cashier_user_id=s["cashier"].id,
     )
     assert returned.status == "completed"
+
+
+async def test_refund_comment_is_redacted_from_audit_and_payment_metadata(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, scaffold, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+    )
+    foundation = FoundationRepository(db_session)
+    settings = await foundation.get_settings(scaffold["tenant"].id)
+    assert settings is not None
+    await foundation.update_settings(settings, refund_reason_mode="required_with_text")
+
+    returned = await service.refund(
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        reason="quality_issue",
+        comment="Visible only in the restricted quarantine workflow",
+        cashier_user_id=scaffold["cashier"].id,
+    )
+
+    payments = await service.repo.list_payments(returned.id)
+    assert payments[0].metadata_json is not None
+    assert payments[0].metadata_json["reason_code"] == "quality_issue"
+    assert "comment" not in payments[0].metadata_json
+
+    quarantine_audit = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.table_name == "customer_return_quarantine_item",
+                    AuditLog.action == "INSERT",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    matching = next(
+        entry
+        for entry in quarantine_audit
+        if entry.metadata_json is not None
+        and entry.metadata_json.get("return_sale_id") == str(returned.id)
+    )
+    assert matching.metadata_json is not None
+    assert matching.metadata_json["refund_reason"] == "quality_issue"
+    assert "refund_comment" not in matching.metadata_json

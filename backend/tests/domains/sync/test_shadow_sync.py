@@ -205,7 +205,7 @@ async def test_shadow_refund_is_linked_and_projection_chain_verifies(
     returned = await pos.refund(
         parent_sale_id=parent.sale_id,
         items=[(parent.items[0].id, parent.items[0].qty)],
-        reason="customer_return",
+        reason="customer_cancelled",
         comment=None,
         cashier_user_id=scaffold["cashier"].id,
         operation_id=uuid4(),
@@ -251,7 +251,7 @@ async def test_refund_without_bootstrapped_parent_is_quarantined(
     returned = await pos.refund(
         parent_sale_id=parent.sale_id,
         items=[(parent.items[0].id, parent.items[0].qty)],
-        reason="customer_return",
+        reason="customer_cancelled",
         comment=None,
         cashier_user_id=scaffold["cashier"].id,
         operation_id=uuid4(),

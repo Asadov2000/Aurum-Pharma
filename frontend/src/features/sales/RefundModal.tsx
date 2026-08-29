@@ -6,6 +6,7 @@ import {
   Input,
   Label,
   Modal,
+  Select,
   Table,
   TBody,
   TD,
@@ -19,6 +20,7 @@ import { hasPermission } from "@/features/auth/permissions";
 import { useTenantOperationalSettingsQuery } from "@/features/foundation/queries";
 import { type Sale, type SaleDetails } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
+import { REFUND_REASON_OPTIONS, type RefundReasonCode } from "@/lib/refundReasons";
 
 import {
   beginRefundAttemptReconciliation,
@@ -114,7 +116,7 @@ export function RefundModal({
   const settings = useTenantOperationalSettingsQuery();
   const reasonMode = settings.data?.refund_reason_mode;
   const [topError, setTopError] = useState<string | null>(null);
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState<RefundReasonCode | "">("");
   const [comment, setComment] = useState("");
   const [initialPendingOperation] = useState(() => loadPendingRefundOperation(sale.id));
   const [refundAttempt, setRefundAttempt] = useState<RefundAttempt | null>(null);
@@ -436,7 +438,7 @@ export function RefundModal({
         payload: {
           operation_id: operation.operationId,
           items: operation.items,
-          reason: reason.trim() || null,
+          reason: reason || null,
           comment: comment.trim() || null,
           refund_attempt_id: activeAttempt?.id ?? null,
         },
@@ -558,13 +560,18 @@ export function RefundModal({
                 Причина
                 {reasonMode === "required" || reasonMode === "required_with_text" ? " *" : ""}
               </Label>
-              <Input
+              <Select
                 id="refund_reason"
                 value={reason}
-                maxLength={500}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder="брак, ошибка кассира…"
-              />
+                onChange={(event) => setReason(event.target.value as RefundReasonCode | "")}
+              >
+                <option value="">Не выбрана</option>
+                {REFUND_REASON_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
             </div>
             <div>
               <Label htmlFor="refund_comment">
@@ -574,8 +581,9 @@ export function RefundModal({
                 id="refund_comment"
                 rows={1}
                 value={comment}
-                maxLength={2000}
+                maxLength={500}
                 onChange={(event) => setComment(event.target.value)}
+                placeholder="Только служебное пояснение, без ФИО, телефона и данных покупателя"
               />
             </div>
           </div>

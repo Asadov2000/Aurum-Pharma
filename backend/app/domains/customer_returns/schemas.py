@@ -33,6 +33,7 @@ class CustomerReturnRead(BaseModel):
     batch_number: str | None
     expires_at: date
     qty: Decimal
+    # Historical rows created before controlled reason codes remain readable.
     refund_reason: str | None
     refund_comment: str | None
     received_at: datetime
