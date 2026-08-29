@@ -186,7 +186,7 @@ case "$(uname -s)" in
             "$secrets/AURUM_OFFSITE_RESTORE_SECRET_KEY" \
             "$secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem" \
             "$secrets/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem"
-        chmod 600 \
+        sudo chmod 600 \
             "$secrets/RESTIC_PASSWORD" \
             "$secrets/AURUM_OFFSITE_ACCESS_KEY" \
             "$secrets/AURUM_OFFSITE_SECRET_KEY" \
