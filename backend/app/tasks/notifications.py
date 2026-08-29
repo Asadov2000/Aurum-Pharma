@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, timedelta
+from uuid import UUID
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import WorkerSessionLocal
 from app.core.time import utc_now
@@ -24,11 +26,34 @@ from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Branch
 from app.domains.notifications.repository import NotificationsRepository
 from app.domains.notifications.service import NotificationsService
+from app.domains.roles.models import TenantMembership, TenantOwnership
 from app.tasks.celery_app import celery_app
 
 logger = structlog.get_logger("tasks.notifications")
 
 DEFAULT_BATCH = 50
+
+
+async def _active_tenant_owners(db: AsyncSession, *, tenant_id: UUID) -> list[AppUser]:
+    result = await db.execute(
+        select(AppUser)
+        .join(
+            TenantMembership,
+            TenantMembership.user_id == AppUser.id,
+        )
+        .join(
+            TenantOwnership,
+            TenantOwnership.membership_id == TenantMembership.id,
+        )
+        .where(
+            TenantMembership.tenant_id == tenant_id,
+            TenantMembership.status == "active",
+            TenantOwnership.tenant_id == tenant_id,
+            TenantOwnership.is_active.is_(True),
+            AppUser.status == "active",
+        )
+    )
+    return list(result.scalars().all())
 
 
 async def _process_pending_async() -> dict[str, int]:
@@ -71,10 +96,7 @@ def purge_old_notifications() -> int:
 
 
 async def _check_expiring_licenses_async() -> int:
-    """Phase-1 stub: count branches whose license expires within 30 days
-    and notify their tenant's home users. Implementation kept minimal to
-    avoid hard-coding "who is the owner" until roles integration lands —
-    we notify every user with home_tenant_id matching the branch's tenant."""
+    """Notify active tenant owners about licenses expiring within 30 days."""
     notified = 0
     cutoff: date = utc_now().date() + timedelta(days=30)
     async with WorkerSessionLocal() as db:
@@ -92,16 +114,9 @@ async def _check_expiring_licenses_async() -> int:
                 # branch.license_expires_at is non-null thanks to the WHERE
                 # clause above; assert so mypy sees the narrowed type.
                 assert branch.license_expires_at is not None
-                # Notify tenant owners — any user with home_tenant_id =
-                # branch.tenant_id.
-                users = list(
-                    (
-                        await db.execute(
-                            select(AppUser).where(AppUser.home_tenant_id == branch.tenant_id)
-                        )
-                    )
-                    .scalars()
-                    .all()
+                users = await _active_tenant_owners(
+                    db,
+                    tenant_id=branch.tenant_id,
                 )
                 for user in users:
                     await service.notify(

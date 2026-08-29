@@ -9,10 +9,10 @@ that includes the effective permission set recomputed from the database.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import UUID
 
 from fastapi import Depends, Header, Request
@@ -33,6 +33,40 @@ from app.core.security import decode_access_token
 
 if TYPE_CHECKING:
     from app.domains.auth.repository import AuthRepository, AuthUserRecord
+
+
+BranchScopePolicy = Literal["direct", "filter", "resource", "tenant_reference"]
+
+# Runtime route contract for permissions whose database scope_type is BRANCH_SET.
+# A database-backed test keeps this list synchronized with permission metadata.
+BRANCH_SCOPED_PERMISSIONS = frozenset(
+    {
+        "branches.view",
+        "branches.update",
+        "branches.delete",
+        "registers.view",
+        "registers.create",
+        "registers.update",
+        "registers.delete",
+        "batches.view",
+        "batches.create",
+        "batches.update",
+        "batches.write_off",
+        "incoming.view",
+        "incoming.create",
+        "incoming.return",
+        "pos.shift_open",
+        "pos.shift_close",
+        "pos.manage_shifts",
+        "pos.sell",
+        "pos.manage_sales",
+        "pos.refund",
+        "pos.refund_external_confirm",
+        "pos.handle_prescription",
+        "reports.view",
+        "sales.view.tenant",
+    }
+)
 
 
 async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
@@ -751,6 +785,7 @@ def require_permission(code: str):  # type: ignore[no-untyped-def]
             return user
         raise PermissionDeniedError(f"Missing permission: {code}")
 
+    _checker.permission_codes = (code,)  # type: ignore[attr-defined]
     return _checker
 
 
@@ -766,6 +801,52 @@ def require_any_permission(*codes: str):  # type: ignore[no-untyped-def]
             return user
         raise PermissionDeniedError(f"Missing one of permissions: {', '.join(codes)}")
 
+    _checker.permission_codes = tuple(codes)  # type: ignore[attr-defined]
+    return _checker
+
+
+def require_branch_permission(
+    code: str,
+    *,
+    policy: BranchScopePolicy,
+) -> Callable[[CurrentUser], Awaitable[CurrentUser]]:
+    """Require a capability and declare how the route enforces its branch scope."""
+
+    async def _checker(
+        user: Annotated[CurrentUser, Depends(current_user)],
+    ) -> CurrentUser:
+        if user.is_developer and user.support_access_session_id is None:
+            return user
+        if code not in user.permissions:
+            raise PermissionDeniedError(f"Missing permission: {code}")
+        if user.branch_scope_for(code) == set():
+            raise PermissionDeniedError(f"Missing branch scope: {code}")
+        return user
+
+    _checker.permission_codes = (code,)  # type: ignore[attr-defined]
+    _checker.branch_scope_policy = policy  # type: ignore[attr-defined]
+    return _checker
+
+
+def require_any_branch_permission(
+    *codes: str,
+    policy: BranchScopePolicy,
+) -> Callable[[CurrentUser], Awaitable[CurrentUser]]:
+    """Require one of several capabilities and declare the branch gate strategy."""
+
+    async def _checker(
+        user: Annotated[CurrentUser, Depends(current_user)],
+    ) -> CurrentUser:
+        if user.is_developer and user.support_access_session_id is None:
+            return user
+        if not any(code in user.permissions for code in codes):
+            raise PermissionDeniedError(f"Missing one of permissions: {', '.join(codes)}")
+        if user.branch_scope_for_any(*codes) == set():
+            raise PermissionDeniedError("Missing usable branch scope")
+        return user
+
+    _checker.permission_codes = tuple(codes)  # type: ignore[attr-defined]
+    _checker.branch_scope_policy = policy  # type: ignore[attr-defined]
     return _checker
 
 
@@ -782,6 +863,7 @@ def require_tenant_permission(code: str):  # type: ignore[no-untyped-def]
             return user
         raise PermissionDeniedError(f"Tenant-wide permission required: {code}")
 
+    _checker.permission_codes = (code,)  # type: ignore[attr-defined]
     return _checker
 
 

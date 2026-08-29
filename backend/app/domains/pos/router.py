@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import (
     CurrentUser,
     get_db,
-    require_any_permission,
-    require_permission,
+    require_any_branch_permission,
+    require_branch_permission,
     require_writable_tenant,
 )
 from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
@@ -144,7 +144,7 @@ def _effective_report_branch_id(user: CurrentUser, branch_id: UUID | None) -> UU
 )
 async def list_pos_favorites(
     response: Response,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
     branch_id: Annotated[UUID, Query()],
 ) -> list[POSFavoriteCatalogRead]:
@@ -177,7 +177,7 @@ async def list_pos_favorites(
 )
 async def add_pos_favorite(
     payload: POSFavoriteCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSFavoriteRead:
     favorite = await service.add_favorite(
@@ -195,7 +195,7 @@ async def add_pos_favorite(
 )
 async def remove_pos_favorite(
     catalog_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> Response:
     await service.remove_favorite(
@@ -219,7 +219,7 @@ async def remove_pos_favorite(
 )
 async def create_pos_payment_attempt(
     payload: POSPaymentAttemptCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
     attempt = await service.create_payment_attempt(
@@ -243,7 +243,7 @@ async def create_pos_payment_attempt(
 )
 async def get_pos_payment_attempt(
     attempt_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
     attempt = await service.get_payment_attempt(
@@ -265,7 +265,7 @@ async def get_pos_payment_attempt(
 async def confirm_pos_payment_attempt(
     attempt_id: UUID,
     payload: POSPaymentAttemptConfirm,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
     attempt = await service.confirm_payment_attempt(
@@ -288,7 +288,7 @@ async def confirm_pos_payment_attempt(
 async def void_pos_payment_attempt(
     attempt_id: UUID,
     payload: POSPaymentAttemptVoid,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
     attempt = await service.void_payment_attempt(
@@ -318,7 +318,9 @@ async def void_pos_payment_attempt(
 async def create_pos_refund_attempt(
     parent_id: UUID,
     payload: POSRefundAttemptCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.refund"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("pos.refund", policy="resource"))
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSRefundAttemptRead:
     return await service.create_refund_attempt(
@@ -341,7 +343,11 @@ async def get_pos_refund_attempt(
     attempt_id: UUID,
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission("pos.refund", "pos.refund_external_confirm")),
+        Depends(
+            require_any_branch_permission(
+                "pos.refund", "pos.refund_external_confirm", policy="resource"
+            )
+        ),
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSRefundAttemptRead:
@@ -362,7 +368,7 @@ async def confirm_pos_refund_attempt(
     payload: POSRefundAttemptConfirm,
     user: Annotated[
         CurrentUser,
-        Depends(require_permission("pos.refund_external_confirm")),
+        Depends(require_branch_permission("pos.refund_external_confirm", policy="resource")),
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSRefundAttemptRead:
@@ -392,7 +398,11 @@ async def void_pos_refund_attempt(
     payload: POSRefundAttemptVoid,
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission("pos.refund", "pos.refund_external_confirm")),
+        Depends(
+            require_any_branch_permission(
+                "pos.refund", "pos.refund_external_confirm", policy="resource"
+            )
+        ),
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSRefundAttemptRead:
@@ -420,7 +430,9 @@ async def void_pos_refund_attempt(
 )
 async def open_shift(
     payload: ShiftOpenRequest,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.shift_open"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("pos.shift_open", policy="resource"))
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> ShiftRead:
     shift = await service.open_shift(
@@ -437,7 +449,11 @@ async def open_shift(
 async def get_current_shift(
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission("pos.shift_open", "pos.shift_close", "pos.sell")),
+        Depends(
+            require_any_branch_permission(
+                "pos.shift_open", "pos.shift_close", "pos.sell", policy="resource"
+            )
+        ),
     ],
     service: Annotated[POSService, Depends(_service)],
     register_id: Annotated[UUID, Query()],
@@ -458,7 +474,9 @@ async def get_current_shift(
 
 @router.get("/shifts", response_model=ShiftHistoryList)
 async def list_shifts(
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
+    ],
     service: Annotated[POSService, Depends(_service)],
     shift_status: Annotated[
         Literal["open", "closed", "suspended"] | None,
@@ -502,7 +520,9 @@ async def list_shifts(
 async def close_shift(
     shift_id: UUID,
     payload: ShiftCloseRequest,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.shift_close"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("pos.shift_close", policy="resource"))
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> ShiftRead:
     shift = await service.close_shift(
@@ -520,7 +540,9 @@ async def close_shift(
 @router.get("/shifts/{shift_id}/z-report", response_model=ZReport)
 async def z_report(
     shift_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> ZReport:
     report = await service.z_report(
@@ -539,7 +561,9 @@ async def z_report(
 )
 async def z_report_xlsx(
     shift_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> Response:
     """Z-report as an Excel workbook (closed shifts only), lazily generated and
@@ -563,7 +587,9 @@ async def z_report_xlsx(
     },
 )
 async def sales_summary_xlsx(
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
+    ],
     service: Annotated[POSService, Depends(_service)],
     date_from: Annotated[date, Query(alias="from")],
     date_to: Annotated[date, Query(alias="to")],
@@ -591,7 +617,9 @@ async def sales_summary_xlsx(
 
 @router.get("/reports/sales-summary", response_model=SalesSummaryOverview)
 async def sales_summary_overview(
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
+    ],
     service: Annotated[POSService, Depends(_service)],
     date_from: Annotated[date, Query(alias="from")],
     date_to: Annotated[date, Query(alias="to")],
@@ -614,7 +642,9 @@ async def sales_summary_overview(
     },
 )
 async def stock_on_date_xlsx(
-    user: Annotated[CurrentUser, Depends(require_permission("reports.view"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
+    ],
     service: Annotated[POSService, Depends(_service)],
     on_date: Annotated[date | None, Query(alias="date")] = None,
     branch_id: Annotated[UUID | None, Query()] = None,
@@ -649,7 +679,7 @@ async def stock_on_date_xlsx(
 )
 async def create_sale(
     payload: SaleCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleRead:
     return await service.create_sale_command(
@@ -666,7 +696,7 @@ async def create_sale(
 @router.get("/pos/commands/{operation_id}", response_model=POSCommandRead)
 async def get_pos_command_result(
     operation_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSCommandRead:
     return await service.get_pos_command_result(
@@ -687,7 +717,7 @@ async def get_pos_command_result(
 )
 async def checkout_sale(
     payload: SaleCheckoutRequest,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleCheckoutResult:
     if payload.prescription is not None and not (
@@ -736,7 +766,7 @@ async def checkout_sale(
 )
 async def get_checkout_result(
     operation_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleCheckoutResult:
     return await service.get_checkout_result(
@@ -755,7 +785,9 @@ async def get_checkout_result(
 )
 async def get_refund_result(
     operation_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.refund"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("pos.refund", policy="resource"))
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleRead:
     return_sale = await service.get_refund_result(
@@ -770,7 +802,9 @@ async def get_refund_result(
 async def list_sales(
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission("sales.view.own", "sales.view.tenant")),
+        Depends(
+            require_any_branch_permission("sales.view.own", "sales.view.tenant", policy="filter")
+        ),
     ],
     service: Annotated[POSService, Depends(_service)],
     date_from: Annotated[date | None, Query()] = None,
@@ -827,7 +861,9 @@ async def get_sale(
     sale_id: UUID,
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission("sales.view.own", "sales.view.tenant")),
+        Depends(
+            require_any_branch_permission("sales.view.own", "sales.view.tenant", policy="filter")
+        ),
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleDetails:
@@ -867,7 +903,9 @@ async def get_receipt(
     sale_id: UUID,
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission("sales.view.own", "sales.view.tenant")),
+        Depends(
+            require_any_branch_permission("sales.view.own", "sales.view.tenant", policy="filter")
+        ),
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> ReceiptData:
@@ -894,7 +932,9 @@ async def get_receipt_pdf(
     sale_id: UUID,
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission("sales.view.own", "sales.view.tenant")),
+        Depends(
+            require_any_branch_permission("sales.view.own", "sales.view.tenant", policy="filter")
+        ),
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> Response:
@@ -925,7 +965,7 @@ async def get_receipt_pdf(
 async def add_sale_item(
     sale_id: UUID,
     payload: SaleItemAdd,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleItemAdded:
     return await service.add_item_command(
@@ -951,7 +991,7 @@ async def update_sale_item(
     sale_id: UUID,
     item_id: UUID,
     payload: SaleItemPatch,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleItemRead:
     return await service.update_item_command(
@@ -976,7 +1016,7 @@ async def delete_sale_item(
     sale_id: UUID,
     item_id: UUID,
     payload: SaleItemDelete,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleItemDeleted:
     return await service.delete_item_command(
@@ -1000,7 +1040,7 @@ async def delete_sale_item(
 async def add_payment(
     sale_id: UUID,
     payload: PaymentAdd,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> PaymentRead:
     payment = await service.add_payment(
@@ -1024,7 +1064,7 @@ async def add_payment(
 )
 async def complete_sale(
     sale_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.sell"))],
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
     payload: Annotated[SaleCompleteRequest | None, Body()] = None,
 ) -> SaleRead:
@@ -1048,7 +1088,10 @@ async def complete_sale(
 async def add_prescription(
     sale_id: UUID,
     payload: PrescriptionLogCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.handle_prescription"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("pos.handle_prescription", policy="resource")),
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> PrescriptionLogRead:
     pl = await service.add_prescription(
@@ -1071,7 +1114,9 @@ async def add_prescription(
 async def refund_sale(
     parent_id: UUID,
     payload: RefundCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("pos.refund"))],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("pos.refund", policy="resource"))
+    ],
     service: Annotated[POSService, Depends(_service)],
 ) -> SaleRead:
     return_sale = await service.refund(

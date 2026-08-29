@@ -23,6 +23,8 @@ from app.domains.notifications.models import (
 from app.domains.notifications.repository import NotificationsRepository
 from app.domains.notifications.schemas import SubscriptionPatch
 from app.domains.notifications.service import NotificationsService
+from app.domains.roles.models import TenantMembership, TenantOwnership
+from app.tasks.notifications import _active_tenant_owners
 
 
 async def _make_tenant_and_user(db_session: AsyncSession) -> tuple:  # type: ignore[no-untyped-def]
@@ -40,6 +42,46 @@ async def _make_tenant_and_user(db_session: AsyncSession) -> tuple:  # type: ign
     await db_session.flush()
     await db_session.refresh(user)
     return tenant, user
+
+
+async def test_license_notifications_target_only_active_owner(
+    db_session: AsyncSession,
+) -> None:
+    tenant, owner = await _make_tenant_and_user(db_session)
+    employee = AppUser(
+        email=f"employee-{uuid4().hex[:6]}@aurum.tj",
+        full_name="Employee",
+        home_tenant_id=tenant.id,
+        status="active",
+    )
+    db_session.add(employee)
+    await db_session.flush()
+
+    owner_membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=owner.id,
+        full_name=owner.full_name,
+        status="active",
+    )
+    employee_membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=employee.id,
+        full_name=employee.full_name,
+        status="active",
+    )
+    db_session.add_all([owner_membership, employee_membership])
+    await db_session.flush()
+    db_session.add(
+        TenantOwnership(
+            tenant_id=tenant.id,
+            membership_id=owner_membership.id,
+        )
+    )
+    await db_session.flush()
+
+    recipients = await _active_tenant_owners(db_session, tenant_id=tenant.id)
+
+    assert [user.id for user in recipients] == [owner.id]
 
 
 async def test_notify_creates_notification_default_channels(
