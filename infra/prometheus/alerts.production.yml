@@ -18,3 +18,77 @@ groups:
         annotations:
           summary: Aurum backend monitoring target is missing
           description: The backend target disappeared from Prometheus service discovery.
+
+  - name: aurum-recovery
+    rules:
+      - alert: AurumRecoveryMetricsUnavailable
+        expr: up{job="aurum-recovery"} == 0 or absent(up{job="aurum-recovery"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum recovery metrics are unavailable
+          description: Prometheus cannot verify backup and restore freshness.
+
+      - alert: AurumRecoveryJobFailed
+        expr: aurum_recovery_job_last_status == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum recovery job failed
+          description: The latest {{ $labels.component }} recovery job failed.
+
+      - alert: AurumCombinedBackupStale
+        expr: (time() - aurum_recovery_job_last_success_timestamp_seconds{component="combined_backup"} > 108000) or absent(aurum_recovery_job_last_success_timestamp_seconds{component="combined_backup"})
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum combined backup is stale
+          description: No successful PostgreSQL and MinIO backup has completed for 30 hours.
+
+      - alert: AurumPitrBaseBackupStale
+        expr: (time() - aurum_recovery_job_last_success_timestamp_seconds{component="pitr_base_backup"} > 108000) or absent(aurum_recovery_job_last_success_timestamp_seconds{component="pitr_base_backup"})
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum PITR base backup is stale
+          description: No verified physical base backup has completed for 30 hours.
+
+      - alert: AurumWalRecoveryPointStale
+        expr: (time() - aurum_recovery_job_last_success_timestamp_seconds{component="wal_snapshot"} > 900) or absent(aurum_recovery_job_last_success_timestamp_seconds{component="wal_snapshot"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum WAL recovery point is stale
+          description: No encrypted WAL snapshot has completed for 15 minutes.
+
+      - alert: AurumOffsiteExportStale
+        expr: (time() - aurum_recovery_job_last_success_timestamp_seconds{component="offsite_export"} > 900) or absent(aurum_recovery_job_last_success_timestamp_seconds{component="offsite_export"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum off-site export is stale
+          description: No WORM export has completed for 15 minutes.
+
+      - alert: AurumRestoreDrillStale
+        expr: (time() - aurum_recovery_job_last_success_timestamp_seconds{component=~"logical_restore_drill|pitr_restore_drill"} > 3024000) or absent(aurum_recovery_job_last_success_timestamp_seconds{component="logical_restore_drill"}) or absent(aurum_recovery_job_last_success_timestamp_seconds{component="pitr_restore_drill"})
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum restore drill is stale
+          description: The {{ $labels.component }} drill has not succeeded for 35 days.
+
+      - alert: AurumRestoreRtoAboveProvisionalTarget
+        expr: aurum_recovery_job_last_duration_seconds{component=~"logical_restore_drill|pitr_restore_drill"} > 3600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aurum restore drill exceeded the provisional RTO
+          description: The latest {{ $labels.component }} drill took more than one hour.

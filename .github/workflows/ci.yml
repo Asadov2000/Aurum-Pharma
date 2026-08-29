@@ -1423,6 +1423,17 @@ jobs:
 
           assert model["services"]["redis"]["environment"]["AURUM_REDIS_MAXMEMORY"]
           assert model["services"]["redis"]["logging"]["driver"] == "local"
+          recovery_exporter = model["services"]["aurum-recovery-exporter"]
+          assert set(recovery_exporter["networks"]) == {"monitoring"}
+          assert recovery_exporter["read_only"] is True
+          assert recovery_exporter["cap_drop"] == ["ALL"]
+          assert not recovery_exporter.get("ports")
+          metrics_mount = next(
+              volume
+              for volume in recovery_exporter["volumes"]
+              if volume["target"] == "/metrics"
+          )
+          assert metrics_mount["read_only"] is True
           for name, service in model["services"].items():
               assert service.get("mem_limit"), f"{name} has no memory limit"
               assert service.get("cpus"), f"{name} has no CPU limit"

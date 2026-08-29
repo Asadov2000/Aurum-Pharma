@@ -14,7 +14,8 @@ secrets="$root/secrets"
 repository="$root/repository"
 scratch="$root/scratch"
 wal_archive="$root/wal-archive"
-mkdir -p "$secrets" "$repository" "$scratch" "$wal_archive"
+metrics="$root/metrics"
+mkdir -p "$secrets" "$repository" "$scratch" "$wal_archive" "$metrics"
 
 cleanup() {
     status=$?
@@ -123,6 +124,7 @@ export AURUM_SECRET_FILES_DIR="$(host_bind_path "$secrets")"
 export AURUM_BACKUP_REPOSITORY="$(host_bind_path "$repository")"
 export AURUM_BACKUP_SCRATCH="$(host_bind_path "$scratch")"
 export AURUM_WAL_ARCHIVE="$(host_bind_path "$wal_archive")"
+export AURUM_RECOVERY_METRICS_DIR="$metrics"
 export AURUM_BACKUP_MIN_FREE_BYTES=1048576
 export AURUM_IMAGE_TAG=ci
 export AURUM_OFFSITE_SECRET_FILES_DIR="$(host_bind_path "$secrets")"
@@ -142,6 +144,41 @@ case "$(uname -s)" in
         sudo chown 70:70 "$wal_archive"
         ;;
 esac
+
+for recovery_script in \
+    scripts/recovery-metrics.sh \
+    scripts/run-production-recovery-cycle.sh \
+    scripts/run-production-restore-drill.sh; do
+    sh -n "$recovery_script"
+done
+
+. ./scripts/recovery-metrics.sh
+aurum_run_recovery_step metrics_probe sh -c 'exit 0'
+metrics_file="$metrics/aurum-recovery-metrics_probe.prom"
+grep -q 'aurum_recovery_job_last_status{component="metrics_probe"} 1' \
+    "$metrics_file"
+last_success_before="$(sed -n \
+    's/^aurum_recovery_job_last_success_timestamp_seconds{component="metrics_probe"} \([0-9][0-9]*\)$/\1/p' \
+    "$metrics_file")"
+test -n "$last_success_before"
+if aurum_run_recovery_step metrics_probe sh -c 'exit 7'; then
+    echo "Failure metrics probe unexpectedly succeeded" >&2
+    exit 1
+fi
+grep -q 'aurum_recovery_job_last_status{component="metrics_probe"} 0' \
+    "$metrics_file"
+grep -q \
+    "aurum_recovery_job_last_success_timestamp_seconds{component=\"metrics_probe\"} $last_success_before" \
+    "$metrics_file"
+test -z "$(find "$metrics" -type f ! -name '*.prom' -print -quit)"
+
+grep -q 'OnUnitActiveSec=5m' infra/systemd/aurum-wal-offsite.timer
+grep -q 'OnCalendar=\*-\*-01 03:30:00' infra/systemd/aurum-restore-drill.timer
+grep -q 'run-production-restore-drill.sh' infra/systemd/aurum-restore-drill.service
+grep -q 'TimeoutStartSec=4h' infra/systemd/aurum-backup.service
+grep -q 'TimeoutStartSec=30m' infra/systemd/aurum-wal-offsite.service
+grep -q 'TimeoutStartSec=4h' infra/systemd/aurum-restore-drill.service
+export AURUM_RECOVERY_METRICS_DIR="$(host_bind_path "$metrics")"
 
 compose() {
     docker compose \

@@ -630,6 +630,33 @@ services:
     logging: *service-logging
     restart: unless-stopped
 
+  aurum-recovery-exporter:
+    image: quay.io/prometheus/node-exporter:v1.11.1@sha256:0f422f62c15f154af8d8572b23d623aebfb10cec73a5c654d18f911f3f9df241
+    command:
+      - --collector.disable-defaults
+      - --collector.textfile
+      - --collector.textfile.directory=/metrics
+      - --web.listen-address=:9100
+    volumes:
+      - type: bind
+        source: "${AURUM_RECOVERY_METRICS_DIR:?AURUM_RECOVERY_METRICS_DIR is required}"
+        target: /metrics
+        read_only: true
+    networks:
+      - monitoring
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: "${AURUM_RECOVERY_EXPORTER_MEMORY_LIMIT:-64m}"
+    cpus: "${AURUM_RECOVERY_EXPORTER_CPU_LIMIT:-0.25}"
+    logging: *service-logging
+    restart: unless-stopped
+
 secrets:
   postgres_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/POSTGRES_PASSWORD"

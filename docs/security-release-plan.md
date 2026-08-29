@@ -73,9 +73,11 @@
       проверены на полной схеме и повторным тестом владельцев, ACL и RLS.
 - [x] WAL archive, проверяемый physical base backup, PITR drill и независимый
       off-site WORM export с append-only credentials реализованы в коде и CI.
+- [x] WAL/off-site запускаются каждые пять минут, restore drill - ежемесячно;
+      Prometheus контролирует статус, freshness и длительность recovery jobs.
 - [ ] Production bucket создан в разрешённой юрисдикции; настроены внешние
-      уведомления о freshness/free-space, ежемесячный off-site drill и измерены
-      RPO/RTO на production-подобном объёме.
+      уведомления о free-space, доверенный restore из конкретной WORM-версии и
+      измерены RPO/RTO на production-подобном объёме.
 
 ### P0: identity и authorization
 
@@ -142,16 +144,17 @@
 - [ ] Логи используют allowlist и redaction; в логах/трейсах нет cookies,
       Authorization, email пациентов, рецептов и закупочных цен.
 - [ ] Prometheus получает token через secret file, порт 9090 закрыт извне и
-      availability alerts добавлены; backup freshness, TLS expiry и Alertmanager
-      ещё требуют exporter/канала доставки.
+      availability/recovery freshness/restore-duration alerts добавлены; TLS
+      expiry и внешний Alertmanager-канал доставки ещё не настроены. Полный
+      service RTO фиксируется только staging drill согласно ADR-0025.
 - [ ] Windows-клиент выпускается как подписанный MSIX/AppInstaller с
       проверкой publisher, anti-rollback и безопасным WebView2 allowlist.
 - [ ] SAST/DAST, ручной threat model и внешний penetration test до пилота.
 
 ## Порядок следующей разработки
 
-1. Внешний WORM storage, автоматический контроль свежести backup/drill и
-   измерение RPO/RTO на staging.
+1. Доверенный manifest и restore из конкретной внешней WORM-версии, затем
+   измерение и утверждение RPO/RTO на staging.
 2. DB-инварианты POS и полный refund/void sync-контур.
 3. Внутренний TLS для PostgreSQL, Redis и MinIO.
 4. mTLS/device identity, зашифрованная локальная БД и trusted time для Edge.

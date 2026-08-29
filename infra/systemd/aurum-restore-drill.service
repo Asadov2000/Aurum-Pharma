@@ -1,5 +1,5 @@
 [Unit]
-Description=Aurum Pharma encrypted backup
+Description=Aurum Pharma isolated restore drill
 Requires=docker.service
 After=docker.service network-online.target
 
@@ -9,7 +9,7 @@ User=root
 WorkingDirectory=/opt/aurum-pharma
 Environment=AURUM_RECOVERY_METRICS_DIR=/var/lib/aurum/recovery-metrics
 ExecStartPre=/usr/bin/install -d -m 0755 -o root -g root /var/lib/aurum/recovery-metrics
-ExecStart=/bin/sh ./scripts/run-production-recovery-cycle.sh full
+ExecStart=/bin/sh ./scripts/run-production-restore-drill.sh
 TimeoutStartSec=4h
 Nice=10
 IOSchedulingClass=best-effort

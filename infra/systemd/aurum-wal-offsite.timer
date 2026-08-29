@@ -1,11 +1,12 @@
 [Unit]
-Description=Export encrypted Aurum WAL off-site every five minutes
+Description=Run Aurum Pharma WAL snapshot and off-site export every five minutes
 
 [Timer]
-OnBootSec=3m
+OnBootSec=5m
 OnUnitActiveSec=5m
 AccuracySec=30s
 Persistent=true
+RandomizedDelaySec=30s
 Unit=aurum-wal-offsite.service
 
 [Install]

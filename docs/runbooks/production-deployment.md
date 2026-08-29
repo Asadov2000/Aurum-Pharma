@@ -166,6 +166,7 @@ backup-контейнеру:
 sudo install -d -m 700 -o 10001 -g 10001 /srv/aurum-backups/restic
 sudo install -d -m 700 -o 10001 -g 10001 /srv/aurum-backups/scratch
 sudo install -d -m 750 -o 70 -g 70 /srv/aurum-backups/wal-archive
+sudo install -d -m 755 -o root -g root /var/lib/aurum/recovery-metrics
 ```
 
 `AURUM_BACKUP_REPOSITORY` хранит зашифрованные snapshots, а
@@ -217,31 +218,39 @@ Uploader экспортирует только зашифрованные Restic
 `RESTIC_PASSWORD`. Успех подтверждается неизменяемым checksum manifest,
 загруженным последним.
 
-После первой ручной проверки установите обе пары unit-файлов из
+После первой ручной проверки установите три пары unit-файлов из
 `infra/systemd`: full backup выполняется ежедневно, WAL snapshot и WORM export -
-каждые пять минут. Все операции сериализуются одним host lock. Скорректируйте
-`WorkingDirectory`, затем проверяйте `systemctl status aurum-backup.timer
-aurum-wal-offsite.timer` и журнал каждого запуска.
-
-Не реже раза в месяц запускайте restore в отдельном Compose project. Уникальное
-имя гарантирует, что drill не использует production volumes:
+каждые пять минут, изолированный logical/PITR restore drill - ежемесячно. Все
+операции сериализуются одним host lock. Скорректируйте `WorkingDirectory`, затем:
 
 ```bash
-drill="aurum-restore-$(date -u +%Y%m%dT%H%M%SZ)"
-docker compose -p "$drill" \
-  --env-file /etc/aurum/production.env \
-  --file docker-compose.production.yml \
-  --file docker-compose.recovery.yml \
-  --profile restore-drill run --rm restore-drill
-
-docker compose -p "$drill" \
-  --env-file /etc/aurum/production.env \
-  --file docker-compose.production.yml \
-  --file docker-compose.recovery.yml \
-  --profile restore-drill down --volumes --remove-orphans
+sudo systemctl daemon-reload
+sudo systemctl enable --now \
+  aurum-backup.timer aurum-wal-offsite.timer aurum-restore-drill.timer
+systemctl list-timers 'aurum-*'
 ```
 
-Успех содержит `Restore drill passed`, фактическую Alembic revision и число
+Каждый job атомарно записывает в `AURUM_RECOVERY_METRICS_DIR` время последней
+попытки и успеха, статус и длительность. Отдельный непривилегированный exporter
+видит только этот каталог read-only через внутреннюю monitoring-сеть. Prometheus
+формирует alerts о неуспехе, пропаже метрик, устаревшем
+backup/WAL/off-site/drill и превышении предварительного технического порога
+restore в 60 минут. Доставка alerts дежурному требует отдельного Alertmanager
+receiver и до его настройки не считается закрытой.
+
+Для внеплановой проверки запустите тот же wrapper вручную. Он создаёт уникальный
+Compose project, проверяет logical и PITR restore и всегда удаляет временные
+volumes:
+
+```bash
+sudo AURUM_RECOVERY_METRICS_DIR=/var/lib/aurum/recovery-metrics \
+  ./scripts/run-production-restore-drill.sh
+```
+
+Локальный drill подтверждает восстановимость repository, но не измеряет RPO и
+полный service RTO: он не включает загрузку конкретной внешней WORM-версии,
+запуск приложения и пользовательский smoke-тест. Успех содержит
+`Restore drill passed`, фактическую Alembic revision и число
 объектов, их SHA-256, RLS и доступ runtime-ролей. PostgreSQL dump и текущий
 снимок объектов MinIO создаются последовательно, поэтому межсистемная
 транзакционная согласованность не гарантируется без окна запрета записей. Этот
@@ -285,7 +294,8 @@ pwsh ./scripts/New-EdgeShadowSecrets.ps1 `
 - TLS и проверка сертификатов для PostgreSQL, Redis и MinIO внутри сети;
 - внешний WORM bucket в юридически допустимом регионе, независимое хранение
   ключей и drill непосредственно из выбранной off-site версии;
-- автоматическое оповещение о backup/restore freshness и измеренные RPO/RTO;
+- staging-замеры RPO/RTO на production-подобном объёме и утверждение целевых
+  порогов; автоматические freshness/RTO metrics и alerts уже включены;
 - HSTS после проверки восстановления TLS на staging;
 - подписанные release images, SAST/DAST и внешний penetration test;
 - общий rate limit/DDoS-контроль на доверенном edge/WAF.
