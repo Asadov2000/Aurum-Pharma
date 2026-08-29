@@ -1,8 +1,8 @@
 # Adversarial review: POS, payments, receipts and refunds
 
-Date: 2026-08-29  
+Date: 2026-08-29
 Scope: seller and pharmacy-owner flows from sale creation through payment,
-receipt, refund and shift close.  
+receipt, refund and shift close.
 Method: read-only code and test review against the current `main`; the shared
 development database was not changed.
 
@@ -24,7 +24,7 @@ small web-POS patch.
 
 ### AP-POS-001 - Confirmed electronic payment can be voided without a refund
 
-Severity: High  
+Severity: High
 Affected roles: seller, pharmacy owner
 
 Evidence:
@@ -54,7 +54,7 @@ checkout, and recovery after the response is lost.
 
 ### AP-POS-002 - Manual card/QR confirmation has no mandatory unique evidence
 
-Severity: High  
+Severity: High
 Affected roles: seller, pharmacy owner
 
 Evidence:
@@ -85,7 +85,7 @@ cross-tenant reuse, permission checks and receipt/reconciliation read model.
 
 ### AP-POS-003 - Active electronic attempts do not block cart changes and shift close
 
-Severity: High  
+Severity: High
 Affected roles: seller, pharmacy owner
 
 Evidence:
@@ -113,7 +113,7 @@ empty draft but active attempt, and the checkout-versus-close race.
 
 ### AP-POS-004 - Customer returns immediately increase sellable stock
 
-Severity: High  
+Severity: High
 Affected roles: seller, pharmacy owner, inventory controller
 
 Evidence:
@@ -140,7 +140,7 @@ returned unit is selected by FEFO before release.
 
 ### AP-POS-005 - Confirmed payment can conflict with a later settings change
 
-Severity: Medium  
+Severity: Medium
 Affected roles: seller, pharmacy owner
 
 Evidence:
@@ -158,7 +158,7 @@ preventing new attempts with the disabled method.
 
 ### AP-POS-006 - Refund evidence and printed return receipt need safer semantics
 
-Severity: Medium  
+Severity: Medium
 Affected roles: seller, pharmacy owner, customer
 
 Evidence:
@@ -178,7 +178,7 @@ snapshots, and make browser/PDF return receipts explicitly say "Возврат",
 
 ### AP-POS-007 - Offline cash core is not yet an executable branch runtime
 
-Severity: Release blocker for the promised 24-hour offline operation  
+Severity: Release blocker for the promised 24-hour offline operation
 Affected roles: seller, pharmacy owner
 
 Evidence: `backend/app/domains/pos/edge_cash.py:38` explicitly contains a
