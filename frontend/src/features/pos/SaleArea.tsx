@@ -16,6 +16,7 @@ import { findByBarcode } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
+import { useOnlineStatus } from "@/lib/useOnlineStatus";
 import { cn } from "@/lib/utils";
 
 import { BarcodeListener } from "./BarcodeListener";
@@ -276,6 +277,7 @@ function ActiveWorkspace({
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
   const queryClient = useQueryClient();
+  const isOnline = useOnlineStatus();
 
   const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin));
   const [saleId, setSaleId] = useState<string | null>(init.saleId);
@@ -416,12 +418,13 @@ function ActiveWorkspace({
         (stagedPayments.some((payment) => !paymentMethods.includes(payment.payment_method)) ||
           (!mixedPaymentEnabled &&
             (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
-  const cartMutationPending = posCommand.blocked;
+  const cartMutationPending = posCommand.blocked || !isOnline;
   const paymentStarted = stagedPayments.length > 0 || recordedPayments.length > 0;
   const electronicPaymentPendingResolution = stagedPayments.some(
     (payment) => payment.payment_method === "card" || payment.payment_method === "qr",
   );
   const saleEditingBlocked =
+    !isOnline ||
     completeSale.isPending ||
     checkoutSale.isPending ||
     posCommand.blocked ||
@@ -432,6 +435,7 @@ function ActiveWorkspace({
     pendingPayment !== null ||
     (saleId !== null && sale === null);
   const scannerHardwareBlocked =
+    !isOnline ||
     completeSale.isPending ||
     checkoutSale.isPending ||
     paymentStarted ||
@@ -441,6 +445,7 @@ function ActiveWorkspace({
     pendingPayment !== null;
   const scanInputBlocked = scannerHardwareBlocked || posCommand.blocked;
   const shiftCloseBlocked =
+    !isOnline ||
     completeSale.isPending ||
     checkoutSale.isPending ||
     checkoutReconciling ||
@@ -461,6 +466,7 @@ function ActiveWorkspace({
         stagedPayments.length > 0 ||
         prescription !== null));
   const registerSwitchBlocked =
+    !isOnline ||
     completeSale.isPending ||
     checkoutSale.isPending ||
     checkoutReconciling ||
@@ -1752,6 +1758,16 @@ function ActiveWorkspace({
             Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую продажу.
           </p>
         )}
+
+        {!isOnline ? (
+          <p
+            className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground"
+            role="status"
+          >
+            Нет связи с сервером. Текущий чек сохранён на этом устройстве; изменение товаров, оплата
+            и закрытие смены временно заблокированы.
+          </p>
+        ) : null}
 
         {posCommand.message ? (
           <div

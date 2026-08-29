@@ -55,7 +55,12 @@ vi.mock("@/features/catalog/pickerQueries", () => ({
 
 import { POSPage } from "@/features/pos/POSPage";
 import { draftKey } from "@/features/pos/draftStorage";
-import { devicePreferencesScope, loadDevicePreferences } from "@/lib/devicePreferences";
+import {
+  defaultDevicePreferences,
+  devicePreferencesScope,
+  loadDevicePreferences,
+  saveDevicePreferences,
+} from "@/lib/devicePreferences";
 import { useAuthStore } from "@/stores/auth";
 
 async function renderPage() {
@@ -123,6 +128,7 @@ const POS_USER = {
 
 describe("POSPage", () => {
   beforeEach(() => {
+    setOnline(true);
     window.localStorage.clear();
     useAuthStore.getState().setUser(POS_USER);
     getCurrentShift.mockReset();
@@ -136,6 +142,7 @@ describe("POSPage", () => {
     getZReportXlsx.mockRejectedValue(new Error("download unavailable"));
   });
   afterEach(() => {
+    setOnline(true);
     vi.clearAllMocks();
     act(() => useAuthStore.getState().clear());
   });
@@ -275,6 +282,62 @@ describe("POSPage", () => {
     });
   });
 
+  it.each(["-1", "1e3", "1.234", "Infinity", ""])(
+    "rejects an invalid opening cash value: %s",
+    async (invalidAmount) => {
+      listRegisters.mockResolvedValue([REGISTER]);
+      getCurrentShift.mockResolvedValue(null);
+      await renderPage();
+
+      const cashInput = await screen.findByLabelText(/Касса на начало смены/i);
+      fireEvent.change(cashInput, { target: { value: invalidAmount } });
+      fireEvent.click(screen.getByRole("button", { name: /Открыть смену/i }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(/с точностью до копейки/i);
+      expect(openShift).not.toHaveBeenCalled();
+      expect(cashInput).toHaveFocus();
+    },
+  );
+
+  it("uses F9 to focus the opening amount without submitting a zero-cash shift", async () => {
+    saveDevicePreferences(devicePreferencesScope(POS_USER.id, POS_USER.active_tenant_id), {
+      ...defaultDevicePreferences(),
+      posMode: "keyboard",
+    });
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockResolvedValue(null);
+    await renderPage();
+
+    const cashInput = await screen.findByLabelText(/Касса на начало смены/i);
+    fireEvent.keyDown(window, { key: "F9" });
+
+    expect(cashInput).toHaveFocus();
+    expect(openShift).not.toHaveBeenCalled();
+  });
+
+  it("blocks shift mutations while the browser is offline", async () => {
+    setOnline(false);
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockResolvedValue(null);
+    await renderPage();
+
+    const openButton = await screen.findByRole("button", { name: /Открыть смену/i });
+    expect(openButton).toBeDisabled();
+    fireEvent.click(openButton);
+    expect(openShift).not.toHaveBeenCalled();
+  });
+
+  it("locks the active selling workspace while the browser is offline", async () => {
+    setOnline(false);
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockResolvedValue(OPEN_SHIFT);
+    await renderPage();
+
+    expect(await screen.findByText(/Текущий чек сохранён на этом устройстве/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Найти товар или отсканировать/i)).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Закрыть смену" })).toBeDisabled();
+  });
+
   it("recovers an already-open shift after a conflicting open response", async () => {
     listRegisters.mockResolvedValue([REGISTER]);
     getCurrentShift.mockResolvedValueOnce(null).mockResolvedValue(OPEN_SHIFT);
@@ -336,4 +399,33 @@ describe("POSPage", () => {
       setItem.mockRestore();
     }
   });
+
+  it("recovers a closed shift when the close response is lost", async () => {
+    let closeWasSent = false;
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockImplementation(() => Promise.resolve(closeWasSent ? null : OPEN_SHIFT));
+    closeShift.mockImplementationOnce(() => {
+      closeWasSent = true;
+      return Promise.reject(new Error("response lost"));
+    });
+    await renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
+    fireEvent.change(screen.getByLabelText("Фактическая касса"), {
+      target: { value: "100,25" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить закрытие смены" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(closeShift).toHaveBeenCalledWith(OPEN_SHIFT.id, {
+      closing_cash_actual: "100.25",
+      notes: null,
+    });
+    expect(screen.queryByText(/Не удалось закрыть смену/i)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("pos:lastClosedShiftId")).toBe(OPEN_SHIFT.id);
+  });
 });
+
+function setOnline(value: boolean): void {
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, value });
+}
