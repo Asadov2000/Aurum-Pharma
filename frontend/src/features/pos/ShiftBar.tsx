@@ -14,7 +14,6 @@ import {
 } from "@/components/ui";
 import { downloadBlob } from "@/lib/download";
 import { describeApiError } from "@/lib/errorMessages";
-import { useOnlineStatus } from "@/lib/useOnlineStatus";
 
 import { getZReportXlsx } from "./api";
 import { posKeys, useCloseShift, useCurrentShiftQuery, useOpenShift } from "./queries";
@@ -26,12 +25,14 @@ export function ShiftBar({
   canOpen = true,
   canClose = true,
   closeBlocked = false,
+  online = true,
 }: {
   registerId: string;
   mode?: PosMode;
   canOpen?: boolean;
   canClose?: boolean;
   closeBlocked?: boolean;
+  online?: boolean;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const queryClient = useQueryClient();
@@ -45,12 +46,11 @@ export function ShiftBar({
   const [openingCashError, setOpeningCashError] = useState<string | null>(null);
   const [closingCashError, setClosingCashError] = useState<string | null>(null);
   const openingCashRef = useRef<HTMLInputElement>(null);
-  const isOnline = useOnlineStatus();
 
   const shift = shiftQuery.data;
 
   const onOpen = async () => {
-    if (!canOpen || !isOnline) return;
+    if (!canOpen || !online) return;
     const normalizedOpeningCash = normalizeCashAmount(openingCash);
     if (normalizedOpeningCash === null) {
       setOpeningCashError(CASH_AMOUNT_ERROR);
@@ -75,7 +75,7 @@ export function ShiftBar({
   };
 
   const onClose = async () => {
-    if (!shift || !canClose || closeBlocked || !isOnline) return;
+    if (!shift || !canClose || closeBlocked || !online) return;
     const normalizedClosingCash = normalizeCashAmount(closingCash);
     if (normalizedClosingCash === null) {
       setClosingCashError(CASH_AMOUNT_ERROR);
@@ -126,7 +126,7 @@ export function ShiftBar({
   const toggleRef = useRef<() => void>(() => {});
   toggleRef.current = () => {
     if (shift) {
-      if (canClose && !closeBlocked && isOnline) setCloseOpen(true);
+      if (canClose && !closeBlocked && online) setCloseOpen(true);
     } else if (canOpen) {
       openingCashRef.current?.focus();
       openingCashRef.current?.select();
@@ -203,9 +203,9 @@ export function ShiftBar({
             <Button
               onClick={() => void onOpen()}
               isLoading={openMutation.isPending}
-              disabled={!isOnline}
+              disabled={!online}
               size={mode === "touch" ? "lg" : "md"}
-              title={!isOnline ? "Открытие смены доступно после восстановления связи" : undefined}
+              title={!online ? "Открытие смены доступно после восстановления связи" : undefined}
             >
               Открыть смену
             </Button>
@@ -250,10 +250,10 @@ export function ShiftBar({
             variant="secondary"
             size="sm"
             className="ml-auto"
-            disabled={closeBlocked || !isOnline}
+            disabled={closeBlocked || !online}
             onClick={() => setCloseOpen(true)}
             title={
-              !isOnline
+              !online
                 ? "Закрытие смены доступно после восстановления связи"
                 : closeBlocked
                   ? "Сначала завершите или очистите текущий чек"
@@ -312,7 +312,7 @@ export function ShiftBar({
               aria-label="Подтвердить закрытие смены"
               onClick={() => void onClose()}
               isLoading={closeMutation.isPending}
-              disabled={!isOnline}
+              disabled={!online}
             >
               Закрыть
             </Button>
