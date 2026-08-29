@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
@@ -51,6 +52,22 @@ class ActivationFoundationSource:
 SyncHealth = Literal["healthy", "delayed", "offline", "critical", "revoked"]
 SyncContactState = Literal["recent", "stale", "offline", "never_seen"]
 SyncIntegrityState = Literal["verified", "stale_report", "unverified", "mismatch"]
+
+
+class SyncProjectionOperationCollision(RuntimeError):
+    """The tenant-scoped operation ID is already owned by another projection."""
+
+
+def _is_projection_operation_collision(exc: IntegrityError) -> bool:
+    if getattr(exc.orig, "sqlstate", None) != "23505":
+        return False
+    cause = getattr(exc.orig, "__cause__", None)
+    constraint_name = getattr(exc.orig, "constraint_name", None) or getattr(
+        cause, "constraint_name", None
+    )
+    return constraint_name == "uq_sync_sale_projection_operation" or (
+        "uq_sync_sale_projection_operation" in str(exc)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1347,6 +1364,20 @@ class SyncEdgeRepository:
     async def get_sale_projection(self, sale_id: UUID) -> SyncSaleProjection | None:
         return await self.session.get(SyncSaleProjection, sale_id)
 
+    async def get_sale_projection_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> SyncSaleProjection | None:
+        result = await self.session.execute(
+            select(SyncSaleProjection).where(
+                SyncSaleProjection.tenant_id == tenant_id,
+                SyncSaleProjection.operation_id == operation_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def insert_sale_projection(
         self,
         *,
@@ -1376,7 +1407,7 @@ class SyncEdgeRepository:
         source_payload_hash: str,
         projection_hash: str,
     ) -> SyncSaleProjection:
-        result = await self.session.execute(
+        statement = (
             insert(SyncSaleProjection)
             .values(
                 sale_id=sale_id,
@@ -1407,6 +1438,13 @@ class SyncEdgeRepository:
             )
             .returning(SyncSaleProjection)
         )
+        try:
+            async with self.session.begin_nested():
+                result = await self.session.execute(statement)
+        except IntegrityError as exc:
+            if _is_projection_operation_collision(exc):
+                raise SyncProjectionOperationCollision from exc
+            raise
         return result.scalar_one()
 
     async def list_refund_projections(
