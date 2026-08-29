@@ -1037,3 +1037,131 @@ async def test_payment_attempt_service_rejects_cross_tenant_access(
             attempt_id=attempt.id,
             actor_id=second["cashier"].id,
         )
+
+
+async def test_payment_reconciliation_queue_is_manager_scoped_and_resolvable_without_sell(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    sale = await _draft_sale(service, scaffold)
+    attempt = await service.create_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        sale_id=sale.id,
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        payment_method="card",
+        amount=Decimal("10.00"),
+        currency="TJS",
+    )
+    await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
+    manager = AppUser(
+        email=f"manager-{uuid4().hex[:8]}@aurum.tj",
+        full_name="Payment Manager",
+        home_tenant_id=scaffold["tenant"].id,
+        status="active",
+    )
+    db_session.add(manager)
+    await db_session.flush()
+    actor = CurrentUser(
+        user_id=manager.id,
+        tenant_id=scaffold["tenant"].id,
+        is_developer=False,
+        is_administrator=False,
+        permissions={"pos.manage_sales"},
+        permission_scopes={
+            "pos.manage_sales": frozenset({scaffold["branch"].id}),
+        },
+    )
+
+    async def _override_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    async def _override_user() -> CurrentUser:
+        return actor
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[current_user] = _override_user
+    try:
+        queued = await client.get("/api/v1/pos/payment-reconciliation")
+        assert queued.status_code == 200
+        body = queued.json()
+        assert body["total"] == 1
+        assert body["items"][0]["id"] == str(attempt.id)
+        assert body["items"][0]["branch_name"] == scaffold["branch"].name
+        assert body["items"][0]["register_name"] == scaffold["register"].name
+        assert body["items"][0]["cashier_name"] == scaffold["cashier"].full_name
+        assert body["items"][0]["item_count"] == 1
+        assert body["summary"]["requires_reconciliation_count"] == 1
+        assert body["summary"]["confirmed_count"] == 0
+        assert body["branches"] == [
+            {"id": str(scaffold["branch"].id), "name": scaffold["branch"].name}
+        ]
+        assert "operation_id" not in body["items"][0]
+
+        forbidden_branch = await client.get(
+            "/api/v1/pos/payment-reconciliation",
+            params={"branch_id": str(uuid4())},
+        )
+        assert forbidden_branch.status_code == 403
+
+        confirmed = await client.post(
+            f"/api/v1/pos/payment-attempts/{attempt.id}/confirm",
+            json={
+                "terminal_id": "TERM-MANAGER",
+                "external_reference": "PAYMENT-001",
+            },
+        )
+        assert confirmed.status_code == 200
+        assert confirmed.json()["status"] == "confirmed"
+        assert confirmed.json()["resolved_by_user_id"] == str(manager.id)
+
+        confirmed_queue = await client.get(
+            "/api/v1/pos/payment-reconciliation",
+            params={"status": "confirmed"},
+        )
+        assert confirmed_queue.status_code == 200
+        confirmed_body = confirmed_queue.json()
+        assert confirmed_body["total"] == 1
+        assert confirmed_body["summary"]["requires_reconciliation_count"] == 0
+        assert confirmed_body["summary"]["confirmed_count"] == 1
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(current_user, None)
+
+
+async def test_payment_reconciliation_queue_requires_manage_sales_permission(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    actor = CurrentUser(
+        user_id=scaffold["cashier"].id,
+        tenant_id=scaffold["tenant"].id,
+        is_developer=False,
+        is_administrator=False,
+        permissions={"pos.sell"},
+        permission_scopes={"pos.sell": frozenset({scaffold["branch"].id})},
+    )
+
+    async def _override_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    async def _override_user() -> CurrentUser:
+        return actor
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[current_user] = _override_user
+    try:
+        response = await client.get("/api/v1/pos/payment-reconciliation")
+        assert response.status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(current_user, None)

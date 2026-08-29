@@ -26,6 +26,7 @@ describe("route access", () => {
     expect(canAccessPath("/pos", SELLER)).toBe(true);
     expect(canAccessPath("/catalog", SELLER)).toBe(true);
     expect(canAccessPath("/sales", SELLER)).toBe(true);
+    expect(canAccessPath("/payment-reconciliation", SELLER)).toBe(false);
     expect(canAccessPath("/audit", SELLER)).toBe(true);
     expect(canAccessPath("/security", SELLER)).toBe(true);
     expect(canAccessPath("/settings", SELLER)).toBe(true);
@@ -33,6 +34,16 @@ describe("route access", () => {
     expect(canAccessPath("/registers", SELLER)).toBe(false);
     expect(canAccessPath("/onboarding", SELLER)).toBe(false);
     expect(canAccessPath("/incoming/document-1", SELLER)).toBe(false);
+  });
+
+  it("shows payment reconciliation only with the delegated manager permission", () => {
+    const manager = { ...SELLER, permissions: ["pos.manage_sales"] };
+
+    expect(canAccessPath("/payment-reconciliation", manager)).toBe(true);
+    expect(canAccessPath("/pos", manager)).toBe(false);
+    expect(accessibleInternalPath("/payment-reconciliation", manager)).toBe(
+      "/payment-reconciliation",
+    );
   });
 
   it("uses the POS as the primary fallback for a cashier", () => {

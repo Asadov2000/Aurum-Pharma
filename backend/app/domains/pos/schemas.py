@@ -160,6 +160,46 @@ class POSPaymentAttemptRead(BaseModel):
     voided_at: datetime | None
 
 
+class POSPaymentReconciliationSummary(BaseModel):
+    requires_reconciliation_count: int
+    requires_reconciliation_amount: Decimal
+    confirmed_count: int
+    confirmed_amount: Decimal
+
+
+class POSPaymentReconciliationBranch(BaseModel):
+    id: UUID
+    name: str
+
+
+class POSPaymentReconciliationItem(BaseModel):
+    id: UUID
+    sale_id: UUID
+    branch_id: UUID
+    branch_name: str
+    register_id: UUID
+    register_name: str
+    cashier_name: str | None
+    payment_method: Literal["card", "qr"]
+    amount: Decimal
+    sale_total_amount: Decimal
+    currency: Literal["TJS"]
+    status: Literal["requires_reconciliation", "confirmed"]
+    item_count: int
+    created_at: datetime
+    reconciliation_started_at: datetime
+    confirmed_at: datetime | None
+
+
+class POSPaymentReconciliationList(BaseModel):
+    items: list[POSPaymentReconciliationItem]
+    total: int
+    page: int
+    page_size: int
+    summary: POSPaymentReconciliationSummary
+    branches: list[POSPaymentReconciliationBranch]
+
+
 # ---- shift ----
 
 
