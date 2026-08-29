@@ -297,7 +297,7 @@ export async function addPosItemToCart(
 }
 
 export async function payPosSaleCash(page: Page, expectedPaidAmount: string): Promise<void> {
-  const cashPayment = page.getByRole("button", { name: "Наличные" });
+  const cashPayment = page.getByRole("button", { name: "Принять наличные" });
   await expect(cashPayment).toBeEnabled({ timeout: 30_000 });
   await cashPayment.click();
   await expect(

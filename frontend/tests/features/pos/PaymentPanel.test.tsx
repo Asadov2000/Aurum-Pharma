@@ -35,7 +35,7 @@ describe("PaymentPanel", () => {
     fireEvent.change(received, { target: { value: "100" } });
 
     expect(screen.getByText("41.00")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Наличные" }));
+    fireEvent.click(screen.getByRole("button", { name: "Принять наличные" }));
 
     expect(onPayTile).toHaveBeenCalledWith("cash", "59.00", {
       cash_received: "100.00",
@@ -49,7 +49,7 @@ describe("PaymentPanel", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Получено наличными" }), {
       target: { value: "20" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Наличные" }));
+    fireEvent.click(screen.getByRole("button", { name: "Принять наличные" }));
     expect(onPayTile).toHaveBeenLastCalledWith("cash", "20.00", {
       cash_received: "20.00",
     });
@@ -73,7 +73,20 @@ describe("PaymentPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Карта" }));
+    expect(onPayTile).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Перейти к оплате картой" }));
     expect(onPayTile).toHaveBeenLastCalledWith("card");
+  });
+
+  it("separates payment-method selection from starting an external payment", () => {
+    const onPayTile = vi.fn();
+    render(<PaymentPanel {...baseProps} onPayTile={onPayTile} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Карта" }));
+    expect(onPayTile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Перейти к оплате картой" }));
+    expect(onPayTile).toHaveBeenCalledWith("card");
   });
 
   it("does not apply the same received cash twice", () => {
@@ -99,14 +112,16 @@ describe("PaymentPanel", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Получено наличными" }), {
       target: { value: "20" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Наличные" }));
+    fireEvent.click(screen.getByRole("button", { name: "Принять наличные" }));
 
     expect(onPayTile).not.toHaveBeenCalled();
   });
 
   it("enables completion only after the receipt is fully paid", () => {
     const { rerender } = render(<PaymentPanel {...baseProps} />);
-    expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeDisabled();
+    const completion = screen.getByRole("button", { name: "Завершить продажу" });
+    expect(completion).toBeDisabled();
+    expect(completion).toHaveAttribute("title", "Сначала подтвердите полную оплату");
 
     rerender(<PaymentPanel {...baseProps} totalPaid={59} remaining={0} />);
     expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeEnabled();
@@ -142,7 +157,8 @@ describe("PaymentPanel", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Получено наличными" }), {
       target: { value: "20" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Наличные" }));
+    expect(screen.getByRole("button", { name: "Принять наличные" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Принять наличные" }));
 
     expect(onPayTile).not.toHaveBeenCalled();
     expect(screen.getByText(/Весь чек оплачивается одним способом/i)).toBeInTheDocument();
@@ -193,6 +209,9 @@ describe("PaymentPanel", () => {
     );
     expect(screen.getByText(/Новые платежи заблокированы/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Принять наличные" }),
+    ).not.toBeInTheDocument();
   });
 
   it("restores cash received separately from the amount applied to the sale", () => {

@@ -232,6 +232,7 @@ test.describe("POS sale (owner)", () => {
           response.ok(),
       );
       await page.getByRole("button", { name: "Карта", exact: true }).click();
+      await page.getByRole("button", { name: "Перейти к оплате картой" }).click();
       const amountDialog = page.getByRole("dialog", { name: "Сумма оплаты" });
       await expect(amountDialog).toBeVisible();
       await amountDialog.getByRole("button", { name: "ОК" }).click();

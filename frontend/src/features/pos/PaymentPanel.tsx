@@ -144,6 +144,18 @@ export function PaymentPanel({
     pendingPaymentMethod !== null &&
     isCurrentPaymentMethod(pendingPaymentMethod) &&
     paymentMethods.includes(pendingPaymentMethod);
+  const paymentActionDisabled =
+    settled ||
+    overpaid ||
+    payingMethod !== null ||
+    totalDue <= 0 ||
+    paymentSettingsBlocked ||
+    interactionBlocked ||
+    completing ||
+    completionUncertain ||
+    pendingPaymentMethod !== null ||
+    (selectedMethod === "cash" &&
+      (availableCash <= 0.001 || (!mixedPaymentEnabled && cashTenderInsufficient)));
 
   useEffect(() => {
     setActiveMethod((current) =>
@@ -171,22 +183,20 @@ export function PaymentPanel({
 
   const chooseMethod = (method: PaymentMethod) => {
     setActiveMethod(method);
-    if (paymentSettingsBlocked || interactionBlocked) return;
-    if (method !== "cash" && mixedPaymentEnabled && paymentMethods.length > 1) {
-      onPayTile(method);
-      return;
-    }
+  };
 
+  const submitSelectedPayment = () => {
+    if (paymentSettingsBlocked || paymentActionDisabled) return;
+    const method = selectedMethod;
     const tendered = availableCash;
     const amount = method === "cash" ? Math.min(tendered, remaining) : Math.max(0, remaining);
     if (!mixedPaymentEnabled && method === "cash" && amount + 0.001 < remaining) return;
-    if (amount > 0) {
-      onPayTile(
-        method,
-        amount.toFixed(2),
-        method === "cash" ? { cash_received: tendered.toFixed(2) } : undefined,
-      );
+    if (amount <= 0) return;
+    if (method === "cash") {
+      onPayTile(method, amount.toFixed(2), { cash_received: tendered.toFixed(2) });
+      return;
     }
+    onPayTile(method);
   };
 
   const pressCashKey = (key: CashKey) => {
@@ -445,7 +455,18 @@ export function PaymentPanel({
             ) : null}
           </div>
 
-          <footer className="border-t border-border p-3">
+          <footer className="space-y-2 border-t border-border p-3">
+            {!paymentSettingsBlocked && !settled && !overpaid ? (
+              <Button
+                size="xl"
+                className="w-full"
+                onClick={submitSelectedPayment}
+                disabled={paymentActionDisabled}
+              >
+                <PaymentMethodIcon method={selectedMethod} active />
+                {paymentActionLabel(selectedMethod)}
+              </Button>
+            ) : null}
             <Button
               size="xl"
               variant="success"
@@ -459,7 +480,7 @@ export function PaymentPanel({
                 interactionBlocked ||
                 completionBlocked
               }
-              title={completeHint}
+              title={settled ? completeHint : "Сначала подтвердите полную оплату"}
             >
               <CheckIcon />
               Завершить продажу
@@ -585,6 +606,12 @@ function PaymentMethodIcon({
 
 function isCurrentPaymentMethod(method: PaymentMethodRead): method is PaymentMethod {
   return method === "cash" || method === "card" || method === "qr";
+}
+
+function paymentActionLabel(method: PaymentMethod): string {
+  if (method === "cash") return "Принять наличные";
+  if (method === "card") return "Перейти к оплате картой";
+  return "Перейти к оплате по QR";
 }
 
 function CheckIcon(): JSX.Element {

@@ -255,6 +255,15 @@ async function stageCashPayment(): Promise<void> {
   await screen.findByRole("button", { name: /Сбросить расчёт/i }, { timeout: 5_000 });
 }
 
+function beginExternalPayment(method: "Карта" | "QR-код"): void {
+  fireEvent.click(screen.getByRole("button", { name: method }));
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: method === "Карта" ? "Перейти к оплате картой" : "Перейти к оплате по QR",
+    }),
+  );
+}
+
 function fillExternalPaymentEvidence(
   dialog: HTMLElement,
   terminalId = "TERM-01",
@@ -500,7 +509,7 @@ describe("SaleArea atomic checkout", () => {
 
     renderArea();
     await screen.findByText(/Остаток/);
-    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    beginExternalPayment("Карта");
     const cardPad = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
     fireEvent.click(within(cardPad).getByRole("button", { name: "2" }));
     fireEvent.click(within(cardPad).getByRole("button", { name: "0" }));
@@ -520,7 +529,7 @@ describe("SaleArea atomic checkout", () => {
     );
     expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /QR/i }));
+    beginExternalPayment("QR-код");
     const qrPad = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
     fireEvent.click(within(qrPad).getByRole("button", { name: "ОК" }));
     const qrConfirmation = await screen.findByRole("dialog", {
@@ -555,7 +564,7 @@ describe("SaleArea atomic checkout", () => {
     renderArea();
 
     await screen.findByText(/Остаток/);
-    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    beginExternalPayment("Карта");
     fireEvent.click(
       within(
         await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
@@ -596,7 +605,7 @@ describe("SaleArea atomic checkout", () => {
     renderArea(false);
 
     await screen.findByText(/Остаток/);
-    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    beginExternalPayment("Карта");
     fireEvent.click(
       within(
         await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
@@ -715,7 +724,7 @@ describe("SaleArea atomic checkout", () => {
 
     renderArea();
     await screen.findByText(/Остаток/);
-    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    beginExternalPayment("Карта");
     fireEvent.click(
       within(
         await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
@@ -753,7 +762,7 @@ describe("SaleArea atomic checkout", () => {
 
     const { rerenderPaymentSettings } = renderArea();
     await screen.findByText(/Остаток/);
-    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    beginExternalPayment("Карта");
     fireEvent.click(
       within(
         await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
@@ -1034,7 +1043,7 @@ describe("SaleArea atomic checkout", () => {
 
     renderArea();
     await screen.findByText(/Остаток/);
-    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    beginExternalPayment("Карта");
     fireEvent.click(
       within(
         await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),

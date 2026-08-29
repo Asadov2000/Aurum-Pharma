@@ -55,6 +55,7 @@ test.describe("Payment reconciliation queue", () => {
       });
 
       await page.getByRole("button", { name: "Карта", exact: true }).click();
+      await page.getByRole("button", { name: "Перейти к оплате картой" }).click();
       await page
         .getByRole("dialog", { name: "Сумма оплаты" })
         .getByRole("button", { name: "ОК" })
