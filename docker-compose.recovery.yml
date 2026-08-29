@@ -230,6 +230,7 @@ services:
   offsite-test-init:
     profiles: ["offsite-test"]
     image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    user: "10001:10001"
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |

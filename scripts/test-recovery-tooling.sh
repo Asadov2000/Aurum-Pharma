@@ -59,7 +59,12 @@ cleanup() {
         down --volumes --remove-orphans >/dev/null 2>&1 || true
 
     case "$root" in
-        "${TMPDIR:-/tmp}"/aurum-recovery-ci.*) rm -rf -- "$root" ;;
+        "${TMPDIR:-/tmp}"/aurum-recovery-ci.*)
+            case "$(uname -s)" in
+                MINGW*|MSYS*) rm -rf -- "$root" ;;
+                *) sudo rm -rf -- "$root" ;;
+            esac
+            ;;
         *) echo "Refusing to remove unexpected recovery test path: $root" >&2 ;;
     esac
 
