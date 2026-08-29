@@ -58,6 +58,7 @@ from app.domains.sync.repository import (
     SyncCloudRepository,
     SyncEdgeRepository,
     SyncHealth,
+    SyncProjectionOperationCollision,
 )
 from app.domains.sync.schemas import (
     EdgeApplyResult,
@@ -1374,6 +1375,21 @@ class SyncEdgeApplyService:
                 applied=applied,
                 duplicates=duplicates,
             )
+        if (
+            await self.repo.get_sale_projection_by_operation_id(
+                tenant_id=sale.tenant_id,
+                operation_id=sale.operation_id,
+            )
+            is not None
+        ):
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code="operation_id_collision",
+                applied=applied,
+                duplicates=duplicates,
+            )
         if isinstance(sale, SaleRefundResult):
             try:
                 await self._validate_refund_parent(sale)
@@ -1388,38 +1404,52 @@ class SyncEdgeApplyService:
                 )
 
         inbox = await self.repo.insert_inbox(envelope, status="received")
-        await self.repo.insert_sale_projection(
-            sale_id=sale.sale_id,
-            tenant_id=sale.tenant_id,
-            branch_id=sale.branch_id,
-            origin_node_id=envelope.origin_node_id,
-            writer_epoch=envelope.writer_epoch,
-            sequence=envelope.sequence,
-            source_event_id=envelope.event_id,
-            operation_id=sale.operation_id,
-            sale_type=("return" if isinstance(sale, SaleRefundResult) else "sale"),
-            parent_sale_id=(sale.parent_sale_id if isinstance(sale, SaleRefundResult) else None),
-            parent_fully_refunded=(
-                sale.parent_fully_refunded if isinstance(sale, SaleRefundResult) else None
-            ),
-            register_id=sale.register_id,
-            shift_id=sale.shift_id,
-            cashier_user_id=sale.cashier_user_id,
-            receipt_number=sale.receipt_number,
-            receipt_seq=sale.receipt_seq,
-            sale_created_at=sale.created_at,
-            completed_at=sale.completed_at,
-            total_amount=sale.total_amount,
-            currency=sale.currency,
-            is_test=sale.is_test,
-            items=[cast(dict[str, object], item.model_dump(mode="json")) for item in sale.items],
-            payments=[
-                cast(dict[str, object], payment.model_dump(mode="json"))
-                for payment in sale.payments
-            ],
-            source_payload_hash=envelope.payload_hash,
-            projection_hash=envelope.projection_hash,
-        )
+        try:
+            await self.repo.insert_sale_projection(
+                sale_id=sale.sale_id,
+                tenant_id=sale.tenant_id,
+                branch_id=sale.branch_id,
+                origin_node_id=envelope.origin_node_id,
+                writer_epoch=envelope.writer_epoch,
+                sequence=envelope.sequence,
+                source_event_id=envelope.event_id,
+                operation_id=sale.operation_id,
+                sale_type=("return" if isinstance(sale, SaleRefundResult) else "sale"),
+                parent_sale_id=(
+                    sale.parent_sale_id if isinstance(sale, SaleRefundResult) else None
+                ),
+                parent_fully_refunded=(
+                    sale.parent_fully_refunded if isinstance(sale, SaleRefundResult) else None
+                ),
+                register_id=sale.register_id,
+                shift_id=sale.shift_id,
+                cashier_user_id=sale.cashier_user_id,
+                receipt_number=sale.receipt_number,
+                receipt_seq=sale.receipt_seq,
+                sale_created_at=sale.created_at,
+                completed_at=sale.completed_at,
+                total_amount=sale.total_amount,
+                currency=sale.currency,
+                is_test=sale.is_test,
+                items=[
+                    cast(dict[str, object], item.model_dump(mode="json")) for item in sale.items
+                ],
+                payments=[
+                    cast(dict[str, object], payment.model_dump(mode="json"))
+                    for payment in sale.payments
+                ],
+                source_payload_hash=envelope.payload_hash,
+                projection_hash=envelope.projection_hash,
+            )
+        except SyncProjectionOperationCollision:
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code="operation_id_collision",
+                applied=applied,
+                duplicates=duplicates,
+            )
         await self.repo.mark_inbox(
             inbox,
             status="applied",

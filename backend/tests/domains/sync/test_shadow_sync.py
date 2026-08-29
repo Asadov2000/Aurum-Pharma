@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.exc import DBAPIError
@@ -21,14 +21,20 @@ from app.domains.sync.bootstrap import (
     verify_manifest,
 )
 from app.domains.sync.credentials import parse_edge_credential
-from app.domains.sync.integrity import ZERO_CHECKSUM
+from app.domains.sync.integrity import (
+    ZERO_CHECKSUM,
+    canonical_json_hash,
+    projection_stream_checksum,
+    sale_projection_hash,
+    source_stream_checksum,
+)
 from app.domains.sync.models import SyncInboxEvent, SyncSaleProjection
 from app.domains.sync.repository import (
     SyncCloudRepository,
     SyncEdgeRepository,
     SyncOutboxRepository,
 )
-from app.domains.sync.schemas import SyncNodeCreate, SyncShadowReportRequest
+from app.domains.sync.schemas import SyncEventEnvelope, SyncNodeCreate, SyncShadowReportRequest
 from app.domains.sync.service import SyncAdminService, SyncCloudService, SyncEdgeApplyService
 
 
@@ -75,6 +81,62 @@ async def _pull(session: AsyncSession, node, *, after: int = 0):  # type: ignore
         after_sequence=after,
         limit=100,
     )
+
+
+def _replace_operation_id(
+    envelope: SyncEventEnvelope,
+    *,
+    operation_id: UUID,
+    previous_source_checksum: str,
+    previous_projection_checksum: str,
+) -> SyncEventEnvelope:
+    payload = dict(envelope.payload)
+    payload["operation_id"] = str(operation_id)
+    payload_digest = canonical_json_hash(payload)
+    projection_digest = sale_projection_hash(payload)
+    return envelope.model_copy(
+        update={
+            "operation_id": operation_id,
+            "payload": payload,
+            "payload_hash": payload_digest,
+            "stream_checksum": source_stream_checksum(
+                previous_checksum=previous_source_checksum,
+                event_id=envelope.event_id,
+                tenant_id=envelope.tenant_id,
+                branch_id=envelope.branch_id,
+                origin_node_id=envelope.origin_node_id,
+                writer_epoch=envelope.writer_epoch,
+                sequence=envelope.sequence,
+                operation_id=operation_id,
+                aggregate_type=envelope.aggregate_type,
+                aggregate_id=envelope.aggregate_id,
+                event_type=envelope.event_type,
+                schema_version=envelope.schema_version,
+                occurred_at=envelope.occurred_at,
+                payload_hash=payload_digest,
+            ),
+            "projection_hash": projection_digest,
+            "projection_checksum": projection_stream_checksum(
+                previous_checksum=previous_projection_checksum,
+                origin_node_id=envelope.origin_node_id,
+                writer_epoch=envelope.writer_epoch,
+                sequence=envelope.sequence,
+                sale_id=envelope.aggregate_id,
+                projection_hash=projection_digest,
+            ),
+        }
+    )
+
+
+class _StaleOperationLookupRepository(SyncEdgeRepository):
+    async def get_sale_projection_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> SyncSaleProjection | None:
+        del tenant_id, operation_id
+        return None
 
 
 async def test_shadow_sale_matches_cloud_checkpoint(
@@ -256,6 +318,81 @@ async def test_lost_ack_replay_is_a_verified_duplicate(
     assert replay.duplicates == 1
     projection = await db_session.get(SyncSaleProjection, pull.events[0].aggregate_id)
     assert projection is not None
+
+
+@pytest.mark.parametrize("simulate_race", [False, True], ids=["precheck", "database_guard"])
+async def test_operation_id_collision_is_durably_quarantined_without_projection(
+    db_session: AsyncSession,
+    pos_scaffold,
+    simulate_race: bool,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold(batch_qty=10)
+    pos = POSService(POSRepository(db_session))
+    await _open_shift(pos, scaffold)
+    node = await _enroll(db_session, scaffold)
+    first = await _checkout(pos, scaffold)
+    second = await _checkout(pos, scaffold)
+    third = await _checkout(pos, scaffold)
+    pull = await _pull(db_session, node)
+    assert [event.sequence for event in pull.events] == [1, 2, 3]
+
+    edge = SyncEdgeApplyService(SyncEdgeRepository(db_session))
+    first_result = await edge.apply(pull.model_copy(update={"events": [pull.events[0]]}))
+    assert first_result.status == "synced"
+    assert first_result.last_sequence == 1
+
+    colliding = _replace_operation_id(
+        pull.events[1],
+        operation_id=first.operation_id,
+        previous_source_checksum=pull.events[0].stream_checksum,
+        previous_projection_checksum=pull.events[0].projection_checksum,
+    )
+    collision_pull = pull.model_copy(update={"events": [colliding, pull.events[2]]})
+    repository = (
+        _StaleOperationLookupRepository(db_session)
+        if simulate_race
+        else SyncEdgeRepository(db_session)
+    )
+
+    result = await SyncEdgeApplyService(repository).apply(collision_pull)
+
+    assert result.status == "quarantined"
+    assert result.last_sequence == 1
+    assert result.applied == 0
+    inbox = await db_session.get(SyncInboxEvent, colliding.event_id)
+    assert inbox is not None
+    assert inbox.status == "quarantined"
+    assert inbox.reason_code == "operation_id_collision"
+    assert inbox.applied_at is None
+    assert await db_session.get(SyncSaleProjection, second.sale_id) is None
+    assert await db_session.get(SyncSaleProjection, third.sale_id) is None
+    assert await db_session.get(SyncInboxEvent, pull.events[2].event_id) is None
+    assert await db_session.get(SyncSaleProjection, first.sale_id) is not None
+
+    replay = await SyncEdgeApplyService(SyncEdgeRepository(db_session)).apply(collision_pull)
+    assert replay.status == "quarantined"
+    assert replay.last_sequence == 1
+    assert replay.applied == 0
+
+    independent = await pos_scaffold()
+    independent_pos = POSService(POSRepository(db_session))
+    await _open_shift(independent_pos, independent)
+    independent_node = await _enroll(db_session, independent)
+    independent_sale = await _checkout(independent_pos, independent)
+    independent_pull = await _pull(db_session, independent_node)
+    same_operation_other_tenant = _replace_operation_id(
+        independent_pull.events[0],
+        operation_id=first.operation_id,
+        previous_source_checksum=ZERO_CHECKSUM,
+        previous_projection_checksum=ZERO_CHECKSUM,
+    )
+    independent_result = await SyncEdgeApplyService(SyncEdgeRepository(db_session)).apply(
+        independent_pull.model_copy(update={"events": [same_operation_other_tenant]})
+    )
+    assert independent_result.status == "synced"
+    independent_projection = await db_session.get(SyncSaleProjection, independent_sale.sale_id)
+    assert independent_projection is not None
+    assert independent_projection.operation_id == first.operation_id
 
 
 async def test_sequence_gap_quarantines_and_does_not_advance_cursor(
