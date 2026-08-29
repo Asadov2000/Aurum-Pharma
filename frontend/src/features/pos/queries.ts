@@ -75,7 +75,7 @@ export function useCreatePaymentAttempt() {
 
 export function useConfirmPaymentAttempt() {
   return useMutation({
-    mutationFn: (args: { attemptId: string; payload?: PaymentAttemptConfirmPayload }) =>
+    mutationFn: (args: { attemptId: string; payload: PaymentAttemptConfirmPayload }) =>
       confirmPaymentAttempt(args.attemptId, args.payload),
   });
 }

@@ -553,7 +553,13 @@ class POSPaymentAttempt(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    evidence_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    reconciliation_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    terminal_id: Mapped[str | None] = mapped_column(Text)
     external_reference: Mapped[str | None] = mapped_column(Text)
+    resolved_by_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     void_reason: Mapped[str | None] = mapped_column(Text)
     void_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -598,6 +604,24 @@ class POSPaymentAttempt(Base):
         CheckConstraint(
             "status IN ('pending','requires_reconciliation','confirmed','consumed','voided')",
             name="ck_pos_payment_attempt_status",
+        ),
+        CheckConstraint(
+            "terminal_id IS NULL OR (char_length(terminal_id) BETWEEN 1 AND 64 "
+            "AND terminal_id !~ '[[:cntrl:]]')",
+            name="ck_pos_payment_attempt_terminal_id",
+        ),
+        CheckConstraint(
+            "external_reference IS NULL OR (char_length(external_reference) BETWEEN 1 AND 128 "
+            "AND external_reference !~ '[[:cntrl:]]')",
+            name="ck_pos_payment_attempt_external_reference",
+        ),
+        Index(
+            "uq_pos_payment_attempt_terminal_reference",
+            "tenant_id",
+            "terminal_id",
+            "external_reference",
+            unique=True,
+            postgresql_where=text("terminal_id IS NOT NULL AND external_reference IS NOT NULL"),
         ),
     )
 

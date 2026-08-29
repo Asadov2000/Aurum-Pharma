@@ -289,6 +289,10 @@ class POSService:
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
+        await self._lock_open_shift(
+            sale.shift_id,
+            error_message="Cannot start a payment attempt in a closed shift",
+        )
         if await self.repo.list_payments(sale.id):
             raise BusinessRuleError(
                 "Payment attempts cannot be added to a sale with legacy payments"
@@ -311,6 +315,7 @@ class POSService:
             amount=amount,
             currency=currency,
             status="pending",
+            evidence_required=True,
             created_by=actor_id,
         )
 
@@ -378,8 +383,25 @@ class POSService:
         return await self.repo.update_payment_attempt(
             attempt,
             status="requires_reconciliation",
+            reconciliation_started_at=self._now(),
             updated_by=actor_id,
         )
+
+    @staticmethod
+    def _normalize_payment_evidence(
+        *,
+        terminal_id: str,
+        external_reference: str,
+    ) -> tuple[str, str]:
+        normalized_terminal = terminal_id.strip()
+        normalized_reference = external_reference.strip()
+        if not normalized_terminal or len(normalized_terminal) > 64:
+            raise BusinessRuleError("Terminal ID is required")
+        if not normalized_reference or len(normalized_reference) > 128:
+            raise BusinessRuleError("External payment reference is required")
+        if any(ord(char) < 32 for char in f"{normalized_terminal}{normalized_reference}"):
+            raise BusinessRuleError("Payment evidence contains control characters")
+        return normalized_terminal, normalized_reference
 
     async def confirm_payment_attempt(
         self,
@@ -387,11 +409,16 @@ class POSService:
         tenant_id: UUID,
         attempt_id: UUID,
         actor_id: UUID,
-        external_reference: str | None,
+        terminal_id: str,
+        external_reference: str,
         can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> POSPaymentAttempt:
+        normalized_terminal, normalized_reference = self._normalize_payment_evidence(
+            terminal_id=terminal_id,
+            external_reference=external_reference,
+        )
         visible_attempt = await self.repo.get_payment_attempt(attempt_id)
         if visible_attempt is None:
             raise NotFoundError("Payment attempt not found")
@@ -418,18 +445,26 @@ class POSService:
         if attempt.amount > sale.total_amount:
             raise BusinessRuleError("Payment attempt exceeds the current sale total")
         if attempt.status in {"confirmed", "consumed"}:
-            if attempt.external_reference != external_reference:
+            if (
+                attempt.terminal_id != normalized_terminal
+                or attempt.external_reference != normalized_reference
+            ):
                 raise ConflictError("Payment attempt was confirmed with another reference")
             return attempt
         if attempt.status != "requires_reconciliation":
             raise BusinessRuleError("Payment attempt must start reconciliation before confirmation")
-        return await self.repo.update_payment_attempt(
-            attempt,
-            status="confirmed",
-            external_reference=external_reference,
-            confirmed_at=self._now(),
-            updated_by=actor_id,
-        )
+        try:
+            return await self.repo.update_payment_attempt(
+                attempt,
+                status="confirmed",
+                terminal_id=normalized_terminal,
+                external_reference=normalized_reference,
+                resolved_by_user_id=actor_id,
+                confirmed_at=self._now(),
+                updated_by=actor_id,
+            )
+        except IntegrityError as exc:
+            raise ConflictError("Terminal payment reference was already used") from exc
 
     async def void_payment_attempt(
         self,
@@ -439,6 +474,8 @@ class POSService:
         actor_id: UUID,
         reason: str,
         operator_note: str | None,
+        terminal_id: str | None = None,
+        external_reference: str | None = None,
         can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
@@ -454,20 +491,52 @@ class POSService:
             allowed_branch_ids=allowed_branch_ids,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
+        normalized_evidence: tuple[str, str] | None = None
+        if terminal_id is not None and external_reference is not None:
+            normalized_evidence = self._normalize_payment_evidence(
+                terminal_id=terminal_id,
+                external_reference=external_reference,
+            )
         if attempt.status == "voided":
-            if attempt.void_reason != reason or attempt.void_note != operator_note:
+            if (
+                attempt.void_reason != reason
+                or attempt.void_note != operator_note
+                or attempt.terminal_id
+                != (normalized_evidence[0] if normalized_evidence is not None else None)
+                or attempt.external_reference
+                != (normalized_evidence[1] if normalized_evidence is not None else None)
+            ):
                 raise ConflictError("Payment attempt was voided with other details")
             return attempt
         if attempt.status == "consumed":
             raise BusinessRuleError("A consumed payment attempt requires a refund")
-        return await self.repo.update_payment_attempt(
-            attempt,
-            status="voided",
-            void_reason=reason,
-            void_note=operator_note,
-            voided_at=self._now(),
-            updated_by=actor_id,
-        )
+        if attempt.status == "confirmed":
+            raise BusinessRuleError("A confirmed payment attempt requires checkout or a refund")
+        if attempt.status == "requires_reconciliation":
+            if normalized_evidence is None:
+                raise BusinessRuleError(
+                    "Terminal evidence is required to resolve an external payment"
+                )
+        elif terminal_id is not None or external_reference is not None:
+            raise BusinessRuleError(
+                "Pending payment cancellation does not accept terminal evidence"
+            )
+        try:
+            return await self.repo.update_payment_attempt(
+                attempt,
+                status="voided",
+                terminal_id=normalized_evidence[0] if normalized_evidence is not None else None,
+                external_reference=(
+                    normalized_evidence[1] if normalized_evidence is not None else None
+                ),
+                resolved_by_user_id=actor_id if normalized_evidence is not None else None,
+                void_reason=reason,
+                void_note=operator_note,
+                voided_at=self._now(),
+                updated_by=actor_id,
+            )
+        except IntegrityError as exc:
+            raise ConflictError("Terminal payment reference was already used") from exc
 
     # =========================================================================
     # Server-controlled electronic refund attempts
@@ -1101,6 +1170,10 @@ class POSService:
             raise BusinessRuleError("Shift is already closed")
         if shift.status != "open":
             raise BusinessRuleError("Shift is not open", details={"status": shift.status})
+        if await self.repo.has_active_payment_attempts_for_shift(shift_id):
+            raise BusinessRuleError(
+                "Cannot close a shift while a card or QR payment attempt is unresolved"
+            )
         if await self.repo.has_active_draft_sales(shift_id):
             raise BusinessRuleError(
                 "Cannot close a shift while unfinished sales contain items or payments"
@@ -1762,6 +1835,7 @@ class POSService:
         tenant_id: UUID,
         requested_methods: set[str],
         existing_methods: set[str] | None = None,
+        grandfather_existing_methods: bool = False,
     ) -> None:
         unsupported = requested_methods - PAYMENT_METHODS
         if unsupported:
@@ -1772,14 +1846,21 @@ class POSService:
         settings = await FoundationRepository(self.repo.session).get_settings_for_pos(tenant_id)
         if settings is None:
             raise AurumError("POS payment settings are unavailable")
+        grandfathered = existing_methods or set()
         disabled = requested_methods - set(settings.pos_payment_methods)
+        if grandfather_existing_methods and grandfathered:
+            disabled.clear()
         if disabled:
             raise BusinessRuleError(
                 "POS payment method is disabled",
                 details={"methods": sorted(disabled)},
             )
-        combined_methods = requested_methods | (existing_methods or set())
-        if not settings.pos_mixed_payment_enabled and len(combined_methods) > 1:
+        combined_methods = requested_methods | grandfathered
+        if (
+            not settings.pos_mixed_payment_enabled
+            and len(combined_methods) > 1
+            and not (grandfather_existing_methods and grandfathered)
+        ):
             raise BusinessRuleError("Mixed POS payments are disabled")
 
     async def _prepare_checkout_sale(
@@ -1881,12 +1962,16 @@ class POSService:
         if existing is not None:
             return existing
 
-        await self._validate_pos_payment_configuration(
-            tenant_id=tenant_id,
-            requested_methods={
-                method for method, _amount, _metadata, _attempt_id in normalized_payments
-            },
-        )
+        if not any(
+            attempt_id is not None
+            for _method, _amount, _metadata, attempt_id in normalized_payments
+        ):
+            await self._validate_pos_payment_configuration(
+                tenant_id=tenant_id,
+                requested_methods={
+                    method for method, _amount, _metadata, _attempt_id in normalized_payments
+                },
+            )
         self._validate_checkout_payments(normalized_payments)
         sale = await self._prepare_checkout_sale(
             tenant_id=tenant_id,
@@ -1908,6 +1993,7 @@ class POSService:
                 can_manage_tenant=can_manage_tenant,
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_manage_branch_ids=allowed_manage_branch_ids,
+                _allow_active_payment_attempts=True,
             )
 
         paid_total = sum(
@@ -1922,6 +2008,18 @@ class POSService:
         payment_attempts = await self._lock_checkout_payment_attempts(
             sale=sale,
             payments=normalized_payments,
+        )
+        await self._validate_pos_payment_configuration(
+            tenant_id=tenant_id,
+            requested_methods={
+                method for method, _amount, _metadata, _attempt_id in normalized_payments
+            },
+            existing_methods={
+                attempt.payment_method
+                for attempt in payment_attempts.values()
+                if attempt.status == "confirmed"
+            },
+            grandfather_existing_methods=True,
         )
         for payment_method, amount, metadata, payment_attempt_id in normalized_payments:
             await self.repo.insert_payment(
@@ -2730,6 +2828,12 @@ class POSService:
                 details={"reason": "special_dispensing_regulatory_approval_required"},
             )
 
+    async def _assert_sale_cart_mutable(self, sale_id: UUID) -> None:
+        if await self.repo.lock_active_payment_attempts_for_sale(sale_id):
+            raise BusinessRuleError(
+                "Resolve the sale's card or QR payment attempt before changing the cart"
+            )
+
     # ---- items ----
 
     async def add_item(
@@ -2744,6 +2848,7 @@ class POSService:
         allowed_manage_branch_ids: set[UUID] | None = None,
         today: date | None = None,
         expired_sale_confirmed: bool = False,
+        _allow_active_payment_attempts: bool = False,
     ) -> tuple[list[SaleItem], bool]:
         """Returns (created items, requires_prescription_log).
 
@@ -2758,6 +2863,8 @@ class POSService:
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
+        if not _allow_active_payment_attempts:
+            await self._assert_sale_cart_mutable(sale.id)
 
         catalog = await self.repo.session.get(TenantCatalog, catalog_id)
         if catalog is None or catalog.tenant_id != sale.tenant_id or catalog.deleted_at is not None:
@@ -2832,6 +2939,7 @@ class POSService:
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
+        await self._assert_sale_cart_mutable(sale.id)
         item = await self.repo.get_item(item_id)
         if item is None or item.sale_id != sale_id:
             raise NotFoundError("Sale item not found")
@@ -2859,6 +2967,7 @@ class POSService:
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
         self._assert_draft(sale)
+        await self._assert_sale_cart_mutable(sale.id)
         rows = await self.repo.delete_item(item_id, sale_id=sale_id)
         if rows == 0:
             raise NotFoundError("Sale item not found")

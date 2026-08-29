@@ -32,7 +32,11 @@ export interface PaymentAttempt {
   amount: string;
   currency: string;
   status: PaymentAttemptStatus;
+  terminal_id: string | null;
   external_reference: string | null;
+  resolved_by_user_id: string | null;
+  reconciliation_started_at: string | null;
+  evidence_required: boolean;
   void_reason: string | null;
   void_note: string | null;
   created_at: string;
@@ -49,12 +53,15 @@ export interface PaymentAttemptCreatePayload {
 }
 
 export interface PaymentAttemptConfirmPayload {
-  external_reference?: string | null;
+  terminal_id: string;
+  external_reference: string;
 }
 
 export interface PaymentAttemptVoidPayload {
-  reason: "cashier_cancelled" | "checkout_failed";
+  reason: "cashier_cancelled" | "checkout_failed" | "terminal_declined";
   operator_note?: string | null;
+  terminal_id?: string | null;
+  external_reference?: string | null;
 }
 
 export interface Shift {

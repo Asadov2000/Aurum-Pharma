@@ -362,6 +362,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_platform_account_status",
     "trg_guard_platform_membership_scope",
     "trg_guard_pos_payment_attempt_transition",
+    "trg_require_pos_payment_attempt_evidence",
     "trg_guard_pos_refund_attempt_transition",
     "trg_guard_role_permission_mutation",
     "trg_guard_access_role_version",

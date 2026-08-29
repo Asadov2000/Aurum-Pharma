@@ -217,6 +217,60 @@ async def test_checkout_rejects_mixed_payment_when_disabled(
         )
 
 
+async def test_confirmed_attempt_can_finish_mixed_checkout_after_settings_change(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    scaffold = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    sale = await _open_sale(service, scaffold)
+    attempt = await service.create_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        sale_id=sale.id,
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        payment_method="card",
+        amount=Decimal("4.00"),
+        currency="TJS",
+    )
+    await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
+    confirmed = await service.confirm_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+        terminal_id="TERM-SETTINGS",
+        external_reference="DOC-SETTINGS",
+    )
+    await _set_payment_settings(
+        db_session,
+        tenant_id=scaffold["tenant"].id,
+        methods=["qr"],
+        mixed=False,
+    )
+
+    result = await service.checkout(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        draft_sale_id=sale.id,
+        items=[(scaffold["item"].id, Decimal("1"))],
+        payments=[
+            ("card", Decimal("4.00"), None, confirmed.id),
+            ("cash", Decimal("6.00"), None, None),
+        ],
+    )
+
+    assert result.total_amount == Decimal("10.00")
+    payments_by_method = {payment.payment_method: payment for payment in result.payments}
+    assert payments_by_method["card"].payment_attempt_status == "consumed"
+    assert payments_by_method["cash"].payment_attempt_status is None
+
+
 async def test_legacy_add_payment_rejects_disabled_method(
     db_session: AsyncSession,
     pos_scaffold,
