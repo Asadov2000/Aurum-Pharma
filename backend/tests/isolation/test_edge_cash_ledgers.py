@@ -77,7 +77,8 @@ async def _assert_command_constraints(
         with pytest.raises(DBAPIError) as scope_error:
             async with connection.begin_nested():
                 await connection.execute(command_insert, invalid_params)
-        assert getattr(scope_error.value.orig, "sqlstate", None) == "23503"
+        expected_sqlstate = "23505" if field == "sale_id" else "23503"
+        assert getattr(scope_error.value.orig, "sqlstate", None) == expected_sqlstate
 
 
 async def test_edge_cash_ledgers_are_dispatcher_scoped_and_force_rls(
@@ -236,6 +237,10 @@ async def test_edge_cash_ledgers_are_dispatcher_scoped_and_force_rls(
         {
             "event_object_table": "edge_cash_command",
             "trigger_name": "trg_edge_cash_command_immutable",
+        },
+        {
+            "event_object_table": "edge_cash_command",
+            "trigger_name": "trg_enforce_pos_operation_namespace",
         },
         {
             "event_object_table": "edge_cash_node_identity",

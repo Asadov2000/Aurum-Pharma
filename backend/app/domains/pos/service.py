@@ -254,15 +254,7 @@ class POSService:
             amount=amount,
             currency=currency,
         )
-        await self.repo.lock_operation_id(operation_id)
-        if (
-            await self.repo.get_pos_command(
-                tenant_id=tenant_id,
-                operation_id=operation_id,
-            )
-            is not None
-        ):
-            raise ConflictError("Operation ID was already used for another POS operation")
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         existing = await self.repo.get_payment_attempt_by_operation_id(
             tenant_id=tenant_id,
             operation_id=operation_id,
@@ -279,17 +271,9 @@ class POSService:
             if existing.operation_hash != operation_hash:
                 raise ConflictError("Operation ID was already used for another payment attempt")
             return existing
-        if (
-            await self.repo.get_sale_by_operation_id(
-                tenant_id=tenant_id,
-                operation_id=operation_id,
-            )
-            is not None
-            or await self.repo.get_payment_by_operation_id(
-                tenant_id=tenant_id,
-                operation_id=operation_id,
-            )
-            is not None
+        if await self.repo.get_pos_operation_kinds(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
         ):
             raise ConflictError("Operation ID was already used for another POS operation")
 
@@ -684,15 +668,7 @@ class POSService:
             parent_sale_id=parent_sale_id,
             items=per_item,
         )
-        await self.repo.lock_operation_id(operation_id)
-        if (
-            await self.repo.get_pos_command(
-                tenant_id=tenant_id,
-                operation_id=operation_id,
-            )
-            is not None
-        ):
-            raise ConflictError("Operation ID was already used for another POS operation")
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         existing = await self.repo.get_refund_attempt_by_operation_id(
             tenant_id=tenant_id,
             operation_id=operation_id,
@@ -706,22 +682,9 @@ class POSService:
             if existing.operation_hash != operation_hash:
                 raise ConflictError("Operation ID was already used for another refund attempt")
             return await self._refund_attempt_read(existing)
-        if (
-            await self.repo.get_sale_by_operation_id(
-                tenant_id=tenant_id,
-                operation_id=operation_id,
-            )
-            is not None
-            or await self.repo.get_payment_by_operation_id(
-                tenant_id=tenant_id,
-                operation_id=operation_id,
-            )
-            is not None
-            or await self.repo.get_payment_attempt_by_operation_id(
-                tenant_id=tenant_id,
-                operation_id=operation_id,
-            )
-            is not None
+        if await self.repo.get_pos_operation_kinds(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
         ):
             raise ConflictError("Operation ID was already used for another POS operation")
 
@@ -1258,7 +1221,7 @@ class POSService:
                 allowed_manage_branch_ids=allowed_manage_branch_ids,
             )
             return restored
-        if await self.repo.has_legacy_pos_operation(
+        if await self.repo.get_pos_operation_kinds(
             tenant_id=tenant_id,
             operation_id=operation_id,
         ):
@@ -1329,7 +1292,7 @@ class POSService:
             command_type=command_type,
             payload={"register_id": str(register_id)},
         )
-        await self.repo.lock_operation_id(operation_id)
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         existing = await self._find_existing_pos_command(
             tenant_id=tenant_id,
             actor_user_id=cashier_user_id,
@@ -1483,23 +1446,11 @@ class POSService:
         allowed_branch_ids: set[UUID] | None,
         allowed_manage_branch_ids: set[UUID] | None,
     ) -> SaleCheckoutResult | None:
-        existing_command = await self.repo.get_pos_command(
+        operation_kinds = await self.repo.get_pos_operation_kinds(
             tenant_id=tenant_id,
             operation_id=operation_id,
         )
-        if existing_command is not None:
-            raise ConflictError("Operation ID was already used for another POS operation")
-        existing_attempt = await self.repo.get_payment_attempt_by_operation_id(
-            tenant_id=tenant_id,
-            operation_id=operation_id,
-        )
-        if existing_attempt is not None:
-            raise ConflictError("Operation ID was already used for another POS operation")
-        existing_payment = await self.repo.get_payment_by_operation_id(
-            tenant_id=tenant_id,
-            operation_id=operation_id,
-        )
-        if existing_payment is not None:
+        if operation_kinds - {"sale"}:
             raise ConflictError("Operation ID was already used for another POS operation")
 
         existing = await self.repo.get_sale_by_operation_id(
@@ -1585,7 +1536,7 @@ class POSService:
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> SaleCheckoutResult:
-        await self.repo.lock_operation_id(operation_id)
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         if (
             await self.repo.get_payment_by_operation_id(
                 tenant_id=tenant_id,
@@ -1862,7 +1813,7 @@ class POSService:
             prescription=prescription,
         )
 
-        await self.repo.lock_operation_id(operation_id)
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         existing = await self._find_existing_checkout(
             tenant_id=tenant_id,
             operation_id=operation_id,
@@ -2881,7 +2832,7 @@ class POSService:
                 "qty": format(qty.normalize(), "f"),
             },
         )
-        await self.repo.lock_operation_id(operation_id)
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         existing = await self._find_existing_pos_command(
             tenant_id=tenant_id,
             actor_user_id=actor_id,
@@ -2944,7 +2895,7 @@ class POSService:
                 "qty": format(qty.normalize(), "f"),
             },
         )
-        await self.repo.lock_operation_id(operation_id)
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         existing = await self._find_existing_pos_command(
             tenant_id=tenant_id,
             actor_user_id=actor_id,
@@ -2998,7 +2949,7 @@ class POSService:
             command_type=command_type,
             payload={"sale_id": str(sale_id), "item_id": str(item_id)},
         )
-        await self.repo.lock_operation_id(operation_id)
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         existing = await self._find_existing_pos_command(
             tenant_id=tenant_id,
             actor_user_id=actor_id,
@@ -3074,23 +3025,11 @@ class POSService:
         operation_id: UUID,
         operation_hash: str,
     ) -> SalePayment | None:
-        existing_command = await self.repo.get_pos_command(
+        operation_kinds = await self.repo.get_pos_operation_kinds(
             tenant_id=sale.tenant_id,
             operation_id=operation_id,
         )
-        if existing_command is not None:
-            raise ConflictError("Operation ID was already used for another POS operation")
-        existing_attempt = await self.repo.get_payment_attempt_by_operation_id(
-            tenant_id=sale.tenant_id,
-            operation_id=operation_id,
-        )
-        if existing_attempt is not None:
-            raise ConflictError("Operation ID was already used for another POS operation")
-        existing_sale = await self.repo.get_sale_by_operation_id(
-            tenant_id=sale.tenant_id,
-            operation_id=operation_id,
-        )
-        if existing_sale is not None:
+        if operation_kinds - {"payment"}:
             raise ConflictError("Operation ID was already used for another POS operation")
 
         existing = await self.repo.get_payment_by_operation_id(
@@ -3125,8 +3064,13 @@ class POSService:
             amount=amount,
             metadata=metadata,
         )
-        await self.repo.lock_operation_id(effective_operation_id)
-
+        visible_sale = await self.repo.get_sale(sale_id)
+        if visible_sale is None:
+            raise NotFoundError("Sale not found")
+        await self.repo.lock_operation_id(
+            tenant_id=visible_sale.tenant_id,
+            operation_id=effective_operation_id,
+        )
         sale = await self._lock_sale(sale_id)
         self._assert_sale_owned_or_managed(
             sale,
@@ -3559,17 +3503,11 @@ class POSService:
         operation_id: UUID,
         operation_hash: str,
     ) -> Sale | None:
-        existing_command = await self.repo.get_pos_command(
+        operation_kinds = await self.repo.get_pos_operation_kinds(
             tenant_id=parent.tenant_id,
             operation_id=operation_id,
         )
-        if existing_command is not None:
-            raise ConflictError("Operation ID was already used for another POS operation")
-        existing_payment = await self.repo.get_payment_by_operation_id(
-            tenant_id=parent.tenant_id,
-            operation_id=operation_id,
-        )
-        if existing_payment is not None:
+        if operation_kinds - {"sale"}:
             raise ConflictError("Operation ID was already used for another POS operation")
 
         existing = await self.repo.get_sale_by_operation_id(
@@ -3636,7 +3574,7 @@ class POSService:
         allowed_branch_ids: set[UUID] | None = None,
     ) -> Sale:
         """Return a committed refund after a client lost the POST response."""
-        await self.repo.lock_operation_id(operation_id)
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         if (
             await self.repo.get_payment_by_operation_id(
                 tenant_id=tenant_id,
@@ -3975,8 +3913,13 @@ class POSService:
             items=per_item,
             refund_attempt_id=refund_attempt_id,
         )
-        await self.repo.lock_operation_id(effective_operation_id)
-
+        visible_parent = await self.repo.get_sale(parent_sale_id)
+        if visible_parent is None:
+            raise NotFoundError("Sale not found")
+        await self.repo.lock_operation_id(
+            tenant_id=visible_parent.tenant_id,
+            operation_id=effective_operation_id,
+        )
         parent = await self._lock_sale(parent_sale_id)
         self._assert_branch_allowed(parent.branch_id, allowed_branch_ids=allowed_branch_ids)
         existing = await self._find_existing_refund(
