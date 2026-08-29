@@ -250,12 +250,30 @@ def _add_hardened_state_constraint() -> None:
 
 def upgrade() -> None:
     op.execute("""
-        ALTER TABLE public.pos_payment_attempt
-          ADD COLUMN evidence_required BOOLEAN NOT NULL DEFAULT false,
-          ADD COLUMN reconciliation_started_at TIMESTAMPTZ,
-          ADD COLUMN terminal_id TEXT,
-          ADD COLUMN resolved_by_user_id UUID
-            REFERENCES public.app_user(id) ON DELETE RESTRICT
+        DO $$
+        DECLARE
+          v_user_had_references BOOLEAN := pg_catalog.has_table_privilege(
+            'aurum_schema_owner',
+            'public.app_user',
+            'REFERENCES'
+          );
+        BEGIN
+          IF NOT v_user_had_references THEN
+            GRANT REFERENCES ON TABLE public.app_user TO aurum_schema_owner;
+          END IF;
+
+          ALTER TABLE public.pos_payment_attempt
+            ADD COLUMN evidence_required BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN reconciliation_started_at TIMESTAMPTZ,
+            ADD COLUMN terminal_id TEXT,
+            ADD COLUMN resolved_by_user_id UUID
+              REFERENCES public.app_user(id) ON DELETE RESTRICT;
+
+          IF NOT v_user_had_references THEN
+            REVOKE REFERENCES ON TABLE public.app_user FROM aurum_schema_owner;
+          END IF;
+        END
+        $$
         """)
     op.execute(
         "ALTER TABLE public.pos_payment_attempt " "ALTER COLUMN evidence_required SET DEFAULT true"
