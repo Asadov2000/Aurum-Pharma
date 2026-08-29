@@ -254,9 +254,17 @@ test.describe("POS sale (owner)", () => {
           response.url().includes(`/api/v1/pos/payment-attempts/${createdAttempt.id}/confirm`) &&
           response.ok(),
       );
-      const confirmation = page.getByRole("dialog", { name: "Подтвердить оплату картой" });
-      await confirmation.getByRole("button", { name: "Оплата подтверждена" }).click();
-      expect(((await (await confirmAttemptResponse).json()) as { status: string }).status).toBe(
+      const paymentReference = `E2E-SALE-${Date.now()}`;
+      const confirmation = page.getByRole("dialog", { name: "Сверка оплаты картой" });
+      await confirmation.getByLabel("Терминал").fill("E2E-TERM-01");
+      await confirmation.getByLabel("Номер операции/документа").fill(paymentReference);
+      await confirmation.getByRole("button", { name: "Оплата прошла" }).click();
+      const confirmedAttemptResponse = await confirmAttemptResponse;
+      expect(confirmedAttemptResponse.request().postDataJSON()).toEqual({
+        terminal_id: "E2E-TERM-01",
+        external_reference: paymentReference,
+      });
+      expect(((await confirmedAttemptResponse.json()) as { status: string }).status).toBe(
         "confirmed",
       );
       await expect(page.getByText("Оплачено 24.00", { exact: false })).toBeVisible();

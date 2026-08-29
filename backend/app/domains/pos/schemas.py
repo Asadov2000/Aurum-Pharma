@@ -68,16 +68,17 @@ class POSPaymentAttemptCreate(BaseModel):
 class POSPaymentAttemptConfirm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    external_reference: str | None = Field(default=None, max_length=128)
+    terminal_id: str = Field(min_length=1, max_length=64)
+    external_reference: str = Field(min_length=1, max_length=128)
 
-    @field_validator("external_reference", mode="before")
+    @field_validator("terminal_id", "external_reference", mode="before")
     @classmethod
-    def _strip_reference(cls, value: object) -> object:
+    def _strip_evidence(cls, value: object) -> object:
         if isinstance(value, str):
             stripped = value.strip()
             if any(ord(char) < 32 for char in stripped):
-                raise ValueError("external_reference contains control characters")
-            return stripped or None
+                raise ValueError("payment evidence contains control characters")
+            return stripped
         return value
 
 
@@ -94,6 +95,18 @@ class POSPaymentAttemptVoid(BaseModel):
         "manager_override",
     ]
     operator_note: str | None = Field(default=None, max_length=160)
+    terminal_id: str | None = Field(default=None, min_length=1, max_length=64)
+    external_reference: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("terminal_id", "external_reference", mode="before")
+    @classmethod
+    def _strip_evidence(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if any(ord(char) < 32 for char in stripped):
+                raise ValueError("payment evidence contains control characters")
+            return stripped
+        return value
 
     @field_validator("operator_note", mode="before")
     @classmethod
@@ -114,6 +127,12 @@ class POSPaymentAttemptVoid(BaseModel):
             raise ValueError("operator_note must not contain long numeric identifiers")
         return stripped or None
 
+    @model_validator(mode="after")
+    def _evidence_pair(self) -> Self:
+        if (self.terminal_id is None) != (self.external_reference is None):
+            raise ValueError("terminal_id and external_reference must be provided together")
+        return self
+
 
 class POSPaymentAttemptRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -127,7 +146,11 @@ class POSPaymentAttemptRead(BaseModel):
     amount: Decimal
     currency: Literal["TJS"]
     status: Literal["pending", "requires_reconciliation", "confirmed", "consumed", "voided"]
+    evidence_required: bool
+    reconciliation_started_at: datetime | None
+    terminal_id: str | None
     external_reference: str | None
+    resolved_by_user_id: UUID | None
     void_reason: str | None
     void_note: str | None
     created_at: datetime

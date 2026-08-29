@@ -280,6 +280,20 @@ class POSRepository:
         )
         return bool(await self.session.scalar(stmt))
 
+    async def has_active_payment_attempts_for_shift(self, shift_id: UUID) -> bool:
+        stmt = select(
+            exists().where(
+                and_(
+                    POSPaymentAttempt.sale_id == Sale.id,
+                    Sale.shift_id == shift_id,
+                    POSPaymentAttempt.status.in_(
+                        ("pending", "requires_reconciliation", "confirmed")
+                    ),
+                )
+            )
+        )
+        return bool(await self.session.scalar(stmt))
+
     async def list_shifts(
         self,
         *,

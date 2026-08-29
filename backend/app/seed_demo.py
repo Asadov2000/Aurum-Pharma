@@ -468,7 +468,8 @@ async def _seed_sales(
                 tenant_id=tenant.id,
                 attempt_id=attempt.id,
                 actor_id=cashier_id,
-                external_reference=None,
+                terminal_id="DEMO-TERMINAL",
+                external_reference=f"DEMO-{attempt.operation_id}",
             )
             payment_attempt_id = attempt.id
         await timed_pos.checkout(

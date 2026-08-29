@@ -41,7 +41,7 @@ export async function createPaymentAttempt(
 
 export async function confirmPaymentAttempt(
   attemptId: string,
-  payload: PaymentAttemptConfirmPayload = {},
+  payload: PaymentAttemptConfirmPayload,
 ): Promise<PaymentAttempt> {
   const { data } = await api.post<PaymentAttempt>(
     `/pos/payment-attempts/${attemptId}/confirm`,
