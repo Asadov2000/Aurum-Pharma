@@ -10,10 +10,11 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
-from app.core.deps import get_db
+from app.core.deps import _seed_request_db_context, get_db
 from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.catalog.image_processing import CatalogImageVariants
@@ -28,17 +29,13 @@ from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 from app.domains.roles.models import (
-    Role,
-    RolePermission,
     TenantMembership,
-    TenantOwnership,
     UserAssignment,
 )
-from app.domains.roles.repository import RolesRepository
-from app.domains.roles.service import RolesService
 from app.domains.suppliers.repository import SuppliersRepository
 from app.domains.suppliers.service import SuppliersService
 from app.main import app
+from tests.role_version_helpers import create_published_test_role, provision_test_owner
 
 SENSITIVE_READ_PATHS = [
     ("/api/v1/batches", "batches.view"),
@@ -62,7 +59,20 @@ DOMAIN_READ_PATHS = [
 
 
 async def _override_db(db_session: AsyncSession) -> None:
-    async def _override() -> AsyncIterator[AsyncSession]:
+    async def _override(request: Request) -> AsyncIterator[AsyncSession]:
+        for key in (
+            "app.user_id",
+            "app.tenant_id",
+            "app.support_access_session_id",
+            "app.auth_session_id",
+            "app.mfa_verified_at",
+        ):
+            await db_session.execute(
+                text("SELECT set_config(:key, '', true)"),
+                {"key": key},
+            )
+        await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
+        await _seed_request_db_context(request, db_session)
         yield db_session
 
     app.dependency_overrides[get_db] = _override
@@ -241,21 +251,11 @@ async def _seed_tenant_subjects(
     db_session.add_all([regular_membership, admin_membership])
     await db_session.flush()
     if admin_is_owner:
-        db_session.add(
-            TenantOwnership(
-                tenant_id=tenant.id,
-                membership_id=admin_membership.id,
-            )
-        )
-        await db_session.flush()
-        repo = RolesRepository(db_session)
-        owner_role = await RolesService(repo)._ensure_tenant_owner_role(tenant.id, admin.id)
-        await repo.insert_assignment(
-            user_id=admin.id,
+        admin, _membership, _ownership, _role = await provision_test_owner(
+            db_session,
             tenant_id=tenant.id,
-            branch_id=None,
-            role_id=owner_role.id,
-            password_required=False,
+            email=f"owner-{nick}@aurum.tj",
+            full_name="Owner",
         )
     return tenant, regular, admin
 
@@ -296,17 +296,13 @@ async def _assign_permissions(
         await db_session.flush()
         await db_session.refresh(membership)
 
-    role = Role(
+    role = await create_published_test_role(
+        db_session,
         tenant_id=tenant_id,
         name=f"sec-role-{uuid4().hex[:8]}",
+        permission_codes=permission_codes,
         level=4,
-        is_system=False,
     )
-    db_session.add(role)
-    await db_session.flush()
-    await db_session.refresh(role)
-    for code in permission_codes:
-        db_session.add(RolePermission(role_id=role.id, permission_code=code))
     db_session.add(
         UserAssignment(
             user_id=user_id,
@@ -797,7 +793,6 @@ async def test_tenant_reads_require_domain_permission(
                     "catalog.view",
                     "pos.shift_open",
                     "registers.view",
-                    "settings.update",
                     "users.view",
                 },
             )

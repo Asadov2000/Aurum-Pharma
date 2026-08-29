@@ -304,7 +304,7 @@ async def _create_runtime_support_scenario(
             "other_role_name": f"Other role {suffix}",
         },
     )
-    developer_id = await connection.scalar(text("""
+    developer_ids = list(await connection.scalars(text("""
             SELECT platform_grant.user_id
             FROM public.platform_access_grant AS platform_grant
             JOIN public.app_user AS account
@@ -313,9 +313,8 @@ async def _create_runtime_support_scenario(
             WHERE platform_grant.access_kind = 'developer'
               AND platform_grant.status = 'active'
             ORDER BY platform_grant.requested_at
-            LIMIT 1
-            """))
-    if developer_id is None:
+            """)))
+    if not developer_ids:
         developer_grant_count = int(
             await connection.scalar(
                 text(
@@ -346,6 +345,9 @@ async def _create_runtime_support_scenario(
                 {"email": f"runtime-developer-{suffix}@example.invalid"},
             )
         ).scalar_one()
+        developer_ids = [developer_id]
+    else:
+        developer_id = developer_ids[0]
     actor_id = (
         await connection.execute(
             text(
@@ -360,9 +362,11 @@ async def _create_runtime_support_scenario(
         text("SELECT set_config('app.user_id', :developer_id, true)"),
         {"developer_id": str(developer_id)},
     )
-    actor_grant_id = (
-        await connection.execute(
-            text("""
+    requires_approval = len(developer_ids) > 1
+    actor_grant = (
+        (
+            await connection.execute(
+                text("""
             INSERT INTO public.platform_access_grant (
               user_id,
               access_kind,
@@ -370,21 +374,35 @@ async def _create_runtime_support_scenario(
               requested_by,
               request_reason_code,
               request_reason,
-              requires_approval
+              requires_approval,
+              approval_expires_at
             ) VALUES (
               :actor_id,
               'administrator',
-              'active',
+              :status,
               :developer_id,
               'other',
               'Runtime support isolation fixture',
-              false
+              :requires_approval,
+              CASE
+                WHEN :requires_approval
+                THEN statement_timestamp() + INTERVAL '15 minutes'
+                ELSE NULL
+              END
             )
-            RETURNING id
+            RETURNING id, version
             """),
-            {"actor_id": actor_id, "developer_id": developer_id},
+                {
+                    "actor_id": actor_id,
+                    "developer_id": developer_id,
+                    "status": "pending" if requires_approval else "active",
+                    "requires_approval": requires_approval,
+                },
+            )
         )
-    ).scalar_one()
+        .mappings()
+        .one()
+    )
     await connection.execute(
         text("""
             INSERT INTO public.platform_access_grant_permission (
@@ -401,8 +419,34 @@ async def _create_runtime_support_scenario(
               AND permission.administrator_grantable
             ORDER BY permission.code
             """),
-        {"grant_id": actor_grant_id, "developer_id": developer_id},
+        {"grant_id": actor_grant["id"], "developer_id": developer_id},
     )
+    if requires_approval:
+        approver_id = developer_ids[1]
+        await connection.execute(
+            text("SELECT set_config('app.user_id', :approver_id, true)"),
+            {"approver_id": str(approver_id)},
+        )
+        await connection.execute(
+            text("""
+                UPDATE public.platform_access_grant
+                SET
+                  status = 'active',
+                  approved_by = :approver_id,
+                  approved_at = statement_timestamp(),
+                  approval_reason_code = 'other',
+                  approval_reason = 'Runtime fixture independent approval',
+                  version = version + 1,
+                  updated_at = statement_timestamp()
+                WHERE id = :grant_id
+                  AND version = :version
+                """),
+            {
+                "approver_id": approver_id,
+                "grant_id": actor_grant["id"],
+                "version": actor_grant["version"],
+            },
+        )
     await connection.execute(text("SELECT set_config('app.user_id', '', true)"))
     auth_sessions = list(
         (

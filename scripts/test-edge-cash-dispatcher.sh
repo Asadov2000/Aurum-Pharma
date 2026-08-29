@@ -74,6 +74,14 @@ BEGIN
 END
 $cleanup$;
 DELETE FROM public.audit_log WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.user_assignment WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.access_role_version_permission
+WHERE role_version_id IN (
+  SELECT id FROM public.access_role_version
+  WHERE tenant_id = :'tenant_id'::UUID
+);
+DELETE FROM public.access_role_version
+WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.tenant WHERE id = :'tenant_id'::UUID;
 DELETE FROM public.app_user WHERE id = :'cashier_id'::UUID;
 SET CONSTRAINTS ALL IMMEDIATE;
@@ -126,6 +134,7 @@ SELECT
   pg_catalog.gen_random_uuid() AS cashier_id,
   pg_catalog.gen_random_uuid() AS membership_id,
   pg_catalog.gen_random_uuid() AS role_id,
+  pg_catalog.gen_random_uuid() AS role_version_id,
   pg_catalog.gen_random_uuid() AS branch_id,
   pg_catalog.gen_random_uuid() AS register_id,
   pg_catalog.gen_random_uuid() AS shift_id,
@@ -175,6 +184,16 @@ SELECT role_id, tenant_id, 'Edge cashier role', 4, true
 FROM edge_dispatcher_context;
 INSERT INTO public.role_permission (role_id, permission_code)
 SELECT role_id, 'pos.sell' FROM edge_dispatcher_context;
+INSERT INTO public.access_role_version (
+  id, role_id, tenant_id, version, name, status, creation_xid, published_at
+)
+SELECT role_version_id, role_id, tenant_id, 1, 'Edge cashier role',
+       'published', pg_catalog.txid_current(), now()
+FROM edge_dispatcher_context;
+INSERT INTO public.access_role_version_permission (
+  role_version_id, permission_code
+)
+SELECT role_version_id, 'pos.sell' FROM edge_dispatcher_context;
 INSERT INTO public.branch (id, tenant_id, name, is_active)
 SELECT branch_id, tenant_id, 'Edge branch', true
 FROM edge_dispatcher_context;
@@ -182,9 +201,11 @@ INSERT INTO public.register (id, tenant_id, branch_id, name, is_active)
 SELECT register_id, tenant_id, branch_id, 'Edge register', true
 FROM edge_dispatcher_context;
 INSERT INTO public.user_assignment (
-  user_id, tenant_id, membership_id, branch_id, role_id, is_active
+  user_id, tenant_id, membership_id, branch_id, role_id, role_version_id,
+  is_active
 )
-SELECT cashier_id, tenant_id, membership_id, branch_id, role_id, true
+SELECT cashier_id, tenant_id, membership_id, branch_id, role_id,
+       role_version_id, true
 FROM edge_dispatcher_context;
 INSERT INTO public.shift (
   id, tenant_id, branch_id, register_id, opened_by_user_id, status

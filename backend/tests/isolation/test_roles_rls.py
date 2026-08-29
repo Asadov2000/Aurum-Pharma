@@ -10,6 +10,7 @@ catalogue every tenant relies on.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
 import pytest_asyncio
 from sqlalchemy import text
@@ -53,30 +54,43 @@ async def _set_tenant(conn: AsyncConnection, tenant_id: str) -> None:
 async def test_user_assignment_isolated_between_tenants(
     support_engine_iso: AsyncEngine,
     app_engine_iso: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> None:
+    suffix = uuid4().hex
     tenant_ids: list[str] = []
     user_ids: list[str] = []
+    role_ids: list[str] = []
     try:
-        # ---- seed two tenants + one user-assignment each (system administrator role) ----
+        # ---- seed two tenants + one tenant-scoped role and assignment each ----
         async with support_engine_iso.begin() as conn:
             t_rows = await conn.execute(
                 text(
                     "INSERT INTO tenant (name, contact_email) VALUES "
-                    "('IsoRoles A', 'roles-a@aurum.tj'), "
-                    "('IsoRoles B', 'roles-b@aurum.tj') "
+                    "(:name_a, :contact_a), (:name_b, :contact_b) "
                     "RETURNING id"
-                )
+                ),
+                {
+                    "name_a": f"IsoRoles A {suffix}",
+                    "contact_a": f"roles-a-{suffix}@example.invalid",
+                    "name_b": f"IsoRoles B {suffix}",
+                    "contact_b": f"roles-b-{suffix}@example.invalid",
+                },
             )
             tenant_ids = [str(row[0]) for row in t_rows.fetchall()]
 
             u_rows = await conn.execute(
                 text(
                     "INSERT INTO app_user (email, full_name, home_tenant_id) VALUES "
-                    "('iso-roles-a@aurum.tj', 'A worker', :a), "
-                    "('iso-roles-b@aurum.tj', 'B worker', :b) "
+                    "(:email_a, 'A worker', :a), "
+                    "(:email_b, 'B worker', :b) "
                     "RETURNING id"
                 ),
-                {"a": tenant_ids[0], "b": tenant_ids[1]},
+                {
+                    "a": tenant_ids[0],
+                    "b": tenant_ids[1],
+                    "email_a": f"iso-roles-a-{suffix}@example.invalid",
+                    "email_b": f"iso-roles-b-{suffix}@example.invalid",
+                },
             )
             user_ids = [str(row[0]) for row in u_rows.fetchall()]
 
@@ -95,23 +109,44 @@ async def test_user_assignment_isolated_between_tenants(
                 },
             )
 
-            role_id = (
-                await conn.execute(
-                    text("SELECT id FROM role WHERE is_system = true AND name = 'administrator'")
-                )
-            ).scalar_one()
+            role_rows = await conn.execute(
+                text(
+                    "INSERT INTO role "
+                    "(tenant_id, name, level, is_system, is_protected) VALUES "
+                    "(:ta, 'Iso worker A', 4, false, false), "
+                    "(:tb, 'Iso worker B', 4, false, false) "
+                    "RETURNING id"
+                ),
+                {"ta": tenant_ids[0], "tb": tenant_ids[1]},
+            )
+            role_ids = [str(row[0]) for row in role_rows.fetchall()]
 
+        async with maintenance_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO access_role_version "
+                    "(id, role_id, tenant_id, version, name, description, status, "
+                    "creation_xid, published_at, created_by) "
+                    "SELECT gen_random_uuid(), id, tenant_id, version, name, "
+                    "description, 'published', txid_current(), statement_timestamp(), "
+                    "created_by FROM role WHERE id = ANY(CAST(:role_ids AS UUID[]))"
+                ),
+                {"role_ids": role_ids},
+            )
+
+        async with support_engine_iso.begin() as conn:
             await conn.execute(
                 text(
                     "INSERT INTO user_assignment (user_id, tenant_id, role_id) VALUES "
-                    "(:ua, :ta, :r), (:ub, :tb, :r)"
+                    "(:ua, :ta, :ra), (:ub, :tb, :rb)"
                 ),
                 {
                     "ua": user_ids[0],
                     "ub": user_ids[1],
                     "ta": tenant_ids[0],
                     "tb": tenant_ids[1],
-                    "r": str(role_id),
+                    "ra": role_ids[0],
+                    "rb": role_ids[1],
                 },
             )
 
@@ -160,6 +195,30 @@ async def test_user_assignment_isolated_between_tenants(
                     await conn.execute(
                         text("DELETE FROM user_assignment " "WHERE tenant_id = ANY(:ids)"),
                         {"ids": tenant_ids},
+                    )
+            if role_ids:
+                async with maintenance_engine.begin() as conn:
+                    await conn.execute(
+                        text(
+                            "DELETE FROM access_role_version_permission "
+                            "WHERE role_version_id IN ("
+                            "SELECT id FROM access_role_version "
+                            "WHERE role_id = ANY(CAST(:ids AS UUID[])))"
+                        ),
+                        {"ids": role_ids},
+                    )
+                    await conn.execute(
+                        text(
+                            "DELETE FROM access_role_version "
+                            "WHERE role_id = ANY(CAST(:ids AS UUID[]))"
+                        ),
+                        {"ids": role_ids},
+                    )
+            async with support_engine_iso.begin() as conn:
+                if role_ids:
+                    await conn.execute(
+                        text("DELETE FROM role WHERE id = ANY(CAST(:ids AS UUID[]))"),
+                        {"ids": role_ids},
                     )
                 if user_ids:
                     await conn.execute(

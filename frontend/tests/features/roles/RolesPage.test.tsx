@@ -8,6 +8,8 @@ const listPermissions = vi.fn();
 const listTemplates = vi.fn();
 const createRole = vi.fn();
 const updateRole = vi.fn();
+const listRoleVersions = vi.fn();
+const archiveRole = vi.fn();
 
 vi.mock("@/features/roles/api", () => ({
   listRoles: (...args: unknown[]) => listRoles(...args),
@@ -15,6 +17,8 @@ vi.mock("@/features/roles/api", () => ({
   listTemplates: (...args: unknown[]) => listTemplates(...args),
   createRole: (...args: unknown[]) => createRole(...args),
   updateRole: (...args: unknown[]) => updateRole(...args),
+  listRoleVersions: (...args: unknown[]) => listRoleVersions(...args),
+  archiveRole: (...args: unknown[]) => archiveRole(...args),
   listUsers: vi.fn(),
   updateUser: vi.fn(),
   suspendUser: vi.fn(),
@@ -46,6 +50,7 @@ const MANAGED_ROLE = {
   version: 1,
   permissions: ["pos.sell"],
   has_hidden_permissions: false,
+  active_assignment_count: 2,
 };
 
 const SYSTEM_ROLE = {
@@ -93,8 +98,11 @@ describe("RolesPage", () => {
     listTemplates.mockReset();
     createRole.mockReset();
     updateRole.mockReset();
+    listRoleVersions.mockReset();
+    archiveRole.mockReset();
     listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE, PROTECTED_ROLE, FOREIGN_ROLE]);
     listTemplates.mockResolvedValue([]);
+    listRoleVersions.mockResolvedValue([]);
     listPermissions.mockResolvedValue([
       {
         code: "pos.sell",
@@ -135,6 +143,77 @@ describe("RolesPage", () => {
     expect(await screen.findByText("Старший кассир")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Создать роль" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Изменить" })).not.toBeInTheDocument();
+  });
+
+  it("requires update and assignment access before offering role archival", async () => {
+    const firstRender = renderPage();
+    expect(await screen.findByText("Старший кассир")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Архивировать" })).not.toBeInTheDocument();
+    firstRender.unmount();
+
+    mockUser = {
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["roles.update", "roles.assign"],
+    };
+    listRoles.mockResolvedValue([
+      MANAGED_ROLE,
+      { ...MANAGED_ROLE, id: "replacement", name: "Фармацевт" },
+      {
+        ...MANAGED_ROLE,
+        id: "hidden-replacement",
+        name: "Скрытая роль",
+        has_hidden_permissions: true,
+      },
+    ]);
+    renderPage();
+
+    const archiveButtons = await screen.findAllByRole("button", { name: "Архивировать" });
+    fireEvent.click(archiveButtons[0]);
+    expect(screen.getByRole("option", { name: "Фармацевт" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Скрытая роль" })).not.toBeInTheDocument();
+  });
+
+  it("shows the publication author, timestamps, and exact permission changes", async () => {
+    listRoleVersions.mockResolvedValue([
+      {
+        id: "version-2",
+        role_id: MANAGED_ROLE.id,
+        version: 2,
+        name: MANAGED_ROLE.name,
+        description: "Разрешена продажа",
+        status: "published",
+        permissions: ["pos.sell"],
+        published_at: "2030-01-02T10:00:00Z",
+        archived_at: null,
+        created_at: "2030-01-02T10:00:00Z",
+        created_by: "owner-1",
+        created_by_name: "Фарход И.",
+      },
+      {
+        id: "version-1",
+        role_id: MANAGED_ROLE.id,
+        version: 1,
+        name: MANAGED_ROLE.name,
+        description: null,
+        status: "archived",
+        permissions: [],
+        published_at: "2030-01-01T10:00:00Z",
+        archived_at: "2030-01-02T10:00:00Z",
+        created_at: "2030-01-01T10:00:00Z",
+        created_by: "owner-1",
+        created_by_name: "Фарход И.",
+      },
+    ]);
+    renderPage();
+
+    await screen.findByText("Старший кассир");
+    fireEvent.click(screen.getByRole("button", { name: "История" }));
+
+    expect(await screen.findByText("Версия 2")).toBeInTheDocument();
+    expect(screen.getAllByText("Фарход И.")).toHaveLength(2);
+    expect(screen.getByText(/Продажа/, { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByText("Разрешена продажа")).toBeInTheDocument();
   });
 
   it("does not request the constructor catalogue for an assignment-only owner", async () => {

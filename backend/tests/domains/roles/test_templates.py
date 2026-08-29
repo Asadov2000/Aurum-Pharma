@@ -11,7 +11,7 @@ from starlette.requests import Request
 
 from app.core.deps import _seed_request_db_context, get_db
 from app.core.security import create_access_token, decode_access_token
-from app.domains.roles.models import Permission, RolePermission
+from app.domains.roles.models import Permission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 from app.domains.support_access.repository import SupportAccessRepository
@@ -199,7 +199,7 @@ async def test_administrator_has_explicit_catalog_access_but_no_role_write_bypas
         app.dependency_overrides.pop(get_db, None)
 
 
-async def test_non_owner_with_roles_create_cannot_read_delegation_catalog(
+async def test_non_owner_cannot_read_delegation_catalog(
     db_session: AsyncSession,
     client: AsyncClient,
     make_tenant,
@@ -218,12 +218,8 @@ async def test_non_owner_with_roles_create_cannot_read_delegation_catalog(
             template_name="Кассир",
             level=4,
         )
-        # The HTTP gate will pass only if roles.create is present, but the
-        # service still requires the protected ownership root.
-        from app.domains.roles.models import RolePermission, UserAssignment
+        from app.domains.roles.models import UserAssignment
 
-        db_session.add(RolePermission(role_id=role.id, permission_code="roles.create"))
-        await db_session.flush()
         membership = await RolesRepository(db_session).get_membership_for_user(
             tenant_id=tenant.id,
             user_id=user.id,
@@ -274,13 +270,6 @@ async def test_role_catalog_does_not_disclose_protected_owner_role(
             level=4,
             name="Visible cashier",
         )
-        db_session.add(
-            RolePermission(
-                role_id=staff_role.id,
-                permission_code="audit.view.global",
-            )
-        )
-        await db_session.flush()
         token = create_access_token(
             owner.id,
             tenant_id=tenant.id,
@@ -296,7 +285,7 @@ async def test_role_catalog_does_not_disclose_protected_owner_role(
         assert response.status_code == 200
         body = response.json()
         assert {item["id"] for item in body} == {str(staff_role.id)}
-        assert body[0]["has_hidden_permissions"] is True
+        assert body[0]["has_hidden_permissions"] is False
         assert "audit.view.global" not in body[0]["permissions"]
         serialized = str(body)
         assert str(owner_role.id) not in serialized

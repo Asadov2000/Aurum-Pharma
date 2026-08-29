@@ -33,13 +33,18 @@ import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { groupLabel } from "./labels";
-import { usePermissionsQuery, useRolesQuery } from "./queries";
+import {
+  useArchiveRole,
+  usePermissionsQuery,
+  useRolesQuery,
+  useRoleVersionsQuery,
+} from "./queries";
 import {
   hasUnavailableRolePermissions,
   isManageableRole,
   ROLE_EDIT_BLOCKED_MESSAGE,
 } from "./roleAccess";
-import { type Permission, type Role } from "./types";
+import { type Permission, type Role, type RoleVersion } from "./types";
 
 type Editor = { mode: "create" } | { mode: "edit"; role: Role } | null;
 type RoleStatusFilter = "all" | "active" | "inactive";
@@ -126,7 +131,17 @@ export function RolesPage(): JSX.Element {
   const roles = useRolesQuery(canView);
   // Assignment-only users need role names, not the constructor catalogue.
   const perms = usePermissionsQuery(canView && canUseBuilder);
+  const permissionNames = useMemo(
+    () => new Map((perms.data ?? []).map((permission) => [permission.code, permission.name])),
+    [perms.data],
+  );
   const [editor, setEditor] = useState<Editor>(null);
+  const [historyRole, setHistoryRole] = useState<Role | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<Role | null>(null);
+  const [replacementRoleId, setReplacementRoleId] = useState("");
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const versions = useRoleVersionsQuery(historyRole?.id ?? null, historyRole !== null);
+  const archiveRole = useArchiveRole();
   const [editorDirty, setEditorDirty] = useState(false);
   const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
   const [roleSearch, setRoleSearch] = useState("");
@@ -418,11 +433,18 @@ export function RolesPage(): JSX.Element {
                   key={view.role.id}
                   view={view}
                   canUpdate={canUpdate}
+                  canArchive={canUpdate && canAssign}
                   catalogueLoading={canUseBuilder && perms.isLoading}
                   catalogueAvailable={!canUseBuilder || perms.isSuccess}
                   onEdit={() => {
                     setEditorDirty(false);
                     setEditor({ mode: "edit", role: view.role });
+                  }}
+                  onHistory={() => setHistoryRole(view.role)}
+                  onArchive={() => {
+                    setArchiveError(null);
+                    setReplacementRoleId("");
+                    setArchiveTarget(view.role);
                   }}
                 />
               ))}
@@ -458,6 +480,107 @@ export function RolesPage(): JSX.Element {
               />
             </Suspense>
           </RoleBuilderLoadBoundary>
+        ) : null}
+      </Modal>
+      <Modal
+        open={historyRole !== null}
+        onClose={() => setHistoryRole(null)}
+        title={historyRole ? `История роли «${historyRole.name}»` : "История роли"}
+        className="max-w-3xl"
+      >
+        {versions.isLoading ? (
+          <SkeletonRows rows={4} />
+        ) : versions.error ? (
+          <p className="rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
+            {describeApiError(versions.error, "Не удалось загрузить историю версий")}
+          </p>
+        ) : (
+          <ol className="space-y-2">
+            {(versions.data ?? []).map((version, index, allVersions) => (
+              <RoleVersionHistoryItem
+                key={version.id}
+                version={version}
+                previousVersion={allVersions[index + 1]}
+                permissionNames={permissionNames}
+              />
+            ))}
+          </ol>
+        )}
+      </Modal>
+      <Modal
+        open={archiveTarget !== null}
+        onClose={() => {
+          if (!archiveRole.isPending) setArchiveTarget(null);
+        }}
+        title="Архивировать роль"
+        className="max-w-xl"
+      >
+        {archiveTarget ? (
+          <div className="space-y-4">
+            <p className="text-sm leading-6 text-foreground-secondary">
+              Роль «{archiveTarget.name}» перестанет использоваться. Все её активные назначения (
+              {archiveTarget.active_assignment_count}) будут атомарно переведены на выбранную роль.
+            </p>
+            <div>
+              <Label htmlFor="role-archive-replacement">Роль-замена</Label>
+              <Select
+                id="role-archive-replacement"
+                className="mt-1"
+                value={replacementRoleId}
+                onChange={(event) => setReplacementRoleId(event.target.value)}
+              >
+                <option value="">Выберите роль</option>
+                {tenantRoles
+                  .filter(
+                    (role) =>
+                      role.is_active &&
+                      !role.has_hidden_permissions &&
+                      role.id !== archiveTarget.id,
+                  )
+                  .map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.name}
+                    </option>
+                  ))}
+              </Select>
+            </div>
+            {archiveError ? (
+              <p className="rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
+                {archiveError}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <Button
+                variant="secondary"
+                disabled={archiveRole.isPending}
+                onClick={() => setArchiveTarget(null)}
+              >
+                Отмена
+              </Button>
+              <Button
+                variant="danger"
+                isLoading={archiveRole.isPending}
+                disabled={!replacementRoleId}
+                onClick={() => {
+                  setArchiveError(null);
+                  void archiveRole
+                    .mutateAsync({
+                      id: archiveTarget.id,
+                      payload: {
+                        expected_version: archiveTarget.version,
+                        replacement_role_id: replacementRoleId,
+                      },
+                    })
+                    .then(() => setArchiveTarget(null))
+                    .catch((error: unknown) =>
+                      setArchiveError(describeApiError(error, "Не удалось архивировать роль")),
+                    );
+                }}
+              >
+                Архивировать и заменить
+              </Button>
+            </div>
+          </div>
         ) : null}
       </Modal>
       <ConfirmDialog
@@ -511,15 +634,21 @@ function buildRoleView(
 function RoleCard({
   view,
   canUpdate,
+  canArchive,
   catalogueLoading,
   catalogueAvailable,
   onEdit,
+  onHistory,
+  onArchive,
 }: {
   view: RoleView;
   canUpdate: boolean;
+  canArchive: boolean;
   catalogueLoading: boolean;
   catalogueAvailable: boolean;
   onEdit: () => void;
+  onHistory: () => void;
+  onArchive: () => void;
 }): JSX.Element {
   const { role, permissionCount, groups, editBlocked } = view;
   const shownGroups = groups.slice(0, 4);
@@ -589,23 +718,98 @@ function RoleCard({
               функций
             </span>
             <span>Версия {role.version}</span>
+            <span>{role.active_assignment_count} назнач.</span>
           </div>
+          <Button variant="ghost" size="sm" onClick={onHistory}>
+            История
+          </Button>
           {canUpdate ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={catalogueLoading || !catalogueAvailable || editBlocked}
-              title={editBlocked ? ROLE_EDIT_BLOCKED_MESSAGE : undefined}
-              onClick={onEdit}
-            >
-              <EditIcon />
-              Изменить
-            </Button>
+            <>
+              {canArchive && role.is_active && !editBlocked ? (
+                <Button variant="ghost" size="sm" onClick={onArchive}>
+                  Архивировать
+                </Button>
+              ) : null}
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={catalogueLoading || !catalogueAvailable || editBlocked}
+                title={editBlocked ? ROLE_EDIT_BLOCKED_MESSAGE : undefined}
+                onClick={onEdit}
+              >
+                <EditIcon />
+                Изменить
+              </Button>
+            </>
           ) : null}
         </div>
       </article>
     </li>
   );
+}
+
+function RoleVersionHistoryItem({
+  version,
+  previousVersion,
+  permissionNames,
+}: {
+  version: RoleVersion;
+  previousVersion: RoleVersion | undefined;
+  permissionNames: ReadonlyMap<string, string>;
+}): JSX.Element {
+  const previousCodes = new Set(previousVersion?.permissions ?? []);
+  const currentCodes = new Set(version.permissions);
+  const added = version.permissions.filter((code) => !previousCodes.has(code));
+  const removed = (previousVersion?.permissions ?? []).filter((code) => !currentCodes.has(code));
+  const permissionLabel = (code: string): string => permissionNames.get(code) ?? code;
+
+  return (
+    <li className="rounded-lg border border-border bg-surface px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <strong className="text-sm text-foreground">Версия {version.version}</strong>
+        <Badge tone={version.status === "published" ? "success" : "neutral"}>
+          {version.status === "published" ? "действует" : "архив"}
+        </Badge>
+        <span className="ml-auto text-xs text-foreground-muted">
+          {version.created_by_name ?? "Системная операция"}
+        </span>
+      </div>
+      <p className="mt-2 text-sm font-medium text-foreground">{version.name}</p>
+      {version.description ? (
+        <p className="mt-1 text-sm leading-5 text-foreground-secondary">{version.description}</p>
+      ) : null}
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-foreground-muted">
+        <span>Опубликована: {formatRoleVersionTime(version.published_at ?? version.created_at)}</span>
+        {version.archived_at ? (
+          <span>Архивирована: {formatRoleVersionTime(version.archived_at)}</span>
+        ) : null}
+        <span>{permissionCountLabel(version.permissions.length)}</span>
+      </div>
+      {added.length > 0 || removed.length > 0 ? (
+        <div className="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-2">
+          <p className="text-xs leading-5 text-success-foreground">
+            <strong>Добавлено:</strong>{" "}
+            {added.length > 0 ? added.map(permissionLabel).join(", ") : "ничего"}
+          </p>
+          <p className="text-xs leading-5 text-danger-foreground">
+            <strong>Убрано:</strong>{" "}
+            {removed.length > 0 ? removed.map(permissionLabel).join(", ") : "ничего"}
+          </p>
+        </div>
+      ) : (
+        <p className="mt-3 border-t border-border pt-3 text-xs text-foreground-muted">
+          Состав доступов не изменялся.
+        </p>
+      )}
+    </li>
+  );
+}
+
+function formatRoleVersionTime(value: string): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function AccessMetric({

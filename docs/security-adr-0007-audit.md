@@ -1,8 +1,8 @@
 # Аудит реализации ADR-0007
 
-- Дата: 2026-08-28
-- Проверенный baseline: `main` на commit `d814d03` и реализация ownership
-  transfer в ветке `codex/co-owner-workflow`
+- Дата: 2026-08-29
+- Проверенный baseline: реализация immutable role publication в ветке
+  `codex/immutable-role-publication`
 - Область: platform account, tenant membership/ownership, роли, назначения,
   branch scope, support access и аудит
 
@@ -13,11 +13,11 @@
 критического обхода tenant isolation или конструктора ролей в проверенном контуре
 не обнаружено.
 
-До полного выполнения ADR остаются два самостоятельных этапа: неизменяемые
-версии опубликованных ролей и исчерпывающая матрица branch-scope проверок для
-каждого доменного маршрута. Устаревшие числовые `level` сохранены только для
-совместимости и отображения; источником решения о доступе служит scoped
-authorization snapshot.
+До полного выполнения ADR остается один самостоятельный этап: исчерпывающая
+матрица branch-scope проверок для каждого доменного маршрута. Неизменяемые
+версии опубликованных ролей реализованы. Устаревшие числовые `level` сохранены
+только для совместимости и отображения; источником решения о доступе служит
+scoped authorization snapshot.
 
 ## Подтверждено кодом и тестами
 
@@ -66,18 +66,25 @@ authorization snapshot.
    участникам (`backend/alembic/versions/0116_add_ownership_transfer.py`,
    `backend/tests/isolation/test_ownership_transfer.py`).
 
+10. Роль публикуется immutable-версиями. Активное назначение закреплено за
+    опубликованным снимком; новая публикация атомарно архивирует предыдущий
+    снимок, обновляет назначения и revisions. Архивирование с активными
+    назначениями требует явную опубликованную замену
+    (`backend/alembic/versions/0117_add_immutable_role_versions.py`,
+    `backend/tests/domains/roles/test_role_versions.py`).
+
+## Закрытые разрывы
+
+### AUTHZ-002: неизменяемые публикации ролей
+
+- Статус: закрыт 2026-08-29.
+- Реализованы `access_role_version`, immutable capability snapshots,
+  optimistic publication, assignment pinning, история версий и атомарный
+  archive-with-replacement workflow.
+- Подтверждено domain-, isolation- и frontend-тестами, полным backend-набором и
+  циклом миграции `0117 -> 0116 -> 0117` на одноразовой БД.
+
 ## Оставшиеся разрывы
-
-### AUTHZ-002: роль версионируется счетчиком, но не неизменяемыми публикациями
-
-- Приоритет: P0 для полного соответствия ADR, после ownership transfer.
-- Состояние: optimistic concurrency и точный diff реализованы, но активная строка
-  `role` изменяется на месте с `version + 1`
-  (`backend/app/domains/roles/service.py:398`,
-  `backend/app/domains/roles/models.py:149`). Нет отдельных draft/published
-  версий и безопасного archive-with-replacement workflow.
-- Требуется: immutable `access_role_version`, явная публикация одной транзакцией,
-  привязка assignment к версии и архивирование только с заменой.
 
 ### AUTHZ-003: branch scope покрыт основными потоками, но нет полного route gate
 

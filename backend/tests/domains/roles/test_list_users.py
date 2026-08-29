@@ -112,15 +112,15 @@ async def test_list_roles_filters_to_current_tenant(
     service = RolesService(RolesRepository(db_session))
     owner_permissions = set(await service.repo.get_role_permissions(owner_role.id))
 
+    visible_roles = await service.list_roles_with_permissions(
+        actor_id=owner.id,
+        tenant_id=tenant_a.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+    )
     visible_ids = {
-        role.id
-        for role, _codes, _has_hidden_permissions in await service.list_roles_with_permissions(
-            actor_id=owner.id,
-            tenant_id=tenant_a.id,
-            actor_permissions=owner_permissions,
-            actor_is_developer=False,
-            actor_is_administrator=False,
-        )
+        role.id for role, _codes, _has_hidden_permissions, _active_count in visible_roles
     }
 
     assert role_a.id in visible_ids

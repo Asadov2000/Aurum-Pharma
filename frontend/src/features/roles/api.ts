@@ -8,9 +8,12 @@ import {
   type OwnershipTransferCreatePayload,
   type Permission,
   type Role,
+  type RoleArchivePayload,
+  type RoleArchiveResponse,
   type RoleCreatePayload,
   type RoleTemplate,
   type RoleUpdatePayload,
+  type RoleVersion,
   type UserListResponse,
   type UserSearchParams,
   type UserUpdatePayload,
@@ -38,6 +41,19 @@ export async function createRole(payload: RoleCreatePayload): Promise<Role> {
 
 export async function updateRole(roleId: string, payload: RoleUpdatePayload): Promise<Role> {
   const { data } = await api.patch<Role>(`/roles/${roleId}`, payload);
+  return data;
+}
+
+export async function listRoleVersions(roleId: string): Promise<RoleVersion[]> {
+  const { data } = await api.get<RoleVersion[]>(`/roles/${roleId}/versions`);
+  return data;
+}
+
+export async function archiveRole(
+  roleId: string,
+  payload: RoleArchivePayload,
+): Promise<RoleArchiveResponse> {
+  const { data } = await api.post<RoleArchiveResponse>(`/roles/${roleId}/archive`, payload);
   return data;
 }
 
@@ -108,10 +124,7 @@ export async function listOwnershipTransfers(): Promise<OwnershipTransfer[]> {
 export async function createOwnershipTransfer(
   payload: OwnershipTransferCreatePayload,
 ): Promise<OwnershipTransferActionResponse> {
-  const { data } = await api.post<OwnershipTransferActionResponse>(
-    "/ownership-transfers",
-    payload,
-  );
+  const { data } = await api.post<OwnershipTransferActionResponse>("/ownership-transfers", payload);
   return data;
 }
 

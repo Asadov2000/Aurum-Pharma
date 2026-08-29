@@ -26,6 +26,22 @@ export interface Role {
   version: number;
   permissions: string[];
   has_hidden_permissions: boolean;
+  active_assignment_count: number;
+}
+
+export interface RoleVersion {
+  id: string;
+  role_id: string;
+  version: number;
+  name: string;
+  description: string | null;
+  status: "draft" | "published" | "archived";
+  permissions: string[];
+  published_at: string | null;
+  archived_at: string | null;
+  created_at: string;
+  created_by: string | null;
+  created_by_name: string | null;
 }
 
 export interface RoleTemplate {
@@ -51,6 +67,16 @@ export interface RoleUpdatePayload {
   permissions?: string[];
 }
 
+export interface RoleArchivePayload {
+  expected_version: number;
+  replacement_role_id: string;
+}
+
+export interface RoleArchiveResponse {
+  archived_version: number;
+  affected_memberships: number;
+}
+
 export interface Assignment {
   id: string;
   user_id: string;
@@ -58,6 +84,7 @@ export interface Assignment {
   membership_id: string;
   branch_id: string | null;
   role_id: string;
+  role_version_id: string;
   role_name: string | null;
   password_required: boolean;
   is_active: boolean;

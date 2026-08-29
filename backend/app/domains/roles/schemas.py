@@ -42,6 +42,7 @@ class RoleRead(BaseModel):
 class RoleWithPermissions(RoleRead):
     permissions: list[str]
     has_hidden_permissions: bool = False
+    active_assignment_count: int = 0
 
 
 class RoleCreate(BaseModel):
@@ -63,6 +64,35 @@ class RoleUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     permissions: list[str] | None = None
+
+
+class RoleVersionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    role_id: UUID
+    version: int
+    name: str
+    description: str | None
+    status: Literal["draft", "published", "archived"]
+    permissions: list[str]
+    published_at: datetime | None
+    archived_at: datetime | None
+    created_at: datetime
+    created_by: UUID | None
+    created_by_name: str | None
+
+
+class RoleArchiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    replacement_role_id: UUID
+
+
+class RoleArchiveResponse(BaseModel):
+    archived_version: int
+    affected_memberships: int
 
 
 class TemplateRead(BaseModel):
@@ -92,6 +122,7 @@ class AssignmentRead(BaseModel):
     membership_id: UUID
     branch_id: UUID | None
     role_id: UUID
+    role_version_id: UUID
     role_name: str | None = None
     password_required: bool
     is_active: bool

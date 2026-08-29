@@ -25,11 +25,10 @@ from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 from app.domains.roles.models import (
-    Role,
-    RolePermission,
     TenantMembership,
     UserAssignment,
 )
+from tests.role_version_helpers import create_published_test_role
 
 
 async def _seed(db: AsyncSession):  # type: ignore[no-untyped-def]
@@ -241,17 +240,16 @@ async def test_dashboard_summary_requires_reports_view(
         full_name=admin.full_name,
         status="active",
     )
-    role = Role(
+    role = await create_published_test_role(
+        db_session,
         tenant_id=tenant.id,
         name=f"dashboard-reporter-{uuid4().hex[:8]}",
+        permission_codes=["reports.view"],
         level=2,
-        is_system=False,
     )
-    db_session.add_all([seller_membership, admin_membership, role])
+    db_session.add_all([seller_membership, admin_membership])
     await db_session.flush()
     await db_session.refresh(admin_membership)
-    await db_session.refresh(role)
-    db_session.add(RolePermission(role_id=role.id, permission_code="reports.view"))
     db_session.add(
         UserAssignment(
             user_id=admin.id,
@@ -270,8 +268,19 @@ async def test_dashboard_summary_requires_reports_view(
     )
     url = "/api/v1/dashboard/summary"
 
+    await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
+    await db_session.execute(text("SELECT set_config('app.support_access_session_id', '', true)"))
+    await db_session.execute(text("SELECT set_config('app.auth_session_id', '', true)"))
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(seller.id)},
+    )
     seller_resp = await auth_client.get(url, headers={"Authorization": f"Bearer {seller_token}"})
     assert seller_resp.status_code == 403
 
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(admin.id)},
+    )
     admin_resp = await auth_client.get(url, headers={"Authorization": f"Bearer {admin_token}"})
     assert admin_resp.status_code == 200

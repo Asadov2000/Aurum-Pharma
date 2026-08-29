@@ -181,10 +181,19 @@ async def main() -> None:
                 ],
             )
 
+            await session.execute(
+                text("SELECT set_config('app.user_id', :user_id, true)"),
+                {"user_id": str(developer.id)},
+            )
+            await session.execute(
+                text("SELECT set_config('app.mfa_verified_at', :verified_at, true)"),
+                {"verified_at": str(int(now.timestamp()))},
+            )
             owner, _membership, _ownership, _role = await RolesService(roles_repo).provision_owner(
                 tenant_id=tenant.id,
                 email="owner@aurum.tj",
                 full_name="Demo Owner",
+                actor_id=developer.id,
             )
             owner.password_hash = hash_password("Owner1234")
             owner.activated_at = now

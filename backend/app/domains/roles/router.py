@@ -31,8 +31,11 @@ from app.domains.roles.schemas import (
     OwnershipTransferListResponse,
     OwnershipTransferRead,
     PermissionRead,
+    RoleArchiveRequest,
+    RoleArchiveResponse,
     RoleCreate,
     RoleUpdate,
+    RoleVersionRead,
     RoleWithPermissions,
     TemplateWithPermissions,
     UserListResponse,
@@ -186,6 +189,7 @@ def _role_with_permissions(
     codes: list[str],
     *,
     has_hidden_permissions: bool = False,
+    active_assignment_count: int = 0,
 ) -> RoleWithPermissions:
     return RoleWithPermissions(
         id=role.id,
@@ -199,6 +203,7 @@ def _role_with_permissions(
         version=role.version,
         permissions=codes,
         has_hidden_permissions=has_hidden_permissions,
+        active_assignment_count=active_assignment_count,
     )
 
 
@@ -216,6 +221,17 @@ async def require_role_catalog_access(
     ):
         return user
     raise PermissionDeniedError("Role catalogue access required")
+
+
+async def require_role_archive_access(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> CurrentUser:
+    required = {"roles.update", "roles.assign"}
+    if not required.issubset(user.permissions):
+        raise PermissionDeniedError("Role update and assignment access required")
+    if user.support_access_session_id is not None or user.is_tenant_owner:
+        return user
+    raise PermissionDeniedError("Tenant owner or scoped support access required")
 
 
 # -----------------------------------------------------------------------------
@@ -251,12 +267,13 @@ async def list_roles(
         actor_is_administrator=user.is_administrator,
     )
     out: list[RoleWithPermissions] = []
-    for role, codes, has_hidden_permissions in pairs:
+    for role, codes, has_hidden_permissions, active_assignment_count in pairs:
         out.append(
             _role_with_permissions(
                 role,
                 codes,
                 has_hidden_permissions=has_hidden_permissions,
+                active_assignment_count=active_assignment_count,
             )
         )
     return out
@@ -266,7 +283,7 @@ async def list_roles(
 async def create_role(
     payload: RoleCreate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.create"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleWithPermissions:
     role, codes = await service.create_role(
@@ -287,22 +304,85 @@ async def update_role(
     role_id: UUID,
     payload: RoleUpdate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.update"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleWithPermissions:
+    tenant_id = _current_tenant_or_400(user)
     role, codes = await service.update_role(
         actor_id=user.user_id,
         actor_permissions=user.permissions,
         actor_is_developer=user.is_developer,
         actor_is_administrator=user.is_administrator,
-        tenant_id=_current_tenant_or_400(user),
+        tenant_id=tenant_id,
         role_id=role_id,
         expected_version=payload.expected_version,
         name=payload.name,
         description=payload.description,
         permission_codes=payload.permissions,
     )
-    return _role_with_permissions(role, codes)
+    active_assignment_count = await service.repo.active_assignment_count(
+        role.id,
+        tenant_id=tenant_id,
+    )
+    return _role_with_permissions(
+        role,
+        codes,
+        active_assignment_count=active_assignment_count,
+    )
+
+
+@router.get("/roles/{role_id}/versions", response_model=list[RoleVersionRead])
+async def list_role_versions(
+    role_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_role_catalog_access)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> list[RoleVersionRead]:
+    versions = await service.list_role_versions(
+        actor_id=user.user_id,
+        actor_permissions=user.permissions,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
+        tenant_id=_current_tenant_or_400(user),
+        role_id=role_id,
+    )
+    return [
+        RoleVersionRead(
+            id=version.id,
+            role_id=version.role_id,
+            version=version.version,
+            name=version.name,
+            description=version.description,
+            status=version.status,
+            permissions=list(version.permissions),
+            published_at=version.published_at,
+            archived_at=version.archived_at,
+            created_at=version.created_at,
+            created_by=version.created_by,
+            created_by_name=version.created_by_name,
+        )
+        for version in versions
+    ]
+
+
+@router.post("/roles/{role_id}/archive", response_model=RoleArchiveResponse)
+async def archive_role(
+    role_id: UUID,
+    payload: RoleArchiveRequest,
+    user: Annotated[CurrentUser, Depends(require_role_archive_access)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> RoleArchiveResponse:
+    result = await service.archive_role_with_replacement(
+        actor_id=user.user_id,
+        tenant_id=_current_tenant_or_400(user),
+        role_id=role_id,
+        expected_version=payload.expected_version,
+        replacement_role_id=payload.replacement_role_id,
+    )
+    return RoleArchiveResponse(
+        archived_version=result.archived_version,
+        affected_memberships=result.affected_memberships,
+    )
 
 
 @router.get("/templates", response_model=list[TemplateWithPermissions])

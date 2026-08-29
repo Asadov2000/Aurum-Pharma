@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import pytest_asyncio
@@ -139,6 +140,10 @@ async def db_connection(
 async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSession]:
     nested = await db_connection.begin_nested()
     await db_connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
+    await db_connection.execute(
+        text("SELECT set_config('app.mfa_verified_at', :verified_at, true)"),
+        {"verified_at": str(int(datetime.now(UTC).timestamp()))},
+    )
     session_factory = async_sessionmaker(
         bind=db_connection,
         expire_on_commit=False,

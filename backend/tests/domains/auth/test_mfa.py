@@ -39,14 +39,13 @@ from app.domains.auth.models import (
 )
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
-from app.domains.roles.repository import RolesRepository
-from app.domains.roles.service import RolesService
 from app.main import app
 from tests.domains.auth.test_login import _seed_code
 from tests.platform_access_helpers import (
     archive_test_platform_user,
     create_test_platform_user,
 )
+from tests.role_version_helpers import provision_test_owner
 
 _PASSWORD = "Very-Strong-Test-Password-42"
 
@@ -209,9 +208,8 @@ async def test_active_owner_enrolls_mfa_and_keeps_tenant_context(
             "contact_email": "owner-mfa-tenant@aurum.tj",
         }
     )
-    owner, _membership, _ownership, _role = await RolesService(
-        RolesRepository(db_session)
-    ).provision_owner(
+    owner, _membership, _ownership, _role = await provision_test_owner(
+        db_session,
         tenant_id=tenant.id,
         email="mfa-owner@aurum.tj",
         full_name="MFA Owner",

@@ -167,6 +167,37 @@ async def test_assignment_gate_rejects_inactive_permission(
                 ),
                 {"role_id": role_ids[0]},
             )
+        async with maintenance_engine.begin() as connection:
+            await connection.execute(
+                text("""
+                    INSERT INTO public.access_role_version (
+                      id, role_id, tenant_id, version, name, description, status,
+                      creation_xid, published_at, created_by
+                    )
+                    SELECT
+                      gen_random_uuid(), role.id, role.tenant_id, role.version,
+                      role.name, role.description, 'published', txid_current(),
+                      statement_timestamp(), NULL
+                    FROM public.role AS role
+                    WHERE role.id = ANY(CAST(:role_ids AS UUID[]))
+                    """),
+                {"role_ids": role_ids},
+            )
+            await connection.execute(
+                text("""
+                    INSERT INTO public.access_role_version_permission (
+                      role_version_id, permission_code
+                    )
+                    SELECT version.id, role_permission.permission_code
+                    FROM public.access_role_version AS version
+                    JOIN public.role_permission AS role_permission
+                      ON role_permission.role_id = version.role_id
+                    WHERE version.role_id = ANY(CAST(:role_ids AS UUID[]))
+                    """),
+                {"role_ids": role_ids},
+            )
+
+        async with support_engine_authorization.begin() as connection:
             await connection.execute(
                 text(
                     "INSERT INTO public.user_assignment (user_id, tenant_id, role_id) "
@@ -222,18 +253,34 @@ async def test_assignment_gate_rejects_inactive_permission(
                     text("DELETE FROM public.user_assignment WHERE tenant_id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
+        if tenant_id:
+            async with maintenance_engine.begin() as connection:
+                await connection.execute(
+                    text("""
+                        DELETE FROM public.access_role_version_permission
+                        WHERE role_version_id IN (
+                          SELECT id FROM public.access_role_version
+                          WHERE tenant_id = :tenant_id
+                        )
+                        """),
+                    {"tenant_id": tenant_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM public.access_role_version " "WHERE tenant_id = :tenant_id"),
+                    {"tenant_id": tenant_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
+                    {"tenant_id": tenant_id},
+                )
+        async with support_engine_authorization.begin() as connection:
+            if tenant_id:
                 await connection.execute(
                     text("DELETE FROM public.role WHERE tenant_id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
                 await connection.execute(
                     text("DELETE FROM public.tenant WHERE id = :tenant_id"),
-                    {"tenant_id": tenant_id},
-                )
-        if tenant_id:
-            async with maintenance_engine.begin() as connection:
-                await connection.execute(
-                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
         if user_ids:

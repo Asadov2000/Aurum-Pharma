@@ -5,7 +5,6 @@ from __future__ import annotations
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.roles.models import Role, RolePermission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService, perms_cache_key
 
@@ -63,18 +62,17 @@ async def test_assignment_change_invalidates_cache(
         home_tenant_id=tenant.id,
     )
     seller_role = await make_tenant_role(tenant_id=tenant.id, template_name="Кассир", level=4)
-    elevated_role = Role(
+    service = RolesService(RolesRepository(db_session), redis=redis)
+    elevated_role, _permissions = await service.create_role(
+        actor_id=actor.id,
+        actor_permissions=set(),
+        actor_is_developer=True,
+        actor_is_administrator=False,
         tenant_id=tenant.id,
         name="Cache elevated role",
-        level=4,
-        is_system=False,
+        description=None,
+        permission_codes=["users.view"],
     )
-    db_session.add(elevated_role)
-    await db_session.flush()
-    await db_session.refresh(elevated_role)
-    db_session.add(RolePermission(role_id=elevated_role.id, permission_code="users.view"))
-    await db_session.flush()
-    service = RolesService(RolesRepository(db_session), redis=redis)
 
     initial = await service.assign_role(
         actor_id=actor.id,
@@ -126,28 +124,34 @@ async def test_assignment_change_invalidates_cache(
 async def test_role_permission_change_invalidates_assigned_users_cache(
     db_session: AsyncSession,
     redis: Redis,
+    make_owner,
     make_tenant,
     make_user,
 ) -> None:
     tenant = await make_tenant()
-    actor = await make_user(email="cache-role-actor@aurum.tj")
+    owner, _membership, _ownership, owner_role = await make_owner(tenant_id=tenant.id)
     target = await make_user(
         email="cache-role-target@aurum.tj",
         home_tenant_id=tenant.id,
     )
-    role = Role(tenant_id=tenant.id, name="Cache mutable role", level=4, is_system=False)
-    db_session.add(role)
-    await db_session.flush()
-    await db_session.refresh(role)
-    db_session.add(RolePermission(role_id=role.id, permission_code="pos.sell"))
-    await db_session.flush()
     service = RolesService(RolesRepository(db_session), redis=redis)
+    owner_permissions = set(await service.repo.get_role_permissions(owner_role.id))
+    role, _permissions = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        name="Cache mutable role",
+        description=None,
+        permission_codes=["pos.sell"],
+    )
 
     await service.assign_role(
-        actor_id=actor.id,
-        actor_permissions=set(),
-        actor_permission_scopes={},
-        actor_is_developer=True,
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes={code: None for code in owner_permissions},
+        actor_is_developer=False,
         actor_is_administrator=False,
         tenant_id=tenant.id,
         target_user_id=target.id,
@@ -160,9 +164,9 @@ async def test_role_permission_change_invalidates_assigned_users_cache(
     await redis.set(perms_cache_key(target.id, tenant.id), '["pos.sell"]')
 
     await service.update_role(
-        actor_id=actor.id,
-        actor_permissions=set(),
-        actor_is_developer=True,
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
         actor_is_administrator=False,
         tenant_id=tenant.id,
         role_id=role.id,

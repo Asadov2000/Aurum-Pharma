@@ -12,15 +12,12 @@ from app.core.security import create_access_token, decode_access_token
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.roles.models import (
-    Role,
-    RolePermission,
     TenantMembership,
     UserAssignment,
 )
-from app.domains.roles.repository import RolesRepository
-from app.domains.roles.service import RolesService
 from tests.auth_helpers import create_support_access_token
 from tests.platform_access_helpers import create_test_platform_user
+from tests.role_version_helpers import create_published_test_role, provision_test_owner
 
 
 async def test_me_without_token_returns_401(auth_client: AsyncClient) -> None:
@@ -213,9 +210,8 @@ async def test_me_reports_active_tenant_ownership(
             "contact_email": "owner-identity@aurum.tj",
         }
     )
-    owner, _membership, _ownership, _role = await RolesService(
-        RolesRepository(db_session)
-    ).provision_owner(
+    owner, _membership, _ownership, _role = await provision_test_owner(
+        db_session,
         tenant_id=tenant.id,
         email="me-owner@aurum.tj",
         full_name="Owner",
@@ -251,15 +247,13 @@ async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
         full_name="Level Role",
         home_tenant_id=tenant.id,
     )
-    role = Role(
+    role = await create_published_test_role(
+        db_session,
         tenant_id=tenant.id,
-        name="Level 4 assigner",
+        name="Level 4 stock operator",
+        permission_codes=["batches.create"],
         level=4,
-        is_system=False,
     )
-    db_session.add(role)
-    await db_session.flush()
-    await db_session.refresh(role)
     membership = TenantMembership(
         tenant_id=tenant.id,
         user_id=user.id,
@@ -269,7 +263,6 @@ async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
     db_session.add(membership)
     await db_session.flush()
     await db_session.refresh(membership)
-    db_session.add(RolePermission(role_id=role.id, permission_code="roles.assign"))
     db_session.add(
         UserAssignment(
             user_id=user.id,
@@ -279,6 +272,13 @@ async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
         )
     )
     await db_session.flush()
+    await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
+    await db_session.execute(text("SELECT set_config('app.support_access_session_id', '', true)"))
+    await db_session.execute(text("SELECT set_config('app.auth_session_id', '', true)"))
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(user.id)},
+    )
 
     token = create_access_token(
         user.id,
@@ -294,11 +294,11 @@ async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["permissions"] == ["roles.assign"]
+    assert body["permissions"] == ["batches.create"]
     assert body["level"] == 4
 
 
-async def test_me_ignores_assignments_to_inactive_roles(
+async def test_me_ignores_inactive_assignments(
     auth_client: AsyncClient,
     db_session: AsyncSession,
     make_user,
@@ -311,15 +311,13 @@ async def test_me_ignores_assignments_to_inactive_roles(
         email="inactive-role-user@aurum.tj",
         home_tenant_id=tenant.id,
     )
-    role = Role(
+    role = await create_published_test_role(
+        db_session,
         tenant_id=tenant.id,
-        name="Inactive owner",
+        name="Inactive catalog viewer",
+        permission_codes=["catalog.view"],
         level=3,
-        is_system=False,
     )
-    db_session.add(role)
-    await db_session.flush()
-    await db_session.refresh(role)
     membership = TenantMembership(
         tenant_id=tenant.id,
         user_id=user.id,
@@ -329,18 +327,23 @@ async def test_me_ignores_assignments_to_inactive_roles(
     db_session.add(membership)
     await db_session.flush()
     await db_session.refresh(membership)
-    db_session.add(RolePermission(role_id=role.id, permission_code="users.invite"))
     db_session.add(
         UserAssignment(
             user_id=user.id,
             tenant_id=tenant.id,
             membership_id=membership.id,
             role_id=role.id,
+            is_active=False,
         )
     )
     await db_session.flush()
-    role.is_active = False
-    await db_session.flush()
+    await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
+    await db_session.execute(text("SELECT set_config('app.support_access_session_id', '', true)"))
+    await db_session.execute(text("SELECT set_config('app.auth_session_id', '', true)"))
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(user.id)},
+    )
 
     token = create_access_token(
         user.id,

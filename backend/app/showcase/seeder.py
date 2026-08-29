@@ -2158,6 +2158,7 @@ async def seed_extra_tenants(
     *,
     count: int,
     today: date,
+    actor_id: UUID,
 ) -> None:
     foundation = FoundationService(FoundationRepository(session))
     roles = RolesService(RolesRepository(session))
@@ -2178,6 +2179,7 @@ async def seed_extra_tenants(
             tenant_id=tenant.id,
             email=showcase_email(f"owner-{index}"),
             full_name=f"Владелец демо-организации {index}",
+            actor_id=actor_id,
         )
         if status in {"active", "trial", "grace_period"}:
             now = _utc_at(today - timedelta(days=45 + index), 9)
@@ -2296,7 +2298,26 @@ async def seed_showcase_dataset(
         employees=employees,
         today=today,
     )
-    await seed_extra_tenants(session, count=profile.extra_tenants, today=today)
+    platform_actor_id = await session.scalar(
+        select(AppUser.id).where(AppUser.email_lower == "dev@aurum.tj")
+    )
+    if platform_actor_id is None:
+        raise RuntimeError("Showcase platform actor is missing")
+    await session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(platform_actor_id)},
+    )
+    await session.execute(text("SELECT set_config('app.tenant_id', '', true)"))
+    await session.execute(
+        text("SELECT set_config('app.mfa_verified_at', :verified_at, true)"),
+        {"verified_at": str(int(utc_now().timestamp()))},
+    )
+    await seed_extra_tenants(
+        session,
+        count=profile.extra_tenants,
+        today=today,
+        actor_id=platform_actor_id,
+    )
     await session.flush()
 
     return ShowcaseSummary(
