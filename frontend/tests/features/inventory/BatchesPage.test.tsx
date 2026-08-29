@@ -4,6 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listBatches = vi.fn();
 const getBatch = vi.fn();
+const authResult = {
+  user: { is_developer: false, permissions: [] as string[] },
+};
+
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => authResult,
+}));
 
 vi.mock("@/features/inventory/api", () => ({
   listBatches: (...args: unknown[]) => listBatches(...args),
@@ -95,6 +102,7 @@ function renderPage() {
 
 describe("BatchesPage", () => {
   beforeEach(() => {
+    authResult.user.permissions = [];
     listBatches.mockReset();
     getBatch.mockReset();
     getBatch.mockResolvedValue({
@@ -121,6 +129,20 @@ describe("BatchesPage", () => {
 
     expect(await screen.findByText("На складе пока нет партий")).toBeInTheDocument();
     expect(screen.getByText(/после принятия первого прихода/i)).toBeInTheDocument();
+  });
+
+  it("shows customer-return quarantine only with its dedicated permission", async () => {
+    authResult.user.permissions = ["customer_returns.view"];
+    listBatches.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, total_qty: "0", attention_count: 0 },
+    });
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Возвраты покупателей" })).toBeInTheDocument();
   });
 
   it("renders a named product, pharmacy context, expiry zone and summary", async () => {

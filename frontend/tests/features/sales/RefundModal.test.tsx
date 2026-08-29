@@ -174,6 +174,8 @@ describe("RefundModal", () => {
     const onRefunded = vi.fn();
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
 
+    expect(screen.getByRole("note")).toHaveTextContent("Возвращённый товар не поступит в продажу");
+
     fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
     await waitFor(() => expect(createRefundAttempt).toHaveBeenCalledTimes(1));
     expect(beginRefundAttemptReconciliation).toHaveBeenCalledWith("attempt-1");

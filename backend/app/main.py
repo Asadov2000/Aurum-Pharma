@@ -34,6 +34,7 @@ from app.domains.billing.router import admin_router as billing_admin_router
 from app.domains.billing.router import platform_router as billing_platform_router
 from app.domains.billing.router import tenant_router as billing_tenant_router
 from app.domains.catalog import router as catalog_router
+from app.domains.customer_returns import router as customer_returns_router
 from app.domains.dashboard import router as dashboard_router
 from app.domains.foundation.router import admin_router as foundation_admin_router
 from app.domains.foundation.router import tenant_router as foundation_tenant_router
@@ -134,6 +135,7 @@ app.include_router(inventory_router)
 app.include_router(suppliers_router)
 app.include_router(incoming_router)
 app.include_router(pos_router)
+app.include_router(customer_returns_router)
 app.include_router(billing_tenant_router)
 app.include_router(billing_admin_router)
 app.include_router(billing_platform_router)

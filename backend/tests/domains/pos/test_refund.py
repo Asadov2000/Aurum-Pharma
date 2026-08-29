@@ -8,6 +8,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import (
@@ -18,6 +19,7 @@ from app.core.errors import (
     PermissionDeniedError,
 )
 from app.domains.auth.models import AppUser
+from app.domains.customer_returns.models import CustomerReturnQuarantineItem
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
@@ -129,12 +131,18 @@ async def test_partial_refund_does_not_void_parent(db_session: AsyncSession, pos
     assert parent.status == "completed"
     assert parent.voided_at is None
 
-    # Inventory came back. session.get returns the cached object; the
-    # trigger updated the DB, so refresh to see the new qty.
+    # A customer-returned medicine is isolated from saleable inventory.
     batch_after = await inv_repo.get_batch(item.batch_id)
     assert batch_after is not None
     await db_session.refresh(batch_after)
-    assert batch_after.qty_remaining == qty_before + Decimal("2.000")
+    assert batch_after.qty_remaining == qty_before
+    quarantine_count = await db_session.scalar(
+        select(func.count(CustomerReturnQuarantineItem.id)).where(
+            CustomerReturnQuarantineItem.tenant_id == s["tenant"].id,
+            CustomerReturnQuarantineItem.return_sale_id == ret.id,
+        )
+    )
+    assert quarantine_count == 1
 
 
 async def test_full_refund_derives_voided_state_without_mutating_parent(

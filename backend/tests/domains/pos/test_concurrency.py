@@ -18,6 +18,7 @@ from app.core.errors import BusinessRuleError
 from app.domains.auth.models import AppUser
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
+from app.domains.customer_returns.models import CustomerReturnQuarantineItem
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.inventory.models import Batch, BatchMovement
@@ -580,7 +581,14 @@ async def test_concurrent_refund_retry_has_one_effect(committed_pos) -> None:
 
     assert first == second
     async with factory() as session:
-        assert await _movement_count(session, first, "sale_return") == 1
+        assert await _movement_count(session, first, "sale_return") == 0
+        quarantine_count = await session.scalar(
+            select(func.count()).select_from(CustomerReturnQuarantineItem).where(
+                CustomerReturnQuarantineItem.tenant_id == context.tenant_id,
+                CustomerReturnQuarantineItem.return_sale_id == first,
+            )
+        )
+        assert quarantine_count == 1
         batch = await session.get(Batch, context.batch_id)
         assert batch is not None
         assert batch.qty_remaining == context.initial_qty - Decimal("3")

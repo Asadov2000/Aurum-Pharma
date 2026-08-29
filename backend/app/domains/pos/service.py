@@ -39,6 +39,8 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.catalog.models import TenantCatalog
+from app.domains.customer_returns.repository import CustomerReturnsRepository
+from app.domains.customer_returns.service import CustomerReturnsService
 from app.domains.foundation.models import Branch, Register, Tenant
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
@@ -3990,7 +3992,7 @@ class POSService:
             max(Decimal("0"), min(discount, remaining_discount)),
         )
 
-    async def _insert_refund_items_and_movements(
+    async def _insert_refund_items_and_quarantine(
         self,
         *,
         parent: Sale,
@@ -3998,9 +4000,12 @@ class POSService:
         parent_items: dict[UUID, SaleItem],
         per_item: dict[UUID, Decimal],
         already_refunded: dict[UUID, tuple[Decimal, Decimal, Decimal]],
+        refund_reason: str | None,
+        refund_comment: str | None,
+        received_by: UUID,
     ) -> Decimal:
         total = Decimal("0")
-        returned_by_batch: dict[UUID, Decimal] = {}
+        quarantine = CustomerReturnsService(CustomerReturnsRepository(self.repo.session))
         ordered_items = sorted(
             per_item.items(),
             key=lambda pair: parent_items[pair[0]].position,
@@ -4013,7 +4018,7 @@ class POSService:
                 already_refunded=already_refunded.get(item_id),
             )
             position = await self.repo.next_item_position(return_sale.id)
-            await self.repo.insert_item(
+            return_item = await self.repo.insert_item(
                 tenant_id=parent.tenant_id,
                 sale_id=return_sale.id,
                 parent_sale_item_id=parent_item.id,
@@ -4026,24 +4031,21 @@ class POSService:
                 position=position,
             )
             total += total_price
-            returned_by_batch[parent_item.batch_id] = (
-                returned_by_batch.get(parent_item.batch_id, Decimal("0")) + qty
-            )
-
-        if parent.is_test:
-            return total
-
-        inv_repo = InventoryRepository(self.repo.session)
-        for batch_id in sorted(returned_by_batch, key=str):
-            await inv_repo.insert_movement(
-                tenant_id=parent.tenant_id,
-                batch_id=batch_id,
-                movement_type="sale_return",
-                qty_delta=returned_by_batch[batch_id],
-                source_table="sale",
-                source_id=return_sale.id,
-                operation_key=f"pos:sale:{return_sale.id}:return:{batch_id}",
-            )
+            if not parent.is_test:
+                await quarantine.record_refund_item(
+                    tenant_id=parent.tenant_id,
+                    branch_id=parent.branch_id,
+                    return_sale_id=return_sale.id,
+                    return_sale_item_id=return_item.id,
+                    parent_sale_id=parent.id,
+                    parent_sale_item_id=parent_item.id,
+                    catalog_id=parent_item.catalog_id,
+                    batch_id=parent_item.batch_id,
+                    qty=qty,
+                    refund_reason=refund_reason,
+                    refund_comment=refund_comment,
+                    received_by=received_by,
+                )
         return total
 
     async def _prepare_refund_financial_command(
@@ -4203,12 +4205,15 @@ class POSService:
             refund_attempt_id=refund_attempt_id,
         )
 
-        total = await self._insert_refund_items_and_movements(
+        total = await self._insert_refund_items_and_quarantine(
             parent=parent,
             return_sale=return_sale,
             parent_items=parent_items,
             per_item=per_item,
             already_refunded=already_refunded,
+            refund_reason=normalized_reason,
+            refund_comment=normalized_comment,
+            received_by=cashier_user_id,
         )
 
         # Preserve the original tender mix. A card/QR sale must never silently
