@@ -9,7 +9,7 @@ that includes the effective permission set recomputed from the database.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -809,7 +809,7 @@ def require_branch_permission(
     code: str,
     *,
     policy: BranchScopePolicy,
-):  # type: ignore[no-untyped-def]
+) -> Callable[[CurrentUser], Awaitable[CurrentUser]]:
     """Require a capability and declare how the route enforces its branch scope."""
 
     async def _checker(
@@ -831,7 +831,7 @@ def require_branch_permission(
 def require_any_branch_permission(
     *codes: str,
     policy: BranchScopePolicy,
-):  # type: ignore[no-untyped-def]
+) -> Callable[[CurrentUser], Awaitable[CurrentUser]]:
     """Require one of several capabilities and declare the branch gate strategy."""
 
     async def _checker(
