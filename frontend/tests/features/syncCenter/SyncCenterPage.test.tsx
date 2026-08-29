@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SyncCenterPage } from "@/features/syncCenter/SyncCenterPage";
+import { quarantineReasonLabel } from "@/features/syncCenter/labels";
 import { type SyncMonitoringOverview } from "@/features/syncCenter/types";
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +42,7 @@ const OVERVIEW: SyncMonitoringOverview = {
     expiring_credentials: 1,
     pending_handovers: 0,
     pending_credential_rotations: 0,
+    quarantined_nodes: 1,
   },
   tenants: [{ tenant_id: "tenant-1", tenant_name: "Аптека Сино", node_count: 1 }],
   items: [
@@ -72,6 +74,11 @@ const OVERVIEW: SyncMonitoringOverview = {
       credential_rotation_status: null,
       credential_rotation_activate_before: null,
       credential_rotation_verified_at: null,
+      quarantine_incident_count: 1,
+      latest_quarantine_reason: "operation_id_collision",
+      latest_quarantine_status: "quarantined",
+      latest_quarantine_sequence: 121,
+      latest_quarantine_at: "2026-08-12T11:59:30Z",
     },
   ],
   total: 1,
@@ -104,10 +111,18 @@ describe("SyncCenterPage", () => {
     expect(mocks.useOverview).toHaveBeenCalledWith(expect.any(Object), false);
   });
 
+  it("uses a safe explanation for an unknown quarantine reason", () => {
+    expect(quarantineReasonLabel("future_reason_without_ui_copy")).toBe(
+      "Требуется проверка инженера",
+    );
+  });
+
   it("shows safe monitoring details without management actions", () => {
     render(<SyncCenterPage />);
 
     expect(screen.getAllByText("Требует вмешательства").length).toBeGreaterThan(0);
+    expect(screen.getByText("В карантине")).toBeInTheDocument();
+    expect(screen.getAllByText("Карантин: 1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Аптека Сино").length).toBeGreaterThan(0);
     expect(
       screen.queryByRole("button", { name: /отозвать|ключ|переключить/i }),
@@ -117,7 +132,22 @@ describe("SyncCenterPage", () => {
 
     expect(screen.getByRole("dialog", { name: "Узел: Edge Рудаки 01" })).toBeInTheDocument();
     expect(screen.getByText("node-1")).toBeInTheDocument();
+    expect(screen.getByText("Обнаружен конфликт операции")).toBeInTheDocument();
+    expect(screen.getByText("Остановлено защитой")).toBeInTheDocument();
+    expect(
+      screen.getByText(/проблемные данные не будут автоматически пропущены/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/credential|checksum/i)).not.toBeInTheDocument();
+  });
+
+  it("explains the safe recovery path to an authorized administrator", () => {
+    mocks.user.platform_capabilities = ["platform.sync.view", "platform.sync.manage"];
+
+    render(<SyncCenterPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Подробнее об узле Edge Рудаки 01" }));
+
+    expect(screen.getByRole("button", { name: "Отозвать узел" })).toBeInTheDocument();
+    expect(screen.getByText(/безопасное восстановление требует отзыва узла/i)).toBeInTheDocument();
   });
 
   it("sends server filters and supports manual refresh", () => {

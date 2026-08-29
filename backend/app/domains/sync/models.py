@@ -195,6 +195,41 @@ class SyncInboxEvent(Base):
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
+class SyncQuarantineIncident(Base):
+    __tablename__ = "sync_quarantine_incident"
+
+    incident_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    cursor_status: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    last_applied_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    blocked_sequence: Mapped[int | None] = mapped_column(BigInteger)
+    blocked_event_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    blocked_operation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    event_type: Mapped[str | None] = mapped_column(Text)
+    schema_version: Mapped[int | None] = mapped_column(Integer)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    evidence_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
 class SyncCursor(Base):
     __tablename__ = "sync_cursor"
 

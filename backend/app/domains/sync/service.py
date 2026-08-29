@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Literal, cast
-from uuid import UUID
+from uuid import UUID, uuid5
 
 import structlog
 from pydantic import ValidationError as PydanticValidationError
@@ -80,6 +80,8 @@ from app.domains.sync.schemas import (
     SyncNodeLifecycleRead,
     SyncNodeRead,
     SyncPullResponse,
+    SyncQuarantineIncidentRead,
+    SyncQuarantineIncidentRequest,
     SyncShadowReportRead,
     SyncShadowReportRequest,
     SyncWriterActivationRead,
@@ -92,12 +94,47 @@ from app.domains.sync.schemas import (
 
 logger = structlog.get_logger("sync.service")
 CursorStatus = Literal["synced", "gap", "quarantined", "mismatch"]
+_QUARANTINE_INCIDENT_NAMESPACE = UUID("c4d7c709-8bd5-4f89-94cb-fcd324d8800b")
 
 
 class _EnvelopeError(ValueError):
     def __init__(self, reason_code: str) -> None:
         self.reason_code = reason_code
         super().__init__(reason_code)
+
+
+def _quarantine_evidence_hash(
+    *,
+    tenant_id: UUID,
+    branch_id: UUID,
+    edge_node_id: UUID,
+    payload: SyncQuarantineIncidentRequest,
+) -> str:
+    return canonical_json_hash(
+        {
+            "tenant_id": str(tenant_id),
+            "branch_id": str(branch_id),
+            "edge_node_id": str(edge_node_id),
+            "origin_node_id": str(payload.origin_node_id),
+            "writer_epoch": payload.writer_epoch,
+            "cursor_status": payload.cursor_status,
+            "reason_code": payload.reason_code,
+            "last_applied_sequence": payload.last_applied_sequence,
+            "blocked_sequence": payload.blocked_sequence,
+            "blocked_event_id": (
+                str(payload.blocked_event_id) if payload.blocked_event_id is not None else None
+            ),
+            "blocked_operation_id": (
+                str(payload.blocked_operation_id)
+                if payload.blocked_operation_id is not None
+                else None
+            ),
+            "source_checksum": payload.source_checksum,
+            "projection_checksum": payload.projection_checksum,
+            "event_type": payload.event_type,
+            "schema_version": payload.schema_version,
+        }
+    )
 
 
 def _handover_error(exc: DBAPIError) -> AurumError:
@@ -980,6 +1017,60 @@ class SyncCloudService:
             )
         return SyncShadowReportRead.model_validate(report, from_attributes=True)
 
+    async def report_quarantine_incident(
+        self,
+        *,
+        edge_node_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        payload: SyncQuarantineIncidentRequest,
+    ) -> SyncQuarantineIncidentRead:
+        if payload.evidence_hash != _quarantine_evidence_hash(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            payload=payload,
+        ):
+            raise BusinessRuleError("Edge incident evidence hash is invalid")
+        request_hash = canonical_json_hash(payload.model_dump(mode="json"))
+        try:
+            async with self.repo.session.begin_nested():
+                record = await self.repo.record_quarantine_incident(
+                    tenant_id=tenant_id,
+                    branch_id=branch_id,
+                    edge_node_id=edge_node_id,
+                    payload=payload,
+                    request_hash=request_hash,
+                )
+        except DBAPIError as exc:
+            sqlstate = getattr(exc.orig, "sqlstate", None)
+            if sqlstate == "42501":
+                raise PermissionDeniedError("Edge incident is not allowed") from exc
+            if sqlstate in {"22023", "23514"}:
+                raise BusinessRuleError("Edge incident evidence is invalid") from exc
+            if sqlstate == "23505":
+                raise ConflictError("Incident identity conflicts with existing evidence") from exc
+            raise AurumError("Edge incident could not be recorded") from exc
+        return SyncQuarantineIncidentRead(
+            incident_id=record.incident_id,
+            origin_node_id=record.origin_node_id,
+            writer_epoch=record.writer_epoch,
+            cursor_status=cast(CursorStatus, record.cursor_status),
+            reason_code=record.reason_code,
+            last_applied_sequence=record.last_applied_sequence,
+            blocked_sequence=record.blocked_sequence,
+            blocked_event_id=record.blocked_event_id,
+            blocked_operation_id=record.blocked_operation_id,
+            source_checksum=record.source_checksum,
+            projection_checksum=record.projection_checksum,
+            event_type=record.event_type,
+            schema_version=record.schema_version,
+            observed_at=record.observed_at,
+            evidence_hash=record.evidence_hash,
+            received_at=record.received_at,
+            replayed=record.replayed,
+        )
+
     async def record_writer_readiness(
         self,
         *,
@@ -1028,9 +1119,16 @@ class SyncCloudService:
 class SyncEdgeApplyService:
     def __init__(self, repo: SyncEdgeRepository) -> None:
         self.repo = repo
+        self._edge_node_id: UUID | None = None
 
     @staticmethod
-    def _result(cursor: SyncCursor, *, applied: int = 0, duplicates: int = 0) -> EdgeApplyResult:
+    def _result(
+        cursor: SyncCursor,
+        *,
+        applied: int = 0,
+        duplicates: int = 0,
+        incident: SyncQuarantineIncidentRequest | None = None,
+    ) -> EdgeApplyResult:
         return EdgeApplyResult(
             applied=applied,
             duplicates=duplicates,
@@ -1038,7 +1136,12 @@ class SyncEdgeApplyService:
             source_checksum=cursor.source_checksum,
             projection_checksum=cursor.projection_checksum,
             status=cast(CursorStatus, cursor.status),
+            incident=incident,
         )
+
+    @staticmethod
+    def _incident_from_record(record: object) -> SyncQuarantineIncidentRequest:
+        return SyncQuarantineIncidentRequest.model_validate(record, from_attributes=True)
 
     async def _stop(
         self,
@@ -1050,6 +1153,8 @@ class SyncEdgeApplyService:
         applied: int,
         duplicates: int,
     ) -> EdgeApplyResult:
+        if self._edge_node_id is None:
+            raise AurumError("Edge node scope is unavailable")
         if envelope is not None:
             inbox = await self.repo.get_inbox_event(envelope.event_id)
             if inbox is None:
@@ -1073,7 +1178,48 @@ class SyncEdgeApplyService:
             projection_checksum=cursor.projection_checksum,
             status=cursor_status,
         )
-        return self._result(cursor, applied=applied, duplicates=duplicates)
+        payload = SyncQuarantineIncidentRequest(
+            incident_id=UUID(int=0),
+            origin_node_id=cursor.origin_node_id,
+            writer_epoch=cursor.writer_epoch,
+            cursor_status=cast(CursorStatus, cursor_status),
+            reason_code=reason_code,
+            last_applied_sequence=cursor.last_sequence,
+            blocked_sequence=envelope.sequence if envelope is not None else None,
+            blocked_event_id=envelope.event_id if envelope is not None else None,
+            blocked_operation_id=envelope.operation_id if envelope is not None else None,
+            source_checksum=cursor.source_checksum,
+            projection_checksum=cursor.projection_checksum,
+            event_type=envelope.event_type if envelope is not None else None,
+            schema_version=envelope.schema_version if envelope is not None else None,
+            observed_at=utc_now(),
+            evidence_hash="0" * 64,
+        )
+        evidence_hash = _quarantine_evidence_hash(
+            tenant_id=cursor.tenant_id,
+            branch_id=cursor.branch_id,
+            edge_node_id=self._edge_node_id,
+            payload=payload,
+        )
+        payload = payload.model_copy(
+            update={
+                "incident_id": uuid5(_QUARANTINE_INCIDENT_NAMESPACE, evidence_hash),
+                "evidence_hash": evidence_hash,
+            }
+        )
+        record = await self.repo.record_quarantine_incident(
+            tenant_id=cursor.tenant_id,
+            branch_id=cursor.branch_id,
+            edge_node_id=self._edge_node_id,
+            payload=payload,
+            request_hash=canonical_json_hash(payload.model_dump(mode="json")),
+        )
+        return self._result(
+            cursor,
+            applied=applied,
+            duplicates=duplicates,
+            incident=self._incident_from_record(record),
+        )
 
     @staticmethod
     def _same_inbox_event(existing: SyncInboxEvent, incoming: SyncEventEnvelope) -> bool:
@@ -1247,7 +1393,29 @@ class SyncEdgeApplyService:
                 start_projection_checksum=pull.after_projection_checksum,
             )
         if cursor.status != "synced":
-            return cursor, self._result(cursor)
+            if self._edge_node_id is None:
+                raise AurumError("Edge node scope is unavailable")
+            incident = await self.repo.get_latest_quarantine_incident(
+                tenant_id=pull.tenant_id,
+                branch_id=pull.branch_id,
+                edge_node_id=self._edge_node_id,
+                origin_node_id=pull.origin_node_id,
+                writer_epoch=pull.writer_epoch,
+            )
+            if incident is None:
+                halted = await self._stop(
+                    cursor=cursor,
+                    envelope=None,
+                    cursor_status=cursor.status,
+                    reason_code="legacy_unknown_quarantine",
+                    applied=0,
+                    duplicates=0,
+                )
+                return cursor, halted
+            return cursor, self._result(
+                cursor,
+                incident=self._incident_from_record(incident),
+            )
         if cursor.writer_epoch != pull.writer_epoch:
             halted = await self._stop(
                 cursor=cursor,
@@ -1467,6 +1635,7 @@ class SyncEdgeApplyService:
         return None
 
     async def apply(self, pull: SyncPullResponse) -> EdgeApplyResult:
+        self._edge_node_id = pull.edge_node_id
         cursor, halted = await self._prepare_cursor(pull)
         if halted is not None:
             return halted
@@ -1576,12 +1745,12 @@ class SyncEdgeApplyService:
         if expected_sequence - 1 != cursor.last_sequence or checksum != cursor.projection_checksum:
             valid = False
         if not valid:
-            await self.repo.update_cursor(
-                cursor,
-                last_sequence=cursor.last_sequence,
-                last_event_id=cursor.last_event_id,
-                source_checksum=cursor.source_checksum,
-                projection_checksum=cursor.projection_checksum,
-                status="mismatch",
+            return await self._stop(
+                cursor=cursor,
+                envelope=None,
+                cursor_status="mismatch",
+                reason_code="local_projection_mismatch",
+                applied=0,
+                duplicates=0,
             )
         return self._result(cursor)

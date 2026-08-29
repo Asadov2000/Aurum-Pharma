@@ -31,6 +31,8 @@ from app.domains.sync.schemas import (
     SyncBootstrapChunkRead,
     SyncBootstrapManifestRead,
     SyncPullResponse,
+    SyncQuarantineIncidentRead,
+    SyncQuarantineIncidentRequest,
     SyncShadowReportRead,
     SyncShadowReportRequest,
 )
@@ -181,7 +183,9 @@ async def _bootstrap_if_required(
     if cursor is not None:
         status, last_sequence, has_last_event = cursor
         if status != "synced":
-            raise BootstrapValidationError("Local Edge cursor is not healthy")
+            # Let apply reconstruct and resend the immutable incident. Bootstrap
+            # must never replace an unhealthy cursor automatically.
+            return
         if last_sequence > checkpoint:
             return
         if last_sequence == checkpoint:
@@ -244,6 +248,21 @@ async def _report(
     return SyncShadowReportRead.model_validate(cast(object, response.json()))
 
 
+async def _report_incident(
+    client: httpx.AsyncClient,
+    *,
+    credential: str,
+    payload: SyncQuarantineIncidentRequest,
+) -> SyncQuarantineIncidentRead:
+    response = await client.post(
+        "/api/v1/sync/incidents",
+        headers=_request_headers(credential),
+        json=payload.model_dump(mode="json"),
+    )
+    response.raise_for_status()
+    return SyncQuarantineIncidentRead.model_validate(cast(object, response.json()))
+
+
 async def run_cycle(client: httpx.AsyncClient, settings: Settings, credential: str) -> None:
     pull = await _pull(
         client,
@@ -257,12 +276,21 @@ async def run_cycle(client: httpx.AsyncClient, settings: Settings, credential: s
     while True:
         result = await _apply_pull(pull)
         if result.status != "synced":
+            if result.incident is None:
+                raise RuntimeError("Halted Edge sync has no quarantine incident")
+            incident = await _report_incident(
+                client,
+                credential=credential,
+                payload=result.incident,
+            )
             logger.error(
                 "edge_sync_halted",
                 edge_node_id=str(pull.edge_node_id),
                 branch_id=str(pull.branch_id),
                 sequence=result.last_sequence,
                 status=result.status,
+                incident_id=str(incident.incident_id),
+                reason_code=incident.reason_code,
             )
             return
         final_pull = pull

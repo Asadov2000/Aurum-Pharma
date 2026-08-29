@@ -34,6 +34,8 @@ from app.domains.sync.schemas import (
     SyncNodeLifecycleRead,
     SyncNodeRead,
     SyncPullResponse,
+    SyncQuarantineIncidentRead,
+    SyncQuarantineIncidentRequest,
     SyncShadowReportRead,
     SyncShadowReportRequest,
     SyncWriterActivationRead,
@@ -420,6 +422,27 @@ async def report_shadow_checkpoint(
         shadow_start_sequence=principal.shadow_start_sequence,
         shadow_start_checksum=principal.shadow_start_checksum,
         shadow_start_projection_checksum=principal.shadow_start_projection_checksum,
+        payload=payload,
+    )
+
+
+@router.post(
+    "/incidents",
+    response_model=SyncQuarantineIncidentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def report_quarantine_incident(
+    payload: SyncQuarantineIncidentRequest,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+) -> SyncQuarantineIncidentRead:
+    principal = context.principal
+    return await SyncCloudService(SyncCloudRepository(context.session)).report_quarantine_incident(
+        edge_node_id=principal.node_id,
+        tenant_id=principal.tenant_id,
+        branch_id=principal.branch_id,
         payload=payload,
     )
 
