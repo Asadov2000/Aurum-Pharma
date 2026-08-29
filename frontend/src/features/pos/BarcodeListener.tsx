@@ -15,12 +15,17 @@ const isEditable = (el: Element | null): boolean =>
     el.tagName === "SELECT" ||
     (el as HTMLElement).isContentEditable);
 
+const isProductSearch = (el: Element | null): boolean =>
+  el instanceof HTMLInputElement && el.id === "pos-product-search";
+
 /**
  * Global barcode capture for the register. A hidden sink input keeps focus so
  * scans land somewhere harmless; clicking anywhere that isn't an interactive
  * control (search/qty/payment/buttons/dialogs) returns focus to it. The window
- * keydown listener runs the timing heuristic and fires `onScan` on a real burst
- * — and stays out of the way while a real field holds focus.
+ * keydown listener runs the timing heuristic and fires `onScan` on a real burst.
+ * It stays out of the way while a real field holds focus, except for the product
+ * search: scanners must keep working there without turning a scan's Enter into
+ * a catalog selection as well.
  */
 export function BarcodeListener({
   enabled,
@@ -40,18 +45,24 @@ export function BarcodeListener({
 
     const onKey = (e: KeyboardEvent) => {
       const el = document.activeElement;
-      // Don't capture while a real field (search/qty/payment) is focused.
-      if (isEditable(el) && el !== sinkRef.current) return;
+      const productSearchFocused = isProductSearch(el);
+      // Quantity, payment and other editable controls own all their keyboard
+      // input. Product search is the sole exception because a scanner burst
+      // commonly arrives while the cashier is already searching.
+      if (isEditable(el) && el !== sinkRef.current && !productSearchFocused) return;
       const hadBufferedCharacters = bufRef.current.chars.length > 0;
       const { buf, code } = feedScanKey(bufRef.current, e.key, performance.now());
       bufRef.current = buf;
-      if (e.key === "Enter" && hadBufferedCharacters) {
+      if (e.key === "Enter" && hadBufferedCharacters && !productSearchFocused) {
         // A malformed, short or slow scanner burst must never fall through to
         // the POS Enter shortcut and accidentally start a payment.
         e.preventDefault();
       }
       if (code) {
         e.preventDefault();
+        // The listener runs in capture phase. Stop the recognised terminator
+        // before CatalogPicker can also treat it as a manual selection.
+        e.stopImmediatePropagation();
         onScanRef.current(code);
       }
     };
