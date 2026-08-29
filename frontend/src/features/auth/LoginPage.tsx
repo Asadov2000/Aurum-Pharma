@@ -5,11 +5,17 @@ import { z } from "zod";
 
 import { Button, Checkbox, FormError, Input, Label } from "@/components/ui";
 import { BrandMark } from "@/components/layout/BrandMark";
+import {
+  accessibleInternalPath,
+  firstAccessiblePath,
+  getRouteAccessContext,
+} from "@/components/layout/routeAccess";
 import { describeApiError } from "@/lib/errorMessages";
 import { useAuthStore } from "@/stores/auth";
 
 import {
   completeMfaEnrollment,
+  fetchMe,
   recoverMfa,
   requestLoginCode,
   startMfaEnrollment,
@@ -83,6 +89,7 @@ export function LoginPage(): JSX.Element {
   const authFlowVersionRef = useRef(0);
   const { login } = useAuth();
   const setTokens = useAuthStore((state) => state.setTokens);
+  const setUser = useAuthStore((state) => state.setUser);
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as { from?: string };
 
@@ -135,9 +142,13 @@ export function LoginPage(): JSX.Element {
     recoveryForm.reset({ recoveryCode: "" });
   };
 
-  const navigateAfterLogin = () => {
-    const target = typeof search.from === "string" && search.from !== "/login" ? search.from : "/";
-    navigate({ to: target });
+  const navigateAfterLogin = async (): Promise<void> => {
+    const user = await fetchMe();
+    setUser(user);
+    const context = getRouteAccessContext(user);
+    const target =
+      accessibleInternalPath(search.from, context) ?? firstAccessiblePath(context) ?? "/security";
+    await navigate({ to: target });
   };
 
   const beginEnrollment = async (token: string, controller: AbortController) => {
@@ -218,7 +229,7 @@ export function LoginPage(): JSX.Element {
       );
       if (!isCurrentRequest(controller)) return;
       if ("access_token" in result) {
-        navigateAfterLogin();
+        await navigateAfterLogin();
         return;
       }
       setChallengeToken(result.challenge_token);
@@ -263,7 +274,7 @@ export function LoginPage(): JSX.Element {
       );
       if (!isCurrentRequest(controller)) return;
       setTokens(tokens);
-      navigateAfterLogin();
+      await navigateAfterLogin();
     } catch (err) {
       if (!controller.signal.aborted) setTopError(extractErrorMessage(err));
     } finally {
@@ -302,7 +313,7 @@ export function LoginPage(): JSX.Element {
       if (!isCurrentRequest(controller)) return;
       setTokens(tokens);
       setEnrollment(null);
-      navigateAfterLogin();
+      await navigateAfterLogin();
     } catch (err) {
       if (!controller.signal.aborted) setTopError(extractErrorMessage(err));
     } finally {

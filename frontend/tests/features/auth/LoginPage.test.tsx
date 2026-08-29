@@ -3,21 +3,24 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigate = vi.fn();
+let search: { from?: string } = {};
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigate,
-  useSearch: () => ({}),
+  useSearch: () => search,
 }));
 
 const requestLoginCode = vi.fn();
 const verifyLoginCode = vi.fn();
 const completeMfaEnrollment = vi.fn();
+const fetchMe = vi.fn();
 const recoverMfa = vi.fn();
 const startMfaEnrollment = vi.fn();
 const verifyMfa = vi.fn();
 
 vi.mock("@/features/auth/api", () => ({
   completeMfaEnrollment: (...args: unknown[]) => completeMfaEnrollment(...args),
+  fetchMe: (...args: unknown[]) => fetchMe(...args),
   recoverMfa: (...args: unknown[]) => recoverMfa(...args),
   requestLoginCode: (...args: unknown[]) => requestLoginCode(...args),
   startMfaEnrollment: (...args: unknown[]) => startMfaEnrollment(...args),
@@ -25,11 +28,28 @@ vi.mock("@/features/auth/api", () => ({
   verifyLoginCode: (...args: unknown[]) => verifyLoginCode(...args),
   logoutRequest: vi.fn(),
   refreshTokensRequest: vi.fn(),
-  fetchMe: vi.fn(),
 }));
 
 import { LoginPage } from "@/features/auth/LoginPage";
 import { useAuthStore } from "@/stores/auth";
+
+const SELLER = {
+  id: "seller-1",
+  email: "seller@aurum.tj",
+  full_name: "Кассир",
+  is_developer: false,
+  is_administrator: false,
+  home_tenant_id: "tenant-1",
+  active_tenant_id: "tenant-1",
+  status: "active",
+  last_login_at: null,
+  level: 10,
+  is_tenant_owner: false,
+  branch_assignments: { "branch-1": "cashier" },
+  permissions: ["pos.shift_open", "pos.sell", "sales.view.own"],
+  platform_capabilities: [],
+  support_access: null,
+};
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -49,6 +69,9 @@ describe("LoginPage", () => {
     recoverMfa.mockReset();
     startMfaEnrollment.mockReset();
     verifyMfa.mockReset();
+    fetchMe.mockReset();
+    fetchMe.mockResolvedValue(SELLER);
+    search = {};
     useAuthStore.getState().clear();
     window.localStorage.clear();
   });
@@ -102,7 +125,7 @@ describe("LoginPage", () => {
     expect(passwordInput.type).toBe("password");
   });
 
-  it("logs in and navigates home on valid code", async () => {
+  it("logs in and navigates to the first accessible section", async () => {
     requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: null });
     verifyLoginCode.mockResolvedValueOnce({
       access_token: "A",
@@ -124,9 +147,47 @@ describe("LoginPage", () => {
         },
         expect.any(AbortSignal),
       );
-      expect(navigate).toHaveBeenCalledWith({ to: "/" });
+      expect(fetchMe).toHaveBeenCalledTimes(1);
+      expect(navigate).toHaveBeenCalledWith({ to: "/pos" });
       expect(useAuthStore.getState().accessToken).toBe("A");
+      expect(useAuthStore.getState().user).toEqual(SELLER);
     });
+  });
+
+  it("honors only an internal return path available to the authenticated user", async () => {
+    search = { from: "/sales?receipt=42" };
+    requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: "123456" });
+    verifyLoginCode.mockResolvedValueOnce({
+      access_token: "A",
+      token_type: "bearer",
+      expires_in: 900,
+    });
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "seller@aurum.tj" } });
+    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
+    const codeInput = await screen.findByLabelText(/Код из письма/i);
+    fireEvent.submit(codeInput.closest("form")!);
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/sales?receipt=42" }));
+  });
+
+  it("falls back to the first accessible section for an external return URL", async () => {
+    search = { from: "//attacker.example/pos" };
+    requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: "123456" });
+    verifyLoginCode.mockResolvedValueOnce({
+      access_token: "A",
+      token_type: "bearer",
+      expires_in: 900,
+    });
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "seller@aurum.tj" } });
+    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
+    const codeInput = await screen.findByLabelText(/Код из письма/i);
+    fireEvent.submit(codeInput.closest("form")!);
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/pos" }));
   });
 
   it("completes the support login only after a valid TOTP code", async () => {
@@ -172,7 +233,7 @@ describe("LoginPage", () => {
         expect.any(AbortSignal),
       );
       expect(useAuthStore.getState().accessToken).toBe("support-access");
-      expect(navigate).toHaveBeenCalledWith({ to: "/" });
+      expect(navigate).toHaveBeenCalledWith({ to: "/pos" });
     });
   });
 
@@ -364,6 +425,6 @@ describe("LoginPage", () => {
       token_type: "bearer",
       expires_in: 900,
     });
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/" }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/pos" }));
   });
 });
