@@ -56,6 +56,11 @@ const NODE: SyncMonitoringNode = {
   credential_rotation_status: null,
   credential_rotation_activate_before: null,
   credential_rotation_verified_at: null,
+  quarantine_incident_count: 0,
+  latest_quarantine_reason: null,
+  latest_quarantine_status: null,
+  latest_quarantine_sequence: null,
+  latest_quarantine_at: null,
 };
 
 describe("SyncNodeActionModal", () => {

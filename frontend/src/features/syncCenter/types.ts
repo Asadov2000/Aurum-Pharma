@@ -4,6 +4,7 @@ export type SyncNodeStatus = "active" | "revoked";
 export type SyncContactState = "recent" | "stale" | "offline" | "never_seen";
 export type SyncIntegrityState = "verified" | "stale_report" | "unverified" | "mismatch";
 export type SyncReportStatus = "matched" | "mismatch";
+export type SyncQuarantineStatus = "gap" | "quarantined" | "mismatch";
 
 export interface SyncMonitoringSummary {
   total_nodes: number;
@@ -16,6 +17,7 @@ export interface SyncMonitoringSummary {
   expiring_credentials: number;
   pending_handovers: number;
   pending_credential_rotations: number;
+  quarantined_nodes: number;
 }
 
 export interface SyncMonitoringTenant {
@@ -52,6 +54,11 @@ export interface SyncMonitoringNode {
   credential_rotation_status: "pending" | "verified" | "expired" | null;
   credential_rotation_activate_before: string | null;
   credential_rotation_verified_at: string | null;
+  quarantine_incident_count: number;
+  latest_quarantine_reason: string | null;
+  latest_quarantine_status: SyncQuarantineStatus | null;
+  latest_quarantine_sequence: number | null;
+  latest_quarantine_at: string | null;
 }
 
 export interface SyncMonitoringOverview {

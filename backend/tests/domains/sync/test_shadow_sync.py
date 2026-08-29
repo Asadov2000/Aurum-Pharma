@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -10,6 +11,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.errors import ConflictError
 from app.core.time import utc_now
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
@@ -28,7 +30,11 @@ from app.domains.sync.integrity import (
     sale_projection_hash,
     source_stream_checksum,
 )
-from app.domains.sync.models import SyncInboxEvent, SyncSaleProjection
+from app.domains.sync.models import (
+    SyncInboxEvent,
+    SyncQuarantineIncident,
+    SyncSaleProjection,
+)
 from app.domains.sync.repository import (
     SyncCloudRepository,
     SyncEdgeRepository,
@@ -256,6 +262,8 @@ async def test_refund_without_bootstrapped_parent_is_quarantined(
     result = await SyncEdgeApplyService(SyncEdgeRepository(db_session)).apply(pull)
 
     assert result.status == "quarantined"
+    assert result.incident is not None
+    assert result.incident.reason_code == "refund_parent_missing"
     inbox = await db_session.get(SyncInboxEvent, pull.events[0].event_id)
     assert inbox is not None
     assert inbox.reason_code == "refund_parent_missing"
@@ -321,7 +329,7 @@ async def test_lost_ack_replay_is_a_verified_duplicate(
 
 
 @pytest.mark.parametrize("simulate_race", [False, True], ids=["precheck", "database_guard"])
-async def test_operation_id_collision_is_durably_quarantined_without_projection(
+async def test_operation_id_collision_is_durably_quarantined_without_projection(  # noqa: PLR0915
     db_session: AsyncSession,
     pos_scaffold,
     simulate_race: bool,
@@ -357,6 +365,8 @@ async def test_operation_id_collision_is_durably_quarantined_without_projection(
     result = await SyncEdgeApplyService(repository).apply(collision_pull)
 
     assert result.status == "quarantined"
+    assert result.incident is not None
+    assert result.incident.reason_code == "operation_id_collision"
     assert result.last_sequence == 1
     assert result.applied == 0
     inbox = await db_session.get(SyncInboxEvent, colliding.event_id)
@@ -371,8 +381,31 @@ async def test_operation_id_collision_is_durably_quarantined_without_projection(
 
     replay = await SyncEdgeApplyService(SyncEdgeRepository(db_session)).apply(collision_pull)
     assert replay.status == "quarantined"
+    assert replay.incident is not None
+    assert replay.incident.incident_id == result.incident.incident_id
     assert replay.last_sequence == 1
     assert replay.applied == 0
+    persisted = await db_session.get(SyncQuarantineIncident, result.incident.incident_id)
+    assert persisted is not None
+    assert persisted.reason_code == "operation_id_collision"
+
+    cloud = SyncCloudService(SyncCloudRepository(db_session))
+    reported = await cloud.report_quarantine_incident(
+        edge_node_id=node.id,
+        tenant_id=node.tenant_id,
+        branch_id=node.branch_id,
+        payload=result.incident,
+    )
+    assert reported.replayed is True
+    with pytest.raises(ConflictError):
+        await cloud.report_quarantine_incident(
+            edge_node_id=node.id,
+            tenant_id=node.tenant_id,
+            branch_id=node.branch_id,
+            payload=result.incident.model_copy(
+                update={"observed_at": result.incident.observed_at + timedelta(seconds=1)}
+            ),
+        )
 
     independent = await pos_scaffold()
     independent_pos = POSService(POSRepository(db_session))

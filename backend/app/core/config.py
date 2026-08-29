@@ -207,6 +207,14 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT != "development" or not self.AUTH_LOCAL_TESTING_MODE
 
     @model_validator(mode="after")
+    def _guard_edge_nonce_window(self) -> Settings:
+        if self.EDGE_SYNC_NONCE_TTL_SECONDS < 2 * self.EDGE_SYNC_MAX_CLOCK_SKEW_SECONDS:
+            raise ValueError(
+                "EDGE_SYNC_NONCE_TTL_SECONDS must cover the full Edge clock-skew window"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _guard_non_development_metrics(self) -> Settings:
         if self.ENVIRONMENT != "development" and (
             self.METRICS_TOKEN is None or len(self.METRICS_TOKEN.get_secret_value()) < 32

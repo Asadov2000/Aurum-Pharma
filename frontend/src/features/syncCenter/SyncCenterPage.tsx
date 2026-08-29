@@ -34,6 +34,8 @@ import {
   integrityStateLabel,
   integrityTone,
   modeLabel,
+  quarantineReasonLabel,
+  quarantineStatusLabel,
 } from "./labels";
 import { useSyncMonitoringOverview } from "./queries";
 import { SyncNodeActionModal } from "./SyncNodeActionModal";
@@ -324,6 +326,7 @@ function Summary({ summary }: { summary: SyncMonitoringSummary }): JSX.Element {
     { label: "С задержкой", value: summary.delayed_nodes, tone: "text-warning-foreground" },
     { label: "Нет связи", value: summary.offline_nodes, tone: "text-danger" },
     { label: "Критично", value: summary.critical_nodes, tone: "text-danger" },
+    { label: "В карантине", value: summary.quarantined_nodes, tone: "text-danger" },
     { label: "Отозваны", value: summary.revoked_nodes, tone: "text-foreground-muted" },
   ];
 
@@ -332,7 +335,7 @@ function Summary({ summary }: { summary: SyncMonitoringSummary }): JSX.Element {
       aria-label="Сводка синхронизации"
       className="rounded-lg border border-border bg-surface"
     >
-      <div className="grid grid-cols-2 divide-x divide-y divide-border sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+      <div className="grid grid-cols-2 divide-x divide-y divide-border sm:grid-cols-4 lg:grid-cols-7 lg:divide-y-0">
         {metrics.map((metric) => (
           <div key={metric.label} className="min-w-0 px-3 py-3 sm:px-4">
             <p className="truncate text-xs text-foreground-muted">{metric.label}</p>
@@ -393,6 +396,9 @@ function NodeTable({
               <TD>
                 <div className="space-y-1">
                   <Badge tone={healthTone[node.health]}>{healthLabel[node.health]}</Badge>
+                  {node.quarantine_incident_count > 0 && (
+                    <Badge tone="danger">Карантин: {node.quarantine_incident_count}</Badge>
+                  )}
                   <p className="text-xs text-foreground-muted">
                     {integrityStateLabel[node.integrity_state]}
                   </p>
@@ -446,9 +452,12 @@ function MobileNodeList({
                 {node.tenant_name} · {node.branch_name}
               </p>
             </div>
-            <Badge tone={healthTone[node.health]} className="shrink-0">
-              {healthLabel[node.health]}
-            </Badge>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Badge tone={healthTone[node.health]}>{healthLabel[node.health]}</Badge>
+              {node.quarantine_incident_count > 0 && (
+                <Badge tone="danger">Карантин: {node.quarantine_incident_count}</Badge>
+              )}
+            </div>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
             <div>
@@ -492,6 +501,45 @@ function NodeDetailModal({
               Целостность: {integrityStateLabel[node.integrity_state]}
             </Badge>
           </div>
+
+          {node.quarantine_incident_count > 0 && (
+            <section
+              aria-label="Сведения о карантине"
+              className="rounded-md border border-danger/30 bg-danger-subtle p-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold text-foreground">Карантин синхронизации</h3>
+                <Badge tone="danger">Инцидентов: {node.quarantine_incident_count}</Badge>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                <DetailField
+                  label="Причина"
+                  value={quarantineReasonLabel(node.latest_quarantine_reason)}
+                />
+                <DetailField
+                  label="Статус"
+                  value={
+                    node.latest_quarantine_status === null
+                      ? "Требуется проверка инженера"
+                      : quarantineStatusLabel[node.latest_quarantine_status]
+                  }
+                />
+                <DetailField
+                  label="Последовательность"
+                  value={
+                    node.latest_quarantine_sequence === null
+                      ? "Не определена"
+                      : new Intl.NumberFormat("ru-RU").format(node.latest_quarantine_sequence)
+                  }
+                />
+                <DetailField label="Обнаружено" value={formatDateTime(node.latest_quarantine_at)} />
+              </div>
+              <p className="mt-3 text-xs leading-5 text-foreground-secondary">
+                Синхронизация остановлена для защиты данных. Проблемные данные не будут
+                автоматически пропущены или изменены.
+              </p>
+            </section>
+          )}
 
           <div className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
             <DetailField label="Аптека" value={node.tenant_name} />
@@ -556,6 +604,16 @@ function NodeDetailModal({
             ID узла:{" "}
             <span className="break-all font-mono text-foreground-secondary">{node.node_id}</span>
           </div>
+
+          {canManage &&
+            node.node_status === "active" &&
+            node.mode === "shadow_readonly" &&
+            node.quarantine_incident_count > 0 && (
+              <div className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
+                Безопасное восстановление требует отзыва узла и нового доверенного подключения.
+                Отзыв не удаляет историю инцидента.
+              </div>
+            )}
 
           <div className="flex flex-wrap justify-end gap-2">
             {canManage && node.node_status === "active" && node.mode === "shadow_readonly" && (

@@ -105,6 +105,14 @@ def test_edge_credential_is_secret_in_settings_representation() -> None:
     assert settings.EDGE_SYNC_CREDENTIAL.get_secret_value() == raw
 
 
+def test_edge_nonce_ttl_covers_full_clock_skew_window() -> None:
+    with pytest.raises(ValidationError, match="full Edge clock-skew window"):
+        _build(
+            EDGE_SYNC_MAX_CLOCK_SKEW_SECONDS=300,
+            EDGE_SYNC_NONCE_TTL_SECONDS=599,
+        )
+
+
 def test_production_rejects_refresh_cookie_without_secure_flag() -> None:
     with pytest.raises(ValidationError, match="REFRESH_COOKIE_SECURE"):
         _build(

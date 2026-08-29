@@ -438,6 +438,11 @@ class SyncMonitoringNodeRead(BaseModel):
     credential_rotation_status: Literal["pending", "verified", "expired"] | None = None
     credential_rotation_activate_before: datetime | None = None
     credential_rotation_verified_at: datetime | None = None
+    quarantine_incident_count: int = Field(ge=0)
+    latest_quarantine_reason: str | None = None
+    latest_quarantine_status: Literal["gap", "quarantined", "mismatch"] | None = None
+    latest_quarantine_sequence: int | None = Field(default=None, ge=0)
+    latest_quarantine_at: datetime | None = None
 
 
 class SyncMonitoringSummaryRead(BaseModel):
@@ -451,6 +456,7 @@ class SyncMonitoringSummaryRead(BaseModel):
     expiring_credentials: int = Field(ge=0)
     pending_handovers: int = Field(ge=0)
     pending_credential_rotations: int = Field(ge=0)
+    quarantined_nodes: int = Field(ge=0)
 
 
 class SyncMonitoringTenantRead(BaseModel):
@@ -673,6 +679,50 @@ class SyncShadowReportRead(BaseModel):
     expected_checksum: Checksum
 
 
+class SyncQuarantineIncidentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    incident_id: UUID
+    origin_node_id: UUID
+    writer_epoch: int = Field(gt=0)
+    cursor_status: Literal["gap", "quarantined", "mismatch"]
+    reason_code: str = Field(pattern=r"^[a-z][a-z0-9_]{2,63}$")
+    last_applied_sequence: int = Field(ge=0)
+    blocked_sequence: int | None = Field(default=None, ge=1)
+    blocked_event_id: UUID | None = None
+    blocked_operation_id: UUID | None = None
+    source_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    projection_checksum: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    event_type: str | None = Field(default=None, max_length=120)
+    schema_version: int | None = Field(default=None, ge=1)
+    observed_at: datetime
+    evidence_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("observed_at")
+    @classmethod
+    def validate_observed_at_is_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() != timedelta(0):
+            raise ValueError("Edge incident observed_at must be UTC")
+        return value
+
+    @model_validator(mode="after")
+    def validate_blocked_event_identity(self) -> Self:
+        identity = (self.blocked_event_id, self.blocked_operation_id)
+        metadata = (self.blocked_sequence, self.event_type, self.schema_version)
+        if (identity[0] is None) != (identity[1] is None):
+            raise ValueError("Blocked event identity must be complete")
+        if identity[0] is None and any(value is not None for value in metadata):
+            raise ValueError("Blocked event metadata requires an event identity")
+        if identity[0] is not None and any(value is None for value in metadata):
+            raise ValueError("Blocked event metadata must be complete")
+        return self
+
+
+class SyncQuarantineIncidentRead(SyncQuarantineIncidentRequest):
+    received_at: datetime
+    replayed: bool
+
+
 class EdgeApplyResult(BaseModel):
     applied: int = Field(ge=0)
     duplicates: int = Field(ge=0)
@@ -680,3 +730,4 @@ class EdgeApplyResult(BaseModel):
     source_checksum: Checksum
     projection_checksum: Checksum
     status: Literal["synced", "gap", "quarantined", "mismatch"]
+    incident: SyncQuarantineIncidentRequest | None = None

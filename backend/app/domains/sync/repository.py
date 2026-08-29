@@ -21,6 +21,7 @@ from app.domains.sync.models import (
     SyncInboxEvent,
     SyncNode,
     SyncOutboxEvent,
+    SyncQuarantineIncident,
     SyncSaleProjection,
     SyncShadowReport,
     SyncStream,
@@ -28,7 +29,7 @@ from app.domains.sync.models import (
     SyncWriterEpoch,
     SyncWriterReadiness,
 )
-from app.domains.sync.schemas import SyncEventEnvelope
+from app.domains.sync.schemas import SyncEventEnvelope, SyncQuarantineIncidentRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,11 @@ class SyncMonitoringRow:
     credential_rotation_status: str | None
     credential_rotation_activate_before: datetime | None
     credential_rotation_verified_at: datetime | None
+    quarantine_incident_count: int
+    latest_quarantine_reason: str | None
+    latest_quarantine_status: str | None
+    latest_quarantine_sequence: int | None
+    latest_quarantine_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +119,91 @@ class SyncMonitoringSummary:
     expiring_credentials: int
     pending_handovers: int
     pending_credential_rotations: int
+    quarantined_nodes: int
+
+
+@dataclass(frozen=True, slots=True)
+class SyncQuarantineIncidentRecord:
+    incident_id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    edge_node_id: UUID
+    origin_node_id: UUID
+    writer_epoch: int
+    cursor_status: str
+    reason_code: str
+    last_applied_sequence: int
+    blocked_sequence: int | None
+    blocked_event_id: UUID | None
+    blocked_operation_id: UUID | None
+    source_checksum: str
+    projection_checksum: str
+    event_type: str | None
+    schema_version: int | None
+    observed_at: datetime
+    evidence_hash: str
+    received_at: datetime
+    replayed: bool
+
+
+async def _record_quarantine_incident(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    branch_id: UUID,
+    edge_node_id: UUID,
+    payload: SyncQuarantineIncidentRequest,
+    request_hash: str,
+) -> SyncQuarantineIncidentRecord:
+    row = (
+        (
+            await session.execute(
+                text("""
+                SELECT * FROM public.record_sync_quarantine_incident(
+                  :incident_id, :tenant_id, :branch_id, :edge_node_id,
+                  :origin_node_id, :writer_epoch, :cursor_status, :reason_code,
+                  :last_applied_sequence, :blocked_sequence, :blocked_event_id,
+                  :blocked_operation_id, :source_checksum, :projection_checksum,
+                  :event_type, :schema_version, :observed_at, :evidence_hash,
+                  :request_hash
+                )
+                """),
+                {
+                    **payload.model_dump(),
+                    "tenant_id": tenant_id,
+                    "branch_id": branch_id,
+                    "edge_node_id": edge_node_id,
+                    "request_hash": request_hash,
+                },
+            )
+        )
+        .mappings()
+        .one()
+    )
+    return SyncQuarantineIncidentRecord(
+        incident_id=row["incident_id"],
+        tenant_id=row["tenant_id"],
+        branch_id=row["branch_id"],
+        edge_node_id=row["edge_node_id"],
+        origin_node_id=row["origin_node_id"],
+        writer_epoch=int(row["writer_epoch"]),
+        cursor_status=str(row["cursor_status"]),
+        reason_code=str(row["reason_code"]),
+        last_applied_sequence=int(row["last_applied_sequence"]),
+        blocked_sequence=(
+            int(row["blocked_sequence"]) if row["blocked_sequence"] is not None else None
+        ),
+        blocked_event_id=row["blocked_event_id"],
+        blocked_operation_id=row["blocked_operation_id"],
+        source_checksum=str(row["source_checksum"]),
+        projection_checksum=str(row["projection_checksum"]),
+        event_type=(str(row["event_type"]) if row["event_type"] is not None else None),
+        schema_version=(int(row["schema_version"]) if row["schema_version"] is not None else None),
+        observed_at=row["observed_at"],
+        evidence_hash=str(row["evidence_hash"]),
+        received_at=row["received_at"],
+        replayed=bool(row["replayed"]),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +256,22 @@ WITH latest_report AS (
     report.created_at
   FROM public.sync_shadow_report AS report
   ORDER BY report.edge_node_id, report.created_at DESC, report.report_id DESC
+), incident_rollup AS (
+  SELECT
+    incident.edge_node_id,
+    COUNT(*) AS incident_count,
+    (ARRAY_AGG(incident.reason_code ORDER BY incident.received_at DESC, incident.incident_id))[1]
+      AS latest_reason,
+    (ARRAY_AGG(incident.cursor_status ORDER BY incident.received_at DESC, incident.incident_id))[1]
+      AS latest_status,
+    (ARRAY_AGG(
+      incident.last_applied_sequence
+      ORDER BY incident.received_at DESC, incident.incident_id
+    ))[1]
+      AS latest_sequence,
+    MAX(incident.received_at) AS latest_at
+  FROM public.sync_quarantine_incident AS incident
+  GROUP BY incident.edge_node_id
 ), open_rotation AS (
   SELECT
     rotation.id,
@@ -195,6 +302,11 @@ WITH latest_report AS (
     rotation.status AS credential_rotation_status,
     rotation.activate_before AS credential_rotation_activate_before,
     rotation.verified_at AS credential_rotation_verified_at,
+    COALESCE(incident.incident_count, 0) AS quarantine_incident_count,
+    incident.latest_reason AS latest_quarantine_reason,
+    incident.latest_status AS latest_quarantine_status,
+    incident.latest_sequence AS latest_quarantine_sequence,
+    incident.latest_at AS latest_quarantine_at,
     node.last_seen_at,
     report.created_at AS latest_report_at,
     report.status AS latest_report_status,
@@ -225,7 +337,8 @@ WITH latest_report AS (
     END AS integrity_state,
     CASE
       WHEN node.status = 'revoked' THEN 'revoked'
-      WHEN node.credential_expires_at <= pg_catalog.now()
+      WHEN COALESCE(incident.incident_count, 0) > 0
+        OR node.credential_expires_at <= pg_catalog.now()
         OR report.status = 'mismatch'
         OR report.source_verified IS FALSE
         OR (
@@ -253,6 +366,7 @@ WITH latest_report AS (
   JOIN public.sync_stream AS stream
     ON stream.tenant_id = node.tenant_id AND stream.branch_id = node.branch_id
   LEFT JOIN latest_report AS report ON report.edge_node_id = node.id
+  LEFT JOIN incident_rollup AS incident ON incident.edge_node_id = node.id
   LEFT JOIN open_rotation AS rotation ON rotation.node_id = node.id
   WHERE node.node_kind = 'edge'
     AND (CAST(:tenant_id AS UUID) IS NULL OR node.tenant_id = CAST(:tenant_id AS UUID))
@@ -321,7 +435,10 @@ SELECT
       )
   ) AS pending_handovers,
   COUNT(*) FILTER (WHERE credential_rotation_id IS NOT NULL)
-    AS pending_credential_rotations
+    AS pending_credential_rotations,
+  COUNT(*) FILTER (
+    WHERE node_status = 'active' AND quarantine_incident_count > 0
+  ) AS quarantined_nodes
 FROM monitored
 """
 
@@ -448,6 +565,24 @@ class SyncOutboxRepository:
 class SyncCloudRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def record_quarantine_incident(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        payload: SyncQuarantineIncidentRequest,
+        request_hash: str,
+    ) -> SyncQuarantineIncidentRecord:
+        return await _record_quarantine_incident(
+            self.session,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            payload=payload,
+            request_hash=request_hash,
+        )
 
     async def branch_exists(self, *, tenant_id: UUID, branch_id: UUID) -> bool:
         result = await self.session.execute(
@@ -620,6 +755,23 @@ class SyncCloudRepository:
                 ),
                 credential_rotation_activate_before=row["credential_rotation_activate_before"],
                 credential_rotation_verified_at=row["credential_rotation_verified_at"],
+                quarantine_incident_count=int(row["quarantine_incident_count"]),
+                latest_quarantine_reason=(
+                    str(row["latest_quarantine_reason"])
+                    if row["latest_quarantine_reason"] is not None
+                    else None
+                ),
+                latest_quarantine_status=(
+                    str(row["latest_quarantine_status"])
+                    if row["latest_quarantine_status"] is not None
+                    else None
+                ),
+                latest_quarantine_sequence=(
+                    int(row["latest_quarantine_sequence"])
+                    if row["latest_quarantine_sequence"] is not None
+                    else None
+                ),
+                latest_quarantine_at=row["latest_quarantine_at"],
             )
             for row in mappings
         ]
@@ -1256,6 +1408,24 @@ class SyncEdgeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def record_quarantine_incident(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        payload: SyncQuarantineIncidentRequest,
+        request_hash: str,
+    ) -> SyncQuarantineIncidentRecord:
+        return await _record_quarantine_incident(
+            self.session,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            payload=payload,
+            request_hash=request_hash,
+        )
+
     async def get_cursor(
         self,
         *,
@@ -1326,6 +1496,32 @@ class SyncEdgeRepository:
 
     async def get_inbox_event(self, event_id: UUID) -> SyncInboxEvent | None:
         return await self.session.get(SyncInboxEvent, event_id)
+
+    async def get_latest_quarantine_incident(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        origin_node_id: UUID,
+        writer_epoch: int,
+    ) -> SyncQuarantineIncident | None:
+        result = await self.session.execute(
+            select(SyncQuarantineIncident)
+            .where(
+                SyncQuarantineIncident.tenant_id == tenant_id,
+                SyncQuarantineIncident.branch_id == branch_id,
+                SyncQuarantineIncident.edge_node_id == edge_node_id,
+                SyncQuarantineIncident.origin_node_id == origin_node_id,
+                SyncQuarantineIncident.writer_epoch == writer_epoch,
+            )
+            .order_by(
+                SyncQuarantineIncident.received_at.desc(),
+                SyncQuarantineIncident.incident_id.desc(),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def insert_inbox(
         self,
