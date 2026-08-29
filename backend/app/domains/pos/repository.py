@@ -742,6 +742,53 @@ class POSRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def has_incomplete_consumed_refund_history(
+        self,
+        *,
+        tenant_id: UUID,
+        parent_sale_id: UUID,
+    ) -> bool:
+        return bool(
+            await self.session.scalar(
+                text("""
+                    SELECT EXISTS (
+                      SELECT 1
+                      FROM public.pos_refund_attempt AS attempt
+                      LEFT JOIN public.sale AS return_sale
+                        ON return_sale.tenant_id = attempt.tenant_id
+                       AND return_sale.refund_attempt_id = attempt.id
+                       AND return_sale.parent_sale_id = attempt.parent_sale_id
+                       AND return_sale.sale_type = 'return'
+                       AND return_sale.status = 'completed'
+                      LEFT JOIN public.sync_outbox AS event
+                        ON event.tenant_id = return_sale.tenant_id
+                       AND event.operation_id = return_sale.operation_id
+                       AND event.aggregate_type = 'sale'
+                       AND event.aggregate_id = return_sale.id
+                       AND event.event_type = 'pos.sale.refunded.v1'
+                       AND event.schema_version = 1
+                      WHERE attempt.tenant_id = :tenant_id
+                        AND attempt.parent_sale_id = :parent_sale_id
+                        AND attempt.status = 'consumed'
+                        AND (return_sale.id IS NULL OR event.event_id IS NULL)
+                    )
+                    """),
+                {"tenant_id": tenant_id, "parent_sale_id": parent_sale_id},
+            )
+        )
+
+    async def get_return_by_refund_attempt_id(
+        self,
+        *,
+        tenant_id: UUID,
+        refund_attempt_id: UUID,
+    ) -> Sale | None:
+        stmt = select(Sale).where(
+            Sale.tenant_id == tenant_id,
+            Sale.refund_attempt_id == refund_attempt_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def insert_refund_attempt(self, **fields: Any) -> POSRefundAttempt:
         attempt = POSRefundAttempt(**fields)
         self.session.add(attempt)
