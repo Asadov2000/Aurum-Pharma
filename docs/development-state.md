@@ -29,8 +29,11 @@ commit `f4e37e5` и открытых Edge PR `#98`/`#99`.
   Интеграционный тест подтвердил данные, объекты, SHA-256, владельцев, ACL и RLS.
 - Реализованы PostgreSQL WAL archive, проверяемый physical base backup, точный
   PITR drill и экспорт зашифрованного Restic repository в независимый WORM bucket.
-  Uploader не получает ключ расшифрования или право удаления; COMPLIANCE lock и
-  восстановление непосредственно из off-site копии проверяются интеграционно.
+  Uploader не получает ключ расшифрования или право удаления. Независимый online
+  verifier принимает только provider-approved version IDs, проверяет весь
+  repository, а offline signer без сети требует отдельный операторский digest и
+  подписывает checkpoint Ed25519. Restore не выбирает `latest`; подмена, отсутствие
+  authorization и новая версия после подписи проверяются CI.
 - Base images закреплены по digest; CI проверяет production-образы и формирует
   CycloneDX SBOM. Публикация и подпись release images остаются отдельной задачей.
 - В проверенной БД tenant-таблицы покрыты RLS. Это не отменяет обязательные
@@ -57,9 +60,9 @@ commit `f4e37e5` и открытых Edge PR `#98`/`#99`.
 ### P0 - блокирует безопасный production
 
 1. Создать внешний WORM bucket в юридически допустимом регионе, независимо
-   сохранить ключ Restic и root/provider credentials, подключить оповещения о
-   свежести/free-space и измерить RPO/RTO на production-подобном объёме. Кодовые
-   механизмы WAL/PITR, off-site export и restore drill уже реализованы.
+   развернуть recovery-host, сохранить ключи Restic/Ed25519 и provider credentials,
+   подключить оповещения о свежести/free-space и измерить RPO/RTO на
+   production-подобном объёме. WAL/PITR, signed checkpoint и exact restore готовы.
 2. Завершить production transport security между приложением и PostgreSQL,
    Redis и MinIO. Внешний TLS уже не заменяет внутреннее шифрование.
 3. Выдать production-секреты во внешнем secret storage, выполнить staging

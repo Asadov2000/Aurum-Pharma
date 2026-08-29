@@ -15,7 +15,14 @@ repository="$root/repository"
 scratch="$root/scratch"
 wal_archive="$root/wal-archive"
 metrics="$root/metrics"
-mkdir -p "$secrets" "$repository" "$scratch" "$wal_archive" "$metrics"
+candidate="$root/candidate"
+approval="$root/approval"
+verified="$root/verified"
+authorization="$root/authorization"
+trusted="$root/trusted"
+mkdir -p \
+    "$secrets" "$repository" "$scratch" "$wal_archive" "$metrics" \
+    "$candidate" "$approval" "$verified" "$authorization" "$trusted"
 
 cleanup() {
     status=$?
@@ -29,6 +36,9 @@ cleanup() {
             --profile backup \
             --profile restore-drill \
             --profile offsite \
+            --profile offsite-trust-verify \
+            --profile offsite-trust-sign \
+            --profile offsite-restore \
             --profile offsite-test \
             logs --no-color --tail 200 \
             postgres restore-postgres offsite-test-minio >&2
@@ -42,6 +52,9 @@ cleanup() {
         --profile backup \
         --profile restore-drill \
         --profile offsite \
+        --profile offsite-trust-verify \
+        --profile offsite-trust-sign \
+        --profile offsite-restore \
         --profile offsite-test \
         down --volumes --remove-orphans >/dev/null 2>&1 || true
 
@@ -118,7 +131,20 @@ write_secret MINIO_BACKUP_SECRET_KEY "$(random_hex 32)"
 write_secret RESTIC_PASSWORD "$(random_hex 48)"
 write_secret AURUM_OFFSITE_ACCESS_KEY "$(random_hex 10)"
 write_secret AURUM_OFFSITE_SECRET_KEY "$(random_hex 32)"
+write_secret AURUM_OFFSITE_RESTORE_ACCESS_KEY "$(random_hex 10)"
+write_secret AURUM_OFFSITE_RESTORE_SECRET_KEY "$(random_hex 32)"
 write_secret EMAIL_PASSWORD "$(random_hex 32)"
+signing_private="$(host_bind_path "$secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem")"
+signing_public="$(host_bind_path "$secrets/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem")"
+openssl genpkey -algorithm Ed25519 \
+    -out "$signing_private" 2>/dev/null
+openssl pkey \
+    -in "$signing_private" \
+    -pubout \
+    -out "$signing_public" 2>/dev/null
+chmod 644 \
+    "$secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem" \
+    "$secrets/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem"
 
 export AURUM_SECRET_FILES_DIR="$(host_bind_path "$secrets")"
 export AURUM_BACKUP_REPOSITORY="$(host_bind_path "$repository")"
@@ -128,6 +154,13 @@ export AURUM_RECOVERY_METRICS_DIR="$metrics"
 export AURUM_BACKUP_MIN_FREE_BYTES=1048576
 export AURUM_IMAGE_TAG=ci
 export AURUM_OFFSITE_SECRET_FILES_DIR="$(host_bind_path "$secrets")"
+export AURUM_OFFSITE_RESTORE_SECRET_FILES_DIR="$(host_bind_path "$secrets")"
+export AURUM_RECOVERY_TRUST_SECRET_FILES_DIR="$(host_bind_path "$secrets")"
+export AURUM_OFFSITE_CANDIDATE_DIR="$(host_bind_path "$candidate")"
+export AURUM_OFFSITE_APPROVAL_DIR="$(host_bind_path "$approval")"
+export AURUM_VERIFIED_CHECKPOINT_DIR="$(host_bind_path "$verified")"
+export AURUM_SIGNING_AUTHORIZATION_DIR="$(host_bind_path "$authorization")"
+export AURUM_TRUSTED_CHECKPOINT_DIR="$(host_bind_path "$trusted")"
 export AURUM_OFFSITE_ENDPOINT=http://offsite-test-minio:9000
 export AURUM_OFFSITE_BUCKET=aurum-offsite-test
 export AURUM_OFFSITE_PREFIX=aurum-ci
@@ -135,17 +168,42 @@ export AURUM_OFFSITE_ALLOW_INSECURE=true
 export AURUM_PITR_TARGET_NAME=aurum_ci_target
 
 # The local bind directory is writable only by the non-root backup UID.
-chmod 700 "$repository" "$scratch"
+chmod 700 \
+    "$repository" "$scratch" "$candidate" "$approval" "$verified" \
+    "$authorization" "$trusted"
 chmod 750 "$wal_archive"
 case "$(uname -s)" in
     MINGW*|MSYS*) ;;
     *)
-        sudo chown 10001:10001 "$repository" "$scratch"
+        sudo chown 10001:10001 \
+            "$repository" "$scratch" "$candidate" "$approval" "$verified" \
+            "$authorization" "$trusted"
+        sudo chown 10001:10001 \
+            "$secrets/RESTIC_PASSWORD" \
+            "$secrets/AURUM_OFFSITE_ACCESS_KEY" \
+            "$secrets/AURUM_OFFSITE_SECRET_KEY" \
+            "$secrets/AURUM_OFFSITE_RESTORE_ACCESS_KEY" \
+            "$secrets/AURUM_OFFSITE_RESTORE_SECRET_KEY" \
+            "$secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem" \
+            "$secrets/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem"
+        chmod 600 \
+            "$secrets/RESTIC_PASSWORD" \
+            "$secrets/AURUM_OFFSITE_ACCESS_KEY" \
+            "$secrets/AURUM_OFFSITE_SECRET_KEY" \
+            "$secrets/AURUM_OFFSITE_RESTORE_ACCESS_KEY" \
+            "$secrets/AURUM_OFFSITE_RESTORE_SECRET_KEY" \
+            "$secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem" \
+            "$secrets/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem"
         sudo chown 70:70 "$wal_archive"
         ;;
 esac
 
 for recovery_script in \
+    infra/backup/offsite-common.sh \
+    infra/backup/offsite-sync.sh \
+    infra/backup/offsite-trust-verify.sh \
+    infra/backup/offsite-trust-sign.sh \
+    infra/backup/offsite-trusted-restore.sh \
     scripts/recovery-metrics.sh \
     scripts/run-production-recovery-cycle.sh \
     scripts/run-production-restore-drill.sh; do
@@ -189,6 +247,7 @@ compose() {
         "$@"
 }
 
+compose --profile backup build backup
 compose up -d --wait postgres minio
 
 docker exec -i "${project}-postgres-1" psql \
@@ -250,13 +309,24 @@ compose --profile offsite-test up -d --wait offsite-test-minio
 compose --profile offsite-test run --rm offsite-test-init
 compose --profile offsite run --rm offsite-sync
 
+candidate_pointer="$(find "$candidate" -maxdepth 1 -type f -name '*.candidate.json' -print -quit)"
+test -n "$candidate_pointer"
+export_id="$(basename "$candidate_pointer" .candidate.json)"
+test -n "$export_id"
+export AURUM_OFFSITE_EXPORT_ID="$export_id"
+compose --profile offsite-test run --rm offsite-test-approve
+printf '{}' > "$candidate_pointer"
+
 compose --profile offsite-test run --rm --entrypoint /bin/sh offsite-test-init -ec '
     root_user="$(cat /run/secrets/MINIO_ROOT_USER)"
     root_password="$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
     append_user="$(cat /run/secrets/AURUM_OFFSITE_ACCESS_KEY)"
     append_password="$(cat /run/secrets/AURUM_OFFSITE_SECRET_KEY)"
+    restore_user="$(cat /run/secrets/AURUM_OFFSITE_RESTORE_ACCESS_KEY)"
+    restore_password="$(cat /run/secrets/AURUM_OFFSITE_RESTORE_SECRET_KEY)"
     mc --config-dir /tmp/root alias set root http://offsite-test-minio:9000 "$root_user" "$root_password" >/dev/null
     mc --config-dir /tmp/append alias set append http://offsite-test-minio:9000 "$append_user" "$append_password" >/dev/null
+    mc --config-dir /tmp/restore alias set restore http://offsite-test-minio:9000 "$restore_user" "$restore_password" >/dev/null
     mc --config-dir /tmp/root find \
         root/aurum-offsite-test/aurum-ci/repository \
         --name '*' \
@@ -280,8 +350,79 @@ compose --profile offsite-test run --rm --entrypoint /bin/sh offsite-test-init -
         echo "COMPLIANCE Object Lock unexpectedly allowed version deletion" >&2
         exit 1
     fi
+    if printf denied | mc --config-dir /tmp/restore pipe \
+        restore/aurum-offsite-test/aurum-ci/forbidden-object >/dev/null 2>&1; then
+        echo "Read-only restore credential unexpectedly uploaded an object" >&2
+        exit 1
+    fi
+    if mc --config-dir /tmp/restore rm --version-id "$version" \
+        "restore/${object#root/}" >/dev/null 2>&1; then
+        echo "Read-only restore credential unexpectedly deleted an object" >&2
+        exit 1
+    fi
     mc --config-dir /tmp/root stat "$object" >/dev/null
 '
-compose --profile offsite-test run --rm offsite-test-restore
+
+compose --profile offsite-trust-verify run --rm offsite-trust-verify
+authorization_log="$root/authorization.log"
+if compose --profile offsite-trust-sign run --rm offsite-trust-sign \
+    >"$authorization_log" 2>&1; then
+    echo "Offline signer unexpectedly ran without independent authorization" >&2
+    exit 1
+fi
+grep -q 'Independent signing authorization is missing' "$authorization_log" || {
+    cat "$authorization_log" >&2
+    echo "Missing authorization failed for an unexpected reason" >&2
+    exit 1
+}
+sha256sum "$verified/$export_id.verified.json" | awk '{print $1}' \
+    > "$authorization/$export_id.authorize.sha256"
+compose --profile offsite-trust-sign run --rm offsite-trust-sign
+immutable_log="$root/immutable.log"
+if compose --profile offsite-trust-sign run --rm offsite-trust-sign \
+    >"$immutable_log" 2>&1; then
+    echo "Immutable trusted checkpoint was unexpectedly overwritten" >&2
+    exit 1
+fi
+grep -q 'Trusted checkpoint already exists and is immutable' "$immutable_log" || {
+    cat "$immutable_log" >&2
+    echo "Immutable checkpoint retry failed for an unexpected reason" >&2
+    exit 1
+}
+
+compose --profile offsite-test run --rm --no-deps \
+    --entrypoint /bin/sh offsite-test-init -ec '
+    append_user="$(cat /run/secrets/AURUM_OFFSITE_ACCESS_KEY)"
+    append_password="$(cat /run/secrets/AURUM_OFFSITE_SECRET_KEY)"
+    mc --config-dir /tmp/append alias set append \
+        http://offsite-test-minio:9000 "$append_user" "$append_password" >/dev/null
+    object="$(mc --config-dir /tmp/append find \
+        append/aurum-offsite-test/aurum-ci/repository \
+        --name "*" --print "{}" | head -n 1)"
+    test -n "$object"
+    printf malicious-latest-version | mc --config-dir /tmp/append pipe "$object" >/dev/null
+'
+
+compose --profile offsite-trust-sign run --rm --no-deps \
+    --entrypoint /bin/sh offsite-trust-sign -ec "
+        cp /trusted/$export_id.trusted/checkpoint.json /trusted/$export_id.trusted/checkpoint.json.valid
+        printf ' ' >> /trusted/$export_id.trusted/checkpoint.json
+    "
+tamper_log="$root/tamper.log"
+if compose --profile offsite-restore run --rm offsite-trusted-restore \
+    >"$tamper_log" 2>&1; then
+    echo "Tampered trusted checkpoint unexpectedly restored" >&2
+    exit 1
+fi
+grep -q 'Trusted checkpoint signature verification failed' "$tamper_log" || {
+    cat "$tamper_log" >&2
+    echo "Tampered checkpoint failed for an unexpected reason" >&2
+    exit 1
+}
+compose --profile offsite-trust-sign run --rm --no-deps \
+    --entrypoint /bin/sh offsite-trust-sign -ec "
+        mv /trusted/$export_id.trusted/checkpoint.json.valid /trusted/$export_id.trusted/checkpoint.json
+    "
+compose --profile offsite-restore run --rm offsite-trusted-restore
 
 echo "Recovery tooling integration test passed"

@@ -55,10 +55,39 @@ PostgreSQL или приложению. Запишите пару в отдел�
 ```powershell
 $access = Read-Host "Off-site access key" -AsSecureString
 $secret = Read-Host "Off-site secret key" -AsSecureString
-pwsh ./scripts/New-OffsiteBackupSecrets.ps1 `
+sudo pwsh ./scripts/New-OffsiteBackupSecrets.ps1 `
   -OutputDirectory /etc/aurum/offsite-secrets `
   -AccessKey $access `
   -SecretKey $secret
+```
+
+Read-only restore credentials создаются у провайдера отдельно и не выдаются
+production host. На независимом recovery-host запишите их с другим назначением:
+
+```powershell
+$access = Read-Host "Off-site restore access key" -AsSecureString
+$secret = Read-Host "Off-site restore secret key" -AsSecureString
+sudo pwsh ./scripts/New-OffsiteBackupSecrets.ps1 `
+  -OutputDirectory /etc/aurum/offsite-restore-secrets `
+  -AccessKey $access `
+  -SecretKey $secret `
+  -Role Restore
+```
+
+Ed25519 private key создаётся только на независимом trust/recovery-host. Его
+публичную часть передайте на restore-host, закрытую часть не копируйте на
+production:
+
+```bash
+sudo install -d -m 0700 /etc/aurum/recovery-trust-secrets
+sudo openssl genpkey -algorithm Ed25519 \
+  -out /etc/aurum/recovery-trust-secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem
+sudo openssl pkey \
+  -in /etc/aurum/recovery-trust-secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem \
+  -pubout \
+  -out /etc/aurum/recovery-trust-secrets/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem
+sudo chown -R 10001:10001 /etc/aurum/recovery-trust-secrets
+sudo chmod 0600 /etc/aurum/recovery-trust-secrets/*.pem
 ```
 
 ## 4. Проверка конфигурации
@@ -167,6 +196,11 @@ sudo install -d -m 700 -o 10001 -g 10001 /srv/aurum-backups/restic
 sudo install -d -m 700 -o 10001 -g 10001 /srv/aurum-backups/scratch
 sudo install -d -m 750 -o 70 -g 70 /srv/aurum-backups/wal-archive
 sudo install -d -m 755 -o root -g root /var/lib/aurum/recovery-metrics
+sudo install -d -m 700 -o 10001 -g 10001 /var/lib/aurum/offsite-candidates
+sudo install -d -m 700 -o 10001 -g 10001 /var/lib/aurum/offsite-approvals
+sudo install -d -m 700 -o 10001 -g 10001 /var/lib/aurum/verified-checkpoints
+sudo install -d -m 700 -o 10001 -g 10001 /var/lib/aurum/signing-authorizations
+sudo install -d -m 700 -o 10001 -g 10001 /var/lib/aurum/trusted-checkpoints
 ```
 
 `AURUM_BACKUP_REPOSITORY` хранит зашифрованные snapshots, а
@@ -215,8 +249,59 @@ docker compose \
 ```
 
 Uploader экспортирует только зашифрованные Restic-объекты и не получает
-`RESTIC_PASSWORD`. Успех подтверждается неизменяемым checksum manifest,
-загруженным последним.
+`RESTIC_PASSWORD`. Он создаёт неподписанный candidate в
+`AURUM_OFFSITE_CANDIDATE_DIR`: SHA-256, размер и точный WORM `version ID` каждого
+объекта. Candidate ещё не считается доверенным.
+
+Выберите конкретный `export ID` из имени `*.candidate.json`. На независимом
+recovery-host получите version ID и SHA-256 manifest напрямую из control plane
+провайдера, а не из production candidate, и создайте
+`$AURUM_OFFSITE_APPROVAL_DIR/$export_id.approval.json` с полями
+`schema_version`, `export_id`, `manifest_key`, `manifest_version_id` и
+`manifest_sha256`. Значения должны быть получены независимым каналом провайдера;
+простое копирование production candidate запрещено.
+Verifier не монтирует production candidate. Он использует отдельные read-only
+credentials и проверяет все зафиксированные версии и весь Restic repository:
+
+```bash
+export AURUM_OFFSITE_EXPORT_ID=20260829T034031Z-1234
+docker compose \
+  --env-file /etc/aurum/recovery.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile offsite-trust-verify run --rm offsite-trust-verify
+```
+
+После этого оператор сверяет export ID и provider approval, вычисляет SHA-256
+перенесённого verified JSON и отдельным каналом записывает только digest в
+`$AURUM_SIGNING_AUTHORIZATION_DIR/$export_id.authorize.sha256`. Verifier не имеет
+доступа к этому каталогу. Signer не имеет сети и получает закрытый ключ,
+verified-каталог, authorization-каталог и каталог публикации:
+
+```bash
+docker compose \
+  --env-file /etc/aurum/recovery.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile offsite-trust-sign run --rm offsite-trust-sign
+```
+
+Каталог `$AURUM_OFFSITE_EXPORT_ID.trusted` из
+`AURUM_TRUSTED_CHECKPOINT_DIR` публикуется атомарно и хранится вне production
+host. Для восстановления передайте каталог и публичный ключ на restore-host:
+
+```bash
+export AURUM_OFFSITE_EXPORT_ID=20260829T034031Z-1234
+docker compose \
+  --env-file /etc/aurum/recovery.env \
+  --file docker-compose.production.yml \
+  --file docker-compose.recovery.yml \
+  --profile offsite-restore run --rm offsite-trusted-restore
+```
+
+Restore проверяет подпись, bucket/prefix, точные версии, размеры и SHA-256. Он не
+использует `latest`, поэтому новая версия, добавленная после подписания, не меняет
+выбранную точку восстановления. Полный протокол зафиксирован в ADR-0026.
 
 После первой ручной проверки установите три пары unit-файлов из
 `infra/systemd`: full backup выполняется ежедневно, WAL snapshot и WORM export -
@@ -248,8 +333,8 @@ sudo AURUM_RECOVERY_METRICS_DIR=/var/lib/aurum/recovery-metrics \
 ```
 
 Локальный drill подтверждает восстановимость repository, но не измеряет RPO и
-полный service RTO: он не включает загрузку конкретной внешней WORM-версии,
-запуск приложения и пользовательский smoke-тест. Успех содержит
+полный service RTO: exact-version WORM restore реализован отдельно, однако
+service RTO также включает запуск приложения и пользовательский smoke-тест. Успех содержит
 `Restore drill passed`, фактическую Alembic revision и число
 объектов, их SHA-256, RLS и доступ runtime-ролей. PostgreSQL dump и текущий
 снимок объектов MinIO создаются последовательно, поэтому межсистемная
@@ -292,8 +377,8 @@ pwsh ./scripts/New-EdgeShadowSecrets.ps1 `
 До реального пилота ещё обязательны:
 
 - TLS и проверка сертификатов для PostgreSQL, Redis и MinIO внутри сети;
-- внешний WORM bucket в юридически допустимом регионе, независимое хранение
-  ключей и drill непосредственно из выбранной off-site версии;
+- внешний WORM bucket в юридически допустимом регионе, независимый recovery-host,
+  раздельное хранение ключей и staging drill из выбранного signed checkpoint;
 - staging-замеры RPO/RTO на production-подобном объёме и утверждение целевых
   порогов; автоматические freshness/RTO metrics и alerts уже включены;
 - HSTS после проверки восстановления TLS на staging;
