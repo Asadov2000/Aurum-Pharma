@@ -62,6 +62,11 @@ async def _confirmed_attempt(
         amount=Decimal("10.00"),
         currency="TJS",
     )
+    await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
     return await service.confirm_payment_attempt(
         tenant_id=scaffold["tenant"].id,
         attempt_id=attempt.id,
@@ -144,6 +149,56 @@ async def test_attempt_create_is_idempotent_and_conflicts_on_changed_payload(
             amount=Decimal("10.00"),
             currency="TJS",
         )
+
+
+async def test_payment_attempt_marks_external_effect_before_terminal_confirmation(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    sale = await _draft_sale(service, scaffold)
+    attempt = await service.create_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        sale_id=sale.id,
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        payment_method="card",
+        amount=Decimal("10.00"),
+        currency="TJS",
+    )
+
+    with pytest.raises(BusinessRuleError, match="must start reconciliation"):
+        await service.confirm_payment_attempt(
+            tenant_id=scaffold["tenant"].id,
+            attempt_id=attempt.id,
+            actor_id=scaffold["cashier"].id,
+            external_reference="TERM-BYPASS",
+        )
+
+    started = await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
+    retried = await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
+
+    assert started.status == "requires_reconciliation"
+    assert retried.id == started.id
+    with pytest.raises(BusinessRuleError, match="Resolve the sale's card or QR"):
+        await service.complete(sale_id=sale.id, actor_id=scaffold["cashier"].id)
+
+    confirmed = await service.confirm_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+        external_reference="TERM-RECONCILED",
+    )
+    assert confirmed.status == "confirmed"
 
 
 async def test_consumed_attempt_cannot_be_reused_or_voided(
@@ -266,6 +321,11 @@ async def test_checkout_requires_every_active_attempt_to_be_resolved(
                 payments=[("cash", Decimal("10.00"), None)],
             )
 
+    await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
     await service.confirm_payment_attempt(
         tenant_id=scaffold["tenant"].id,
         attempt_id=attempt.id,
@@ -370,7 +430,7 @@ async def test_void_is_terminal_idempotent_and_blocks_confirmation(
     assert first.status == "voided"
     assert first.voided_at is not None
 
-    with pytest.raises(BusinessRuleError, match="pending payment attempt"):
+    with pytest.raises(BusinessRuleError, match="must start reconciliation"):
         await service.confirm_payment_attempt(
             tenant_id=scaffold["tenant"].id,
             attempt_id=attempt.id,
@@ -500,6 +560,16 @@ async def test_payment_attempt_api_requires_permission_and_sale_ownership(
         created = await client.post("/api/v1/pos/payment-attempts", json=payload)
         assert created.status_code == 201
         attempt_id = created.json()["id"]
+        bypass = await client.post(
+            f"/api/v1/pos/payment-attempts/{attempt_id}/confirm",
+            json={"external_reference": "TERM-BYPASS"},
+        )
+        assert bypass.status_code == 422
+        reconciliation = await client.post(
+            f"/api/v1/pos/payment-attempts/{attempt_id}/reconciliation"
+        )
+        assert reconciliation.status_code == 200
+        assert reconciliation.json()["status"] == "requires_reconciliation"
         confirmed = await client.post(
             f"/api/v1/pos/payment-attempts/{attempt_id}/confirm",
             json={"external_reference": "  TERM-API-1  "},

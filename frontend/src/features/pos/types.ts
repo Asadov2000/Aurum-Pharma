@@ -9,7 +9,12 @@ export type SaleType = "sale" | "return";
 export type PaymentMethod = PosPaymentMethod;
 export type LegacyPaymentMethod = "bank_transfer";
 export type PaymentMethodRead = PaymentMethod | LegacyPaymentMethod;
-export type PaymentAttemptStatus = "pending" | "confirmed" | "consumed" | "voided";
+export type PaymentAttemptStatus =
+  | "pending"
+  | "requires_reconciliation"
+  | "confirmed"
+  | "consumed"
+  | "voided";
 
 export interface PaymentMetadata {
   cash_received?: string;

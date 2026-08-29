@@ -596,7 +596,7 @@ class POSPaymentAttempt(Base):
         CheckConstraint("amount > 0", name="ck_pos_payment_attempt_amount"),
         CheckConstraint("currency = 'TJS'", name="ck_pos_payment_attempt_currency"),
         CheckConstraint(
-            "status IN ('pending','confirmed','consumed','voided')",
+            "status IN ('pending','requires_reconciliation','confirmed','consumed','voided')",
             name="ck_pos_payment_attempt_status",
         ),
     )
@@ -657,7 +657,7 @@ class POSRefundAttempt(Base):
         CheckConstraint("external_amount <= total_amount", name="ck_pos_refund_attempt_amounts"),
         CheckConstraint("currency = 'TJS'", name="ck_pos_refund_attempt_currency"),
         CheckConstraint(
-            "status IN ('pending','confirmed','consumed','voided')",
+            "status IN ('pending','requires_reconciliation','confirmed','consumed','voided')",
             name="ck_pos_refund_attempt_status",
         ),
         Index(
@@ -665,7 +665,7 @@ class POSRefundAttempt(Base):
             "tenant_id",
             "parent_sale_id",
             unique=True,
-            postgresql_where=text("status IN ('pending','confirmed')"),
+            postgresql_where=text("status IN ('pending','requires_reconciliation','confirmed')"),
         ),
     )
 

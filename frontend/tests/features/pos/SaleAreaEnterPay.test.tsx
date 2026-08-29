@@ -12,6 +12,7 @@ const findByBarcode = vi.fn();
 const addSaleItem = vi.fn();
 const getPosFavorites = vi.fn();
 const createPaymentAttempt = vi.fn();
+const beginPaymentAttemptReconciliation = vi.fn();
 const confirmPaymentAttempt = vi.fn();
 const voidPaymentAttempt = vi.fn();
 const requestDesktopCashDrawerOpen = vi.fn();
@@ -39,6 +40,8 @@ vi.mock("@/features/pos/api", () => ({
   addPosFavorite: vi.fn(),
   removePosFavorite: vi.fn(),
   createPaymentAttempt: (...args: unknown[]) => createPaymentAttempt(...args),
+  beginPaymentAttemptReconciliation: (...args: unknown[]) =>
+    beginPaymentAttemptReconciliation(...args),
   confirmPaymentAttempt: (...args: unknown[]) => confirmPaymentAttempt(...args),
   voidPaymentAttempt: (...args: unknown[]) => voidPaymentAttempt(...args),
 }));
@@ -256,6 +259,7 @@ describe("SaleArea atomic checkout", () => {
     addSaleItem.mockReset();
     getPosFavorites.mockReset();
     createPaymentAttempt.mockReset();
+    beginPaymentAttemptReconciliation.mockReset();
     confirmPaymentAttempt.mockReset();
     voidPaymentAttempt.mockReset();
     requestDesktopCashDrawerOpen.mockReset();
@@ -290,6 +294,24 @@ describe("SaleArea atomic checkout", () => {
           voided_at: null,
         });
       },
+    );
+    beginPaymentAttemptReconciliation.mockImplementation((attemptId: string) =>
+      Promise.resolve({
+        id: attemptId,
+        tenant_id: SALE.tenant_id,
+        sale_id: SALE.id,
+        cashier_user_id: SALE.cashier_user_id,
+        operation_id: attemptOperations.get(attemptId),
+        payment_method: attemptId.endsWith("1") ? "card" : "qr",
+        amount: attemptId.endsWith("1") ? "20.00" : "30.00",
+        currency: "TJS",
+        status: "requires_reconciliation",
+        external_reference: null,
+        created_at: SALE.created_at,
+        confirmed_at: null,
+        consumed_at: null,
+        voided_at: null,
+      }),
     );
     confirmPaymentAttempt.mockImplementation((attemptId: string) =>
       Promise.resolve({
@@ -501,7 +523,9 @@ describe("SaleArea atomic checkout", () => {
       name: "Подтвердить оплату картой",
     });
     expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Отмена" }));
+    fireEvent.click(
+      within(confirmation).getByRole("button", { name: "Терминал проверен, оплаты нет" }),
+    );
 
     await waitFor(() =>
       expect(
@@ -509,6 +533,9 @@ describe("SaleArea atomic checkout", () => {
       ).not.toBeInTheDocument(),
     );
     expect(createPaymentAttempt).toHaveBeenCalledTimes(1);
+    expect(beginPaymentAttemptReconciliation).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000001",
+    );
     expect(voidPaymentAttempt).toHaveBeenCalledWith("30000000-0000-4000-8000-000000000001", {
       reason: "cashier_cancelled",
     });
@@ -572,7 +599,9 @@ describe("SaleArea atomic checkout", () => {
     expect(await screen.findByText(/Просроченные лекарства нельзя продавать/i)).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: /просроч/i })).not.toBeInTheDocument();
     expect(checkoutSale).toHaveBeenCalledTimes(1);
-    expect((checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).expired_sale_confirmed).toBeUndefined();
+    expect(
+      (checkoutSale.mock.calls[0]?.[0] as CheckoutPayload).expired_sale_confirmed,
+    ).toBeUndefined();
   });
 
   it("requires confirmation before F2 clears a non-empty draft", async () => {

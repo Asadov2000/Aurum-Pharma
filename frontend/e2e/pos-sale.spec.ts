@@ -225,6 +225,12 @@ test.describe("POS sale (owner)", () => {
           /\/api\/v1\/pos\/payment-attempts$/.test(response.url()) &&
           response.status() === 201,
       );
+      const reconcileAttemptResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          /\/api\/v1\/pos\/payment-attempts\/[^/]+\/reconciliation$/.test(response.url()) &&
+          response.ok(),
+      );
       await page.getByRole("button", { name: "Карта", exact: true }).click();
       const amountDialog = page.getByRole("dialog", { name: "Сумма оплаты" });
       await expect(amountDialog).toBeVisible();
@@ -234,6 +240,13 @@ test.describe("POS sale (owner)", () => {
         status: string;
       };
       expect(createdAttempt.status).toBe("pending");
+      const reconciledAttemptResponse = await reconcileAttemptResponse;
+      expect(reconciledAttemptResponse.url()).toContain(
+        `/api/v1/pos/payment-attempts/${createdAttempt.id}/reconciliation`,
+      );
+      expect(((await reconciledAttemptResponse.json()) as { status: string }).status).toBe(
+        "requires_reconciliation",
+      );
 
       const confirmAttemptResponse = page.waitForResponse(
         (response) =>
@@ -316,12 +329,25 @@ test.describe("POS sale (owner)", () => {
           response.url().endsWith(`/api/v1/sales/${completedSale.sale_id}/refund-attempts`) &&
           response.status() === 201,
       );
+      const reconcileRefundAttemptResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          /\/api\/v1\/pos\/refund-attempts\/[^/]+\/reconciliation$/.test(response.url()) &&
+          response.ok(),
+      );
       await refundDialog.getByRole("button", { name: "Рассчитать возврат" }).click();
       const refundAttempt = (await (await createRefundAttemptResponse).json()) as {
         id: string;
         status: string;
       };
       expect(refundAttempt.status).toBe("pending");
+      const reconciledRefundAttemptResponse = await reconcileRefundAttemptResponse;
+      expect(reconciledRefundAttemptResponse.url()).toContain(
+        `/api/v1/pos/refund-attempts/${refundAttempt.id}/reconciliation`,
+      );
+      expect(((await reconciledRefundAttemptResponse.json()) as { status: string }).status).toBe(
+        "requires_reconciliation",
+      );
 
       const refundDocument = `E2E-REFUND-${Date.now()}`;
       await refundDialog.getByLabel("Терминал").fill("E2E-TERM-01");

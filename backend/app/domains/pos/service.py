@@ -352,6 +352,50 @@ class POSService:
         )
         return attempt
 
+    async def begin_payment_attempt_reconciliation(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_id: UUID,
+        actor_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> POSPaymentAttempt:
+        """Durably mark that the external terminal may now have an effect."""
+        visible_attempt = await self.repo.get_payment_attempt(attempt_id)
+        if visible_attempt is None:
+            raise NotFoundError("Payment attempt not found")
+        await self._assert_payment_attempt_access(
+            visible_attempt,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        sale = await self._lock_sale(visible_attempt.sale_id)
+        self._assert_sale_owned_or_managed(
+            sale,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        self._assert_draft(sale)
+        attempt = await self.repo.lock_payment_attempt(attempt_id)
+        if attempt is None or attempt.tenant_id != tenant_id or attempt.sale_id != sale.id:
+            raise NotFoundError("Payment attempt not found")
+        if attempt.status in {"requires_reconciliation", "confirmed", "consumed"}:
+            return attempt
+        if attempt.status != "pending":
+            raise BusinessRuleError("Closed payment attempt cannot start reconciliation")
+        return await self.repo.update_payment_attempt(
+            attempt,
+            status="requires_reconciliation",
+            updated_by=actor_id,
+        )
+
     async def confirm_payment_attempt(
         self,
         *,
@@ -392,8 +436,8 @@ class POSService:
             if attempt.external_reference != external_reference:
                 raise ConflictError("Payment attempt was confirmed with another reference")
             return attempt
-        if attempt.status != "pending":
-            raise BusinessRuleError("Only a pending payment attempt can be confirmed")
+        if attempt.status != "requires_reconciliation":
+            raise BusinessRuleError("Payment attempt must start reconciliation before confirmation")
         return await self.repo.update_payment_attempt(
             attempt,
             status="confirmed",
@@ -741,6 +785,38 @@ class POSService:
         )
         return await self._refund_attempt_read(attempt)
 
+    async def begin_refund_attempt_reconciliation(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> POSRefundAttemptRead:
+        """Durably mark that an external refund may now have an effect."""
+        visible = await self.repo.get_refund_attempt(attempt_id)
+        if visible is None:
+            raise NotFoundError("Refund attempt not found")
+        parent = await self._assert_refund_attempt_access(
+            visible,
+            tenant_id=tenant_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        await self._lock_sale(parent.id)
+        attempt = await self.repo.lock_refund_attempt(attempt_id)
+        if attempt is None or attempt.tenant_id != tenant_id:
+            raise NotFoundError("Refund attempt not found")
+        if attempt.status in {"requires_reconciliation", "confirmed", "consumed"}:
+            return await self._refund_attempt_read(attempt)
+        if attempt.status != "pending":
+            raise BusinessRuleError("Closed refund attempt cannot start reconciliation")
+        attempt = await self.repo.update_refund_attempt(
+            attempt,
+            status="requires_reconciliation",
+            updated_by=actor_id,
+        )
+        return await self._refund_attempt_read(attempt)
+
     async def confirm_refund_attempt(
         self,
         *,
@@ -783,8 +859,8 @@ class POSService:
             if existing != provided:
                 raise ConflictError("Refund attempt was confirmed with other terminal documents")
             return await self._refund_attempt_read(attempt)
-        if attempt.status != "pending":
-            raise BusinessRuleError("Only a pending refund attempt can be confirmed")
+        if attempt.status != "requires_reconciliation":
+            raise BusinessRuleError("Refund attempt must start reconciliation before confirmation")
         if existing_references:
             raise AurumError("Pending refund attempt already contains terminal documents")
         await self._assert_refund_attempt_current(attempt=attempt, parent=parent)
@@ -822,8 +898,9 @@ class POSService:
         actor_id: UUID,
         reason: str,
         operator_note: str | None,
-        can_manage: bool,
+        can_manage_tenant: bool,
         allowed_branch_ids: set[UUID] | None,
+        allowed_manage_branch_ids: set[UUID] | None,
     ) -> POSRefundAttemptRead:
         visible = await self.repo.get_refund_attempt(attempt_id)
         if visible is None:
@@ -837,7 +914,10 @@ class POSService:
         attempt = await self.repo.lock_refund_attempt(attempt_id)
         if attempt is None or attempt.tenant_id != tenant_id:
             raise NotFoundError("Refund attempt not found")
-        if attempt.requested_by_user_id != actor_id and not can_manage:
+        can_manage_branch = can_manage_tenant or (
+            allowed_manage_branch_ids is not None and parent.branch_id in allowed_manage_branch_ids
+        )
+        if attempt.requested_by_user_id != actor_id and not can_manage_branch:
             raise PermissionDeniedError(
                 "Refund attempt can be voided only by its requester or manager"
             )
@@ -849,6 +929,10 @@ class POSService:
             raise BusinessRuleError("A consumed refund attempt is immutable")
         if attempt.status == "confirmed":
             raise BusinessRuleError("A confirmed refund attempt must be completed")
+        if attempt.status == "requires_reconciliation" and not can_manage_branch:
+            raise PermissionDeniedError(
+                "Reconciled refund attempt can be voided only by an electronic refund approver"
+            )
         attempt = await self.repo.update_refund_attempt(
             attempt,
             status="voided",

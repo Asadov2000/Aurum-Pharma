@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
   addPrescription: vi.fn(),
   addSaleItem: vi.fn(),
   checkoutSale: vi.fn(),
+  beginPaymentAttemptReconciliation: vi.fn(),
   closeShift: vi.fn(),
   completeSale: vi.fn(),
   confirmPaymentAttempt: vi.fn(),

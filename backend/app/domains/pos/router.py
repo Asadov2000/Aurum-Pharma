@@ -258,6 +258,27 @@ async def get_pos_payment_attempt(
 
 
 @router.post(
+    "/pos/payment-attempts/{attempt_id}/reconciliation",
+    response_model=POSPaymentAttemptRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def begin_pos_payment_attempt_reconciliation(
+    attempt_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSPaymentAttemptRead:
+    attempt = await service.begin_payment_attempt_reconciliation(
+        tenant_id=_current_tenant_or_400(user),
+        attempt_id=attempt_id,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for("pos.sell"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+    return POSPaymentAttemptRead.model_validate(attempt)
+
+
+@router.post(
     "/pos/payment-attempts/{attempt_id}/confirm",
     response_model=POSPaymentAttemptRead,
     dependencies=[Depends(require_writable_tenant)],
@@ -359,6 +380,27 @@ async def get_pos_refund_attempt(
 
 
 @router.post(
+    "/pos/refund-attempts/{attempt_id}/reconciliation",
+    response_model=POSRefundAttemptRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def begin_pos_refund_attempt_reconciliation(
+    attempt_id: UUID,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("pos.refund", policy="resource")),
+    ],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSRefundAttemptRead:
+    return await service.begin_refund_attempt_reconciliation(
+        tenant_id=_current_tenant_or_400(user),
+        attempt_id=attempt_id,
+        actor_id=user.user_id,
+        allowed_branch_ids=user.branch_scope_for("pos.refund"),
+    )
+
+
+@router.post(
     "/pos/refund-attempts/{attempt_id}/confirm",
     response_model=POSRefundAttemptRead,
     dependencies=[Depends(require_writable_tenant)],
@@ -412,8 +454,9 @@ async def void_pos_refund_attempt(
         actor_id=user.user_id,
         reason=payload.reason,
         operator_note=payload.operator_note,
-        can_manage="pos.refund_external_confirm" in user.permissions,
+        can_manage_tenant=user.has_tenant_scope("pos.refund_external_confirm"),
         allowed_branch_ids=_refund_attempt_branch_scope(user),
+        allowed_manage_branch_ids=user.branch_scope_for("pos.refund_external_confirm"),
     )
 
 

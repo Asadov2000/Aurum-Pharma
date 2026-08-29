@@ -638,7 +638,7 @@ class POSRepository:
             select(POSPaymentAttempt)
             .where(
                 POSPaymentAttempt.sale_id == sale_id,
-                POSPaymentAttempt.status.in_(("pending", "confirmed")),
+                POSPaymentAttempt.status.in_(("pending", "requires_reconciliation", "confirmed")),
             )
             .order_by(POSPaymentAttempt.id)
             .with_for_update()
@@ -698,7 +698,7 @@ class POSRepository:
             select(POSRefundAttempt)
             .where(
                 POSRefundAttempt.parent_sale_id == parent_sale_id,
-                POSRefundAttempt.status.in_(("pending", "confirmed")),
+                POSRefundAttempt.status.in_(("pending", "requires_reconciliation", "confirmed")),
             )
             .with_for_update()
             .execution_options(populate_existing=True)
@@ -757,7 +757,7 @@ class POSRepository:
         stmt = select(
             exists().where(
                 POSRefundAttempt.register_id == register_id,
-                POSRefundAttempt.status.in_(("pending", "confirmed")),
+                POSRefundAttempt.status.in_(("pending", "requires_reconciliation", "confirmed")),
             )
         )
         return bool(await self.session.scalar(stmt))

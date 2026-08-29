@@ -459,6 +459,11 @@ async def _seed_sales(
                 amount=fresh.total_amount,
                 currency=fresh.currency,
             )
+            attempt = await timed_pos.begin_payment_attempt_reconciliation(
+                tenant_id=tenant.id,
+                attempt_id=attempt.id,
+                actor_id=cashier_id,
+            )
             attempt = await timed_pos.confirm_payment_attempt(
                 tenant_id=tenant.id,
                 attempt_id=attempt.id,

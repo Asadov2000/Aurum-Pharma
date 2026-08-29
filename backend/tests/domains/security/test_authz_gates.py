@@ -1679,6 +1679,12 @@ async def test_electronic_refund_confirmation_requires_separate_permission(
         )
         assert create_response.status_code == 201
         attempt_id = create_response.json()["id"]
+        reconciliation = await client.post(
+            f"/api/v1/pos/refund-attempts/{attempt_id}/reconciliation",
+            headers=cashier_headers,
+        )
+        assert reconciliation.status_code == 200
+        assert reconciliation.json()["status"] == "requires_reconciliation"
         confirmation = {
             "confirmations": [
                 {
@@ -1695,6 +1701,12 @@ async def test_electronic_refund_confirmation_requires_separate_permission(
             json=confirmation,
         )
         assert denied.status_code == 403
+        denied_void = await client.post(
+            f"/api/v1/pos/refund-attempts/{attempt_id}/void",
+            headers=cashier_headers,
+            json={"reason": "refund_failed", "operator_note": None},
+        )
+        assert denied_void.status_code == 403
 
         approved = await client.post(
             f"/api/v1/pos/refund-attempts/{attempt_id}/confirm",
