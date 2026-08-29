@@ -1,6 +1,7 @@
 # Adversarial review: POS, payments, receipts and refunds
 
 Date: 2026-08-29
+Last updated: 2026-08-30
 Scope: seller and pharmacy-owner flows from sale creation through payment,
 receipt, refund and shift close.
 Method: read-only code and test review against the current `main`; the shared
@@ -14,12 +15,11 @@ quantities are bounded, and lost responses can be reconciled without blind
 money retries. No critical RLS bypass or direct mutation of completed sales was
 found.
 
-Release readiness is nevertheless blocked by four business-safety gaps. The
-first implementation package should close AP-POS-001 through AP-POS-004 before
-new POS features are added. AP-POS-005 is now covered by the confirmed-payment
-grandfathering flow, and AP-POS-006 is closed by the controlled refund evidence
-and receipt package. AP-POS-007 is a separate Edge milestone, not a small
-web-POS patch.
+The server-side business-safety gaps AP-POS-001 through AP-POS-006 are now
+covered by implementation and regression tests. AP-POS-003 still needs an
+owner-facing reconciliation queue so unresolved operations are operationally
+visible without opening an individual sale. AP-POS-007 remains a separate Edge
+release milestone, not a small web-POS patch.
 
 ## Findings
 
@@ -27,6 +27,8 @@ web-POS patch.
 
 Severity: High
 Affected roles: seller, pharmacy owner
+Status: Resolved by migration `0122`, the payment-attempt state machine and the
+manager-only uncertain-payment resolution rule.
 
 Evidence:
 
@@ -53,10 +55,18 @@ Required fix:
 Required tests: cashier denial, manager reconciliation, concurrent void versus
 checkout, and recovery after the response is lost.
 
+Resolution: confirmed payments can only be consumed by checkout or corrected
+through a linked refund. A `requires_reconciliation` attempt can be marked as
+unpaid only by a user with `pos.manage_sales` for that tenant or branch and only
+with terminal evidence. The cashier UI does not expose that decline action.
+Concurrent checkout/void and lost-response reload recovery are regression
+tested.
+
 ### AP-POS-002 - Manual card/QR confirmation has no mandatory unique evidence
 
 Severity: High
 Affected roles: seller, pharmacy owner
+Status: Resolved by migration `0122` and tenant-scoped evidence validation.
 
 Evidence:
 
@@ -84,10 +94,16 @@ Required fix:
 Required tests: empty evidence, duplicate and concurrent duplicate evidence,
 cross-tenant reuse, permission checks and receipt/reconciliation read model.
 
+Resolution: manual card and QR confirmation requires normalized terminal and
+external reference values. PostgreSQL enforces uniqueness inside a tenant;
+concurrent duplicates produce one confirmation and one conflict, while two
+different tenants may legitimately reuse the same provider reference.
+
 ### AP-POS-003 - Active electronic attempts do not block cart changes and shift close
 
 Severity: High
 Affected roles: seller, pharmacy owner
+Status: Core safety invariant resolved; owner reconciliation queue pending.
 
 Evidence:
 
@@ -112,10 +128,17 @@ Required fix:
 Required tests: update/delete after an active attempt, closing a shift with an
 empty draft but active attempt, and the checkout-versus-close race.
 
+Resolution: active attempts lock amount-changing draft operations and prevent
+shift close. A deterministic PostgreSQL race test proves that checkout and
+shift close leave one consistent order with no duplicate sale, stock movement
+or outbox event. The remaining work is the owner-facing queue, not an accounting
+or authorization bypass.
+
 ### AP-POS-004 - Customer returns immediately increase sellable stock
 
 Severity: High
 Affected roles: seller, pharmacy owner, inventory controller
+Status: Resolved by migration `0123` and the customer-return quarantine domain.
 
 Evidence:
 
@@ -138,6 +161,10 @@ Required fix:
 Required tests: financial refund leaves sellable stock unchanged, quarantine is
 tenant/branch isolated, only an authorized disposition changes stock, and no
 returned unit is selected by FEFO before release.
+
+Resolution: a refund creates an immutable quarantined item and does not increase
+sellable stock. A separately authorized disposition records release, supplier
+return, write-off or destruction with tenant/branch isolation and audit.
 
 ### AP-POS-005 - Confirmed payment can conflict with a later settings change
 
@@ -219,11 +246,20 @@ and one audit trail after synchronization.
 
 ## Implementation order
 
-1. Electronic payment state machine: AP-POS-001, AP-POS-002 and AP-POS-003.
-2. Pharmaceutical return quarantine: AP-POS-004.
-3. Settings-race and receipt/privacy corrections: AP-POS-005 and AP-POS-006.
-4. Full POS regression matrix and adversarial concurrency tests.
-5. Separate Branch Edge executable milestone: AP-POS-007.
+1. Owner reconciliation queue for unresolved payment attempts.
+2. Separate Branch Edge executable milestone: AP-POS-007.
+3. Bank/provider sandbox integration after contracts are available.
+
+## Regression matrix
+
+| Risk | Automated evidence |
+| --- | --- |
+| Cashier discards an uncertain electronic payment | Backend permission denial and frontend action-hiding test |
+| One terminal document confirms two sales | Sequential and concurrent same-tenant uniqueness tests |
+| Provider references overlap between pharmacies | Cross-tenant reuse test |
+| Checkout races with payment void | PostgreSQL barrier test: checkout wins, attempt is consumed once |
+| Checkout races with shift close | PostgreSQL barrier test with consistent totals, stock and outbox |
+| Checkout response and first lookup are lost | Browser reload recovery with the original operation ID and no second checkout POST |
 
 Each package must pass targeted tests first, then full backend pytest, full
 Vitest and the sale/refund/shift Playwright flows in a disposable environment.

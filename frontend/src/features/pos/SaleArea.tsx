@@ -189,6 +189,7 @@ export function SaleArea({
   canOpenShift = true,
   canCloseShift = true,
   canSell = true,
+  canReconcileExternalPayment = false,
   workstationControls,
   onRegisterSwitchStateChange,
 }: {
@@ -203,6 +204,7 @@ export function SaleArea({
   canOpenShift?: boolean;
   canCloseShift?: boolean;
   canSell?: boolean;
+  canReconcileExternalPayment?: boolean;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
@@ -226,6 +228,7 @@ export function SaleArea({
           paymentSettingsLoading={paymentSettingsLoading}
           paymentSettingsUnavailable={paymentSettingsUnavailable}
           canCloseShift={canCloseShift}
+          canReconcileExternalPayment={canReconcileExternalPayment}
           online={isOnline}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={onRegisterSwitchStateChange}
@@ -266,6 +269,7 @@ function ActiveWorkspace({
   paymentSettingsLoading,
   paymentSettingsUnavailable,
   canCloseShift,
+  canReconcileExternalPayment,
   online,
   workstationControls,
   onRegisterSwitchStateChange,
@@ -280,6 +284,7 @@ function ActiveWorkspace({
   paymentSettingsLoading: boolean;
   paymentSettingsUnavailable: boolean;
   canCloseShift: boolean;
+  canReconcileExternalPayment: boolean;
   online: boolean;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
@@ -2059,6 +2064,7 @@ function ActiveWorkspace({
             method={externalPaymentConfirmation.method}
             amount={externalPaymentConfirmation.amount}
             currency={currency}
+            canResolveDecline={canReconcileExternalPayment}
             error={topError}
             isLoading={
               beginPaymentAttemptReconciliation.isPending ||

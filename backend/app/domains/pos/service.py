@@ -486,7 +486,7 @@ class POSService:
         attempt = await self.repo.lock_payment_attempt(attempt_id)
         if attempt is None:
             raise NotFoundError("Payment attempt not found")
-        await self._assert_payment_attempt_access(
+        sale = await self._assert_payment_attempt_access(
             attempt,
             tenant_id=tenant_id,
             actor_id=actor_id,
@@ -499,6 +499,17 @@ class POSService:
             normalized_evidence = self._normalize_payment_evidence(
                 terminal_id=terminal_id,
                 external_reference=external_reference,
+            )
+        can_reconcile = can_manage_tenant or (
+            allowed_manage_branch_ids is not None and sale.branch_id in allowed_manage_branch_ids
+        )
+        if (
+            attempt.status in {"requires_reconciliation", "voided"}
+            and attempt.reconciliation_started_at is not None
+            and not can_reconcile
+        ):
+            raise PermissionDeniedError(
+                "Resolving an uncertain payment requires sales management permission"
             )
         if attempt.status == "voided":
             if (
