@@ -343,6 +343,7 @@ test.describe("POS sale (owner)", () => {
           /\/api\/v1\/pos\/refund-attempts\/[^/]+\/reconciliation$/.test(response.url()) &&
           response.ok(),
       );
+      await refundDialog.getByLabel("Причина").selectOption("quality_issue");
       await refundDialog.getByRole("button", { name: "Рассчитать возврат" }).click();
       const refundAttempt = (await (await createRefundAttemptResponse).json()) as {
         id: string;
@@ -372,6 +373,11 @@ test.describe("POS sale (owner)", () => {
           response.url().endsWith(`/api/v1/sales/${completedSale.sale_id}/refund`) &&
           response.ok(),
       );
+      const refundRequest = page.waitForRequest(
+        (request) =>
+          request.method() === "POST" &&
+          request.url().endsWith(`/api/v1/sales/${completedSale.sale_id}/refund`),
+      );
       await refundDialog.getByRole("button", { name: "Подтвердить и оформить" }).click();
       expect(
         ((await (await confirmRefundAttemptResponse).json()) as { status: string }).status,
@@ -383,10 +389,26 @@ test.describe("POS sale (owner)", () => {
       };
       expect(returnedSale.sale_type).toBe("return");
       expect(returnedSale.refund_attempt_id).toBe(refundAttempt.id);
+      expect((await refundRequest).postDataJSON()).toMatchObject({
+        reason: "quality_issue",
+        comment: null,
+      });
 
       const storedRefundAttempt = await api.get(`pos/refund-attempts/${refundAttempt.id}`);
       expect(storedRefundAttempt.ok()).toBe(true);
       expect(((await storedRefundAttempt.json()) as { status: string }).status).toBe("consumed");
+
+      await expect(page.getByText("Возврат", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Печать возврата" }).click();
+      await expect(page.getByRole("dialog", { name: "Печать возврата" })).toBeVisible();
+      await expect(page.getByText("ВОЗВРАТ", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText(`Исходный чек № ${completedSale.receipt_number}`, { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("ВОЗВРАЩЕНО", { exact: true })).toBeVisible();
+      await expect(page.getByText("Принято", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("Сдача", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("Спасибо за покупку!", { exact: true })).toHaveCount(0);
     } finally {
       await apiAnon.dispose();
       await api.dispose();

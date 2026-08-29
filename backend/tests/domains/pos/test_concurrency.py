@@ -275,7 +275,7 @@ async def _refund(
         sale = await POSService(POSRepository(session)).refund(
             parent_sale_id=parent_sale_id,
             items=[(parent_item_id, qty)],
-            reason="concurrency",
+            reason="other",
             comment=None,
             cashier_user_id=context.cashier_id,
             operation_id=operation_id,

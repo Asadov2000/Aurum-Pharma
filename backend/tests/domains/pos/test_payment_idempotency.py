@@ -439,7 +439,7 @@ async def test_payment_and_refund_share_operation_id_namespace(
         await service.refund(
             parent_sale_id=parent.id,
             items=[(items[0].id, Decimal("1"))],
-            reason="customer return",
+            reason="customer_cancelled",
             comment=None,
             cashier_user_id=scaffold["cashier"].id,
             operation_id=payment_operation_id,
@@ -449,7 +449,7 @@ async def test_payment_and_refund_share_operation_id_namespace(
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(items[0].id, Decimal("1"))],
-        reason="customer return",
+        reason="customer_cancelled",
         comment=None,
         cashier_user_id=scaffold["cashier"].id,
         operation_id=refund_operation_id,

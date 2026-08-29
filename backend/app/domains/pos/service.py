@@ -39,6 +39,7 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.catalog.models import TenantCatalog
+from app.domains.customer_returns.reasons import REFUND_REASON_CODES
 from app.domains.customer_returns.repository import CustomerReturnsRepository
 from app.domains.customer_returns.service import CustomerReturnsService
 from app.domains.foundation.models import Branch, Register, Tenant
@@ -2284,8 +2285,10 @@ class POSService:
             raise AurumError("Tenant report timezone is invalid") from exc
 
         original_return_names: dict[UUID, str] = {}
+        original_receipt_number: str | None = None
         if sale.sale_type == "return" and sale.parent_sale_id is not None:
             parent = await self.repo.get_sale(sale.parent_sale_id)
+            original_receipt_number = parent.receipt_number if parent is not None else None
             if parent is not None and parent.receipt_snapshot is not None:
                 try:
                     parent_receipt = ReceiptData.model_validate(parent.receipt_snapshot)
@@ -2340,6 +2343,7 @@ class POSService:
             branch_address=branch.address if branch is not None else None,
             branch_license=branch.license_number if branch is not None else None,
             receipt_number=receipt_number,
+            original_receipt_number=original_receipt_number,
             datetime=local_receipt_datetime,
             cashier_name=cashier_name,
             items=lines,
@@ -2382,6 +2386,16 @@ class POSService:
                 raise AurumError("Receipt snapshot is invalid") from exc
             if snapshot.sale_id != sale.id:
                 raise AurumError("Receipt snapshot does not match the sale")
+            if (
+                snapshot.is_refund
+                and snapshot.original_receipt_number is None
+                and sale.parent_sale_id is not None
+            ):
+                parent = await self.repo.get_sale(sale.parent_sale_id)
+                if parent is not None:
+                    snapshot = snapshot.model_copy(
+                        update={"original_receipt_number": parent.receipt_number}
+                    )
             return snapshot
 
         items = await self.repo.list_items(sale.id)
@@ -4120,6 +4134,8 @@ class POSService:
         normalized_comment = comment.strip() if comment is not None else None
         normalized_reason = normalized_reason or None
         normalized_comment = normalized_comment or None
+        if normalized_reason is not None and normalized_reason not in REFUND_REASON_CODES:
+            raise BusinessRuleError("Unsupported refund reason code")
         effective_operation_id = operation_id or uuid4()
         operation_hash = self._refund_operation_hash(
             parent_sale_id=parent_sale_id,
@@ -4225,8 +4241,7 @@ class POSService:
                 payment_method=payment_method,
                 amount=amount,
                 metadata_json={
-                    "reason": normalized_reason,
-                    "comment": normalized_comment,
+                    "reason_code": normalized_reason,
                     "refund_attempt_id": (
                         str(refund_attempt_id) if refund_attempt_id is not None else None
                     ),

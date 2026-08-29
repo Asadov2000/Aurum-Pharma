@@ -205,7 +205,7 @@ async def test_shift_history_reports_gross_sales_and_returns(
     await service.refund(
         parent_sale_id=sale.id,
         items=[(items[0].id, Decimal("1"))],
-        reason="defect",
+        reason="quality_issue",
         comment=None,
         cashier_user_id=scaffold["cashier"].id,
     )

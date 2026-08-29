@@ -222,7 +222,7 @@ async def test_has_refund_filter(db_session: AsyncSession, pos_scaffold) -> None
     await service.refund(
         parent_sale_id=refunded_parent.id,
         items=[(items[0].id, Decimal("1"))],
-        reason="defect",
+        reason="quality_issue",
         comment=None,
         cashier_user_id=s["cashier"].id,
     )

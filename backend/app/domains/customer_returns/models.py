@@ -42,6 +42,12 @@ class CustomerReturnQuarantineItem(Base):
 
     __table_args__ = (
         CheckConstraint("qty > 0", name="ck_customer_return_quarantine_qty"),
+        CheckConstraint(
+            "refund_reason IS NULL OR refund_reason IN "
+            "('dispensing_error','duplicate_sale','pricing_error','quality_issue',"
+            "'damaged_package','customer_cancelled','other')",
+            name="ck_customer_return_quarantine_refund_reason_code",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_customer_return_quarantine_tenant_id"),
         UniqueConstraint(
             "tenant_id",

@@ -182,7 +182,7 @@ async def test_today_sales_gross_keeps_same_day_full_refund_and_matches_summary(
     await pos.refund(
         parent_sale_id=sale.id,
         items=[(created[0].id, Decimal("1"))],
-        reason="defect",
+        reason="quality_issue",
         comment=None,
         cashier_user_id=cashier.id,
     )

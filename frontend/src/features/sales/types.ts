@@ -1,3 +1,5 @@
+import { type RefundReasonCode } from "@/lib/refundReasons";
+
 // Mirrors backend app/domains/pos/schemas.py SaleListItem / SaleList.
 
 export interface SaleListItem {
@@ -48,7 +50,7 @@ export interface RefundLine {
 export interface RefundPayload {
   operation_id: string;
   items: RefundLine[];
-  reason?: string | null;
+  reason?: RefundReasonCode | null;
   comment?: string | null;
   refund_attempt_id?: string | null;
 }
