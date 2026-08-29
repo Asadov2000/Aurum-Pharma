@@ -9,7 +9,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, require_any_permission, require_permission
+from app.core.deps import (
+    CurrentUser,
+    get_db,
+    require_any_branch_permission,
+    require_branch_permission,
+    require_permission,
+)
 from app.core.errors import BusinessRuleError
 from app.domains.suppliers.repository import SupplierReturnRow, SuppliersRepository
 from app.domains.suppliers.schemas import (
@@ -78,7 +84,10 @@ def _return_details(row: SupplierReturnRow, *, report_timezone: str) -> Supplier
 async def search_supplier_return_candidates(
     payload: SupplierReturnCandidateSearchRequest,
     response: Response,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.return"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.return", policy="filter")),
+    ],
     service: Annotated[SuppliersService, Depends(_service)],
 ) -> SupplierReturnCandidateList:
     _set_search_no_store(response)
@@ -122,7 +131,10 @@ async def search_supplier_return_candidates(
 async def search_supplier_returns(
     payload: SupplierReturnSearchRequest,
     response: Response,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.view", policy="filter")),
+    ],
     service: Annotated[SuppliersService, Depends(_service)],
 ) -> SupplierReturnList:
     _set_search_no_store(response)
@@ -156,7 +168,10 @@ async def search_supplier_returns(
 )
 async def create_supplier_return(
     payload: SupplierReturnCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.return"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.return", policy="resource")),
+    ],
     service: Annotated[SuppliersService, Depends(_service)],
 ) -> SupplierReturnCreated:
     supplier_return = await service.create_return(
@@ -179,7 +194,10 @@ async def create_supplier_return(
 
 @router.get("/returns", response_model=list[SupplierReturnRead])
 async def list_supplier_returns(
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.view", policy="filter")),
+    ],
     service: Annotated[SuppliersService, Depends(_service)],
     supplier_id: Annotated[UUID | None, Query()] = None,
     date_from: Annotated[date | None, Query()] = None,
@@ -206,10 +224,11 @@ async def search_supplier_options(
     user: Annotated[
         CurrentUser,
         Depends(
-            require_any_permission(
+            require_any_branch_permission(
                 "suppliers.view",
                 "incoming.create",
                 "incoming.return",
+                policy="tenant_reference",
             )
         ),
     ],
