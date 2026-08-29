@@ -16,6 +16,53 @@ down_revision: str | Sequence[str] | None = "0120"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+REFERENCE_TABLES = ("tenant", "branch", "sync_node", "app_user")
+
+
+def _grant_missing_reference_privileges() -> None:
+    op.execute("""
+        CREATE TEMPORARY TABLE aurum_0121_missing_reference_privilege (
+          table_name TEXT PRIMARY KEY
+        ) ON COMMIT DROP
+        """)
+    for table_name in REFERENCE_TABLES:
+        op.execute(f"""
+            DO $$
+            BEGIN
+              IF NOT pg_catalog.has_table_privilege(
+                'aurum_schema_owner',
+                'public.{table_name}',
+                'REFERENCES'
+              ) THEN
+                INSERT INTO pg_temp.aurum_0121_missing_reference_privilege (
+                  table_name
+                ) VALUES ('{table_name}');
+                GRANT REFERENCES ON TABLE public.{table_name}
+                  TO aurum_schema_owner;
+              END IF;
+            END
+            $$
+            """)
+
+
+def _restore_reference_privileges() -> None:
+    for table_name in REFERENCE_TABLES:
+        op.execute(f"""
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1
+                FROM pg_temp.aurum_0121_missing_reference_privilege
+                WHERE table_name = '{table_name}'
+              ) THEN
+                REVOKE REFERENCES ON TABLE public.{table_name}
+                  FROM aurum_schema_owner;
+              END IF;
+            END
+            $$
+            """)
+    op.execute("DROP TABLE pg_temp.aurum_0121_missing_reference_privilege")
+
 
 RECORD_INCIDENT_SQL = r"""
 CREATE FUNCTION public.record_sync_quarantine_incident(
@@ -229,6 +276,7 @@ SET search_path = pg_catalog, public, pg_temp
 
 
 def upgrade() -> None:
+    _grant_missing_reference_privileges()
     op.execute("""
         CREATE TABLE public.sync_quarantine_incident (
           incident_id UUID PRIMARY KEY,
@@ -352,9 +400,7 @@ def upgrade() -> None:
         "REVOKE ALL PRIVILEGES ON TABLE public.sync_quarantine_incident "
         "FROM PUBLIC, aurum_app, aurum_support"
     )
-    op.execute(
-        "GRANT SELECT ON TABLE public.sync_quarantine_incident TO aurum_app, aurum_support"
-    )
+    op.execute("GRANT SELECT ON TABLE public.sync_quarantine_incident TO aurum_app, aurum_support")
     op.execute(RECORD_INCIDENT_SQL)
     signature = (
         "public.record_sync_quarantine_incident("
@@ -362,10 +408,10 @@ def upgrade() -> None:
         "UUID, UUID, TEXT, TEXT, TEXT, INTEGER, TIMESTAMPTZ, TEXT, TEXT)"
     )
     op.execute(
-        f"REVOKE ALL PRIVILEGES ON FUNCTION {signature} "
-        "FROM PUBLIC, aurum_app, aurum_support"
+        f"REVOKE ALL PRIVILEGES ON FUNCTION {signature} " "FROM PUBLIC, aurum_app, aurum_support"
     )
     op.execute(f"GRANT EXECUTE ON FUNCTION {signature} TO aurum_app, aurum_support")
+    _restore_reference_privileges()
 
 
 def downgrade() -> None:
@@ -376,13 +422,11 @@ def downgrade() -> None:
         )
         """)
     op.execute(
-        "DROP TRIGGER trg_audit_sync_quarantine_incident "
-        "ON public.sync_quarantine_incident"
+        "DROP TRIGGER trg_audit_sync_quarantine_incident " "ON public.sync_quarantine_incident"
     )
     op.execute("DROP FUNCTION public.trg_audit_sync_quarantine_incident()")
     op.execute(
-        "DROP TRIGGER trg_immutable_sync_quarantine_incident "
-        "ON public.sync_quarantine_incident"
+        "DROP TRIGGER trg_immutable_sync_quarantine_incident " "ON public.sync_quarantine_incident"
     )
     op.execute("DROP FUNCTION public.trg_reject_sync_quarantine_incident_mutation()")
     op.execute("DROP TABLE public.sync_quarantine_incident")
