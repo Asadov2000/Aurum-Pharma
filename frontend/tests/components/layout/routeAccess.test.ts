@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  accessibleInternalPath,
   canAccessPath,
   firstAccessiblePath,
   type RouteAccessContext,
@@ -36,6 +37,21 @@ describe("route access", () => {
 
   it("uses the POS as the primary fallback for a cashier", () => {
     expect(firstAccessiblePath(SELLER)).toBe("/pos");
+  });
+
+  it("keeps an accessible internal return path including its search and hash", () => {
+    expect(accessibleInternalPath("/sales?receipt=42#payments", SELLER)).toBe(
+      "/sales?receipt=42#payments",
+    );
+  });
+
+  it("rejects external, unknown, login and inaccessible return paths", () => {
+    expect(accessibleInternalPath("https://attacker.example/pos", SELLER)).toBeNull();
+    expect(accessibleInternalPath("//attacker.example/pos", SELLER)).toBeNull();
+    expect(accessibleInternalPath("/\\attacker.example/pos", SELLER)).toBeNull();
+    expect(accessibleInternalPath("/login", SELLER)).toBeNull();
+    expect(accessibleInternalPath("/future-section", SELLER)).toBeNull();
+    expect(accessibleInternalPath("/admin", SELLER)).toBeNull();
   });
 
   it("keeps owner onboarding unavailable to platform and support identities", () => {

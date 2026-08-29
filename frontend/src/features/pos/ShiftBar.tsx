@@ -25,12 +25,14 @@ export function ShiftBar({
   canOpen = true,
   canClose = true,
   closeBlocked = false,
+  online = true,
 }: {
   registerId: string;
   mode?: PosMode;
   canOpen?: boolean;
   canClose?: boolean;
   closeBlocked?: boolean;
+  online?: boolean;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const queryClient = useQueryClient();
@@ -41,18 +43,27 @@ export function ShiftBar({
   const [notes, setNotes] = useState("");
   const [closeOpen, setCloseOpen] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
+  const [openingCashError, setOpeningCashError] = useState<string | null>(null);
+  const [closingCashError, setClosingCashError] = useState<string | null>(null);
+  const openingCashRef = useRef<HTMLInputElement>(null);
 
   const shift = shiftQuery.data;
 
   const onOpen = async () => {
-    if (!canOpen) return;
-    if (Number(openingCash) < 0) {
-      setTopError("Сумма не может быть отрицательной");
+    if (!canOpen || !online) return;
+    const normalizedOpeningCash = normalizeCashAmount(openingCash);
+    if (normalizedOpeningCash === null) {
+      setOpeningCashError(CASH_AMOUNT_ERROR);
+      openingCashRef.current?.focus();
       return;
     }
+    setOpeningCashError(null);
     setTopError(null);
     try {
-      await openMutation.mutateAsync({ register_id: registerId, opening_cash: openingCash });
+      await openMutation.mutateAsync({
+        register_id: registerId,
+        opening_cash: normalizedOpeningCash,
+      });
     } catch (err) {
       const refreshed = await shiftQuery.refetch();
       if (refreshed.data) {
@@ -64,52 +75,61 @@ export function ShiftBar({
   };
 
   const onClose = async () => {
-    if (!shift || !canClose || closeBlocked) return;
-    if (closingCash === "" || Number(closingCash) < 0) {
-      setTopError("Введите фактическую сумму наличных");
+    if (!shift || !canClose || closeBlocked || !online) return;
+    const normalizedClosingCash = normalizeCashAmount(closingCash);
+    if (normalizedClosingCash === null) {
+      setClosingCashError(CASH_AMOUNT_ERROR);
       return;
     }
+    setClosingCashError(null);
     setTopError(null);
     try {
       await closeMutation.mutateAsync({
         shiftId: shift.id,
         registerId,
         payload: {
-          closing_cash_actual: closingCash,
+          closing_cash_actual: normalizedClosingCash,
           notes: notes.trim() || null,
         },
       });
-      // Stash the just-closed shift id so /reports can preload the Z-report.
-      try {
-        window.localStorage.setItem("pos:lastClosedShiftId", shift.id);
-      } catch {
-        // Closing the shift must not depend on optional browser storage.
-      }
-      setCloseOpen(false);
-      setClosingCash("");
-      setNotes("");
-      // Auto-download the Z-report XLSX. Best-effort: the shift is already
-      // closed, so a download hiccup must not surface as a close failure —
-      // the cashier can re-download from «Отчёты».
-      try {
-        const blob = await getZReportXlsx(shift.id);
-        downloadBlob(blob, `z-report-${shift.id}.xlsx`);
-      } catch {
-        // ignore — re-downloadable from Отчёты
-      }
+      await finishClosedShift(shift.id);
     } catch (err) {
+      const refreshed = await shiftQuery.refetch();
+      if (refreshed.isSuccess && !refreshed.data) {
+        await finishClosedShift(shift.id);
+        return;
+      }
       setTopError(describeApiError(err, "Не удалось закрыть смену"));
     }
   };
 
-  // F9 toggles the shift in keyboard mode: open it (no shift) or pop the close
-  // dialog. Ref keeps the latest closures so the listener binds once.
+  const finishClosedShift = async (shiftId: string) => {
+    // Stash the just-closed shift id so /reports can preload the Z-report.
+    try {
+      window.localStorage.setItem("pos:lastClosedShiftId", shiftId);
+    } catch {
+      // Closing the shift must not depend on optional browser storage.
+    }
+    setCloseOpen(false);
+    setClosingCash("");
+    setClosingCashError(null);
+    setNotes("");
+    try {
+      const blob = await getZReportXlsx(shiftId);
+      downloadBlob(blob, `z-report-${shiftId}.xlsx`);
+    } catch {
+      // The report remains available from «Отчёты».
+    }
+  };
+
+  // F9 never submits money: it focuses the opening amount or opens the close dialog.
   const toggleRef = useRef<() => void>(() => {});
   toggleRef.current = () => {
     if (shift) {
-      if (canClose && !closeBlocked) setCloseOpen(true);
+      if (canClose && !closeBlocked && online) setCloseOpen(true);
     } else if (canOpen) {
-      void onOpen();
+      openingCashRef.current?.focus();
+      openingCashRef.current?.select();
     }
   };
   useEffect(() => {
@@ -158,19 +178,34 @@ export function ShiftBar({
             <div className="min-w-0 flex-1">
               <Label htmlFor="opening_cash">Касса на начало смены</Label>
               <Input
+                ref={openingCashRef}
                 id="opening_cash"
                 type="text"
                 inputMode="decimal"
                 value={openingCash}
-                onChange={(e) => setOpeningCash(e.target.value)}
+                onChange={(e) => {
+                  setOpeningCash(e.target.value);
+                  if (openingCashError) setOpeningCashError(null);
+                }}
+                invalid={openingCashError !== null}
+                aria-describedby={openingCashError ? "opening-cash-error" : undefined}
+                aria-keyshortcuts={mode === "keyboard" ? "F9" : undefined}
+                autoComplete="off"
+                maxLength={15}
                 className="w-full"
               />
+              {openingCashError ? (
+                <p id="opening-cash-error" className="mt-1 text-xs text-danger" role="alert">
+                  {openingCashError}
+                </p>
+              ) : null}
             </div>
             <Button
               onClick={() => void onOpen()}
               isLoading={openMutation.isPending}
+              disabled={!online}
               size={mode === "touch" ? "lg" : "md"}
-              title={mode === "keyboard" ? "Открыть смену (F9)" : undefined}
+              title={!online ? "Открытие смены доступно после восстановления связи" : undefined}
             >
               Открыть смену
             </Button>
@@ -215,14 +250,16 @@ export function ShiftBar({
             variant="secondary"
             size="sm"
             className="ml-auto"
-            disabled={closeBlocked}
+            disabled={closeBlocked || !online}
             onClick={() => setCloseOpen(true)}
             title={
-              closeBlocked
-                ? "Сначала завершите или очистите текущий чек"
-                : mode === "keyboard"
-                  ? "Закрыть смену (F9)"
-                  : undefined
+              !online
+                ? "Закрытие смены доступно после восстановления связи"
+                : closeBlocked
+                  ? "Сначала завершите или очистите текущий чек"
+                  : mode === "keyboard"
+                    ? "Закрыть смену (F9)"
+                    : undefined
             }
           >
             Закрыть смену
@@ -243,9 +280,21 @@ export function ShiftBar({
               type="text"
               inputMode="decimal"
               value={closingCash}
-              onChange={(e) => setClosingCash(e.target.value)}
+              onChange={(e) => {
+                setClosingCash(e.target.value);
+                if (closingCashError) setClosingCashError(null);
+              }}
+              invalid={closingCashError !== null}
+              aria-describedby={closingCashError ? "closing-cash-error" : undefined}
+              autoComplete="off"
+              maxLength={15}
               autoFocus
             />
+            {closingCashError ? (
+              <p id="closing-cash-error" className="mt-1 text-xs text-danger" role="alert">
+                {closingCashError}
+              </p>
+            ) : null}
             <p className="mt-1 text-xs text-foreground-muted">
               Сумма в кассе после пересчёта. Расхождение с ожидаемым появится в Z-отчёте.
             </p>
@@ -263,6 +312,7 @@ export function ShiftBar({
               aria-label="Подтвердить закрытие смены"
               onClick={() => void onClose()}
               isLoading={closeMutation.isPending}
+              disabled={!online}
             >
               Закрыть
             </Button>
@@ -271,4 +321,12 @@ export function ShiftBar({
       </Modal>
     </>
   );
+}
+
+const CASH_AMOUNT_ERROR = "Введите сумму от 0 до 999 999 999 999,99 с точностью до копейки";
+
+function normalizeCashAmount(value: string): string | null {
+  const normalized = value.trim().replace(",", ".");
+  if (!/^\d{1,12}(?:\.\d{1,2})?$/.test(normalized)) return null;
+  return normalized;
 }

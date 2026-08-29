@@ -7,6 +7,7 @@ const PLATFORM_ACCESS_VIEW_CAPABILITY = "platform.access.view";
 const PLATFORM_ACCOUNTS_VIEW_CAPABILITY = "platform.accounts.view";
 const PLATFORM_SYNC_VIEW_CAPABILITY = "platform.sync.view";
 const PLATFORM_BILLING_VIEW_CAPABILITY = "platform.billing.view";
+const INTERNAL_REDIRECT_ORIGIN = "https://aurum.internal";
 
 export const BRANCH_VIEW_PERMISSIONS = ["branches.view"] as const;
 export const REGISTER_VIEW_PERMISSIONS = ["registers.view"] as const;
@@ -62,6 +63,33 @@ export interface RouteAccessContext {
   permissions: readonly string[];
   platformCapabilities: readonly string[];
 }
+
+const KNOWN_APP_ROUTES: readonly AppRoutePath[] = [
+  "/",
+  "/admin",
+  "/admin/access",
+  "/admin/accounts",
+  "/admin/sync",
+  "/admin/billing",
+  "/admin/tenants",
+  "/onboarding",
+  "/branches",
+  "/registers",
+  "/users",
+  "/roles",
+  "/catalog",
+  "/batches",
+  "/suppliers",
+  "/incoming",
+  "/pos",
+  "/sales",
+  "/billing",
+  "/reports",
+  "/audit",
+  "/notifications",
+  "/security",
+  "/settings",
+];
 
 export function getRouteAccessContext(user: MeResponse | null | undefined): RouteAccessContext {
   const identity: Partial<MeResponse> = user ?? {};
@@ -211,6 +239,26 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   // A scoped support identity is fail-closed: a newly added route must opt in
   // before it can become visible inside a tenant context.
   return !context.isSupportScoped;
+}
+
+export function accessibleInternalPath(
+  candidate: unknown,
+  context: RouteAccessContext,
+): string | null {
+  if (typeof candidate !== "string" || !candidate.startsWith("/")) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate, INTERNAL_REDIRECT_ORIGIN);
+  } catch {
+    return null;
+  }
+
+  if (parsed.origin !== INTERNAL_REDIRECT_ORIGIN) return null;
+  if (!KNOWN_APP_ROUTES.some((route) => isPath(parsed.pathname, route))) return null;
+  if (!canAccessPath(parsed.pathname, context)) return null;
+
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
 const FALLBACK_PATHS: readonly AppRoutePath[] = [

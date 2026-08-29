@@ -16,6 +16,7 @@ import { findByBarcode } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
+import { useOnlineStatus } from "@/lib/useOnlineStatus";
 import { cn } from "@/lib/utils";
 
 import { BarcodeListener } from "./BarcodeListener";
@@ -200,6 +201,7 @@ export function SaleArea({
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
+  const isOnline = useOnlineStatus();
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
 
@@ -219,6 +221,7 @@ export function SaleArea({
           paymentSettingsLoading={paymentSettingsLoading}
           paymentSettingsUnavailable={paymentSettingsUnavailable}
           canCloseShift={canCloseShift}
+          online={isOnline}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={onRegisterSwitchStateChange}
         />
@@ -234,6 +237,7 @@ export function SaleArea({
             mode={mode}
             canOpen={canOpenShift}
             canClose={canCloseShift}
+            online={isOnline}
           />
         </div>
       )}
@@ -257,6 +261,7 @@ function ActiveWorkspace({
   paymentSettingsLoading,
   paymentSettingsUnavailable,
   canCloseShift,
+  online,
   workstationControls,
   onRegisterSwitchStateChange,
 }: {
@@ -270,6 +275,7 @@ function ActiveWorkspace({
   paymentSettingsLoading: boolean;
   paymentSettingsUnavailable: boolean;
   canCloseShift: boolean;
+  online: boolean;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
@@ -416,12 +422,13 @@ function ActiveWorkspace({
         (stagedPayments.some((payment) => !paymentMethods.includes(payment.payment_method)) ||
           (!mixedPaymentEnabled &&
             (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
-  const cartMutationPending = posCommand.blocked;
+  const cartMutationPending = posCommand.blocked || !online;
   const paymentStarted = stagedPayments.length > 0 || recordedPayments.length > 0;
   const electronicPaymentPendingResolution = stagedPayments.some(
     (payment) => payment.payment_method === "card" || payment.payment_method === "qr",
   );
   const saleEditingBlocked =
+    !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
     posCommand.blocked ||
@@ -432,6 +439,7 @@ function ActiveWorkspace({
     pendingPayment !== null ||
     (saleId !== null && sale === null);
   const scannerHardwareBlocked =
+    !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
     paymentStarted ||
@@ -441,6 +449,7 @@ function ActiveWorkspace({
     pendingPayment !== null;
   const scanInputBlocked = scannerHardwareBlocked || posCommand.blocked;
   const shiftCloseBlocked =
+    !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
     checkoutReconciling ||
@@ -461,6 +470,7 @@ function ActiveWorkspace({
         stagedPayments.length > 0 ||
         prescription !== null));
   const registerSwitchBlocked =
+    !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
     checkoutReconciling ||
@@ -1744,6 +1754,7 @@ function ActiveWorkspace({
             mode={mode}
             canClose={canCloseShift}
             closeBlocked={shiftCloseBlocked}
+            online={online}
           />
         </div>
 
@@ -1752,6 +1763,16 @@ function ActiveWorkspace({
             Прошлый черновик устарел (более {draftTtlMin} мин) и был очищен — начните новую продажу.
           </p>
         )}
+
+        {!online ? (
+          <p
+            className="rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground"
+            role="status"
+          >
+            Нет связи с сервером. Текущий чек сохранён на этом устройстве; изменение товаров, оплата
+            и закрытие смены временно заблокированы.
+          </p>
+        ) : null}
 
         {posCommand.message ? (
           <div
