@@ -8,7 +8,19 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, delete, distinct, exists, func, literal, or_, select, text
+from sqlalchemy import (
+    and_,
+    case,
+    delete,
+    distinct,
+    exists,
+    func,
+    literal,
+    or_,
+    select,
+    text,
+    union_all,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -430,12 +442,13 @@ class POSRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def lock_operation_id(self, operation_id: UUID) -> None:
+    async def lock_operation_id(self, *, tenant_id: UUID, operation_id: UUID) -> None:
         await self.session.execute(
             text(
-                "SELECT pg_advisory_xact_lock(" "hashtextextended(CAST(:operation_id AS TEXT), 0))"
+                "SELECT pg_advisory_xact_lock(hashtextextended("
+                "CAST(:tenant_id AS TEXT) || ':' || CAST(:operation_id AS TEXT), 0))"
             ),
-            {"operation_id": str(operation_id)},
+            {"tenant_id": str(tenant_id), "operation_id": str(operation_id)},
         )
 
     async def get_pos_command(
@@ -471,33 +484,45 @@ class POSRepository:
         await self.session.refresh(command)
         return command
 
-    async def has_legacy_pos_operation(
+    async def get_pos_operation_kinds(
         self,
         *,
         tenant_id: UUID,
         operation_id: UUID,
-    ) -> bool:
-        stmt = select(
-            or_(
+    ) -> set[str]:
+        stmt = union_all(
+            select(literal("command")).where(
+                exists().where(
+                    POSCommand.tenant_id == tenant_id,
+                    POSCommand.operation_id == operation_id,
+                )
+            ),
+            select(literal("sale")).where(
                 exists().where(
                     Sale.tenant_id == tenant_id,
                     Sale.operation_id == operation_id,
-                ),
+                )
+            ),
+            select(literal("payment")).where(
                 exists().where(
                     SalePayment.tenant_id == tenant_id,
                     SalePayment.operation_id == operation_id,
-                ),
+                )
+            ),
+            select(literal("payment_attempt")).where(
                 exists().where(
                     POSPaymentAttempt.tenant_id == tenant_id,
                     POSPaymentAttempt.operation_id == operation_id,
-                ),
+                )
+            ),
+            select(literal("refund_attempt")).where(
                 exists().where(
                     POSRefundAttempt.tenant_id == tenant_id,
                     POSRefundAttempt.operation_id == operation_id,
-                ),
-            )
+                )
+            ),
         )
-        return bool(await self.session.scalar(stmt))
+        return {str(kind) for kind in (await self.session.execute(stmt)).scalars().all()}
 
     async def update_sale(self, sale: Sale, **fields: Any) -> Sale:
         for k, v in fields.items():

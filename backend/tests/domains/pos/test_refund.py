@@ -545,6 +545,57 @@ async def test_refund_attempt_create_is_idempotent_and_payload_bound(
         )
 
 
+async def test_refund_attempt_operation_id_cannot_be_reused_for_payment_attempt(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, scaffold, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20"))],
+    )
+    operation_id = uuid4()
+    await service.create_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        actor_id=scaffold["cashier"].id,
+        operation_id=operation_id,
+    )
+    draft = await service.create_sale(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=draft.id,
+        catalog_id=scaffold["item"].id,
+        qty=Decimal("1"),
+        actor_id=scaffold["cashier"].id,
+    )
+
+    with pytest.raises(ConflictError, match="another POS operation"):
+        await service.create_payment_attempt(
+            tenant_id=scaffold["tenant"].id,
+            sale_id=draft.id,
+            actor_id=scaffold["cashier"].id,
+            operation_id=operation_id,
+            payment_method="card",
+            amount=Decimal("10.00"),
+            currency="TJS",
+        )
+
+    with pytest.raises(ConflictError, match="another POS operation"):
+        await service.refund(
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            reason="customer return",
+            comment=None,
+            cashier_user_id=scaffold["cashier"].id,
+            operation_id=operation_id,
+        )
+
+
 async def test_refund_confirmation_requires_all_methods_and_is_idempotent(
     db_session: AsyncSession, pos_scaffold
 ) -> None:

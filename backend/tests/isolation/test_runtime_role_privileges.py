@@ -346,6 +346,7 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_incoming_document_lifecycle",
     "trg_guard_incoming_item_lifecycle",
     "trg_guard_pos_command_immutable",
+    "trg_enforce_pos_operation_namespace",
     "trg_guard_write_off_immutability",
     "trg_guard_supplier_return_immutability",
     "trg_guard_trial_activation_immutable",

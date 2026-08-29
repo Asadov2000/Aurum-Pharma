@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, current_user, get_db
@@ -149,6 +150,79 @@ async def test_attempt_create_is_idempotent_and_conflicts_on_changed_payload(
             amount=Decimal("10.00"),
             currency="TJS",
         )
+
+
+async def test_operation_namespace_blocks_cross_type_reuse_in_service_and_database(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    repo = POSRepository(db_session)
+    service = POSService(repo)
+    sale = await _draft_sale(service, scaffold)
+    operation_id = uuid4()
+    await service.create_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        sale_id=sale.id,
+        actor_id=scaffold["cashier"].id,
+        operation_id=operation_id,
+        payment_method="card",
+        amount=Decimal("10.00"),
+        currency="TJS",
+    )
+
+    with pytest.raises(ConflictError, match="another POS operation"):
+        await service.add_payment(
+            sale_id=sale.id,
+            payment_method="cash",
+            amount=Decimal("10.00"),
+            operation_id=operation_id,
+        )
+
+    with pytest.raises(IntegrityError, match="already owned by another operation"):
+        async with db_session.begin_nested():
+            await repo.insert_payment(
+                tenant_id=scaffold["tenant"].id,
+                sale_id=sale.id,
+                payment_method="cash",
+                amount=Decimal("10.00"),
+                operation_id=operation_id,
+                operation_hash="0" * 64,
+            )
+
+
+async def test_operation_namespace_is_tenant_scoped(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    first_scaffold = await pos_scaffold()
+    second_scaffold = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    first_sale = await _draft_sale(service, first_scaffold)
+    second_sale = await _draft_sale(service, second_scaffold)
+    operation_id = uuid4()
+
+    first = await service.create_payment_attempt(
+        tenant_id=first_scaffold["tenant"].id,
+        sale_id=first_sale.id,
+        actor_id=first_scaffold["cashier"].id,
+        operation_id=operation_id,
+        payment_method="card",
+        amount=Decimal("10.00"),
+        currency="TJS",
+    )
+    second = await service.create_payment_attempt(
+        tenant_id=second_scaffold["tenant"].id,
+        sale_id=second_sale.id,
+        actor_id=second_scaffold["cashier"].id,
+        operation_id=operation_id,
+        payment_method="card",
+        amount=Decimal("10.00"),
+        currency="TJS",
+    )
+
+    assert first.tenant_id != second.tenant_id
+    assert first.operation_id == second.operation_id == operation_id
 
 
 async def test_payment_attempt_marks_external_effect_before_terminal_confirmation(
