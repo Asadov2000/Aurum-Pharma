@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, PermissionDeniedError
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.domains.auth.models import AppUser
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from app.domains.sync.models import SyncOutboxEvent
 from app.domains.sync.repository import SyncOutboxRepository
 
 
@@ -267,6 +276,351 @@ async def test_refund_retry_and_result_recovery_are_idempotent_and_scoped(
             operation_id=operation_id,
             allowed_branch_ids={uuid4()},
         )
+
+
+async def test_electronic_refund_recovery_rejects_missing_outbox_snapshot(
+    db_session: AsyncSession,
+    pos_scaffold,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, scaffold, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20"))],
+    )
+    attempt = await _confirmed_refund_attempt(
+        service,
+        scaffold,
+        parent,
+        [(item.id, Decimal("1"))],
+        suffix="missing-outbox",
+    )
+    operation_id = uuid4()
+    returned = await service.refund(
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        reason="customer return",
+        comment=None,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=operation_id,
+        refund_attempt_id=attempt.id,
+    )
+
+    async def _missing_snapshot(
+        self: SyncOutboxRepository,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> None:
+        del self, tenant_id, operation_id
+
+    monkeypatch.setattr(SyncOutboxRepository, "get_by_operation_id", _missing_snapshot)
+    with pytest.raises(AurumError, match="snapshot is unavailable"):
+        await service.refund(
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            reason="customer return",
+            comment=None,
+            cashier_user_id=scaffold["cashier"].id,
+            operation_id=operation_id,
+            refund_attempt_id=attempt.id,
+        )
+    with pytest.raises(AurumError, match="snapshot is unavailable"):
+        await service.get_refund_result(
+            tenant_id=scaffold["tenant"].id,
+            operation_id=operation_id,
+        )
+
+    assert returned.status == "completed"
+
+
+async def test_electronic_refund_outbox_failure_rolls_back_and_remains_retryable(
+    db_session: AsyncSession,
+    pos_scaffold,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, scaffold, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20"))],
+    )
+    attempt = await _confirmed_refund_attempt(
+        service,
+        scaffold,
+        parent,
+        [(item.id, Decimal("1"))],
+        suffix="rollback",
+    )
+    tenant_id = scaffold["tenant"].id
+    cashier_id = scaffold["cashier"].id
+    parent_id = parent.id
+    item_id = item.id
+    attempt_id = attempt.id
+    operation_id = uuid4()
+
+    async def _fail_enqueue(
+        self: SyncOutboxRepository,
+        **fields: object,
+    ) -> SyncOutboxEvent:
+        del self, fields
+        raise RuntimeError("injected refund outbox failure")
+
+    monkeypatch.setattr(SyncOutboxRepository, "enqueue", _fail_enqueue)
+    with pytest.raises(RuntimeError, match="injected refund outbox failure"):
+        async with db_session.begin_nested():
+            await service.refund(
+                parent_sale_id=parent_id,
+                items=[(item_id, Decimal("1"))],
+                reason="customer return",
+                comment=None,
+                cashier_user_id=cashier_id,
+                operation_id=operation_id,
+                refund_attempt_id=attempt_id,
+            )
+
+    db_session.expire_all()
+    assert (
+        await service.repo.get_sale_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        is None
+    )
+    assert await service.get_refunded_quantities(parent_id) == {}
+    restored_attempt = await service.get_refund_attempt(
+        tenant_id=tenant_id,
+        attempt_id=attempt_id,
+        allowed_branch_ids=None,
+    )
+    assert restored_attempt.status == "confirmed"
+    assert restored_attempt.consumed_at is None
+
+    monkeypatch.undo()
+    returned = await service.refund(
+        parent_sale_id=parent_id,
+        items=[(item_id, Decimal("1"))],
+        reason="customer return",
+        comment=None,
+        cashier_user_id=cashier_id,
+        operation_id=operation_id,
+        refund_attempt_id=attempt_id,
+    )
+    event = await SyncOutboxRepository(db_session).get_by_operation_id(
+        tenant_id=tenant_id,
+        operation_id=operation_id,
+    )
+    recovered = await service.get_refund_result(
+        tenant_id=tenant_id,
+        operation_id=operation_id,
+    )
+    consumed_attempt = await service.get_refund_attempt(
+        tenant_id=tenant_id,
+        attempt_id=attempt_id,
+        allowed_branch_ids=None,
+    )
+    assert event is not None
+    assert event.aggregate_id == returned.id
+    assert recovered.id == returned.id
+    assert consumed_attempt.status == "consumed"
+
+
+async def test_consumed_attempt_without_completed_refund_blocks_recovery_and_repeat(
+    db_session: AsyncSession,
+    pos_scaffold,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, scaffold, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20"))],
+    )
+    attempt = await _confirmed_refund_attempt(
+        service,
+        scaffold,
+        parent,
+        [(item.id, Decimal("1"))],
+        suffix="orphan-consumed",
+    )
+    await service.refund(
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        reason="customer return",
+        comment=None,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        refund_attempt_id=attempt.id,
+    )
+
+    async def _missing_return(
+        *,
+        tenant_id: UUID,
+        refund_attempt_id: UUID,
+    ) -> None:
+        assert tenant_id == scaffold["tenant"].id
+        assert refund_attempt_id == attempt.id
+
+    async def _incomplete_history(
+        *,
+        tenant_id: UUID,
+        parent_sale_id: UUID,
+    ) -> bool:
+        assert tenant_id == scaffold["tenant"].id
+        assert parent_sale_id == parent.id
+        return True
+
+    monkeypatch.setattr(service.repo, "get_return_by_refund_attempt_id", _missing_return)
+    monkeypatch.setattr(
+        service.repo,
+        "has_incomplete_consumed_refund_history",
+        _incomplete_history,
+    )
+    with pytest.raises(AurumError, match="no completed refund"):
+        await service.get_refund_attempt(
+            tenant_id=scaffold["tenant"].id,
+            attempt_id=attempt.id,
+            allowed_branch_ids=None,
+        )
+
+    retry_operation_id = uuid4()
+    with pytest.raises(AurumError, match="history is incomplete"):
+        await service.create_refund_attempt(
+            tenant_id=scaffold["tenant"].id,
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            actor_id=scaffold["cashier"].id,
+            operation_id=retry_operation_id,
+        )
+    assert (
+        await service.repo.get_refund_attempt_by_operation_id(
+            tenant_id=scaffold["tenant"].id,
+            operation_id=retry_operation_id,
+        )
+        is None
+    )
+
+
+async def test_confirmed_refund_attempt_requires_all_terminal_references_at_finalize(
+    db_session: AsyncSession,
+    pos_scaffold,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, scaffold, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("10")), ("qr", Decimal("10"))],
+    )
+    attempt = await _confirmed_refund_attempt(
+        service,
+        scaffold,
+        parent,
+        [(item.id, Decimal("1"))],
+        suffix="incomplete-references",
+    )
+    references = await service.repo.list_refund_references(attempt.id)
+
+    async def _missing_reference(
+        attempt_id: UUID,
+    ):  # type: ignore[no-untyped-def]
+        assert attempt_id == attempt.id
+        return references[:-1]
+
+    monkeypatch.setattr(service.repo, "list_refund_references", _missing_reference)
+    operation_id = uuid4()
+    with pytest.raises(AurumError, match="terminal references are incomplete"):
+        await service.refund(
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            reason="customer return",
+            comment=None,
+            cashier_user_id=scaffold["cashier"].id,
+            operation_id=operation_id,
+            refund_attempt_id=attempt.id,
+        )
+
+    assert (
+        await service.repo.get_sale_by_operation_id(
+            tenant_id=scaffold["tenant"].id,
+            operation_id=operation_id,
+        )
+        is None
+    )
+    assert (
+        await SyncOutboxRepository(db_session).get_by_operation_id(
+            tenant_id=scaffold["tenant"].id,
+            operation_id=operation_id,
+        )
+        is None
+    )
+
+
+async def test_refund_recovery_rejects_outbox_snapshot_that_differs_from_sale(
+    db_session: AsyncSession,
+    pos_scaffold,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, scaffold, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+    )
+    operation_id = uuid4()
+    returned = await service.refund(
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        reason="customer return",
+        comment=None,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=operation_id,
+    )
+    event = await SyncOutboxRepository(db_session).get_by_operation_id(
+        tenant_id=scaffold["tenant"].id,
+        operation_id=operation_id,
+    )
+    assert event is not None
+    mismatched_payload = {**event.payload, "receipt_number": "MISMATCHED-RECEIPT"}
+    mismatched_event = cast(
+        SyncOutboxEvent,
+        SimpleNamespace(
+            event_id=event.event_id,
+            aggregate_type=event.aggregate_type,
+            aggregate_id=event.aggregate_id,
+            event_type=event.event_type,
+            schema_version=event.schema_version,
+            payload=mismatched_payload,
+            payload_hash=service._checkout_result_hash(mismatched_payload),
+        ),
+    )
+
+    async def _mismatched_snapshot(
+        self: SyncOutboxRepository,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> SyncOutboxEvent:
+        del self, tenant_id, operation_id
+        return mismatched_event
+
+    monkeypatch.setattr(SyncOutboxRepository, "get_by_operation_id", _mismatched_snapshot)
+    with pytest.raises(AurumError, match="does not match the sale"):
+        await service.get_refund_result(
+            tenant_id=scaffold["tenant"].id,
+            operation_id=operation_id,
+        )
+    with pytest.raises(AurumError, match="does not match the sale"):
+        await service.refund(
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            reason="customer return",
+            comment=None,
+            cashier_user_id=scaffold["cashier"].id,
+            operation_id=operation_id,
+        )
+
+    assert returned.status == "completed"
 
 
 async def test_refund_more_than_sold_blocked(db_session: AsyncSession, pos_scaffold) -> None:

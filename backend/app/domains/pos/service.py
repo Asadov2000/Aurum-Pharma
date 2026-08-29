@@ -48,6 +48,7 @@ from app.domains.pos.models import (
     POSFavorite,
     POSPaymentAttempt,
     POSRefundAttempt,
+    POSRefundReference,
     PrescriptionLog,
     Sale,
     SaleItem,
@@ -557,6 +558,7 @@ class POSService:
         Decimal,
         list[tuple[str, Decimal]],
     ]:
+        await self._assert_consumed_refund_history(parent)
         parent_items, already_refunded = await self._validate_refund_items(
             parent_sale_id=parent.id,
             per_item=per_item,
@@ -609,10 +611,9 @@ class POSService:
         return financials
 
     async def _refund_attempt_read(self, attempt: POSRefundAttempt) -> POSRefundAttemptRead:
-        references = {
-            reference.payment_method: reference
-            for reference in await self.repo.list_refund_references(attempt.id)
-        }
+        if attempt.status == "consumed":
+            await self._validate_consumed_refund_attempt(attempt)
+        references = await self._validated_refund_references(attempt)
         payments: list[POSRefundAttemptPaymentRead] = []
         for allocation in attempt.external_allocations_json:
             method = str(allocation["payment_method"])
@@ -649,6 +650,60 @@ class POSService:
             confirmed_at=attempt.confirmed_at,
             consumed_at=attempt.consumed_at,
             voided_at=attempt.voided_at,
+        )
+
+    async def _validated_refund_references(
+        self,
+        attempt: POSRefundAttempt,
+    ) -> dict[str, POSRefundReference]:
+        references = {
+            reference.payment_method: reference
+            for reference in await self.repo.list_refund_references(attempt.id)
+        }
+        actual = {method: reference.amount for method, reference in references.items()}
+        expected = self._stored_refund_allocations(attempt)
+        if attempt.status in {"confirmed", "consumed"}:
+            if actual != expected:
+                raise AurumError("Refund attempt terminal references are incomplete")
+        elif references:
+            raise AurumError("Unconfirmed refund attempt contains terminal references")
+        return references
+
+    async def _assert_consumed_refund_history(self, parent: Sale) -> None:
+        incomplete = await self.repo.has_incomplete_consumed_refund_history(
+            tenant_id=parent.tenant_id,
+            parent_sale_id=parent.id,
+        )
+        if incomplete:
+            raise AurumError("Consumed refund history is incomplete")
+
+    async def _validate_consumed_refund_attempt(
+        self,
+        attempt: POSRefundAttempt,
+    ) -> None:
+        return_sale = await self.repo.get_return_by_refund_attempt_id(
+            tenant_id=attempt.tenant_id,
+            refund_attempt_id=attempt.id,
+        )
+        if (
+            return_sale is None
+            or return_sale.sale_type != "return"
+            or return_sale.status != "completed"
+            or return_sale.parent_sale_id != attempt.parent_sale_id
+            or return_sale.operation_id is None
+        ):
+            raise AurumError("Consumed refund attempt has no completed refund")
+        outbox_event = await SyncOutboxRepository(self.repo.session).get_by_operation_id(
+            tenant_id=attempt.tenant_id,
+            operation_id=return_sale.operation_id,
+        )
+        if outbox_event is None:
+            raise AurumError("Consumed refund attempt has no refund snapshot")
+        await self._validate_refund_snapshot(
+            sale=return_sale,
+            outbox_event=outbox_event,
+            tenant_id=attempt.tenant_id,
+            operation_id=return_sale.operation_id,
         )
 
     async def create_refund_attempt(
@@ -3514,7 +3569,13 @@ class POSService:
             tenant_id=parent.tenant_id,
             operation_id=operation_id,
         )
+        outbox_event = await SyncOutboxRepository(self.repo.session).get_by_operation_id(
+            tenant_id=parent.tenant_id,
+            operation_id=operation_id,
+        )
         if existing is None:
+            if outbox_event is not None:
+                raise AurumError("Refund outbox event has no sale aggregate")
             return None
         if (
             existing.sale_type != "return"
@@ -3522,20 +3583,17 @@ class POSService:
             or existing.operation_hash != operation_hash
         ):
             raise ConflictError("Operation ID was already used for another refund")
-        outbox_event = await SyncOutboxRepository(self.repo.session).get_by_operation_id(
+        if outbox_event is None:
+            raise AurumError("Refund result snapshot is unavailable")
+        await self._validate_refund_snapshot(
+            sale=existing,
+            outbox_event=outbox_event,
             tenant_id=parent.tenant_id,
             operation_id=operation_id,
         )
-        if outbox_event is not None:
-            self._validate_refund_snapshot(
-                sale=existing,
-                outbox_event=outbox_event,
-                tenant_id=parent.tenant_id,
-                operation_id=operation_id,
-            )
         return existing
 
-    def _validate_refund_snapshot(
+    async def _validate_refund_snapshot(
         self,
         *,
         sale: Sale,
@@ -3562,8 +3620,50 @@ class POSService:
             or result.parent_sale_id != sale.parent_sale_id
             or result.operation_id != operation_id
             or result.tenant_id != tenant_id
+            or result.branch_id != sale.branch_id
+            or result.register_id != sale.register_id
+            or result.shift_id != sale.shift_id
+            or result.cashier_user_id != sale.cashier_user_id
+            or result.receipt_number != sale.receipt_number
+            or result.receipt_seq != sale.receipt_seq
+            or result.created_at != sale.created_at
+            or result.completed_at != sale.completed_at
+            or result.total_amount != sale.total_amount
+            or result.currency != sale.currency
+            or result.is_test != sale.is_test
         ):
             raise AurumError("Refund result snapshot does not match the sale")
+        actual_items = [
+            SaleRefundItemResult.model_validate(item)
+            for item in await self.repo.list_items(sale.id)
+        ]
+        actual_payment_rows = await self.repo.list_payments(sale.id)
+        actual_payments = [
+            SaleCheckoutPaymentResult.model_validate(payment) for payment in actual_payment_rows
+        ]
+        if result.items != actual_items or result.payments != actual_payments:
+            raise AurumError("Refund result snapshot does not match its financial records")
+
+        if sale.refund_attempt_id is None:
+            if any(payment.payment_method != "cash" for payment in actual_payment_rows):
+                raise AurumError("Electronic refund has no refund attempt")
+        else:
+            attempt = await self.repo.get_refund_attempt(sale.refund_attempt_id)
+            if (
+                attempt is None
+                or attempt.tenant_id != sale.tenant_id
+                or attempt.parent_sale_id != sale.parent_sale_id
+                or attempt.status != "consumed"
+                or attempt.consumed_at != sale.completed_at
+            ):
+                raise AurumError("Refund attempt does not match the completed refund")
+            await self._validated_refund_references(attempt)
+            expected_attempt_id = str(attempt.id)
+            if any(
+                (payment.metadata_json or {}).get("refund_attempt_id") != expected_attempt_id
+                for payment in actual_payment_rows
+            ):
+                raise AurumError("Refund payment does not match its refund attempt")
         return result
 
     async def get_refund_result(
@@ -3602,13 +3702,14 @@ class POSService:
             tenant_id=tenant_id,
             operation_id=operation_id,
         )
-        if outbox_event is not None:
-            self._validate_refund_snapshot(
-                sale=sale,
-                outbox_event=outbox_event,
-                tenant_id=tenant_id,
-                operation_id=operation_id,
-            )
+        if outbox_event is None:
+            raise AurumError("Refund result snapshot is unavailable")
+        await self._validate_refund_snapshot(
+            sale=sale,
+            outbox_event=outbox_event,
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
         return sale
 
     async def _enqueue_refund_event(
@@ -3863,6 +3964,7 @@ class POSService:
                 raise NotFoundError("Refund attempt not found")
             if attempt.status != "confirmed":
                 raise BusinessRuleError("Electronic refund attempt is not confirmed")
+            await self._validated_refund_references(attempt)
             if self._stored_refund_items(attempt) != per_item:
                 raise ConflictError("Refund attempt does not match the selected items")
             financials = await self._assert_refund_attempt_current(
