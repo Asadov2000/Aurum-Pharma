@@ -86,6 +86,13 @@ def _restore_reference_privileges() -> None:
 
 
 def _insert_permissions() -> None:
+    # Published role versions are the authorization source of truth, while
+    # role_permission remains the editable projection used by role management.
+    # The migration role may synchronize that projection only inside this
+    # transaction; runtime publication guards stay enabled otherwise.
+    op.execute(
+        "ALTER TABLE public.role_permission " "DISABLE TRIGGER trg_guard_role_permission_mutation"
+    )
     for code, name, description, dangerous, risk, confirmation in PERMISSIONS:
         op.execute(f"""
             INSERT INTO public.permission (
@@ -135,6 +142,9 @@ def _insert_permissions() -> None:
               )
             ON CONFLICT (role_version_id, permission_code) DO NOTHING
             """)
+    op.execute(
+        "ALTER TABLE public.role_permission " "ENABLE TRIGGER trg_guard_role_permission_mutation"
+    )
     op.execute("SELECT public.bump_all_authorization_policy_revisions()")
 
 
@@ -142,7 +152,9 @@ def upgrade() -> None:
     _grant_missing_reference_privileges()
     op.execute("""
         ALTER TABLE public.branch
-          ADD CONSTRAINT uq_branch_tenant_id_id UNIQUE (tenant_id, id);
+          ADD CONSTRAINT uq_branch_tenant_id_id UNIQUE (tenant_id, id)
+        """)
+    op.execute("""
         ALTER TABLE public.sale_item
           ADD CONSTRAINT uq_sale_item_tenant_id_id UNIQUE (tenant_id, id)
         """)
@@ -200,7 +212,9 @@ def upgrade() -> None:
         """)
     op.execute("""
         CREATE INDEX ix_customer_return_quarantine_pending
-        ON public.customer_return_quarantine_item (tenant_id, branch_id, received_at DESC);
+        ON public.customer_return_quarantine_item (tenant_id, branch_id, received_at DESC)
+        """)
+    op.execute("""
         CREATE INDEX ix_customer_return_quarantine_catalog
         ON public.customer_return_quarantine_item (tenant_id, catalog_id)
         """)
@@ -268,7 +282,9 @@ def upgrade() -> None:
             """)
         op.execute(f"""
             REVOKE ALL PRIVILEGES ON TABLE public.{table_name}
-            FROM PUBLIC, aurum_app, aurum_support;
+            FROM PUBLIC, aurum_app, aurum_support
+            """)
+        op.execute(f"""
             GRANT SELECT, INSERT ON TABLE public.{table_name}
             TO aurum_app, aurum_support
             """)
@@ -286,11 +302,15 @@ def upgrade() -> None:
     op.execute("""
         REVOKE ALL PRIVILEGES ON FUNCTION
           public.trg_reject_customer_return_journal_mutation()
-        FROM PUBLIC, aurum_app, aurum_support;
+        FROM PUBLIC, aurum_app, aurum_support
+        """)
+    op.execute("""
         CREATE TRIGGER trg_immutable_customer_return_quarantine
         BEFORE UPDATE OR DELETE ON public.customer_return_quarantine_item
         FOR EACH ROW EXECUTE FUNCTION
-          public.trg_reject_customer_return_journal_mutation();
+          public.trg_reject_customer_return_journal_mutation()
+        """)
+    op.execute("""
         CREATE TRIGGER trg_immutable_customer_return_disposition
         BEFORE UPDATE OR DELETE ON public.customer_return_disposition
         FOR EACH ROW EXECUTE FUNCTION
@@ -346,10 +366,14 @@ def upgrade() -> None:
         REVOKE ALL PRIVILEGES ON FUNCTION
           public.trg_audit_customer_return_quarantine(),
           public.trg_audit_customer_return_disposition()
-        FROM PUBLIC, aurum_app, aurum_support;
+        FROM PUBLIC, aurum_app, aurum_support
+        """)
+    op.execute("""
         CREATE TRIGGER trg_audit_customer_return_quarantine
         AFTER INSERT ON public.customer_return_quarantine_item
-        FOR EACH ROW EXECUTE FUNCTION public.trg_audit_customer_return_quarantine();
+        FOR EACH ROW EXECUTE FUNCTION public.trg_audit_customer_return_quarantine()
+        """)
+    op.execute("""
         CREATE TRIGGER trg_audit_customer_return_disposition
         AFTER INSERT ON public.customer_return_disposition
         FOR EACH ROW EXECUTE FUNCTION public.trg_audit_customer_return_disposition()
@@ -387,6 +411,7 @@ def upgrade() -> None:
           AND NOT return_sale.is_test
         ON CONFLICT (tenant_id, return_sale_item_id) DO NOTHING
         """)
+    op.execute("ALTER TABLE public.batch DISABLE TRIGGER trg_batch_writer_guard")
     op.execute("""
         UPDATE public.batch AS batch
         SET is_blocked = true,
@@ -402,6 +427,7 @@ def upgrade() -> None:
             AND item.batch_id = batch.id
         )
         """)
+    op.execute("ALTER TABLE public.batch ENABLE TRIGGER trg_batch_writer_guard")
 
     op.execute("""
         CREATE FUNCTION public.trg_validate_customer_return_quarantine_insert()
@@ -509,15 +535,21 @@ def upgrade() -> None:
           public.trg_validate_customer_return_quarantine_insert(),
           public.trg_validate_customer_return_disposition_insert(),
           public.trg_require_return_quarantine_before_completion()
-        FROM PUBLIC, aurum_app, aurum_support;
+        FROM PUBLIC, aurum_app, aurum_support
+        """)
+    op.execute("""
         CREATE TRIGGER trg_validate_customer_return_quarantine_insert
         BEFORE INSERT ON public.customer_return_quarantine_item
         FOR EACH ROW EXECUTE FUNCTION
-          public.trg_validate_customer_return_quarantine_insert();
+          public.trg_validate_customer_return_quarantine_insert()
+        """)
+    op.execute("""
         CREATE TRIGGER trg_validate_customer_return_disposition_insert
         BEFORE INSERT ON public.customer_return_disposition
         FOR EACH ROW EXECUTE FUNCTION
-          public.trg_validate_customer_return_disposition_insert();
+          public.trg_validate_customer_return_disposition_insert()
+        """)
+    op.execute("""
         CREATE TRIGGER trg_require_return_quarantine_before_completion
         BEFORE UPDATE OF status ON public.sale
         FOR EACH ROW EXECUTE FUNCTION
@@ -529,12 +561,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "DROP TRIGGER trg_require_return_quarantine_before_completion ON public.sale"
-    )
-    op.execute(
-        "DROP FUNCTION public.trg_require_return_quarantine_before_completion()"
-    )
+    op.execute("DROP TRIGGER trg_require_return_quarantine_before_completion ON public.sale")
+    op.execute("DROP FUNCTION public.trg_require_return_quarantine_before_completion()")
     op.execute(
         "DROP TRIGGER trg_validate_customer_return_disposition_insert "
         "ON public.customer_return_disposition"
@@ -573,6 +601,12 @@ def downgrade() -> None:
         f"DELETE FROM public.access_role_version_permission WHERE permission_code IN ({codes})"
     )
     op.execute(f"DELETE FROM public.role_template_permission WHERE permission_code IN ({codes})")
+    op.execute(
+        "ALTER TABLE public.role_permission " "DISABLE TRIGGER trg_guard_role_permission_mutation"
+    )
     op.execute(f"DELETE FROM public.role_permission WHERE permission_code IN ({codes})")
+    op.execute(
+        "ALTER TABLE public.role_permission " "ENABLE TRIGGER trg_guard_role_permission_mutation"
+    )
     op.execute(f"DELETE FROM public.permission WHERE code IN ({codes})")
     op.execute("SELECT public.bump_all_authorization_policy_revisions()")

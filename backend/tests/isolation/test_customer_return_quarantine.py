@@ -10,9 +10,7 @@ async def test_customer_return_journals_are_tenant_scoped_and_append_only(
     maintenance_engine: AsyncEngine,
 ) -> None:
     async with maintenance_engine.connect() as connection:
-        rows = (
-            await connection.execute(
-                text("""
+        rows = (await connection.execute(text("""
                     SELECT
                       relations.relname AS table_name,
                       relations.relrowsecurity AS rls_enabled,
@@ -38,9 +36,7 @@ async def test_customer_return_journals_are_tenant_scoped_and_append_only(
                         'customer_return_disposition'
                       )
                     ORDER BY relations.relname
-                """)
-            )
-        ).mappings().all()
+                """))).mappings().all()
 
         assert [dict(row) for row in rows] == [
             {
@@ -63,9 +59,7 @@ async def test_customer_return_journals_are_tenant_scoped_and_append_only(
             },
         ]
 
-        policies = (
-            await connection.execute(
-                text("""
+        policies = (await connection.execute(text("""
                     SELECT tablename, policyname
                     FROM pg_catalog.pg_policies
                     WHERE schemaname = 'public'
@@ -74,9 +68,7 @@ async def test_customer_return_journals_are_tenant_scoped_and_append_only(
                         'customer_return_disposition'
                       )
                     ORDER BY tablename, policyname
-                """)
-            )
-        ).all()
+                """))).all()
         assert [tuple(row) for row in policies] == [
             (
                 "customer_return_disposition",
@@ -96,10 +88,7 @@ async def test_customer_return_journals_are_tenant_scoped_and_append_only(
             ),
         ]
 
-        trigger_names = set(
-            (
-                await connection.execute(
-                    text("""
+        trigger_names = set((await connection.execute(text("""
                         SELECT triggers.tgname
                         FROM pg_catalog.pg_trigger AS triggers
                         JOIN pg_catalog.pg_class AS relations
@@ -110,11 +99,12 @@ async def test_customer_return_journals_are_tenant_scoped_and_append_only(
                             'customer_return_disposition',
                             'sale'
                           )
-                          AND triggers.tgname LIKE '%customer_return%'
-                    """)
-                )
-            ).scalars()
-        )
+                          AND (
+                            triggers.tgname LIKE '%customer_return%'
+                            OR triggers.tgname =
+                              'trg_require_return_quarantine_before_completion'
+                          )
+                    """))).scalars())
         assert {
             "trg_immutable_customer_return_quarantine",
             "trg_immutable_customer_return_disposition",
