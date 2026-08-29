@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import {
   Badge,
@@ -9,6 +9,7 @@ import {
   Modal,
   PageHeader,
   Pagination,
+  SegmentedControl,
   Select,
   SkeletonRows,
   Switch,
@@ -21,6 +22,8 @@ import {
   TR,
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
@@ -39,13 +42,27 @@ import { useBatchesQuery } from "./queries";
 import { type BatchWithExpiry, type ExpiryStatus } from "./types";
 
 const PAGE_SIZE = 25;
+const CustomerReturnsPanel = lazy(() =>
+  import("@/features/customerReturns/CustomerReturnsPanel").then((module) => ({
+    default: module.CustomerReturnsPanel,
+  })),
+);
 
 type BlockedFilter = "" | "active" | "blocked";
 type BatchView = "table" | "cards";
+type InventorySection = "saleable" | "customer_returns";
+
+const inventorySections = [
+  { value: "saleable", label: "Продаваемые партии" },
+  { value: "customer_returns", label: "Возвраты покупателей" },
+] as const;
 
 const VIEW_STORAGE_KEY = "aurum:batches:view:v1";
 
 export function BatchesPage(): JSX.Element {
+  const { user } = useAuth();
+  const canViewCustomerReturns = hasPermission(user, "customer_returns.view");
+  const [section, setSection] = useState<InventorySection>("saleable");
   const filterPreferenceKey = useFilterPreferenceKey("batches");
   const [batchNumberInput, setBatchNumberInput] = useState("");
   const [batchNumber, setBatchNumber] = useState("");
@@ -62,6 +79,10 @@ export function BatchesPage(): JSX.Element {
   const isSplitLayout = useMediaQuery("(min-width: 1280px)");
 
   const branches = useBranchesQuery(true);
+
+  useEffect(() => {
+    if (!canViewCustomerReturns && section !== "saleable") setSection("saleable");
+  }, [canViewCustomerReturns, section]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -133,258 +154,281 @@ export function BatchesPage(): JSX.Element {
         }
       />
 
-      {data && <InventorySummary total={data.total} summary={data.summary} />}
+      {canViewCustomerReturns ? (
+        <SegmentedControl
+          value={section}
+          options={inventorySections}
+          onChange={setSection}
+          label="Раздел складского учёта"
+          className="w-full sm:w-auto"
+        />
+      ) : null}
 
-      <ConfigurableFilterBar
-        preferenceKey={filterPreferenceKey}
-        filters={[
-          {
-            id: "batch_number",
-            label: "Номер партии",
-            content: (
-              <div>
-                <Label htmlFor="batch_number_filter">Номер партии</Label>
-                <Input
-                  id="batch_number_filter"
-                  value={batchNumberInput}
-                  onChange={(event) => setBatchNumberInput(event.target.value)}
-                  placeholder="Например, LOT-2408"
-                  autoComplete="off"
-                  className="w-full sm:w-48"
-                />
-              </div>
-            ),
-            active: Boolean(batchNumberInput),
-            onClear: () => {
-              setBatchNumberInput("");
-              setBatchNumber("");
-              setPage(1);
-            },
-            alwaysVisible: true,
-          },
-          {
-            id: "product",
-            label: "Товар",
-            content: (
-              <div className="w-full sm:w-72">
-                <Label htmlFor="batch_catalog_filter">Товар</Label>
-                <CatalogPicker
-                  id="batch_catalog_filter"
-                  value={catalogId}
-                  onChange={(id) => {
-                    setCatalogId(id);
-                    setPage(1);
-                  }}
-                  placeholder="Найти товар…"
-                  clearable
-                />
-              </div>
-            ),
-            active: Boolean(catalogId),
-            onClear: () => {
-              setCatalogId("");
-              setPage(1);
-            },
-            defaultVisible: true,
-          },
-          {
-            id: "branch",
-            label: "Точка",
-            content: (
-              <div>
-                <Label htmlFor="batch_branch_filter">Точка</Label>
-                <Select
-                  id="batch_branch_filter"
-                  value={branchId}
-                  onChange={(event) => {
-                    setBranchId(event.target.value);
-                    setPage(1);
-                  }}
-                  className="w-full sm:w-52"
-                >
-                  <option value="">Все точки</option>
-                  {branches.data?.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ),
-            active: Boolean(branchId),
-            onClear: () => {
-              setBranchId("");
-              setPage(1);
-            },
-            defaultVisible: true,
-          },
-          {
-            id: "expiry",
-            label: "Срок годности",
-            content: (
-              <div>
-                <Label htmlFor="batch_expiry_filter">Срок годности</Label>
-                <Select
-                  id="batch_expiry_filter"
-                  value={expiry}
-                  onChange={(event) => {
-                    setExpiry(event.target.value as ExpiryStatus | "");
-                    setPage(1);
-                  }}
-                  className="w-full sm:w-48"
-                >
-                  <option value="">Все зоны</option>
-                  {expiryOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {expiryLabel[status]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ),
-            active: Boolean(expiry),
-            onClear: () => {
-              setExpiry("");
-              setPage(1);
-            },
-            defaultVisible: true,
-          },
-          {
-            id: "blocked",
-            label: "Доступность",
-            content: (
-              <div>
-                <Label htmlFor="batch_blocked_filter">Доступность</Label>
-                <Select
-                  id="batch_blocked_filter"
-                  value={blockedFilter}
-                  onChange={(event) => {
-                    setBlockedFilter(event.target.value as BlockedFilter);
-                    setPage(1);
-                  }}
-                  className="w-full sm:w-48"
-                >
-                  <option value="">Все</option>
-                  <option value="active">Доступные к продаже</option>
-                  <option value="blocked">Заблокированные</option>
-                </Select>
-              </div>
-            ),
-            active: Boolean(blockedFilter),
-            onClear: () => {
-              setBlockedFilter("");
-              setPage(1);
-            },
-          },
-          {
-            id: "empty",
-            label: "Пустые партии",
-            content: (
-              <div className="flex h-10 items-center">
-                <Switch
-                  label="Показывать пустые партии"
-                  checked={showEmpty}
-                  onChange={(event) => {
-                    setShowEmpty(event.target.checked);
-                    setPage(1);
-                  }}
-                />
-              </div>
-            ),
-            active: showEmpty,
-            onClear: () => {
-              setShowEmpty(false);
-              setPage(1);
-            },
-          },
-        ]}
-        onResetValues={resetFilters}
-        actions={
-          <div className="flex min-h-[var(--control-height-md)] min-w-0 items-center gap-3">
-            {isDesktopLayout && <BatchViewControl value={view} onChange={changeView} />}
-            <span className="whitespace-nowrap text-sm text-foreground-muted" aria-live="polite">
-              Найдено: {data?.total ?? 0}
-            </span>
-          </div>
-        }
-      />
-
-      {isLoading ? (
-        <SkeletonRows rows={7} />
-      ) : error ? (
-        <div
-          role="alert"
-          className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-4 text-sm text-danger-foreground"
-        >
-          <p>{describeApiError(error, "Не удалось загрузить партии")}</p>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="mt-3"
-            isLoading={isFetching}
-            onClick={() => void refetch()}
-          >
-            Повторить
-          </Button>
-        </div>
-      ) : !data || data.items.length === 0 ? (
-        <TableEmpty
-          title={filtersActive ? "Партии не найдены" : "На складе пока нет партий"}
-          action={
-            filtersActive ? (
-              <Button variant="secondary" size="sm" onClick={resetFilters}>
-                Сбросить фильтры
-              </Button>
-            ) : undefined
-          }
-        >
-          {filtersActive
-            ? "Измените условия поиска или верните стандартный набор фильтров."
-            : "Партии появятся после принятия первого прихода."}
-        </TableEmpty>
+      {section === "customer_returns" && canViewCustomerReturns ? (
+        <Suspense fallback={<SkeletonRows rows={6} />}>
+          <CustomerReturnsPanel />
+        </Suspense>
       ) : (
         <>
-          {view === "cards" || !isDesktopLayout ? (
-            <BatchCards items={data.items} onOpen={openBatch} />
-          ) : showSplitWorkspace ? (
-            <div className="grid min-w-0 grid-cols-[minmax(0,1.65fr)_minmax(23rem,1fr)] items-start gap-4">
-              <BatchTable
-                items={data.items}
-                selectedId={selectedBatch?.id ?? null}
-                onOpen={openBatch}
-              />
-              {selectedBatch && (
-                <section
-                  aria-label={`Карточка партии ${selectedBatch.batch_number ?? "без номера"}`}
-                  className="sticky top-[calc(var(--app-header-height)+1rem)] max-h-[calc(100vh-var(--app-header-height)-2rem)] min-w-0 overflow-y-auto rounded-lg border border-border bg-surface"
+          {data && <InventorySummary total={data.total} summary={data.summary} />}
+
+          <ConfigurableFilterBar
+            preferenceKey={filterPreferenceKey}
+            filters={[
+              {
+                id: "batch_number",
+                label: "Номер партии",
+                content: (
+                  <div>
+                    <Label htmlFor="batch_number_filter">Номер партии</Label>
+                    <Input
+                      id="batch_number_filter"
+                      value={batchNumberInput}
+                      onChange={(event) => setBatchNumberInput(event.target.value)}
+                      placeholder="Например, LOT-2408"
+                      autoComplete="off"
+                      className="w-full sm:w-48"
+                    />
+                  </div>
+                ),
+                active: Boolean(batchNumberInput),
+                onClear: () => {
+                  setBatchNumberInput("");
+                  setBatchNumber("");
+                  setPage(1);
+                },
+                alwaysVisible: true,
+              },
+              {
+                id: "product",
+                label: "Товар",
+                content: (
+                  <div className="w-full sm:w-72">
+                    <Label htmlFor="batch_catalog_filter">Товар</Label>
+                    <CatalogPicker
+                      id="batch_catalog_filter"
+                      value={catalogId}
+                      onChange={(id) => {
+                        setCatalogId(id);
+                        setPage(1);
+                      }}
+                      placeholder="Найти товар…"
+                      clearable
+                    />
+                  </div>
+                ),
+                active: Boolean(catalogId),
+                onClear: () => {
+                  setCatalogId("");
+                  setPage(1);
+                },
+                defaultVisible: true,
+              },
+              {
+                id: "branch",
+                label: "Точка",
+                content: (
+                  <div>
+                    <Label htmlFor="batch_branch_filter">Точка</Label>
+                    <Select
+                      id="batch_branch_filter"
+                      value={branchId}
+                      onChange={(event) => {
+                        setBranchId(event.target.value);
+                        setPage(1);
+                      }}
+                      className="w-full sm:w-52"
+                    >
+                      <option value="">Все точки</option>
+                      {branches.data?.map((branch) => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                ),
+                active: Boolean(branchId),
+                onClear: () => {
+                  setBranchId("");
+                  setPage(1);
+                },
+                defaultVisible: true,
+              },
+              {
+                id: "expiry",
+                label: "Срок годности",
+                content: (
+                  <div>
+                    <Label htmlFor="batch_expiry_filter">Срок годности</Label>
+                    <Select
+                      id="batch_expiry_filter"
+                      value={expiry}
+                      onChange={(event) => {
+                        setExpiry(event.target.value as ExpiryStatus | "");
+                        setPage(1);
+                      }}
+                      className="w-full sm:w-48"
+                    >
+                      <option value="">Все зоны</option>
+                      {expiryOptions.map((status) => (
+                        <option key={status} value={status}>
+                          {expiryLabel[status]}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                ),
+                active: Boolean(expiry),
+                onClear: () => {
+                  setExpiry("");
+                  setPage(1);
+                },
+                defaultVisible: true,
+              },
+              {
+                id: "blocked",
+                label: "Доступность",
+                content: (
+                  <div>
+                    <Label htmlFor="batch_blocked_filter">Доступность</Label>
+                    <Select
+                      id="batch_blocked_filter"
+                      value={blockedFilter}
+                      onChange={(event) => {
+                        setBlockedFilter(event.target.value as BlockedFilter);
+                        setPage(1);
+                      }}
+                      className="w-full sm:w-48"
+                    >
+                      <option value="">Все</option>
+                      <option value="active">Доступные к продаже</option>
+                      <option value="blocked">Заблокированные</option>
+                    </Select>
+                  </div>
+                ),
+                active: Boolean(blockedFilter),
+                onClear: () => {
+                  setBlockedFilter("");
+                  setPage(1);
+                },
+              },
+              {
+                id: "empty",
+                label: "Пустые партии",
+                content: (
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      label="Показывать пустые партии"
+                      checked={showEmpty}
+                      onChange={(event) => {
+                        setShowEmpty(event.target.checked);
+                        setPage(1);
+                      }}
+                    />
+                  </div>
+                ),
+                active: showEmpty,
+                onClear: () => {
+                  setShowEmpty(false);
+                  setPage(1);
+                },
+              },
+            ]}
+            onResetValues={resetFilters}
+            actions={
+              <div className="flex min-h-[var(--control-height-md)] min-w-0 items-center gap-3">
+                {isDesktopLayout && <BatchViewControl value={view} onChange={changeView} />}
+                <span
+                  className="whitespace-nowrap text-sm text-foreground-muted"
+                  aria-live="polite"
                 >
-                  <BatchDetailModal
-                    batchId={selectedBatch.id}
-                    onClose={() => setSelectedBatchId(null)}
-                    mode="preview"
-                    onOpenFull={() => setOpenBatchId(selectedBatch.id)}
-                  />
-                </section>
-              )}
+                  Найдено: {data?.total ?? 0}
+                </span>
+              </div>
+            }
+          />
+
+          {isLoading ? (
+            <SkeletonRows rows={7} />
+          ) : error ? (
+            <div
+              role="alert"
+              className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-4 text-sm text-danger-foreground"
+            >
+              <p>{describeApiError(error, "Не удалось загрузить партии")}</p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-3"
+                isLoading={isFetching}
+                onClick={() => void refetch()}
+              >
+                Повторить
+              </Button>
             </div>
+          ) : !data || data.items.length === 0 ? (
+            <TableEmpty
+              title={filtersActive ? "Партии не найдены" : "На складе пока нет партий"}
+              action={
+                filtersActive ? (
+                  <Button variant="secondary" size="sm" onClick={resetFilters}>
+                    Сбросить фильтры
+                  </Button>
+                ) : undefined
+              }
+            >
+              {filtersActive
+                ? "Измените условия поиска или верните стандартный набор фильтров."
+                : "Партии появятся после принятия первого прихода."}
+            </TableEmpty>
           ) : (
-            <BatchTable items={data.items} selectedId={null} onOpen={openBatch} />
+            <>
+              {view === "cards" || !isDesktopLayout ? (
+                <BatchCards items={data.items} onOpen={openBatch} />
+              ) : showSplitWorkspace ? (
+                <div className="grid min-w-0 grid-cols-[minmax(0,1.65fr)_minmax(23rem,1fr)] items-start gap-4">
+                  <BatchTable
+                    items={data.items}
+                    selectedId={selectedBatch?.id ?? null}
+                    onOpen={openBatch}
+                  />
+                  {selectedBatch && (
+                    <section
+                      aria-label={`Карточка партии ${selectedBatch.batch_number ?? "без номера"}`}
+                      className="sticky top-[calc(var(--app-header-height)+1rem)] max-h-[calc(100vh-var(--app-header-height)-2rem)] min-w-0 overflow-y-auto rounded-lg border border-border bg-surface"
+                    >
+                      <BatchDetailModal
+                        batchId={selectedBatch.id}
+                        onClose={() => setSelectedBatchId(null)}
+                        mode="preview"
+                        onOpenFull={() => setOpenBatchId(selectedBatch.id)}
+                      />
+                    </section>
+                  )}
+                </div>
+              ) : (
+                <BatchTable items={data.items} selectedId={null} onOpen={openBatch} />
+              )}
+              <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onPage={setPage} />
+            </>
           )}
-          <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onPage={setPage} />
+
+          <Modal
+            open={openBatchId !== null}
+            onClose={() => setOpenBatchId(null)}
+            title={
+              modalBatch?.batch_number ? `Партия ${modalBatch.batch_number}` : "Карточка партии"
+            }
+            className="max-w-5xl"
+            bodyClassName="p-0 sm:p-0"
+          >
+            {openBatchId && (
+              <BatchDetailModal batchId={openBatchId} onClose={() => setOpenBatchId(null)} />
+            )}
+          </Modal>
         </>
       )}
-
-      <Modal
-        open={openBatchId !== null}
-        onClose={() => setOpenBatchId(null)}
-        title={modalBatch?.batch_number ? `Партия ${modalBatch.batch_number}` : "Карточка партии"}
-        className="max-w-5xl"
-        bodyClassName="p-0 sm:p-0"
-      >
-        {openBatchId && (
-          <BatchDetailModal batchId={openBatchId} onClose={() => setOpenBatchId(null)} />
-        )}
-      </Modal>
     </div>
   );
 }

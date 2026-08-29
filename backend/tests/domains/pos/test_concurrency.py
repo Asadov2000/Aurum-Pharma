@@ -18,6 +18,7 @@ from app.core.errors import BusinessRuleError
 from app.domains.auth.models import AppUser
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
+from app.domains.customer_returns.models import CustomerReturnQuarantineItem
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.inventory.models import Batch, BatchMovement
@@ -113,6 +114,14 @@ async def committed_pos(
     finally:
         guarded_tables = (
             ("batch_movement", "trg_guard_batch_movement_immutability"),
+            (
+                "customer_return_disposition",
+                "trg_immutable_customer_return_disposition",
+            ),
+            (
+                "customer_return_quarantine_item",
+                "trg_immutable_customer_return_quarantine",
+            ),
             ("pos_command", "trg_pos_command_immutable"),
             ("prescription_log", "trg_guard_prescription_log_immutability"),
             ("sale_payment", "trg_guard_sale_payment_immutability"),
@@ -126,6 +135,25 @@ async def committed_pos(
                 )
 
         try:
+            async with maintenance_engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "DELETE FROM public.customer_return_disposition "
+                        "WHERE tenant_id = :tenant_id"
+                    ),
+                    {"tenant_id": context.tenant_id},
+                )
+                await connection.execute(
+                    text(
+                        "DELETE FROM public.customer_return_quarantine_item "
+                        "WHERE tenant_id = :tenant_id"
+                    ),
+                    {"tenant_id": context.tenant_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
+                    {"tenant_id": context.tenant_id},
+                )
             async with db_engine.begin() as connection:
                 await connection.execute(
                     text("SELECT set_config('app.support_session', 'true', true)")
@@ -137,11 +165,6 @@ async def committed_pos(
                 await connection.execute(
                     text("DELETE FROM public.app_user WHERE id = :user_id"),
                     {"user_id": context.cashier_id},
-                )
-            async with maintenance_engine.begin() as connection:
-                await connection.execute(
-                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
-                    {"tenant_id": context.tenant_id},
                 )
         finally:
             async with maintenance_engine.begin() as connection:
@@ -580,10 +603,19 @@ async def test_concurrent_refund_retry_has_one_effect(committed_pos) -> None:
 
     assert first == second
     async with factory() as session:
-        assert await _movement_count(session, first, "sale_return") == 1
+        assert await _movement_count(session, first, "sale_return") == 0
+        quarantine_count = await session.scalar(
+            select(func.count())
+            .select_from(CustomerReturnQuarantineItem)
+            .where(
+                CustomerReturnQuarantineItem.tenant_id == context.tenant_id,
+                CustomerReturnQuarantineItem.return_sale_id == first,
+            )
+        )
+        assert quarantine_count == 1
         batch = await session.get(Batch, context.batch_id)
         assert batch is not None
-        assert batch.qty_remaining == context.initial_qty - Decimal("3")
+        assert batch.qty_remaining == context.initial_qty - Decimal("5")
 
 
 async def test_close_and_complete_race_has_consistent_result(committed_pos) -> None:

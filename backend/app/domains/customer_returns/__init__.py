@@ -1,0 +1,1 @@
+"""Customer-return quarantine domain."""

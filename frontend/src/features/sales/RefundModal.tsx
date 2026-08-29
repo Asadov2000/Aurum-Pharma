@@ -63,6 +63,7 @@ const METHOD_LABELS: Record<ElectronicRefundMethod, string> = {
   qr: "QR-код",
   bank_transfer: "Банковский перевод",
 };
+const refundDateFormatter = new Intl.DateTimeFormat("ru-RU");
 
 function sameRefundItems(
   left: { sale_item_id: string; qty: string }[],
@@ -521,7 +522,13 @@ export function RefundModal({
                       onChange={(event) => setLine(item.id, { selected: event.target.checked })}
                     />
                   </TD>
-                  <TD className="font-mono text-xs">{item.catalog_id.slice(0, 8)}</TD>
+                  <TD>
+                    <p className="font-medium">Позиция {item.position}</p>
+                    <p className="text-xs text-foreground-muted">
+                      Партия {item.batch_number ?? "без номера"}
+                      {item.expires_at ? ` · до ${formatRefundDate(item.expires_at)}` : ""}
+                    </p>
+                  </TD>
                   <TD className="text-right font-mono">{available.toFixed(3)}</TD>
                   <TD className="text-right">
                     <Input
@@ -667,6 +674,14 @@ export function RefundModal({
 
         {topError ? <p className="text-sm text-danger">{topError}</p> : null}
 
+        <div
+          role="note"
+          className="rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning-foreground"
+        >
+          <p className="font-medium">Возвращённый товар не поступит в продажу.</p>
+          <p className="mt-1">Поместите упаковку отдельно и передайте ответственному сотруднику.</p>
+        </div>
+
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={reconciling || attemptBusy}>
             Закрыть
@@ -714,4 +729,10 @@ export function RefundModal({
       </div>
     </Modal>
   );
+}
+
+function formatRefundDate(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return value;
+  return refundDateFormatter.format(new Date(year, month - 1, day, 12));
 }

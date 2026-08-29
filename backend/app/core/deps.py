@@ -63,6 +63,8 @@ BRANCH_SCOPED_PERMISSIONS = frozenset(
         "pos.refund",
         "pos.refund_external_confirm",
         "pos.handle_prescription",
+        "customer_returns.view",
+        "customer_returns.resolve",
         "reports.view",
         "sales.view.tenant",
     }
