@@ -5,6 +5,7 @@ const mutateAsync = vi.fn();
 const getRefundResult = vi.fn();
 const createRefundAttempt = vi.fn();
 const getRefundAttempt = vi.fn();
+const beginRefundAttemptReconciliation = vi.fn();
 const confirmRefundAttempt = vi.fn();
 const voidRefundAttempt = vi.fn();
 const authResult = {
@@ -33,6 +34,8 @@ vi.mock("@/features/sales/api", () => ({
   getRefundResult: (...args: unknown[]) => getRefundResult(...args),
   createRefundAttempt: (...args: unknown[]) => createRefundAttempt(...args),
   getRefundAttempt: (...args: unknown[]) => getRefundAttempt(...args),
+  beginRefundAttemptReconciliation: (...args: unknown[]) =>
+    beginRefundAttemptReconciliation(...args),
   confirmRefundAttempt: (...args: unknown[]) => confirmRefundAttempt(...args),
   voidRefundAttempt: (...args: unknown[]) => voidRefundAttempt(...args),
 }));
@@ -154,6 +157,11 @@ describe("RefundModal", () => {
     createRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
     getRefundAttempt.mockReset();
     getRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
+    beginRefundAttemptReconciliation.mockReset();
+    beginRefundAttemptReconciliation.mockResolvedValue({
+      ...PENDING_ATTEMPT,
+      status: "requires_reconciliation",
+    });
     confirmRefundAttempt.mockReset();
     confirmRefundAttempt.mockResolvedValue(CONFIRMED_ATTEMPT);
     voidRefundAttempt.mockReset();
@@ -168,9 +176,12 @@ describe("RefundModal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
     await waitFor(() => expect(createRefundAttempt).toHaveBeenCalledTimes(1));
+    expect(beginRefundAttemptReconciliation).toHaveBeenCalledWith("attempt-1");
     expect(mutateAsync).not.toHaveBeenCalled();
     expect(await screen.findByText("Карта")).toBeInTheDocument();
     expect(screen.getAllByText("10.00 TJS")).toHaveLength(2);
+    expect(screen.getByLabelText("Терминал")).toBeEnabled();
+    expect(screen.getByLabelText("Номер документа")).toBeEnabled();
 
     fireEvent.change(screen.getByLabelText("Терминал"), {
       target: { value: " TERM-01 " },
@@ -212,6 +223,9 @@ describe("RefundModal", () => {
     expect(await screen.findByText(/Для подтверждения пригласите сотрудника/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Терминал")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Ожидает подтверждения" })).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Терминал проверен, возврата нет" }),
+    ).not.toBeInTheDocument();
     expect(confirmRefundAttempt).not.toHaveBeenCalled();
   });
 
@@ -289,9 +303,9 @@ describe("RefundModal", () => {
   it("cancels a pending request without posting a return", async () => {
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
     fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
-    await screen.findByRole("button", { name: "Отменить заявку" });
+    await screen.findByRole("button", { name: "Терминал проверен, возврата нет" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Отменить заявку" }));
+    fireEvent.click(screen.getByRole("button", { name: "Терминал проверен, возврата нет" }));
 
     await waitFor(() => expect(voidRefundAttempt).toHaveBeenCalledWith("attempt-1"));
     expect(mutateAsync).not.toHaveBeenCalled();

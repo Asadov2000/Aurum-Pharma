@@ -82,6 +82,15 @@ export async function confirmRefundAttempt(
   return data;
 }
 
+export async function beginRefundAttemptReconciliation(attemptId: string): Promise<RefundAttempt> {
+  const { data } = await api.post<RefundAttempt>(
+    `/pos/refund-attempts/${attemptId}/reconciliation`,
+    {},
+    { timeout: MONEY_OPERATION_TIMEOUT_MS },
+  );
+  return data;
+}
+
 export async function voidRefundAttempt(attemptId: string): Promise<RefundAttempt> {
   const { data } = await api.post<RefundAttempt>(
     `/pos/refund-attempts/${attemptId}/void`,

@@ -53,7 +53,12 @@ export interface RefundPayload {
   refund_attempt_id?: string | null;
 }
 
-export type RefundAttemptStatus = "pending" | "confirmed" | "consumed" | "voided";
+export type RefundAttemptStatus =
+  | "pending"
+  | "requires_reconciliation"
+  | "confirmed"
+  | "consumed"
+  | "voided";
 export type ElectronicRefundMethod = "card" | "qr" | "bank_transfer";
 
 export interface RefundAttemptPayment {

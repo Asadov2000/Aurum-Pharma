@@ -73,6 +73,12 @@ async def _confirmed_refund_attempt(  # type: ignore[no-untyped-def]
         actor_id=scaffold["cashier"].id,
         operation_id=uuid4(),
     )
+    await service.begin_refund_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+        allowed_branch_ids=None,
+    )
     return await service.confirm_refund_attempt(
         tenant_id=scaffold["tenant"].id,
         attempt_id=attempt.id,
@@ -559,7 +565,28 @@ async def test_refund_confirmation_requires_all_methods_and_is_idempotent(
         ("card", "TERM-CARD", "CARD-REFUND-001"),
         ("qr", "TERM-QR", "QR-REFUND-001"),
     ]
-
+    with pytest.raises(BusinessRuleError, match="must start reconciliation"):
+        await service.confirm_refund_attempt(
+            tenant_id=s["tenant"].id,
+            attempt_id=attempt.id,
+            actor_id=s["cashier"].id,
+            confirmations=confirmations,
+            allowed_branch_ids=None,
+        )
+    started = await service.begin_refund_attempt_reconciliation(
+        tenant_id=s["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=s["cashier"].id,
+        allowed_branch_ids=None,
+    )
+    retried_start = await service.begin_refund_attempt_reconciliation(
+        tenant_id=s["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=s["cashier"].id,
+        allowed_branch_ids=None,
+    )
+    assert started.status == "requires_reconciliation"
+    assert retried_start.id == started.id
     with pytest.raises(BusinessRuleError, match="Every electronic refund method"):
         await service.confirm_refund_attempt(
             tenant_id=s["tenant"].id,
@@ -616,6 +643,12 @@ async def test_terminal_refund_document_cannot_be_reused_for_another_sale(
         actor_id=s["cashier"].id,
         operation_id=uuid4(),
     )
+    await service.begin_refund_attempt_reconciliation(
+        tenant_id=s["tenant"].id,
+        attempt_id=first.id,
+        actor_id=s["cashier"].id,
+        allowed_branch_ids=None,
+    )
     await service.confirm_refund_attempt(
         tenant_id=s["tenant"].id,
         attempt_id=first.id,
@@ -647,6 +680,12 @@ async def test_terminal_refund_document_cannot_be_reused_for_another_sale(
         actor_id=s["cashier"].id,
         operation_id=uuid4(),
     )
+    await service.begin_refund_attempt_reconciliation(
+        tenant_id=s["tenant"].id,
+        attempt_id=second.id,
+        actor_id=s["cashier"].id,
+        allowed_branch_ids=None,
+    )
 
     with pytest.raises(ConflictError, match="already used"):
         async with db_session.begin_nested():
@@ -665,8 +704,9 @@ async def test_terminal_refund_document_cannot_be_reused_for_another_sale(
             actor_id=s["cashier"].id,
             reason="refund_failed",
             operator_note=None,
-            can_manage=True,
+            can_manage_tenant=True,
             allowed_branch_ids=None,
+            allowed_manage_branch_ids=None,
         )
 
 
@@ -700,8 +740,9 @@ async def test_shift_close_waits_until_refund_attempt_is_resolved(
         actor_id=s["cashier"].id,
         reason="customer_cancelled",
         operator_note=None,
-        can_manage=False,
+        can_manage_tenant=False,
         allowed_branch_ids=None,
+        allowed_manage_branch_ids=set(),
     )
     closed = await service.close_shift(
         shift_id=parent.shift_id,

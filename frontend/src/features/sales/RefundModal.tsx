@@ -21,6 +21,7 @@ import { type Sale, type SaleDetails } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
 
 import {
+  beginRefundAttemptReconciliation,
   confirmRefundAttempt,
   createRefundAttempt,
   getRefundAttempt,
@@ -172,7 +173,7 @@ export function RefundModal({
       if (!operation.refundAttemptOperationId) return true;
       setAttemptBusy(true);
       try {
-        const attempt = operation.refundAttemptId
+        let attempt = operation.refundAttemptId
           ? await getRefundAttempt(operation.refundAttemptId)
           : await createRefundAttempt(
               operation.parentSaleId,
@@ -212,11 +213,14 @@ export function RefundModal({
           );
           return false;
         }
+        if (attempt.status === "pending") {
+          attempt = await beginRefundAttemptReconciliation(attempt.id);
+        }
         applyRefundAttempt(attempt);
         setRecoveryBlocked(false);
         setTopError(
-          attempt.status === "pending"
-            ? "Заявка восстановлена. Проверьте реквизиты терминального документа."
+          attempt.status === "requires_reconciliation"
+            ? "Заявка восстановлена и требует сверки. Не повторяйте возврат в терминале; проверьте его документ."
             : "Подтверждение восстановлено. Можно повторить оформление чека возврата.",
         );
         return true;
@@ -390,15 +394,27 @@ export function RefundModal({
         const updated = persistAttempt(operation, created);
         if (!updated) return;
         operation = updated;
-        applyRefundAttempt(created);
+        activeAttempt =
+          created.status === "pending"
+            ? await beginRefundAttemptReconciliation(created.id)
+            : created;
+        applyRefundAttempt(activeAttempt);
         setTopError(
           canConfirmExternal
-            ? "Сумма рассчитана. Выполните возврат в терминале и внесите реквизиты документа."
+            ? "Сумма зафиксирована для сверки. Выполните возврат в терминале один раз и внесите реквизиты документа."
             : "Заявка создана. Для подтверждения пригласите сотрудника с соответствующим правом.",
         );
         return;
       }
       if (activeAttempt?.status === "pending") {
+        activeAttempt = await beginRefundAttemptReconciliation(activeAttempt.id);
+        applyRefundAttempt(activeAttempt);
+        setTopError(
+          "Сумма зафиксирована для сверки. Выполните возврат в терминале один раз и внесите реквизиты документа.",
+        );
+        return;
+      }
+      if (activeAttempt?.status === "requires_reconciliation") {
         if (!canConfirmExternal) {
           setTopError(
             "У вас нет права подтверждать электронные возвраты. Пригласите управляющего.",
@@ -443,7 +459,14 @@ export function RefundModal({
 
   const cancelPendingAttempt = async () => {
     const operation = pendingOperationRef.current;
-    if (!operation || refundAttempt?.status !== "pending" || attemptBusy) return;
+    if (
+      !operation ||
+      !refundAttempt ||
+      !["pending", "requires_reconciliation"].includes(refundAttempt.status) ||
+      (refundAttempt.status === "requires_reconciliation" && !canConfirmExternal) ||
+      attemptBusy
+    )
+      return;
     setAttemptBusy(true);
     setTopError(null);
     try {
@@ -465,7 +488,7 @@ export function RefundModal({
   const buttonLabel =
     requiresExternalRefund && !refundAttempt
       ? "Рассчитать возврат"
-      : refundAttempt?.status === "pending"
+      : refundAttempt?.status === "pending" || refundAttempt?.status === "requires_reconciliation"
         ? canConfirmExternal
           ? "Подтвердить и оформить"
           : "Ожидает подтверждения"
@@ -574,7 +597,8 @@ export function RefundModal({
                     terminalId: "",
                     documentNumber: "",
                   };
-                  const disabled = refundAttempt.status !== "pending" || !canConfirmExternal;
+                  const disabled =
+                    refundAttempt.status !== "requires_reconciliation" || !canConfirmExternal;
                   return (
                     <div
                       key={payment.payment_method}
@@ -629,7 +653,9 @@ export function RefundModal({
                     </div>
                   );
                 })}
-                {!canConfirmExternal && refundAttempt.status === "pending" ? (
+                {!canConfirmExternal &&
+                (refundAttempt.status === "pending" ||
+                  refundAttempt.status === "requires_reconciliation") ? (
                   <p className="text-sm text-warning-foreground">
                     Подтвердить заявку может только сотрудник с правом электронного возврата.
                   </p>
@@ -645,13 +671,14 @@ export function RefundModal({
           <Button variant="ghost" onClick={onClose} disabled={reconciling || attemptBusy}>
             Закрыть
           </Button>
-          {refundAttempt?.status === "pending" ? (
+          {refundAttempt?.status === "pending" ||
+          (refundAttempt?.status === "requires_reconciliation" && canConfirmExternal) ? (
             <Button
               variant="secondary"
               onClick={() => void cancelPendingAttempt()}
               isLoading={attemptBusy}
             >
-              Отменить заявку
+              Терминал проверен, возврата нет
             </Button>
           ) : null}
           {recoveryBlocked ? (
@@ -676,7 +703,9 @@ export function RefundModal({
               reconciling ||
               attemptBusy ||
               refund.isPending ||
-              (refundAttempt?.status === "pending" && !canConfirmExternal)
+              ((refundAttempt?.status === "pending" ||
+                refundAttempt?.status === "requires_reconciliation") &&
+                !canConfirmExternal)
             }
           >
             {buttonLabel}

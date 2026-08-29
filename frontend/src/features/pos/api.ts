@@ -51,6 +51,17 @@ export async function confirmPaymentAttempt(
   return data;
 }
 
+export async function beginPaymentAttemptReconciliation(
+  attemptId: string,
+): Promise<PaymentAttempt> {
+  const { data } = await api.post<PaymentAttempt>(
+    `/pos/payment-attempts/${attemptId}/reconciliation`,
+    {},
+    { timeout: POS_MONEY_WRITE_TIMEOUT_MS },
+  );
+  return data;
+}
+
 export async function voidPaymentAttempt(
   attemptId: string,
   payload: PaymentAttemptVoidPayload,

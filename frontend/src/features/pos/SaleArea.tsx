@@ -50,6 +50,7 @@ import {
   useAddPayment,
   useAddPosFavorite,
   useAddPrescription,
+  useBeginPaymentAttemptReconciliation,
   useCheckoutSale,
   useCompleteSale,
   useConfirmPaymentAttempt,
@@ -362,6 +363,7 @@ function ActiveWorkspace({
   const completeSale = useCompleteSale();
   const checkoutSale = useCheckoutSale();
   const createPaymentAttempt = useCreatePaymentAttempt();
+  const beginPaymentAttemptReconciliation = useBeginPaymentAttemptReconciliation();
   const confirmPaymentAttempt = useConfirmPaymentAttempt();
   const voidPaymentAttempt = useVoidPaymentAttempt();
   const saleQuery = useSaleQuery(saleId);
@@ -1082,7 +1084,7 @@ function ActiveWorkspace({
     setPayingMethod(method);
     setTopError(null);
     try {
-      const attempt = await createPaymentAttempt.mutateAsync({
+      let attempt = await createPaymentAttempt.mutateAsync({
         operation_id: operation.operationId,
         sale_id: saleId,
         payment_method: method,
@@ -1094,7 +1096,10 @@ function ActiveWorkspace({
         }
         return;
       }
-      if (attempt.status !== "pending") {
+      if (attempt.status === "pending") {
+        attempt = await beginPaymentAttemptReconciliation.mutateAsync(attempt.id);
+      }
+      if (attempt.status !== "requires_reconciliation") {
         clearPaymentAttemptOperation(saleId, operation.operationId);
         setTopError("Эта электронная операция уже закрыта. Создайте новую оплату.");
         return;
@@ -2035,11 +2040,16 @@ function ActiveWorkspace({
         }
         message={
           externalPaymentConfirmation
-            ? `Подтвердите, что внешний терминал показал успешную оплату ${Number(externalPaymentConfirmation.amount).toFixed(2)} ${currency}. Aurum не списывает деньги самостоятельно.`
+            ? `Операция ${Number(externalPaymentConfirmation.amount).toFixed(2)} ${currency} отмечена на сервере как требующая сверки. Выполните её во внешнем терминале один раз и подтвердите только после сообщения об успехе. Aurum не списывает деньги самостоятельно.`
             : ""
         }
         confirmLabel="Оплата подтверждена"
-        isLoading={confirmPaymentAttempt.isPending || voidPaymentAttempt.isPending}
+        cancelLabel="Терминал проверен, оплаты нет"
+        isLoading={
+          beginPaymentAttemptReconciliation.isPending ||
+          confirmPaymentAttempt.isPending ||
+          voidPaymentAttempt.isPending
+        }
         onConfirm={() => void confirmExternalPayment()}
         onCancel={() => void cancelExternalPayment()}
       />

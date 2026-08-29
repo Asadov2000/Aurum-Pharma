@@ -126,7 +126,7 @@ class POSPaymentAttemptRead(BaseModel):
     payment_method: Literal["card", "qr"]
     amount: Decimal
     currency: Literal["TJS"]
-    status: Literal["pending", "confirmed", "consumed", "voided"]
+    status: Literal["pending", "requires_reconciliation", "confirmed", "consumed", "voided"]
     external_reference: str | None
     void_reason: str | None
     void_note: str | None
@@ -698,7 +698,7 @@ class POSRefundAttemptRead(BaseModel):
     total_amount: Decimal
     external_amount: Decimal
     currency: Literal["TJS"]
-    status: Literal["pending", "confirmed", "consumed", "voided"]
+    status: Literal["pending", "requires_reconciliation", "confirmed", "consumed", "voided"]
     void_reason: str | None
     void_note: str | None
     created_at: datetime

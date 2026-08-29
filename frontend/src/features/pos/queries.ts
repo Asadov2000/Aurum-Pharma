@@ -5,6 +5,7 @@ import {
   addPosFavorite,
   addPrescription,
   addSaleItem,
+  beginPaymentAttemptReconciliation,
   checkoutSale,
   closeShift,
   completeSale,
@@ -76,6 +77,12 @@ export function useConfirmPaymentAttempt() {
   return useMutation({
     mutationFn: (args: { attemptId: string; payload?: PaymentAttemptConfirmPayload }) =>
       confirmPaymentAttempt(args.attemptId, args.payload),
+  });
+}
+
+export function useBeginPaymentAttemptReconciliation() {
+  return useMutation({
+    mutationFn: (attemptId: string) => beginPaymentAttemptReconciliation(attemptId),
   });
 }
 
