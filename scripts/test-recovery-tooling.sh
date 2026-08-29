@@ -314,13 +314,23 @@ compose --profile offsite-test up -d --wait offsite-test-minio
 compose --profile offsite-test run --rm offsite-test-init
 compose --profile offsite run --rm offsite-sync
 
-candidate_pointer="$(find "$candidate" -maxdepth 1 -type f -name '*.candidate.json' -print -quit)"
+case "$(uname -s)" in
+    MINGW*|MSYS*)
+        candidate_pointer="$(find "$candidate" -maxdepth 1 -type f -name '*.candidate.json' -print -quit)"
+        ;;
+    *)
+        candidate_pointer="$(sudo find "$candidate" -maxdepth 1 -type f -name '*.candidate.json' -print -quit)"
+        ;;
+esac
 test -n "$candidate_pointer"
 export_id="$(basename "$candidate_pointer" .candidate.json)"
 test -n "$export_id"
 export AURUM_OFFSITE_EXPORT_ID="$export_id"
 compose --profile offsite-test run --rm offsite-test-approve
-printf '{}' > "$candidate_pointer"
+case "$(uname -s)" in
+    MINGW*|MSYS*) printf '{}' > "$candidate_pointer" ;;
+    *) sudo sh -c 'printf "{}" > "$1"' sh "$candidate_pointer" ;;
+esac
 
 compose --profile offsite-test run --rm --entrypoint /bin/sh offsite-test-init -ec '
     root_user="$(cat /run/secrets/MINIO_ROOT_USER)"
@@ -380,8 +390,16 @@ grep -q 'Independent signing authorization is missing' "$authorization_log" || {
     echo "Missing authorization failed for an unexpected reason" >&2
     exit 1
 }
-sha256sum "$verified/$export_id.verified.json" | awk '{print $1}' \
-    > "$authorization/$export_id.authorize.sha256"
+case "$(uname -s)" in
+    MINGW*|MSYS*)
+        sha256sum "$verified/$export_id.verified.json" | awk '{print $1}' \
+            > "$authorization/$export_id.authorize.sha256"
+        ;;
+    *)
+        sudo sha256sum "$verified/$export_id.verified.json" | awk '{print $1}' | \
+            sudo tee "$authorization/$export_id.authorize.sha256" >/dev/null
+        ;;
+esac
 compose --profile offsite-trust-sign run --rm offsite-trust-sign
 immutable_log="$root/immutable.log"
 if compose --profile offsite-trust-sign run --rm offsite-trust-sign \
