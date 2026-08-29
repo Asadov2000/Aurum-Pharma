@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, require_permission
+from app.core.deps import CurrentUser, get_db, require_branch_permission
 from app.core.errors import BusinessRuleError
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.schemas import (
@@ -45,7 +45,10 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
 
 @router.get("", response_model=IncomingDocumentList)
 async def list_incoming(
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.view", policy="filter")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
     branch_id: Annotated[UUID | None, Query()] = None,
     supplier_id: Annotated[UUID | None, Query()] = None,
@@ -120,7 +123,10 @@ async def list_incoming(
 )
 async def create_incoming(
     payload: IncomingDocumentCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.create"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.create", policy="direct")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentRead:
     doc = await service.create_document(
@@ -135,7 +141,10 @@ async def create_incoming(
 @router.get("/{document_id}", response_model=IncomingDocumentWithItems)
 async def get_incoming(
     document_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.view", policy="resource")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentWithItems:
     branch_scope = user.branch_scope_for("incoming.view")
@@ -171,7 +180,10 @@ async def get_incoming(
 async def update_incoming(
     document_id: UUID,
     payload: IncomingDocumentUpdate,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.create"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.create", policy="resource")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentRead:
     doc = await service.update_document(
@@ -194,7 +206,10 @@ async def update_incoming(
 async def add_item(
     document_id: UUID,
     payload: IncomingItemBase,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.create"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.create", policy="resource")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingItemRead:
     item = await service.add_item(
@@ -213,7 +228,10 @@ async def update_item(
     document_id: UUID,
     item_id: UUID,
     payload: IncomingItemUpdate,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.create"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.create", policy="resource")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingItemRead:
     item = await service.update_item(
@@ -229,7 +247,10 @@ async def update_item(
 async def delete_item(
     document_id: UUID,
     item_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.create"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.create", policy="resource")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> dict[str, str]:
     await service.delete_item(
@@ -246,7 +267,10 @@ async def delete_item(
 @router.post("/{document_id}/accept", response_model=IncomingDocumentRead)
 async def accept_incoming(
     document_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.create"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.create", policy="resource")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentRead:
     doc = await service.accept(
@@ -260,7 +284,10 @@ async def accept_incoming(
 @router.post("/{document_id}/reject", response_model=IncomingDocumentRead)
 async def reject_incoming(
     document_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("incoming.create"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("incoming.create", policy="resource")),
+    ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentRead:
     doc = await service.reject(

@@ -21,7 +21,8 @@ from app.core.deps import (
     CurrentUser,
     ensure_platform_capability,
     get_db,
-    require_any_permission,
+    require_any_branch_permission,
+    require_branch_permission,
     require_permission,
     require_platform_capability,
     require_recent_platform_capability,
@@ -287,7 +288,12 @@ async def get_tenant_operational_settings(
     response: Response,
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission(*OPERATIONAL_SETTINGS_PERMISSIONS)),
+        Depends(
+            require_any_branch_permission(
+                *OPERATIONAL_SETTINGS_PERMISSIONS,
+                policy="tenant_reference",
+            )
+        ),
     ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> TenantOperationalSettingsRead:
@@ -326,8 +332,9 @@ async def list_branches(
     user: Annotated[
         CurrentUser,
         Depends(
-            require_any_permission(
+            require_any_branch_permission(
                 *BRANCH_DISCOVERY_PERMISSIONS,
+                policy="filter",
             )
         ),
     ],
@@ -345,7 +352,10 @@ async def list_branches(
 async def search_branches(
     payload: BranchSearchRequest,
     response: Response,
-    user: Annotated[CurrentUser, Depends(require_permission("branches.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("branches.view", policy="filter")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> BranchSearchResponse:
     _set_search_no_store(response)
@@ -388,8 +398,9 @@ async def get_branch(
     user: Annotated[
         CurrentUser,
         Depends(
-            require_any_permission(
+            require_any_branch_permission(
                 *BRANCH_DISCOVERY_PERMISSIONS,
+                policy="resource",
             )
         ),
     ],
@@ -405,7 +416,10 @@ async def get_branch(
 async def update_branch(
     branch_id: UUID,
     payload: BranchUpdate,
-    user: Annotated[CurrentUser, Depends(require_permission("branches.update"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("branches.update", policy="direct")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> BranchRead:
     if not user.can_access_branch("branches.update", branch_id):
@@ -424,7 +438,10 @@ async def update_branch(
 )
 async def delete_branch(
     branch_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("branches.delete"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("branches.delete", policy="direct")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> BranchRead:
     if not user.can_access_branch("branches.delete", branch_id):
@@ -441,8 +458,9 @@ async def list_registers(
     user: Annotated[
         CurrentUser,
         Depends(
-            require_any_permission(
+            require_any_branch_permission(
                 *REGISTER_DISCOVERY_PERMISSIONS,
+                policy="filter",
             )
         ),
     ],
@@ -463,7 +481,10 @@ async def list_registers(
 async def search_registers(
     payload: RegisterSearchRequest,
     response: Response,
-    user: Annotated[CurrentUser, Depends(require_permission("registers.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("registers.view", policy="filter")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterSearchResponse:
     _set_search_no_store(response)
@@ -488,7 +509,10 @@ async def search_registers(
 @tenant_router.post("/registers", response_model=RegisterRead, status_code=status.HTTP_201_CREATED)
 async def create_register(
     payload: RegisterCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("registers.create"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("registers.create", policy="direct")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterRead:
     if not user.can_access_branch("registers.create", payload.branch_id):
@@ -507,8 +531,9 @@ async def get_register(
     user: Annotated[
         CurrentUser,
         Depends(
-            require_any_permission(
+            require_any_branch_permission(
                 *REGISTER_DISCOVERY_PERMISSIONS,
+                policy="resource",
             )
         ),
     ],
@@ -527,7 +552,10 @@ async def get_register(
 async def update_register(
     register_id: UUID,
     payload: RegisterUpdate,
-    user: Annotated[CurrentUser, Depends(require_permission("registers.update"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("registers.update", policy="resource")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterRead:
     existing = await service.get_register(register_id)
@@ -544,7 +572,10 @@ async def update_register(
 @tenant_router.delete("/registers/{register_id}", response_model=RegisterRead)
 async def delete_register(
     register_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("registers.delete"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("registers.delete", policy="resource")),
+    ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> RegisterRead:
     existing = await service.get_register(register_id)

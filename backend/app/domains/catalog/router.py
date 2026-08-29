@@ -23,7 +23,12 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.deps import CurrentUser, get_db, require_any_permission, require_permission
+from app.core.deps import (
+    CurrentUser,
+    get_db,
+    require_any_branch_permission,
+    require_permission,
+)
 from app.core.errors import (
     BusinessRuleError,
     NotFoundError,
@@ -131,7 +136,13 @@ def _remove_catalog_image_version(tenant_id: UUID, item_id: UUID, version: UUID)
 async def list_catalog(
     user: Annotated[
         CurrentUser,
-        Depends(require_any_permission("catalog.view", "pos.sell")),
+        Depends(
+            require_any_branch_permission(
+                "catalog.view",
+                "pos.sell",
+                policy="filter",
+            )
+        ),
     ],
     service: Annotated[CatalogService, Depends(_service)],
     q: Annotated[str | None, Query()] = None,

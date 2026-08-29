@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, require_permission
+from app.core.deps import CurrentUser, get_db, require_branch_permission
 from app.domains.inventory.expiry import ExpiryStatus
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.schemas import (
@@ -34,7 +34,10 @@ async def _service(
 
 @router.get("", response_model=BatchList)
 async def list_batches(
-    user: Annotated[CurrentUser, Depends(require_permission("batches.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("batches.view", policy="filter")),
+    ],
     service: Annotated[InventoryService, Depends(_service)],
     catalog_id: Annotated[UUID | None, Query()] = None,
     branch_id: Annotated[UUID | None, Query()] = None,
@@ -104,7 +107,10 @@ async def list_batches(
 @router.get("/{batch_id}", response_model=BatchDetails)
 async def get_batch(
     batch_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("batches.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("batches.view", policy="resource")),
+    ],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> BatchDetails:
     branch_scope = user.branch_scope_for("batches.view")
@@ -130,7 +136,10 @@ async def get_batch(
 @router.get("/{batch_id}/movements", response_model=list[MovementRead])
 async def list_movements(
     batch_id: UUID,
-    user: Annotated[CurrentUser, Depends(require_permission("batches.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("batches.view", policy="resource")),
+    ],
     service: Annotated[InventoryService, Depends(_service)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> list[MovementRead]:
@@ -151,7 +160,10 @@ async def list_movements(
 async def create_write_off(
     batch_id: UUID,
     payload: WriteOffCreate,
-    user: Annotated[CurrentUser, Depends(require_permission("batches.write_off"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("batches.write_off", policy="resource")),
+    ],
     service: Annotated[InventoryService, Depends(_service)],
 ) -> WriteOffRead:
     wo = await service.write_off(
