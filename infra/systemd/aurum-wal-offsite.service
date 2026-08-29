@@ -1,5 +1,5 @@
 [Unit]
-Description=Aurum Pharma encrypted WAL and off-site WORM export
+Description=Aurum Pharma encrypted WAL and off-site export
 Requires=docker.service
 After=docker.service network-online.target
 
@@ -7,10 +7,19 @@ After=docker.service network-online.target
 Type=oneshot
 User=root
 WorkingDirectory=/opt/aurum-pharma
+Environment=AURUM_RECOVERY_METRICS_DIR=/var/lib/aurum/recovery-metrics
+ExecStartPre=/usr/bin/install -d -m 0755 -o root -g root /var/lib/aurum/recovery-metrics
 ExecStart=/bin/sh ./scripts/run-production-recovery-cycle.sh wal
+TimeoutStartSec=30m
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aurum/recovery-metrics /run/lock
 
 [Install]
 WantedBy=multi-user.target

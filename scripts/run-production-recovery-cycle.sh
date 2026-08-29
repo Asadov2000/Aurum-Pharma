@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+. "$script_dir/recovery-metrics.sh"
+
 mode="${1:-}"
 case "$mode" in
     full|wal) ;;
@@ -23,9 +26,13 @@ compose() {
 }
 
 if [ "$mode" = "full" ]; then
-    compose --profile backup run --rm backup
-    compose --profile backup run --rm pitr-basebackup
+    aurum_run_recovery_step \
+        combined_backup compose --profile backup run --rm backup
+    aurum_run_recovery_step \
+        pitr_base_backup compose --profile backup run --rm pitr-basebackup
 fi
 
-compose --profile backup run --rm wal-snapshot
-compose --profile offsite run --rm offsite-sync
+aurum_run_recovery_step \
+    wal_snapshot compose --profile backup run --rm wal-snapshot
+aurum_run_recovery_step \
+    offsite_export compose --profile offsite run --rm offsite-sync

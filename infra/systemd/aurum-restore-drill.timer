@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Aurum Pharma isolated restore drill monthly
+
+[Timer]
+OnCalendar=*-*-01 03:30:00
+Persistent=true
+RandomizedDelaySec=6h
+Unit=aurum-restore-drill.service
+
+[Install]
+WantedBy=timers.target

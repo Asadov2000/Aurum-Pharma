@@ -12,3 +12,7 @@ scrape_configs:
       credentials_file: /run/secrets/METRICS_TOKEN
     static_configs:
       - targets: ["backend:8000"]
+
+  - job_name: aurum-recovery
+    static_configs:
+      - targets: ["aurum-recovery-exporter:9100"]
