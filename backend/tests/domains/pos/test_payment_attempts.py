@@ -12,7 +12,12 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, current_user, get_db
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.errors import (
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.domains.auth.models import AppUser
 from app.domains.pos.models import POSPaymentAttempt
 from app.domains.pos.repository import POSRepository
@@ -432,6 +437,16 @@ async def test_reconciliation_void_requires_terminal_evidence(
         actor_id=scaffold["cashier"].id,
     )
     assert retried_start.reconciliation_started_at == started_at
+    with pytest.raises(PermissionDeniedError, match="sales management permission"):
+        await service.void_payment_attempt(
+            tenant_id=scaffold["tenant"].id,
+            attempt_id=attempt.id,
+            actor_id=scaffold["cashier"].id,
+            reason="terminal_declined",
+            operator_note=None,
+            terminal_id="TERM-01",
+            external_reference="DECLINED-01",
+        )
     with pytest.raises(BusinessRuleError, match="Terminal evidence"):
         await service.void_payment_attempt(
             tenant_id=scaffold["tenant"].id,
@@ -439,6 +454,7 @@ async def test_reconciliation_void_requires_terminal_evidence(
             actor_id=scaffold["cashier"].id,
             reason="terminal_declined",
             operator_note=None,
+            can_manage_tenant=True,
         )
 
     voided = await service.void_payment_attempt(
@@ -449,9 +465,20 @@ async def test_reconciliation_void_requires_terminal_evidence(
         operator_note=None,
         terminal_id="TERM-01",
         external_reference="DECLINED-01",
+        can_manage_tenant=True,
     )
     assert voided.status == "voided"
     assert voided.resolved_by_user_id == scaffold["cashier"].id
+    with pytest.raises(PermissionDeniedError, match="sales management permission"):
+        await service.void_payment_attempt(
+            tenant_id=scaffold["tenant"].id,
+            attempt_id=attempt.id,
+            actor_id=scaffold["cashier"].id,
+            reason="terminal_declined",
+            operator_note=None,
+            terminal_id="TERM-01",
+            external_reference="DECLINED-01",
+        )
     retried = await service.void_payment_attempt(
         tenant_id=scaffold["tenant"].id,
         attempt_id=attempt.id,
@@ -460,6 +487,7 @@ async def test_reconciliation_void_requires_terminal_evidence(
         operator_note=None,
         terminal_id="TERM-01",
         external_reference="DECLINED-01",
+        can_manage_tenant=True,
     )
     assert retried.id == voided.id
 
@@ -524,6 +552,36 @@ async def test_terminal_reference_is_unique_per_tenant(
     )
     assert restored.status == "requires_reconciliation"
     assert restored.terminal_id is None
+
+
+async def test_terminal_reference_can_be_reused_by_another_tenant(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    first = await pos_scaffold()
+    second = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    first_sale = await _draft_sale(service, first)
+    second_sale = await _draft_sale(service, second)
+
+    first_attempt = await _confirmed_attempt(
+        service,
+        first,
+        sale_id=first_sale.id,
+        terminal_id="TERM-SHARED",
+        external_reference="DOC-SHARED",
+    )
+    second_attempt = await _confirmed_attempt(
+        service,
+        second,
+        sale_id=second_sale.id,
+        terminal_id="TERM-SHARED",
+        external_reference="DOC-SHARED",
+    )
+
+    assert first_attempt.status == "confirmed"
+    assert second_attempt.status == "confirmed"
+    assert first_attempt.tenant_id != second_attempt.tenant_id
 
 
 async def test_active_payment_attempt_blocks_cart_changes_and_shift_close(

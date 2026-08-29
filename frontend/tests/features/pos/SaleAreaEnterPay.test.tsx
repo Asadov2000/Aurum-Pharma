@@ -203,7 +203,7 @@ function apiError(status: number, detail: string): unknown {
   };
 }
 
-function renderArea() {
+function renderArea(canReconcileExternalPayment: boolean = true) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -221,6 +221,7 @@ function renderArea() {
         mixedPaymentEnabled={mixedPaymentEnabled}
         paymentSettingsLoading={false}
         paymentSettingsUnavailable={false}
+        canReconcileExternalPayment={canReconcileExternalPayment}
       />
     </QueryClientProvider>
   );
@@ -587,6 +588,29 @@ describe("SaleArea atomic checkout", () => {
     });
     expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
     expect(checkoutSale).not.toHaveBeenCalled();
+  });
+
+  it("requires a sales manager to decline an uncertain external payment", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    renderArea(false);
+
+    await screen.findByText(/Остаток/);
+    fireEvent.click(screen.getByRole("button", { name: /Карта/i }));
+    fireEvent.click(
+      within(
+        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
+      ).getByRole("button", { name: "ОК" }),
+    );
+
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Сверка оплаты картой",
+    });
+    expect(within(confirmation).queryByRole("button", { name: "Оплаты нет" })).toBeNull();
+    expect(
+      within(confirmation).getByText(/передайте операцию ответственному сотруднику/i),
+    ).toBeInTheDocument();
+    expect(within(confirmation).getByRole("button", { name: "Оплата прошла" })).toBeEnabled();
   });
 
   it("does not submit or open the drawer twice while checkout is pending", async () => {

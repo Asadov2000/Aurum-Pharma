@@ -14,7 +14,7 @@ import pytest_asyncio
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.core.errors import BusinessRuleError
+from app.core.errors import BusinessRuleError, ConflictError
 from app.domains.auth.models import AppUser
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
@@ -23,7 +23,7 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.inventory.models import Batch, BatchMovement
 from app.domains.inventory.repository import InventoryRepository
-from app.domains.pos.models import POSCommand, Sale, SalePayment, Shift
+from app.domains.pos.models import POSCommand, POSPaymentAttempt, Sale, SalePayment, Shift
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
 from app.domains.sync.models import SyncOutboxEvent
@@ -281,6 +281,108 @@ async def _refund(
             operation_id=operation_id,
         )
         return sale.id
+
+
+async def _create_reconciling_attempt(
+    factory: async_sessionmaker[AsyncSession],
+    context: CommittedPOS,
+    *,
+    payment_method: str = "card",
+) -> tuple[UUID, UUID]:
+    async with factory.begin() as session:
+        service = POSService(POSRepository(session))
+        sale = await service.create_sale(
+            tenant_id=context.tenant_id,
+            register_id=context.register_id,
+            cashier_user_id=context.cashier_id,
+        )
+        await service.add_item(
+            sale_id=sale.id,
+            catalog_id=context.catalog_id,
+            qty=Decimal("1"),
+            actor_id=context.cashier_id,
+        )
+        attempt = await service.create_payment_attempt(
+            tenant_id=context.tenant_id,
+            sale_id=sale.id,
+            actor_id=context.cashier_id,
+            operation_id=uuid4(),
+            payment_method=payment_method,
+            amount=Decimal("10"),
+            currency="TJS",
+        )
+        await service.begin_payment_attempt_reconciliation(
+            tenant_id=context.tenant_id,
+            attempt_id=attempt.id,
+            actor_id=context.cashier_id,
+        )
+        return sale.id, attempt.id
+
+
+async def _confirm_attempt(
+    factory: async_sessionmaker[AsyncSession],
+    context: CommittedPOS,
+    *,
+    attempt_id: UUID,
+    terminal_id: str,
+    external_reference: str,
+    barrier: asyncio.Barrier,
+) -> UUID:
+    await barrier.wait()
+    async with factory.begin() as session:
+        attempt = await POSService(POSRepository(session)).confirm_payment_attempt(
+            tenant_id=context.tenant_id,
+            attempt_id=attempt_id,
+            actor_id=context.cashier_id,
+            terminal_id=terminal_id,
+            external_reference=external_reference,
+        )
+        return attempt.id
+
+
+async def _checkout_confirmed_attempt(
+    factory: async_sessionmaker[AsyncSession],
+    context: CommittedPOS,
+    *,
+    sale_id: UUID,
+    attempt_id: UUID,
+    operation_id: UUID,
+    barrier: asyncio.Barrier,
+) -> UUID:
+    await barrier.wait()
+    async with factory.begin() as session:
+        result = await POSService(POSRepository(session)).checkout(
+            tenant_id=context.tenant_id,
+            register_id=context.register_id,
+            cashier_user_id=context.cashier_id,
+            operation_id=operation_id,
+            draft_sale_id=sale_id,
+            items=[(context.catalog_id, Decimal("1"))],
+            payments=[("card", Decimal("10"), None, attempt_id)],
+        )
+        return result.sale_id
+
+
+async def _void_confirmed_attempt(
+    factory: async_sessionmaker[AsyncSession],
+    context: CommittedPOS,
+    *,
+    attempt_id: UUID,
+    barrier: asyncio.Barrier,
+) -> UUID:
+    await barrier.wait()
+    async with factory.begin() as session:
+        attempt = await POSService(POSRepository(session)).void_payment_attempt(
+            tenant_id=context.tenant_id,
+            attempt_id=attempt_id,
+            actor_id=context.cashier_id,
+            reason="manager_override",
+            operator_note=None,
+            terminal_id="TERM-RACE",
+            external_reference="DOC-RACE",
+            can_manage_tenant=True,
+        )
+        return attempt.id
 
 
 async def _movement_count(session: AsyncSession, sale_id: UUID, movement_type: str) -> int:
@@ -616,6 +718,164 @@ async def test_concurrent_refund_retry_has_one_effect(committed_pos) -> None:
         batch = await session.get(Batch, context.batch_id)
         assert batch is not None
         assert batch.qty_remaining == context.initial_qty - Decimal("5")
+
+
+async def test_concurrent_duplicate_terminal_evidence_confirms_one_attempt(
+    committed_pos,
+) -> None:
+    factory, context = committed_pos
+    _first_sale_id, first_attempt_id = await _create_reconciling_attempt(factory, context)
+    _second_sale_id, second_attempt_id = await _create_reconciling_attempt(factory, context)
+    barrier = asyncio.Barrier(2)
+
+    results = await asyncio.gather(
+        _confirm_attempt(
+            factory,
+            context,
+            attempt_id=first_attempt_id,
+            terminal_id="TERM-DUPLICATE",
+            external_reference="DOC-DUPLICATE",
+            barrier=barrier,
+        ),
+        _confirm_attempt(
+            factory,
+            context,
+            attempt_id=second_attempt_id,
+            terminal_id="TERM-DUPLICATE",
+            external_reference="DOC-DUPLICATE",
+            barrier=barrier,
+        ),
+        return_exceptions=True,
+    )
+
+    assert sum(isinstance(result, UUID) for result in results) == 1
+    assert sum(isinstance(result, ConflictError) for result in results) == 1
+    async with factory() as session:
+        attempts = (
+            await session.execute(
+                select(POSPaymentAttempt).where(
+                    POSPaymentAttempt.id.in_((first_attempt_id, second_attempt_id))
+                )
+            )
+        ).scalars()
+        assert sorted(attempt.status for attempt in attempts) == [
+            "confirmed",
+            "requires_reconciliation",
+        ]
+
+
+async def test_concurrent_void_cannot_discard_confirmed_checkout(committed_pos) -> None:
+    factory, context = committed_pos
+    sale_id, attempt_id = await _create_reconciling_attempt(factory, context)
+    async with factory.begin() as session:
+        await POSService(POSRepository(session)).confirm_payment_attempt(
+            tenant_id=context.tenant_id,
+            attempt_id=attempt_id,
+            actor_id=context.cashier_id,
+            terminal_id="TERM-RACE",
+            external_reference="DOC-RACE",
+        )
+
+    operation_id = uuid4()
+    barrier = asyncio.Barrier(2)
+    checkout_result, void_result = await asyncio.gather(
+        _checkout_confirmed_attempt(
+            factory,
+            context,
+            sale_id=sale_id,
+            attempt_id=attempt_id,
+            operation_id=operation_id,
+            barrier=barrier,
+        ),
+        _void_confirmed_attempt(
+            factory,
+            context,
+            attempt_id=attempt_id,
+            barrier=barrier,
+        ),
+        return_exceptions=True,
+    )
+
+    assert checkout_result == sale_id
+    assert isinstance(void_result, BusinessRuleError)
+    async with factory() as session:
+        sale = await session.get(Sale, sale_id)
+        attempt = await session.get(POSPaymentAttempt, attempt_id)
+        batch = await session.get(Batch, context.batch_id)
+        payment_count = await session.scalar(
+            select(func.count())
+            .select_from(SalePayment)
+            .where(SalePayment.payment_attempt_id == attempt_id)
+        )
+        outbox_count = await session.scalar(
+            select(func.count())
+            .select_from(SyncOutboxEvent)
+            .where(SyncOutboxEvent.operation_id == operation_id)
+        )
+        assert sale is not None and sale.status == "completed"
+        assert attempt is not None and attempt.status == "consumed"
+        assert batch is not None and batch.qty_remaining == context.initial_qty - Decimal("1")
+        assert payment_count == 1
+        assert outbox_count == 1
+
+
+async def test_atomic_checkout_and_shift_close_have_one_consistent_order(
+    committed_pos,
+) -> None:
+    factory, context = committed_pos
+    operation_id = uuid4()
+    barrier = asyncio.Barrier(2)
+
+    async def checkout() -> tuple[UUID, UUID, str]:
+        await barrier.wait()
+        return await _atomic_checkout(
+            factory,
+            context,
+            operation_id=operation_id,
+            qty=Decimal("1"),
+        )
+
+    async def close_shift() -> UUID:
+        await barrier.wait()
+        async with factory.begin() as session:
+            shift = await POSService(POSRepository(session)).close_shift(
+                shift_id=context.shift_id,
+                closing_cash_actual=Decimal("10"),
+                closed_by_user_id=context.cashier_id,
+            )
+            return shift.id
+
+    checkout_result, close_result = await asyncio.gather(
+        checkout(),
+        close_shift(),
+        return_exceptions=True,
+    )
+    assert close_result == context.shift_id
+    assert isinstance(checkout_result, tuple | BusinessRuleError)
+
+    async with factory() as session:
+        shift = await session.get(Shift, context.shift_id)
+        batch = await session.get(Batch, context.batch_id)
+        sale_count = await session.scalar(
+            select(func.count()).select_from(Sale).where(Sale.operation_id == operation_id)
+        )
+        outbox_count = await session.scalar(
+            select(func.count())
+            .select_from(SyncOutboxEvent)
+            .where(SyncOutboxEvent.operation_id == operation_id)
+        )
+        assert shift is not None and shift.status == "closed"
+        assert batch is not None
+        if isinstance(checkout_result, tuple):
+            assert shift.totals is not None and shift.totals["sales_count"] == 1
+            assert batch.qty_remaining == context.initial_qty - Decimal("1")
+            assert sale_count == 1
+            assert outbox_count == 1
+        else:
+            assert shift.totals is not None and shift.totals["sales_count"] == 0
+            assert batch.qty_remaining == context.initial_qty
+            assert sale_count == 0
+            assert outbox_count == 0
 
 
 async def test_close_and_complete_race_has_consistent_result(committed_pos) -> None:

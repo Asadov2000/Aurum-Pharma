@@ -35,6 +35,7 @@ interface Props {
   amount: string;
   currency: string;
   isLoading: boolean;
+  canResolveDecline: boolean;
   error?: string | null;
   onConfirm: (evidence: PaymentAttemptConfirmPayload) => void | Promise<void>;
   onDecline: (evidence: PaymentAttemptConfirmPayload) => void | Promise<void>;
@@ -47,6 +48,7 @@ export function ExternalPaymentEvidenceDialog({
   amount,
   currency,
   isLoading,
+  canResolveDecline,
   error,
   onConfirm,
   onDecline,
@@ -148,15 +150,23 @@ export function ExternalPaymentEvidenceDialog({
           </p>
         ) : null}
 
+        {!canResolveDecline ? (
+          <p className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-foreground">
+            Если оплаты нет, передайте операцию ответственному сотруднику для сверки с терминалом.
+          </p>
+        ) : null}
+
         <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={isLoading}
-            onClick={() => void submit(onDecline)()}
-          >
-            Оплаты нет
-          </Button>
+          {canResolveDecline ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={isLoading}
+              onClick={() => void submit(onDecline)()}
+            >
+              Оплаты нет
+            </Button>
+          ) : null}
           <Button type="submit" variant="success" isLoading={isLoading}>
             Оплата прошла
           </Button>

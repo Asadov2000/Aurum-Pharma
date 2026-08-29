@@ -484,31 +484,61 @@ test.describe("POS sale (owner)", () => {
     await expect(page.getByText("140.00", { exact: false }).first()).toBeVisible();
 
     // The tender is staged only in memory. Commit the complete sale command,
-    // then drop its HTTP response so the POS must recover by operation_id.
+    // then lose both its HTTP response and the first recovery lookup. The POS
+    // must stop in a safe uncertain state until a reload can reconcile the
+    // exact operation without another checkout POST.
     await payPosSaleCash(page, "140.00");
     let checkoutRequests = 0;
     let recoveryRequests = 0;
+    let blockRecoveryLookup = true;
     let checkoutOperationId: string | undefined;
+    const recoveredOperationIds: string[] = [];
     await page.route("**/api/v1/sales/operations/**", async (route) => {
       recoveryRequests += 1;
+      recoveredOperationIds.push(route.request().url().split("/").at(-1) ?? "");
+      if (blockRecoveryLookup) {
+        await route.abort("failed");
+        return;
+      }
       await route.continue();
     });
     await page.route("**/api/v1/sales/checkout", async (route) => {
       checkoutRequests += 1;
       const payload = route.request().postDataJSON() as { operation_id?: string };
       checkoutOperationId = payload.operation_id;
-      await route.fetch();
+      const committed = await route.fetch();
+      expect(committed.ok()).toBe(true);
       await route.abort("failed");
     });
-    await completePosSale(page);
+
+    const completeSale = page.getByRole("button", { name: /Завершить продажу/ });
+    await completeSale.click();
+    await expect(
+      page.getByText(
+        "Не удалось проверить результат продажи. Не повторяйте оплату, пока сверка с сервером не завершится.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Сверить с сервером" })).toBeVisible();
+    expect(checkoutRequests).toBe(1);
+    expect(recoveryRequests).toBe(1);
+    expect(recoveredOperationIds).toEqual([checkoutOperationId]);
+    await expectNoDesktopCashDrawerOpen(page);
+
+    blockRecoveryLookup = false;
+    await page.reload();
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await expect(page.getByText(/оформлен/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("button", { name: /Печать чека/ })).toBeVisible();
+    await expect.poll(() => recoveryRequests).toBe(2);
+
     await page.unroute("**/api/v1/sales/checkout");
     await page.unroute("**/api/v1/sales/operations/**");
     expect(checkoutRequests).toBe(1);
-    expect(recoveryRequests).toBe(1);
+    expect(recoveredOperationIds).toEqual([checkoutOperationId, checkoutOperationId]);
     expect(checkoutOperationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
-    await expectDesktopCashDrawerOpen(page, register.id);
+    await expectNoDesktopCashDrawerOpen(page);
 
     // ---- Print: open the receipt view and verify the totals match ----
     await page.getByRole("button", { name: /Печать чека/ }).click();
@@ -599,7 +629,7 @@ async function installDesktopCashDrawerBridge(page: Page): Promise<void> {
   });
 }
 
-async function expectDesktopCashDrawerOpen(page: Page, registerId: string): Promise<void> {
+async function expectNoDesktopCashDrawerOpen(page: Page): Promise<void> {
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -609,17 +639,8 @@ async function expectDesktopCashDrawerOpen(page: Page, registerId: string): Prom
 
         return (target.__aurumDesktopMessages ?? []).filter(
           (message) => message.type === "aurum.cash-drawer.open",
-        );
+        ).length;
       }),
     )
-    .toContainEqual(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          reason: "sale-completed",
-          registerId,
-          saleId: expect.any(String),
-        }),
-        type: "aurum.cash-drawer.open",
-      }),
-    );
+    .toBe(0);
 }
