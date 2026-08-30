@@ -17,12 +17,9 @@ const printerLabel: Record<PrinterType, string> = {
 };
 
 const schema = z.object({
-  name: z.string().min(1, "Введите название"),
-  branch_id: z.string().min(1, "Выберите точку"),
-  printer_type: z.union([
-    z.enum(["browser", "thermal_58", "thermal_80", "a4"]),
-    z.literal(""),
-  ]),
+  name: z.string().trim().min(1, "Введите название").max(200, "Не более 200 символов"),
+  branch_id: z.string().min(1, "Выберите торговую точку"),
+  printer_type: z.union([z.enum(["browser", "thermal_58", "thermal_80", "a4"]), z.literal("")]),
   is_active: z.boolean(),
 });
 
@@ -30,10 +27,19 @@ type FormValues = z.infer<typeof schema>;
 
 interface Props {
   register: Register | null;
+  branchName: string | null;
   onClose: () => void;
+  onCancel: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
-export function RegisterForm({ register: row, onClose }: Props): JSX.Element {
+export function RegisterForm({
+  register: row,
+  branchName,
+  onClose,
+  onCancel,
+  onDirtyChange,
+}: Props): JSX.Element {
   const isEdit = row !== null;
   const createMutation = useCreateRegister();
   const updateMutation = useUpdateRegister();
@@ -58,16 +64,24 @@ export function RegisterForm({ register: row, onClose }: Props): JSX.Element {
     });
   }, [row, form]);
 
+  useEffect(() => {
+    onDirtyChange(form.formState.isDirty);
+  }, [form.formState.isDirty, onDirtyChange]);
+
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
+      let firstInvalidField: keyof FormValues | null = null;
       for (const issue of parsed.error.issues) {
         const p = issue.path[0];
         if (typeof p !== "string" || seen.has(p)) continue;
         seen.add(p);
-        form.setError(p as keyof FormValues, { message: issue.message });
+        const field = p as keyof FormValues;
+        firstInvalidField ??= field;
+        form.setError(field, { message: issue.message });
       }
+      if (firstInvalidField) form.setFocus(firstInvalidField);
       return;
     }
     setTopError(null);
@@ -104,14 +118,19 @@ export function RegisterForm({ register: row, onClose }: Props): JSX.Element {
         <FormError>{form.formState.errors.name?.message}</FormError>
       </div>
       <div>
-        <Label htmlFor="branch_id">Точка</Label>
+        <Label htmlFor="branch_id">Торговая точка</Label>
         <Select
           id="branch_id"
-          disabled={isEdit}
+          disabled={isEdit || branches.isLoading || branches.isError}
           invalid={Boolean(form.formState.errors.branch_id)}
           {...form.register("branch_id")}
         >
-          <option value="">— выберите —</option>
+          <option value="">
+            {branches.isLoading ? "Загрузка торговых точек…" : "Выберите торговую точку"}
+          </option>
+          {isEdit && row && !branches.data?.some((branch) => branch.id === row.branch_id) && (
+            <option value={row.branch_id}>{branchName ?? "Текущая торговая точка"}</option>
+          )}
           {branches.data?.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name}
@@ -121,29 +140,66 @@ export function RegisterForm({ register: row, onClose }: Props): JSX.Element {
         <FormError>{form.formState.errors.branch_id?.message}</FormError>
         {isEdit && (
           <p className="mt-1 text-xs text-foreground-muted">
-            Точку нельзя менять после создания кассы
+            Торговую точку нельзя менять после создания рабочей кассы.
+          </p>
+        )}
+        {branches.isError && (
+          <div
+            role="alert"
+            className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          >
+            <span>{describeApiError(branches.error, "Не удалось загрузить торговые точки")}</span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void branches.refetch()}
+            >
+              Повторить
+            </Button>
+          </div>
+        )}
+        {!isEdit && !branches.isLoading && !branches.isError && branches.data?.length === 0 && (
+          <p className="mt-2 text-sm text-warning-foreground" role="status">
+            Сначала добавьте активную торговую точку, затем создайте рабочую кассу.
           </p>
         )}
       </div>
       <div>
-        <Label htmlFor="printer_type">Принтер</Label>
+        <Label htmlFor="printer_type">Предпочтительный формат чека</Label>
         <Select id="printer_type" {...form.register("printer_type")}>
-          <option value="">— не задан —</option>
+          <option value="">Не выбран</option>
           {printerTypes.map((p) => (
             <option key={p} value={p}>
               {printerLabel[p]}
             </option>
           ))}
         </Select>
+        <p className="mt-1 text-xs leading-5 text-foreground-muted">
+          Кассир сможет проверить формат перед печатью на своём устройстве.
+        </p>
       </div>
-      {isEdit && <Switch label="Активна" {...form.register("is_active")} />}
-      {topError && <p className="text-sm text-danger">{topError}</p>}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose}>
+      {isEdit && <Switch label="Рабочая касса активна" {...form.register("is_active")} />}
+      {topError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+        >
+          {topError}
+        </div>
+      )}
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
-        <Button type="submit" isLoading={form.formState.isSubmitting}>
-          {isEdit ? "Сохранить" : "Создать"}
+        <Button
+          type="submit"
+          isLoading={form.formState.isSubmitting}
+          disabled={
+            !isEdit && (branches.isLoading || branches.isError || branches.data?.length === 0)
+          }
+        >
+          {isEdit ? "Сохранить изменения" : "Добавить кассу"}
         </Button>
       </div>
     </form>

@@ -203,6 +203,22 @@ class FoundationRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def deactivate_registers_for_branch(
+        self,
+        branch_id: UUID,
+        *,
+        updated_by: UUID | None = None,
+    ) -> None:
+        values: dict[str, object] = {"is_active": False}
+        if updated_by is not None:
+            values["updated_by"] = updated_by
+        await self.session.execute(
+            update(Register)
+            .where(Register.branch_id == branch_id, Register.is_active.is_(True))
+            .values(**values)
+        )
+        await self.session.flush()
+
     # -------------------------------------------------------------------------
     # register
     # -------------------------------------------------------------------------

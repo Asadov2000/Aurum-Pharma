@@ -16,7 +16,7 @@ const branchTypeLabel: Record<BranchType, string> = {
 };
 
 const schema = z.object({
-  name: z.string().min(1, "Введите название"),
+  name: z.string().trim().min(1, "Введите название").max(200, "Не более 200 символов"),
   branch_type: z.enum(["pharmacy", "pharmacy_post", "kiosk"]),
   address: z.string().optional(),
   license_number: z.string().optional(),
@@ -33,9 +33,11 @@ type FormValues = z.infer<typeof schema>;
 interface Props {
   branch: Branch | null;
   onClose: () => void;
+  onCancel: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
-export function BranchForm({ branch, onClose }: Props): JSX.Element {
+export function BranchForm({ branch, onClose, onCancel, onDirtyChange }: Props): JSX.Element {
   const isEdit = branch !== null;
   const createMutation = useCreateBranch();
   const updateMutation = useUpdateBranch();
@@ -71,16 +73,24 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
     });
   }, [branch, form]);
 
+  useEffect(() => {
+    onDirtyChange(form.formState.isDirty);
+  }, [form.formState.isDirty, onDirtyChange]);
+
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
+      let firstInvalidField: keyof FormValues | null = null;
       for (const issue of parsed.error.issues) {
         const p = issue.path[0];
         if (typeof p !== "string" || seen.has(p)) continue;
         seen.add(p);
-        form.setError(p as keyof FormValues, { message: issue.message });
+        const field = p as keyof FormValues;
+        firstInvalidField ??= field;
+        form.setError(field, { message: issue.message });
       }
+      if (firstInvalidField) form.setFocus(firstInvalidField);
       return;
     }
     setTopError(null);
@@ -153,7 +163,7 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
           <Input id="license_number" {...form.register("license_number")} />
         </div>
         <div>
-          <Label htmlFor="license_expires_at">Истекает</Label>
+          <Label htmlFor="license_expires_at">Лицензия действует до</Label>
           <Input id="license_expires_at" type="date" {...form.register("license_expires_at")} />
         </div>
       </div>
@@ -193,7 +203,7 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
             <FormError>{form.formState.errors.receipt_phone?.message}</FormError>
           </div>
           <div>
-            <Label htmlFor="receipt_inn_or_tin">ИНН / TIN</Label>
+            <Label htmlFor="receipt_inn_or_tin">ИНН организации</Label>
             <Input
               id="receipt_inn_or_tin"
               invalid={Boolean(form.formState.errors.receipt_inn_or_tin)}
@@ -203,7 +213,7 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
           </div>
         </div>
       </div>
-      {isEdit && <Switch label="Активна" {...form.register("is_active")} />}
+      {isEdit && <Switch label="Торговая точка активна" {...form.register("is_active")} />}
       {topError && (
         <div
           role="alert"
@@ -213,11 +223,11 @@ export function BranchForm({ branch, onClose }: Props): JSX.Element {
         </div>
       )}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose}>
+        <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
         <Button type="submit" isLoading={form.formState.isSubmitting}>
-          {isEdit ? "Сохранить" : "Создать"}
+          {isEdit ? "Сохранить изменения" : "Добавить точку"}
         </Button>
       </div>
     </form>

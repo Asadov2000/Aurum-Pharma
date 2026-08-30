@@ -172,6 +172,10 @@ class FoundationService:
                 raise BusinessRuleError("Cannot deactivate the last active branch of the tenant")
             if await self.repo.has_open_shift_for_branch(branch.id):
                 raise BusinessRuleError("Cannot deactivate a branch with an open shift")
+            await self.repo.deactivate_registers_for_branch(
+                branch.id,
+                updated_by=updated_by,
+            )
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_branch(branch, **fields)

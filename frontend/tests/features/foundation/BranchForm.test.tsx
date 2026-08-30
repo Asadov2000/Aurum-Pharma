@@ -42,11 +42,13 @@ describe("BranchForm receipt details", () => {
   });
 
   it("preserves the hidden demo notice while editing visible receipt details", async () => {
-    render(<BranchForm branch={branch} onClose={vi.fn()} />);
+    render(
+      <BranchForm branch={branch} onClose={vi.fn()} onCancel={vi.fn()} onDirtyChange={vi.fn()} />,
+    );
     fireEvent.change(screen.getByLabelText("Название точки"), {
       target: { value: "Точка 2" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
 
     await waitFor(() =>
       expect(updateBranch).toHaveBeenCalledWith({
@@ -63,11 +65,13 @@ describe("BranchForm receipt details", () => {
   });
 
   it("sends an explicit null when receipt details are cleared", async () => {
-    render(<BranchForm branch={branch} onClose={vi.fn()} />);
+    render(
+      <BranchForm branch={branch} onClose={vi.fn()} onCancel={vi.fn()} onDirtyChange={vi.fn()} />,
+    );
     fireEvent.change(screen.getByLabelText("Название организации"), {
       target: { value: "" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
 
     await waitFor(() =>
       expect(updateBranch).toHaveBeenCalledWith({

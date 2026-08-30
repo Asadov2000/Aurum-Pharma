@@ -10,19 +10,23 @@ export function LocationsWorkspaceHeader({
   active,
   actions,
   meta,
+  showBranches,
+  showRegisters,
 }: {
   active: LocationSection;
   actions?: ReactNode;
   meta?: ReactNode;
+  showBranches: boolean;
+  showRegisters: boolean;
 }): JSX.Element {
   const content = {
     branches: {
-      title: "Точки",
+      title: "Торговые точки",
       description: "Аптеки, аптечные пункты, адреса, лицензии и реквизиты чеков.",
     },
     registers: {
-      title: "Кассы",
-      description: "Рабочие места продаж, привязка к точкам и параметры печати чеков.",
+      title: "Рабочие кассы",
+      description: "Рабочие места кассиров, привязка к торговым точкам и печать чеков.",
     },
   }[active];
 
@@ -39,12 +43,16 @@ export function LocationsWorkspaceHeader({
         className="flex min-w-0 gap-1 overflow-x-auto border-b border-border"
         aria-label="Управление торговыми точками"
       >
-        <WorkspaceTab to="/branches" active={active === "branches"}>
-          Точки
-        </WorkspaceTab>
-        <WorkspaceTab to="/registers" active={active === "registers"}>
-          Кассы
-        </WorkspaceTab>
+        {showBranches && (
+          <WorkspaceTab to="/branches" active={active === "branches"}>
+            Торговые точки
+          </WorkspaceTab>
+        )}
+        {showRegisters && (
+          <WorkspaceTab to="/registers" active={active === "registers"}>
+            Рабочие кассы
+          </WorkspaceTab>
+        )}
       </nav>
     </div>
   );

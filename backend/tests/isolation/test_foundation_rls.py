@@ -63,6 +63,23 @@ async def _set_support_flag(conn: AsyncConnection) -> None:
     )
 
 
+async def _visible_register_names(
+    engine: AsyncEngine,
+    tenant_ids: list[str],
+    tenant_id: str | None,
+) -> list[str]:
+    async with engine.begin() as conn:
+        if tenant_id is not None:
+            await _set_tenant(conn, tenant_id)
+        rows = (
+            await conn.execute(
+                text("SELECT name FROM register WHERE tenant_id = ANY(:ids)"),
+                {"ids": tenant_ids},
+            )
+        ).fetchall()
+    return sorted(str(row[0]) for row in rows)
+
+
 async def test_tenant_a_does_not_see_branches_of_tenant_b(
     support_engine_iso: AsyncEngine,
     app_engine_iso: AsyncEngine,
@@ -194,6 +211,88 @@ async def test_tenant_a_does_not_see_branches_of_tenant_b(
                     {"ids": tenant_ids},
                 )
 
+            async with maintenance_engine.begin() as conn:
+                await conn.execute(
+                    text("DELETE FROM audit_log WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+
+
+async def test_tenant_a_does_not_see_registers_of_tenant_b(
+    support_engine_iso: AsyncEngine,
+    app_engine_iso: AsyncEngine,
+    maintenance_engine: AsyncEngine,
+) -> None:
+    tenant_ids: list[str] = []
+    try:
+        async with support_engine_iso.begin() as conn:
+            tenant_result = await conn.execute(
+                text(
+                    "INSERT INTO tenant (name, contact_email) VALUES "
+                    "('Register Iso A', 'register-iso-a@aurum.tj'), "
+                    "('Register Iso B', 'register-iso-b@aurum.tj') RETURNING id"
+                )
+            )
+            tenant_ids = [str(row[0]) for row in tenant_result.fetchall()]
+            branch_result = await conn.execute(
+                text(
+                    "INSERT INTO branch (tenant_id, name) VALUES "
+                    "(:a, 'Register A branch'), (:b, 'Register B branch') RETURNING id"
+                ),
+                {"a": tenant_ids[0], "b": tenant_ids[1]},
+            )
+            branch_ids = [str(row[0]) for row in branch_result.fetchall()]
+            await conn.execute(
+                text(
+                    "INSERT INTO register (tenant_id, branch_id, name) VALUES "
+                    "(:a, :branch_a, 'A-register'), (:b, :branch_b, 'B-register')"
+                ),
+                {
+                    "a": tenant_ids[0],
+                    "b": tenant_ids[1],
+                    "branch_a": branch_ids[0],
+                    "branch_b": branch_ids[1],
+                },
+            )
+
+        assert await _visible_register_names(app_engine_iso, tenant_ids, tenant_ids[0]) == [
+            "A-register"
+        ]
+        assert await _visible_register_names(app_engine_iso, tenant_ids, tenant_ids[1]) == [
+            "B-register"
+        ]
+        assert await _visible_register_names(app_engine_iso, tenant_ids, None) == []
+    finally:
+        if tenant_ids:
+            async with support_engine_iso.begin() as conn:
+                await conn.execute(
+                    text("DELETE FROM sync_stream WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM sync_writer_epoch WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM sync_node WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM register WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM branch WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM tenant_settings WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM tenant WHERE id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
             async with maintenance_engine.begin() as conn:
                 await conn.execute(
                     text("DELETE FROM audit_log WHERE tenant_id = ANY(:ids)"),

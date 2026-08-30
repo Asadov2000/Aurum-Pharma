@@ -23,7 +23,7 @@ import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 
-import { describeApiError } from "./errors";
+import { describeApiError, describeFoundationError } from "./errors";
 import { LocationsSummary, LocationsWorkspaceHeader } from "./LocationsWorkspace";
 import { useBranchesQuery, useDeleteRegister, useRegisterSearchQuery } from "./queries";
 import { RegisterForm } from "./RegisterForm";
@@ -56,6 +56,8 @@ export function RegistersPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Register | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Register | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -67,7 +69,9 @@ export function RegistersPage(): JSX.Element {
     return () => clearTimeout(timer);
   }, [qInput]);
 
-  const branches = useBranchesQuery(true, canViewBranches);
+  // registers.view is itself a branch-discovery capability on the backend.
+  // Loading names here avoids exposing internal branch IDs to restricted roles.
+  const branches = useBranchesQuery(true);
   const { data, isLoading, isFetching, error, refetch } = useRegisterSearchQuery({
     q,
     branch_id: branchFilter || undefined,
@@ -78,13 +82,25 @@ export function RegistersPage(): JSX.Element {
   });
   const deleteMutation = useDeleteRegister();
   const rows = data?.items ?? [];
+  const hasInitialLoadError = Boolean(error && data === undefined);
   const hasFilters = Boolean(q || branchFilter || printerType || status !== "active");
   const activeOnPage = rows.filter((register) => register.is_active).length;
   const printersOnPage = rows.filter((register) => register.printer_type !== null).length;
-  const loadError = error ?? branches.error;
 
   const branchNameById = (id: string): string =>
-    branches.data?.find((branch) => branch.id === id)?.name ?? id.slice(0, 8);
+    branches.data?.find((branch) => branch.id === id)?.name ?? `Точка ${id.slice(0, 8)}`;
+
+  const closeEditor = () => {
+    setCreating(false);
+    setEditing(null);
+    setEditorDirty(false);
+    setDiscardOpen(false);
+  };
+
+  const requestEditorClose = () => {
+    if (editorDirty) setDiscardOpen(true);
+    else closeEditor();
+  };
 
   const confirmDelete = async () => {
     if (!pendingDelete || !canDelete) return;
@@ -93,7 +109,7 @@ export function RegistersPage(): JSX.Element {
       await deleteMutation.mutateAsync(pendingDelete.id);
       setPendingDelete(null);
     } catch (err) {
-      setDeleteError(describeApiError(err, "Не удалось деактивировать"));
+      setDeleteError(describeFoundationError(err, "Не удалось деактивировать рабочую кассу"));
     }
   };
 
@@ -101,22 +117,28 @@ export function RegistersPage(): JSX.Element {
     <div className="space-y-4">
       <LocationsWorkspaceHeader
         active="registers"
+        showBranches={canViewBranches}
+        showRegisters
         meta={isFetching && !isLoading ? "Обновление…" : undefined}
         actions={
-          canCreate ? <Button onClick={() => setCreating(true)}>+ Новая касса</Button> : undefined
+          canCreate ? (
+            <Button onClick={() => setCreating(true)}>Добавить рабочую кассу</Button>
+          ) : undefined
         }
       />
 
-      <LocationsSummary
-        label="Сводка касс"
-        loading={isLoading}
-        metrics={[
-          { label: "Найдено", value: data?.total ?? 0 },
-          { label: "На странице", value: rows.length },
-          { label: "Активны на странице", value: activeOnPage, tone: "success" },
-          { label: "Печать настроена", value: printersOnPage },
-        ]}
-      />
+      {!hasInitialLoadError && (
+        <LocationsSummary
+          label="Сводка касс"
+          loading={isLoading}
+          metrics={[
+            { label: "Всего по фильтрам", value: data?.total ?? 0 },
+            { label: "Показано на странице", value: rows.length },
+            { label: "Активных на странице", value: activeOnPage, tone: "success" },
+            { label: "Формат чека выбран на странице", value: printersOnPage },
+          ]}
+        />
+      )}
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -145,10 +167,10 @@ export function RegistersPage(): JSX.Element {
           },
           {
             id: "branch",
-            label: "Точка",
+            label: "Торговая точка",
             content: (
               <div>
-                <Label htmlFor="register_branch_filter">Точка</Label>
+                <Label htmlFor="register_branch_filter">Торговая точка</Label>
                 <Select
                   id="register_branch_filter"
                   value={branchFilter}
@@ -158,7 +180,7 @@ export function RegistersPage(): JSX.Element {
                   }}
                   className="w-52"
                 >
-                  <option value="">Все точки</option>
+                  <option value="">Все торговые точки</option>
                   {branches.data?.map((branch) => (
                     <option key={branch.id} value={branch.id}>
                       {branch.name}
@@ -173,14 +195,13 @@ export function RegistersPage(): JSX.Element {
               setPage(1);
             },
             defaultVisible: true,
-            available: canViewBranches,
           },
           {
             id: "printer",
-            label: "Тип принтера",
+            label: "Формат чека",
             content: (
               <div>
-                <Label htmlFor="register_printer_filter">Тип принтера</Label>
+                <Label htmlFor="register_printer_filter">Формат чека</Label>
                 <Select
                   id="register_printer_filter"
                   value={printerType}
@@ -244,35 +265,48 @@ export function RegistersPage(): JSX.Element {
         }}
       />
 
-      {loadError && (
+      {error && (
         <div
           role="alert"
           className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm leading-5 text-danger-foreground"
         >
-          <span>{describeApiError(loadError, "Не удалось загрузить список касс")}</span>
+          <span>{describeApiError(error, "Не удалось загрузить рабочие кассы")}</span>
           <Button
             variant="secondary"
             size="sm"
             onClick={() => {
               void refetch();
-              if (branches.error) void branches.refetch();
             }}
           >
             Повторить
           </Button>
         </div>
       )}
+      {branches.error && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-subtle px-4 py-3 text-sm leading-5 text-warning-foreground"
+        >
+          <span>
+            Названия торговых точек не загрузились. Рабочие кассы доступны, но временно показаны с
+            короткими кодами.
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => void branches.refetch()}>
+            Повторить
+          </Button>
+        </div>
+      )}
       {isLoading ? (
         <SkeletonRows rows={6} />
-      ) : rows.length === 0 ? (
+      ) : hasInitialLoadError ? null : rows.length === 0 ? (
         hasFilters ? (
           <TableEmpty title="Ничего не найдено">Измените запрос или выбранные фильтры.</TableEmpty>
         ) : (
           <TableEmpty
-            title="Касс пока нет"
+            title="Рабочих касс пока нет"
             action={
               canCreate ? (
-                <Button onClick={() => setCreating(true)}>+ Новая касса</Button>
+                <Button onClick={() => setCreating(true)}>Добавить рабочую кассу</Button>
               ) : undefined
             }
           >
@@ -285,8 +319,8 @@ export function RegistersPage(): JSX.Element {
             <THead>
               <TR>
                 <TH>Название</TH>
-                <TH>Точка</TH>
-                <TH>Принтер</TH>
+                <TH>Торговая точка</TH>
+                <TH>Формат чека</TH>
                 <TH>Статус</TH>
                 {showActions && <TH className="text-right">Действия</TH>}
               </TR>
@@ -354,28 +388,26 @@ export function RegistersPage(): JSX.Element {
       {(canCreate || canUpdate) && (
         <Modal
           open={creating || editing !== null}
-          onClose={() => {
-            setCreating(false);
-            setEditing(null);
-          }}
-          title={editing ? `Редактирование: ${editing.name}` : "Новая касса"}
+          onClose={requestEditorClose}
+          title={editing ? `Изменить рабочую кассу: ${editing.name}` : "Добавить рабочую кассу"}
         >
           <RegisterForm
             register={editing}
-            onClose={() => {
-              setCreating(false);
-              setEditing(null);
-            }}
+            branchName={editing ? branchNameById(editing.branch_id) : null}
+            onClose={closeEditor}
+            onCancel={requestEditorClose}
+            onDirtyChange={setEditorDirty}
           />
         </Modal>
       )}
       {canDelete && (
         <ConfirmDialog
           open={pendingDelete !== null}
-          title="Деактивировать кассу"
+          title="Деактивировать рабочую кассу"
           message={
             <>
-              Деактивировать кассу «{pendingDelete?.name}»?
+              Деактивировать рабочую кассу «{pendingDelete?.name}»? На ней нельзя будет открыть
+              новую смену или провести продажу.
               {deleteError && (
                 <span
                   role="alert"
@@ -396,6 +428,16 @@ export function RegistersPage(): JSX.Element {
           }}
         />
       )}
+      <ConfirmDialog
+        open={discardOpen}
+        title="Закрыть без сохранения?"
+        message="Изменения рабочей кассы не сохранятся."
+        cancelLabel="Продолжить редактирование"
+        confirmLabel="Закрыть без сохранения"
+        variant="danger"
+        onCancel={() => setDiscardOpen(false)}
+        onConfirm={closeEditor}
+      />
     </div>
   );
 }
