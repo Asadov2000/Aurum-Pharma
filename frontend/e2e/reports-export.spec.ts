@@ -121,8 +121,11 @@ test.describe("Reports export", () => {
     expect((await summaryDownload).suggestedFilename()).toMatch(/\.xlsx$/);
 
     await page.getByRole("tab", { name: /^Товары/ }).click();
+    const topProducts = page.getByRole("region", { name: "Товары-лидеры" });
+    await topProducts.getByLabel("Аптечная точка").selectOption({ label: branch.name });
+    await topProducts.getByRole("button", { name: "Показать" }).click();
     await expect(
-      page.getByRole("table", { name: "Товары-лидеры за выбранный период" }),
+      topProducts.getByRole("table", { name: "Товары-лидеры за выбранный период" }),
     ).toContainText(item.brand_name);
 
     await page.getByRole("tab", { name: /^Остатки/ }).click();
