@@ -9,6 +9,7 @@ $verifyScript = Join-Path $PSScriptRoot "verify-change.ps1"
 $e2eScript = Join-Path $PSScriptRoot "e2e-isolated.ps1"
 $whitespaceScript = Join-Path $PSScriptRoot "check-untracked-whitespace.ps1"
 $localLauncherScript = Join-Path $PSScriptRoot "start-local-demo-admin.ps1"
+$currentMainLauncherScript = Join-Path $PSScriptRoot "start-current-main-demo.ps1"
 $cmdLauncher = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) "Start-Aurum-Pharma-Admin.cmd"
 $powershellExecutable = (Get-Process -Id $PID).Path
 $script:assertions = 0
@@ -247,6 +248,23 @@ Assert-Equal `
     -Actual ($launcherText -match "Verify shared frontend matches local frontend") `
     -Expected $true `
     -Because "the local launcher rejects a stale shared frontend"
+
+$currentLauncherArguments = @("-NoProfile")
+if ($env:OS -eq "Windows_NT") {
+    $currentLauncherArguments += @("-ExecutionPolicy", "Bypass")
+}
+$currentLauncherArguments += @("-File", $currentMainLauncherScript, "-DryRun", "-NoBrowser")
+$currentLauncherOutput = & $powershellExecutable @currentLauncherArguments
+Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the current-main launcher dry run succeeds"
+$currentLauncherText = $currentLauncherOutput -join [Environment]::NewLine
+Assert-Equal `
+    -Actual ($currentLauncherText -match "isolated runtime worktree") `
+    -Expected $true `
+    -Because "the current-main launcher explains the isolated update"
+Assert-Equal `
+    -Actual ($currentLauncherText -match "Dry run complete") `
+    -Expected $true `
+    -Because "the current-main launcher delegates to the safe local launcher"
 
 if ($env:OS -eq "Windows_NT") {
     $cmdLauncherOutput = & cmd.exe /d /c "`"$cmdLauncher`" -DryRun -NoBrowser"

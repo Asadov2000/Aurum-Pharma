@@ -58,3 +58,6 @@ celerybeat-schedule.*
 
 # Claude Code local settings (per-machine, never committed)
 .claude/
+
+# Codex local worktrees, reports and runtime state
+.codex/
