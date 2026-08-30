@@ -1,6 +1,6 @@
 import { api } from "@/lib/api";
 
-import { type CatalogList } from "./types";
+import { type CatalogPickerList } from "./types";
 
 export interface CatalogPickerSearchParams {
   q: string;
@@ -11,7 +11,15 @@ export interface CatalogPickerSearchParams {
 
 export async function listCatalogForPicker(
   params: CatalogPickerSearchParams,
-): Promise<CatalogList> {
-  const { data } = await api.get<CatalogList>("/catalog", { params });
+  signal?: AbortSignal,
+): Promise<CatalogPickerList> {
+  const { data } = await api.get<CatalogPickerList>("/catalog/picker", {
+    params: {
+      q: params.q,
+      branch_id: params.branch_id,
+      limit: params.page_size,
+    },
+    signal,
+  });
   return data;
 }

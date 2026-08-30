@@ -173,7 +173,14 @@ export function POSPage(): JSX.Element {
   );
 
   return (
-    <div className={cn("space-y-4", mode === "touch" ? "pos--touch" : "pos--keyboard")}>
+    <div
+      className={cn(
+        "space-y-4",
+        registerId &&
+          "xl:h-[calc(100dvh-var(--app-header-height)-2.75rem)] xl:min-h-0 xl:space-y-0",
+        mode === "touch" ? "pos--touch" : "pos--keyboard",
+      )}
+    >
       {!registerId ? (
         <PageHeader title="Касса" compact actions={workstationControls} />
       ) : (

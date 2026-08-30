@@ -50,6 +50,7 @@ from app.domains.catalog.schemas import (
     CatalogItemWithBarcodes,
     CatalogLifecycle,
     CatalogList,
+    CatalogPickerList,
     CatalogSummary,
     ImportConfirmRequest,
     ImportJobRead,
@@ -130,6 +131,29 @@ def _remove_catalog_image_version(tenant_id: UUID, item_id: UUID, version: UUID)
 # -----------------------------------------------------------------------------
 # CRUD + search
 # -----------------------------------------------------------------------------
+
+
+@router.get("/picker", response_model=CatalogPickerList)
+async def search_catalog_picker(
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_branch_permission("catalog.view", "pos.sell", policy="filter")),
+    ],
+    service: Annotated[CatalogService, Depends(_service)],
+    q: Annotated[str, Query(min_length=2, max_length=200)],
+    branch_id: Annotated[UUID | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=20)] = 10,
+) -> CatalogPickerList:
+    _authorize_catalog_search(user, branch_id)
+    items, stock = await service.search_picker(q=q, branch_id=branch_id, limit=limit)
+    return CatalogPickerList(
+        items=[
+            CatalogItemRead.model_validate(item).model_copy(
+                update={"stock_available": stock.get(item.id)}
+            )
+            for item in items
+        ]
+    )
 
 
 @router.get("", response_model=CatalogList)

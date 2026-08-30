@@ -81,11 +81,7 @@ export function PaymentPanel({
   paymentSettingsUnavailable: boolean;
   interactionBlocked: boolean;
   completionBlocked: boolean;
-  onPayTile: (
-    method: PaymentMethod,
-    amount?: string,
-    metadata?: PaymentMetadata,
-  ) => void;
+  onPayTile: (method: PaymentMethod, amount?: string, metadata?: PaymentMetadata) => void;
   onRetryPendingPayment?: () => void;
   onClearPayments?: () => void;
   onComplete: () => void;
@@ -114,7 +110,8 @@ export function PaymentPanel({
       : null;
   const fallbackMethod = lockedMethod ?? paymentMethods[0] ?? "cash";
   const selectedMethod =
-    paymentMethods.includes(activeMethod) && (lockedMethod === null || activeMethod === lockedMethod)
+    paymentMethods.includes(activeMethod) &&
+    (lockedMethod === null || activeMethod === lockedMethod)
       ? activeMethod
       : fallbackMethod;
   const settled = Math.abs(remaining) <= 0.001;
@@ -128,18 +125,12 @@ export function PaymentPanel({
     (sum, payment) => (payment.payment_method === "cash" ? sum + Number(payment.amount) : sum),
     0,
   );
-  const cashTendered = payments.reduce(
-    (sum, payment) => sum + cashTenderedFor(payment),
-    0,
-  );
+  const cashTendered = payments.reduce((sum, payment) => sum + cashTenderedFor(payment), 0);
   const cashDue = Math.max(0, totalDue - nonCashPaid);
   const change = Math.max(0, cashReceivedNumber - cashDue);
   const availableCash = Math.max(0, cashReceivedNumber - cashPaid);
   const cashTenderInsufficient =
-    isDraft &&
-    selectedMethod === "cash" &&
-    remaining > 0.001 &&
-    availableCash + 0.001 < remaining;
+    isDraft && selectedMethod === "cash" && remaining > 0.001 && availableCash + 0.001 < remaining;
   const pendingMethodVisible =
     pendingPaymentMethod !== null &&
     isCurrentPaymentMethod(pendingPaymentMethod) &&
@@ -209,9 +200,9 @@ export function PaymentPanel({
   return (
     <section
       aria-labelledby="payment-panel-title"
-      className="flex min-h-[30rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface xl:h-[36rem]"
+      className="flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface sm:min-h-[30rem] xl:h-full xl:min-h-0"
     >
-      <header className="border-b border-border px-4 py-4">
+      <header className={cn("border-b border-border px-3 py-2", touch && "px-4 py-3")}>
         <div className="flex items-end justify-between gap-4">
           <div className="min-w-0">
             <h2
@@ -228,20 +219,23 @@ export function PaymentPanel({
                     {totalPaid.toFixed(2)}
                   </span>
                 </span>
-                  <span
-                    className={cn(
-                      settled ? "text-success-foreground" : "text-warning-foreground",
-                    )}
-                  >
-                    {overpaid ? "Переплата" : "Остаток"}{" "}
-                    <span className="font-mono font-semibold tabular-nums">
-                      {Math.abs(remaining).toFixed(2)}
-                    </span>
+                <span
+                  className={cn(settled ? "text-success-foreground" : "text-warning-foreground")}
+                >
+                  {overpaid ? "Переплата" : "Остаток"}{" "}
+                  <span className="font-mono font-semibold tabular-nums">
+                    {Math.abs(remaining).toFixed(2)}
                   </span>
+                </span>
               </div>
             ) : null}
           </div>
-          <p className="shrink-0 text-right font-mono text-4xl font-bold tabular-nums text-foreground">
+          <p
+            className={cn(
+              "shrink-0 text-right font-mono text-3xl font-bold tabular-nums text-foreground",
+              touch && "text-4xl",
+            )}
+          >
             {totalDue.toFixed(2)}{" "}
             <span className="font-sans text-sm font-semibold text-foreground-secondary">
               {currency}
@@ -292,8 +286,8 @@ export function PaymentPanel({
                       (pendingPaymentMethod !== null && pendingPaymentMethod !== method)
                     }
                     className={cn(
-                      "pos-tile flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 border-r border-border px-1 text-xs font-semibold text-foreground transition-colors duration-fast last:border-r-0 2xl:flex-row 2xl:gap-2 2xl:px-2 2xl:text-sm",
-                      touch && "min-h-16 text-base",
+                      "pos-tile flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 border-r border-border px-1 text-xs font-semibold text-foreground transition-colors duration-fast last:border-r-0 2xl:flex-row 2xl:gap-2 2xl:px-2 2xl:text-sm",
+                      touch && "min-h-14 text-base",
                       selectedMethod === method
                         ? "bg-primary text-primary-foreground"
                         : "bg-surface hover:bg-primary/5",
@@ -307,7 +301,7 @@ export function PaymentPanel({
             </div>
           )}
 
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
+          <div className={cn("flex min-h-0 flex-1 flex-col overflow-y-auto p-2", touch && "p-3")}>
             {!mixedPaymentEnabled && paymentMethods.length > 1 ? (
               <p className="mb-3 rounded-md border border-border bg-background px-3 py-2 text-xs leading-5 text-foreground-muted">
                 Смешанная оплата отключена. Весь чек оплачивается одним способом.
@@ -346,7 +340,7 @@ export function PaymentPanel({
               <>
                 <label
                   htmlFor="cash-received"
-                  className="mb-1.5 flex items-center justify-between gap-3 text-sm font-medium text-foreground-secondary"
+                  className="mb-1 flex items-center justify-between gap-3 text-sm font-medium text-foreground-secondary"
                 >
                   <span>Получено</span>
                   <span className="text-xs font-semibold text-foreground-muted">{currency}</span>
@@ -366,12 +360,12 @@ export function PaymentPanel({
                     }
                   }}
                   className={cn(
-                    "h-12 w-full rounded-md border border-input bg-surface px-3 text-right font-mono text-2xl tabular-nums text-foreground shadow-sm focus:border-ring",
-                    touch && "h-14 text-2xl",
+                    "h-10 w-full rounded-md border border-input bg-surface px-3 text-right font-mono text-xl tabular-nums text-foreground shadow-sm focus:border-ring",
+                    touch && "h-12 text-2xl",
                   )}
                 />
 
-                <div className="mt-3 grid flex-1 grid-cols-4 overflow-hidden rounded-md border border-border bg-surface">
+                <div className="mt-2 grid flex-1 grid-cols-4 overflow-hidden rounded-md border border-border bg-surface">
                   {cashKeys.map((key) => (
                     <button
                       key={key}
@@ -380,8 +374,8 @@ export function PaymentPanel({
                       onClick={() => pressCashKey(key)}
                       disabled={interactionBlocked || completing || completionUncertain}
                       className={cn(
-                        "min-h-12 border-b border-r border-border bg-surface text-lg font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
-                        touch && "min-h-14 text-xl",
+                        "min-h-9 border-b border-r border-border bg-surface text-base font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
+                        touch && "min-h-11 text-xl",
                         (key === "+50" || key === "+100") && "text-primary",
                         key === "clear" && "text-danger",
                       )}
@@ -393,7 +387,8 @@ export function PaymentPanel({
 
                 <div
                   className={cn(
-                    "mt-3 flex min-h-14 items-center justify-between gap-3 rounded-md border px-3",
+                    "mt-2 flex min-h-11 items-center justify-between gap-3 rounded-md border px-3",
+                    touch && "min-h-12",
                     cashTenderInsufficient
                       ? "border-warning/40 bg-warning-subtle text-warning-foreground"
                       : "border-success/35 bg-success-subtle text-success-foreground",
@@ -455,11 +450,11 @@ export function PaymentPanel({
             ) : null}
           </div>
 
-          <footer className="space-y-2 border-t border-border p-3">
+          <footer className={cn("space-y-1 border-t border-border p-2", touch && "space-y-2 p-3")}>
             {!paymentSettingsBlocked && !settled && !overpaid ? (
               <Button
                 size="xl"
-                className="w-full"
+                className={cn("h-11 w-full", touch && "h-12")}
                 onClick={submitSelectedPayment}
                 disabled={paymentActionDisabled}
               >
@@ -470,7 +465,7 @@ export function PaymentPanel({
             <Button
               size="xl"
               variant="success"
-              className="w-full"
+              className={cn("h-11 w-full", touch && "h-12")}
               onClick={onComplete}
               isLoading={completing}
               disabled={

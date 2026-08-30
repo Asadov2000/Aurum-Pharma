@@ -46,6 +46,10 @@ export interface CatalogList {
   page_size: number;
 }
 
+export interface CatalogPickerList {
+  items: CatalogItem[];
+}
+
 export interface CatalogSummary {
   total: number;
   active: number;

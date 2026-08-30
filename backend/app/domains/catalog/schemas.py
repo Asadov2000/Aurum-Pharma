@@ -186,6 +186,12 @@ class CatalogList(BaseModel):
     page_size: int
 
 
+class CatalogPickerList(BaseModel):
+    """Small ranked result set for operational typeaheads such as POS."""
+
+    items: list[CatalogItemRead]
+
+
 class CatalogSummary(BaseModel):
     total: int
     active: int

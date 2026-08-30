@@ -31,7 +31,7 @@ test.describe("POS sale (owner)", () => {
     page,
   }) => {
     test.setTimeout(90_000);
-    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.setViewportSize({ width: 1366, height: 768 });
 
     const apiAnon = await request.newContext();
     const tokens = await apiLogin(apiAnon, OWNER);
@@ -96,6 +96,15 @@ test.describe("POS sale (owner)", () => {
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
       ),
     ).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1,
+      ),
+    ).toBe(true);
+    expect(
+      Math.max(quickBox!.y + quickBox!.height, receiptBox!.y + receiptBox!.height),
+    ).toBeLessThanOrEqual(768);
+    expect(paymentBox!.y + paymentBox!.height).toBeLessThanOrEqual(768);
 
     const productSearch = page.getByRole("combobox", { name: "Товар" });
     await productSearch.fill(item.brand_name);

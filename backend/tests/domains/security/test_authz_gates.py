@@ -140,14 +140,33 @@ async def _assert_pos_catalog_scope(
     assert own_catalog_resp.status_code == 200
     assert own_catalog_resp.json()["total"] == 1
 
+    own_picker_resp = await client.get(
+        f"/api/v1/catalog/picker?q=Scoped&branch_id={visible_branch_id}",
+        headers=headers,
+    )
+    assert own_picker_resp.status_code == 200
+    assert len(own_picker_resp.json()["items"]) == 1
+
     unscoped_catalog_resp = await client.get("/api/v1/catalog", headers=headers)
     assert unscoped_catalog_resp.status_code == 422
+
+    unscoped_picker_resp = await client.get(
+        "/api/v1/catalog/picker?q=Scoped",
+        headers=headers,
+    )
+    assert unscoped_picker_resp.status_code == 422
 
     other_catalog_resp = await client.get(
         f"/api/v1/catalog?branch_id={forbidden_branch_id}",
         headers=headers,
     )
     assert other_catalog_resp.status_code == 403
+
+    other_picker_resp = await client.get(
+        f"/api/v1/catalog/picker?q=Scoped&branch_id={forbidden_branch_id}",
+        headers=headers,
+    )
+    assert other_picker_resp.status_code == 403
 
     catalog_summary_resp = await client.get("/api/v1/catalog/summary", headers=headers)
     assert catalog_summary_resp.status_code == 403

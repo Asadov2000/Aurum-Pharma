@@ -38,7 +38,9 @@ REFUND_ATTEMPT_METHODS = frozenset({"card", "qr", "bank_transfer"})
 class POSFavoriteCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    catalog_id: UUID4
+    # Catalog records may use deterministic UUID5 identifiers in seeded and
+    # imported datasets. This reference is not restricted to random UUID4 IDs.
+    catalog_id: UUID
 
 
 class POSFavoriteRead(BaseModel):
