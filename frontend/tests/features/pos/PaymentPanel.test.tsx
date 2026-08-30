@@ -121,38 +121,24 @@ describe("PaymentPanel", () => {
     const { rerender } = render(<PaymentPanel {...baseProps} />);
     const completion = screen.getByRole("button", { name: "Завершить продажу" });
     expect(completion).toBeDisabled();
-    expect(completion).toHaveAttribute("title", "Сначала подтвердите полную оплату");
+    expect(screen.getByText("Сначала примите оставшиеся 59.00 TJS.")).toBeInTheDocument();
+    expect(completion).toHaveAttribute("title", "Сначала примите оставшиеся 59.00 TJS.");
 
     rerender(<PaymentPanel {...baseProps} totalPaid={59} remaining={0} />);
     expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeEnabled();
   });
 
   it("shows only configured methods and selects the first available method", () => {
-    render(
-      <PaymentPanel
-        {...baseProps}
-        paymentMethods={["qr"]}
-        mixedPaymentEnabled={false}
-      />,
-    );
+    render(<PaymentPanel {...baseProps} paymentMethods={["qr"]} mixedPaymentEnabled={false} />);
 
     expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Карта" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "QR-код" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByRole("button", { name: "QR-код" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("does not stage a partial amount when mixed payment is disabled", () => {
     const onPayTile = vi.fn();
-    render(
-      <PaymentPanel
-        {...baseProps}
-        mixedPaymentEnabled={false}
-        onPayTile={onPayTile}
-      />,
-    );
+    render(<PaymentPanel {...baseProps} mixedPaymentEnabled={false} onPayTile={onPayTile} />);
 
     fireEvent.change(screen.getByRole("textbox", { name: "Получено наличными" }), {
       target: { value: "20" },
@@ -196,22 +182,12 @@ describe("PaymentPanel", () => {
   });
 
   it("fails closed when server payment settings are unavailable", () => {
-    render(
-      <PaymentPanel
-        {...baseProps}
-        paymentMethods={[]}
-        paymentSettingsUnavailable
-      />,
-    );
+    render(<PaymentPanel {...baseProps} paymentMethods={[]} paymentSettingsUnavailable />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Способы оплаты временно недоступны",
-    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Способы оплаты временно недоступны");
     expect(screen.getByText(/Новые платежи заблокированы/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Принять наличные" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Принять наличные" })).not.toBeInTheDocument();
   });
 
   it("restores cash received separately from the amount applied to the sale", () => {
@@ -225,14 +201,7 @@ describe("PaymentPanel", () => {
       metadata: { cash_received: "100.00" },
     };
 
-    render(
-      <PaymentPanel
-        {...baseProps}
-        totalPaid={59}
-        remaining={0}
-        payments={[cashPayment]}
-      />,
-    );
+    render(<PaymentPanel {...baseProps} totalPaid={59} remaining={0} payments={[cashPayment]} />);
 
     expect(screen.getByRole("textbox", { name: "Получено наличными" })).toHaveValue("100,00");
     expect(screen.getByText("41.00")).toBeInTheDocument();
@@ -257,27 +226,19 @@ describe("PaymentPanel", () => {
       />,
     );
 
-    const reset = screen.getByRole("button", { name: "Сбросить расчёт" });
+    const reset = screen.getByRole("button", { name: "Удалить введённую оплату" });
     expect(reset).toHaveAttribute("title", expect.stringMatching(/внешнего терминала/i));
-    expect(screen.queryByRole("button", { name: "Очистить оплату" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Товары останутся в чеке/i)).toBeInTheDocument();
   });
 
   it("blocks completion for an overpaid or unconfirmed calculation", () => {
-    const { rerender } = render(
-      <PaymentPanel {...baseProps} totalPaid={60} remaining={-1} />,
-    );
+    const { rerender } = render(<PaymentPanel {...baseProps} totalPaid={60} remaining={-1} />);
 
     expect(screen.getByText("Переплата")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeDisabled();
 
-    rerender(
-      <PaymentPanel
-        {...baseProps}
-        totalPaid={59}
-        remaining={0}
-        completionBlocked
-      />,
-    );
+    rerender(<PaymentPanel {...baseProps} totalPaid={59} remaining={0} completionBlocked />);
     expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeDisabled();
+    expect(screen.getByText(/Дождитесь завершения текущей операции оплаты/i)).toBeInTheDocument();
   });
 });

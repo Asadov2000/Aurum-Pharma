@@ -85,9 +85,9 @@ describe("findActiveNavItem", () => {
 });
 
 describe("buildNav — team management visibility", () => {
-  it("hides «Пользователи»/«Роли» from a tenant user without users.view (seller)", () => {
+  it("hides «Сотрудники»/«Роли» from a tenant user without users.view (seller)", () => {
     const items = buildNav(false, true, false, SELLER_PERMS);
-    expect(labels(items)).not.toContain("Пользователи");
+    expect(labels(items)).not.toContain("Сотрудники");
     expect(labels(items)).not.toContain("Роли");
     // The rest of the seller's workspace is untouched.
     expect(items.some((i) => i.to === "/catalog")).toBe(true);
@@ -96,7 +96,7 @@ describe("buildNav — team management visibility", () => {
 
   it("shows team pages to an owner with their exact permissions", () => {
     const items = buildNav(false, true, true, OWNER_PERMS);
-    expect(labels(items)).toContain("Пользователи");
+    expect(labels(items)).toContain("Сотрудники");
     expect(labels(items)).toContain("Роли");
     expect(items.some((i) => i.to === "/users")).toBe(true);
     expect(items.some((i) => i.to === "/roles")).toBe(true);
@@ -104,11 +104,11 @@ describe("buildNav — team management visibility", () => {
 
   it("does not use users.view as permission to open role management", () => {
     const userViewer = buildNav(false, true, false, ["users.view"]);
-    expect(labels(userViewer)).toContain("Пользователи");
+    expect(labels(userViewer)).toContain("Сотрудники");
     expect(labels(userViewer)).not.toContain("Роли");
 
     const roleManager = buildNav(false, true, false, ["roles.update"]);
-    expect(labels(roleManager)).not.toContain("Пользователи");
+    expect(labels(roleManager)).not.toContain("Сотрудники");
     expect(labels(roleManager)).not.toContain("Роли");
 
     const ownerRoleManager = buildNav(false, true, true, ["roles.update"]);

@@ -119,7 +119,10 @@ describe("management list filters", () => {
   it("searches and filters branches through the paginated contract", async () => {
     renderPage(<BranchesPage />);
     expect(await screen.findByText("Аптека Рудаки")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Точки" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Торговые точки" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(
       within(screen.getByRole("region", { name: "Сводка торговых точек" })).getByText(
         "Лицензии требуют внимания",
@@ -150,7 +153,10 @@ describe("management list filters", () => {
   it("filters registers by an allowed branch and keeps printer optional", async () => {
     renderPage(<RegistersPage />);
     expect(await screen.findByText("Касса 01")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Кассы" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Рабочие кассы" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(
       within(screen.getByRole("region", { name: "Сводка касс" })).getByText("Печать настроена"),
     ).toBeInTheDocument();

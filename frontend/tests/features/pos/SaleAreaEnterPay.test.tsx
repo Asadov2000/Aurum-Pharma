@@ -252,7 +252,7 @@ function localStorageContents(): string {
 async function stageCashPayment(): Promise<void> {
   await screen.findByText(/Остаток/, undefined, { timeout: 5_000 });
   fireEvent.keyDown(window, { key: "Enter" });
-  await screen.findByRole("button", { name: /Сбросить расчёт/i }, { timeout: 5_000 });
+  await screen.findByRole("button", { name: /Удалить введённую оплату/i }, { timeout: 5_000 });
 }
 
 function beginExternalPayment(method: "Карта" | "QR-код"): void {
@@ -439,10 +439,12 @@ describe("SaleArea atomic checkout", () => {
 
     renderArea();
     await stageCashPayment();
-    fireEvent.click(screen.getByRole("button", { name: /Сбросить расчёт/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Удалить введённую оплату/i }));
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+      ).not.toBeInTheDocument();
     });
     expect(screen.getByTestId("cart-item")).toBeInTheDocument();
     expect(checkoutSale).not.toHaveBeenCalled();
@@ -481,7 +483,9 @@ describe("SaleArea atomic checkout", () => {
 
     renderArea();
 
-    expect(await screen.findByRole("button", { name: /Сбросить расчёт/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /Удалить введённую оплату/i }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText(/Получено наличными/i)).toHaveValue("100,00");
     expect(screen.queryByRole("button", { name: /Удалить Парацетамол/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
@@ -527,7 +531,9 @@ describe("SaleArea atomic checkout", () => {
         screen.queryByRole("dialog", { name: "Сверка оплаты картой" }),
       ).not.toBeInTheDocument(),
     );
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
 
     beginExternalPayment("QR-код");
     const qrPad = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
@@ -540,7 +546,9 @@ describe("SaleArea atomic checkout", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Сверка оплаты QR" })).not.toBeInTheDocument(),
     );
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
@@ -574,7 +582,9 @@ describe("SaleArea atomic checkout", () => {
     const confirmation = await screen.findByRole("dialog", {
       name: "Сверка оплаты картой",
     });
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
     fireEvent.click(within(confirmation).getByRole("button", { name: "Оплаты нет" }));
     expect(await within(confirmation).findByText("Укажите терминал")).toBeInTheDocument();
     expect(voidPaymentAttempt).not.toHaveBeenCalled();
@@ -595,7 +605,9 @@ describe("SaleArea atomic checkout", () => {
       terminal_id: "TERM-DECLINE",
       external_reference: "DECLINE-0042",
     });
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
     expect(checkoutSale).not.toHaveBeenCalled();
   });
 
@@ -742,7 +754,9 @@ describe("SaleArea atomic checkout", () => {
       terminal_id: "TERM-01",
       external_reference: "CARD-1234",
     });
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
@@ -780,7 +794,9 @@ describe("SaleArea atomic checkout", () => {
       ).not.toBeInTheDocument(),
     );
     expect(screen.queryByText(/способ оплаты отключён/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
@@ -806,7 +822,9 @@ describe("SaleArea atomic checkout", () => {
     cardButton.focus();
     fireEvent.keyDown(cardButton, { key: "Enter" });
 
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not treat the barcode scanner terminator as a cash-payment shortcut", async () => {
@@ -824,7 +842,9 @@ describe("SaleArea atomic checkout", () => {
     fireEvent.keyDown(window, { key: "Enter" });
 
     await screen.findByText(/Штрихкод 1234567890123 не найден/i);
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
     expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
   });
 
@@ -1033,7 +1053,7 @@ describe("SaleArea atomic checkout", () => {
     expect(await screen.findByText(/Не удалось оформить продажу/i)).toBeInTheDocument();
     expect(getCheckoutResult).not.toHaveBeenCalled();
     expect(loadPendingCheckoutOperation(SALE.id, REG)).toBeNull();
-    expect(screen.getByRole("button", { name: /Сбросить расчёт/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Удалить введённую оплату/i })).toBeInTheDocument();
   });
 
   it("locks a confirmed external payment for terminal review after checkout rejection", async () => {
@@ -1059,7 +1079,9 @@ describe("SaleArea atomic checkout", () => {
         screen.queryByRole("dialog", { name: "Сверка оплаты картой" }),
       ).not.toBeInTheDocument(),
     );
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
 
@@ -1077,7 +1099,9 @@ describe("SaleArea atomic checkout", () => {
       ],
     });
 
-    expect(screen.queryByRole("button", { name: /Сбросить расчёт/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
+    ).not.toBeInTheDocument();
     expect(voidPaymentAttempt).not.toHaveBeenCalled();
   });
 

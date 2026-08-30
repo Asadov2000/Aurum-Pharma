@@ -39,6 +39,7 @@ export function POSPage(): JSX.Element {
   const canCloseShift = hasPermission(user, "pos.shift_close");
   const canSell = hasPermission(user, "pos.sell");
   const canManageSales = hasPermission(user, "pos.manage_sales");
+  const canCreateRegister = hasPermission(user, "registers.create");
   const registers = useRegistersQuery(null, false);
   // POS draft TTL comes from tenant settings; fall back until they load (or if
   // the user can't read them).
@@ -188,16 +189,29 @@ export function POSPage(): JSX.Element {
       )}
 
       {registers.error && (
-        <p
+        <div
           className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
           role="alert"
         >
-          Не удалось загрузить список касс. Проверьте соединение и обновите страницу.
-        </p>
+          <p>Не удалось загрузить рабочие кассы. Продажа пока недоступна.</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="mt-2"
+            onClick={() => void registers.refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
       )}
 
       {registerList && registerList.length === 0 && (
-        <TableEmpty title="Нет активных касс">Создайте рабочую кассу в разделе «Кассы».</TableEmpty>
+        <TableEmpty title="Нет доступной рабочей кассы">
+          {canCreateRegister
+            ? "Добавьте рабочую кассу в разделе «Рабочие кассы», затем вернитесь к продаже."
+            : "Обратитесь к владельцу или ответственному сотруднику: он должен создать и включить рабочую кассу для этой торговой точки."}
+        </TableEmpty>
       )}
 
       {registerList && registerList.length > 1 && !registerId && (

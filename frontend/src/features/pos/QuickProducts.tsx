@@ -121,9 +121,17 @@ export function QuickProducts({
         ) : favorites.error ? (
           <div
             role="alert"
-            className="flex min-h-48 items-center justify-center px-6 text-center text-sm text-danger"
+            className="flex min-h-48 flex-col items-center justify-center gap-3 px-6 text-center"
           >
-            Не удалось загрузить быстрый выбор.
+            <p className="text-sm text-danger">Не удалось загрузить избранные товары.</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => void favorites.refetch()}
+            >
+              Повторить
+            </Button>
           </div>
         ) : products.length ? (
           <div
@@ -229,8 +237,12 @@ export function QuickProducts({
             })}
           </div>
         ) : (
-          <div className="flex min-h-48 items-center justify-center px-6 text-center text-sm text-foreground-muted">
-            Избранных товаров пока нет.
+          <div className="flex min-h-48 flex-col items-center justify-center gap-1 px-6 text-center">
+            <p className="text-sm font-medium text-foreground">Избранных товаров пока нет</p>
+            <p className="max-w-sm text-sm text-foreground-muted">
+              Найдите товар в строке поиска и нажмите звезду. Он появится здесь только для вашего
+              аккаунта.
+            </p>
           </div>
         )}
         {favoriteError ? (
