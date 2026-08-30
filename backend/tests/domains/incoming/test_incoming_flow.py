@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, NotFoundError
+from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Branch, Tenant
 from app.domains.incoming import service as incoming_service_module
@@ -135,6 +135,86 @@ async def test_incoming_document_refs_must_match_tenant(db_session: AsyncSession
         await service.update_document(doc.id, fields={"supplier_id": other_supplier.id})
 
     assert other_tenant.id != tenant.id
+
+
+async def test_inactive_supplier_cannot_be_used_for_new_incoming(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, _item, supplier = await scaffold()
+    supplier.is_active = False
+    await db_session.flush()
+    service = IncomingService(IncomingRepository(db_session))
+
+    with pytest.raises(ConflictError, match="unavailable for new incoming"):
+        await service.create_document(
+            tenant_id=tenant.id,
+            fields={
+                "branch_id": branch.id,
+                "supplier_id": supplier.id,
+                "document_date": date.today(),
+            },
+        )
+
+
+async def test_database_rejects_cross_tenant_incoming_supplier(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, _item, _supplier = await scaffold()
+    _other_tenant, _other_branch, _other_item, other_supplier = await scaffold()
+    savepoint = await db_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError):
+            await db_session.execute(
+                text(
+                    "INSERT INTO incoming_document "
+                    "(tenant_id, branch_id, supplier_id, document_date) "
+                    "VALUES (:tenant_id, :branch_id, :supplier_id, :document_date)"
+                ),
+                {
+                    "tenant_id": tenant.id,
+                    "branch_id": branch.id,
+                    "supplier_id": other_supplier.id,
+                    "document_date": date.today(),
+                },
+            )
+            await db_session.flush()
+    finally:
+        await savepoint.rollback()
+
+
+async def test_supplier_deactivated_after_draft_blocks_acceptance(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+    await service.add_item(
+        doc.id,
+        fields={
+            "catalog_id": item.id,
+            "expires_at": date.today() + timedelta(days=365),
+            "qty": Decimal("1"),
+            "purchase_price": Decimal("5.00"),
+            "sale_price": Decimal("8.00"),
+        },
+    )
+    supplier.is_active = False
+    await db_session.flush()
+
+    with pytest.raises(ConflictError, match="unavailable for new incoming"):
+        await service.accept(doc.id)
+
+    batches = (
+        await db_session.execute(select(Batch).where(Batch.tenant_id == tenant.id))
+    ).scalars()
+    assert batches.all() == []
 
 
 async def test_add_items_recomputes_total(db_session: AsyncSession, scaffold) -> None:

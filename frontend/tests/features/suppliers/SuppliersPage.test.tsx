@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const searchSuppliers = vi.fn();
@@ -133,11 +133,12 @@ describe("SuppliersPage", () => {
     createSupplier.mockResolvedValueOnce(SAMPLE);
     renderPage();
     await screen.findByText(/Поставщиков пока нет/i);
-    fireEvent.click(screen.getByRole("button", { name: /Новый поставщик/i }));
-    fireEvent.change(await screen.findByLabelText("Название"), {
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить поставщика" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "Добавить поставщика" });
+    fireEvent.change(within(dialog).getByLabelText("Краткое название"), {
       target: { value: "ОсОО Прима-Фарм" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Создать$/i }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить поставщика" }));
     await waitFor(() => {
       expect(createSupplier).toHaveBeenCalledTimes(1);
     });
@@ -155,6 +156,29 @@ describe("SuppliersPage", () => {
         notes: null,
       }),
     );
+  });
+
+  it("warns before discarding an unfinished supplier", async () => {
+    searchSuppliers.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 0, active_count: 0, with_contact_count: 0 },
+    });
+    renderPage();
+    await screen.findByText(/Поставщиков пока нет/i);
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить поставщика" })[0]);
+    const editor = await screen.findByRole("dialog", { name: "Добавить поставщика" });
+    fireEvent.change(within(editor).getByLabelText("Краткое название"), {
+      target: { value: "Черновик" },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Отмена" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Закрыть без сохранения?" }),
+    ).toBeInTheDocument();
+    expect(editor).toBeInTheDocument();
   });
 
   it("debounces search and applies an explicit inactive status", async () => {

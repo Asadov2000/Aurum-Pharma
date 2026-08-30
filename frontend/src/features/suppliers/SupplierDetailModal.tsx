@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Modal,
   Pagination,
   SkeletonRows,
@@ -45,10 +46,21 @@ export function SupplierDetailModal({
   const canCreateReturn = hasPermission(user, "incoming.return") && supplier.is_active;
   const [returnPage, setReturnPage] = useState(1);
   const [returnOpen, setReturnOpen] = useState(false);
+  const [returnDirty, setReturnDirty] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
   const returns = useSupplierReturnsQuery(
     { supplier_id: supplier.id, page: returnPage, page_size: RETURN_PAGE_SIZE },
     canViewReturns,
   );
+  const closeReturn = () => {
+    setReturnOpen(false);
+    setReturnDirty(false);
+    setDiscardOpen(false);
+  };
+  const requestReturnClose = () => {
+    if (returnDirty) setDiscardOpen(true);
+    else closeReturn();
+  };
 
   return (
     <div className="min-w-0">
@@ -60,7 +72,7 @@ export function SupplierDetailModal({
                 {supplier.name}
               </h2>
               <Badge tone={supplier.is_active ? "success" : "neutral"}>
-                {supplier.is_active ? "Активен" : "Неактивен"}
+                {supplier.is_active ? "Доступен для приходов" : "Отключён для новых документов"}
               </Badge>
             </div>
             {supplier.legal_name && (
@@ -87,9 +99,31 @@ export function SupplierDetailModal({
         aria-label="Контакты поставщика"
         className="grid grid-cols-1 border-b border-border bg-background/60 sm:grid-cols-2 lg:grid-cols-4"
       >
-        <Metric label="Телефон" value={supplier.phone || "Не указан"} />
-        <Metric label="Email" value={supplier.email || "Не указан"} />
-        <Metric label="ИНН / TIN" value={supplier.inn_or_tin || "Не указан"} mono />
+        <Metric
+          label="Телефон"
+          value={
+            supplier.phone ? (
+              <a className="hover:text-primary hover:underline" href={`tel:${supplier.phone}`}>
+                {supplier.phone}
+              </a>
+            ) : (
+              "Не указан"
+            )
+          }
+        />
+        <Metric
+          label="Email"
+          value={
+            supplier.email ? (
+              <a className="hover:text-primary hover:underline" href={`mailto:${supplier.email}`}>
+                {supplier.email}
+              </a>
+            ) : (
+              "Не указан"
+            )
+          }
+        />
+        <Metric label="ИНН поставщика" value={supplier.inn_or_tin || "Не указан"} mono />
         <Metric label="Адрес" value={supplier.address || "Не указан"} />
       </section>
 
@@ -180,12 +214,26 @@ export function SupplierDetailModal({
 
       <Modal
         open={returnOpen}
-        onClose={() => setReturnOpen(false)}
+        onClose={requestReturnClose}
         title={`Возврат: ${supplier.name}`}
         className="max-w-3xl"
       >
-        <SupplierReturnForm supplier={supplier} onClose={() => setReturnOpen(false)} />
+        <SupplierReturnForm
+          supplier={supplier}
+          onClose={requestReturnClose}
+          onDirtyChange={setReturnDirty}
+        />
       </Modal>
+      <ConfirmDialog
+        open={discardOpen}
+        title="Закрыть без сохранения?"
+        message="Введённые данные возврата не сохранятся."
+        cancelLabel="Продолжить"
+        confirmLabel="Закрыть без сохранения"
+        variant="danger"
+        onCancel={() => setDiscardOpen(false)}
+        onConfirm={closeReturn}
+      />
     </div>
   );
 }
@@ -259,15 +307,17 @@ function Metric({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   mono?: boolean;
 }): JSX.Element {
   return (
     <div className="min-w-0 border-b border-r border-border px-4 py-3 last:border-r-0 lg:border-b-0">
       <p className="text-xs text-foreground-muted">{label}</p>
-      <p className={`mt-1 truncate text-sm font-medium ${mono ? "font-mono tabular-nums" : ""}`}>
+      <div
+        className={`mt-1 break-words text-sm font-medium ${mono ? "font-mono tabular-nums" : ""}`}
+      >
         {value}
-      </p>
+      </div>
     </div>
   );
 }

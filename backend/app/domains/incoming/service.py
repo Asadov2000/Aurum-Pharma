@@ -21,7 +21,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 
-from app.core.errors import AurumError, BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.time import utc_now
 from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Branch
@@ -269,6 +275,11 @@ class IncomingService:
         if doc.status == "accepted":
             return doc
         self._assert_draft(doc)
+        await self._assert_document_refs_in_tenant(
+            tenant_id=doc.tenant_id,
+            branch_id=None,
+            supplier_id=doc.supplier_id,
+        )
         items = await self.repo.list_items(document_id)
         if not items:
             raise BusinessRuleError("Cannot accept a document with no items")
@@ -404,6 +415,8 @@ class IncomingService:
             supplier = await self.repo.session.get(Supplier, supplier_id)
             if supplier is None or supplier.tenant_id != tenant_id:
                 raise NotFoundError("Supplier not found")
+            if not supplier.is_active:
+                raise ConflictError("Supplier is unavailable for new incoming documents")
 
     async def _assert_catalog_in_tenant(self, catalog_id: UUID, *, tenant_id: UUID) -> None:
         item = await self.repo.session.get(TenantCatalog, catalog_id)

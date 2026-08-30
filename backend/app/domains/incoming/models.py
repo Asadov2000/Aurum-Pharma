@@ -33,6 +33,8 @@ class IncomingDocument(Base):
     )
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # The composite tenant/supplier FK is declared in migration 0126. Supplier
+    # uses another domain's SQLAlchemy metadata, so it is not mirrored here.
     supplier_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     document_number: Mapped[str | None] = mapped_column(Text)
     document_date: Mapped[date] = mapped_column(Date, nullable=False)

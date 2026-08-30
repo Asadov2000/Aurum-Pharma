@@ -28,9 +28,11 @@ type FormValues = z.infer<typeof schema>;
 interface Props {
   supplier: Supplier | null;
   onClose: () => void;
+  onCancel: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
-export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
+export function SupplierForm({ supplier, onClose, onCancel, onDirtyChange }: Props): JSX.Element {
   const isEdit = supplier !== null;
   const create = useCreateSupplier();
   const update = useUpdateSupplier();
@@ -64,16 +66,24 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
     });
   }, [supplier, form]);
 
+  useEffect(() => {
+    onDirtyChange(form.formState.isDirty);
+  }, [form.formState.isDirty, onDirtyChange]);
+
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
+      let firstInvalidField: keyof FormValues | null = null;
       for (const issue of parsed.error.issues) {
         const p = issue.path[0];
         if (typeof p !== "string" || seen.has(p)) continue;
         seen.add(p);
-        form.setError(p as keyof FormValues, { message: issue.message });
+        const field = p as keyof FormValues;
+        firstInvalidField ??= field;
+        form.setError(field, { message: issue.message });
       }
+      if (firstInvalidField) form.setFocus(firstInvalidField);
       return;
     }
     setTopError(null);
@@ -107,6 +117,7 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
           notes: trim(d.notes),
         });
       }
+      onDirtyChange(false);
       onClose();
     } catch (err) {
       setTopError(describeApiError(err, "Не удалось сохранить поставщика"));
@@ -117,7 +128,7 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
     <form onSubmit={onSubmit} noValidate className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
-          <Label htmlFor="name">Название</Label>
+          <Label htmlFor="name">Краткое название</Label>
           <Input
             id="name"
             invalid={Boolean(form.formState.errors.name)}
@@ -126,7 +137,7 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
           <FormError>{form.formState.errors.name?.message}</FormError>
         </div>
         <div>
-          <Label htmlFor="legal_name">Юр. название</Label>
+          <Label htmlFor="legal_name">Юридическое наименование</Label>
           <Input
             id="legal_name"
             invalid={Boolean(form.formState.errors.legal_name)}
@@ -135,7 +146,7 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
           <FormError>{form.formState.errors.legal_name?.message}</FormError>
         </div>
         <div>
-          <Label htmlFor="inn_or_tin">ИНН/TIN</Label>
+          <Label htmlFor="inn_or_tin">ИНН поставщика</Label>
           <Input
             id="inn_or_tin"
             invalid={Boolean(form.formState.errors.inn_or_tin)}
@@ -156,6 +167,8 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
           <Label htmlFor="phone">Телефон</Label>
           <Input
             id="phone"
+            type="tel"
+            autoComplete="tel"
             invalid={Boolean(form.formState.errors.phone)}
             {...form.register("phone")}
           />
@@ -166,6 +179,7 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
           <Input
             id="email"
             type="email"
+            autoComplete="email"
             invalid={Boolean(form.formState.errors.email)}
             {...form.register("email")}
           />
@@ -191,7 +205,11 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
         </div>
         {isEdit && (
           <div className="sm:col-span-2">
-            <Switch label="Активен" {...form.register("is_active")} />
+            <Switch label="Разрешить выбирать в новых приходах" {...form.register("is_active")} />
+            <p className="mt-1 text-xs text-foreground-muted">
+              Отключённый поставщик останется в истории, но его нельзя будет выбрать в новом приходе
+              или возврате.
+            </p>
           </div>
         )}
       </div>
@@ -204,11 +222,11 @@ export function SupplierForm({ supplier, onClose }: Props): JSX.Element {
         </div>
       )}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose}>
+        <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
         <Button type="submit" isLoading={form.formState.isSubmitting}>
-          {isEdit ? "Сохранить" : "Создать"}
+          {isEdit ? "Сохранить изменения" : "Добавить поставщика"}
         </Button>
       </div>
     </form>
