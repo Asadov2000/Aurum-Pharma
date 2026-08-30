@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
@@ -56,9 +56,23 @@ class IncomingService:
         *,
         tenant_id: UUID,
         fields: dict[str, Any],
+        operation_id: UUID | None = None,
         created_by: UUID | None = None,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingDocument:
+        operation_id = operation_id or uuid4()
+        await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
+        existing = await self.repo.get_document_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is not None:
+            self._assert_branch_allowed(
+                existing.branch_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
+            self._assert_document_retry_matches(existing, fields=fields)
+            return existing
         await self._assert_document_refs_in_tenant(
             tenant_id=tenant_id,
             branch_id=fields.get("branch_id"),
@@ -67,7 +81,12 @@ class IncomingService:
         branch_id = fields.get("branch_id")
         if isinstance(branch_id, UUID):
             self._assert_branch_allowed(branch_id, allowed_branch_ids=allowed_branch_ids)
-        payload = {**fields, "tenant_id": tenant_id, "status": "draft"}
+        payload = {
+            **fields,
+            "tenant_id": tenant_id,
+            "operation_id": operation_id,
+            "status": "draft",
+        }
         if created_by is not None:
             payload["created_by"] = created_by
         return await self.repo.create_document(**payload)
@@ -199,19 +218,41 @@ class IncomingService:
         document_id: UUID,
         *,
         fields: dict[str, Any],
+        operation_id: UUID | None = None,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingItem:
         doc = await self._get_document_for_mutation(
             document_id,
             allowed_branch_ids=allowed_branch_ids,
         )
+        operation_id = operation_id or uuid4()
+        await self.repo.lock_operation_id(
+            tenant_id=doc.tenant_id,
+            operation_id=operation_id,
+        )
+        existing = await self.repo.get_item_by_operation_id(
+            tenant_id=doc.tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is not None:
+            self._assert_item_retry_matches(
+                existing,
+                document_id=document_id,
+                fields=fields,
+            )
+            return existing
         self._assert_draft(doc)
         await self._assert_catalog_in_tenant(fields["catalog_id"], tenant_id=doc.tenant_id)
         self._assert_item_dates(
             manufactured_at=fields.get("manufactured_at"),
             expires_at=fields["expires_at"],
         )
-        payload = {**fields, "document_id": doc.id, "tenant_id": doc.tenant_id}
+        payload = {
+            **fields,
+            "document_id": doc.id,
+            "tenant_id": doc.tenant_id,
+            "operation_id": operation_id,
+        }
         item = await self.repo.create_item(**payload)
         await self._recompute_total(doc)
         return item
@@ -349,10 +390,12 @@ class IncomingService:
         actor_id: UUID | None = None,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> IncomingDocument:
-        doc = await self._get_document_for_mutation(
-            document_id,
-            allowed_branch_ids=allowed_branch_ids,
-        )
+        doc = await self.repo.get_document_for_update(document_id)
+        if doc is None:
+            raise NotFoundError("Incoming document not found")
+        self._assert_branch_allowed(doc.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if doc.status == "rejected":
+            return doc
         self._assert_draft(doc)
         await self.repo.update_document(doc, status="rejected", updated_by=actor_id)
         logger.info("incoming_rejected", document_id=str(doc.id))
@@ -379,6 +422,43 @@ class IncomingService:
                 "Cannot modify a document that is already accepted or rejected",
                 details={"status": doc.status},
             )
+
+    @staticmethod
+    def _assert_document_retry_matches(
+        existing: IncomingDocument,
+        *,
+        fields: dict[str, Any],
+    ) -> None:
+        expected = {
+            "branch_id": fields.get("branch_id"),
+            "supplier_id": fields.get("supplier_id"),
+            "document_date": fields.get("document_date"),
+            "document_number": fields.get("document_number"),
+            "notes": fields.get("notes"),
+        }
+        actual = {name: getattr(existing, name) for name in expected}
+        if actual != expected:
+            raise ConflictError("Operation ID was already used for another incoming document")
+
+    @staticmethod
+    def _assert_item_retry_matches(
+        existing: IncomingItem,
+        *,
+        document_id: UUID,
+        fields: dict[str, Any],
+    ) -> None:
+        expected = {
+            "catalog_id": fields.get("catalog_id"),
+            "batch_number": fields.get("batch_number"),
+            "manufactured_at": fields.get("manufactured_at"),
+            "expires_at": fields.get("expires_at"),
+            "qty": fields.get("qty"),
+            "purchase_price": fields.get("purchase_price"),
+            "sale_price": fields.get("sale_price"),
+        }
+        actual = {name: getattr(existing, name) for name in expected}
+        if existing.document_id != document_id or actual != expected:
+            raise ConflictError("Operation ID was already used for another incoming item")
 
     @staticmethod
     def _assert_branch_allowed(

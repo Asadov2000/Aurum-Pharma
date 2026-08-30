@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Modal,
   SkeletonRows,
   Table,
@@ -45,6 +46,8 @@ export function BatchDetailModal({
   const canWriteOff = hasPermission(user, "batches.write_off");
   const batchQuery = useBatchQuery(batchId);
   const [writeOffOpen, setWriteOffOpen] = useState(false);
+  const [writeOffDirty, setWriteOffDirty] = useState(false);
+  const [discardWriteOffOpen, setDiscardWriteOffOpen] = useState(false);
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
   const isPreview = mode === "preview";
 
@@ -79,6 +82,18 @@ export function BatchDetailModal({
   const marginValue = saleValue - purchaseValue;
   const canWriteOffCurrentBatch =
     canWriteOff && !batch.is_blocked && Number(batch.qty_remaining) > 0;
+  const closeWriteOff = () => {
+    setWriteOffOpen(false);
+    setWriteOffDirty(false);
+    setDiscardWriteOffOpen(false);
+  };
+  const requestCloseWriteOff = () => {
+    if (writeOffDirty) {
+      setDiscardWriteOffOpen(true);
+      return;
+    }
+    closeWriteOff();
+  };
 
   return (
     <div className="min-w-0">
@@ -147,6 +162,9 @@ export function BatchDetailModal({
           <div className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
             <p className="font-medium">Партия недоступна для продажи и списания</p>
             {batch.block_reason && <p className="mt-1">Причина: {batch.block_reason}</p>}
+            <p className="mt-1">
+              Проверьте причину блокировки и обратитесь к владельцу или управляющему аптеки.
+            </p>
           </div>
         )}
 
@@ -231,7 +249,7 @@ export function BatchDetailModal({
 
       <Modal
         open={writeOffOpen}
-        onClose={() => setWriteOffOpen(false)}
+        onClose={requestCloseWriteOff}
         title="Списание партии"
         className="max-w-xl"
       >
@@ -242,9 +260,20 @@ export function BatchDetailModal({
           currency={batch.currency}
           productName={batch.catalog_name}
           batchNumber={batch.batch_number}
-          onClose={() => setWriteOffOpen(false)}
+          onClose={closeWriteOff}
+          onCancel={requestCloseWriteOff}
+          onDirtyChange={setWriteOffDirty}
         />
       </Modal>
+      <ConfirmDialog
+        open={discardWriteOffOpen}
+        title="Закрыть без списания?"
+        message="Введённые количество, причина и комментарий будут потеряны."
+        confirmLabel="Закрыть без сохранения"
+        variant="danger"
+        onConfirm={closeWriteOff}
+        onCancel={() => setDiscardWriteOffOpen(false)}
+      />
     </div>
   );
 }

@@ -32,6 +32,7 @@ class IncomingDocument(Base):
         server_default=text("gen_random_uuid()"),
     )
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     # The composite tenant/supplier FK is declared in migration 0126. Supplier
     # uses another domain's SQLAlchemy metadata, so it is not mirrored here.
@@ -73,6 +74,7 @@ class IncomingItem(Base):
         server_default=text("gen_random_uuid()"),
     )
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     document_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("incoming_document.id", ondelete="CASCADE"),

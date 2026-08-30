@@ -41,17 +41,17 @@ test.describe("Incoming flow (owner)", () => {
     await loginInBrowser(page, OWNER);
     await page.goto("/incoming");
     await selectTouchDensity(page);
-    await page.getByRole("button", { name: "Новый приход", exact: true }).click();
+    await page.getByRole("button", { name: "Новая приёмка", exact: true }).click();
 
     const dialog = page.locator('div[role="dialog"]');
-    await dialog.getByLabel("Точка").selectOption({ label: branch.name });
+    await dialog.getByLabel("Аптечная точка").selectOption({ label: branch.name });
     const supplierPicker = dialog.getByRole("combobox", { name: "Поставщик" });
     await supplierPicker.fill(supplier.name);
     const supplierOption = dialog.getByRole("option", { name: supplier.name });
     await expect(supplierOption).toBeVisible({ timeout: 15_000 });
     await supplierOption.click();
     const docNumber = `E2E-${Date.now()}`;
-    await dialog.getByLabel("Номер", { exact: true }).fill(docNumber);
+    await dialog.getByLabel("Номер документа поставщика", { exact: true }).fill(docNumber);
     await dialog.getByRole("button", { name: /Создать черновик/ }).click();
 
     // We land on the detail page after creation.
@@ -60,10 +60,10 @@ test.describe("Incoming flow (owner)", () => {
     // Editing also runs in the touch layout. Explicitly clearing an optional
     // value must persist as null instead of silently restoring the old value.
     await page.getByRole("button", { name: "Изменить реквизиты" }).click();
-    const documentDialog = page.getByRole("dialog", { name: "Реквизиты прихода" });
-    await documentDialog.getByLabel("Номер", { exact: true }).clear();
+    const documentDialog = page.getByRole("dialog", { name: "Реквизиты приёмки" });
+    await documentDialog.getByLabel("Номер документа поставщика", { exact: true }).clear();
     await documentDialog.getByRole("button", { name: "Сохранить" }).click();
-    await expect(page.getByRole("heading", { name: "Приход без номера" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Приёмка без номера" })).toBeVisible();
 
     // ---- UI: open the add-item form, then pick a catalog row ----
     await page.getByRole("button", { name: "Добавить позицию" }).click();
@@ -78,13 +78,13 @@ test.describe("Incoming flow (owner)", () => {
 
     const expiresAt = isoDateInDays(180);
     await page.getByLabel("Номер партии").fill("E2E-BATCH");
-    await page.getByLabel("Произведена").fill(isoDateInDays(-30));
+    await page.getByLabel("Дата производства").fill(isoDateInDays(-30));
     await page.getByLabel("Срок годности").fill(expiresAt);
-    await page.getByLabel("Количество").fill("10");
+    await page.getByLabel("Количество единиц").fill("10");
     // Disambiguate between "Цена закупки" and "Цена продажи" — both are
     // exact labels, not regex.
-    await page.getByLabel("Цена закупки").fill("4.00");
-    await page.getByLabel("Цена продажи").fill("5.00");
+    await page.getByLabel("Закупочная цена за единицу").fill("4.00");
+    await page.getByLabel("Розничная цена за единицу").fill("5.00");
     // The form's submit button is plain «Добавить». The page header carries
     // «+ Добавить позицию», so we anchor to the exact label here.
     await page.getByRole("button", { name: "Добавить", exact: true }).click();
@@ -98,8 +98,8 @@ test.describe("Incoming flow (owner)", () => {
     await createdItemCard.getByRole("button", { name: "Изменить" }).click();
     const itemDialog = page.getByRole("dialog", { name: "Изменить позицию" });
     await itemDialog.getByLabel("Номер партии").clear();
-    await itemDialog.getByLabel("Произведена").clear();
-    await itemDialog.getByLabel("Цена продажи").fill("6.00");
+    await itemDialog.getByLabel("Дата производства").clear();
+    await itemDialog.getByLabel("Розничная цена за единицу").fill("6.00");
     await itemDialog.getByRole("button", { name: "Сохранить" }).click();
     await expect(createdItemCard).toContainText("Без номера");
     await expect(createdItemCard).toContainText("6,00 TJS");
@@ -117,14 +117,16 @@ test.describe("Incoming flow (owner)", () => {
     expect(addPositionBounds!.height).toBeGreaterThanOrEqual(44);
 
     // ---- UI: accept → batch lands on /batches ----
-    await page.getByRole("button", { name: "Принять приход" }).click();
-    const acceptDialog = page.getByRole("dialog").filter({ hasText: /Принять приход/ });
+    await page.getByRole("button", { name: "Принять на склад" }).click();
+    const acceptDialog = page.getByRole("dialog").filter({ hasText: /Принять товары на склад/ });
     await expect(acceptDialog).toBeVisible();
-    await acceptDialog.getByRole("button", { name: "Принять приход" }).click();
+    await acceptDialog.getByRole("button", { name: "Принять на склад" }).click();
 
     // Wait for the exact accepted status. A partial match also finds the
     // "Принять" action before its request has completed.
-    await expect(page.getByText("Принят", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Принят на склад", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Hop over to /batches and filter by the unique catalog item → see the
     // freshly-made batch. Branch options are loaded separately and can lag
@@ -166,7 +168,8 @@ test.describe("Incoming flow (owner)", () => {
     await writeOffDialog.getByLabel("Причина").selectOption("damaged");
     await writeOffDialog.getByLabel("Комментарий").fill("E2E: повреждена упаковка");
     await writeOffDialog.getByRole("button", { name: "Подтвердить списание" }).click();
-
+    await expect(writeOffDialog.getByRole("status")).toContainText("Товар списан");
+    await writeOffDialog.getByRole("button", { name: "Готово" }).click();
     await expect(writeOffDialog).toBeHidden({ timeout: 15_000 });
     const writeOffMovement = batchDialog.getByRole("article").filter({ hasText: "Акт списания" });
     await expect(writeOffMovement).toContainText("Списание", { timeout: 15_000 });

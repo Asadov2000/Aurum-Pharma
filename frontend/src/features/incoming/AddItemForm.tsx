@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -7,6 +7,7 @@ import { describeApiError } from "@/features/foundation/errors";
 
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { pharmacyCalendarDate } from "./calendar";
+import { createIncomingOperationId } from "./operationId";
 import { useAddIncomingItem, useUpdateIncomingItem } from "./queries";
 import { type IncomingItem } from "./types";
 
@@ -85,15 +86,20 @@ type FormValues = z.infer<typeof schema>;
 export function AddItemForm({
   documentId,
   onClose,
+  onCancel = onClose,
+  onDirtyChange,
   item,
 }: {
   documentId: string;
   onClose: () => void;
+  onCancel?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   item?: IncomingItem;
 }): JSX.Element {
   const addItem = useAddIncomingItem();
   const updateItem = useUpdateIncomingItem();
   const [topError, setTopError] = useState<string | null>(null);
+  const [operationId] = useState(createIncomingOperationId);
   const isEditing = item !== undefined;
 
   const form = useForm<FormValues>({
@@ -108,22 +114,31 @@ export function AddItemForm({
     },
   });
 
+  useEffect(() => {
+    onDirtyChange?.(form.formState.isDirty);
+  }, [form.formState.isDirty, onDirtyChange]);
+
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
+      let firstInvalidField: keyof FormValues | null = null;
       for (const issue of parsed.error.issues) {
         const p = issue.path[0];
         if (typeof p !== "string" || seen.has(p)) continue;
         seen.add(p);
-        form.setError(p as keyof FormValues, { message: issue.message });
+        const field = p as keyof FormValues;
+        firstInvalidField ??= field;
+        form.setError(field, { message: issue.message });
       }
+      if (firstInvalidField) form.setFocus(firstInvalidField);
       return;
     }
     setTopError(null);
     const d = parsed.data;
     try {
       const payload = {
+        operation_id: operationId,
         catalog_id: d.catalog_id,
         batch_number: d.batch_number?.trim() || null,
         manufactured_at: d.manufactured_at || null,
@@ -133,10 +148,23 @@ export function AddItemForm({
         sale_price: d.sale_price.replace(",", "."),
       };
       if (item) {
-        await updateItem.mutateAsync({ documentId, itemId: item.id, payload });
+        await updateItem.mutateAsync({
+          documentId,
+          itemId: item.id,
+          payload: {
+            catalog_id: payload.catalog_id,
+            batch_number: payload.batch_number,
+            manufactured_at: payload.manufactured_at,
+            expires_at: payload.expires_at,
+            qty: payload.qty,
+            purchase_price: payload.purchase_price,
+            sale_price: payload.sale_price,
+          },
+        });
       } else {
         await addItem.mutateAsync({ documentId, payload });
       }
+      onDirtyChange?.(false);
       onClose();
     } catch (err) {
       setTopError(
@@ -151,7 +179,7 @@ export function AddItemForm({
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-3">
       <div>
-        <Label htmlFor="incoming-catalog-item">Позиция каталога</Label>
+        <Label htmlFor="incoming-catalog-item">Лекарство или товар</Label>
         <Controller
           control={form.control}
           name="catalog_id"
@@ -173,7 +201,7 @@ export function AddItemForm({
           <Input id="batch_number" {...form.register("batch_number")} />
         </div>
         <div>
-          <Label htmlFor="qty">Количество</Label>
+          <Label htmlFor="qty">Количество единиц</Label>
           <Input
             id="qty"
             type="text"
@@ -184,7 +212,7 @@ export function AddItemForm({
           <FormError>{form.formState.errors.qty?.message}</FormError>
         </div>
         <div>
-          <Label htmlFor="manufactured_at">Произведена</Label>
+          <Label htmlFor="manufactured_at">Дата производства</Label>
           <Input id="manufactured_at" type="date" {...form.register("manufactured_at")} />
           <FormError>{form.formState.errors.manufactured_at?.message}</FormError>
         </div>
@@ -199,7 +227,7 @@ export function AddItemForm({
           <FormError>{form.formState.errors.expires_at?.message}</FormError>
         </div>
         <div>
-          <Label htmlFor="purchase_price">Цена закупки</Label>
+          <Label htmlFor="purchase_price">Закупочная цена за единицу</Label>
           <Input
             id="purchase_price"
             type="text"
@@ -210,7 +238,7 @@ export function AddItemForm({
           <FormError>{form.formState.errors.purchase_price?.message}</FormError>
         </div>
         <div>
-          <Label htmlFor="sale_price">Цена продажи</Label>
+          <Label htmlFor="sale_price">Розничная цена за единицу</Label>
           <Input
             id="sale_price"
             type="text"
@@ -223,7 +251,7 @@ export function AddItemForm({
       </div>
       {topError && <p className="text-sm text-danger">{topError}</p>}
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           Отмена
         </Button>
         <Button type="submit" size="sm" isLoading={form.formState.isSubmitting}>

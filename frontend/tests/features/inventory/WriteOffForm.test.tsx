@@ -57,7 +57,16 @@ describe("WriteOffForm", () => {
   });
 
   it("reuses the operation id after a lost response", async () => {
-    mocks.mutateAsync.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({});
+    mocks.mutateAsync.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({
+      id: "00000000-0000-4000-8000-000000000099",
+      batch_id: "00000000-0000-0000-0000-000000000001",
+      qty: "2.500",
+      reason: "damaged",
+      comment: "Повреждена упаковка",
+      amount: "10.00",
+      currency: "TJS",
+      created_at: "2026-08-30T10:00:00Z",
+    });
     const { onClose } = renderForm();
     fillValidForm();
 
@@ -77,6 +86,10 @@ describe("WriteOffForm", () => {
       reason: "damaged",
       comment: "Повреждена упаковка",
     });
+    expect(await screen.findByRole("status")).toHaveTextContent("Товар списан");
+    expect(screen.getByText("Повреждение")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 

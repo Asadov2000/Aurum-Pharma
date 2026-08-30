@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator
 
 IncomingQuantity = Annotated[
     Decimal,
@@ -20,6 +20,7 @@ IncomingMoney = Annotated[
 
 
 class IncomingDocumentCreate(BaseModel):
+    operation_id: UUID4
     branch_id: UUID
     supplier_id: UUID
     document_date: date
@@ -44,6 +45,7 @@ class IncomingDocumentUpdate(BaseModel):
 
 
 class IncomingItemBase(BaseModel):
+    operation_id: UUID4
     catalog_id: UUID
     batch_number: str | None = None
     manufactured_at: date | None = None

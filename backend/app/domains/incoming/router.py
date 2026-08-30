@@ -131,7 +131,8 @@ async def create_incoming(
 ) -> IncomingDocumentRead:
     doc = await service.create_document(
         tenant_id=_current_tenant_or_400(user),
-        fields=payload.model_dump(),
+        fields=payload.model_dump(exclude={"operation_id"}),
+        operation_id=payload.operation_id,
         created_by=user.user_id,
         allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
@@ -214,7 +215,8 @@ async def add_item(
 ) -> IncomingItemRead:
     item = await service.add_item(
         document_id,
-        fields=payload.model_dump(),
+        fields=payload.model_dump(exclude={"operation_id"}),
+        operation_id=payload.operation_id,
         allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
     return IncomingItemRead.model_validate(item)

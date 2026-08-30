@@ -8,7 +8,7 @@ import { describeApiError } from "@/features/foundation/errors";
 import { formatInventoryMoney, formatInventoryQuantity } from "./formatters";
 import { writeOffReasonLabel, writeOffReasonOptions } from "./labels";
 import { useWriteOff } from "./queries";
-import { type WriteOffReason } from "./types";
+import { type WriteOff, type WriteOffReason } from "./types";
 
 const quantityPattern = /^(?:0|[1-9]\d{0,10})(?:[.,]\d{1,3})?$/;
 
@@ -50,6 +50,8 @@ export function WriteOffForm({
   productName,
   batchNumber,
   onClose,
+  onCancel = onClose,
+  onDirtyChange,
 }: {
   batchId: string;
   maxQty: string;
@@ -58,10 +60,13 @@ export function WriteOffForm({
   productName: string;
   batchNumber: string | null;
   onClose: () => void;
+  onCancel?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }): JSX.Element {
   const writeOff = useWriteOff();
   const operationId = useMemo(createOperationId, []);
   const [topError, setTopError] = useState<string | null>(null);
+  const [result, setResult] = useState<WriteOff | null>(null);
   const [online, setOnline] = useState(() =>
     typeof navigator === "undefined" ? true : navigator.onLine,
   );
@@ -83,22 +88,31 @@ export function WriteOffForm({
     };
   }, []);
 
+  useEffect(() => {
+    onDirtyChange?.(form.formState.isDirty && result === null);
+  }, [form.formState.isDirty, onDirtyChange, result]);
+
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
+      let firstInvalidField: keyof FormValues | null = null;
       for (const issue of parsed.error.issues) {
         const path = issue.path[0];
         if (typeof path !== "string" || seen.has(path)) continue;
         seen.add(path);
-        form.setError(path as keyof FormValues, { message: issue.message });
+        const field = path as keyof FormValues;
+        firstInvalidField ??= field;
+        form.setError(field, { message: issue.message });
       }
+      if (firstInvalidField) form.setFocus(firstInvalidField);
       return;
     }
 
     const parsedQty = parsed.data.qty.replace(",", ".");
     if (Number(parsedQty) > Number(maxQty)) {
       form.setError("qty", { message: `Доступно не более ${formatInventoryQuantity(maxQty)}` });
+      form.setFocus("qty");
       return;
     }
     if (!online) {
@@ -108,7 +122,7 @@ export function WriteOffForm({
 
     setTopError(null);
     try {
-      await writeOff.mutateAsync({
+      const completed = await writeOff.mutateAsync({
         batchId,
         payload: {
           operation_id: operationId,
@@ -117,11 +131,38 @@ export function WriteOffForm({
           comment: parsed.data.comment?.trim() || null,
         },
       });
-      onClose();
+      setResult(completed);
+      onDirtyChange?.(false);
     } catch (error) {
       setTopError(describeApiError(error, "Не удалось списать товар"));
     }
   });
+
+  if (result) {
+    return (
+      <div role="status" className="space-y-4">
+        <div className="rounded-lg border border-success/30 bg-success-subtle px-4 py-4">
+          <p className="font-semibold text-success-foreground">Товар списан</p>
+          <p className="mt-1 text-sm text-success-foreground">
+            Остаток уменьшен, операция сохранена в неизменяемой истории склада.
+          </p>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border px-4 py-4 text-sm">
+          <ResultField label="Товар" value={productName} />
+          <ResultField label="Партия" value={batchNumber ?? "Без номера"} />
+          <ResultField label="Количество" value={formatInventoryQuantity(result.qty)} />
+          <ResultField label="Причина" value={writeOffReasonLabel[result.reason]} />
+          <ResultField label="Сумма" value={formatInventoryMoney(result.amount, result.currency)} />
+          <ResultField label="Код операции" value={result.id.slice(0, 8)} mono />
+        </dl>
+        <div className="flex justify-end">
+          <Button type="button" className="min-h-11" onClick={onClose}>
+            Готово
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4">
@@ -138,7 +179,7 @@ export function WriteOffForm({
             <Label htmlFor="write_off_qty">Количество</Label>
             <button
               type="button"
-              className="text-xs font-medium text-primary hover:underline"
+              className="min-h-11 rounded-md px-2 text-sm font-medium text-primary hover:bg-primary/5"
               onClick={() => {
                 form.setValue("qty", maxQty, { shouldDirty: true, shouldValidate: true });
                 form.clearErrors("qty");
@@ -213,7 +254,7 @@ export function WriteOffForm({
       </p>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button type="button" variant="ghost" className="min-h-11" onClick={onClose}>
+        <Button type="button" variant="ghost" className="min-h-11" onClick={onCancel}>
           Отмена
         </Button>
         <Button
@@ -226,5 +267,22 @@ export function WriteOffForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+function ResultField({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-foreground-muted">{label}</dt>
+      <dd className={mono ? "mt-1 font-mono tabular-nums" : "mt-1 break-words"}>{value}</dd>
+    </div>
   );
 }

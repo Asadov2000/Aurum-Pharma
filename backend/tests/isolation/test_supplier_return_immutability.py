@@ -76,15 +76,17 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                 await connection.execute(
                     text(
                         "INSERT INTO incoming_document ("
-                        "tenant_id, branch_id, supplier_id, document_date, status"
+                        "tenant_id, branch_id, supplier_id, operation_id, document_date, status"
                         ") VALUES ("
-                        ":tenant_id, :branch_id, :supplier_id, CURRENT_DATE, 'accepted'"
+                        ":tenant_id, :branch_id, :supplier_id, :operation_id, "
+                        "CURRENT_DATE, 'accepted'"
                         ") RETURNING id"
                     ),
                     {
                         "tenant_id": tenant_id,
                         "branch_id": branch_id,
                         "supplier_id": supplier_id,
+                        "operation_id": uuid4(),
                     },
                 )
             ).scalar_one()

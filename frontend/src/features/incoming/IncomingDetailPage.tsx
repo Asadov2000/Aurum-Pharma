@@ -46,7 +46,10 @@ export function IncomingDetailPage(): JSX.Element {
   const [adding, setAdding] = useState(false);
   const [editingDocument, setEditingDocument] = useState(false);
   const [editingItem, setEditingItem] = useState<IncomingItem | null>(null);
+  const [formDirty, setFormDirty] = useState(false);
+  const [discardFormOpen, setDiscardFormOpen] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [docAction, setDocAction] = useState<"accept" | "reject" | null>(null);
   const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
   const [deleteItemError, setDeleteItemError] = useState<string | null>(null);
@@ -85,7 +88,7 @@ export function IncomingDetailPage(): JSX.Element {
   }
 
   const isDraft = doc.status === "draft";
-  const title = doc.document_number ? `Приход № ${doc.document_number}` : "Приход без номера";
+  const title = doc.document_number ? `Приёмка № ${doc.document_number}` : "Приёмка без номера";
   const branchName = doc.branch_name ?? `Точка ${doc.branch_id.slice(0, 8)}`;
   const supplierName = doc.supplier_name ?? `Поставщик ${doc.supplier_id.slice(0, 8)}`;
   const pendingDeleteItem = doc.items.find((item) => item.id === pendingDeleteItemId) ?? null;
@@ -93,9 +96,11 @@ export function IncomingDetailPage(): JSX.Element {
   const onAccept = async () => {
     if (!canEdit || accept.isPending) return;
     setTopError(null);
+    setActionMessage(null);
     try {
       await accept.mutateAsync(doc.id);
       setDocAction(null);
+      setActionMessage("Товары приняты на склад. Документ теперь доступен только для просмотра.");
     } catch (error) {
       setTopError(describeApiError(error, "Не удалось принять приход"));
     }
@@ -104,9 +109,11 @@ export function IncomingDetailPage(): JSX.Element {
   const onReject = async () => {
     if (!canEdit || reject.isPending) return;
     setTopError(null);
+    setActionMessage(null);
     try {
       await reject.mutateAsync(doc.id);
       setDocAction(null);
+      setActionMessage("Документ отклонён. Остатки на складе не изменились.");
     } catch (error) {
       setTopError(describeApiError(error, "Не удалось отклонить приход"));
     }
@@ -121,6 +128,28 @@ export function IncomingDetailPage(): JSX.Element {
     } catch (error) {
       setDeleteItemError(describeApiError(error, "Не удалось удалить позицию"));
     }
+  };
+
+  const closeItemForm = () => {
+    setAdding(false);
+    setEditingItem(null);
+    setFormDirty(false);
+    setDiscardFormOpen(false);
+  };
+
+  const closeDocumentForm = () => {
+    setEditingDocument(false);
+    setFormDirty(false);
+    setDiscardFormOpen(false);
+  };
+
+  const requestCloseForm = () => {
+    if (formDirty) {
+      setDiscardFormOpen(true);
+      return;
+    }
+    if (editingDocument) closeDocumentForm();
+    else closeItemForm();
   };
 
   return (
@@ -199,6 +228,14 @@ export function IncomingDetailPage(): JSX.Element {
           className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger-foreground"
         >
           {topError}
+        </div>
+      )}
+      {actionMessage && (
+        <div
+          role="status"
+          className="rounded-lg border border-success/30 bg-success-subtle px-4 py-3 text-sm text-success-foreground"
+        >
+          {actionMessage}
         </div>
       )}
 
@@ -289,7 +326,7 @@ export function IncomingDetailPage(): JSX.Element {
               title={doc.items.length === 0 ? "Сначала добавьте хотя бы одну позицию" : undefined}
               onClick={() => setDocAction("accept")}
             >
-              Принять приход
+              Принять на склад
             </Button>
           </div>
         </div>
@@ -298,20 +335,16 @@ export function IncomingDetailPage(): JSX.Element {
       {canEdit && (
         <Modal
           open={adding || editingItem !== null}
-          onClose={() => {
-            setAdding(false);
-            setEditingItem(null);
-          }}
+          onClose={requestCloseForm}
           title={editingItem ? "Изменить позицию" : "Добавить позицию"}
           className="sm:max-w-2xl"
         >
           <AddItemForm
             documentId={doc.id}
             item={editingItem ?? undefined}
-            onClose={() => {
-              setAdding(false);
-              setEditingItem(null);
-            }}
+            onClose={closeItemForm}
+            onCancel={requestCloseForm}
+            onDirtyChange={setFormDirty}
           />
         </Modal>
       )}
@@ -319,18 +352,23 @@ export function IncomingDetailPage(): JSX.Element {
       {canEdit && (
         <Modal
           open={editingDocument}
-          onClose={() => setEditingDocument(false)}
-          title="Реквизиты прихода"
+          onClose={requestCloseForm}
+          title="Реквизиты приёмки"
           className="sm:max-w-2xl"
         >
-          <NewIncomingForm document={doc} onClose={() => setEditingDocument(false)} />
+          <NewIncomingForm
+            document={doc}
+            onClose={closeDocumentForm}
+            onCancel={requestCloseForm}
+            onDirtyChange={setFormDirty}
+          />
         </Modal>
       )}
 
       {canEdit && (
         <ConfirmDialog
           open={docAction === "accept"}
-          title="Принять приход"
+          title="Принять товары на склад"
           message={
             <>
               <span className="block">
@@ -344,7 +382,7 @@ export function IncomingDetailPage(): JSX.Element {
               {topError && <span className="mt-2 block text-danger">{topError}</span>}
             </>
           }
-          confirmLabel="Принять приход"
+          confirmLabel="Принять на склад"
           isLoading={accept.isPending}
           onConfirm={() => void onAccept()}
           onCancel={() => {
@@ -374,6 +412,16 @@ export function IncomingDetailPage(): JSX.Element {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={discardFormOpen}
+        title="Закрыть без сохранения?"
+        message="Изменения в форме будут потеряны."
+        confirmLabel="Закрыть без сохранения"
+        variant="danger"
+        onConfirm={editingDocument ? closeDocumentForm : closeItemForm}
+        onCancel={() => setDiscardFormOpen(false)}
+      />
 
       {canEdit && (
         <ConfirmDialog
