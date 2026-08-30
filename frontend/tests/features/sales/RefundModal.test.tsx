@@ -85,6 +85,7 @@ const SALE: SaleDetails = {
       currency: "TJS",
       discount_amount: "0.00",
       position: 1,
+      name: "Парацетамол 500 мг",
       refunded_qty: "1.000",
     },
   ],
@@ -170,6 +171,23 @@ describe("RefundModal", () => {
     settingsResult.data.refund_reason_mode = "optional";
   });
 
+  function selectRefundItem(): void {
+    fireEvent.click(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" }));
+  }
+
+  it("starts with no selected items and shows the calculated refund total", () => {
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).not.toBeChecked();
+    expect(screen.getByText("Предварительно: 0,00 TJS")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Зафиксировать сумму возврата" })).toBeDisabled();
+
+    selectRefundItem();
+
+    expect(screen.getByText("Предварительно: 10,00 TJS")).toBeInTheDocument();
+    expect(screen.getByLabelText("Количество для возврата: Парацетамол 500 мг")).toBeEnabled();
+  });
+
   it("binds a card refund to terminal document details before posting the return", async () => {
     const onRefunded = vi.fn();
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
@@ -180,10 +198,12 @@ describe("RefundModal", () => {
       target: { value: "quality_issue" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: "Зафиксировать сумму возврата" }));
     await waitFor(() => expect(createRefundAttempt).toHaveBeenCalledTimes(1));
     expect(beginRefundAttemptReconciliation).toHaveBeenCalledWith("attempt-1");
     expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByText("К возврату: 10,00 TJS")).toBeInTheDocument();
     expect(await screen.findByText("Карта")).toBeInTheDocument();
     expect(screen.getAllByText("10.00 TJS")).toHaveLength(2);
     expect(screen.getByLabelText("Терминал")).toBeEnabled();
@@ -195,7 +215,7 @@ describe("RefundModal", () => {
     fireEvent.change(screen.getByLabelText("Номер документа"), {
       target: { value: " REFUND-001 " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Подтвердить и оформить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить возврат и создать чек" }));
 
     await waitFor(() => expect(confirmRefundAttempt).toHaveBeenCalledTimes(1));
     expect(confirmRefundAttempt).toHaveBeenCalledWith("attempt-1", [
@@ -224,14 +244,13 @@ describe("RefundModal", () => {
     authResult.user.permissions = ["pos.refund"];
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: "Зафиксировать сумму возврата" }));
 
     expect(await screen.findByText(/Для подтверждения пригласите сотрудника/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Терминал")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Ожидает подтверждения" })).toBeDisabled();
-    expect(
-      screen.queryByRole("button", { name: "Терминал проверен, возврата нет" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Отменить заявку" })).not.toBeInTheDocument();
     expect(confirmRefundAttempt).not.toHaveBeenCalled();
   });
 
@@ -247,7 +266,8 @@ describe("RefundModal", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: /Вернуть выбранное/ }));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(createRefundAttempt).not.toHaveBeenCalled();
@@ -273,7 +293,7 @@ describe("RefundModal", () => {
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
 
     expect(await screen.findByText(/Подтверждение восстановлено/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+    fireEvent.click(screen.getByRole("button", { name: /Вернуть выбранное/ }));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(mutateAsync.mock.calls[0]?.[0]).toMatchObject({
@@ -299,19 +319,44 @@ describe("RefundModal", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: /Вернуть выбранное/ }));
 
     await waitFor(() => expect(getRefundResult).toHaveBeenCalledTimes(1));
     expect(onRefunded).toHaveBeenCalledWith("return-recovered");
     expect(loadPendingRefundOperation(SALE.id)).toBeNull();
   });
 
+  it("recovers an electronic refund after the final response is lost without repeating confirmation", async () => {
+    const onRefunded = vi.fn();
+    mutateAsync.mockRejectedValue(new Error("response lost"));
+    getRefundResult.mockResolvedValue({ id: "return-electronic-recovered" });
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
+
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: "Зафиксировать сумму возврата" }));
+    await screen.findByLabelText("Терминал");
+    fireEvent.change(screen.getByLabelText("Терминал"), { target: { value: "TERM-01" } });
+    fireEvent.change(screen.getByLabelText("Номер документа"), {
+      target: { value: "REFUND-LOST-RESPONSE" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить возврат и создать чек" }));
+
+    await waitFor(() => expect(getRefundResult).toHaveBeenCalledTimes(1));
+    expect(confirmRefundAttempt).toHaveBeenCalledTimes(1);
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(onRefunded).toHaveBeenCalledWith("return-electronic-recovered");
+    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+  });
+
   it("cancels a pending request without posting a return", async () => {
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
-    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
-    await screen.findByRole("button", { name: "Терминал проверен, возврата нет" });
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: "Зафиксировать сумму возврата" }));
+    await screen.findByRole("button", { name: "Отменить заявку" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Терминал проверен, возврата нет" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отменить заявку" }));
+    fireEvent.click(screen.getByRole("button", { name: "Деньги не возвращены — отменить" }));
 
     await waitFor(() => expect(voidRefundAttempt).toHaveBeenCalledWith("attempt-1"));
     expect(mutateAsync).not.toHaveBeenCalled();
@@ -324,7 +369,8 @@ describe("RefundModal", () => {
     });
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: "Зафиксировать сумму возврата" }));
 
     expect(
       await screen.findByText(/Локальное хранилище недоступно.*Возврат не отправлен/i),

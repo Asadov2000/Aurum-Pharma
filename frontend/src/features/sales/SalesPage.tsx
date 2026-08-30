@@ -58,6 +58,7 @@ export function SalesPage(): JSX.Element {
   const [branchId, setBranchId] = useState("");
   const [registerId, setRegisterId] = useState("");
   const [hasRefund, setHasRefund] = useState<"" | "true" | "false">("");
+  const [saleType, setSaleType] = useState<"" | "sale" | "return">("");
   const [page, setPage] = useState(1);
   const [openRow, setOpenRow] = useState<SaleListItem | null>(null);
 
@@ -79,6 +80,7 @@ export function SalesPage(): JSX.Element {
     branch_id: branchId || undefined,
     register_id: registerId || undefined,
     has_refund: hasRefund === "" ? undefined : hasRefund === "true",
+    sale_type: saleType || undefined,
     page,
     page_size: PAGE_SIZE,
   });
@@ -86,16 +88,19 @@ export function SalesPage(): JSX.Element {
   const total = sales.data?.total ?? 0;
   const resetPage = () => setPage(1);
 
-  const selectReceiptView = (view: "all" | "with-refund" | "without-refund") => {
-    setHasRefund(view === "with-refund" ? "true" : view === "without-refund" ? "false" : "");
+  const selectReceiptView = (view: "all" | "sales" | "returns" | "with-refund") => {
+    setSaleType(
+      view === "sales" || view === "with-refund" ? "sale" : view === "returns" ? "return" : "",
+    );
+    setHasRefund(view === "with-refund" ? "true" : "");
     resetPage();
   };
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Чеки"
-        description="Продажи, оплаты и связанные возвраты"
+        title="Чеки и возвраты"
+        description="Завершённые продажи, способы оплаты и документы возврата"
         meta={sales.data ? `Найдено: ${total}` : undefined}
         showTitleOnDesktop
         actions={
@@ -126,7 +131,13 @@ export function SalesPage(): JSX.Element {
 
       <ReceiptViews
         active={
-          hasRefund === "true" ? "with-refund" : hasRefund === "false" ? "without-refund" : "all"
+          hasRefund === "true"
+            ? "with-refund"
+            : saleType === "sale"
+              ? "sales"
+              : saleType === "return"
+                ? "returns"
+                : "all"
         }
         total={total}
         onSelect={selectReceiptView}
@@ -212,7 +223,7 @@ export function SalesPage(): JSX.Element {
             label: "Точка",
             content: (
               <div>
-                <Label htmlFor="branch">Точка</Label>
+                <Label htmlFor="branch">Торговая точка</Label>
                 <Select
                   id="branch"
                   value={branchId}
@@ -246,7 +257,7 @@ export function SalesPage(): JSX.Element {
             label: "Касса",
             content: (
               <div>
-                <Label htmlFor="register">Касса</Label>
+                <Label htmlFor="register">Рабочая касса</Label>
                 <Select
                   id="register"
                   value={registerId}
@@ -282,14 +293,16 @@ export function SalesPage(): JSX.Element {
                   id="has_refund"
                   value={hasRefund}
                   onChange={(event) => {
-                    setHasRefund(event.target.value as "" | "true" | "false");
+                    const value = event.target.value as "" | "true" | "false";
+                    setHasRefund(value);
+                    if (value) setSaleType("sale");
                     resetPage();
                   }}
                   className="w-full sm:w-48"
                 >
                   <option value="">Все</option>
                   <option value="true">С возвратом</option>
-                  <option value="false">Без возврата</option>
+                  <option value="false">Без оформленных возвратов</option>
                 </Select>
               </div>
             ),
@@ -308,6 +321,7 @@ export function SalesPage(): JSX.Element {
           setBranchId("");
           setRegisterId("");
           setHasRefund("");
+          setSaleType("");
           resetPage();
         }}
       />
@@ -333,7 +347,7 @@ export function SalesPage(): JSX.Element {
         <SkeletonRows rows={8} />
       ) : !sales.data || sales.data.items.length === 0 ? (
         <TableEmpty title="Чеков пока нет" icon={<ReceiptIcon />}>
-          {receiptInput || dateFrom || dateTo || branchId || registerId || hasRefund
+          {receiptInput || dateFrom || dateTo || branchId || registerId || hasRefund || saleType
             ? "По выбранным условиям ничего не найдено. Измените или сбросьте фильтры."
             : "Завершённые продажи появятся здесь — отсюда же оформляется возврат."}
         </TableEmpty>
@@ -357,9 +371,9 @@ function ReceiptViews({
   total,
   onSelect,
 }: {
-  active: "all" | "with-refund" | "without-refund";
+  active: "all" | "sales" | "returns" | "with-refund";
   total: number;
-  onSelect: (view: "all" | "with-refund" | "without-refund") => void;
+  onSelect: (view: "all" | "sales" | "returns" | "with-refund") => void;
 }): JSX.Element {
   return (
     <section
@@ -367,22 +381,28 @@ function ReceiptViews({
       aria-label="Представление чеков"
     >
       <ViewButton
-        label="Все чеки"
+        label="Все операции"
         active={active === "all"}
         count={active === "all" ? total : undefined}
         onClick={() => onSelect("all")}
       />
       <ViewButton
-        label="С возвратом"
+        label="Продажи"
+        active={active === "sales"}
+        count={active === "sales" ? total : undefined}
+        onClick={() => onSelect("sales")}
+      />
+      <ViewButton
+        label="Чеки возврата"
+        active={active === "returns"}
+        count={active === "returns" ? total : undefined}
+        onClick={() => onSelect("returns")}
+      />
+      <ViewButton
+        label="Продажи с возвратом"
         active={active === "with-refund"}
         count={active === "with-refund" ? total : undefined}
         onClick={() => onSelect("with-refund")}
-      />
-      <ViewButton
-        label="Без возврата"
-        active={active === "without-refund"}
-        count={active === "without-refund" ? total : undefined}
-        onClick={() => onSelect("without-refund")}
       />
     </section>
   );
@@ -421,7 +441,7 @@ function ViewButton({
 }
 
 const desktopReceiptGrid =
-  "lg:grid lg:grid-cols-[5.5rem_9rem_minmax(8rem,1fr)_minmax(7rem,.8fr)_7.5rem_minmax(8rem,auto)_2rem] 2xl:grid-cols-[5.5rem_9.5rem_minmax(8rem,1fr)_minmax(9rem,1fr)_minmax(10rem,1.2fr)_minmax(7rem,.8fr)_7.5rem_minmax(8rem,auto)_2rem]";
+  "lg:grid lg:grid-cols-[5rem_8.5rem_minmax(7rem,.8fr)_minmax(8rem,1fr)_minmax(6rem,.7fr)_6.5rem_minmax(8rem,auto)_2rem] 2xl:grid-cols-[5.5rem_9.5rem_minmax(8rem,1fr)_minmax(9rem,1fr)_minmax(10rem,1.2fr)_minmax(7rem,.8fr)_7.5rem_minmax(8rem,auto)_2rem]";
 
 function ReceiptList({
   items,
@@ -452,7 +472,7 @@ function ReceiptList({
         <span>Дата и время</span>
         <span>Кассир</span>
         <span className="hidden 2xl:block">Точка · касса</span>
-        <span className="hidden 2xl:block">Товары</span>
+        <span>Товары</span>
         <span>Оплата</span>
         <span className="text-right">Сумма</span>
         <span>Статус</span>
@@ -517,7 +537,7 @@ function ReceiptRow({ sale, onOpen }: { sale: SaleListItem; onOpen: () => void }
         <span className="hidden truncate text-sm text-foreground-secondary 2xl:block">
           {location}
         </span>
-        <span className="hidden truncate text-sm text-foreground-secondary 2xl:block">
+        <span className="truncate text-sm text-foreground-secondary">
           {sale.items_summary || "—"}
         </span>
         <span className="truncate text-sm text-foreground-secondary">{payment}</span>
@@ -539,20 +559,27 @@ function ReceiptRow({ sale, onOpen }: { sale: SaleListItem; onOpen: () => void }
 }
 
 function ReceiptStatus({ sale }: { sale: SaleListItem }): JSX.Element {
+  const saleStatus =
+    sale.status === "voided"
+      ? "Возвращено полностью"
+      : sale.has_refund
+        ? "Возвращено частично"
+        : "Продажа завершена";
+
   return (
     <span className="flex min-w-0 flex-wrap gap-1">
       {sale.is_refund ? (
-        <Badge tone="warning">Возврат</Badge>
+        <Badge tone="warning">Чек возврата</Badge>
       ) : (
-        <Badge tone="success">Продажа</Badge>
-      )}
-      {sale.has_refund && (
-        <Badge tone="info">
-          {sale.refund_receipt_number ? `Возврат №${sale.refund_receipt_number}` : "Есть возврат"}
+        <Badge tone={sale.status === "voided" ? "danger" : sale.has_refund ? "warning" : "success"}>
+          {saleStatus}
         </Badge>
       )}
+      {sale.has_refund && sale.refund_receipt_number && (
+        <Badge tone="info">Чек №{sale.refund_receipt_number}</Badge>
+      )}
       {sale.is_refund && sale.parent_receipt_number && (
-        <Badge tone="info">к чеку №{sale.parent_receipt_number}</Badge>
+        <Badge tone="info">К продаже №{sale.parent_receipt_number}</Badge>
       )}
     </span>
   );

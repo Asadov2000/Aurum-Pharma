@@ -26,7 +26,8 @@ export function SaleDetailModal({
   const [currentId, setCurrentId] = useState(row.id);
   const [refundOpen, setRefundOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
-  const { data, isLoading, error } = useSaleDetailsQuery(currentId);
+  const details = useSaleDetailsQuery(currentId);
+  const { data, isLoading, error } = details;
 
   // If we navigated to a different sale than the row we opened from, the
   // row-level flags (has_refund) no longer apply.
@@ -40,62 +41,78 @@ export function SaleDetailModal({
   const hasRefundableItems =
     data?.items.some((item) => Number(item.qty) - Number(item.refunded_qty ?? "0") > 0.0005) ??
     false;
+  const hasRefundedItems =
+    data?.items.some((item) => Number(item.refunded_qty ?? "0") > 0.0005) ?? false;
 
   return (
     <Modal
       open
       onClose={onClose}
       title={`Чек № ${data?.receipt_number ?? row.receipt_number ?? "—"}`}
-      className="max-w-2xl"
+      className="max-w-4xl"
     >
-      {error && (
-        <p className="text-sm text-danger">{describeApiError(error, "Не удалось загрузить чек")}</p>
-      )}
-      {isLoading || !data ? (
+      {error ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger-foreground"
+        >
+          <span>{describeApiError(error, "Не удалось загрузить чек. Проверьте соединение.")}</span>
+          <Button
+            variant="secondary"
+            size="sm"
+            isLoading={details.isFetching}
+            onClick={() => void details.refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
+      ) : isLoading || !data ? (
         <p className="text-sm text-foreground-muted">Загрузка…</p>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             {isRefund ? (
-              <Badge tone="warning">Возврат</Badge>
+              <Badge tone="warning">Чек возврата</Badge>
+            ) : data.status === "voided" ? (
+              <Badge tone="danger">Возвращено полностью</Badge>
+            ) : hasRefundedItems ? (
+              <Badge tone="warning">Возвращено частично</Badge>
             ) : (
-              <Badge tone="success">Продажа</Badge>
-            )}
-            {data.status === "voided" && <Badge tone="danger">Отменён возвратом</Badge>}
-            {isOriginalRow && row.has_refund && !isRefund && (
-              <Badge tone="info">
-                Есть возврат
-                {row.refund_receipt_number ? ` № ${row.refund_receipt_number}` : ""}
-              </Badge>
+              <Badge tone="success">Продажа завершена</Badge>
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <Field label="Дата" value={fmtDate(data.completed_at)} />
-            <Field
-              label="Сумма"
-              value={`${Number(data.total_amount).toFixed(2)} ${data.currency}`}
-            />
+          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="Дата и время" value={fmtDate(data.completed_at)} />
+            <Field label="Сумма" value={`${formatMoney(data.total_amount)} ${data.currency}`} />
+            {isOriginalRow ? (
+              <>
+                <Field label="Кассир" value={row.cashier_name ?? "Не указан"} />
+                <Field label="Торговая точка" value={row.branch_name ?? "Не указана"} />
+                <Field label="Рабочая касса" value={row.register_name ?? "Не указана"} />
+              </>
+            ) : null}
             {data.parent_sale_id && (
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-2 lg:col-span-3">
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setCurrentId(data.parent_sale_id as string)}
                 >
-                  ← Открыть оригинальный чек
+                  ← Открыть исходную продажу
                 </Button>
               </div>
             )}
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-medium text-foreground-muted">Позиции</p>
+            <p className="mb-1 text-xs font-medium text-foreground-muted">Товары</p>
             <Table>
               <THead>
                 <TR>
-                  <TH>#</TH>
+                  <TH>Товар</TH>
                   <TH className="text-right">Кол-во</TH>
+                  {!isRefund && <TH className="text-right">Возвращено</TH>}
                   <TH className="text-right">Цена</TH>
                   <TH className="text-right">Сумма</TH>
                 </TR>
@@ -103,10 +120,18 @@ export function SaleDetailModal({
               <TBody>
                 {data.items.map((it) => (
                   <TR key={it.id}>
-                    <TD>{it.position}</TD>
-                    <TD className="text-right font-mono">{it.qty}</TD>
-                    <TD className="text-right font-mono">{Number(it.unit_price).toFixed(2)}</TD>
-                    <TD className="text-right font-mono">{Number(it.total_price).toFixed(2)}</TD>
+                    <TD>
+                      <p className="font-medium">{it.name ?? `Товар, строка ${it.position}`}</p>
+                      <p className="text-xs text-foreground-muted">
+                        Партия {it.batch_number ?? "без номера"}
+                      </p>
+                    </TD>
+                    <TD className="text-right font-mono">{formatQty(it.qty)}</TD>
+                    {!isRefund && (
+                      <TD className="text-right font-mono">{formatQty(it.refunded_qty ?? "0")}</TD>
+                    )}
+                    <TD className="text-right font-mono">{formatMoney(it.unit_price)}</TD>
+                    <TD className="text-right font-mono">{formatMoney(it.total_price)}</TD>
                   </TR>
                 ))}
               </TBody>
@@ -116,7 +141,7 @@ export function SaleDetailModal({
           <div>
             <p className="mb-1 text-xs font-medium text-foreground-muted">Оплаты</p>
             {data.payments.length === 0 ? (
-              <p className="text-sm italic text-foreground-muted">Нет</p>
+              <p className="text-sm text-foreground-muted">Оплата не указана</p>
             ) : (
               <ul className="space-y-1 text-sm">
                 {data.payments.map((p) => (
@@ -126,7 +151,7 @@ export function SaleDetailModal({
                         p.payment_method}
                     </span>
                     <span className="font-mono">
-                      {Number(p.amount).toFixed(2)} {p.currency}
+                      {formatMoney(p.amount)} {p.currency}
                     </span>
                   </li>
                 ))}
@@ -184,5 +209,18 @@ function Field({ label, value }: { label: string; value: string }): JSX.Element 
 }
 
 function fmtDate(v: string | null): string {
-  return v ? new Date(v).toLocaleString("ru-RU") : "—";
+  if (!v) return "—";
+  const date = new Date(v);
+  return Number.isNaN(date.getTime()) ? v : date.toLocaleString("ru-RU");
+}
+
+function formatMoney(value: string): string {
+  return Number(value).toLocaleString("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatQty(value: string): string {
+  return Number(value).toLocaleString("ru-RU", { maximumFractionDigits: 3 });
 }

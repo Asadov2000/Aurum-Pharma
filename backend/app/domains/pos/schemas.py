@@ -552,6 +552,8 @@ class SaleItemRead(BaseModel):
     expires_at: date | None = None
     days_to_expiry: int | None = None
     refunded_qty: Decimal = Decimal("0")
+    # Current name for a draft; immutable receipt-snapshot name after completion.
+    name: str | None = None
 
 
 class SaleItemAdded(BaseModel):

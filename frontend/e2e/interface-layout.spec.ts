@@ -5,7 +5,7 @@ import { clearLoginRateLimit, expect, loginInBrowser, OWNER, selectTouchDensity 
 const WORKSPACES = [
   { path: "/", heading: "Главная" },
   { path: "/catalog", heading: "Каталог" },
-  { path: "/sales", heading: "Чеки" },
+  { path: "/sales", heading: "Чеки и возвраты" },
   { path: "/users", heading: "Сотрудники" },
   { path: "/roles", heading: "Роли" },
   { path: "/pos", heading: "Касса" },

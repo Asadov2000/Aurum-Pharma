@@ -131,6 +131,7 @@ export interface SaleItem {
   expires_at?: string | null;
   days_to_expiry?: number | null;
   refunded_qty?: string;
+  name?: string | null;
 }
 
 export interface Payment {

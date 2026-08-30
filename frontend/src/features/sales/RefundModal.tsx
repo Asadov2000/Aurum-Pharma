@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
+  ConfirmDialog,
   Input,
   Label,
   Modal,
@@ -116,6 +117,7 @@ export function RefundModal({
   const settings = useTenantOperationalSettingsQuery();
   const reasonMode = settings.data?.refund_reason_mode;
   const [topError, setTopError] = useState<string | null>(null);
+  const [topMessageTone, setTopMessageTone] = useState<"danger" | "warning" | "info">("danger");
   const [reason, setReason] = useState<RefundReasonCode | "">("");
   const [comment, setComment] = useState("");
   const [initialPendingOperation] = useState(() => loadPendingRefundOperation(sale.id));
@@ -123,6 +125,7 @@ export function RefundModal({
   const [terminalReferences, setTerminalReferences] = useState<TerminalReferences>({});
   const [reconciling, setReconciling] = useState(false);
   const [attemptBusy, setAttemptBusy] = useState(false);
+  const [cancelAttemptOpen, setCancelAttemptOpen] = useState(false);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [financialOperationPending, setFinancialOperationPending] = useState(
     initialPendingOperation !== null,
@@ -144,8 +147,7 @@ export function RefundModal({
         return [
           item.id,
           {
-            selected:
-              initialPendingOperation !== null ? pendingLine !== undefined : available > 0.0005,
+            selected: initialPendingOperation !== null ? pendingLine !== undefined : false,
             qty:
               pendingLine?.qty ??
               (available > 0.0005 ? available.toFixed(3).replace(/\.?0+$/, "") : "0"),
@@ -154,6 +156,22 @@ export function RefundModal({
       }),
     ),
   );
+  const selectedSummary = useMemo(() => {
+    let count = 0;
+    let amount = 0;
+    for (const item of sale.items) {
+      const line = lines[item.id];
+      if (!line?.selected) continue;
+      const qty = Number(line.qty);
+      if (!(qty > 0) || !(Number(item.qty) > 0)) continue;
+      count += 1;
+      amount += (Number(item.total_price) * qty) / Number(item.qty);
+    }
+    return { count, amount };
+  }, [lines, sale.items]);
+  const displayedRefundAmount = refundAttempt
+    ? Number(refundAttempt.total_amount)
+    : selectedSummary.amount;
 
   const finishRefund = useCallback(
     (operation: PendingRefundOperation, returnSaleId: string) => {
@@ -161,6 +179,7 @@ export function RefundModal({
       pendingOperationRef.current = null;
       setFinancialOperationPending(false);
       setRecoveryBlocked(false);
+      setCancelAttemptOpen(false);
       onRefunded(returnSaleId);
     },
     [onRefunded, sale.id],
@@ -206,6 +225,7 @@ export function RefundModal({
           pendingOperationRef.current = null;
           setFinancialOperationPending(false);
           setRefundAttempt(null);
+          setTopMessageTone("info");
           setTopError("Предыдущая заявка отменена. Можно создать новый возврат.");
           return true;
         }
@@ -221,6 +241,7 @@ export function RefundModal({
         }
         applyRefundAttempt(attempt);
         setRecoveryBlocked(false);
+        setTopMessageTone(attempt.status === "requires_reconciliation" ? "warning" : "info");
         setTopError(
           attempt.status === "requires_reconciliation"
             ? "Заявка восстановлена и требует сверки. Не повторяйте возврат в терминале; проверьте его документ."
@@ -257,6 +278,7 @@ export function RefundModal({
         if (operation.refundAttemptOperationId) {
           await restoreRefundAttempt(operation);
         } else {
+          setTopMessageTone("info");
           setTopError(
             "Предыдущий возврат не найден на сервере. Можно безопасно повторить отправку.",
           );
@@ -363,6 +385,7 @@ export function RefundModal({
 
   const onSubmit = async () => {
     if (submittingRef.current || reconciling || recoveryBlocked || attemptBusy) return;
+    setTopMessageTone("danger");
     const chosen = validateForm();
     if (!chosen) return;
     const currentOperation = pendingOperationRef.current;
@@ -402,6 +425,7 @@ export function RefundModal({
             ? await beginRefundAttemptReconciliation(created.id)
             : created;
         applyRefundAttempt(activeAttempt);
+        setTopMessageTone(canConfirmExternal ? "warning" : "info");
         setTopError(
           canConfirmExternal
             ? "Сумма зафиксирована для сверки. Выполните возврат в терминале один раз и внесите реквизиты документа."
@@ -412,6 +436,7 @@ export function RefundModal({
       if (activeAttempt?.status === "pending") {
         activeAttempt = await beginRefundAttemptReconciliation(activeAttempt.id);
         applyRefundAttempt(activeAttempt);
+        setTopMessageTone("warning");
         setTopError(
           "Сумма зафиксирована для сверки. Выполните возврат в терминале один раз и внесите реквизиты документа.",
         );
@@ -480,8 +505,11 @@ export function RefundModal({
       setTerminalReferences({});
       setFinancialOperationPending(false);
       setRecoveryBlocked(false);
+      setCancelAttemptOpen(false);
+      setTopMessageTone("info");
       setTopError("Заявка отменена. Деньги во внешнем терминале возвращать не нужно.");
     } catch (error) {
+      setTopMessageTone("danger");
       setTopError(describeApiError(error, "Не удалось отменить заявку возврата."));
     } finally {
       setAttemptBusy(false);
@@ -490,15 +518,20 @@ export function RefundModal({
 
   const buttonLabel =
     requiresExternalRefund && !refundAttempt
-      ? "Рассчитать возврат"
+      ? "Зафиксировать сумму возврата"
       : refundAttempt?.status === "pending" || refundAttempt?.status === "requires_reconciliation"
         ? canConfirmExternal
-          ? "Подтвердить и оформить"
+          ? "Подтвердить возврат и создать чек"
           : "Ожидает подтверждения"
-        : "Оформить возврат";
+        : `Вернуть выбранное · ${formatRefundMoney(selectedSummary.amount)} TJS`;
 
   return (
-    <Modal open onClose={onClose} title={`Возврат по чеку № ${sale.receipt_number ?? "—"}`}>
+    <Modal
+      open
+      onClose={onClose}
+      title={`Возврат по чеку № ${sale.receipt_number ?? "—"}`}
+      className="max-w-4xl"
+    >
       <div className="space-y-4">
         <Table>
           <THead>
@@ -516,16 +549,19 @@ export function RefundModal({
               return (
                 <TR key={item.id}>
                   <TD>
-                    <input
-                      type="checkbox"
-                      aria-label={`Вернуть позицию ${item.position}`}
-                      checked={line.selected}
-                      disabled={available <= 0.0005 || financialOperationPending}
-                      onChange={(event) => setLine(item.id, { selected: event.target.checked })}
-                    />
+                    <label className="inline-flex size-11 cursor-pointer items-center justify-center">
+                      <input
+                        type="checkbox"
+                        aria-label={`Вернуть ${item.name ?? `товар из строки ${item.position}`}`}
+                        checked={line.selected}
+                        disabled={available <= 0.0005 || financialOperationPending}
+                        onChange={(event) => setLine(item.id, { selected: event.target.checked })}
+                        className="size-5 accent-primary"
+                      />
+                    </label>
                   </TD>
                   <TD>
-                    <p className="font-medium">Позиция {item.position}</p>
+                    <p className="font-medium">{item.name ?? `Товар, строка ${item.position}`}</p>
                     <p className="text-xs text-foreground-muted">
                       Партия {item.batch_number ?? "без номера"}
                       {item.expires_at ? ` · до ${formatRefundDate(item.expires_at)}` : ""}
@@ -536,6 +572,7 @@ export function RefundModal({
                     <Input
                       type="text"
                       inputMode="decimal"
+                      aria-label={`Количество для возврата: ${item.name ?? `товар из строки ${item.position}`}`}
                       value={line.qty}
                       disabled={!line.selected || financialOperationPending}
                       onChange={(event) => {
@@ -552,6 +589,27 @@ export function RefundModal({
             })}
           </TBody>
         </Table>
+
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background px-4 py-3"
+        >
+          <div>
+            <p className="text-sm font-medium">
+              {selectedSummary.count > 0
+                ? `Выбрано товаров: ${selectedSummary.count}`
+                : "Выберите товары, которые покупатель возвращает"}
+            </p>
+            <p className="mt-0.5 text-xs text-foreground-muted">
+              Количество и итог можно проверить до создания возвратного чека.
+            </p>
+          </div>
+          <p className="font-mono text-lg font-semibold tabular-nums">
+            {refundAttempt ? "К возврату" : "Предварительно"}:{" "}
+            {formatRefundMoney(displayedRefundAmount)}
+            {" TJS"}
+          </p>
+        </div>
 
         {reasonMode !== "off" ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -680,7 +738,20 @@ export function RefundModal({
           </section>
         ) : null}
 
-        {topError ? <p className="text-sm text-danger">{topError}</p> : null}
+        {topError ? (
+          <p
+            role={topMessageTone === "danger" ? "alert" : "status"}
+            className={
+              topMessageTone === "danger"
+                ? "rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger-foreground"
+                : topMessageTone === "warning"
+                  ? "rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning-foreground"
+                  : "rounded-lg border border-info/30 bg-info-subtle px-4 py-3 text-sm text-info-foreground"
+            }
+          >
+            {topError}
+          </p>
+        ) : null}
 
         <div
           role="note"
@@ -698,10 +769,10 @@ export function RefundModal({
           (refundAttempt?.status === "requires_reconciliation" && canConfirmExternal) ? (
             <Button
               variant="secondary"
-              onClick={() => void cancelPendingAttempt()}
+              onClick={() => setCancelAttemptOpen(true)}
               isLoading={attemptBusy}
             >
-              Терминал проверен, возврата нет
+              Отменить заявку
             </Button>
           ) : null}
           {recoveryBlocked ? (
@@ -726,6 +797,7 @@ export function RefundModal({
               reconciling ||
               attemptBusy ||
               refund.isPending ||
+              selectedSummary.count === 0 ||
               ((refundAttempt?.status === "pending" ||
                 refundAttempt?.status === "requires_reconciliation") &&
                 !canConfirmExternal)
@@ -735,6 +807,17 @@ export function RefundModal({
           </Button>
         </div>
       </div>
+      <ConfirmDialog
+        open={cancelAttemptOpen}
+        title="Отменить заявку возврата?"
+        message="Подтвердите только если деньги не были возвращены через терминал или QR. Если возврат мог пройти, сначала закройте это окно и проверьте документ терминала."
+        confirmLabel="Деньги не возвращены — отменить"
+        cancelLabel="Продолжить проверку"
+        variant="danger"
+        isLoading={attemptBusy}
+        onCancel={() => setCancelAttemptOpen(false)}
+        onConfirm={() => void cancelPendingAttempt()}
+      />
     </Modal>
   );
 }
@@ -743,4 +826,11 @@ function formatRefundDate(value: string): string {
   const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) return value;
   return refundDateFormatter.format(new Date(year, month - 1, day, 12));
+}
+
+function formatRefundMoney(value: number): string {
+  return value.toLocaleString("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }

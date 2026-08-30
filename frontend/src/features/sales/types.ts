@@ -36,6 +36,7 @@ export interface SaleSearchParams {
   register_id?: string;
   cashier_id?: string;
   has_refund?: boolean;
+  sale_type?: "sale" | "return";
   min_total?: string;
   max_total?: string;
   page?: number;
