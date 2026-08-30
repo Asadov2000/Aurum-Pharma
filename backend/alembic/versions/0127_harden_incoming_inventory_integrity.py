@@ -10,8 +10,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "0127"
 down_revision: str | Sequence[str] | None = "0126"
@@ -98,16 +99,24 @@ def upgrade() -> None:
     operation_type = postgresql.UUID(as_uuid=True)
     op.add_column(
         "incoming_document",
-        sa.Column("operation_id", operation_type, nullable=True),
+        sa.Column(
+            "operation_id",
+            operation_type,
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
     )
     op.add_column(
         "incoming_item",
-        sa.Column("operation_id", operation_type, nullable=True),
+        sa.Column(
+            "operation_id",
+            operation_type,
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
     )
-    op.execute("UPDATE public.incoming_document SET operation_id = gen_random_uuid()")
-    op.execute("UPDATE public.incoming_item SET operation_id = gen_random_uuid()")
-    op.alter_column("incoming_document", "operation_id", nullable=False)
-    op.alter_column("incoming_item", "operation_id", nullable=False)
+    op.alter_column("incoming_document", "operation_id", server_default=None)
+    op.alter_column("incoming_item", "operation_id", server_default=None)
 
     op.create_unique_constraint(
         "uq_incoming_document_tenant_id",
