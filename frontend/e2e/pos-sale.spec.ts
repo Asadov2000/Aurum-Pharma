@@ -409,7 +409,7 @@ test.describe("POS sale (owner)", () => {
       expect(storedRefundAttempt.ok()).toBe(true);
       expect(((await storedRefundAttempt.json()) as { status: string }).status).toBe("consumed");
 
-      await expect(page.getByText("Возврат", { exact: true })).toBeVisible();
+      await expect(page.getByText("Чек возврата", { exact: true })).toBeVisible();
       await page.getByRole("button", { name: "Печать возврата" }).click();
       await expect(page.getByRole("dialog", { name: "Печать возврата" })).toBeVisible();
       await expect(page.getByText("ВОЗВРАТ", { exact: true })).toBeVisible();
