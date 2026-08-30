@@ -44,7 +44,7 @@ test.describe("Payment reconciliation queue", () => {
       await loginInBrowser(page, OWNER);
       await page.goto("/pos");
       await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
-      await page.getByLabel("Касса на начало смены").fill("100");
+      await page.getByLabel("Наличные в кассе на начало смены").fill("100");
       await page.getByRole("button", { name: "Открыть смену" }).click();
       await expect(page.getByText("Смена открыта")).toBeVisible();
       await addPosItemToCart(page, {
