@@ -126,11 +126,11 @@ describe("AddItemForm", () => {
 
   it("rejects empty prices before sending a request", async () => {
     renderForm();
-    fireEvent.click(screen.getByRole("button", { name: "Позиция каталога" }));
+    fireEvent.click(screen.getByRole("button", { name: "Лекарство или товар" }));
     fireEvent.change(screen.getByLabelText("Срок годности"), {
       target: { value: "2099-12-31" },
     });
-    fireEvent.change(screen.getByLabelText("Количество"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "Добавить", exact: true }));
 
     expect(await screen.findByText("Укажите цену закупки")).toBeInTheDocument();
@@ -141,13 +141,17 @@ describe("AddItemForm", () => {
   it("normalizes decimal commas and submits a valid item", async () => {
     const onClose = vi.fn();
     renderForm(onClose);
-    fireEvent.click(screen.getByRole("button", { name: "Позиция каталога" }));
+    fireEvent.click(screen.getByRole("button", { name: "Лекарство или товар" }));
     fireEvent.change(screen.getByLabelText("Срок годности"), {
       target: { value: "2099-12-31" },
     });
-    fireEvent.change(screen.getByLabelText("Количество"), { target: { value: "2,5" } });
-    fireEvent.change(screen.getByLabelText("Цена закупки"), { target: { value: "4,50" } });
-    fireEvent.change(screen.getByLabelText("Цена продажи"), { target: { value: "5,25" } });
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "2,5" } });
+    fireEvent.change(screen.getByLabelText("Закупочная цена за единицу"), {
+      target: { value: "4,50" },
+    });
+    fireEvent.change(screen.getByLabelText("Розничная цена за единицу"), {
+      target: { value: "5,25" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Добавить", exact: true }));
 
     await waitFor(() =>
@@ -166,16 +170,20 @@ describe("AddItemForm", () => {
 
   it("validates the manufacturing date against the expiry date", async () => {
     renderForm();
-    fireEvent.click(screen.getByRole("button", { name: "Позиция каталога" }));
-    fireEvent.change(screen.getByLabelText("Произведена"), {
+    fireEvent.click(screen.getByRole("button", { name: "Лекарство или товар" }));
+    fireEvent.change(screen.getByLabelText("Дата производства"), {
       target: { value: "2099-12-31" },
     });
     fireEvent.change(screen.getByLabelText("Срок годности"), {
       target: { value: "2099-01-01" },
     });
-    fireEvent.change(screen.getByLabelText("Количество"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Цена закупки"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Цена продажи"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Закупочная цена за единицу"), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByLabelText("Розничная цена за единицу"), {
+      target: { value: "2" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Добавить", exact: true }));
 
     expect(
@@ -186,13 +194,17 @@ describe("AddItemForm", () => {
 
   it("rejects values that exceed database precision", async () => {
     renderForm();
-    fireEvent.click(screen.getByRole("button", { name: "Позиция каталога" }));
+    fireEvent.click(screen.getByRole("button", { name: "Лекарство или товар" }));
     fireEvent.change(screen.getByLabelText("Срок годности"), {
       target: { value: "2099-12-31" },
     });
-    fireEvent.change(screen.getByLabelText("Количество"), { target: { value: "0.0001" } });
-    fireEvent.change(screen.getByLabelText("Цена закупки"), { target: { value: "1.999" } });
-    fireEvent.change(screen.getByLabelText("Цена продажи"), {
+    fireEvent.change(screen.getByLabelText("Количество единиц"), {
+      target: { value: "0.0001" },
+    });
+    fireEvent.change(screen.getByLabelText("Закупочная цена за единицу"), {
+      target: { value: "1.999" },
+    });
+    fireEvent.change(screen.getByLabelText("Розничная цена за единицу"), {
       target: { value: "1234567890123" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Добавить", exact: true }));
@@ -222,8 +234,10 @@ describe("AddItemForm", () => {
     });
 
     fireEvent.change(screen.getByLabelText("Номер партии"), { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText("Произведена"), { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText("Цена продажи"), { target: { value: "6.00" } });
+    fireEvent.change(screen.getByLabelText("Дата производства"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Розничная цена за единицу"), {
+      target: { value: "6.00" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() =>
@@ -302,7 +316,9 @@ describe("NewIncomingForm", () => {
     );
 
     await screen.findByRole("option", { name: BRANCH.name });
-    fireEvent.change(screen.getByLabelText("Номер"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Номер документа поставщика"), {
+      target: { value: "" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() =>

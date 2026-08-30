@@ -276,4 +276,26 @@ describe("IncomingPage", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(getIncoming).toHaveBeenLastCalledWith(second.id));
   });
+
+  it("warns before closing a new receiving document with unsaved data", async () => {
+    listIncoming.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, all_count: 0, draft_count: 0 },
+    });
+    listBranches.mockResolvedValueOnce([BRANCH]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Новая приёмка" }));
+    const formDialog = screen.getByRole("dialog", { name: "Новая приёмка" });
+    fireEvent.change(within(formDialog).getByLabelText("Номер документа поставщика"), {
+      target: { value: "ПР-TEST" },
+    });
+    fireEvent.click(within(formDialog).getByRole("button", { name: "Закрыть" }));
+
+    expect(screen.getByRole("dialog", { name: "Закрыть без сохранения?" })).toBeInTheDocument();
+    expect(formDialog).toBeInTheDocument();
+  });
 });

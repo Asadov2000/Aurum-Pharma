@@ -1,11 +1,11 @@
 import { type ExpiryStatus, type WriteOffReason } from "./types";
 
 export const expiryLabel: Record<ExpiryStatus, string> = {
-  expired: "Просрочена",
-  red: "Красная зона",
-  orange: "Оранжевая зона",
-  yellow: "Жёлтая зона",
-  normal: "Норма",
+  expired: "Просрочено",
+  red: "Критический срок",
+  orange: "Скоро истекает",
+  yellow: "Срок под контролем",
+  normal: "Достаточный срок",
 };
 
 export const expiryTone: Record<

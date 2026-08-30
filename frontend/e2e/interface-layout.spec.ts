@@ -99,7 +99,7 @@ test.describe("Interface layout", () => {
       await page.setViewportSize(viewport);
       await page.goto("/incoming");
       await expect(
-        page.getByRole("heading", { level: 1, name: "Приходы", exact: true }),
+        page.getByRole("heading", { level: 1, name: "Приёмка товаров", exact: true }),
       ).toBeVisible();
       await expect(page.getByRole("region", { name: "Сводка по приходам" })).toBeVisible();
       await expectNoHorizontalOverflow(page, `/incoming @ ${viewport.width}x${viewport.height}`);

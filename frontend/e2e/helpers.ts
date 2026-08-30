@@ -412,6 +412,7 @@ export async function seedAcceptedBatch(
 ): Promise<SeededBatch> {
   const docRes = await api.post("incoming", {
     data: {
+      operation_id: crypto.randomUUID(),
       branch_id: args.branchId,
       supplier_id: args.supplierId,
       document_date: new Date().toISOString().slice(0, 10),
@@ -423,6 +424,7 @@ export async function seedAcceptedBatch(
 
   const itemRes = await api.post(`incoming/${doc.id}/items`, {
     data: {
+      operation_id: crypto.randomUUID(),
       catalog_id: args.catalogId,
       batch_number: args.batchNumber ?? `B-${Date.now()}`,
       expires_at: args.expiresAt,

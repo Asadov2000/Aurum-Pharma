@@ -62,6 +62,7 @@ export interface IncomingDocumentSummary {
 }
 
 export interface IncomingDocumentCreatePayload {
+  operation_id: string;
   branch_id: string;
   supplier_id: string;
   document_date: string;
@@ -79,6 +80,7 @@ export interface IncomingDocumentUpdatePayload {
 }
 
 export interface IncomingItemCreatePayload {
+  operation_id: string;
   catalog_id: string;
   batch_number?: string | null;
   manufactured_at?: string | null;

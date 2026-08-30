@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select, text
@@ -40,6 +40,74 @@ async def test_create_incoming_draft(db_session: AsyncSession, scaffold) -> None
     )
     assert doc.status == "draft"
     assert doc.total_amount == Decimal("0.00")
+
+
+async def test_create_document_retry_is_idempotent(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, _item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    operation_id = uuid4()
+    fields = {
+        "branch_id": branch.id,
+        "supplier_id": supplier.id,
+        "document_date": date.today(),
+        "document_number": "RETRY-1",
+    }
+
+    first = await service.create_document(
+        tenant_id=tenant.id,
+        fields=fields,
+        operation_id=operation_id,
+    )
+    repeated = await service.create_document(
+        tenant_id=tenant.id,
+        fields=fields,
+        operation_id=operation_id,
+    )
+
+    assert repeated.id == first.id
+    with pytest.raises(ConflictError, match="another incoming document"):
+        await service.create_document(
+            tenant_id=tenant.id,
+            fields={**fields, "document_number": "CHANGED"},
+            operation_id=operation_id,
+        )
+
+
+async def test_add_item_retry_is_idempotent_after_document_acceptance(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    service = IncomingService(IncomingRepository(db_session))
+    document = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+    operation_id = uuid4()
+    fields = {
+        "catalog_id": item.id,
+        "expires_at": date.today() + timedelta(days=180),
+        "qty": Decimal("2"),
+        "purchase_price": Decimal("3.00"),
+        "sale_price": Decimal("4.00"),
+    }
+
+    first = await service.add_item(document.id, fields=fields, operation_id=operation_id)
+    await service.accept(document.id)
+    repeated = await service.add_item(document.id, fields=fields, operation_id=operation_id)
+
+    assert repeated.id == first.id
+    with pytest.raises(ConflictError, match="another incoming item"):
+        await service.add_item(
+            document.id,
+            fields={**fields, "qty": Decimal("3")},
+            operation_id=operation_id,
+        )
 
 
 async def test_list_incoming_is_searchable_and_paginated(
@@ -167,15 +235,77 @@ async def test_database_rejects_cross_tenant_incoming_supplier(
             await db_session.execute(
                 text(
                     "INSERT INTO incoming_document "
-                    "(tenant_id, branch_id, supplier_id, document_date) "
-                    "VALUES (:tenant_id, :branch_id, :supplier_id, :document_date)"
+                    "(tenant_id, branch_id, supplier_id, operation_id, document_date) "
+                    "VALUES (:tenant_id, :branch_id, :supplier_id, :operation_id, :document_date)"
                 ),
                 {
                     "tenant_id": tenant.id,
                     "branch_id": branch.id,
                     "supplier_id": other_supplier.id,
+                    "operation_id": uuid4(),
                     "document_date": date.today(),
                 },
+            )
+            await db_session.flush()
+    finally:
+        await savepoint.rollback()
+
+
+async def test_database_rejects_cross_tenant_batch_movement(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, _branch, _item, _supplier = await scaffold()
+    other_tenant, other_branch, other_item, _other_supplier = await scaffold()
+    batch = await InventoryRepository(db_session).create_batch(
+        tenant_id=other_tenant.id,
+        branch_id=other_branch.id,
+        catalog_id=other_item.id,
+        expires_at=date.today() + timedelta(days=365),
+        purchase_price=Decimal("1.00"),
+        sale_price=Decimal("2.00"),
+        qty_initial=Decimal("1"),
+        qty_remaining=Decimal("0"),
+    )
+    savepoint = await db_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError):
+            await db_session.execute(
+                text(
+                    "INSERT INTO batch_movement "
+                    "(tenant_id, batch_id, movement_type, qty_delta) "
+                    "VALUES (:tenant_id, :batch_id, 'incoming', 1)"
+                ),
+                {"tenant_id": tenant.id, "batch_id": batch.id},
+            )
+            await db_session.flush()
+    finally:
+        await savepoint.rollback()
+
+
+async def test_database_rejects_invalid_inventory_movement_direction(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, item, _supplier = await scaffold()
+    batch = await InventoryRepository(db_session).create_batch(
+        tenant_id=tenant.id,
+        branch_id=branch.id,
+        catalog_id=item.id,
+        expires_at=date.today() + timedelta(days=365),
+        purchase_price=Decimal("1.00"),
+        sale_price=Decimal("2.00"),
+        qty_initial=Decimal("1"),
+        qty_remaining=Decimal("0"),
+    )
+    savepoint = await db_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError):
+            await db_session.execute(
+                text(
+                    "INSERT INTO batch_movement "
+                    "(tenant_id, batch_id, movement_type, qty_delta) "
+                    "VALUES (:tenant_id, :batch_id, 'incoming', -1)"
+                ),
+                {"tenant_id": tenant.id, "batch_id": batch.id},
             )
             await db_session.flush()
     finally:
@@ -644,6 +774,8 @@ async def test_reject_locks_document_without_batches(db_session: AsyncSession, s
     )
     rejected = await service.reject(doc.id)
     assert rejected.status == "rejected"
+    repeated = await service.reject(doc.id)
+    assert repeated.id == rejected.id
 
     # No batches were created for this document.
     rows = (

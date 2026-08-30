@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   Badge,
   Button,
+  ConfirmDialog,
   ConfigurableFilterBar,
   Input,
   Label,
@@ -69,6 +70,8 @@ export function IncomingPage(): JSX.Element {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [creatingDirty, setCreatingDirty] = useState(false);
+  const [discardCreatingOpen, setDiscardCreatingOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<IncomingView>(readIncomingView);
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
@@ -97,6 +100,7 @@ export function IncomingPage(): JSX.Element {
     [branchFilter, supplierFilter, statusFilter, documentNumber, dateFrom, dateTo, page],
   );
   const query = useIncomingListQuery(params);
+  const isShowingPreviousResults = query.isPlaceholderData && query.isFetching;
   const rows = query.data?.items ?? [];
   const selectedDocument = rows.find((document) => document.id === selectedId) ?? rows[0] ?? null;
   const showSplitWorkspace = isSplitLayout && view === "table";
@@ -118,6 +122,7 @@ export function IncomingPage(): JSX.Element {
   };
 
   const openDocument = (document: IncomingDocument) => {
+    if (isShowingPreviousResults) return;
     if (showSplitWorkspace) {
       setSelectedId(document.id);
       return;
@@ -141,17 +146,31 @@ export function IncomingPage(): JSX.Element {
     setPage(1);
   };
 
+  const closeCreating = () => {
+    setCreating(false);
+    setCreatingDirty(false);
+    setDiscardCreatingOpen(false);
+  };
+
+  const requestCloseCreating = () => {
+    if (creatingDirty) {
+      setDiscardCreatingOpen(true);
+      return;
+    }
+    closeCreating();
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Приходы"
-        description="Черновики поставок, принятые документы и история движения товара на склад."
+        title="Приёмка товаров"
+        description="Проверяйте поставки и принимайте товары на склад без изменения завершённых документов."
         showTitleOnDesktop
         actions={
           canCreate ? (
             <Button size="lg" onClick={() => setCreating(true)}>
               <PlusIcon />
-              Новый приход
+              Новая приёмка
             </Button>
           ) : undefined
         }
@@ -187,10 +206,10 @@ export function IncomingPage(): JSX.Element {
           },
           {
             id: "branch",
-            label: "Точка",
+            label: "Аптечная точка",
             content: (
               <div>
-                <Label htmlFor="branch_filter">Точка</Label>
+                <Label htmlFor="branch_filter">Аптечная точка</Label>
                 <Select
                   id="branch_filter"
                   value={branchFilter}
@@ -200,13 +219,22 @@ export function IncomingPage(): JSX.Element {
                   }}
                   className="w-full sm:w-44"
                 >
-                  <option value="">Все точки</option>
+                  <option value="">Все аптечные точки</option>
                   {branches.data?.map((branch) => (
                     <option key={branch.id} value={branch.id}>
                       {branch.name}
                     </option>
                   ))}
                 </Select>
+                {branches.error && (
+                  <button
+                    type="button"
+                    className="mt-1 block text-left text-xs text-danger hover:underline"
+                    onClick={() => void branches.refetch()}
+                  >
+                    Не удалось загрузить точки. Повторить
+                  </button>
+                )}
               </div>
             ),
             active: Boolean(branchFilter),
@@ -323,7 +351,9 @@ export function IncomingPage(): JSX.Element {
           <div className="flex min-h-[var(--control-height-md)] min-w-0 items-center gap-3">
             {isDesktopLayout && <IncomingViewControl value={view} onChange={changeView} />}
             <span className="whitespace-nowrap text-sm text-foreground-muted" aria-live="polite">
-              Найдено: {query.data?.total ?? 0}
+              {isShowingPreviousResults
+                ? "Обновляем список…"
+                : `Найдено: ${query.data?.total ?? 0}`}
             </span>
           </div>
         }
@@ -361,6 +391,7 @@ export function IncomingPage(): JSX.Element {
                   document={document}
                   branchName={branchName(document)}
                   onOpen={openDocument}
+                  disabled={isShowingPreviousResults}
                 />
               ))}
             </div>
@@ -371,6 +402,7 @@ export function IncomingPage(): JSX.Element {
                 selectedId={selectedDocument?.id ?? null}
                 branchName={branchName}
                 onOpen={openDocument}
+                disabled={isShowingPreviousResults}
               />
               {selectedDocument && (
                 <IncomingPreviewPanel
@@ -390,6 +422,7 @@ export function IncomingPage(): JSX.Element {
               selectedId={null}
               branchName={branchName}
               onOpen={openDocument}
+              disabled={isShowingPreviousResults}
             />
           )}
           <Pagination page={page} pageSize={PAGE_SIZE} total={query.data.total} onPage={setPage} />
@@ -397,10 +430,23 @@ export function IncomingPage(): JSX.Element {
       )}
 
       {canCreate && (
-        <Modal open={creating} onClose={() => setCreating(false)} title="Новый приход">
-          <NewIncomingForm onClose={() => setCreating(false)} />
+        <Modal open={creating} onClose={requestCloseCreating} title="Новая приёмка">
+          <NewIncomingForm
+            onClose={closeCreating}
+            onCancel={requestCloseCreating}
+            onDirtyChange={setCreatingDirty}
+          />
         </Modal>
       )}
+      <ConfirmDialog
+        open={discardCreatingOpen}
+        title="Закрыть без сохранения?"
+        message="Введённые реквизиты новой приёмки будут потеряны."
+        confirmLabel="Закрыть без сохранения"
+        variant="danger"
+        onConfirm={closeCreating}
+        onCancel={() => setDiscardCreatingOpen(false)}
+      />
     </div>
   );
 }
@@ -468,11 +514,13 @@ function IncomingTable({
   selectedId,
   branchName,
   onOpen,
+  disabled = false,
 }: {
   items: IncomingDocument[];
   selectedId: string | null;
   branchName: (document: IncomingDocument) => string;
   onOpen: (document: IncomingDocument) => void;
+  disabled?: boolean;
 }): JSX.Element {
   return (
     <Table className="min-w-full" aria-label="Приходы">
@@ -498,7 +546,12 @@ function IncomingTable({
             )}
           >
             <TD>
-              <button type="button" className="text-left" onClick={() => onOpen(document)}>
+              <button
+                type="button"
+                className="text-left disabled:cursor-wait disabled:opacity-60"
+                disabled={disabled}
+                onClick={() => onOpen(document)}
+              >
                 <span className="block whitespace-nowrap font-medium text-foreground">
                   {formatDate(document.document_date)}
                 </span>
@@ -523,6 +576,7 @@ function IncomingTable({
                 size="sm"
                 className="w-[var(--control-height-sm)] px-0"
                 aria-label={`Открыть приход: ${document.document_number || "без номера"}`}
+                disabled={disabled}
                 onClick={() => onOpen(document)}
               >
                 <ChevronRightIcon />
@@ -539,10 +593,12 @@ function IncomingCard({
   document,
   branchName,
   onOpen,
+  disabled = false,
 }: {
   document: IncomingDocument;
   branchName: string;
   onOpen: (document: IncomingDocument) => void;
+  disabled?: boolean;
 }): JSX.Element {
   return (
     <article className="min-w-0 rounded-lg border border-border bg-surface p-4">
@@ -551,7 +607,7 @@ function IncomingCard({
           <h2 className="truncate font-semibold text-foreground">
             {document.document_number
               ? `Приход № ${document.document_number}`
-              : "Приход без номера"}
+              : "Без номера поставщика"}
           </h2>
           <p className="mt-1 text-sm text-foreground-muted">{formatDate(document.document_date)}</p>
         </div>
@@ -568,6 +624,7 @@ function IncomingCard({
       <Button
         className="mt-4 w-full justify-between"
         variant="secondary"
+        disabled={disabled}
         onClick={() => onOpen(document)}
       >
         Открыть документ
@@ -608,7 +665,7 @@ function IncomingPreviewPanel({
   const itemSummary = summarizeItems(items);
   const title = current.document_number
     ? `Приход № ${current.document_number}`
-    : "Приход без номера";
+    : "Без номера поставщика";
 
   return (
     <section

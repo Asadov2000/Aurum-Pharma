@@ -158,7 +158,7 @@ describe("BatchesPage", () => {
     expect(await screen.findByText("Парацетамол")).toBeInTheDocument();
     expect(screen.getByText("Аптека Рудаки")).toBeInTheDocument();
     expect(screen.getByText("LOT-2026-001")).toBeInTheDocument();
-    expect(screen.getAllByText("Жёлтая зона").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Срок под контролем").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Требуют внимания")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Открыть партию LOT-2026-001 товара Парацетамол/ }),

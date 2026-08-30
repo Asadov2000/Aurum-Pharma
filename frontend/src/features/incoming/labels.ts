@@ -2,7 +2,7 @@ import { type IncomingStatus } from "./types";
 
 export const statusLabel: Record<IncomingStatus, string> = {
   draft: "Черновик",
-  accepted: "Принят",
+  accepted: "Принят на склад",
   rejected: "Отклонён",
 };
 

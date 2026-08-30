@@ -392,6 +392,7 @@ async def _assert_incoming_update_contract(
         f"/api/v1/incoming/{document_id}/items",
         headers=headers,
         json={
+            "operation_id": str(uuid4()),
             "catalog_id": str(catalog_item.id),
             "expires_at": (date.today() + timedelta(days=180)).isoformat(),
             "qty": "0.0001",
@@ -405,6 +406,7 @@ async def _assert_incoming_update_contract(
         f"/api/v1/incoming/{document_id}/items",
         headers=headers,
         json={
+            "operation_id": str(uuid4()),
             "catalog_id": str(catalog_item.id),
             "batch_number": "BATCH-TO-CLEAR",
             "manufactured_at": date.today().isoformat(),
@@ -729,6 +731,7 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
         assert [item["id"] for item in branches_resp.json()] == [str(branch_a.id)]
 
         own_payload = {
+            "operation_id": str(uuid4()),
             "branch_id": str(branch_a.id),
             "supplier_id": str(supplier.id),
             "document_date": date.today().isoformat(),
@@ -749,7 +752,11 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
         other_create_resp = await client.post(
             "/api/v1/incoming",
             headers=headers,
-            json={**own_payload, "branch_id": str(branch_b.id)},
+            json={
+                **own_payload,
+                "operation_id": str(uuid4()),
+                "branch_id": str(branch_b.id),
+            },
         )
         assert other_create_resp.status_code == 403
 

@@ -110,9 +110,9 @@ describe("IncomingDetailPage", () => {
     acceptIncoming.mockRejectedValue(new Error("conflict"));
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Принять приход" }));
-    const dialog = screen.getByRole("dialog", { name: "Принять приход" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Принять приход" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Принять на склад" }));
+    const dialog = screen.getByRole("dialog", { name: "Принять товары на склад" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Принять на склад" }));
 
     await waitFor(() => expect(acceptIncoming).toHaveBeenCalledWith("doc-1"));
     expect(await within(dialog).findByText("Не удалось принять приход")).toBeInTheDocument();
@@ -136,7 +136,7 @@ describe("IncomingDetailPage", () => {
     expect(await screen.findByText("Приход № ПР-1042")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Добавить позицию" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Принять приход" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Отклонить" })).not.toBeInTheDocument();
   });
 });

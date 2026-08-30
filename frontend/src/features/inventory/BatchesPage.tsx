@@ -106,7 +106,9 @@ export function BatchesPage(): JSX.Element {
     }),
     [batchNumber, blockedFilter, branchId, catalogId, expiry, page, showEmpty],
   );
-  const { data, isLoading, isFetching, error, refetch } = useBatchesQuery(params);
+  const { data, isLoading, isFetching, isPlaceholderData, error, refetch } =
+    useBatchesQuery(params);
+  const isShowingPreviousResults = isPlaceholderData && isFetching;
   const filtersActive = Boolean(
     batchNumberInput || branchId || catalogId || expiry || blockedFilter || showEmpty,
   );
@@ -132,6 +134,7 @@ export function BatchesPage(): JSX.Element {
   };
 
   const openBatch = (batch: BatchWithExpiry) => {
+    if (isShowingPreviousResults) return;
     if (showSplitWorkspace) {
       setSelectedBatchId(batch.id);
       return;
@@ -229,7 +232,7 @@ export function BatchesPage(): JSX.Element {
                 label: "Точка",
                 content: (
                   <div>
-                    <Label htmlFor="batch_branch_filter">Точка</Label>
+                    <Label htmlFor="batch_branch_filter">Аптечная точка</Label>
                     <Select
                       id="batch_branch_filter"
                       value={branchId}
@@ -239,13 +242,22 @@ export function BatchesPage(): JSX.Element {
                       }}
                       className="w-full sm:w-52"
                     >
-                      <option value="">Все точки</option>
+                      <option value="">Все аптечные точки</option>
                       {branches.data?.map((branch) => (
                         <option key={branch.id} value={branch.id}>
                           {branch.name}
                         </option>
                       ))}
                     </Select>
+                    {branches.error && (
+                      <button
+                        type="button"
+                        className="mt-1 block text-left text-xs text-danger hover:underline"
+                        onClick={() => void branches.refetch()}
+                      >
+                        Не удалось загрузить точки. Повторить
+                      </button>
+                    )}
                   </div>
                 ),
                 active: Boolean(branchId),
@@ -343,7 +355,7 @@ export function BatchesPage(): JSX.Element {
                   className="whitespace-nowrap text-sm text-foreground-muted"
                   aria-live="polite"
                 >
-                  Найдено: {data?.total ?? 0}
+                  {isShowingPreviousResults ? "Обновляем список…" : `Найдено: ${data?.total ?? 0}`}
                 </span>
               </div>
             }
@@ -385,13 +397,18 @@ export function BatchesPage(): JSX.Element {
           ) : (
             <>
               {view === "cards" || !isDesktopLayout ? (
-                <BatchCards items={data.items} onOpen={openBatch} />
+                <BatchCards
+                  items={data.items}
+                  onOpen={openBatch}
+                  disabled={isShowingPreviousResults}
+                />
               ) : showSplitWorkspace ? (
                 <div className="grid min-w-0 grid-cols-[minmax(0,1.65fr)_minmax(23rem,1fr)] items-start gap-4">
                   <BatchTable
                     items={data.items}
                     selectedId={selectedBatch?.id ?? null}
                     onOpen={openBatch}
+                    disabled={isShowingPreviousResults}
                   />
                   {selectedBatch && (
                     <section
@@ -408,7 +425,12 @@ export function BatchesPage(): JSX.Element {
                   )}
                 </div>
               ) : (
-                <BatchTable items={data.items} selectedId={null} onOpen={openBatch} />
+                <BatchTable
+                  items={data.items}
+                  selectedId={null}
+                  onOpen={openBatch}
+                  disabled={isShowingPreviousResults}
+                />
               )}
               <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onPage={setPage} />
             </>
@@ -507,10 +529,12 @@ function BatchTable({
   items,
   selectedId,
   onOpen,
+  disabled = false,
 }: {
   items: BatchWithExpiry[];
   selectedId: string | null;
   onOpen: (batch: BatchWithExpiry) => void;
+  disabled?: boolean;
 }): JSX.Element {
   return (
     <Table className="min-w-full" aria-label="Партии товаров">
@@ -539,6 +563,7 @@ function BatchTable({
               <button
                 type="button"
                 className="max-w-64 truncate text-left font-semibold text-foreground hover:text-primary"
+                disabled={disabled}
                 onClick={() => onOpen(batch)}
               >
                 {batch.catalog_name}
@@ -585,6 +610,7 @@ function BatchTable({
                 size="sm"
                 className="w-[var(--control-height-sm)] px-0"
                 aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
+                disabled={disabled}
                 onClick={() => onOpen(batch)}
               >
                 <ChevronRightIcon />
@@ -600,9 +626,11 @@ function BatchTable({
 function BatchCards({
   items,
   onOpen,
+  disabled = false,
 }: {
   items: BatchWithExpiry[];
   onOpen: (batch: BatchWithExpiry) => void;
+  disabled?: boolean;
 }): JSX.Element {
   return (
     <div className="space-y-2">
@@ -658,6 +686,7 @@ function BatchCards({
             <Button
               className="min-h-11 shrink-0"
               variant="secondary"
+              disabled={disabled}
               aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
               onClick={() => onOpen(batch)}
             >

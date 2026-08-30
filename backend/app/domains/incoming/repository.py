@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.catalog.models import TenantCatalog
@@ -54,6 +54,27 @@ class IncomingRepository:
         await self.session.flush()
         await self.session.refresh(d)
         return d
+
+    async def get_document_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> IncomingDocument | None:
+        stmt = select(IncomingDocument).where(
+            IncomingDocument.tenant_id == tenant_id,
+            IncomingDocument.operation_id == operation_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def lock_operation_id(self, *, tenant_id: UUID, operation_id: UUID) -> None:
+        await self.session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended("
+                "CAST(:tenant_id AS TEXT) || ':' || CAST(:operation_id AS TEXT), 0))"
+            ),
+            {"tenant_id": str(tenant_id), "operation_id": str(operation_id)},
+        )
 
     async def get_document(self, document_id: UUID) -> IncomingDocument | None:
         return await self.session.get(IncomingDocument, document_id)
@@ -267,6 +288,18 @@ class IncomingRepository:
         await self.session.flush()
         await self.session.refresh(item)
         return item
+
+    async def get_item_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> IncomingItem | None:
+        stmt = select(IncomingItem).where(
+            IncomingItem.tenant_id == tenant_id,
+            IncomingItem.operation_id == operation_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def get_item(self, item_id: UUID) -> IncomingItem | None:
         return await self.session.get(IncomingItem, item_id)

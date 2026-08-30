@@ -98,6 +98,13 @@ class BatchMovement(Base):
             "'supplier_return','correction','transfer_in','transfer_out')",
             name="ck_bm_type",
         ),
+        CheckConstraint(
+            "qty_delta <> 0 AND "
+            "(movement_type NOT IN ('incoming','sale_return','transfer_in') OR qty_delta > 0) "
+            "AND (movement_type NOT IN "
+            "('sale','write_off','supplier_return','transfer_out') OR qty_delta < 0)",
+            name="ck_bm_qty_direction",
+        ),
     )
 
 

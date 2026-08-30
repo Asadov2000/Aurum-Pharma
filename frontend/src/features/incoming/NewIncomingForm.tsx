@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
@@ -9,6 +9,7 @@ import { useBranchesQuery } from "@/features/foundation/queries";
 import { SupplierPicker } from "@/features/suppliers/SupplierPicker";
 
 import { pharmacyCalendarDate } from "./calendar";
+import { createIncomingOperationId } from "./operationId";
 import { useCreateIncoming, useUpdateIncoming } from "./queries";
 import { type IncomingDocument } from "./types";
 
@@ -24,9 +25,13 @@ type FormValues = z.infer<typeof schema>;
 
 export function NewIncomingForm({
   onClose,
+  onCancel = onClose,
+  onDirtyChange,
   document,
 }: {
   onClose: () => void;
+  onCancel?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   document?: IncomingDocument;
 }): JSX.Element {
   const branches = useBranchesQuery(false);
@@ -34,6 +39,7 @@ export function NewIncomingForm({
   const update = useUpdateIncoming();
   const navigate = useNavigate();
   const [topError, setTopError] = useState<string | null>(null);
+  const [operationId] = useState(createIncomingOperationId);
   const isEditing = document !== undefined;
 
   const form = useForm<FormValues>({
@@ -46,22 +52,31 @@ export function NewIncomingForm({
     },
   });
 
+  useEffect(() => {
+    onDirtyChange?.(form.formState.isDirty);
+  }, [form.formState.isDirty, onDirtyChange]);
+
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
+      let firstInvalidField: keyof FormValues | null = null;
       for (const issue of parsed.error.issues) {
         const p = issue.path[0];
         if (typeof p !== "string" || seen.has(p)) continue;
         seen.add(p);
-        form.setError(p as keyof FormValues, { message: issue.message });
+        const field = p as keyof FormValues;
+        firstInvalidField ??= field;
+        form.setError(field, { message: issue.message });
       }
+      if (firstInvalidField) form.setFocus(firstInvalidField);
       return;
     }
     setTopError(null);
     const d = parsed.data;
     try {
       const payload = {
+        operation_id: operationId,
         branch_id: d.branch_id,
         supplier_id: d.supplier_id,
         document_date: d.document_date,
@@ -69,8 +84,18 @@ export function NewIncomingForm({
         notes: d.notes?.trim() || null,
       };
       const saved = document
-        ? await update.mutateAsync({ id: document.id, payload })
+        ? await update.mutateAsync({
+            id: document.id,
+            payload: {
+              branch_id: payload.branch_id,
+              supplier_id: payload.supplier_id,
+              document_date: payload.document_date,
+              document_number: payload.document_number,
+              notes: payload.notes,
+            },
+          })
         : await create.mutateAsync(payload);
+      onDirtyChange?.(false);
       onClose();
       if (!document) navigate({ to: "/incoming/$id", params: { id: saved.id } });
     } catch (err) {
@@ -105,7 +130,7 @@ export function NewIncomingForm({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <Label htmlFor="branch_id">Точка</Label>
+          <Label htmlFor="branch_id">Аптечная точка</Label>
           <Select
             id="branch_id"
             invalid={Boolean(form.formState.errors.branch_id)}
@@ -147,8 +172,12 @@ export function NewIncomingForm({
           <FormError>{form.formState.errors.document_date?.message}</FormError>
         </div>
         <div>
-          <Label htmlFor="document_number">Номер</Label>
-          <Input id="document_number" {...form.register("document_number")} />
+          <Label htmlFor="document_number">Номер документа поставщика</Label>
+          <Input
+            id="document_number"
+            placeholder="Например, НК-1042"
+            {...form.register("document_number")}
+          />
         </div>
         <div className="sm:col-span-2">
           <Label htmlFor="notes">Комментарий</Label>
@@ -157,7 +186,7 @@ export function NewIncomingForm({
       </div>
       {topError && <p className="text-sm text-danger">{topError}</p>}
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose}>
+        <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
         <Button

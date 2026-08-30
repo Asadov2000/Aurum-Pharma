@@ -50,8 +50,8 @@ const MESSAGE_MAP: Record<string, string> = {
   "No catalog item for this barcode": "По этому штрихкоду нет позиции каталога.",
 
   // --- incoming ---
-  "Incoming document not found": "Приходный документ не найден.",
-  "Cannot accept a document with no items": "Нельзя принять приход без позиций.",
+  "Incoming document not found": "Приёмка не найдена.",
+  "Cannot accept a document with no items": "Сначала добавьте товар.",
   "Item not found": "Позиция не найдена.",
 
   // --- billing ---
