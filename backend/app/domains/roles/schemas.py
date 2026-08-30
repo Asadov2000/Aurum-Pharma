@@ -143,6 +143,9 @@ class UserInfo(BaseModel):
 
 
 class UserWithAssignments(UserInfo):
+    invited_at: datetime | None
+    invitation_expires_at: datetime | None
+    invitation_status: Literal["pending", "expired", "accepted", "revoked"] | None
     assignments: list[AssignmentRead]
 
 
@@ -175,6 +178,19 @@ class UserSearchRequest(BaseModel):
 class UserSessionRevokeResponse(BaseModel):
     status: Literal["ok"] = "ok"
     revoked_count: int = Field(ge=0)
+
+
+class InvitationReissueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: UUID
+
+
+class InvitationRead(BaseModel):
+    invitation_id: UUID
+    invitation_status: Literal["pending", "expired", "accepted", "revoked"]
+    invited_at: datetime
+    invitation_expires_at: datetime
 
 
 class InviteUserRequest(BaseModel):
@@ -217,6 +233,9 @@ class TenantMembershipRead(BaseModel):
     full_name: str
     phone: str | None
     status: Literal["pending", "active", "suspended", "offboarded"]
+    invited_at: datetime | None = None
+    invitation_expires_at: datetime | None = None
+    invitation_status: Literal["pending", "expired", "accepted", "revoked"] | None = None
 
 
 class OwnershipTransferCreate(BaseModel):

@@ -25,10 +25,7 @@ test.describe("Employee session security", () => {
       expect(createResponse.status()).toBe(201);
       const employee = (await createResponse.json()) as { user_id: string };
 
-      const activateResponse = await ownerApi.patch(`users/${employee.user_id}`, {
-        data: { status: "active" },
-      });
-      expect(activateResponse.ok()).toBe(true);
+      await apiLogin(ownerAnon, { email, password: "" });
 
       await loginInBrowser(page, OWNER);
       await page.goto("/users");
@@ -58,10 +55,10 @@ test.describe("Employee session security", () => {
       await dialog.getByRole("button", { name: "Завершить сеансы" }).click();
       const body = (await (await revokedResponse).json()) as { revoked_count: number };
 
-      expect(body.revoked_count).toBe(0);
+      expect(body.revoked_count).toBe(1);
       await expect(
-        page.getByRole("status").filter({ hasText: "У сотрудника нет активных сеансов." }),
-      ).toHaveText("У сотрудника нет активных сеансов.");
+        page.getByRole("status").filter({ hasText: "Завершено активных сеансов: 1" }),
+      ).toHaveText("Завершено активных сеансов: 1");
     } finally {
       await ownerApi.dispose();
       await developerApi.dispose();

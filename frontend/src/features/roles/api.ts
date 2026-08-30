@@ -17,6 +17,7 @@ import {
   type UserListResponse,
   type UserSearchParams,
   type UserUpdatePayload,
+  type InvitationRead,
 } from "./types";
 
 export async function listPermissions(): Promise<Permission[]> {
@@ -101,6 +102,16 @@ export async function revokeUserSessions(
   const { data } = await api.post<{ status: "ok"; revoked_count: number }>(
     `/users/${userId}/sessions/revoke`,
   );
+  return data;
+}
+
+export async function reissueUserInvitation(
+  userId: string,
+  operationId: string,
+): Promise<InvitationRead> {
+  const { data } = await api.post<InvitationRead>(`/users/${userId}/invitation/reissue`, {
+    operation_id: operationId,
+  });
   return data;
 }
 

@@ -7,6 +7,7 @@ import { type UserWithAssignments } from "./types";
 import {
   employeeInitials,
   formatLastLogin,
+  formatInvitationDeadline,
   userStatusLabel,
   userStatusTone,
 } from "./userPresentation";
@@ -22,12 +23,14 @@ interface EmployeeDirectoryProps {
   canRevokeSessions: boolean;
   canOffboard: boolean;
   canAssign: boolean;
+  canInvite: boolean;
   canTransferOwnership: boolean;
   showActions: boolean;
   activatingUserId: string | null;
   registerActionTrigger: (userId: string, element: HTMLButtonElement | null) => void;
   onProfile: (member: Row) => void;
   onActivate: (member: Row) => void;
+  onReissueInvitation: (member: Row) => void;
   onAssignments: (member: Row) => void;
   onTransferOwnership: (member: Row) => void;
   onRevokeSessions: (member: Row) => void;
@@ -44,12 +47,14 @@ export function EmployeeDirectory({
   canRevokeSessions,
   canOffboard,
   canAssign,
+  canInvite,
   canTransferOwnership,
   showActions,
   activatingUserId,
   registerActionTrigger,
   onProfile,
   onActivate,
+  onReissueInvitation,
   onAssignments,
   onTransferOwnership,
   onRevokeSessions,
@@ -96,6 +101,7 @@ export function EmployeeDirectory({
             canRevokeSessions={canRevokeSessions}
             canOffboard={canOffboard}
             canAssign={canAssign}
+            canInvite={canInvite}
             canTransferOwnership={canTransferOwnership}
             showActions={showActions}
             columns={columns}
@@ -103,6 +109,7 @@ export function EmployeeDirectory({
             actionRef={(element) => registerActionTrigger(member.id, element)}
             onProfile={() => onProfile(member)}
             onActivate={() => onActivate(member)}
+            onReissueInvitation={() => onReissueInvitation(member)}
             onAssignments={() => onAssignments(member)}
             onTransferOwnership={() => onTransferOwnership(member)}
             onRevokeSessions={() => onRevokeSessions(member)}
@@ -124,6 +131,7 @@ function EmployeeDirectoryRow({
   canRevokeSessions,
   canOffboard,
   canAssign,
+  canInvite,
   canTransferOwnership,
   showActions,
   columns,
@@ -131,6 +139,7 @@ function EmployeeDirectoryRow({
   actionRef,
   onProfile,
   onActivate,
+  onReissueInvitation,
   onAssignments,
   onTransferOwnership,
   onRevokeSessions,
@@ -145,6 +154,7 @@ function EmployeeDirectoryRow({
   canRevokeSessions: boolean;
   canOffboard: boolean;
   canAssign: boolean;
+  canInvite: boolean;
   canTransferOwnership: boolean;
   showActions: boolean;
   columns: string;
@@ -152,6 +162,7 @@ function EmployeeDirectoryRow({
   actionRef: (element: HTMLButtonElement | null) => void;
   onProfile: () => void;
   onActivate: () => void;
+  onReissueInvitation: () => void;
   onAssignments: () => void;
   onTransferOwnership: () => void;
   onRevokeSessions: () => void;
@@ -164,11 +175,14 @@ function EmployeeDirectoryRow({
   const isOwnerMembership = member.is_tenant_owner;
   const protectsLifecycle = isOwnerMembership || member.id === currentUserId;
   const canEditMember = canUpdate && member.status !== "offboarded";
-  const canActivateMember =
-    canUpdate &&
-    (member.status === "pending" || member.status === "suspended") &&
+  const canActivateMember = canUpdate && member.status === "suspended" && !protectsLifecycle;
+  const canAssignMember =
+    canAssign && (member.status === "pending" || member.status === "active") && !protectsLifecycle;
+  const canReissueInvitation =
+    canInvite &&
+    member.status === "pending" &&
+    member.invitation_status === "expired" &&
     !protectsLifecycle;
-  const canAssignMember = canAssign && member.status === "active" && !protectsLifecycle;
   const canSuspendMember = canSuspend && !protectsLifecycle && member.status === "active";
   const canRevokeMemberSessions =
     canRevokeSessions &&
@@ -183,9 +197,12 @@ function EmployeeDirectoryRow({
   if (canEditMember) actions.push({ label: "Профиль", onSelect: onProfile });
   if (canActivateMember) {
     actions.push({
-      label: member.status === "pending" ? "Активировать" : "Возобновить",
+      label: "Возобновить",
       onSelect: onActivate,
     });
+  }
+  if (canReissueInvitation) {
+    actions.push({ label: "Обновить приглашение", onSelect: onReissueInvitation });
   }
   if (canAssignMember) actions.push({ label: "Роли", onSelect: onAssignments });
   if (canRevokeMemberSessions) {
@@ -196,7 +213,11 @@ function EmployeeDirectoryRow({
   }
   if (canSuspendMember) actions.push({ label: "Приостановить", onSelect: onSuspend });
   if (canOffboardMember) {
-    actions.push({ label: "Уволить", tone: "danger", onSelect: onOffboard });
+    actions.push({
+      label: member.status === "pending" ? "Отозвать приглашение" : "Уволить",
+      tone: "danger",
+      onSelect: onOffboard,
+    });
   }
 
   return (
@@ -244,7 +265,23 @@ function EmployeeDirectoryRow({
       </DirectoryCell>
 
       <DirectoryCell label="Статус">
-        <Badge tone={userStatusTone[member.status]}>{userStatusLabel[member.status]}</Badge>
+        {member.status === "pending" && member.invitation_status === "expired" ? (
+          <>
+            <Badge tone="warning">Приглашение истекло</Badge>
+            <span className="mt-1 block text-xs text-foreground-muted">
+              Обновите срок, чтобы сотрудник мог войти
+            </span>
+          </>
+        ) : (
+          <>
+            <Badge tone={userStatusTone[member.status]}>{userStatusLabel[member.status]}</Badge>
+            {member.status === "pending" ? (
+              <span className="mt-1 block text-xs text-foreground-muted">
+                {formatInvitationDeadline(member.invitation_expires_at)}
+              </span>
+            ) : null}
+          </>
+        )}
       </DirectoryCell>
 
       <DirectoryCell label="Доступ">
@@ -267,6 +304,11 @@ function EmployeeDirectoryRow({
             ) : null}
           </div>
         )}
+        {member.status === "pending" ? (
+          <span className="mt-1 block text-xs text-foreground-muted">
+            Начнёт действовать после первого подтверждённого входа
+          </span>
+        ) : null}
       </DirectoryCell>
 
       <DirectoryCell label="Последний вход">

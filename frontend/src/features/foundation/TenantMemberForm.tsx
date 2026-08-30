@@ -66,6 +66,11 @@ export function TenantMemberForm({ tenantId, tenantName, onClose }: Props): JSX.
           <p className="mt-1 text-sm text-foreground-secondary">
             {createdEmail} прикреплён к аптеке «{tenantName}».
           </p>
+          <p className="mt-2 text-sm text-foreground-secondary">
+            Приглашение действует 7 дней. Сообщите сотруднику адрес входа: он сам запросит
+            одноразовый код на эту почту. Роли можно настроить заранее, но доступ появится только
+            после первого подтверждённого входа.
+          </p>
         </div>
         <div className="flex justify-end">
           <Button onClick={onClose}>Закрыть</Button>

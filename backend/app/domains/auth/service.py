@@ -369,11 +369,14 @@ class AuthService:
         if session_id is None:
             raise AuthenticationError("Invalid or expired code")
 
-        await self.repo.accept_tenant_invitation(
+        accepted_memberships = await self.repo.accept_tenant_invitation(
             session_id=session_id,
             tenant_id=user.home_tenant_id,
+            email_code_id=ec.id,
             accepted_at=now,
         )
+        if user.membership_status == "pending" and accepted_memberships != 1:
+            raise AuthenticationError("Invitation is no longer valid")
         await self._register_login_device(
             session_id=session_id,
             refresh_token=refresh_token,

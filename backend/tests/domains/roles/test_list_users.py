@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.foundation.repository import FoundationRepository
@@ -44,10 +45,32 @@ async def _create_attached_user(
         password_required=False,
     )
     if activate:
-        await service.activate_membership(
-            actor_id=actor_id,
-            tenant_id=tenant_id,
-            target_user_id=account.id,
+        # Search tests need a post-acceptance fixture without repeating the
+        # email-code login flow covered by the auth and invitation suites.
+        await service.repo.session.execute(
+            text("""
+                WITH accepted_invitation AS (
+                  UPDATE public.tenant_invitation
+                  SET status = 'accepted', accepted_at = statement_timestamp()
+                  WHERE tenant_id = :tenant_id
+                    AND user_id = :user_id
+                    AND status = 'pending'
+                  RETURNING membership_id, user_id
+                ), active_membership AS (
+                  UPDATE public.tenant_membership AS membership
+                  SET status = 'active',
+                      activated_at = statement_timestamp(),
+                      suspended_at = NULL
+                  FROM accepted_invitation AS invitation
+                  WHERE membership.id = invitation.membership_id
+                  RETURNING invitation.user_id
+                )
+                UPDATE public.app_user AS account
+                SET status = 'active', activated_at = statement_timestamp()
+                FROM active_membership AS membership
+                WHERE account.id = membership.user_id
+                """),
+            {"tenant_id": tenant_id, "user_id": account.id},
         )
     return account.id, assignment
 

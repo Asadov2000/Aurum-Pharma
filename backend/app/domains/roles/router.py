@@ -25,6 +25,8 @@ from app.domains.roles.repository import DirectoryUser, OwnershipTransferRecord,
 from app.domains.roles.schemas import (
     AssignmentCreate,
     AssignmentRead,
+    InvitationRead,
+    InvitationReissueRequest,
     InviteUserRequest,
     OwnershipTransferActionResponse,
     OwnershipTransferCreate,
@@ -166,6 +168,9 @@ async def _serialize_user_list(
             status=user.status,
             last_login_at=user.last_login_at,
             can_require_password=user.can_require_password,
+            invited_at=user.invited_at,
+            invitation_expires_at=user.invitation_expires_at,
+            invitation_status=user.invitation_status,
             assignments=[
                 AssignmentRead.model_validate(assignment).model_copy(
                     update={
@@ -530,6 +535,27 @@ async def block_user(
         target_user_id=user_id,
     )
     return {"status": "suspended"}
+
+
+@router.post("/users/{user_id}/invitation/reissue", response_model=InvitationRead)
+async def reissue_user_invitation(
+    user_id: UUID,
+    payload: InvitationReissueRequest,
+    user: Annotated[CurrentUser, Depends(require_permission("users.invite"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> InvitationRead:
+    invitation = await service.reissue_invitation(
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+        operation_id=payload.operation_id,
+    )
+    return InvitationRead(
+        invitation_id=invitation.id,
+        invitation_status=invitation.status,
+        invited_at=invitation.issued_at,
+        invitation_expires_at=invitation.expires_at,
+    )
 
 
 @router.post(

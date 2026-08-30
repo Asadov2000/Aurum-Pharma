@@ -9,6 +9,7 @@ const updateUser = vi.fn();
 const suspendUser = vi.fn();
 const offboardUser = vi.fn();
 const revokeUserSessions = vi.fn();
+const reissueUserInvitation = vi.fn();
 const createAssignment = vi.fn();
 const createOwnershipTransfer = vi.fn();
 const listBranches = vi.fn();
@@ -25,6 +26,7 @@ vi.mock("@/features/roles/api", () => ({
   suspendUser: (...args: unknown[]) => suspendUser(...args),
   offboardUser: (...args: unknown[]) => offboardUser(...args),
   revokeUserSessions: (...args: unknown[]) => revokeUserSessions(...args),
+  reissueUserInvitation: (...args: unknown[]) => reissueUserInvitation(...args),
   createAssignment: (...args: unknown[]) => createAssignment(...args),
   createOwnershipTransfer: (...args: unknown[]) => createOwnershipTransfer(...args),
   listOwnershipTransfers: vi.fn().mockResolvedValue([]),
@@ -133,6 +135,9 @@ const USER_ACTIVE = {
   status: "active" as const,
   last_login_at: null,
   can_require_password: false,
+  invited_at: null,
+  invitation_expires_at: null,
+  invitation_status: null,
   assignments: [
     {
       id: "assignment-1",
@@ -171,6 +176,7 @@ describe("UsersPage", () => {
     suspendUser.mockReset();
     offboardUser.mockReset();
     revokeUserSessions.mockReset();
+    reissueUserInvitation.mockReset();
     createAssignment.mockReset();
     createOwnershipTransfer.mockReset();
     listBranches.mockReset();
@@ -181,6 +187,12 @@ describe("UsersPage", () => {
     suspendUser.mockResolvedValue(undefined);
     offboardUser.mockResolvedValue(undefined);
     revokeUserSessions.mockResolvedValue({ status: "ok", revoked_count: 1 });
+    reissueUserInvitation.mockResolvedValue({
+      invitation_id: "invitation-2",
+      invitation_status: "pending",
+      invited_at: "2026-08-30T09:00:00Z",
+      invitation_expires_at: "2026-09-06T09:00:00Z",
+    });
     createAssignment.mockResolvedValue({ id: "assignment-new" });
     createOwnershipTransfer.mockResolvedValue({
       transfer: { id: "transfer-1" },
@@ -297,7 +309,7 @@ describe("UsersPage", () => {
     });
   });
 
-  it("activates a pending membership through users.update", async () => {
+  it("does not allow an owner to activate a pending membership manually", async () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
@@ -305,15 +317,51 @@ describe("UsersPage", () => {
       permissions: ["users.view", "users.update"],
     };
     listUsers.mockResolvedValue(
-      usersResponse([{ ...USER_ACTIVE, status: "pending", assignments: [] }]),
+      usersResponse([
+        {
+          ...USER_ACTIVE,
+          status: "pending",
+          invitation_status: "pending",
+          invitation_expires_at: "2026-09-06T09:00:00Z",
+          assignments: [],
+        },
+      ]),
     );
     renderPage();
 
     await openUserActions();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Активировать" }));
+    expect(screen.queryByRole("menuitem", { name: "Активировать" })).not.toBeInTheDocument();
+    expect(updateUser).not.toHaveBeenCalled();
+  });
 
-    await waitFor(() => expect(updateUser).toHaveBeenCalledTimes(1));
-    expect(updateUser).toHaveBeenCalledWith("member-1", { status: "active" });
+  it("reissues only an expired invitation through users.invite", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.invite"],
+    };
+    listUsers.mockResolvedValue(
+      usersResponse([
+        {
+          ...USER_ACTIVE,
+          status: "pending",
+          invitation_status: "expired",
+          invitation_expires_at: "2026-08-29T09:00:00Z",
+          assignments: [],
+        },
+      ]),
+    );
+    renderPage();
+
+    expect(await screen.findByText("Приглашение истекло")).toBeInTheDocument();
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Обновить приглашение" }));
+
+    await waitFor(() =>
+      expect(reissueUserInvitation).toHaveBeenCalledWith("member-1", expect.any(String)),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Приглашение для");
   });
 
   it("assigns only an active, manageable tenant role", async () => {
@@ -349,6 +397,33 @@ describe("UsersPage", () => {
       branch_id: null,
       password_required: false,
     });
+  });
+
+  it("allows roles to be prepared before the first confirmed login", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(
+      usersResponse([
+        {
+          ...USER_ACTIVE,
+          status: "pending",
+          invitation_status: "pending",
+          invitation_expires_at: "2026-09-06T09:00:00Z",
+          assignments: [],
+        },
+      ]),
+    );
+    renderPage();
+
+    expect(
+      await screen.findByText(/Начнёт действовать после первого подтверждённого входа/),
+    ).toBeInTheDocument();
+    await openUserActions();
+    expect(await screen.findByRole("menuitem", { name: "Роли" })).toBeInTheDocument();
   });
 
   it("reviews only visible capabilities and warns about important permissions", async () => {
@@ -396,9 +471,7 @@ describe("UsersPage", () => {
     expect(within(confirmation).getByText("Аптека Рудаки")).toBeInTheDocument();
     expect(within(confirmation).getByText(/Разделы: Касса, Сотрудники/)).toBeInTheDocument();
     expect(within(confirmation).getByText("Проводить продажи")).toBeInTheDocument();
-    expect(
-      within(confirmation).getAllByText("Отключать сотрудников от аптеки"),
-    ).toHaveLength(2);
+    expect(within(confirmation).getAllByText("Отключать сотрудников от аптеки")).toHaveLength(2);
     expect(within(confirmation).getByText("Обратите внимание")).toBeInTheDocument();
     expect(within(confirmation).queryByText("Системное управление Aurum")).not.toBeInTheDocument();
     expect(within(confirmation).queryByText("roles.not-visible")).not.toBeInTheDocument();

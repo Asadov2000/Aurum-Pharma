@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
@@ -20,6 +20,7 @@ from app.domains.foundation.models import Branch
 from app.domains.roles.models import (
     Role,
     RolePermission,
+    TenantInvitation,
     TenantMembership,
     UserAssignment,
 )
@@ -70,19 +71,20 @@ async def _seed_code(
     *,
     email: str,
     code: str = "123456",
-) -> None:
+) -> EmailCode:
     salt = generate_code_salt()
-    db_session.add(
-        EmailCode(
-            email_lower=email.lower(),
-            code_hash=hash_code(code, salt),
-            code_salt=salt,
-            purpose="login",
-            ip_address="127.0.0.1",
-            expires_at=utc_now() + timedelta(minutes=10),
-        )
+    email_code = EmailCode(
+        email_lower=email.lower(),
+        code_hash=hash_code(code, salt),
+        code_salt=salt,
+        purpose="login",
+        ip_address="127.0.0.1",
+        expires_at=utc_now() + timedelta(minutes=10),
     )
+    db_session.add(email_code)
     await db_session.flush()
+    await db_session.refresh(email_code)
+    return email_code
 
 
 async def test_pending_membership_can_be_preassigned_but_has_no_permissions_until_acceptance(
@@ -204,6 +206,154 @@ async def test_failed_login_does_not_activate_pending_membership(
     await db_session.refresh(membership)
     assert membership.status == "pending"
     assert await service.get_effective_permissions(account.id, tenant.id) == set()
+
+
+async def test_pending_membership_cannot_be_manually_activated(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, _owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    account, membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="manual-activation-denied@aurum.tj",
+        full_name="Pending Employee",
+    )
+
+    with pytest.raises(BusinessRuleError, match="suspended"):
+        await service.activate_membership(
+            actor_id=owner.id,
+            tenant_id=tenant.id,
+            target_user_id=account.id,
+        )
+
+    await db_session.refresh(membership)
+    assert membership.status == "pending"
+
+
+async def test_reissue_revokes_previous_invitation_and_email_code(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, _owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    account, membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="reissue@aurum.tj",
+        full_name="Reissued Employee",
+        actor_id=owner.id,
+    )
+    old_invitation = (
+        await db_session.execute(
+            select(TenantInvitation).where(TenantInvitation.membership_id == membership.id)
+        )
+    ).scalar_one()
+    old_code = await _seed_code(db_session, email=account.email)
+    assert old_code.tenant_invitation_id == old_invitation.id
+
+    operation_id = uuid4()
+    replacement = await service.reissue_invitation(
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        operation_id=operation_id,
+    )
+    replay = await service.reissue_invitation(
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        operation_id=operation_id,
+    )
+    await db_session.refresh(old_invitation)
+    await db_session.refresh(old_code)
+
+    assert old_invitation.status == "revoked"
+    assert old_code.used_at is not None
+    assert replacement.id == replay.id
+    assert replacement.status == "pending"
+    assert replacement.id != old_invitation.id
+
+
+async def test_offboarding_pending_membership_revokes_invitation(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, _owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    account, membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="revoked-before-login@aurum.tj",
+        full_name="Revoked Employee",
+        actor_id=owner.id,
+    )
+    invitation = (
+        await db_session.execute(
+            select(TenantInvitation).where(TenantInvitation.membership_id == membership.id)
+        )
+    ).scalar_one()
+
+    await service.soft_delete_user(
+        actor_id=owner.id,
+        actor_is_developer=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+    )
+    await db_session.refresh(membership)
+    await db_session.refresh(invitation)
+
+    assert membership.status == "offboarded"
+    assert invitation.status == "revoked"
+
+
+async def test_invitation_operation_cannot_be_reused_for_another_employee(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, _owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    first, _ = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="operation-first@aurum.tj",
+        full_name="First Employee",
+        actor_id=owner.id,
+    )
+    second, _ = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="operation-second@aurum.tj",
+        full_name="Second Employee",
+        actor_id=owner.id,
+    )
+    operation_id = uuid4()
+
+    await service.reissue_invitation(
+        tenant_id=tenant.id,
+        target_user_id=first.id,
+        operation_id=operation_id,
+    )
+    with pytest.raises(DBAPIError, match="another employee"):
+        await service.reissue_invitation(
+            tenant_id=tenant.id,
+            target_user_id=second.id,
+            operation_id=operation_id,
+        )
 
 
 async def test_owner_invite_route_cannot_create_global_account(

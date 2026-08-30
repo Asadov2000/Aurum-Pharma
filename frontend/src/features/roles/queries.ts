@@ -16,6 +16,7 @@ import {
   offboardUser,
   revokeAssignment,
   revokeUserSessions,
+  reissueUserInvitation,
   suspendUser,
   updateRole,
   updateUser,
@@ -189,6 +190,17 @@ export function useOffboardUser() {
 
 export function useRevokeUserSessions() {
   return useMutation({ mutationFn: (id: string) => revokeUserSessions(id) });
+}
+
+export function useReissueUserInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, operationId }: { id: string; operationId: string }) =>
+      reissueUserInvitation(id, operationId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.users });
+    },
+  });
 }
 
 export function useCreateAssignment() {
