@@ -16,6 +16,8 @@ docker-стека**. Критические сценарии проходят ц
 | `incoming-flow.spec.ts` | приход → приёмка → партия | owner |
 | `interface-layout.spec.ts` | desktop/mobile/touch layout ключевых экранов | owner |
 | `owner-onboarding.spec.ts` | создание аптеки и вход владельца | dev/owner |
+| `ownership-transfer.spec.ts` | подтверждаемая передача владения аптекой | owner |
+| `payment-reconciliation.spec.ts` | безопасное разрешение неопределенной оплаты | owner |
 | `payment-settings.spec.ts` | способы оплаты, выбранные владельцем | owner |
 | `platform-account-activation.spec.ts` | одноразовая активация приглашения сотрудника | platform |
 | `platform-account-lifecycle.spec.ts` | перевыпуск приглашения и жизненный цикл аккаунта | platform |
@@ -31,7 +33,7 @@ docker-стека**. Критические сценарии проходят ц
 | `tenant-setup.spec.ts` | создание и изменение статуса аптеки | dev |
 | `user-session-revocation.spec.ts` | отзыв сессий сотрудника владельцем | owner |
 
-Всего **22 spec-файла / 58 тестов**.
+Всего **24 spec-файла / 61 тест**.
 
 ## Предусловия
 
