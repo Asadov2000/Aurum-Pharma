@@ -7,6 +7,8 @@ const listShiftHistory = vi.fn();
 const getSalesSummary = vi.fn();
 const getSalesSummaryXlsx = vi.fn();
 const getStockOnDateXlsx = vi.fn();
+const getStockOnDate = vi.fn();
+const getTopProducts = vi.fn();
 const getZReportXlsx = vi.fn();
 const listBranches = vi.fn();
 const listRegisters = vi.fn();
@@ -18,6 +20,8 @@ vi.mock("@/features/reports/api", () => ({
   getSalesSummary: (...args: unknown[]) => getSalesSummary(...args),
   getSalesSummaryXlsx: (...args: unknown[]) => getSalesSummaryXlsx(...args),
   getStockOnDateXlsx: (...args: unknown[]) => getStockOnDateXlsx(...args),
+  getStockOnDate: (...args: unknown[]) => getStockOnDate(...args),
+  getTopProducts: (...args: unknown[]) => getTopProducts(...args),
 }));
 
 vi.mock("@/features/pos/api", () => ({
@@ -135,6 +139,8 @@ describe("ReportsPage", () => {
     getSalesSummary.mockReset();
     getSalesSummaryXlsx.mockReset();
     getStockOnDateXlsx.mockReset();
+    getStockOnDate.mockReset();
+    getTopProducts.mockReset();
     getZReportXlsx.mockReset();
     listBranches.mockReset();
     listRegisters.mockReset();
@@ -144,6 +150,25 @@ describe("ReportsPage", () => {
     getTenantOperationalSettings.mockResolvedValue({ report_timezone: "Asia/Dushanbe" });
     listShiftHistory.mockResolvedValue(SHIFT_LIST);
     getSalesSummary.mockResolvedValue(SALES_SUMMARY);
+    getStockOnDate.mockResolvedValue({
+      on_date: "2026-05-23",
+      branch_name: null,
+      currency: "TJS",
+      rows: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      total_qty: "0",
+      total_value: "0.00",
+    });
+    getTopProducts.mockResolvedValue({
+      date_from: "2026-05-01",
+      date_to: "2026-05-23",
+      branch_name: null,
+      currency: "TJS",
+      sort_by: "revenue",
+      rows: [],
+    });
   });
 
   afterEach(() => {
@@ -265,8 +290,38 @@ describe("ReportsPage", () => {
     expect(window.localStorage.getItem("aurum:reports:view:v1")).toBe("shifts");
 
     await openReportTab(/^Остатки/);
-    expect(screen.getByRole("region", { name: "Остатки на дату" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Остатки и сроки годности" })).toBeInTheDocument();
     expect(window.localStorage.getItem("aurum:reports:view:v1")).toBe("stock");
+  });
+
+  it("explains that the product ranking is net of returns", async () => {
+    getTopProducts.mockResolvedValueOnce({
+      date_from: "2026-05-01",
+      date_to: "2026-05-23",
+      branch_name: null,
+      currency: "TJS",
+      sort_by: "revenue",
+      rows: [
+        {
+          catalog_id: "catalog-1",
+          name: "Парацетамол 500 мг",
+          form: "таблетки",
+          dosage: "500 мг",
+          pack_size: "20 шт.",
+          quantity: "14",
+          revenue: "91.00",
+          receipts_count: 11,
+        },
+      ],
+    });
+    renderPage();
+    await openReportTab(/^Товары/);
+
+    expect(await screen.findByText("Парацетамол 500 мг")).toBeInTheDocument();
+    expect(screen.getByText(/Возвраты уже вычтены/)).toBeInTheDocument();
+    expect(getTopProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ sort_by: "revenue", limit: 20 }),
+    );
   });
 
   it("supports keyboard navigation between report tabs", async () => {
@@ -277,9 +332,9 @@ describe("ReportsPage", () => {
     salesTab.focus();
     fireEvent.keyDown(salesTab, { key: "ArrowRight" });
 
-    const shiftsTab = screen.getByRole("tab", { name: /^Смены/ });
-    expect(shiftsTab).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByText("Малика Саидова")).toBeInTheDocument();
+    const productsTab = screen.getByRole("tab", { name: /^Товары/ });
+    expect(productsTab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("Продаж за выбранный период нет")).toBeInTheDocument();
   });
 
   it("does not show reports with an unknown timezone after settings fail", async () => {

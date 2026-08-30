@@ -120,10 +120,16 @@ test.describe("Reports export", () => {
     await overview.getByRole("button", { name: "Скачать XLSX" }).click();
     expect((await summaryDownload).suggestedFilename()).toMatch(/\.xlsx$/);
 
+    await page.getByRole("tab", { name: /^Товары/ }).click();
+    await expect(
+      page.getByRole("table", { name: "Товары-лидеры за выбранный период" }),
+    ).toContainText(item.brand_name);
+
     await page.getByRole("tab", { name: /^Остатки/ }).click();
-    const stockReport = page.getByRole("region", { name: "Остатки на дату" });
+    const stockReport = page.getByRole("region", { name: "Остатки и сроки годности" });
+    await expect(stockReport.getByText(item.brand_name)).toBeVisible();
     const stockDownload = page.waitForEvent("download");
-    await stockReport.getByRole("button", { name: "Скачать остатки XLSX" }).click();
+    await stockReport.getByRole("button", { name: "Скачать в Excel" }).click();
     expect((await stockDownload).suggestedFilename()).toMatch(/\.xlsx$/);
   });
 });
