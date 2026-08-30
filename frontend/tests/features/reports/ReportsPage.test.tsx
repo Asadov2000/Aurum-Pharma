@@ -43,8 +43,8 @@ function renderPage() {
   );
 }
 
-function openReportTab(name: RegExp): void {
-  fireEvent.click(screen.getByRole("tab", { name }));
+async function openReportTab(name: RegExp): Promise<void> {
+  fireEvent.click(await screen.findByRole("tab", { name }));
 }
 
 const SHIFT = {
@@ -153,7 +153,7 @@ describe("ReportsPage", () => {
   it("shows resolved shift history and opens a Z-report without a UUID field", async () => {
     getZReport.mockResolvedValueOnce(Z_REPORT);
     renderPage();
-    openReportTab(/^Смены/);
+    await openReportTab(/^Смены/);
 
     expect(await screen.findByText("Аптека Рудаки")).toBeInTheDocument();
     expect(screen.getByText("Касса 01")).toBeInTheDocument();
@@ -220,7 +220,7 @@ describe("ReportsPage", () => {
 
   it("applies cashier search only after submitting filters", async () => {
     renderPage();
-    openReportTab(/^Смены/);
+    await openReportTab(/^Смены/);
     await screen.findByText("Малика Саидова");
     expect(listShiftHistory).toHaveBeenCalledTimes(1);
 
@@ -247,7 +247,7 @@ describe("ReportsPage", () => {
     });
 
     renderPage();
-    openReportTab(/^Смены/);
+    await openReportTab(/^Смены/);
 
     expect(await screen.findByText("Закрытых смен не найдено")).toBeInTheDocument();
   });
@@ -259,12 +259,12 @@ describe("ReportsPage", () => {
     expect(getSalesSummary).toHaveBeenCalledTimes(1);
     expect(listShiftHistory).not.toHaveBeenCalled();
 
-    openReportTab(/^Смены/);
+    await openReportTab(/^Смены/);
     expect(await screen.findByText("Малика Саидова")).toBeInTheDocument();
     expect(listShiftHistory).toHaveBeenCalledTimes(1);
     expect(window.localStorage.getItem("aurum:reports:view:v1")).toBe("shifts");
 
-    openReportTab(/^Остатки/);
+    await openReportTab(/^Остатки/);
     expect(screen.getByRole("region", { name: "Остатки на дату" })).toBeInTheDocument();
     expect(window.localStorage.getItem("aurum:reports:view:v1")).toBe("stock");
   });
