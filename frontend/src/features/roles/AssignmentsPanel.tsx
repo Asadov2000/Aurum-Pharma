@@ -6,9 +6,15 @@ import { Badge, Button, ConfirmDialog, FormError, Label, Select, Switch } from "
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 
-import { useCreateAssignment, useRevokeAssignment, useRolesQuery } from "./queries";
-import { isManageableRole } from "./roleAccess";
-import { type Assignment, type UserWithAssignments } from "./types";
+import {
+  useCreateAssignment,
+  usePermissionsQuery,
+  useRevokeAssignment,
+  useRolesQuery,
+} from "./queries";
+import { GROUP_LABEL } from "./labels";
+import { hasUnavailableRolePermissions, isManageableRole } from "./roleAccess";
+import { type Assignment, type Permission, type Role, type UserWithAssignments } from "./types";
 
 const schema = z.object({
   role_id: z.string().min(1, "Выберите роль"),
@@ -17,6 +23,7 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
+type ResolvedAssignment = { role: Role; branchId: string | null };
 const EMPTY_ASSIGNMENT_FORM: FormValues = {
   role_id: "",
   branch_id: "",
@@ -36,12 +43,14 @@ export function AssignmentsPanel({
 }): JSX.Element {
   const roles = useRolesQuery(canManage);
   const branches = useBranchesQuery(true, canManage);
+  const permissions = usePermissionsQuery(canManage);
   const createAssignment = useCreateAssignment();
   const revokeAssignment = useRevokeAssignment();
   const [topError, setTopError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [pendingRevokeId, setPendingRevokeId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [pendingAdd, setPendingAdd] = useState<FormValues | null>(null);
 
   const form = useForm<FormValues>({
     defaultValues: EMPTY_ASSIGNMENT_FORM,
@@ -50,10 +59,38 @@ export function AssignmentsPanel({
   const closeAddForm = () => {
     form.reset(EMPTY_ASSIGNMENT_FORM);
     setTopError(null);
+    setPendingAdd(null);
     setAddOpen(false);
   };
 
-  const onAdd = form.handleSubmit(async (values) => {
+  const resolveAssignment = (values: FormValues): ResolvedAssignment | string => {
+    const selectedRole = roles.data?.find((role) => role.id === values.role_id);
+    if (
+      !canManage ||
+      !selectedRole ||
+      !selectedRole.is_active ||
+      hasUnavailableRolePermissions(selectedRole) ||
+      !isManageableRole(selectedRole, tenantId)
+    ) {
+      return "Эта роль недоступна для назначения";
+    }
+    if (values.branch_id && !branches.data?.some((branch) => branch.id === values.branch_id)) {
+      return "Эта торговая точка недоступна для назначения";
+    }
+    const branchId = values.branch_id === "" ? null : values.branch_id;
+    const duplicateAssignment = user.assignments.some(
+      (assignment) =>
+        assignment.is_active &&
+        assignment.role_id === values.role_id &&
+        assignment.branch_id === branchId,
+    );
+    if (duplicateAssignment) {
+      return "Эта роль уже назначена сотруднику для выбранной области";
+    }
+    return { role: selectedRole, branchId };
+  };
+
+  const onReview = form.handleSubmit((values) => {
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
@@ -66,46 +103,38 @@ export function AssignmentsPanel({
       return;
     }
     setTopError(null);
-    const d = parsed.data;
-    const selectedRole = roles.data?.find((role) => role.id === d.role_id);
-    if (
-      !canManage ||
-      !selectedRole ||
-      !selectedRole.is_active ||
-      !isManageableRole(selectedRole, tenantId)
-    ) {
-      setTopError("Эта роль недоступна для назначения");
+    const resolved = resolveAssignment(parsed.data);
+    if (typeof resolved === "string") {
+      setTopError(resolved);
       return;
     }
-    if (d.branch_id && !branches.data?.some((branch) => branch.id === d.branch_id)) {
-      setTopError("Эта точка недоступна для назначения");
-      return;
-    }
-    const normalizedBranchId = d.branch_id === "" ? null : d.branch_id;
-    const duplicateAssignment = user.assignments.some(
-      (assignment) =>
-        assignment.is_active &&
-        assignment.role_id === d.role_id &&
-        assignment.branch_id === normalizedBranchId,
-    );
-    if (duplicateAssignment) {
-      setTopError("Эта роль уже назначена сотруднику для выбранной области");
+    setPendingAdd(parsed.data);
+  });
+
+  const confirmAdd = async () => {
+    if (!pendingAdd) return;
+    setTopError(null);
+    const resolved = resolveAssignment(pendingAdd);
+    if (typeof resolved === "string") {
+      setPendingAdd(null);
+      setTopError(resolved);
       return;
     }
     try {
       await createAssignment.mutateAsync({
         userId: user.id,
         payload: {
-          role_id: d.role_id,
-          branch_id: normalizedBranchId,
-          password_required: d.password_required,
+          role_id: resolved.role.id,
+          branch_id: resolved.branchId,
+          password_required: pendingAdd.password_required,
         },
       });
       closeAddForm();
     } catch (err) {
+      setPendingAdd(null);
       setTopError(describeApiError(err, "Не удалось назначить роль"));
     }
-  });
+  };
 
   const confirmRevoke = async () => {
     if (!pendingRevokeId) return;
@@ -119,7 +148,10 @@ export function AssignmentsPanel({
   };
 
   const manageableRoles = (roles.data ?? []).filter(
-    (role) => role.is_active && isManageableRole(role, tenantId),
+    (role) =>
+      role.is_active &&
+      !hasUnavailableRolePermissions(role) &&
+      isManageableRole(role, tenantId),
   );
   const roleById = (roleId: string) => roles.data?.find((role) => role.id === roleId);
   const assignmentRoleName = (assignment: Assignment) =>
@@ -136,6 +168,26 @@ export function AssignmentsPanel({
   const revokedAssignments = user.assignments.filter((assignment) => !assignment.is_active);
   const pendingAssignment =
     user.assignments.find((assignment) => assignment.id === pendingRevokeId) ?? null;
+  const pendingResolved = pendingAdd ? resolveAssignment(pendingAdd) : null;
+  const pendingRole =
+    pendingResolved && typeof pendingResolved !== "string" ? pendingResolved.role : null;
+  const visiblePermissionByCode = new Map(
+    (permissions.data ?? [])
+      .filter(isVisibleTenantPermission)
+      .map((permission) => [permission.code, permission]),
+  );
+  const pendingPermissions = (pendingRole?.permissions ?? []).flatMap((code) => {
+    const permission = visiblePermissionByCode.get(code);
+    return permission ? [permission] : [];
+  });
+  const pendingRiskPermissions = pendingPermissions.filter(isRiskPermission);
+  const pendingCapabilityGroups = [
+    ...new Set(
+      pendingPermissions.map(
+        (permission) => GROUP_LABEL[permission.group_code] ?? "Другие функции",
+      ),
+    ),
+  ];
 
   const assignmentItem = (assignment: Assignment, showRevoke: boolean) => (
     <li
@@ -224,20 +276,33 @@ export function AssignmentsPanel({
           className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
           role="alert"
         >
-          {describeApiError(branches.error, "Не удалось загрузить точки")}
+          {describeApiError(branches.error, "Не удалось загрузить торговые точки")}
         </p>
       )}
-      {canManage && (roles.isLoading || branches.isLoading) && (
-        <p className="text-sm text-foreground-muted">Загрузка доступных ролей…</p>
+      {permissions.error && (
+        <p
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
+          {describeApiError(permissions.error, "Не удалось загрузить доступные возможности")}
+        </p>
+      )}
+      {canManage && (roles.isLoading || branches.isLoading || permissions.isLoading) && (
+        <p className="text-sm text-foreground-muted">Подготавливаем доступные роли…</p>
       )}
 
       {canManage && addOpen ? (
         <form
-          onSubmit={onAdd}
+          onSubmit={onReview}
           noValidate
           className="space-y-3 rounded-lg border border-border bg-background p-3"
         >
-          <h3 className="text-sm font-semibold text-foreground">Новое назначение</h3>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Назначение роли</h3>
+            <p className="mt-1 text-xs leading-5 text-foreground-muted">
+              Выберите, что сотрудник сможет делать и где будет действовать его доступ.
+            </p>
+          </div>
           <div>
             <Label htmlFor="role_id">Роль</Label>
             <Select
@@ -246,7 +311,7 @@ export function AssignmentsPanel({
               aria-describedby={form.formState.errors.role_id ? "role-id-error" : undefined}
               {...form.register("role_id")}
             >
-              <option value="">— выберите —</option>
+              <option value="">Выберите роль</option>
               {manageableRoles.map((role) => (
                 <option key={role.id} value={role.id}>
                   {role.name}
@@ -256,7 +321,7 @@ export function AssignmentsPanel({
             <FormError id="role-id-error">{form.formState.errors.role_id?.message}</FormError>
           </div>
           <div>
-            <Label htmlFor="branch_id">Точка</Label>
+            <Label htmlFor="branch_id">Где действует роль</Label>
             <Select id="branch_id" {...form.register("branch_id")}>
               <option value="">Все точки аптеки</option>
               {branches.data?.map((b) => (
@@ -267,7 +332,10 @@ export function AssignmentsPanel({
             </Select>
           </div>
           {user.can_require_password ? (
-            <Switch label="Требовать пароль при входе" {...form.register("password_required")} />
+            <Switch
+              label="Запрашивать пароль при входе с этой ролью"
+              {...form.register("password_required")}
+            />
           ) : (
             <p className="rounded-lg border border-border bg-surface-subtle px-3 py-2 text-sm text-foreground-muted">
               Обязательный пароль станет доступен после настройки пароля сотрудником.
@@ -289,17 +357,26 @@ export function AssignmentsPanel({
               type="submit"
               size="sm"
               isLoading={form.formState.isSubmitting}
-              disabled={roles.isError || branches.isError}
+              disabled={
+                roles.isError ||
+                branches.isError ||
+                permissions.isError ||
+                roles.isLoading ||
+                branches.isLoading ||
+                permissions.isLoading
+              }
             >
-              Добавить
+              Проверить доступ
             </Button>
           </div>
         </form>
       ) : canManage &&
         !roles.isLoading &&
         !branches.isLoading &&
+        !permissions.isLoading &&
         !roles.error &&
         !branches.error &&
+        !permissions.error &&
         manageableRoles.length > 0 ? (
         <Button variant="secondary" onClick={() => setAddOpen(true)}>
           <PlusIcon />
@@ -308,8 +385,10 @@ export function AssignmentsPanel({
       ) : canManage &&
         !roles.isLoading &&
         !branches.isLoading &&
+        !permissions.isLoading &&
         !roles.error &&
-        !branches.error ? (
+        !branches.error &&
+        !permissions.error ? (
         <p className="text-sm text-foreground-muted">Нет доступных для назначения ролей.</p>
       ) : null}
 
@@ -318,6 +397,71 @@ export function AssignmentsPanel({
           Закрыть
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={pendingAdd !== null && pendingRole !== null}
+        title="Проверьте доступ сотрудника"
+        message={
+          pendingRole ? (
+            <div className="space-y-4">
+              <dl className="grid gap-3 rounded-lg border border-border bg-background p-3 sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs text-foreground-muted">Роль</dt>
+                  <dd className="mt-1 font-semibold text-foreground">{pendingRole.name}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-foreground-muted">Где действует</dt>
+                  <dd className="mt-1 font-semibold text-foreground">
+                    {branchName(pendingAdd?.branch_id || null)}
+                  </dd>
+                </div>
+              </dl>
+
+              <div>
+                <p className="font-medium text-foreground">Кратко о возможностях</p>
+                {pendingPermissions.length > 0 ? (
+                  <>
+                    <p className="mt-1 leading-5">Разделы: {pendingCapabilityGroups.join(", ")}.</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground-secondary">
+                      {pendingPermissions.slice(0, 5).map((permission) => (
+                        <li key={permission.code}>{permission.name}</li>
+                      ))}
+                    </ul>
+                    {pendingPermissions.length > 5 ? (
+                      <p className="mt-2 text-xs text-foreground-muted">
+                        И ещё возможностей: {pendingPermissions.length - 5}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="mt-1 leading-5 text-foreground-muted">
+                    Для этой роли нет доступных действий.
+                  </p>
+                )}
+              </div>
+
+              {pendingRiskPermissions.length > 0 ? (
+                <div className="rounded-lg border border-warning/40 bg-warning-subtle p-3 text-warning-foreground">
+                  <p className="font-semibold">Обратите внимание</p>
+                  <p className="mt-1 leading-5">
+                    Роль включает важные действия. Назначайте её только сотруднику, которому вы
+                    доверяете:
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    {pendingRiskPermissions.map((permission) => (
+                      <li key={permission.code}>{permission.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null
+        }
+        confirmLabel="Назначить роль"
+        isLoading={createAssignment.isPending}
+        onConfirm={() => void confirmAdd()}
+        onCancel={() => setPendingAdd(null)}
+      />
 
       <ConfirmDialog
         open={pendingRevokeId !== null}
@@ -383,5 +527,22 @@ function ScopeIcon(): JSX.Element {
       <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
       <circle cx="12" cy="10" r="2.5" />
     </svg>
+  );
+}
+
+function isVisibleTenantPermission(permission: Permission): boolean {
+  return (
+    permission.is_active &&
+    permission.target_role_type === "tenant" &&
+    permission.scope_type !== "PLATFORM"
+  );
+}
+
+function isRiskPermission(permission: Permission): boolean {
+  return (
+    permission.is_dangerous ||
+    permission.risk_level !== "normal" ||
+    permission.requires_confirmation ||
+    permission.requires_step_up
   );
 }

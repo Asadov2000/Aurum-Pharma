@@ -55,6 +55,7 @@ def test_ownership_transfer_routes_keep_role_specific_mfa_boundaries() -> None:
 
 
 @pytest_asyncio.fixture
+# pytest-asyncio's decorator does not preserve this async-generator fixture type for mypy.
 async def ownership_history_scenario(  # type: ignore[no-untyped-def]
     db_session: AsyncSession,
     maintenance_engine: AsyncEngine,
