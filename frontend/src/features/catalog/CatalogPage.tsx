@@ -67,9 +67,9 @@ function itemStatus(item: CatalogItem): {
   label: string;
   tone: "neutral" | "success" | "warning";
 } {
-  if (item.deleted_at) return { label: "Архив", tone: "neutral" };
-  if (!item.is_active) return { label: "Отключена", tone: "warning" };
-  return { label: "Активна", tone: "success" };
+  if (item.deleted_at) return { label: "В архиве", tone: "neutral" };
+  if (!item.is_active) return { label: "Не показывается в кассе", tone: "warning" };
+  return { label: "Доступен для продажи", tone: "success" };
 }
 
 function formattedPrice(item: CatalogItem): string {
@@ -97,6 +97,7 @@ function SummaryMetric({
         active ? "border-primary bg-primary/5" : "border-transparent",
       )}
       onClick={onClick}
+      aria-pressed={active}
     >
       <span className="block text-xs font-medium text-foreground-muted">{label}</span>
       <span className="mt-1 block text-xl font-semibold tabular-nums text-foreground">
@@ -120,6 +121,16 @@ function CatalogDetailContent({
 
   return (
     <div className="space-y-4">
+      {detail.error && !detail.data ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2">
+          <p className="text-sm text-foreground-secondary" role="status">
+            Показаны краткие данные. Полная карточка не загрузилась.
+          </p>
+          <Button variant="secondary" size="sm" onClick={() => void detail.refetch()}>
+            Повторить
+          </Button>
+        </div>
+      ) : null}
       <CatalogImageManager item={current} canManage={canUpdate} />
       <CatalogItemDetails item={current} />
       <BarcodesPanel itemId={current.id} canManage={canUpdate && !current.deleted_at} />
@@ -207,6 +218,7 @@ export function CatalogPage(): JSX.Element {
   const deleteMutation = useDeleteCatalogItem();
   const restoreMutation = useRestoreCatalogItem();
   const rows = useMemo(() => query.data?.items ?? [], [query.data?.items]);
+  const isShowingPreviousResults = query.isPlaceholderData && query.isFetching;
   const total = query.data?.total ?? 0;
   const selectedItem = rows.find((item) => item.id === selectedId) ?? rows[0] ?? null;
   const activePreset: Preset | null =
@@ -287,6 +299,14 @@ export function CatalogPage(): JSX.Element {
     }
   };
 
+  const openItem = (item: CatalogItem) => {
+    if (isWideCatalogLayout) {
+      setSelectedId(item.id);
+      return;
+    }
+    setViewing(item);
+  };
+
   const doArchive = async () => {
     if (!confirmItem) return;
     setActionError(null);
@@ -333,17 +353,17 @@ export function CatalogPage(): JSX.Element {
       <PageHeader
         title="Каталог"
         showTitleOnDesktop
-        description="Единый справочник лекарств, цен, условий отпуска и штрихкодов."
-        meta={query.isFetching && !query.isLoading ? "Обновление…" : undefined}
+        description="Справочник товаров аптеки: названия, цены, условия отпуска, хранение и штрихкоды."
+        meta={isShowingPreviousResults ? "Поиск…" : query.isFetching ? "Обновление…" : undefined}
         actions={
           canCreate || canImport ? (
             <>
               {canImport && (
                 <Button variant="secondary" onClick={() => setImporting(true)}>
-                  Импорт из файла
+                  Загрузить из Excel/CSV
                 </Button>
               )}
-              {canCreate && <Button onClick={() => setCreating(true)}>+ Новая позиция</Button>}
+              {canCreate && <Button onClick={() => setCreating(true)}>Добавить товар</Button>}
             </>
           ) : undefined
         }
@@ -351,16 +371,16 @@ export function CatalogPage(): JSX.Element {
 
       <section
         className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-4"
-        aria-label="Сводка каталога"
+        aria-label="Сводка по каталогу"
       >
         <SummaryMetric
-          label="Всего позиций"
+          label="Всего товаров"
           value={summary.data?.total}
           active={activePreset === "all"}
           onClick={() => applyPreset("all")}
         />
         <SummaryMetric
-          label="Активные позиции"
+          label="Доступны для продажи"
           value={summary.data?.active}
           active={activePreset === "active"}
           onClick={() => applyPreset("active")}
@@ -378,6 +398,16 @@ export function CatalogPage(): JSX.Element {
           onClick={() => applyPreset("without_image")}
         />
       </section>
+      {summary.error ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2">
+          <p className="text-sm text-foreground-secondary" role="status">
+            Сводка временно недоступна. Список товаров продолжает работать.
+          </p>
+          <Button variant="secondary" size="sm" onClick={() => void summary.refetch()}>
+            Повторить
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border">
         <nav
@@ -386,7 +416,7 @@ export function CatalogPage(): JSX.Element {
         >
           {(
             [
-              ["all", "Все позиции", summary.data?.total],
+              ["all", "Все товары", summary.data?.total],
               ["without_image", "Без фото", summary.data?.without_image],
               ["without_barcode", "Без штрихкода", summary.data?.without_barcode],
               ["inactive", "Отключённые", summary.data?.inactive],
@@ -403,6 +433,7 @@ export function CatalogPage(): JSX.Element {
                   : "border-transparent text-foreground-secondary hover:text-foreground",
               )}
               onClick={() => applyPreset(id)}
+              aria-pressed={activePreset === id}
             >
               {label}
               {count !== undefined && (
@@ -422,6 +453,7 @@ export function CatalogPage(): JSX.Element {
               viewMode === "list" ? "bg-primary text-primary-foreground" : "text-foreground-muted",
             )}
             aria-label="Список"
+            aria-pressed={viewMode === "list"}
             title="Список"
             onClick={() => changeViewMode("list")}
           >
@@ -434,6 +466,7 @@ export function CatalogPage(): JSX.Element {
               viewMode === "grid" ? "bg-primary text-primary-foreground" : "text-foreground-muted",
             )}
             aria-label="Плитка"
+            aria-pressed={viewMode === "grid"}
             title="Плитка"
             onClick={() => changeViewMode("grid")}
           >
@@ -483,11 +516,11 @@ export function CatalogPage(): JSX.Element {
                   }}
                   className="w-full sm:w-48"
                 >
-                  <option value="current">Все текущие</option>
-                  <option value="active">Активные</option>
-                  <option value="inactive">Отключённые</option>
+                  <option value="current">Все товары, кроме архива</option>
+                  <option value="active">Доступны для продажи</option>
+                  <option value="inactive">Не показываются в кассе</option>
                   <option value="archived">Архив</option>
-                  <option value="all">Все, включая архив</option>
+                  <option value="all">Все товары, включая архив</option>
                 </Select>
               </div>
             ),
@@ -500,10 +533,10 @@ export function CatalogPage(): JSX.Element {
           },
           {
             id: "dispensing",
-            label: "Тип отпуска",
+            label: "Условия отпуска",
             content: (
               <div>
-                <Label htmlFor="catalog_dispensing">Тип отпуска</Label>
+                <Label htmlFor="catalog_dispensing">Условия отпуска</Label>
                 <Select
                   id="catalog_dispensing"
                   value={dispensing}
@@ -544,7 +577,7 @@ export function CatalogPage(): JSX.Element {
                   }}
                   className="w-full sm:w-44"
                 >
-                  <option value="any">Любая</option>
+                  <option value="any">Не важно</option>
                   <option value="with_image">С фото</option>
                   <option value="without_image">Без фото</option>
                 </Select>
@@ -571,7 +604,7 @@ export function CatalogPage(): JSX.Element {
                   }}
                   className="w-full sm:w-48"
                 >
-                  <option value="any">Любой</option>
+                  <option value="any">Не важно</option>
                   <option value="with_barcode">Есть</option>
                   <option value="without_barcode">Не указан</option>
                 </Select>
@@ -675,6 +708,15 @@ export function CatalogPage(): JSX.Element {
         </div>
       )}
 
+      {isShowingPreviousResults ? (
+        <div
+          className="rounded-lg border border-info/30 bg-info-subtle px-3 py-2 text-sm text-info-foreground"
+          role="status"
+        >
+          Ищем товары. Пока показан предыдущий список; действия временно недоступны.
+        </div>
+      ) : null}
+
       {query.error && !query.data ? (
         <TableEmpty
           title="Каталог не загрузился"
@@ -696,10 +738,10 @@ export function CatalogPage(): JSX.Element {
               <div className="flex flex-wrap justify-center gap-2">
                 {canImport && (
                   <Button variant="secondary" onClick={() => setImporting(true)}>
-                    Импорт из файла
+                    Загрузить из Excel/CSV
                   </Button>
                 )}
-                {canCreate && <Button onClick={() => setCreating(true)}>+ Новая позиция</Button>}
+                {canCreate && <Button onClick={() => setCreating(true)}>Добавить товар</Button>}
               </div>
             ) : undefined
           }
@@ -707,8 +749,8 @@ export function CatalogPage(): JSX.Element {
           {hasFilters
             ? "Измените запрос или верните стандартные фильтры."
             : canCreate || canImport
-              ? "Добавьте первую позицию вручную или импортируйте прайс из файла."
-              : "В аптеке пока нет доступных позиций."}
+              ? "Добавьте первый товар вручную или загрузите список из Excel/CSV."
+              : "В аптеке пока нет доступных товаров."}
         </TableEmpty>
       ) : (
         <>
@@ -723,13 +765,18 @@ export function CatalogPage(): JSX.Element {
             </div>
           )}
           <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
-            <section className="min-w-0" aria-label="Позиции каталога">
+            <section
+              className={cn("min-w-0", isShowingPreviousResults && "opacity-70")}
+              aria-label="Товары каталога"
+              aria-busy={isShowingPreviousResults}
+            >
               {viewMode === "list" ? (
                 <div className="overflow-hidden rounded-lg border border-border bg-surface">
-                  <div className="hidden grid-cols-[minmax(260px,1.4fr)_minmax(150px,.8fr)_130px_100px_120px_40px] gap-3 border-b border-border bg-background px-3 py-2 text-xs font-semibold text-foreground-muted md:grid">
-                    <span>Позиция</span>
+                  <div className="hidden grid-cols-[64px_minmax(220px,1.4fr)_minmax(140px,.8fr)_150px_180px_120px_44px] gap-3 border-b border-border bg-background px-3 py-2 text-xs font-semibold text-foreground-muted xl:grid">
+                    <span className="sr-only">Фото</span>
+                    <span>Товар</span>
                     <span>Производитель</span>
-                    <span>Отпуск</span>
+                    <span>Условия отпуска</span>
                     <span>Статус</span>
                     <span>Цена</span>
                     <span className="sr-only">Действия</span>
@@ -751,9 +798,12 @@ export function CatalogPage(): JSX.Element {
                           )}
                           <button
                             type="button"
-                            className="grid min-w-0 flex-1 grid-cols-[64px_minmax(0,1fr)] items-center gap-3 px-3 py-3 text-left md:grid-cols-[64px_minmax(180px,1.4fr)_minmax(150px,.8fr)_130px_100px_120px]"
-                            onClick={() => setSelectedId(item.id)}
-                            onDoubleClick={() => setViewing(item)}
+                            className="grid min-w-0 flex-1 grid-cols-[64px_minmax(0,1fr)] items-center gap-3 px-3 py-3 text-left disabled:cursor-wait xl:grid-cols-[64px_minmax(220px,1.4fr)_minmax(140px,.8fr)_150px_180px_120px]"
+                            aria-label={`Открыть карточку ${item.brand_name}`}
+                            aria-pressed={isWideCatalogLayout ? selected : undefined}
+                            disabled={isShowingPreviousResults}
+                            onClick={() => openItem(item)}
+                            onDoubleClick={() => isWideCatalogLayout && setViewing(item)}
                           >
                             <CatalogImage item={item} />
                             <span className="min-w-0">
@@ -765,23 +815,23 @@ export function CatalogPage(): JSX.Element {
                                   [item.form, item.dosage].filter(Boolean).join(" · ") ||
                                   "Сведения не указаны"}
                               </span>
-                              <span className="mt-1 flex flex-wrap gap-1 md:hidden">
+                              <span className="mt-1 flex flex-wrap gap-1 xl:hidden">
                                 <Badge tone={status.tone}>{status.label}</Badge>
                                 <span className="text-xs font-semibold text-foreground">
                                   {formattedPrice(item)}
                                 </span>
                               </span>
                             </span>
-                            <span className="hidden truncate text-sm text-foreground-secondary md:block">
+                            <span className="hidden truncate text-sm text-foreground-secondary xl:block">
                               {item.manufacturer || "—"}
                             </span>
-                            <span className="hidden text-sm text-foreground-secondary md:block">
+                            <span className="hidden text-sm text-foreground-secondary xl:block">
                               {dispensingLabel[item.dispensing_type]}
                             </span>
-                            <span className="hidden md:block">
+                            <span className="hidden xl:block">
                               <Badge tone={status.tone}>{status.label}</Badge>
                             </span>
-                            <span className="hidden whitespace-nowrap text-sm font-semibold text-foreground md:block">
+                            <span className="hidden whitespace-nowrap text-sm font-semibold text-foreground xl:block">
                               {formattedPrice(item)}
                             </span>
                           </button>
@@ -789,6 +839,7 @@ export function CatalogPage(): JSX.Element {
                             <ActionMenu
                               label={`Действия для ${item.brand_name}`}
                               items={rowActions(item)}
+                              isLoading={isShowingPreviousResults}
                             />
                           </div>
                         </article>
@@ -812,8 +863,11 @@ export function CatalogPage(): JSX.Element {
                         <button
                           type="button"
                           className="block w-full p-3 text-left"
-                          onClick={() => setSelectedId(item.id)}
-                          onDoubleClick={() => setViewing(item)}
+                          aria-label={`Открыть карточку ${item.brand_name}`}
+                          aria-pressed={isWideCatalogLayout ? selected : undefined}
+                          disabled={isShowingPreviousResults}
+                          onClick={() => openItem(item)}
+                          onDoubleClick={() => isWideCatalogLayout && setViewing(item)}
                         >
                           <CatalogImage item={item} variant="detail" className="h-32" />
                           <span className="mt-3 block truncate text-sm font-semibold text-foreground">
@@ -833,6 +887,7 @@ export function CatalogPage(): JSX.Element {
                           <ActionMenu
                             label={`Действия для ${item.brand_name}`}
                             items={rowActions(item)}
+                            isLoading={isShowingPreviousResults}
                           />
                         </div>
                       </article>
@@ -884,7 +939,7 @@ export function CatalogPage(): JSX.Element {
       <Modal
         open={creating}
         onClose={() => setCreating(false)}
-        title="Новая позиция"
+        title="Добавить товар"
         className="max-w-2xl"
       >
         <CatalogItemForm item={null} onClose={() => setCreating(false)} />
@@ -892,7 +947,7 @@ export function CatalogPage(): JSX.Element {
       <Modal
         open={viewing !== null}
         onClose={() => setViewing(null)}
-        title="Карточка позиции"
+        title="Карточка товара"
         className="max-w-2xl"
       >
         {viewing && (
@@ -909,7 +964,7 @@ export function CatalogPage(): JSX.Element {
       <Modal
         open={editing !== null}
         onClose={() => setEditing(null)}
-        title={editing ? `Изменить: ${editing.brand_name}` : ""}
+        title={editing ? `Изменить товар: ${editing.brand_name}` : ""}
         className="max-w-2xl"
       >
         {editing && (
@@ -923,7 +978,7 @@ export function CatalogPage(): JSX.Element {
       <Modal
         open={importing}
         onClose={() => setImporting(false)}
-        title="Импорт каталога"
+        title="Загрузить товары из Excel/CSV"
         className="max-w-3xl"
       >
         <ImportWizard
@@ -934,11 +989,12 @@ export function CatalogPage(): JSX.Element {
       </Modal>
       <ConfirmDialog
         open={confirmItem !== null}
-        title="Архивировать позицию"
+        title="Перенести товар в архив?"
         message={
           <>
-            Архивировать «{confirmItem?.brand_name}»? Она исчезнет из рабочего каталога, но её можно
-            будет восстановить через представление «Архив».
+            «{confirmItem?.brand_name}» больше нельзя будет выбирать в кассе и новых документах.
+            История продаж и складских операций сохранится. Товар можно восстановить через раздел
+            «Архив».
             {actionError && <span className="mt-2 block text-danger">{actionError}</span>}
           </>
         }

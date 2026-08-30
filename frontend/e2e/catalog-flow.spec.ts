@@ -13,9 +13,7 @@ import {
 } from "./helpers";
 
 function catalogItem(page: Page, name: string) {
-  return page
-    .locator('section[aria-label="Позиции каталога"] article')
-    .filter({ hasText: name });
+  return page.locator('section[aria-label="Товары каталога"] article').filter({ hasText: name });
 }
 
 test.describe("Catalog flow (owner)", () => {
@@ -28,10 +26,12 @@ test.describe("Catalog flow (owner)", () => {
     await page.goto("/catalog");
 
     const name = uniqueName("E2E Item");
-    await page.getByRole("button", { name: /\+ Новая позиция/ }).click();
+    await page.getByRole("button", { name: /Добавить товар/ }).click();
     await page.getByLabel("Торговое название").fill(name);
-    await page.getByLabel(/Базовая цена/).fill("12.50");
-    await page.getByRole("button", { name: /^Создать$/ }).click();
+    await page.getByLabel("Условия отпуска", { exact: true }).selectOption("otc");
+    await page.getByLabel("Условия хранения", { exact: true }).selectOption("normal");
+    await page.getByLabel(/Цена по умолчанию/).fill("12.50");
+    await page.getByRole("button", { name: /^Добавить товар$/ }).click();
     await expect(page.getByRole("dialog")).toBeHidden({ timeout: 15_000 });
 
     // Modal closes and the row appears. Catalog page uses a trigram search;

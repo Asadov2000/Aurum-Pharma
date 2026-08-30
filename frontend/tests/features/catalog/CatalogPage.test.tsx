@@ -116,10 +116,10 @@ describe("CatalogPage", () => {
     renderPage();
     expect((await screen.findAllByText("Парацетамол")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Paracetamol").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Безрецептурный/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Без рецепта/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/5\.50 TJS/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Активна").length).toBeGreaterThan(0);
-    expect(screen.getByText("Активные позиции")).toBeInTheDocument();
+    expect(screen.getAllByText("Доступен для продажи").length).toBeGreaterThan(0);
+    expect(screen.getByText("Доступны для продажи")).toBeInTheDocument();
   });
 
   it("shows accurate summary and applies the no-photo preset", async () => {
@@ -149,11 +149,12 @@ describe("CatalogPage", () => {
     listCatalog.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
     renderPage();
     await screen.findByText(/Каталог пуст/i);
-    // Header + empty-state both expose "+ Новая позиция"; the header one is first.
-    fireEvent.click(screen.getAllByRole("button", { name: /\+ Новая позиция/i })[0]!);
-    const submit = await screen.findByRole("button", { name: /^Создать$/i });
+    fireEvent.click(screen.getAllByRole("button", { name: /Добавить товар/i })[0]!);
+    const submit = await screen.findByRole("button", { name: /^Добавить товар$/i });
     fireEvent.click(submit);
     expect(await screen.findByText(/Введите название/i)).toBeInTheDocument();
+    expect(screen.getByText(/Выберите условия отпуска/i)).toBeInTheDocument();
+    expect(screen.getByText(/Выберите условия хранения/i)).toBeInTheDocument();
     expect(createCatalogItem).not.toHaveBeenCalled();
   });
 
@@ -162,11 +163,17 @@ describe("CatalogPage", () => {
     createCatalogItem.mockResolvedValueOnce(ITEM);
     renderPage();
     await screen.findByText(/Каталог пуст/i);
-    fireEvent.click(screen.getAllByRole("button", { name: /\+ Новая позиция/i })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /Добавить товар/i })[0]!);
     fireEvent.change(await screen.findByLabelText(/Торговое название/i), {
       target: { value: "Анальгин" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Создать$/i }));
+    fireEvent.change(screen.getByLabelText(/^Условия отпуска$/i), {
+      target: { value: "otc" },
+    });
+    fireEvent.change(screen.getByLabelText(/^Условия хранения$/i), {
+      target: { value: "normal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Добавить товар$/i }));
     await waitFor(() => {
       expect(createCatalogItem).toHaveBeenCalledTimes(1);
     });
@@ -189,7 +196,16 @@ describe("CatalogPage", () => {
     renderPage();
 
     expect(await screen.findByText(/Каталог пуст/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Новая позиция/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Импорт из файла/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Добавить товар/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Загрузить из Excel/i })).not.toBeInTheDocument();
+  });
+
+  it("opens the product card with one click on an ordinary screen", async () => {
+    listCatalog.mockResolvedValueOnce({ items: [ITEM], total: 1, page: 1, page_size: 25 });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть карточку Парацетамол" }));
+
+    expect(await screen.findByRole("dialog", { name: "Карточка товара" })).toBeInTheDocument();
   });
 });

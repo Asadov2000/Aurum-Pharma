@@ -56,7 +56,7 @@ function renderWizard() {
 
 describe("ImportWizard", () => {
   beforeEach(() => {
-    window.sessionStorage.clear();
+    window.localStorage.clear();
     uploadImport.mockReset();
     getImportJob.mockReset();
     rollbackImport.mockReset();
@@ -88,7 +88,7 @@ describe("ImportWizard", () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Подготовить превью/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Проверить файл/ })).toBeInTheDocument();
     });
     expect(uploadImport).toHaveBeenCalledTimes(1);
   });
@@ -108,15 +108,19 @@ describe("ImportWizard", () => {
 
     fireEvent.change(input, { target: { files: [file] } });
 
-    const rollbackButton = await screen.findByRole("button", { name: /^Откатить$/i });
+    const rollbackButton = await screen.findByRole("button", {
+      name: /^Отменить результаты импорта$/i,
+    });
     fireEvent.click(rollbackButton);
-    let dialog = await screen.findByRole("dialog", { name: /Откатить импорт/i });
+    let dialog = await screen.findByRole("dialog", { name: /Отменить результаты импорта/i });
     fireEvent.click(within(dialog).getByRole("button", { name: /Отмена/i }));
     expect(rollbackImport).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: /^Откатить$/i }));
-    dialog = await screen.findByRole("dialog", { name: /Откатить импорт/i });
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Откатить$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Отменить результаты импорта$/i }));
+    dialog = await screen.findByRole("dialog", { name: /Отменить результаты импорта/i });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /^Перенести созданные товары в архив$/i }),
+    );
 
     await waitFor(() => {
       expect(rollbackImport).toHaveBeenCalledWith("job-1");

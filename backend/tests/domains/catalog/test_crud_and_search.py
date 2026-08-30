@@ -157,6 +157,34 @@ async def test_picker_search_prefers_exact_name_without_full_catalog_count(
     assert stock == {}
 
 
+async def test_catalog_search_prefers_exact_brand_name(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    suffix = str(tenant.id)[:8]
+    exact_name = f"Аурелин {suffix}"
+    exact = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": exact_name},
+    )
+    extended = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": f"{exact_name} Форте"},
+    )
+
+    items, _total, _stock = await service.search(
+        q=exact_name,
+        category=None,
+        dispensing_type=None,
+        page=1,
+        page_size=50,
+    )
+    mine = [item for item in items if item.tenant_id == tenant.id]
+
+    assert [item.id for item in mine[:2]] == [exact.id, extended.id]
+
+
 async def test_unique_barcode_per_tenant(db_session: AsyncSession, make_tenant) -> None:
     tenant = await make_tenant()
     service = CatalogService(CatalogRepository(db_session))
@@ -280,13 +308,15 @@ async def test_search_combines_manufacturer_and_storage_filters(
 ) -> None:
     tenant = await make_tenant()
     service = CatalogService(CatalogRepository(db_session))
-    category = f"filters-{tenant.id}"
+    unique_part = str(tenant.id)[:8]
+    category = f"Противопростудные {unique_part}"
+    manufacturer = f"Aurum Test Maker {unique_part}"
     expected = await service.create_item(
         tenant_id=tenant.id,
         fields={
             "brand_name": "Cold exact",
             "category": category,
-            "manufacturer": "Aurum Test Maker",
+            "manufacturer": manufacturer,
             "storage_type": "cold",
         },
     )
@@ -295,16 +325,16 @@ async def test_search_combines_manufacturer_and_storage_filters(
         fields={
             "brand_name": "Normal exact",
             "category": category,
-            "manufacturer": "Aurum Test Maker",
+            "manufacturer": manufacturer,
             "storage_type": "normal",
         },
     )
 
     items, total, _ = await service.search(
         q=None,
-        category=category,
+        category=f"простудные {unique_part}",
         dispensing_type=None,
-        manufacturer="Aurum Test Maker",
+        manufacturer=f"test maker {unique_part}",
         storage_type="cold",
         page=1,
         page_size=50,

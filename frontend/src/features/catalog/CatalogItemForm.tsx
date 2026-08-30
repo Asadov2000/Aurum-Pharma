@@ -19,8 +19,12 @@ const schema = z.object({
   dosage: optionalText,
   pack_size: optionalText,
   atx_code: z.string().trim().max(32, "Не более 32 символов").optional(),
-  dispensing_type: z.enum(["prescription", "otc", "special"]),
-  storage_type: z.enum(["normal", "cold", "frozen"]),
+  dispensing_type: z
+    .enum(["", "prescription", "otc", "special"])
+    .refine((value) => value !== "", "Выберите условия отпуска"),
+  storage_type: z
+    .enum(["", "normal", "cold", "frozen"])
+    .refine((value) => value !== "", "Выберите условия хранения"),
   category: optionalText,
   base_price: z
     .string()
@@ -33,7 +37,11 @@ const schema = z.object({
   is_active: z.boolean(),
 });
 
-type FormValues = z.infer<typeof schema>;
+type ParsedValues = z.infer<typeof schema>;
+type FormValues = Omit<ParsedValues, "dispensing_type" | "storage_type"> & {
+  dispensing_type: ParsedValues["dispensing_type"] | "";
+  storage_type: ParsedValues["storage_type"] | "";
+};
 
 interface Props {
   item: CatalogItem | null;
@@ -55,8 +63,8 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
       dosage: item?.dosage ?? "",
       pack_size: item?.pack_size ?? "",
       atx_code: item?.atx_code ?? "",
-      dispensing_type: item?.dispensing_type ?? "otc",
-      storage_type: item?.storage_type ?? "normal",
+      dispensing_type: item?.dispensing_type ?? "",
+      storage_type: item?.storage_type ?? "",
       category: item?.category ?? "",
       base_price: item?.base_price ?? "",
       is_active: item?.is_active ?? true,
@@ -72,8 +80,8 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
       dosage: item?.dosage ?? "",
       pack_size: item?.pack_size ?? "",
       atx_code: item?.atx_code ?? "",
-      dispensing_type: item?.dispensing_type ?? "otc",
-      storage_type: item?.storage_type ?? "normal",
+      dispensing_type: item?.dispensing_type ?? "",
+      storage_type: item?.storage_type ?? "",
       category: item?.category ?? "",
       base_price: item?.base_price ?? "",
       is_active: item?.is_active ?? true,
@@ -96,6 +104,7 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
     }
     setTopError(null);
     const d = parsed.data;
+    if (!d.dispensing_type || !d.storage_type) return;
     const nullable = (v: string | undefined) => (v && v.trim() !== "" ? v.trim() : null);
     try {
       if (isEdit && item) {
@@ -151,7 +160,7 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
           <FormError>{form.formState.errors.brand_name?.message}</FormError>
         </div>
         <div>
-          <Label htmlFor="inn">МНН</Label>
+          <Label htmlFor="inn">МНН (действующее вещество)</Label>
           <Input id="inn" autoComplete="off" {...form.register("inn")} />
         </div>
         <div>
@@ -159,7 +168,7 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
           <Input id="manufacturer" autoComplete="off" {...form.register("manufacturer")} />
         </div>
         <div>
-          <Label htmlFor="form">Форма</Label>
+          <Label htmlFor="form">Форма выпуска</Label>
           <Input id="form" placeholder="таблетки, сироп…" {...form.register("form")} />
         </div>
         <div>
@@ -167,39 +176,51 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
           <Input id="dosage" placeholder="500 мг" {...form.register("dosage")} />
         </div>
         <div>
-          <Label htmlFor="pack_size">Упаковка</Label>
-          <Input id="pack_size" placeholder="№ 10" {...form.register("pack_size")} />
+          <Label htmlFor="pack_size">Размер упаковки</Label>
+          <Input id="pack_size" placeholder="20 таблеток" {...form.register("pack_size")} />
         </div>
         <div>
           <Label htmlFor="atx_code">ATX-код</Label>
           <Input id="atx_code" {...form.register("atx_code")} />
         </div>
         <div>
-          <Label htmlFor="dispensing_type">Отпуск</Label>
-          <Select id="dispensing_type" {...form.register("dispensing_type")}>
+          <Label htmlFor="dispensing_type">Условия отпуска</Label>
+          <Select
+            id="dispensing_type"
+            invalid={Boolean(form.formState.errors.dispensing_type)}
+            {...form.register("dispensing_type")}
+          >
+            <option value="">Выберите условия</option>
             {dispensingOptions.map((d) => (
               <option key={d} value={d}>
                 {dispensingLabel[d]}
               </option>
             ))}
           </Select>
+          <FormError>{form.formState.errors.dispensing_type?.message}</FormError>
         </div>
         <div>
-          <Label htmlFor="storage_type">Хранение</Label>
-          <Select id="storage_type" {...form.register("storage_type")}>
+          <Label htmlFor="storage_type">Условия хранения</Label>
+          <Select
+            id="storage_type"
+            invalid={Boolean(form.formState.errors.storage_type)}
+            {...form.register("storage_type")}
+          >
+            <option value="">Выберите условия</option>
             {storageOptions.map((s) => (
               <option key={s} value={s}>
                 {storageLabel[s]}
               </option>
             ))}
           </Select>
+          <FormError>{form.formState.errors.storage_type?.message}</FormError>
         </div>
         <div>
           <Label htmlFor="category">Категория</Label>
           <Input id="category" {...form.register("category")} />
         </div>
         <div>
-          <Label htmlFor="base_price">Базовая цена (TJS)</Label>
+          <Label htmlFor="base_price">Цена по умолчанию (TJS)</Label>
           <Input
             id="base_price"
             type="text"
@@ -212,7 +233,13 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
         </div>
         {isEdit && (
           <div className="sm:col-span-2">
-            <Switch label="Активна" {...form.register("is_active")} />
+            <Switch
+              label="Показывать товар в кассе и рабочих списках"
+              {...form.register("is_active")}
+            />
+            <p className="mt-1 text-xs text-foreground-muted">
+              Отключите, если товар временно нельзя выбирать для новых операций.
+            </p>
           </div>
         )}
       </div>
@@ -226,7 +253,7 @@ export function CatalogItemForm({ item, onClose }: Props): JSX.Element {
           Отмена
         </Button>
         <Button type="submit" isLoading={form.formState.isSubmitting}>
-          {isEdit ? "Сохранить" : "Создать"}
+          {isEdit ? "Сохранить изменения" : "Добавить товар"}
         </Button>
       </div>
     </form>

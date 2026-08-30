@@ -9,12 +9,14 @@ interface CatalogImageProps {
   item: CatalogItem;
   variant?: "thumbnail" | "detail";
   className?: string;
+  showRetry?: boolean;
 }
 
 export function CatalogImage({
   item,
   variant = "thumbnail",
   className,
+  showRetry = false,
 }: CatalogImageProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === "undefined");
@@ -69,15 +71,32 @@ export function CatalogImage({
           alt={`Упаковка ${item.brand_name}`}
           className="h-full w-full object-contain p-1"
         />
+      ) : item.image_version && imageQuery.isError ? (
+        <div className="grid h-full w-full place-items-center px-2 text-center text-xs text-danger">
+          <span>{variant === "detail" ? "Фото не загрузилось" : "Фото недоступно"}</span>
+          {showRetry ? (
+            <button
+              type="button"
+              className="mt-2 min-h-9 rounded-md border border-border bg-surface px-3 font-medium text-foreground"
+              onClick={() => void imageQuery.refetch()}
+            >
+              Повторить
+            </button>
+          ) : null}
+        </div>
+      ) : item.image_version && (!visible || imageQuery.isFetching) ? (
+        <div
+          className="grid h-full w-full animate-pulse place-items-center bg-primary/5 text-xs text-foreground-muted"
+          role={variant === "detail" ? "status" : undefined}
+        >
+          {variant === "detail" ? "Загрузка фото…" : null}
+        </div>
       ) : (
         <div className="grid h-full w-full place-items-center bg-primary/5" aria-hidden="true">
           <span className="rounded border border-primary/25 bg-surface px-1.5 py-1 text-[10px] font-bold text-primary">
             Rx
           </span>
         </div>
-      )}
-      {imageQuery.isFetching && !objectUrl && item.image_version && (
-        <span className="absolute inset-x-2 bottom-1 h-0.5 animate-pulse rounded bg-primary/30" />
       )}
     </div>
   );

@@ -17,6 +17,19 @@ from app.domains.catalog.models import Barcode, CatalogImportJob, TenantCatalog
 from app.domains.inventory.models import Batch
 
 
+def _normalize_search_text(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _contains_pattern(value: str) -> str:
+    escaped = _escape_like(value)
+    return f"%{escaped}%"
+
+
 class CatalogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -111,8 +124,10 @@ class CatalogRepository:
         image_state: str = "any",
         barcode_state: str = "any",
     ) -> tuple[list[TenantCatalog], int]:
-        """Trigram search across brand_name, inn, and manufacturer. Filters by category and
-        dispensing_type are exact-match. Tenant scoping is handled by RLS;
+        """Search brand, INN, manufacturer, and barcode with relevance ordering.
+
+        Category and manufacturer support case-insensitive partial matching; enum filters
+        remain exact. Tenant scoping is handled by RLS;
         we still add deleted_at IS NULL because the policy doesn't filter
         soft-deletes."""
 
@@ -125,12 +140,22 @@ class CatalogRepository:
             filters.append(TenantCatalog.deleted_at.is_not(None))
         elif lifecycle == "current":
             filters.append(TenantCatalog.deleted_at.is_(None))
-        if category:
-            filters.append(TenantCatalog.category == category)
+        normalized_category = _normalize_search_text(category) if category else ""
+        if normalized_category:
+            filters.append(
+                TenantCatalog.category.ilike(
+                    _contains_pattern(normalized_category), escape="\\"
+                )
+            )
         if dispensing_type:
             filters.append(TenantCatalog.dispensing_type == dispensing_type)
-        if manufacturer:
-            filters.append(TenantCatalog.manufacturer == manufacturer.strip())
+        normalized_manufacturer = _normalize_search_text(manufacturer) if manufacturer else ""
+        if normalized_manufacturer:
+            filters.append(
+                TenantCatalog.manufacturer.ilike(
+                    _contains_pattern(normalized_manufacturer), escape="\\"
+                )
+            )
         if storage_type:
             filters.append(TenantCatalog.storage_type == storage_type)
         if image_state == "with_image":
@@ -144,39 +169,52 @@ class CatalogRepository:
         elif barcode_state == "without_barcode":
             filters.append(not_(barcode_exists))
 
-        base_stmt = select(TenantCatalog).where(*filters)
-        if q:
+        relevance_order: list[Any] = []
+        normalized = _normalize_search_text(q) if q else ""
+        if normalized:
+            contains_pattern = _contains_pattern(normalized)
+            escaped = _escape_like(normalized)
+            prefix_pattern = f"{escaped}%"
+            barcode_match = exists(
+                select(1).where(
+                    Barcode.catalog_id == TenantCatalog.id,
+                    Barcode.code == normalized,
+                )
+            )
             # pg_trgm `%` operator with similarity_threshold defaulting to 0.3.
-            base_stmt = base_stmt.where(
-                or_(
-                    text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q),
-                    exists(
-                        select(1).where(
-                            Barcode.catalog_id == TenantCatalog.id,
-                            Barcode.code == q,
-                        )
-                    ),
-                )
+            text_match = or_(
+                TenantCatalog.brand_name.ilike(contains_pattern, escape="\\"),
+                TenantCatalog.inn.ilike(contains_pattern, escape="\\"),
+                TenantCatalog.manufacturer.ilike(contains_pattern, escape="\\"),
+                text(
+                    "(brand_name % :catalog_q OR inn % :catalog_q "
+                    "OR manufacturer % :catalog_q)"
+                ).bindparams(catalog_q=normalized),
             )
+            filters.append(or_(barcode_match, text_match))
+            relevance_order = [
+                barcode_match.desc(),
+                case(
+                    (func.lower(TenantCatalog.brand_name) == normalized.lower(), 0),
+                    (TenantCatalog.brand_name.ilike(prefix_pattern, escape="\\"), 1),
+                    (func.lower(TenantCatalog.inn) == normalized.lower(), 2),
+                    (TenantCatalog.inn.ilike(prefix_pattern, escape="\\"), 3),
+                    (TenantCatalog.brand_name.ilike(contains_pattern, escape="\\"), 4),
+                    else_=5,
+                ).asc(),
+            ]
 
+        base_stmt = select(TenantCatalog).where(*filters)
         count_stmt = select(func.count()).select_from(TenantCatalog).where(*filters)
-        if q:
-            count_stmt = count_stmt.where(
-                or_(
-                    text("(brand_name % :q OR inn % :q OR manufacturer % :q)").bindparams(q=q),
-                    exists(
-                        select(1).where(
-                            Barcode.catalog_id == TenantCatalog.id,
-                            Barcode.code == q,
-                        )
-                    ),
-                )
-            )
 
         total = int((await self.session.execute(count_stmt)).scalar_one())
 
         list_stmt = (
-            base_stmt.order_by(TenantCatalog.brand_name.asc(), TenantCatalog.id.asc())
+            base_stmt.order_by(
+                *relevance_order,
+                TenantCatalog.brand_name.asc(),
+                TenantCatalog.id.asc(),
+            )
             .limit(page_size)
             .offset((page - 1) * page_size)
         )
@@ -186,8 +224,10 @@ class CatalogRepository:
     async def search_picker(self, *, q: str, limit: int) -> list[TenantCatalog]:
         """Return a small relevance-ranked result set without a full COUNT query."""
 
-        normalized = " ".join(q.split())
-        escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        normalized = _normalize_search_text(q)
+        if not normalized:
+            return []
+        escaped = _escape_like(normalized)
         contains_pattern = f"%{escaped}%"
         prefix_pattern = f"{escaped}%"
         barcode_match = exists(
