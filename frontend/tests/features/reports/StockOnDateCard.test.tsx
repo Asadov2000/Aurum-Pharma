@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,6 +30,17 @@ vi.mock("@/features/foundation/queries", () => ({
 
 import { StockOnDateCard } from "@/features/reports/ReportsPage";
 
+function renderCard() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StockOnDateCard />
+    </QueryClientProvider>,
+  );
+}
+
 describe("StockOnDateCard", () => {
   beforeEach(() => {
     getStockOnDate.mockResolvedValue({
@@ -51,7 +63,7 @@ describe("StockOnDateCard", () => {
   it("downloads the stock XLSX for the selected date", async () => {
     const blob = new Blob(["x"]);
     getStockOnDateXlsx.mockResolvedValueOnce(blob);
-    render(<StockOnDateCard />);
+    renderCard();
 
     const dateInput = screen.getByLabelText("Дата остатка") as HTMLInputElement;
     fireEvent.change(dateInput, { target: { value: "2026-05-31" } });
@@ -65,7 +77,7 @@ describe("StockOnDateCard", () => {
   });
 
   it("keeps the all-branches option when no branches are available", () => {
-    render(<StockOnDateCard />);
+    renderCard();
     expect(screen.getByLabelText("Аптечная точка")).toHaveValue("");
   });
 });
