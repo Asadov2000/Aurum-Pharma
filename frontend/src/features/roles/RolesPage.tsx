@@ -715,7 +715,7 @@ function RoleCard({
               <strong className="font-mono text-sm font-semibold text-foreground">
                 {catalogueLoading ? "—" : permissionCount}
               </strong>{" "}
-              функций
+              {catalogueLoading ? "функций" : permissionCountNoun(permissionCount)}
             </span>
             <span>Версия {role.version}</span>
             <span>{role.active_assignment_count} назнач.</span>
@@ -779,7 +779,9 @@ function RoleVersionHistoryItem({
         <p className="mt-1 text-sm leading-5 text-foreground-secondary">{version.description}</p>
       ) : null}
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-foreground-muted">
-        <span>Опубликована: {formatRoleVersionTime(version.published_at ?? version.created_at)}</span>
+        <span>
+          Опубликована: {formatRoleVersionTime(version.published_at ?? version.created_at)}
+        </span>
         {version.archived_at ? (
           <span>Архивирована: {formatRoleVersionTime(version.archived_at)}</span>
         ) : null}
@@ -857,13 +859,17 @@ function roleCountLabel(count: number): string {
 }
 
 function permissionCountLabel(count: number): string {
+  return `${count} ${permissionCountNoun(count)}`;
+}
+
+function permissionCountNoun(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${count} функция`;
+  if (mod10 === 1 && mod100 !== 11) return "функция";
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return `${count} функции`;
+    return "функции";
   }
-  return `${count} функций`;
+  return "функций";
 }
 
 function PlusIcon(): JSX.Element {
