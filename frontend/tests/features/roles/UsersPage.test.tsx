@@ -10,6 +10,7 @@ const suspendUser = vi.fn();
 const offboardUser = vi.fn();
 const revokeUserSessions = vi.fn();
 const reissueUserInvitation = vi.fn();
+const inviteEmployee = vi.fn();
 const createAssignment = vi.fn();
 const createOwnershipTransfer = vi.fn();
 const listBranches = vi.fn();
@@ -27,6 +28,7 @@ vi.mock("@/features/roles/api", () => ({
   offboardUser: (...args: unknown[]) => offboardUser(...args),
   revokeUserSessions: (...args: unknown[]) => revokeUserSessions(...args),
   reissueUserInvitation: (...args: unknown[]) => reissueUserInvitation(...args),
+  inviteEmployee: (...args: unknown[]) => inviteEmployee(...args),
   createAssignment: (...args: unknown[]) => createAssignment(...args),
   createOwnershipTransfer: (...args: unknown[]) => createOwnershipTransfer(...args),
   listOwnershipTransfers: vi.fn().mockResolvedValue([]),
@@ -177,6 +179,7 @@ describe("UsersPage", () => {
     offboardUser.mockReset();
     revokeUserSessions.mockReset();
     reissueUserInvitation.mockReset();
+    inviteEmployee.mockReset();
     createAssignment.mockReset();
     createOwnershipTransfer.mockReset();
     listBranches.mockReset();
@@ -193,6 +196,7 @@ describe("UsersPage", () => {
       invited_at: "2026-08-30T09:00:00Z",
       invitation_expires_at: "2026-09-06T09:00:00Z",
     });
+    inviteEmployee.mockResolvedValue({ id: "assignment-invited" });
     createAssignment.mockResolvedValue({ id: "assignment-new" });
     createOwnershipTransfer.mockResolvedValue({
       transfer: { id: "transfer-1" },
@@ -202,17 +206,94 @@ describe("UsersPage", () => {
 
   afterEach(() => vi.clearAllMocks());
 
-  it("renders attached-membership empty state without invite controls", async () => {
+  it("explains how the owner can add the first employee", async () => {
     listUsers.mockResolvedValue(usersResponse([]));
     renderPage();
 
     expect(await screen.findByText("Сотрудников пока нет")).toBeInTheDocument();
+    expect(screen.getByText(/Добавьте сотрудника, выберите ему роль/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Добавить сотрудника/i })).not.toBeInTheDocument();
+  });
+
+  it("lets the owner create an employee only with an available pharmacy role", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.invite", "roles.assign", "branches.view"],
+    };
+    listUsers.mockResolvedValue(usersResponse([]));
+    listBranches.mockResolvedValue([
+      {
+        id: "branch-1",
+        tenant_id: "tenant-1",
+        name: "Аптека №1",
+        address: "Душанбе",
+        branch_type: "pharmacy",
+        license_number: null,
+        license_expires_at: null,
+        working_hours: null,
+        receipt_header: null,
+        is_active: true,
+        created_at: "2026-08-30T09:00:00Z",
+        updated_at: "2026-08-30T09:00:00Z",
+      },
+    ]);
+    renderPage();
+
+    const addEmployeeButton = await screen.findByRole("button", {
+      name: /Добавить сотрудника/i,
+    });
+    await waitFor(() => expect(addEmployeeButton).toBeEnabled());
+    fireEvent.click(addEmployeeButton);
     expect(
-      screen.getByText(/Аккаунты сотрудников создаёт и подключает команда Aurum Pharma/i),
+      await screen.findByText(/Аккаунт будет привязан только к этой аптеке/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/владелец аптеки назначает каждому сотруднику/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Пригласить/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Создать аккаунт/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("ФИО сотрудника"), {
+      target: { value: "Саида Каримова" },
+    });
+    fireEvent.change(screen.getByLabelText("Email для входа"), {
+      target: { value: "saida@aurum.tj" },
+    });
+    fireEvent.change(screen.getByLabelText("Телефон (необязательно)"), {
+      target: { value: "+992 90 000 00 00" },
+    });
+    fireEvent.change(screen.getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
+    fireEvent.change(screen.getByLabelText("Торговая точка"), {
+      target: { value: "branch-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Создать и пригласить" }));
+
+    await waitFor(() => expect(inviteEmployee).toHaveBeenCalledTimes(1));
+    expect(inviteEmployee).toHaveBeenCalledWith({
+      operation_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      email: "saida@aurum.tj",
+      full_name: "Саида Каримова",
+      phone: "+992 90 000 00 00",
+      role_id: MANAGED_ROLE.id,
+      branch_id: "branch-1",
+      password_required: false,
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Сотрудник «Саида Каримова» создан",
+    );
+  });
+
+  it("does not show employee creation to a non-owner with delegated permissions", async () => {
+    mockUser = {
+      id: "manager",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: false,
+      permissions: ["users.view", "users.invite", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([]));
+    renderPage();
+
+    expect(await screen.findByText("Сотрудников пока нет")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Добавить сотрудника/i })).not.toBeInTheDocument();
   });
 
   it("renders server-provided assignment names without opening the role builder", async () => {

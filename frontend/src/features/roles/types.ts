@@ -137,6 +137,16 @@ export interface AssignmentCreatePayload {
   password_required?: boolean;
 }
 
+export interface InviteEmployeePayload {
+  operation_id: string;
+  email: string;
+  full_name: string;
+  phone?: string | null;
+  role_id: string;
+  branch_id?: string | null;
+  password_required?: boolean;
+}
+
 export interface UserUpdatePayload {
   full_name?: string;
   phone?: string | null;

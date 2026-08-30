@@ -490,6 +490,8 @@ async def invite_user(
         tenant_id=_current_tenant_or_400(user),
         email=str(payload.email),
         full_name=payload.full_name,
+        phone=payload.phone,
+        operation_id=payload.operation_id,
         role_id=payload.role_id,
         branch_id=payload.branch_id,
         password_required=payload.password_required,

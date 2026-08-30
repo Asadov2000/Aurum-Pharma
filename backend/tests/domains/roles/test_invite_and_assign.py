@@ -6,11 +6,15 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.core.errors import (
+    BusinessRuleError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.security import generate_code_salt, hash_code, hash_password
 from app.core.time import utc_now
 from app.domains.auth.models import AppUser, EmailCode
@@ -24,7 +28,7 @@ from app.domains.roles.models import (
     TenantMembership,
     UserAssignment,
 )
-from app.domains.roles.repository import RolesRepository
+from app.domains.roles.repository import EmployeeInvitationCreation, RolesRepository
 from app.domains.roles.service import RolesService
 
 
@@ -356,10 +360,11 @@ async def test_invitation_operation_cannot_be_reused_for_another_employee(
         )
 
 
-async def test_owner_invite_route_cannot_create_global_account(
+async def test_owner_invite_creates_employee_only_in_current_tenant_and_is_idempotent(
     db_session: AsyncSession,
     make_tenant,
     make_owner,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tenant = await make_tenant()
     owner, _owner_role, owner_permissions, service = await _owner_context(
@@ -374,16 +379,121 @@ async def test_owner_invite_route_cannot_create_global_account(
         owner_permissions=owner_permissions,
     )
 
-    with pytest.raises(PermissionDeniedError, match="cannot create accounts"):
-        await service.invite_user(
+    async def create_employee_invitation(**fields: object) -> EmployeeInvitationCreation:
+        account, membership = await service.create_tenant_account(
+            tenant_id=tenant.id,
+            email=str(fields["email"]),
+            full_name=str(fields["full_name"]),
+            phone=str(fields["phone"]) if fields["phone"] is not None else None,
             actor_id=owner.id,
-            actor_permissions=owner_permissions,
-            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        )
+        invitation = await service.repo.latest_invitation_for_membership(membership.id)
+        assert invitation is not None
+        return EmployeeInvitationCreation(
+            user_id=account.id,
+            membership_id=membership.id,
+            invitation_id=invitation.id,
+            invited_at=invitation.issued_at,
+            invitation_expires_at=invitation.expires_at,
+            created=True,
+        )
+
+    monkeypatch.setattr(service.repo, "create_employee_invitation", create_employee_invitation)
+
+    operation_id = uuid4()
+    account, assignment, created = await service.invite_user(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        email="new-employee@aurum.tj",
+        full_name="Новый сотрудник",
+        phone="+992900001122",
+        operation_id=operation_id,
+        role_id=role.id,
+        branch_id=None,
+        password_required=False,
+    )
+    replay_account, replay_assignment, replay_created = await service.invite_user(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        email="new-employee@aurum.tj",
+        full_name="Новый сотрудник",
+        phone="+992900001122",
+        operation_id=operation_id,
+        role_id=role.id,
+        branch_id=None,
+        password_required=False,
+    )
+
+    membership = await service.repo.get_membership_for_user(
+        tenant_id=tenant.id,
+        user_id=account.id,
+    )
+    invitations = list(
+        (
+            await db_session.execute(
+                select(TenantInvitation).where(TenantInvitation.user_id == account.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert created is True
+    assert replay_created is False
+    assert replay_account.id == account.id
+    assert replay_assignment.id == assignment.id
+    assert account.home_tenant_id == tenant.id
+    assert membership is not None
+    assert membership.tenant_id == tenant.id
+    assert membership.status == "pending"
+    assert membership.phone == "+992900001122"
+    assert len(invitations) == 1
+    assert invitations[0].status == "pending"
+
+
+async def test_non_owner_cannot_create_employee_even_with_invite_permission(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    employee = await make_user(home_tenant_id=tenant.id)
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(employee.id)},
+    )
+
+    with pytest.raises(PermissionDeniedError, match="только активный владелец"):
+        await service.invite_user(
+            actor_id=employee.id,
+            actor_permissions={"users.invite", "roles.assign"},
+            actor_permission_scopes={"users.invite": None, "roles.assign": None},
             actor_is_developer=False,
             actor_is_administrator=False,
             tenant_id=tenant.id,
-            email="not-created@aurum.tj",
-            full_name="Not Created",
+            email="forbidden-employee@aurum.tj",
+            full_name="Недоступный сотрудник",
+            phone=None,
+            operation_id=uuid4(),
             role_id=role.id,
             branch_id=None,
             password_required=False,
@@ -391,7 +501,7 @@ async def test_owner_invite_route_cannot_create_global_account(
 
     assert (
         await db_session.execute(
-            select(AppUser).where(AppUser.email_lower == "not-created@aurum.tj")
+            select(AppUser).where(AppUser.email_lower == "forbidden-employee@aurum.tj")
         )
     ).scalar_one_or_none() is None
 
@@ -839,16 +949,10 @@ async def test_membership_lookup_never_links_same_email_from_another_tenant(
 ) -> None:
     tenant_a = await make_tenant()
     tenant_b = await make_tenant()
-    owner, _owner_role, owner_permissions, service = await _owner_context(
+    _owner, _owner_role, _owner_permissions, service = await _owner_context(
         db_session,
         tenant_id=tenant_a.id,
         make_owner=make_owner,
-    )
-    role = await _custom_cashier_role(
-        service,
-        owner=owner,
-        tenant_id=tenant_a.id,
-        owner_permissions=owner_permissions,
     )
     await service.create_tenant_account(
         tenant_id=tenant_b.id,
@@ -856,20 +960,13 @@ async def test_membership_lookup_never_links_same_email_from_another_tenant(
         full_name="Foreign",
     )
 
-    with pytest.raises(PermissionDeniedError, match="cannot create accounts"):
-        await service.invite_user(
-            actor_id=owner.id,
-            actor_permissions=owner_permissions,
-            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
-            actor_is_developer=False,
-            actor_is_administrator=False,
+    assert (
+        await service.repo.find_membership_by_email(
             tenant_id=tenant_a.id,
             email="same-email-foreign@aurum.tj",
-            full_name="Foreign",
-            role_id=role.id,
-            branch_id=None,
-            password_required=False,
         )
+        is None
+    )
 
     memberships = list(
         (

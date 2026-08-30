@@ -55,6 +55,16 @@ class InvitationRecord:
 
 
 @dataclass(frozen=True)
+class EmployeeInvitationCreation:
+    user_id: UUID
+    membership_id: UUID
+    invitation_id: UUID
+    invited_at: datetime
+    invitation_expires_at: datetime
+    created: bool
+
+
+@dataclass(frozen=True)
 class UserSessionRevocationResult:
     result: str
     revoked_count: int
@@ -623,6 +633,45 @@ class RolesRepository:
         await self.session.flush()
         await self.session.refresh(invitation)
         return invitation
+
+    async def create_employee_invitation(
+        self,
+        *,
+        tenant_id: UUID,
+        email: str,
+        full_name: str,
+        phone: str | None,
+        operation_id: UUID,
+        issued_at: datetime,
+    ) -> EmployeeInvitationCreation:
+        row = (
+            (
+                await self.session.execute(
+                    text(
+                        "SELECT * FROM public.create_tenant_employee_invitation("
+                        ":tenant_id, :email, :full_name, :phone, :operation_id, :issued_at)"
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "email": email,
+                        "full_name": full_name,
+                        "phone": phone,
+                        "operation_id": operation_id,
+                        "issued_at": issued_at,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        return EmployeeInvitationCreation(
+            user_id=cast(UUID, row["employee_user_id"]),
+            membership_id=cast(UUID, row["employee_membership_id"]),
+            invitation_id=cast(UUID, row["employee_invitation_id"]),
+            invited_at=cast(datetime, row["invited_at"]),
+            invitation_expires_at=cast(datetime, row["invitation_expires_at"]),
+            created=bool(row["employee_created"]),
+        )
 
     async def latest_invitation_for_membership(
         self, membership_id: UUID

@@ -196,8 +196,10 @@ class InvitationRead(BaseModel):
 class InviteUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    operation_id: UUID
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=200)
+    phone: str | None = Field(default=None, max_length=50)
     role_id: UUID
     branch_id: UUID | None = None
     password_required: bool = False
