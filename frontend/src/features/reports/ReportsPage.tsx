@@ -4,10 +4,7 @@ import { z } from "zod";
 
 import { Button, Input, Label, Modal, PageHeader, Select, SkeletonRows } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
-import {
-  useBranchesQuery,
-  useTenantOperationalSettingsQuery,
-} from "@/features/foundation/queries";
+import { useBranchesQuery, useTenantOperationalSettingsQuery } from "@/features/foundation/queries";
 import { getZReportXlsx } from "@/features/pos/api";
 import { downloadBlob } from "@/lib/download";
 import { cn } from "@/lib/utils";
@@ -33,7 +30,7 @@ const LAST_CLOSED_SHIFT_KEY = "pos:lastClosedShiftId";
 
 const REPORT_VIEWS: Array<{ value: ReportView; label: string; description: string }> = [
   { value: "sales", label: "Продажи", description: "Выручка и оплаты" },
-  { value: "shifts", label: "Смены", description: "Касса и Z-отчёты" },
+  { value: "shifts", label: "Смены", description: "Итоги кассовых смен" },
   { value: "stock", label: "Остатки", description: "Склад на дату" },
 ];
 
@@ -56,30 +53,64 @@ export function ReportsPage(): JSX.Element {
         showTitleOnDesktop
       />
 
-      <ReportTabs value={view} onChange={changeView} />
+      {settings.isPending ? (
+        <SkeletonRows rows={5} />
+      ) : settings.isError || !settings.data ? (
+        <div
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-4 text-sm text-danger-foreground"
+          role="alert"
+        >
+          <p>
+            {describeApiError(
+              settings.error,
+              "Не удалось загрузить часовой пояс отчётов. Даты и суммы пока не показаны.",
+            )}
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            isLoading={settings.isFetching}
+            onClick={() => void settings.refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
+      ) : (
+        <>
+          <ReportTabs value={view} onChange={changeView} />
 
-      <div id={`report-panel-${view}`} role="tabpanel" aria-labelledby={`report-tab-${view}`}>
-        {view === "sales" ? (
-          <SalesOverviewPanel
-            key={`sales-overview-${reportTimezone}`}
-            reportTimezone={reportTimezone}
-          />
-        ) : view === "shifts" ? (
-          <ShiftHistoryPanel
-            key={`shift-history-${reportTimezone}`}
-            selectedShift={selectedShift}
-            onSelect={setSelectedShift}
-            reportTimezone={reportTimezone}
-          />
-        ) : (
-          <StockOnDateCard key={`stock-date-${reportTimezone}`} reportTimezone={reportTimezone} />
-        )}
-      </div>
+          <div id={`report-panel-${view}`} role="tabpanel" aria-labelledby={`report-tab-${view}`}>
+            {view === "sales" ? (
+              <SalesOverviewPanel
+                key={`sales-overview-${reportTimezone}`}
+                reportTimezone={reportTimezone}
+              />
+            ) : view === "shifts" ? (
+              <ShiftHistoryPanel
+                key={`shift-history-${reportTimezone}`}
+                selectedShift={selectedShift}
+                onSelect={setSelectedShift}
+                reportTimezone={reportTimezone}
+              />
+            ) : (
+              <StockOnDateCard
+                key={`stock-date-${reportTimezone}`}
+                reportTimezone={reportTimezone}
+              />
+            )}
+          </div>
+        </>
+      )}
 
       <Modal
         open={selectedShift !== null}
         onClose={() => setSelectedShift(null)}
-        title={selectedShift ? `Z-отчёт · ${selectedShift.register_name}` : "Z-отчёт"}
+        title={
+          selectedShift
+            ? `Итог смены (Z-отчёт) · ${selectedShift.register_name}`
+            : "Итог смены (Z-отчёт)"
+        }
         className="max-w-5xl"
       >
         {selectedShift && <ZReportSection shift={selectedShift} reportTimezone={reportTimezone} />}
@@ -315,7 +346,7 @@ export function StockOnDateCard({
         </div>
         {hasBranches && (
           <div className="w-full sm:w-auto">
-            <Label htmlFor="stock_branch">Точка</Label>
+            <Label htmlFor="stock_branch">Аптечная точка</Label>
             <Select id="stock_branch" className="w-full sm:w-56" {...form.register("branch_id")}>
               <option value="">Все доступные</option>
               {branches.data?.map((branch) => (
@@ -330,14 +361,25 @@ export function StockOnDateCard({
           type="submit"
           variant="secondary"
           className="w-full sm:w-auto"
-          isLoading={downloading}
+          isLoading={downloading || branches.isPending}
+          disabled={branches.isError}
         >
           Скачать остатки XLSX
         </Button>
         {(error || branches.error) && (
-          <p className="w-full text-sm text-danger" role="alert">
-            {error ?? describeApiError(branches.error, "Не удалось загрузить точки")}
-          </p>
+          <div
+            className="flex w-full flex-wrap items-center gap-2 text-sm text-danger"
+            role="alert"
+          >
+            <span>
+              {error ?? describeApiError(branches.error, "Не удалось загрузить аптечные точки")}
+            </span>
+            {branches.error && (
+              <Button variant="secondary" size="sm" onClick={() => void branches.refetch()}>
+                Повторить
+              </Button>
+            )}
+          </div>
         )}
       </form>
     </section>

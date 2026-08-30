@@ -27,13 +27,20 @@ const expiryTone: Record<ExpiryStatus, "neutral" | "success" | "warning" | "dang
 };
 
 const subscriptionLabel: Record<string, string> = {
-  trial: "Пробный",
+  trial: "Пробный период",
   active: "Активна",
   grace_period: "Льготный период",
   suspended: "Приостановлена",
   cancelled: "Отменена",
   archived: "Архив",
 };
+
+function subscriptionTone(status: string): "success" | "warning" | "danger" | "info" {
+  if (status === "active") return "success";
+  if (status === "trial") return "info";
+  if (status === "grace_period") return "warning";
+  return "danger";
+}
 
 const moneyFormatter = new Intl.NumberFormat("ru-RU", {
   minimumFractionDigits: 2,
@@ -80,6 +87,8 @@ export function DashboardPage(): JSX.Element {
     hasPermission(user, permission),
   );
   const generatedAt = query.data ? formatGeneratedAt(query.data.generated_at) : null;
+  const dashboardError = query.error;
+  const refreshing = query.isFetching;
 
   return (
     <div className="space-y-4">
@@ -101,28 +110,27 @@ export function DashboardPage(): JSX.Element {
               size="lg"
               className="w-[var(--control-height-lg)] px-0"
               aria-label="Обновить сводку"
-              title="Обновить"
-              isLoading={query.isFetching}
-              onClick={() => void query.refetch()}
+              isLoading={refreshing}
+              onClick={() => query.refresh()}
             >
-              <RefreshIcon />
+              <SyncIcon />
             </Button>
           </>
         }
       />
 
-      {query.error && (
+      {dashboardError && (
         <div
           className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger-foreground"
           role="alert"
         >
-          <p>{describeApiError(query.error, "Не удалось загрузить сводку")}</p>
+          <p>{describeApiError(dashboardError, "Не удалось обновить сводку")}</p>
           <Button
             variant="secondary"
             size="sm"
             className="mt-3"
-            isLoading={query.isFetching}
-            onClick={() => void query.refetch()}
+            isLoading={refreshing}
+            onClick={() => (query.data ? query.refresh() : void query.refetch())}
           >
             Повторить
           </Button>
@@ -146,10 +154,9 @@ export function DashboardPage(): JSX.Element {
 
       {query.data && (
         <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-1 pt-3 text-xs text-foreground-muted">
-          <span>Данные обновляются автоматически раз в минуту</span>
-          <span className="inline-flex items-center gap-2 text-success-foreground">
-            <SyncIcon />
-            Синхронизация выполнена
+          <span>Данные обновляются раз в минуту</span>
+          <span className={dashboardError ? "text-danger" : "text-success-foreground"}>
+            {dashboardError ? "Последнее обновление не выполнено" : "Синхронизация выполнена"}
           </span>
         </footer>
       )}
@@ -232,10 +239,14 @@ function DashboardWorkspace({
 
 function TodaySummary({ data }: { data: TodaySection }): JSX.Element {
   const metrics = [
-    { label: "Выручка", value: money(data.revenue, data.currency), icon: <WalletIcon /> },
-    { label: "Чеков", value: count(data.receipts), icon: <ReceiptIcon /> },
+    {
+      label: "Продажи до возвратов",
+      value: money(data.revenue, data.currency),
+      icon: <RegisterIcon />,
+    },
+    { label: "Чеков продаж", value: count(data.receipts), icon: <ReceiptIcon /> },
     { label: "Активных смен", value: count(data.active_shifts), icon: <ShiftIcon /> },
-    { label: "Кассиров на смене", value: count(data.cashiers_on_shift), icon: <UserIcon /> },
+    { label: "Кассиров на смене", value: count(data.cashiers_on_shift), icon: <ShiftIcon /> },
   ];
 
   return (
@@ -288,7 +299,7 @@ function AttentionPanel({
   const empty = batches.length === 0 && licenses.length === 0;
 
   return (
-    <Panel title="Скоро истекает" ariaLabel="Требует внимания">
+    <Panel title="Сроки годности и лицензии" ariaLabel="Требует внимания">
       <div className="flex min-h-10 items-end gap-1 border-b border-border px-4 sm:px-5">
         <AttentionTab
           label="Партии"
@@ -306,7 +317,7 @@ function AttentionPanel({
 
       {empty ? (
         <div className="flex min-h-48 items-center justify-center px-5 py-8 text-sm text-foreground-muted">
-          Критичных сроков нет
+          Срочных предупреждений нет
         </div>
       ) : activeTab === "batches" ? (
         <BatchAttentionList batches={batches} canOpen={canOpenBatches} />
@@ -321,8 +332,8 @@ function AttentionPanel({
             to={activeTab === "batches" ? "/batches" : "/branches"}
             className="inline-flex min-h-9 items-center gap-2 text-sm font-medium text-primary hover:underline"
           >
-            {activeTab === "batches" ? "Открыть партии" : "Открыть точки"}
-            <ArrowIcon />
+            {activeTab === "batches" ? "Открыть партии" : "Открыть торговые точки"}
+            <ChevronIcon />
           </Link>
         </div>
       )}
@@ -456,43 +467,45 @@ function ChecklistPanel({
   const nothing = visibleDraftIncoming === 0 && closedShifts === 0;
   const onReportsClick = () => {
     if (latestClosedShiftId) {
-      window.localStorage.setItem("pos:lastClosedShiftId", latestClosedShiftId);
+      try {
+        window.localStorage.setItem("pos:lastClosedShiftId", latestClosedShiftId);
+      } catch {
+        // The reports page remains available without the one-time navigation hint.
+      }
     }
   };
 
   return (
-    <Panel title="Чек-лист">
+    <Panel title="Требует проверки">
       <div className="divide-y divide-border px-4 py-2 sm:px-5">
         {visibleDraftIncoming > 0 && (
           <ChecklistLink
             to="/incoming"
-            title="Черновики приходов"
-            description="Нужно проверить и провести"
+            title="Черновики приёмок"
+            description="Проверить и принять на склад"
             value={visibleDraftIncoming}
-            icon={<DocumentIcon />}
+            icon={<IncomingIcon />}
           />
         )}
         {closedShifts > 0 && (
           <ChecklistLink
             to="/reports"
-            title="Закрытые смены — Z-отчёт"
-            description="Готовы к просмотру"
+            title="Итоги закрытых смен за сегодня"
+            description="Проверить суммы и расхождения"
             value={closedShifts}
             icon={<ReportIcon />}
             onClick={onReportsClick}
           />
         )}
         {nothing && (
-          <div className="flex min-h-36 items-center gap-3 text-sm text-success-foreground">
-            <StatusOkIcon />
-            Других задач нет
+          <div className="flex min-h-36 items-center text-sm text-success-foreground">
+            На сегодня обязательных проверок нет
           </div>
         )}
       </div>
       {!nothing && (
-        <div className="flex items-center gap-3 border-t border-border px-4 py-3 text-sm text-success-foreground sm:px-5">
-          <StatusOkIcon />
-          Других задач нет
+        <div className="flex items-center border-t border-border px-4 py-3 text-sm text-success-foreground sm:px-5">
+          Остальных обязательных проверок нет
         </div>
       )}
     </Panel>
@@ -560,8 +573,8 @@ function FinancePanel({
         <FinanceMetric label="Подписка">
           {data.subscription_status ? (
             <>
-              <Badge tone={data.subscription_status === "active" ? "success" : "info"}>
-                {subscriptionLabel[data.subscription_status] ?? data.subscription_status}
+              <Badge tone={subscriptionTone(data.subscription_status)}>
+                {subscriptionLabel[data.subscription_status] ?? "Неизвестный статус"}
               </Badge>
               {data.subscription_period_end && (
                 <p className="mt-2 text-xs text-foreground-muted">
@@ -586,10 +599,7 @@ function FinancePanel({
           ) : data.has_overdue ? (
             <Badge tone="danger">Есть просрочка</Badge>
           ) : (
-            <p className="inline-flex items-center gap-2 text-sm text-success-foreground">
-              <StatusOkIcon />
-              Просроченных платежей нет
-            </p>
+            <p className="text-sm text-success-foreground">Просроченных платежей нет</p>
           )}
         </FinanceMetric>
       </div>
@@ -624,11 +634,11 @@ function QuickActions({
     { to: "/pos", label: "Новая продажа", icon: <RegisterIcon />, available: canOpenPos },
     {
       to: "/incoming",
-      label: "Новый приход",
+      label: "Новая приёмка",
       icon: <IncomingIcon />,
       available: canCreateIncoming,
     },
-    { to: "/catalog", label: "Каталог", icon: <CatalogIcon />, available: canOpenCatalog },
+    { to: "/catalog", label: "Каталог", icon: <ReceiptIcon />, available: canOpenCatalog },
     { to: "/reports", label: "Отчёты", icon: <ReportIcon />, available: true },
   ];
 
@@ -738,15 +748,6 @@ function SvgIcon({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-function WalletIcon(): JSX.Element {
-  return (
-    <SvgIcon>
-      <path d="M4 6h14a2 2 0 0 1 2 2v10H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12" />
-      <path d="M15 11h5v4h-5a2 2 0 0 1 0-4Z" />
-    </SvgIcon>
-  );
-}
-
 function ReceiptIcon(): JSX.Element {
   return (
     <SvgIcon>
@@ -761,15 +762,6 @@ function ShiftIcon(): JSX.Element {
     <SvgIcon>
       <circle cx="9" cy="8" r="3" />
       <path d="M3 20a6 6 0 0 1 12 0M16 7a3 3 0 0 1 0 6M18 20a5 5 0 0 0-3-4.6" />
-    </SvgIcon>
-  );
-}
-
-function UserIcon(): JSX.Element {
-  return (
-    <SvgIcon>
-      <circle cx="12" cy="8" r="3.5" />
-      <path d="M5 21a7 7 0 0 1 14 0" />
     </SvgIcon>
   );
 }
@@ -792,37 +784,10 @@ function IncomingIcon(): JSX.Element {
   );
 }
 
-function CatalogIcon(): JSX.Element {
-  return (
-    <SvgIcon>
-      <rect x="3" y="8" width="18" height="8" rx="4" />
-      <path d="M12 8v8" />
-    </SvgIcon>
-  );
-}
-
-function DocumentIcon(): JSX.Element {
-  return (
-    <SvgIcon>
-      <path d="M6 3h8l4 4v14H6V3Z" />
-      <path d="M14 3v5h5M9 13h6M9 17h6" />
-    </SvgIcon>
-  );
-}
-
 function ReportIcon(): JSX.Element {
   return (
     <SvgIcon>
       <path d="M4 20h16M7 20v-6M12 20V8M17 20v-9" />
-    </SvgIcon>
-  );
-}
-
-function RefreshIcon(): JSX.Element {
-  return (
-    <SvgIcon>
-      <path d="M20 6v5h-5M4 18v-5h5" />
-      <path d="M18.5 9A7 7 0 0 0 6 6.5L4 9M5.5 15A7 7 0 0 0 18 17.5l2-2.5" />
     </SvgIcon>
   );
 }
@@ -832,23 +797,6 @@ function SyncIcon(): JSX.Element {
     <SvgIcon>
       <path d="M20 7v5h-5M4 17v-5h5" />
       <path d="M18.5 10A7 7 0 0 0 6 7.5L4 10M5.5 14A7 7 0 0 0 18 16.5l2-2.5" />
-    </SvgIcon>
-  );
-}
-
-function StatusOkIcon(): JSX.Element {
-  return (
-    <SvgIcon>
-      <circle cx="12" cy="12" r="9" />
-      <path d="m8 12 2.5 2.5L16 9" />
-    </SvgIcon>
-  );
-}
-
-function ArrowIcon(): JSX.Element {
-  return (
-    <SvgIcon>
-      <path d="M5 12h14M14 7l5 5-5 5" />
     </SvgIcon>
   );
 }

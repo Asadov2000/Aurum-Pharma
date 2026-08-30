@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,7 +41,8 @@ async def get_summary(
         Depends(require_tenant_permission("reports.view")),
     ],
     service: Annotated[DashboardService, Depends(_service)],
+    refresh: Annotated[bool, Query()] = False,
 ) -> DashboardSummary:
     # reports.view (owner/admin/dev) — keeps owner-level financials off the
     # seller's screen. Tenant scoping still comes from the token, not a param.
-    return await service.get_summary(_current_tenant_or_400(user))
+    return await service.get_summary(_current_tenant_or_400(user), force_refresh=refresh)

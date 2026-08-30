@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.domains.dashboard.service as dashboard_service_module
+from app.domains.auth.models import AppUser
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
 from app.domains.dashboard.repository import DashboardRepository
@@ -18,6 +21,7 @@ from app.domains.foundation.models import Branch
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.inventory.repository import InventoryRepository
+from app.domains.pos.models import Shift
 
 
 async def _seed_tenant_with_branch(db: AsyncSession):  # type: ignore[no-untyped-def]
@@ -98,3 +102,92 @@ async def test_summary_surfaces_expiring_batch_and_license(
     assert len(summary.expiring.licenses) == 1
     assert summary.expiring.licenses[0].branch_name == "Main"
     assert summary.expiring.licenses[0].days_left == 15
+
+
+async def test_force_refresh_bypasses_cached_summary(db_session: AsyncSession) -> None:
+    tenant, _ = await _seed_tenant_with_branch(db_session)
+    uncached = await DashboardService(DashboardRepository(db_session), redis=None).get_summary(
+        tenant.id
+    )
+    cached = uncached.model_copy(
+        update={"today": uncached.today.model_copy(update={"revenue": Decimal("999.00")})}
+    )
+    redis = AsyncMock()
+    redis.get.return_value = cached.model_dump_json()
+    service = DashboardService(DashboardRepository(db_session), redis=redis)
+
+    summary = await service.get_summary(tenant.id, force_refresh=True)
+
+    assert summary.today.revenue == Decimal("0")
+    redis.get.assert_not_awaited()
+    redis.set.assert_awaited_once()
+
+
+async def test_summary_falls_back_to_database_when_cache_is_unavailable(
+    db_session: AsyncSession,
+) -> None:
+    tenant, _ = await _seed_tenant_with_branch(db_session)
+    redis = AsyncMock()
+    redis.get.side_effect = RedisError("cache unavailable")
+    redis.set.side_effect = RedisError("cache unavailable")
+
+    summary = await DashboardService(DashboardRepository(db_session), redis=redis).get_summary(
+        tenant.id
+    )
+
+    assert summary.today.revenue == Decimal("0")
+    redis.get.assert_awaited_once()
+    redis.set.assert_awaited_once()
+
+
+async def test_summary_counts_only_shifts_closed_today(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixed_now = datetime(2026, 8, 8, 12, tzinfo=UTC)
+    monkeypatch.setattr(dashboard_service_module, "utc_now", lambda: fixed_now)
+    tenant, branch = await _seed_tenant_with_branch(db_session)
+    foundation = FoundationService(FoundationRepository(db_session))
+    register = await foundation.create_register(
+        tenant_id=tenant.id,
+        fields={"branch_id": branch.id, "name": "Касса 1"},
+    )
+    user = AppUser(
+        email=f"dash-shift-{uuid4().hex[:8]}@aurum.tj",
+        full_name="Owner",
+        home_tenant_id=tenant.id,
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    today_shift = Shift(
+        tenant_id=tenant.id,
+        branch_id=branch.id,
+        register_id=register.id,
+        opened_by_user_id=user.id,
+        closed_by_user_id=user.id,
+        opened_at=fixed_now - timedelta(hours=2),
+        closed_at=fixed_now - timedelta(hours=1),
+        status="closed",
+        opening_cash=Decimal("0"),
+    )
+    old_shift = Shift(
+        tenant_id=tenant.id,
+        branch_id=branch.id,
+        register_id=register.id,
+        opened_by_user_id=user.id,
+        closed_by_user_id=user.id,
+        opened_at=fixed_now - timedelta(days=2, hours=2),
+        closed_at=fixed_now - timedelta(days=2, hours=1),
+        status="closed",
+        opening_cash=Decimal("0"),
+    )
+    db_session.add_all([today_shift, old_shift])
+    await db_session.flush()
+
+    summary = await DashboardService(DashboardRepository(db_session), redis=None).get_summary(
+        tenant.id
+    )
+
+    assert summary.checklist.closed_shifts_count == 1
+    assert summary.checklist.latest_closed_shift_id == today_shift.id

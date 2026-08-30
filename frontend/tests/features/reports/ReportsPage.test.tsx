@@ -27,8 +27,7 @@ vi.mock("@/features/pos/api", () => ({
 vi.mock("@/features/foundation/api", () => ({
   listBranches: (...args: unknown[]) => listBranches(...args),
   listRegisters: (...args: unknown[]) => listRegisters(...args),
-  getTenantOperationalSettings: (...args: unknown[]) =>
-    getTenantOperationalSettings(...args),
+  getTenantOperationalSettings: (...args: unknown[]) => getTenantOperationalSettings(...args),
 }));
 
 import { ReportsPage } from "@/features/reports/ReportsPage";
@@ -210,6 +209,7 @@ describe("ReportsPage", () => {
     });
     expect(await screen.findByText(/сходится/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыт" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("pos:lastClosedShiftId")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть", exact: true }));
     await waitFor(() => {
@@ -280,5 +280,16 @@ describe("ReportsPage", () => {
     const shiftsTab = screen.getByRole("tab", { name: /^Смены/ });
     expect(shiftsTab).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByText("Малика Саидова")).toBeInTheDocument();
+  });
+
+  it("does not show reports with an unknown timezone after settings fail", async () => {
+    getTenantOperationalSettings.mockReset();
+    getTenantOperationalSettings.mockRejectedValueOnce(new Error("network"));
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Не удалось загрузить часовой пояс отчётов",
+    );
+    expect(getSalesSummary).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ import { Badge, Button, ConfirmDialog, PageHeader, Skeleton } from "@/components
 import { useMeQuery } from "@/features/auth/queries";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/lib/errorMessages";
+import { createOperationId } from "@/lib/operationId";
 import { cn } from "@/lib/utils";
 
 import { readinessStepAction, readinessSteps, taskLabel } from "./labels";
@@ -100,7 +101,7 @@ function statusCopy(overview: OnboardingOverview): {
     };
   }
   return {
-    title: "Организация архивирована",
+    title: "Аптека архивирована",
     description: "Для восстановления работы обратитесь к администратору Aurum Pharma.",
     tone: "warning",
   };
@@ -205,7 +206,7 @@ export function OnboardingPage(): JSX.Element {
   }).format(new Date(overviewQuery.dataUpdatedAt));
 
   const openTrialConfirmation = (): void => {
-    setOperationId((current) => current ?? crypto.randomUUID());
+    setOperationId((current) => current ?? createOperationId());
     startTrial.reset();
     setConfirmOpen(true);
   };
@@ -292,9 +293,14 @@ export function OnboardingPage(): JSX.Element {
 
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-1 pt-3 text-xs text-foreground-muted">
         <span>Готовность проверяется автоматически</span>
-        <span className="inline-flex items-center gap-2 text-success-foreground">
+        <span
+          className={cn(
+            "inline-flex items-center gap-2",
+            online ? "text-success-foreground" : "text-warning-foreground",
+          )}
+        >
           <SyncIcon />
-          Синхронизация выполнена
+          {online ? "Синхронизация выполнена" : "Ожидаем подключения"}
         </span>
       </footer>
 
@@ -373,7 +379,7 @@ function LaunchSummary({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm text-foreground-muted">
             <Badge tone={tone === "success" ? "success" : tone === "warning" ? "warning" : "info"}>
-              {setupPhase ? "Фаза настройки" : tenantStatusLabel[overview.tenant_status]}
+              {setupPhase ? "Настройка" : tenantStatusLabel[overview.tenant_status]}
             </Badge>
             <span aria-hidden="true">·</span>
             <span className="truncate">{overview.tenant_name}</span>
@@ -407,7 +413,7 @@ function LaunchSummary({
           </div>
           <span className="text-xs text-foreground-muted lg:text-right">
             {setupPhase
-              ? `Фаза настройки доступна до ${formatDate(overview.setup_ends_at)}`
+              ? `Настройку нужно завершить до ${formatDate(overview.setup_ends_at)}`
               : `${progress}% обязательных настроек выполнено`}
           </span>
         </div>
@@ -601,9 +607,9 @@ function RecommendedPanel({
 }
 
 const tenantStatusLabel: Record<OnboardingOverview["tenant_status"], string> = {
-  setup: "Фаза настройки",
+  setup: "Настройка",
   trial: "Пробный период",
-  active: "Активна",
+  active: "Работает",
   grace_period: "Ожидает оплаты",
   readonly: "Только просмотр",
   archived: "Архив",

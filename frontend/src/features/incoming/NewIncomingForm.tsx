@@ -5,11 +5,11 @@ import { z } from "zod";
 
 import { Button, FormError, Input, Label, Select, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
+import { createOperationId } from "@/lib/operationId";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { SupplierPicker } from "@/features/suppliers/SupplierPicker";
 
 import { pharmacyCalendarDate } from "./calendar";
-import { createIncomingOperationId } from "./operationId";
 import { useCreateIncoming, useUpdateIncoming } from "./queries";
 import { type IncomingDocument } from "./types";
 
@@ -39,7 +39,7 @@ export function NewIncomingForm({
   const update = useUpdateIncoming();
   const navigate = useNavigate();
   const [topError, setTopError] = useState<string | null>(null);
-  const [operationId] = useState(createIncomingOperationId);
+  const [operationId] = useState(createOperationId);
   const isEditing = document !== undefined;
 
   const form = useForm<FormValues>({
