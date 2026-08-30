@@ -102,7 +102,17 @@ export interface UserWithAssignments {
   status: UserStatus;
   last_login_at: string | null;
   can_require_password: boolean;
+  invited_at: string | null;
+  invitation_expires_at: string | null;
+  invitation_status: "pending" | "expired" | "accepted" | "revoked" | null;
   assignments: Assignment[];
+}
+
+export interface InvitationRead {
+  invitation_id: string;
+  invitation_status: "pending" | "expired" | "accepted" | "revoked";
+  invited_at: string;
+  invitation_expires_at: string;
 }
 
 export interface UserListResponse {

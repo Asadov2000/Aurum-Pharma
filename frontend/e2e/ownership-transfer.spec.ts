@@ -90,20 +90,14 @@ test.describe("Protected ownership transfer", () => {
           data: { email: successorEmail, full_name: successorName },
         });
         expect(memberResponse.status()).toBe(201);
-        const successor = (await memberResponse.json()) as { user_id: string };
 
-        const activationResponse = await ownerApi.patch(`users/${successor.user_id}`, {
-          data: { status: "active" },
-        });
-        expect(activationResponse.ok()).toBe(true);
+        await apiLogin(anonymousApi, { email: successorEmail, password: "" });
 
         await installBrowserSession(page, ownerEnrollment.tokens);
         await page.goto("/users");
         const successorRow = page.getByRole("row", { name: new RegExp(successorName) });
         await expect(successorRow).toBeVisible();
-        await successorRow
-          .getByRole("button", { name: `Действия для ${successorName}` })
-          .click();
+        await successorRow.getByRole("button", { name: `Действия для ${successorName}` }).click();
         await page.getByRole("menuitem", { name: "Передать владение" }).click();
 
         const requestDialog = page.getByRole("dialog", { name: "Передать владение аптекой?" });

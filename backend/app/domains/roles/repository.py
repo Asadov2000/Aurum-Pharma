@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, or_, select, text, update
+from sqlalchemy import and_, case, delete, func, or_, select, text, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -21,6 +21,7 @@ from app.domains.roles.models import (
     RolePermission,
     RoleTemplate,
     RoleTemplatePermission,
+    TenantInvitation,
     TenantMembership,
     TenantOwnership,
     UserAssignment,
@@ -40,6 +41,17 @@ class DirectoryUser:
     status: str
     last_login_at: datetime | None
     can_require_password: bool
+    invited_at: datetime | None
+    invitation_expires_at: datetime | None
+    invitation_status: str | None
+
+
+@dataclass(frozen=True)
+class InvitationRecord:
+    id: UUID
+    status: str
+    issued_at: datetime
+    expires_at: datetime
 
 
 @dataclass(frozen=True)
@@ -124,6 +136,35 @@ _DIRECTORY_COLUMNS = (
     TenantMembership.status,
     AppUser.last_login_at,
     AppUser.password_configured.label("can_require_password"),
+    select(TenantInvitation.issued_at)
+    .where(TenantInvitation.membership_id == TenantMembership.id)
+    .order_by(TenantInvitation.version.desc())
+    .limit(1)
+    .scalar_subquery()
+    .label("invited_at"),
+    select(TenantInvitation.expires_at)
+    .where(TenantInvitation.membership_id == TenantMembership.id)
+    .order_by(TenantInvitation.version.desc())
+    .limit(1)
+    .scalar_subquery()
+    .label("invitation_expires_at"),
+    select(
+        case(
+            (
+                and_(
+                    TenantInvitation.status == "pending",
+                    TenantInvitation.expires_at <= func.statement_timestamp(),
+                ),
+                "expired",
+            ),
+            else_=TenantInvitation.status,
+        )
+    )
+    .where(TenantInvitation.membership_id == TenantMembership.id)
+    .order_by(TenantInvitation.version.desc())
+    .limit(1)
+    .scalar_subquery()
+    .label("invitation_status"),
 )
 
 
@@ -140,6 +181,9 @@ def _directory_user_from_row(row: RowMapping) -> DirectoryUser:
         status=cast(str, row["status"]),
         last_login_at=cast(datetime | None, row["last_login_at"]),
         can_require_password=bool(row["can_require_password"]),
+        invited_at=cast(datetime | None, row["invited_at"]),
+        invitation_expires_at=cast(datetime | None, row["invitation_expires_at"]),
+        invitation_status=cast(str | None, row["invitation_status"]),
     )
 
 
@@ -572,6 +616,71 @@ class RolesRepository:
         await self.session.flush()
         await self.session.refresh(membership)
         return membership
+
+    async def insert_invitation(self, **fields: Any) -> TenantInvitation:
+        invitation = TenantInvitation(**fields)
+        self.session.add(invitation)
+        await self.session.flush()
+        await self.session.refresh(invitation)
+        return invitation
+
+    async def latest_invitation_for_membership(
+        self, membership_id: UUID
+    ) -> InvitationRecord | None:
+        invitation = (
+            await self.session.execute(
+                select(TenantInvitation)
+                .where(TenantInvitation.membership_id == membership_id)
+                .order_by(TenantInvitation.version.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if invitation is None:
+            return None
+        status = invitation.status
+        if status == "pending" and invitation.expires_at <= datetime.now(
+            invitation.expires_at.tzinfo
+        ):
+            status = "expired"
+        return InvitationRecord(
+            id=invitation.id,
+            status=status,
+            issued_at=invitation.issued_at,
+            expires_at=invitation.expires_at,
+        )
+
+    async def reissue_invitation(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        operation_id: UUID,
+        issued_at: datetime,
+    ) -> InvitationRecord:
+        row = (
+            (
+                await self.session.execute(
+                    text(
+                        "SELECT * FROM public.reissue_tenant_invitation("
+                        ":tenant_id, :user_id, :operation_id, :issued_at)"
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "operation_id": operation_id,
+                        "issued_at": issued_at,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        return InvitationRecord(
+            id=cast(UUID, row["invitation_id"]),
+            status=cast(str, row["invitation_status"]),
+            issued_at=cast(datetime, row["invited_at"]),
+            expires_at=cast(datetime, row["invitation_expires_at"]),
+        )
 
     async def get_membership(self, membership_id: UUID) -> TenantMembership | None:
         return await self.session.get(

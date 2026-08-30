@@ -44,6 +44,13 @@ export function formatLastLogin(value: string | null): string {
   return lastLoginFormatter.format(date);
 }
 
+export function formatInvitationDeadline(value: string | null): string {
+  if (!value) return "Срок не указан";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Срок не указан";
+  return `до ${lastLoginFormatter.format(date)}`;
+}
+
 export function employeeCountLabel(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;

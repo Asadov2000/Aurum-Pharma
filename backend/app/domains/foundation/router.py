@@ -209,6 +209,7 @@ async def create_tenant_membership(
         phone=payload.phone,
         actor_id=user.user_id,
     )
+    invitation = await roles.repo.latest_invitation_for_membership(membership.id)
     return TenantMembershipRead(
         membership_id=membership.id,
         user_id=account.id,
@@ -217,6 +218,9 @@ async def create_tenant_membership(
         full_name=membership.full_name,
         phone=membership.phone,
         status=membership.status,
+        invited_at=invitation.issued_at if invitation is not None else None,
+        invitation_expires_at=invitation.expires_at if invitation is not None else None,
+        invitation_status=invitation.status if invitation is not None else None,
     )
 
 

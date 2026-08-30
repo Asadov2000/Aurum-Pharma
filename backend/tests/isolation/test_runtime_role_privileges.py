@@ -100,6 +100,7 @@ READ_ONLY_TABLES = {
     "sync_writer_epoch",
     "sync_writer_readiness",
     "tenant_membership",
+    "tenant_invitation",
     "tenant_ownership",
     "tenant_ownership_transfer",
     "trial_activation",
@@ -318,6 +319,7 @@ CUSTOM_FUNCTIONS = {
     "reject_billing_payment_adjustment",
     "reject_platform_billing_payment_submission",
     "reinvite_platform_staff_account",
+    "reissue_tenant_invitation",
     "trg_audit_log",
     "trg_audit_billing_financial_row",
     "trg_audit_billing_payment_submission",
@@ -387,6 +389,9 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_sync_writer_epoch",
     "trg_guard_sync_writer_readiness",
     "trg_guard_tenant_membership",
+    "trg_guard_tenant_invitation",
+    "trg_bind_tenant_invitation_email_code",
+    "trg_guard_tenant_invitation_email_delivery",
     "trg_guard_tenant_ownership",
     "trg_guard_tenant_role_mutation",
     "trg_initialize_branch_sync_writer",
@@ -466,6 +471,7 @@ APP_EXECUTABLE_FUNCTIONS = {
     "platform_staff_invitation_is_usable",
     "publish_tenant_role_version",
     "reactivate_tenant_user_assignment",
+    "reissue_tenant_invitation",
     "register_auth_session_device",
     "record_edge_writer_readiness",
     "record_auth_login_attempt",
@@ -691,7 +697,7 @@ CROSS JOIN (
     ('DELETE')
 ) AS checks(privilege)
 WHERE schemas.nspname = 'public'
-  AND relations.relname IN ('tenant_membership', 'tenant_ownership')
+  AND relations.relname IN ('tenant_membership', 'tenant_ownership', 'tenant_invitation')
 ORDER BY relations.relname, checks.privilege
 """
 
@@ -810,6 +816,7 @@ def _assert_tenant_account_support_privileges(
     actual = {
         "tenant_membership": set(),
         "tenant_ownership": set(),
+        "tenant_invitation": set(),
     }
     for row in rows:
         if row["support_has_privilege"]:
@@ -817,6 +824,7 @@ def _assert_tenant_account_support_privileges(
     assert actual == {
         "tenant_membership": {"SELECT", "INSERT", "UPDATE", "DELETE"},
         "tenant_ownership": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+        "tenant_invitation": {"SELECT", "INSERT", "UPDATE", "DELETE"},
     }
 
 

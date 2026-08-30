@@ -62,6 +62,9 @@ export interface TenantMembership {
   full_name: string;
   phone: string | null;
   status: "pending" | "active" | "suspended" | "offboarded";
+  invited_at: string | null;
+  invitation_expires_at: string | null;
+  invitation_status: "pending" | "expired" | "accepted" | "revoked" | null;
 }
 
 export interface TenantUpdatePayload {

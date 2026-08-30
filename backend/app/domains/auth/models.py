@@ -360,6 +360,7 @@ class EmailCode(Base):
     code_hash: Mapped[str] = mapped_column(Text, nullable=False)
     code_salt: Mapped[str] = mapped_column(Text, nullable=False)
     purpose: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'login'"))
+    tenant_invitation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     ip_address: Mapped[str | None] = mapped_column(INET)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

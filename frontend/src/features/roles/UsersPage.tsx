@@ -29,6 +29,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
+import { createOperationId } from "@/lib/operationId";
 import { cn } from "@/lib/utils";
 
 import { EmployeeDirectory } from "./EmployeeDirectory";
@@ -36,6 +37,7 @@ import {
   useCreateOwnershipTransfer,
   useOffboardUser,
   useRevokeUserSessions,
+  useReissueUserInvitation,
   useRolesQuery,
   useSuspendUser,
   useUpdateUser,
@@ -117,10 +119,12 @@ export function UsersPage(): JSX.Element {
   const canRevokeSessions = canSuspend;
   const canOffboard = (isTenantOwner || isSupportScoped) && permissions.includes("users.delete");
   const canAssign = (isTenantOwner || isSupportScoped) && permissions.includes("roles.assign");
+  const canInvite = (isTenantOwner || isSupportScoped) && permissions.includes("users.invite");
   const canViewRoles = permissions.includes("roles.view");
   const canViewBranches = permissions.includes("branches.view");
   const canTransferOwnership = isTenantOwner && !isSupportScoped;
-  const showActions = canUpdate || canSuspend || canOffboard || canAssign || canTransferOwnership;
+  const showActions =
+    canUpdate || canSuspend || canOffboard || canAssign || canInvite || canTransferOwnership;
 
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
@@ -165,6 +169,7 @@ export function UsersPage(): JSX.Element {
   const offboardMutation = useOffboardUser();
   const revokeSessionsMutation = useRevokeUserSessions();
   const activateMutation = useUpdateUser();
+  const reissueMutation = useReissueUserInvitation();
   const ownershipTransferMutation = useCreateOwnershipTransfer();
 
   const rows = users.data?.items ?? [];
@@ -234,7 +239,7 @@ export function UsersPage(): JSX.Element {
     actionFocusUserId.current = target.id;
     setActionError(null);
     setActionNotice(null);
-    setOwnershipTransfer({ user: target, operationId: crypto.randomUUID() });
+    setOwnershipTransfer({ user: target, operationId: createOperationId() });
   };
 
   const runOwnershipTransfer = async () => {
@@ -272,7 +277,11 @@ export function UsersPage(): JSX.Element {
         setActionNotice(`Доступ сотрудника «${targetName}» приостановлен.`);
       } else {
         await offboardMutation.mutateAsync(pending.user.id);
-        setActionNotice(`Сотрудник «${targetName}» уволен.`);
+        setActionNotice(
+          pending.user.status === "pending"
+            ? `Приглашение для «${targetName}» отозвано.`
+            : `Сотрудник «${targetName}» уволен.`,
+        );
       }
       setPending(null);
       restoreActionFocus();
@@ -297,13 +306,38 @@ export function UsersPage(): JSX.Element {
         id: member.id,
         payload: { status: "active" },
       });
+      setActionNotice(`Доступ сотрудника «${member.full_name}» возобновлён.`);
+    } catch (error) {
+      setActionError(describeApiError(error, "Не удалось возобновить доступ сотрудника"));
+    } finally {
+      setActivatingUserId(null);
+      restoreActionFocus();
+    }
+  };
+
+  const reissueInvitation = async (member: Row) => {
+    actionFocusUserId.current = member.id;
+    setActionError(null);
+    setActionNotice(null);
+    setActivatingUserId(member.id);
+    try {
+      const invitation = await reissueMutation.mutateAsync({
+        id: member.id,
+        operationId: createOperationId(),
+      });
+      const deadline = new Intl.DateTimeFormat("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Dushanbe",
+      }).format(new Date(invitation.invitation_expires_at));
       setActionNotice(
-        member.status === "pending"
-          ? `Сотрудник «${member.full_name}» активирован.`
-          : `Доступ сотрудника «${member.full_name}» возобновлён.`,
+        `Приглашение для «${member.full_name}» обновлено. Войти можно до ${deadline}.`,
       );
     } catch (error) {
-      setActionError(describeApiError(error, "Не удалось активировать сотрудника"));
+      setActionError(describeApiError(error, "Не удалось обновить приглашение"));
     } finally {
       setActivatingUserId(null);
       restoreActionFocus();
@@ -582,15 +616,19 @@ export function UsersPage(): JSX.Element {
               canRevokeSessions={canRevokeSessions}
               canOffboard={canOffboard}
               canAssign={canAssign}
+              canInvite={canInvite}
               canTransferOwnership={canTransferOwnership}
               showActions={showActions}
-              activatingUserId={activateMutation.isPending ? activatingUserId : null}
+              activatingUserId={
+                activateMutation.isPending || reissueMutation.isPending ? activatingUserId : null
+              }
               registerActionTrigger={(userId, element) => {
                 if (element) actionTriggers.current.set(userId, element);
                 else actionTriggers.current.delete(userId);
               }}
               onProfile={openProfile}
               onActivate={(member) => void activateMembership(member)}
+              onReissueInvitation={(member) => void reissueInvitation(member)}
               onAssignments={openAssignments}
               onTransferOwnership={askOwnershipTransfer}
               onRevokeSessions={(member) => ask("sessions", member)}
@@ -690,7 +728,9 @@ export function UsersPage(): JSX.Element {
             ? "Завершить активные сеансы"
             : pending?.type === "suspend"
               ? "Приостановить доступ"
-              : "Уволить сотрудника"
+              : pending?.user.status === "pending"
+                ? "Отозвать приглашение"
+                : "Уволить сотрудника"
         }
         message={
           <>
@@ -701,6 +741,11 @@ export function UsersPage(): JSX.Element {
               </>
             ) : pending?.type === "suspend" ? (
               <>Приостановить доступ для «{pending?.user.full_name}»? Сотрудник не сможет войти.</>
+            ) : pending?.user.status === "pending" ? (
+              <>
+                Отозвать приглашение для «{pending?.user.full_name}»? Войти по нему больше не
+                получится. Действие необратимо.
+              </>
             ) : (
               <>Уволить «{pending?.user.full_name}»? Действие необратимо.</>
             )}
@@ -719,7 +764,9 @@ export function UsersPage(): JSX.Element {
             ? "Завершить сеансы"
             : pending?.type === "suspend"
               ? "Приостановить"
-              : "Уволить"
+              : pending?.user.status === "pending"
+                ? "Отозвать"
+                : "Уволить"
         }
         variant="danger"
         isLoading={

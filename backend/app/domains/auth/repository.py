@@ -755,15 +755,18 @@ class AuthRepository:
         *,
         session_id: UUID,
         tenant_id: UUID | None,
+        email_code_id: UUID,
         accepted_at: datetime,
     ) -> int:
         result = await self.session.execute(
             text(
-                "SELECT public.accept_tenant_invitation(" ":session_id, :tenant_id, :accepted_at)"
+                "SELECT public.accept_tenant_invitation("
+                ":session_id, :tenant_id, :email_code_id, :accepted_at)"
             ),
             {
                 "session_id": session_id,
                 "tenant_id": tenant_id,
+                "email_code_id": email_code_id,
                 "accepted_at": accepted_at,
             },
         )

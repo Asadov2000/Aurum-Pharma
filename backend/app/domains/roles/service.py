@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from redis.asyncio import Redis
@@ -31,6 +31,7 @@ from app.domains.roles.models import (
 from app.domains.roles.repository import (
     AuthorizationSnapshot,
     DirectoryUser,
+    InvitationRecord,
     OwnershipTransferRecord,
     RoleArchiveResult,
     RolesRepository,
@@ -287,6 +288,18 @@ class RolesService:
             created_by=actor_id,
             updated_by=actor_id,
         )
+        now = utc_now()
+        await self.repo.insert_invitation(
+            tenant_id=tenant_id,
+            membership_id=membership.id,
+            user_id=user.id,
+            version=1,
+            status="pending",
+            operation_id=uuid4(),
+            issued_at=now,
+            expires_at=now + timedelta(days=7),
+            created_by=actor_id,
+        )
         logger.info(
             "tenant_membership_created",
             tenant_id=str(tenant_id),
@@ -294,6 +307,27 @@ class RolesService:
             user_id=str(user.id),
         )
         return user, membership
+
+    async def reissue_invitation(
+        self,
+        *,
+        tenant_id: UUID,
+        target_user_id: UUID,
+        operation_id: UUID,
+    ) -> InvitationRecord:
+        invitation = await self.repo.reissue_invitation(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+            operation_id=operation_id,
+            issued_at=utc_now(),
+        )
+        logger.info(
+            "tenant_invitation_reissued",
+            tenant_id=str(tenant_id),
+            user_id=str(target_user_id),
+            invitation_id=str(invitation.id),
+        )
+        return invitation
 
     async def provision_owner(
         self,
@@ -770,7 +804,15 @@ class RolesService:
         target_user_id: UUID,
     ) -> None:
         if actor_id == target_user_id:
-            raise BusinessRuleError("You cannot activate your own membership")
+            raise BusinessRuleError("You cannot resume your own membership")
+        membership = await self.repo.get_membership_for_user(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+        )
+        if membership is None:
+            raise NotFoundError("Membership not found")
+        if membership.status != "suspended":
+            raise BusinessRuleError("Only a suspended membership can be resumed")
         if not await self.repo.set_membership_status(
             tenant_id=tenant_id,
             user_id=target_user_id,

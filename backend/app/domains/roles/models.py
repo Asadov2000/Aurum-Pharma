@@ -244,6 +244,47 @@ class TenantMembership(Base):
     )
 
 
+class TenantInvitation(Base):
+    __tablename__ = "tenant_invitation"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    membership_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenant_membership.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_tenant_invitation_version"),
+        CheckConstraint(
+            "status IN ('pending','accepted','revoked')",
+            name="ck_tenant_invitation_status",
+        ),
+        CheckConstraint("expires_at > issued_at", name="ck_tenant_invitation_expiry"),
+        UniqueConstraint(
+            "membership_id", "version", name="uq_tenant_invitation_membership_version"
+        ),
+        UniqueConstraint("tenant_id", "operation_id", name="uq_tenant_invitation_tenant_operation"),
+    )
+
+
 class TenantOwnership(Base):
     __tablename__ = "tenant_ownership"
 
