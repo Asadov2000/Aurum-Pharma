@@ -185,6 +185,7 @@ test.describe("Incoming flow (owner)", () => {
     const returnDialog = page.getByRole("dialog", {
       name: new RegExp(`Возврат: ${supplier.name}`),
     });
+    await returnDialog.getByLabel("Аптечная точка").selectOption({ label: branch.name });
     const returnCandidate = returnDialog.getByRole("option", {
       name: new RegExp(item.brand_name),
     });
@@ -193,9 +194,12 @@ test.describe("Incoming flow (owner)", () => {
     await returnDialog.getByLabel("Количество").fill("1");
     await returnDialog.getByLabel("Причина").selectOption("incorrect_delivery");
     await returnDialog.getByLabel("Комментарий").fill("E2E: ошибка поставки");
-    await returnDialog.getByRole("button", { name: "Оформить возврат" }).click();
+    await returnDialog.getByRole("button", { name: "Подтвердить возврат" }).click();
 
-    await expect(returnDialog).toBeHidden({ timeout: 15_000 });
+    await expect(returnDialog.getByText("Возврат оформлен")).toBeVisible({ timeout: 15_000 });
+    await expect(returnDialog.getByText(branch.name)).toBeVisible();
+    await returnDialog.getByRole("button", { name: "Готово" }).click();
+    await expect(returnDialog).toBeHidden();
     const returnEntry = supplierDialog.getByRole("article").filter({ hasText: item.brand_name });
     await expect(returnEntry).toContainText("Ошибка поставки", { timeout: 15_000 });
     await expect(returnEntry).toContainText("4,00 TJS");

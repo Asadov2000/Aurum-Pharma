@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import {
   Badge,
   Button,
   ConfigurableFilterBar,
+  ConfirmDialog,
   Input,
   Label,
   Modal,
@@ -45,6 +46,10 @@ type SupplierView = "table" | "cards";
 
 const VIEW_STORAGE_KEY = "aurum:suppliers:view:v1";
 
+function supplierStatusLabel(supplier: Supplier): string {
+  return supplier.is_active ? "Доступен для приходов" : "Отключён для новых документов";
+}
+
 export function SuppliersPage(): JSX.Element {
   const { user } = useAuth();
   const filterPreferenceKey = useFilterPreferenceKey("suppliers");
@@ -59,6 +64,9 @@ export function SuppliersPage(): JSX.Element {
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [returning, setReturning] = useState<Supplier | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [returnDirty, setReturnDirty] = useState(false);
+  const [discardTarget, setDiscardTarget] = useState<"editor" | "return" | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<SupplierView>(readSupplierView);
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
@@ -83,6 +91,7 @@ export function SuppliersPage(): JSX.Element {
   );
   const query = useSupplierSearchQuery(params);
   const rows = query.data?.items ?? [];
+  const isShowingPreviousResults = query.isPlaceholderData && query.isFetching;
   const selectedSupplier = rows.find((supplier) => supplier.id === selectedId) ?? rows[0] ?? null;
   const hasFilters = Boolean(qInput.trim() || status !== "active");
 
@@ -106,6 +115,26 @@ export function SuppliersPage(): JSX.Element {
     setDetail(supplier);
   };
 
+  const closeEditor = () => {
+    setCreating(false);
+    setEditing(null);
+    setEditorDirty(false);
+    setDiscardTarget(null);
+  };
+  const requestEditorClose = () => {
+    if (editorDirty) setDiscardTarget("editor");
+    else closeEditor();
+  };
+  const closeReturn = () => {
+    setReturning(null);
+    setReturnDirty(false);
+    setDiscardTarget(null);
+  };
+  const requestReturnClose = () => {
+    if (returnDirty) setDiscardTarget("return");
+    else closeReturn();
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -116,7 +145,7 @@ export function SuppliersPage(): JSX.Element {
           query.data ? (
             <span aria-live="polite">
               {query.data.total} найдено
-              {query.isFetching && !query.isLoading ? " · обновление" : ""}
+              {isShowingPreviousResults ? " · поиск" : query.isFetching ? " · обновление" : ""}
             </span>
           ) : undefined
         }
@@ -126,7 +155,7 @@ export function SuppliersPage(): JSX.Element {
               <Button
                 variant="secondary"
                 size="lg"
-                disabled={!selectedSupplier?.is_active}
+                disabled={isShowingPreviousResults || !selectedSupplier?.is_active}
                 onClick={() => selectedSupplier && setReturning(selectedSupplier)}
               >
                 <ReturnIcon />
@@ -136,7 +165,7 @@ export function SuppliersPage(): JSX.Element {
             {canCreate && (
               <Button size="lg" onClick={() => setCreating(true)}>
                 <PlusIcon />
-                Новый поставщик
+                Добавить поставщика
               </Button>
             )}
           </>
@@ -186,9 +215,9 @@ export function SuppliersPage(): JSX.Element {
                   }}
                   className="w-full sm:w-44"
                 >
-                  <option value="active">Активные</option>
-                  <option value="inactive">Неактивные</option>
-                  <option value="all">Все</option>
+                  <option value="active">Доступны для новых приходов</option>
+                  <option value="inactive">Не используются в новых документах</option>
+                  <option value="all">Все поставщики</option>
                 </Select>
               </div>
             ),
@@ -211,9 +240,18 @@ export function SuppliersPage(): JSX.Element {
         }
       />
 
+      {isShowingPreviousResults ? (
+        <div
+          className="rounded-lg border border-info/30 bg-info-subtle px-3 py-2 text-sm text-info-foreground"
+          role="status"
+        >
+          Ищем поставщиков. Пока показан предыдущий список; действия временно недоступны.
+        </div>
+      ) : null}
+
       {query.isLoading ? (
         <SkeletonRows rows={7} />
-      ) : query.error ? (
+      ) : query.error && !query.data ? (
         <div
           role="alert"
           className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-4 text-sm text-danger-foreground"
@@ -250,10 +288,25 @@ export function SuppliersPage(): JSX.Element {
         </TableEmpty>
       ) : (
         <>
+          {query.error ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2">
+              <p className="text-sm text-foreground-secondary" role="status">
+                Показаны ранее загруженные данные. Обновление не удалось.
+              </p>
+              <Button variant="secondary" size="sm" onClick={() => void query.refetch()}>
+                Повторить
+              </Button>
+            </div>
+          ) : null}
           {view === "cards" || !isDesktopLayout ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
               {rows.map((supplier) => (
-                <SupplierCard key={supplier.id} supplier={supplier} onOpen={openSupplier} />
+                <SupplierCard
+                  key={supplier.id}
+                  supplier={supplier}
+                  disabled={isShowingPreviousResults}
+                  onOpen={openSupplier}
+                />
               ))}
             </div>
           ) : isSplitLayout ? (
@@ -261,11 +314,13 @@ export function SuppliersPage(): JSX.Element {
               <SupplierTable
                 items={rows}
                 selectedId={selectedSupplier?.id ?? null}
+                disabled={isShowingPreviousResults}
                 onOpen={openSupplier}
               />
               {selectedSupplier && (
                 <SupplierPreviewPanel
                   supplier={selectedSupplier}
+                  disabled={isShowingPreviousResults}
                   onEdit={(supplier) => setEditing(supplier)}
                   onReturn={(supplier) => setReturning(supplier)}
                   onOpenFull={(supplier) => setDetail(supplier)}
@@ -273,7 +328,12 @@ export function SuppliersPage(): JSX.Element {
               )}
             </div>
           ) : (
-            <SupplierTable items={rows} selectedId={null} onOpen={openSupplier} />
+            <SupplierTable
+              items={rows}
+              selectedId={null}
+              disabled={isShowingPreviousResults}
+              onOpen={openSupplier}
+            />
           )}
           <Pagination
             page={page}
@@ -306,12 +366,16 @@ export function SuppliersPage(): JSX.Element {
       {canCreateReturn && (
         <Modal
           open={returning !== null}
-          onClose={() => setReturning(null)}
-          title={returning ? `Возврат: ${returning.name}` : "Возврат поставщику"}
+          onClose={requestReturnClose}
+          title={returning ? `Возврат поставщику: ${returning.name}` : "Возврат поставщику"}
           className="max-w-3xl"
         >
           {returning && (
-            <SupplierReturnForm supplier={returning} onClose={() => setReturning(null)} />
+            <SupplierReturnForm
+              supplier={returning}
+              onClose={requestReturnClose}
+              onDirtyChange={setReturnDirty}
+            />
           )}
         </Modal>
       )}
@@ -319,22 +383,33 @@ export function SuppliersPage(): JSX.Element {
       {(canCreate || canUpdate) && (
         <Modal
           open={creating || editing !== null}
-          onClose={() => {
-            setCreating(false);
-            setEditing(null);
-          }}
-          title={editing ? `Редактирование: ${editing.name}` : "Новый поставщик"}
+          onClose={requestEditorClose}
+          title={editing ? `Изменить поставщика: ${editing.name}` : "Добавить поставщика"}
           className="max-w-2xl"
         >
           <SupplierForm
             supplier={editing}
-            onClose={() => {
-              setCreating(false);
-              setEditing(null);
-            }}
+            onClose={closeEditor}
+            onCancel={requestEditorClose}
+            onDirtyChange={setEditorDirty}
           />
         </Modal>
       )}
+
+      <ConfirmDialog
+        open={discardTarget !== null}
+        title="Закрыть без сохранения?"
+        message={
+          discardTarget === "return"
+            ? "Введённые данные возврата не сохранятся."
+            : "Изменения в карточке поставщика не сохранятся."
+        }
+        cancelLabel="Продолжить"
+        confirmLabel="Закрыть без сохранения"
+        variant="danger"
+        onCancel={() => setDiscardTarget(null)}
+        onConfirm={discardTarget === "return" ? closeReturn : closeEditor}
+      />
     </div>
   );
 }
@@ -411,14 +486,14 @@ function SupplierSummary({ summary }: { summary: SupplierSearchSummary }): JSX.E
       className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface md:grid-cols-4"
     >
       <SummaryMetric label="Всего" value={summary.all_count} />
-      <SummaryMetric label="Активные" value={summary.active_count} tone="success" />
+      <SummaryMetric label="Доступны для приходов" value={summary.active_count} tone="success" />
       <SummaryMetric
-        label="Неактивные"
+        label="Отключены"
         value={summary.inactive_count}
         tone={summary.inactive_count > 0 ? "muted" : "default"}
       />
       <SummaryMetric
-        label="Есть контакты"
+        label="Есть телефон или email"
         value={summary.with_contact_count}
         detail={`${contactCoverage}% справочника`}
       />
@@ -457,10 +532,12 @@ function SummaryMetric({
 function SupplierTable({
   items,
   selectedId,
+  disabled,
   onOpen,
 }: {
   items: Supplier[];
   selectedId: string | null;
+  disabled: boolean;
   onOpen: (supplier: Supplier) => void;
 }): JSX.Element {
   return (
@@ -490,6 +567,7 @@ function SupplierTable({
               <button
                 type="button"
                 className="max-w-72 text-left font-semibold text-foreground hover:text-primary"
+                disabled={disabled}
                 onClick={() => onOpen(supplier)}
               >
                 {supplier.name}
@@ -512,16 +590,26 @@ function SupplierTable({
             </TD>
             <TD>{supplier.contact_person || "—"}</TD>
             <TD>
-              <p>{supplier.phone || "—"}</p>
+              {supplier.phone ? (
+                <a className="hover:text-primary hover:underline" href={`tel:${supplier.phone}`}>
+                  {supplier.phone}
+                </a>
+              ) : (
+                <p>—</p>
+              )}
               {supplier.email && (
-                <p className="mt-0.5 max-w-52 truncate text-xs text-foreground-muted">
+                <a
+                  className="mt-0.5 block max-w-52 truncate text-xs text-foreground-muted hover:text-primary hover:underline"
+                  href={`mailto:${supplier.email}`}
+                  title={supplier.email}
+                >
                   {supplier.email}
-                </p>
+                </a>
               )}
             </TD>
             <TD>
               <Badge tone={supplier.is_active ? "success" : "neutral"}>
-                {supplier.is_active ? "Активен" : "Неактивен"}
+                {supplierStatusLabel(supplier)}
               </Badge>
             </TD>
             <TD className="text-right">
@@ -530,6 +618,7 @@ function SupplierTable({
                 size="sm"
                 className="w-[var(--control-height-sm)] px-0"
                 aria-label={`Открыть карточку: ${supplier.name}`}
+                disabled={disabled}
                 onClick={() => onOpen(supplier)}
               >
                 <ChevronRightIcon />
@@ -544,11 +633,13 @@ function SupplierTable({
 
 function SupplierPreviewPanel({
   supplier,
+  disabled,
   onEdit,
   onReturn,
   onOpenFull,
 }: {
   supplier: Supplier;
+  disabled: boolean;
   onEdit: (supplier: Supplier) => void;
   onReturn: (supplier: Supplier) => void;
   onOpenFull: (supplier: Supplier) => void;
@@ -556,7 +647,7 @@ function SupplierPreviewPanel({
   const { user } = useAuth();
   const canUpdate = hasPermission(user, "suppliers.update");
   const canViewReturns = hasPermission(user, "incoming.view");
-  const canCreateReturn = hasPermission(user, "incoming.return") && supplier.is_active;
+  const canCreateReturn = hasPermission(user, "incoming.return") && supplier.is_active && !disabled;
   const returns = useSupplierReturnsQuery(
     { supplier_id: supplier.id, page: 1, page_size: 3 },
     canViewReturns,
@@ -573,7 +664,7 @@ function SupplierPreviewPanel({
             {supplier.name}
           </h2>
           <Badge tone={supplier.is_active ? "success" : "neutral"}>
-            {supplier.is_active ? "Активен" : "Неактивен"}
+            {supplierStatusLabel(supplier)}
           </Badge>
         </div>
         <p className="mt-1 text-sm text-foreground-muted">
@@ -588,7 +679,7 @@ function SupplierPreviewPanel({
             )}
           >
             {canUpdate && (
-              <Button variant="secondary" onClick={() => onEdit(supplier)}>
+              <Button variant="secondary" disabled={disabled} onClick={() => onEdit(supplier)}>
                 <EditIcon />
                 Изменить
               </Button>
@@ -608,9 +699,31 @@ function SupplierPreviewPanel({
         className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 border-t border-border px-5 py-4 text-sm"
       >
         <PreviewField label="Контактное лицо" value={supplier.contact_person || "Не указано"} />
-        <PreviewField label="Телефон" value={supplier.phone || "Не указан"} />
-        <PreviewField label="Email" value={supplier.email || "Не указан"} />
-        <PreviewField label="ИНН / TIN" value={supplier.inn_or_tin || "Не указан"} mono />
+        <PreviewField
+          label="Телефон"
+          value={
+            supplier.phone ? (
+              <a className="hover:text-primary hover:underline" href={`tel:${supplier.phone}`}>
+                {supplier.phone}
+              </a>
+            ) : (
+              "Не указан"
+            )
+          }
+        />
+        <PreviewField
+          label="Email"
+          value={
+            supplier.email ? (
+              <a className="hover:text-primary hover:underline" href={`mailto:${supplier.email}`}>
+                {supplier.email}
+              </a>
+            ) : (
+              "Не указан"
+            )
+          }
+        />
+        <PreviewField label="ИНН поставщика" value={supplier.inn_or_tin || "Не указан"} mono />
         <PreviewField label="Адрес" value={supplier.address || "Не указан"} />
       </section>
 
@@ -665,6 +778,7 @@ function SupplierPreviewPanel({
         <Button
           className="w-full justify-between"
           variant="ghost"
+          disabled={disabled}
           onClick={() => onOpenFull(supplier)}
         >
           Открыть полную карточку
@@ -681,7 +795,7 @@ function PreviewField({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   mono?: boolean;
 }): JSX.Element {
   return (
@@ -720,9 +834,11 @@ function SupplierReturnPreview({ item }: { item: SupplierReturnDetails }): JSX.E
 
 function SupplierCard({
   supplier,
+  disabled,
   onOpen,
 }: {
   supplier: Supplier;
+  disabled: boolean;
   onOpen: (supplier: Supplier) => void;
 }): JSX.Element {
   return (
@@ -735,16 +851,43 @@ function SupplierCard({
           </p>
         </div>
         <Badge tone={supplier.is_active ? "success" : "neutral"}>
-          {supplier.is_active ? "Активен" : "Неактивен"}
+          {supplierStatusLabel(supplier)}
         </Badge>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <CardField label="Телефон" value={supplier.phone || "—"} />
-        <CardField label="Email" value={supplier.email || "—"} />
-        <CardField label="ИНН / TIN" value={supplier.inn_or_tin || "—"} mono />
+        <CardField
+          label="Телефон"
+          value={
+            supplier.phone ? (
+              <a className="hover:text-primary hover:underline" href={`tel:${supplier.phone}`}>
+                {supplier.phone}
+              </a>
+            ) : (
+              "—"
+            )
+          }
+        />
+        <CardField
+          label="Email"
+          value={
+            supplier.email ? (
+              <a className="hover:text-primary hover:underline" href={`mailto:${supplier.email}`}>
+                {supplier.email}
+              </a>
+            ) : (
+              "—"
+            )
+          }
+        />
+        <CardField label="ИНН поставщика" value={supplier.inn_or_tin || "—"} mono />
         <CardField label="Адрес" value={supplier.address || "—"} />
       </div>
-      <Button className="mt-4 min-h-11 w-full" variant="secondary" onClick={() => onOpen(supplier)}>
+      <Button
+        className="mt-4 min-h-11 w-full"
+        variant="secondary"
+        disabled={disabled}
+        onClick={() => onOpen(supplier)}
+      >
         Открыть карточку
       </Button>
     </article>
@@ -757,7 +900,7 @@ function CardField({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   mono?: boolean;
 }): JSX.Element {
   return (
