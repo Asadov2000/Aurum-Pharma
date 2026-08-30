@@ -120,8 +120,7 @@ export function UsersPage(): JSX.Element {
   const canViewRoles = permissions.includes("roles.view");
   const canViewBranches = permissions.includes("branches.view");
   const canTransferOwnership = isTenantOwner && !isSupportScoped;
-  const showActions =
-    canUpdate || canSuspend || canOffboard || canAssign || canTransferOwnership;
+  const showActions = canUpdate || canSuspend || canOffboard || canAssign || canTransferOwnership;
 
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
@@ -549,7 +548,10 @@ export function UsersPage(): JSX.Element {
               Измените запрос или выбранные фильтры.
             </TableEmpty>
           ) : (
-            <TableEmpty>К аптеке пока не прикреплены сотрудники</TableEmpty>
+            <TableEmpty title="Сотрудников пока нет">
+              Аккаунты сотрудников создаёт и подключает команда Aurum Pharma. После подключения
+              владелец аптеки назначает каждому сотруднику подходящую роль и торговые точки.
+            </TableEmpty>
           )
         ) : (
           <>

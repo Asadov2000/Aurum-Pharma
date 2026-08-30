@@ -85,7 +85,7 @@ async def list_ownership_transfers(
 ) -> OwnershipTransferListResponse:
     _current_tenant_or_400(user)
     _set_search_no_store(response)
-    records = await service.list_ownership_transfers()
+    records = await service.list_ownership_transfers(actor_user_id=user.user_id)
     return OwnershipTransferListResponse(
         items=[_ownership_transfer_read(record) for record in records]
     )

@@ -384,8 +384,12 @@ class RolesService:
         )
         return transfer
 
-    async def list_ownership_transfers(self) -> list[OwnershipTransferRecord]:
-        return await self.repo.list_ownership_transfers()
+    async def list_ownership_transfers(
+        self,
+        *,
+        actor_user_id: UUID,
+    ) -> list[OwnershipTransferRecord]:
+        return await self.repo.list_ownership_transfers(actor_user_id=actor_user_id)
 
     async def cancel_ownership_transfer(
         self,

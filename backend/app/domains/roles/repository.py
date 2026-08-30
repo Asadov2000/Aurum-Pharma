@@ -657,15 +657,22 @@ class RolesRepository:
         )
         return _ownership_transfer_from_row(row) if row is not None else None
 
-    async def list_ownership_transfers(self) -> list[OwnershipTransferRecord]:
+    async def list_ownership_transfers(
+        self,
+        *,
+        actor_user_id: UUID,
+    ) -> list[OwnershipTransferRecord]:
         rows = (
             (
                 await self.session.execute(
                     text(
                         _OWNERSHIP_TRANSFER_SELECT
                         + " WHERE transfer.tenant_id = public.current_tenant_id() "
+                        "AND (initiator.user_id = :actor_user_id "
+                        "OR target.user_id = :actor_user_id) "
                         "ORDER BY transfer.created_at DESC, transfer.id DESC"
-                    )
+                    ),
+                    {"actor_user_id": actor_user_id},
                 )
             )
             .mappings()

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listUsers = vi.fn();
 const listRoles = vi.fn();
+const listPermissions = vi.fn();
 const updateUser = vi.fn();
 const suspendUser = vi.fn();
 const offboardUser = vi.fn();
@@ -16,7 +17,7 @@ const LAZY_PANEL_WAIT = { timeout: 5_000 };
 vi.mock("@/features/roles/api", () => ({
   listUsers: (...args: unknown[]) => listUsers(...args),
   listRoles: (...args: unknown[]) => listRoles(...args),
-  listPermissions: vi.fn().mockResolvedValue([]),
+  listPermissions: (...args: unknown[]) => listPermissions(...args),
   listTemplates: vi.fn().mockResolvedValue([]),
   createRole: vi.fn(),
   updateRole: vi.fn(),
@@ -86,6 +87,32 @@ const MANAGED_ROLE = {
   has_hidden_permissions: false,
 };
 
+const SELL_PERMISSION = {
+  code: "pos.sell",
+  group_code: "pos",
+  name: "Проводить продажи",
+  description: "Создание продажи на кассе",
+  is_dangerous: false,
+  is_active: true,
+  scope_type: "BRANCH_SET" as const,
+  target_role_type: "tenant" as const,
+  risk_level: "normal" as const,
+  requires_step_up: false,
+  requires_confirmation: false,
+};
+
+const DELETE_USER_PERMISSION = {
+  ...SELL_PERMISSION,
+  code: "users.delete",
+  group_code: "users",
+  name: "Отключать сотрудников от аптеки",
+  description: "Прекращение доступа сотрудника",
+  is_dangerous: true,
+  scope_type: "TENANT_ALL" as const,
+  risk_level: "critical" as const,
+  requires_confirmation: true,
+};
+
 const SYSTEM_ROLE = {
   ...MANAGED_ROLE,
   id: "role-system",
@@ -139,6 +166,7 @@ describe("UsersPage", () => {
     };
     listUsers.mockReset();
     listRoles.mockReset();
+    listPermissions.mockReset();
     updateUser.mockReset();
     suspendUser.mockReset();
     offboardUser.mockReset();
@@ -147,6 +175,7 @@ describe("UsersPage", () => {
     createOwnershipTransfer.mockReset();
     listBranches.mockReset();
     listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE]);
+    listPermissions.mockResolvedValue([]);
     listBranches.mockResolvedValue([]);
     updateUser.mockResolvedValue({});
     suspendUser.mockResolvedValue(undefined);
@@ -165,7 +194,11 @@ describe("UsersPage", () => {
     listUsers.mockResolvedValue(usersResponse([]));
     renderPage();
 
-    expect(await screen.findByText(/К аптеке пока не прикреплены сотрудники/i)).toBeInTheDocument();
+    expect(await screen.findByText("Сотрудников пока нет")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Аккаунты сотрудников создаёт и подключает команда Aurum Pharma/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/владелец аптеки назначает каждому сотруднику/i)).toBeInTheDocument();
     expect(screen.queryByText(/Пригласить/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Создать аккаунт/i)).not.toBeInTheDocument();
   });
@@ -300,7 +333,15 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
+
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Проверьте доступ сотрудника",
+    });
+    expect(within(confirmation).getByText("Кассир")).toBeInTheDocument();
+    expect(within(confirmation).getByText("Все точки аптеки")).toBeInTheDocument();
+    expect(createAssignment).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Назначить роль" }));
 
     await waitFor(() => expect(createAssignment).toHaveBeenCalledTimes(1));
     expect(createAssignment).toHaveBeenCalledWith("member-1", {
@@ -308,6 +349,86 @@ describe("UsersPage", () => {
       branch_id: null,
       password_required: false,
     });
+  });
+
+  it("reviews only visible capabilities and warns about important permissions", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    const reviewRole = {
+      ...MANAGED_ROLE,
+      id: "role-review",
+      name: "Старший кассир",
+      permissions: ["pos.sell", "users.delete", "platform.secret", "roles.not-visible"],
+    };
+    listRoles.mockResolvedValue([reviewRole]);
+    listPermissions.mockResolvedValue([
+      SELL_PERMISSION,
+      DELETE_USER_PERMISSION,
+      {
+        ...SELL_PERMISSION,
+        code: "platform.secret",
+        name: "Системное управление Aurum",
+        scope_type: "PLATFORM",
+        target_role_type: "platform",
+      },
+    ]);
+    listBranches.mockResolvedValue([{ id: "branch-1", name: "Аптека Рудаки" }]);
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
+    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: reviewRole.id } });
+    fireEvent.change(screen.getByLabelText("Где действует роль"), {
+      target: { value: "branch-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
+
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Проверьте доступ сотрудника",
+    });
+    expect(within(confirmation).getByText("Старший кассир")).toBeInTheDocument();
+    expect(within(confirmation).getByText("Аптека Рудаки")).toBeInTheDocument();
+    expect(within(confirmation).getByText(/Разделы: Касса, Сотрудники/)).toBeInTheDocument();
+    expect(within(confirmation).getByText("Проводить продажи")).toBeInTheDocument();
+    expect(
+      within(confirmation).getAllByText("Отключать сотрудников от аптеки"),
+    ).toHaveLength(2);
+    expect(within(confirmation).getByText("Обратите внимание")).toBeInTheDocument();
+    expect(within(confirmation).queryByText("Системное управление Aurum")).not.toBeInTheDocument();
+    expect(within(confirmation).queryByText("roles.not-visible")).not.toBeInTheDocument();
+  });
+
+  it("does not offer a role whose permissions are only partially visible", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listRoles.mockResolvedValue([
+      {
+        ...MANAGED_ROLE,
+        id: "role-hidden-capabilities",
+        name: "Неполная роль",
+        has_hidden_permissions: true,
+      },
+    ]);
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+
+    expect(
+      await screen.findByText("Нет доступных для назначения ролей.", {}, LAZY_PANEL_WAIT),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Назначить роль" })).not.toBeInTheDocument();
   });
 
   it("does not offer password enforcement before the employee configures a password", async () => {
@@ -324,7 +445,9 @@ describe("UsersPage", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
 
-    expect(screen.queryByLabelText("Требовать пароль при входе")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Запрашивать пароль при входе с этой ролью"),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText("Обязательный пароль станет доступен после настройки пароля сотрудником."),
     ).toBeInTheDocument();
@@ -348,8 +471,12 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
-    fireEvent.click(screen.getByLabelText("Требовать пароль при входе"));
-    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
+    fireEvent.click(screen.getByLabelText("Запрашивать пароль при входе с этой ролью"));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Проверьте доступ сотрудника",
+    });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Назначить роль" }));
 
     await waitFor(() => expect(createAssignment).toHaveBeenCalledTimes(1));
     expect(createAssignment).toHaveBeenCalledWith("member-1", {
@@ -375,7 +502,7 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
 
     expect(
       await screen.findByText("Эта роль уже назначена сотруднику для выбранной области"),
