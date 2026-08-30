@@ -95,7 +95,7 @@ describe("IncomingDetailPage", () => {
   it("shows reference names, product details and control totals", async () => {
     renderPage();
 
-    expect(await screen.findByText("Приход № ПР-1042")).toBeInTheDocument();
+    expect(await screen.findByText("Приёмка № ПР-1042")).toBeInTheDocument();
     expect(screen.getByText(/Сино Фарм · Аптека Рудаки/)).toBeInTheDocument();
     expect(screen.getAllByText("Парацетамол 500 мг").length).toBeGreaterThanOrEqual(1);
 
@@ -126,14 +126,14 @@ describe("IncomingDetailPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить документ");
     expect(screen.queryByText("Документ пока пуст")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
-    expect(await screen.findByText("Приход № ПР-1042")).toBeInTheDocument();
+    expect(await screen.findByText("Приёмка № ПР-1042")).toBeInTheDocument();
   });
 
   it("hides every modifying action from a read-only user", async () => {
     permissions = ["incoming.view"];
     renderPage();
 
-    expect(await screen.findByText("Приход № ПР-1042")).toBeInTheDocument();
+    expect(await screen.findByText("Приёмка № ПР-1042")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Добавить позицию" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
