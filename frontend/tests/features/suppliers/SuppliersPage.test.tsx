@@ -133,7 +133,7 @@ describe("SuppliersPage", () => {
     createSupplier.mockResolvedValueOnce(SAMPLE);
     renderPage();
     await screen.findByText(/Поставщиков пока нет/i);
-    fireEvent.click(screen.getByRole("button", { name: /Добавить поставщика/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить поставщика" })[0]);
     const dialog = await screen.findByRole("dialog", { name: "Добавить поставщика" });
     fireEvent.change(within(dialog).getByLabelText("Краткое название"), {
       target: { value: "ОсОО Прима-Фарм" },
@@ -168,7 +168,7 @@ describe("SuppliersPage", () => {
     });
     renderPage();
     await screen.findByText(/Поставщиков пока нет/i);
-    fireEvent.click(screen.getByRole("button", { name: /Добавить поставщика/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить поставщика" })[0]);
     const editor = await screen.findByRole("dialog", { name: "Добавить поставщика" });
     fireEvent.change(within(editor).getByLabelText("Краткое название"), {
       target: { value: "Черновик" },
