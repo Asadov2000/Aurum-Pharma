@@ -73,7 +73,8 @@ describe("SalesPage", () => {
     const receipt = await screen.findByRole("button", { name: "Открыть чек № 000142" });
     expect(within(receipt).getAllByText("Иван Кассиров").length).toBeGreaterThan(0);
     expect(within(receipt).getAllByText("Наличные").length).toBeGreaterThan(0);
-    expect(within(receipt).getAllByText(/Возврат №000143/).length).toBeGreaterThan(0);
+    expect(within(receipt).getAllByText("Возвращено частично").length).toBeGreaterThan(0);
+    expect(within(receipt).getAllByText("Чек №000143").length).toBeGreaterThan(0);
     expect(screen.getByText("Найдено: 1")).toBeInTheDocument();
   });
 
@@ -82,21 +83,23 @@ describe("SalesPage", () => {
     renderPage();
 
     await screen.findByRole("button", { name: "Открыть чек № 000142" });
-    fireEvent.click(screen.getByRole("button", { name: "С возвратом" }));
+    fireEvent.click(screen.getByRole("button", { name: "Продажи с возвратом" }));
 
     await waitFor(() => {
       expect(listSales).toHaveBeenLastCalledWith(expect.objectContaining({ has_refund: true }));
     });
-    expect(screen.getByRole("button", { name: /С возвратом/ })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /Продажи с возвратом/ })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Без возврата" }));
+    fireEvent.click(screen.getByRole("button", { name: "Чеки возврата" }));
     await waitFor(() => {
-      expect(listSales).toHaveBeenLastCalledWith(expect.objectContaining({ has_refund: false }));
+      expect(listSales).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sale_type: "return", has_refund: undefined }),
+      );
     });
-    expect(screen.getByRole("button", { name: /Без возврата/ })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /Чеки возврата/ })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -137,6 +140,7 @@ describe("SalesPage", () => {
           currency: "TJS",
           discount_amount: "0",
           position: 1,
+          name: "Парацетамол 500 мг",
         },
       ],
       payments: [
@@ -149,7 +153,35 @@ describe("SalesPage", () => {
     await waitFor(() => {
       expect(getSaleDetails).toHaveBeenCalledWith("s-1");
     });
+    expect(screen.getByText("Парацетамол 500 мг")).toBeInTheDocument();
     // Refund button hidden because this row already has_refund.
     expect(screen.queryByRole("button", { name: /Оформить возврат/ })).not.toBeInTheDocument();
+  });
+
+  it("offers a retry when receipt details fail to load", async () => {
+    listSales.mockResolvedValueOnce({ items: [SALE], total: 1, page: 1, page_size: 50 });
+    getSaleDetails
+      .mockRejectedValueOnce(new Error("temporary network error"))
+      .mockResolvedValueOnce({
+        id: "s-1",
+        sale_type: "sale",
+        status: "completed",
+        receipt_number: "000142",
+        completed_at: "2026-05-28T10:00:00Z",
+        total_amount: "120.00",
+        currency: "TJS",
+        parent_sale_id: null,
+        items: [],
+        payments: [],
+      });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть чек № 000142" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить чек");
+    expect(screen.queryByText("Загрузка…")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByText("Продажа завершена")).toBeInTheDocument();
+    expect(getSaleDetails).toHaveBeenCalledTimes(2);
   });
 });

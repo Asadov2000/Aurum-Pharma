@@ -246,3 +246,39 @@ async def test_has_refund_filter(db_session: AsyncSession, pos_scaffold) -> None
     assert str(refunded_rows[0]["id"]) == str(refunded_parent.id)
     assert refunded_rows[0]["has_refund"] is True
     assert refunded_rows[0]["refund_receipt_number"] is not None
+
+    return_rows, return_total = await service.list_sales(
+        tenant_id=s["tenant"].id,
+        cashier_id=None,
+        branch_id=None,
+        register_id=None,
+        receipt_number=None,
+        date_from=None,
+        date_to=None,
+        has_refund=None,
+        min_total=None,
+        max_total=None,
+        page=1,
+        page_size=50,
+        sale_type="return",
+    )
+    assert return_total == 1
+    assert return_rows[0]["is_refund"] is True
+
+    plain_sales, plain_total = await service.list_sales(
+        tenant_id=s["tenant"].id,
+        cashier_id=None,
+        branch_id=None,
+        register_id=None,
+        receipt_number=None,
+        date_from=None,
+        date_to=None,
+        has_refund=False,
+        min_total=None,
+        max_total=None,
+        page=1,
+        page_size=50,
+        sale_type="sale",
+    )
+    assert plain_total == 1
+    assert plain_sales[0]["has_refund"] is False

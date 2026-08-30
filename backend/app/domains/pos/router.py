@@ -943,6 +943,7 @@ async def list_sales(
     register_id: Annotated[UUID | None, Query()] = None,
     cashier_id: Annotated[UUID | None, Query()] = None,
     has_refund: Annotated[bool | None, Query()] = None,
+    sale_type: Annotated[Literal["sale", "return"] | None, Query()] = None,
     min_total: Annotated[Decimal | None, Query()] = None,
     max_total: Annotated[Decimal | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -976,6 +977,7 @@ async def list_sales(
         own_branch_ids=own_branch_ids,
         tenant_view_branch_ids=tenant_view_branch_ids,
         can_view_tenant=_can_view_tenant_sales(user),
+        sale_type=sale_type,
     )
     return SaleList(
         items=[SaleListItem(**row) for row in rows],
@@ -1010,6 +1012,7 @@ async def get_sale(
     refunded_quantities = (
         await service.get_refunded_quantities(sale.id) if sale.sale_type == "sale" else {}
     )
+    snapshot_names = service.get_receipt_item_names(sale)
     return SaleDetails(
         **SaleRead.model_validate(sale).model_copy(update=lifecycle).model_dump(),
         items=[
@@ -1019,9 +1022,10 @@ async def get_sale(
                     "expires_at": expires_at,
                     "days_to_expiry": days_to_expiry,
                     "refunded_qty": refunded_quantities.get(si.id, Decimal("0")),
+                    "name": snapshot_names.get(si.position, current_name),
                 }
             )
-            for (si, batch_number, expires_at, days_to_expiry) in items
+            for (si, batch_number, expires_at, days_to_expiry, current_name) in items
         ],
         payments=[PaymentRead.model_validate(p) for p in payments],
     )

@@ -610,7 +610,7 @@ class POSRepository:
 
     async def list_items_with_batch(
         self, sale_id: UUID
-    ) -> list[tuple[SaleItem, str | None, date | None, int | None]]:
+    ) -> list[tuple[SaleItem, str | None, date | None, int | None, str | None]]:
         """Read-only enrichment for the sale view: each line plus its batch
         number, expiry and days-to-expiry (PG `date - date` → int days). One
         join, no extra logic — the FEFO-chosen batch_id is already on the row.
@@ -621,13 +621,15 @@ class POSRepository:
                 Batch.batch_number,
                 Batch.expires_at,
                 (Batch.expires_at - func.current_date()),
+                TenantCatalog.brand_name,
             )
             .join(Batch, Batch.id == SaleItem.batch_id, isouter=True)
+            .join(TenantCatalog, TenantCatalog.id == SaleItem.catalog_id, isouter=True)
             .where(SaleItem.sale_id == sale_id)
             .order_by(SaleItem.position.asc())
         )
         rows = (await self.session.execute(stmt)).all()
-        return [(r[0], r[1], r[2], r[3]) for r in rows]
+        return [(r[0], r[1], r[2], r[3], r[4]) for r in rows]
 
     async def get_item(self, item_id: UUID) -> SaleItem | None:
         return await self.session.get(SaleItem, item_id)
@@ -1378,6 +1380,7 @@ class POSRepository:
         own_branch_ids: set[UUID] | None = None,
         tenant_view_branch_ids: set[UUID] | None = None,
         can_view_tenant: bool = False,
+        sale_type: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         """One query joins sale → branch/register/cashier for resolved names,
         aggregates payment methods, builds a short item preview, and derives
@@ -1411,6 +1414,9 @@ class POSRepository:
         if register_id is not None:
             clauses.append("s.register_id = :register")
             params["register"] = str(register_id)
+        if sale_type is not None:
+            clauses.append("s.sale_type = :sale_type")
+            params["sale_type"] = sale_type
         if receipt_number is not None:
             clauses.append("s.receipt_number = :receipt")
             params["receipt"] = receipt_number

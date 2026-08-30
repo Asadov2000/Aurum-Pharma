@@ -341,6 +341,7 @@ test.describe("POS sale (owner)", () => {
       const refundDialog = page.getByRole("dialog", {
         name: `Возврат по чеку № ${completedSale.receipt_number}`,
       });
+      await refundDialog.getByRole("checkbox").first().check();
       const createRefundAttemptResponse = page.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
@@ -354,7 +355,7 @@ test.describe("POS sale (owner)", () => {
           response.ok(),
       );
       await refundDialog.getByLabel("Причина").selectOption("quality_issue");
-      await refundDialog.getByRole("button", { name: "Рассчитать возврат" }).click();
+      await refundDialog.getByRole("button", { name: "Зафиксировать сумму возврата" }).click();
       const refundAttempt = (await (await createRefundAttemptResponse).json()) as {
         id: string;
         status: string;
@@ -388,7 +389,7 @@ test.describe("POS sale (owner)", () => {
           request.method() === "POST" &&
           request.url().endsWith(`/api/v1/sales/${completedSale.sale_id}/refund`),
       );
-      await refundDialog.getByRole("button", { name: "Подтвердить и оформить" }).click();
+      await refundDialog.getByRole("button", { name: "Подтвердить возврат и создать чек" }).click();
       expect(
         ((await (await confirmRefundAttemptResponse).json()) as { status: string }).status,
       ).toBe("confirmed");
@@ -408,7 +409,7 @@ test.describe("POS sale (owner)", () => {
       expect(storedRefundAttempt.ok()).toBe(true);
       expect(((await storedRefundAttempt.json()) as { status: string }).status).toBe("consumed");
 
-      await expect(page.getByText("Возврат", { exact: true })).toBeVisible();
+      await expect(page.getByText("Чек возврата", { exact: true })).toBeVisible();
       await page.getByRole("button", { name: "Печать возврата" }).click();
       await expect(page.getByRole("dialog", { name: "Печать возврата" })).toBeVisible();
       await expect(page.getByText("ВОЗВРАТ", { exact: true })).toBeVisible();

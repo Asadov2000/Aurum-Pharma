@@ -2213,6 +2213,19 @@ class POSService:
     async def get_refunded_quantities(self, parent_sale_id: UUID) -> dict[UUID, Decimal]:
         return await self.repo.refunded_quantities(parent_sale_id)
 
+    @staticmethod
+    def get_receipt_item_names(sale: Sale) -> dict[int, str]:
+        """Return immutable line names for a completed receipt snapshot."""
+        if sale.receipt_snapshot is None:
+            return {}
+        try:
+            snapshot = ReceiptData.model_validate(sale.receipt_snapshot)
+        except PydanticValidationError as exc:
+            raise AurumError("Receipt snapshot is invalid") from exc
+        if snapshot.sale_id != sale.id:
+            raise AurumError("Receipt snapshot does not match the sale")
+        return {line.position: line.name for line in snapshot.items}
+
     async def _lock_sale(self, sale_id: UUID) -> Sale:
         sale = await self.repo.lock_sale(sale_id)
         if sale is None:
@@ -2259,6 +2272,7 @@ class POSService:
         own_branch_ids: set[UUID] | None = None,
         tenant_view_branch_ids: set[UUID] | None = None,
         can_view_tenant: bool = False,
+        sale_type: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         return await self.repo.list_sales(
             tenant_id=tenant_id,
@@ -2279,6 +2293,7 @@ class POSService:
             own_branch_ids=own_branch_ids,
             tenant_view_branch_ids=tenant_view_branch_ids,
             can_view_tenant=can_view_tenant,
+            sale_type=sale_type,
         )
 
     async def get_sale_details(
@@ -2289,7 +2304,11 @@ class POSService:
         can_view_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
         allowed_view_branch_ids: set[UUID] | None = None,
-    ) -> tuple[Sale, list[tuple[SaleItem, str | None, date | None, int | None]], list[SalePayment]]:
+    ) -> tuple[
+        Sale,
+        list[tuple[SaleItem, str | None, date | None, int | None, str | None]],
+        list[SalePayment],
+    ]:
         sale = await self.get_sale(sale_id)
         if viewer_id is not None:
             self._assert_sale_viewable(

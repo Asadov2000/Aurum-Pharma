@@ -40,13 +40,14 @@ async def test_get_sale_details_enriches_batch_and_expiry(
 
     _sale, rows, _payments = await service.get_sale_details(sale.id)
     assert len(rows) == 1
-    item, batch_number, expires_at, days_to_expiry = rows[0]
+    item, batch_number, expires_at, days_to_expiry, item_name = rows[0]
 
     # Enrichment points at the FEFO-chosen batch.
     assert item.batch_id == s["batch"].id
     assert batch_number == s["batch"].batch_number
     assert expires_at == s["batch"].expires_at
     assert days_to_expiry is not None and 170 <= days_to_expiry <= 181
+    assert item_name == s["item"].brand_name
 
     # FEFO/pricing untouched: qty and the batch sale price are unchanged.
     assert item.qty == Decimal("2")

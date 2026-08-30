@@ -22,6 +22,7 @@ export async function listSales(params: SaleSearchParams): Promise<SaleList> {
       register_id: params.register_id || undefined,
       cashier_id: params.cashier_id || undefined,
       has_refund: params.has_refund,
+      sale_type: params.sale_type,
       min_total: params.min_total || undefined,
       max_total: params.max_total || undefined,
       page: params.page ?? 1,
