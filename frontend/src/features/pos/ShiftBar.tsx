@@ -227,7 +227,7 @@ export function ShiftBar({
   return (
     <>
       {/* Slim status strip — compact so it doesn't crowd the selling area. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm xl:flex-nowrap xl:gap-x-2 xl:gap-y-0 xl:px-3 xl:py-2 xl:text-xs">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm xl:gap-x-2 xl:px-3 xl:py-2 xl:text-xs 2xl:flex-nowrap 2xl:gap-y-0">
         <Badge tone="success">Смена открыта</Badge>
         <span className="shrink-0 whitespace-nowrap text-foreground-muted" title={openedTime}>
           С {openedTime}

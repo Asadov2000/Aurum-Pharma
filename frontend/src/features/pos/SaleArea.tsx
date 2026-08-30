@@ -1745,7 +1745,7 @@ function ActiveWorkspace({
       )}
 
       <div className="space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-2 xl:space-y-0">
-        <div className="grid min-w-0 shrink-0 gap-2 xl:grid-cols-[auto_minmax(0,1fr)]">
+        <div className="grid min-w-0 shrink-0 gap-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
           {workstationControls ? (
             <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
               {workstationControls}
