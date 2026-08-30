@@ -7,6 +7,7 @@ import {
   createAssignment,
   createOwnershipTransfer,
   createRole,
+  inviteEmployee,
   listPermissions,
   listOwnershipTransfers,
   listRoles,
@@ -23,6 +24,7 @@ import {
 } from "./api";
 import {
   type AssignmentCreatePayload,
+  type InviteEmployeePayload,
   type OwnershipTransferCreatePayload,
   type RoleCreatePayload,
   type RoleArchivePayload,
@@ -197,6 +199,16 @@ export function useReissueUserInvitation() {
   return useMutation({
     mutationFn: ({ id, operationId }: { id: string; operationId: string }) =>
       reissueUserInvitation(id, operationId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.users });
+    },
+  });
+}
+
+export function useInviteEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: InviteEmployeePayload) => inviteEmployee(payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rolesKeys.users });
     },

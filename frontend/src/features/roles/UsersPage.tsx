@@ -60,6 +60,10 @@ const UserProfileForm = lazy(async () => {
   const module = await import("./UserProfileForm");
   return { default: module.UserProfileForm };
 });
+const InviteEmployeeForm = lazy(async () => {
+  const module = await import("./InviteEmployeeForm");
+  return { default: module.InviteEmployeeForm };
+});
 
 interface UserPanelLoadBoundaryProps {
   children: ReactNode;
@@ -120,9 +124,15 @@ export function UsersPage(): JSX.Element {
   const canOffboard = (isTenantOwner || isSupportScoped) && permissions.includes("users.delete");
   const canAssign = (isTenantOwner || isSupportScoped) && permissions.includes("roles.assign");
   const canInvite = (isTenantOwner || isSupportScoped) && permissions.includes("users.invite");
-  const canViewRoles = permissions.includes("roles.view");
+  const canViewRoles =
+    (isTenantOwner || isSupportScoped) &&
+    permissions.some((permission) =>
+      ["roles.assign", "roles.create", "roles.update"].includes(permission),
+    );
   const canViewBranches = permissions.includes("branches.view");
   const canTransferOwnership = isTenantOwner && !isSupportScoped;
+  const canCreateEmployee =
+    isTenantOwner && !isSupportScoped && canInvite && canAssign && canViewRoles;
   const showActions =
     canUpdate || canSuspend || canOffboard || canAssign || canInvite || canTransferOwnership;
 
@@ -137,6 +147,7 @@ export function UsersPage(): JSX.Element {
   const [profileDiscardOpen, setProfileDiscardOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [ownershipTransfer, setOwnershipTransfer] = useState<OwnershipTransferDraft | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [activatingUserId, setActivatingUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -362,6 +373,20 @@ export function UsersPage(): JSX.Element {
               : `Всего: ${total}`
             : undefined
         }
+        actions={
+          canCreateEmployee ? (
+            <Button
+              disabled={roles.isLoading || Boolean(roles.error)}
+              onClick={() => {
+                setActionError(null);
+                setActionNotice(null);
+                setInviteOpen(true);
+              }}
+            >
+              + Добавить сотрудника
+            </Button>
+          ) : undefined
+        }
       />
 
       <ConfigurableFilterBar
@@ -583,8 +608,8 @@ export function UsersPage(): JSX.Element {
             </TableEmpty>
           ) : (
             <TableEmpty title="Сотрудников пока нет">
-              Аккаунты сотрудников создаёт и подключает команда Aurum Pharma. После подключения
-              владелец аптеки назначает каждому сотруднику подходящую роль и торговые точки.
+              Добавьте сотрудника, выберите ему роль и при необходимости ограничьте доступ одной
+              торговой точкой.
             </TableEmpty>
           )
         ) : (
@@ -639,6 +664,31 @@ export function UsersPage(): JSX.Element {
           </>
         )}
       </section>
+
+      <Modal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        title="Новый сотрудник"
+        className="sm:max-w-2xl"
+      >
+        {inviteOpen && tenantId ? (
+          <UserPanelLoadBoundary onClose={() => setInviteOpen(false)}>
+            <Suspense fallback={<SkeletonRows rows={4} />}>
+              <InviteEmployeeForm
+                tenantId={tenantId}
+                roles={roles.data ?? []}
+                branches={branches.data ?? []}
+                onCreated={(fullName) => {
+                  setInviteOpen(false);
+                  setActionNotice(`Сотрудник «${fullName}» создан. Приглашение действует 7 дней.`);
+                  setPage(1);
+                }}
+                onCancel={() => setInviteOpen(false)}
+              />
+            </Suspense>
+          </UserPanelLoadBoundary>
+        ) : null}
+      </Modal>
 
       <Modal
         open={profileUser !== null}

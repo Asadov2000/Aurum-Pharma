@@ -74,6 +74,23 @@ def _ownership_transfer_error(exc: DBAPIError) -> Exception:
     return RuntimeError("Unexpected ownership transfer database failure")
 
 
+def _employee_invitation_error(exc: DBAPIError) -> Exception:
+    sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    if sqlstate == "23505":
+        return ConflictError(
+            "Не удалось создать новый аккаунт с этим email",
+            details={"reason": "email_unavailable"},
+        )
+    if sqlstate == "42501":
+        return PermissionDeniedError(
+            "Создавать сотрудников может только активный владелец этой аптеки"
+        )
+    if sqlstate in {"22004", "22023"}:
+        return ValidationError("Проверьте данные сотрудника и повторите попытку")
+    logger.error("employee_invitation_database_guard_failed", sqlstate=sqlstate)
+    return RuntimeError("Unexpected employee invitation database failure")
+
+
 def _role_publication_error(exc: DBAPIError) -> Exception:
     sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
     if sqlstate == "42501":
@@ -1023,24 +1040,67 @@ class RolesService:
         tenant_id: UUID,
         email: str,
         full_name: str,
+        phone: str | None,
+        operation_id: UUID,
         role_id: UUID,
         branch_id: UUID | None,
         password_required: bool,
     ) -> tuple[DirectoryUser, UserAssignment, bool]:
-        """Compatibility route: resolve only an existing tenant membership.
+        """Create or complete an employee invitation inside the owner's tenant."""
+        if (
+            actor_is_developer
+            or actor_is_administrator
+            or "roles.assign" not in actor_permissions
+            or not await self.repo.has_active_ownership(
+                tenant_id=tenant_id,
+                user_id=actor_id,
+            )
+        ):
+            raise PermissionDeniedError(
+                "Создавать сотрудников может только активный владелец этой аптеки"
+            )
 
-        The full name is intentionally not used. A tenant actor cannot create a
-        global account or discover an account outside this tenant.
-        """
-        del full_name
         membership = await self.repo.find_membership_by_email(
             tenant_id=tenant_id,
             email=email,
         )
+        created = False
         if membership is None:
-            raise PermissionDeniedError(
-                "Tenant owners cannot create accounts; support must create the membership"
+            try:
+                creation = await self.repo.create_employee_invitation(
+                    tenant_id=tenant_id,
+                    email=email,
+                    full_name=full_name,
+                    phone=phone,
+                    operation_id=operation_id,
+                    issued_at=utc_now(),
+                )
+            except DBAPIError as exc:
+                raise _employee_invitation_error(exc) from exc
+            membership = await self.repo.get_membership_for_user(
+                tenant_id=tenant_id,
+                user_id=creation.user_id,
             )
+            if membership is None:
+                raise NotFoundError("Employee membership was not created")
+            created = creation.created
+
+        existing_assignments = await self.repo.list_assignments_for_user(
+            membership.user_id,
+            tenant_id=tenant_id,
+        )
+        for existing in existing_assignments:
+            if (
+                existing.is_active
+                and existing.role_id == role_id
+                and existing.branch_id == branch_id
+                and existing.password_required == password_required
+            ):
+                user = await self.repo.get_user(membership.user_id, tenant_id=tenant_id)
+                if user is None:
+                    raise NotFoundError("Membership not found")
+                return user, existing, False
+
         assignment = await self.assign_role(
             actor_id=actor_id,
             actor_permissions=actor_permissions,
@@ -1056,7 +1116,14 @@ class RolesService:
         user = await self.repo.get_user(membership.user_id, tenant_id=tenant_id)
         if user is None:
             raise NotFoundError("Membership not found")
-        return user, assignment, False
+        if created:
+            logger.info(
+                "tenant_employee_invited",
+                tenant_id=str(tenant_id),
+                membership_id=str(membership.id),
+                user_id=str(membership.user_id),
+            )
+        return user, assignment, created
 
     async def _reactivate_assignment_with_password_guard(
         self,

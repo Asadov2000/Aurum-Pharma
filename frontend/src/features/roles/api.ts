@@ -18,6 +18,7 @@ import {
   type UserSearchParams,
   type UserUpdatePayload,
   type InvitationRead,
+  type InviteEmployeePayload,
 } from "./types";
 
 export async function listPermissions(): Promise<Permission[]> {
@@ -112,6 +113,11 @@ export async function reissueUserInvitation(
   const { data } = await api.post<InvitationRead>(`/users/${userId}/invitation/reissue`, {
     operation_id: operationId,
   });
+  return data;
+}
+
+export async function inviteEmployee(payload: InviteEmployeePayload): Promise<Assignment> {
+  const { data } = await api.post<Assignment>("/users/invite", payload);
   return data;
 }
 
