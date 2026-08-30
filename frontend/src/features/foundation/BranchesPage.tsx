@@ -24,7 +24,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 
 import { BranchForm } from "./BranchForm";
-import { describeApiError } from "./errors";
+import { describeApiError, describeFoundationError } from "./errors";
 import { LocationsSummary, LocationsWorkspaceHeader } from "./LocationsWorkspace";
 import { useBranchSearchQuery, useDeleteBranch } from "./queries";
 import { type Branch, type BranchType } from "./types";
@@ -45,6 +45,7 @@ export function BranchesPage(): JSX.Element {
   const canCreate = hasPermission(user, "branches.create");
   const canUpdate = hasPermission(user, "branches.update");
   const canDelete = hasPermission(user, "branches.delete");
+  const canViewRegisters = hasPermission(user, "registers.view");
   const showActions = canUpdate || canDelete;
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
@@ -53,6 +54,8 @@ export function BranchesPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Branch | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Branch | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -73,11 +76,24 @@ export function BranchesPage(): JSX.Element {
   });
   const deleteMutation = useDeleteBranch();
   const rows = data?.items ?? [];
+  const hasInitialLoadError = Boolean(error && data === undefined);
   const hasFilters = Boolean(q || branchType || status !== "active");
   const activeOnPage = rows.filter((branch) => branch.is_active).length;
   const licenseAttentionOnPage = rows.filter((branch) =>
     licenseNeedsAttention(branch.license_number, branch.license_expires_at),
   ).length;
+
+  const closeEditor = () => {
+    setCreating(false);
+    setEditing(null);
+    setEditorDirty(false);
+    setDiscardOpen(false);
+  };
+
+  const requestEditorClose = () => {
+    if (editorDirty) setDiscardOpen(true);
+    else closeEditor();
+  };
 
   const confirmDelete = async () => {
     if (!pendingDelete || !canDelete) return;
@@ -86,7 +102,7 @@ export function BranchesPage(): JSX.Element {
       await deleteMutation.mutateAsync(pendingDelete.id);
       setPendingDelete(null);
     } catch (err) {
-      setDeleteError(describeApiError(err, "Не удалось деактивировать"));
+      setDeleteError(describeFoundationError(err, "Не удалось деактивировать торговую точку"));
     }
   };
 
@@ -94,26 +110,32 @@ export function BranchesPage(): JSX.Element {
     <div className="space-y-4">
       <LocationsWorkspaceHeader
         active="branches"
+        showBranches
+        showRegisters={canViewRegisters}
         meta={isFetching && !isLoading ? "Обновление…" : undefined}
         actions={
-          canCreate ? <Button onClick={() => setCreating(true)}>+ Новая точка</Button> : undefined
+          canCreate ? (
+            <Button onClick={() => setCreating(true)}>Добавить торговую точку</Button>
+          ) : undefined
         }
       />
 
-      <LocationsSummary
-        label="Сводка торговых точек"
-        loading={isLoading}
-        metrics={[
-          { label: "Найдено", value: data?.total ?? 0 },
-          { label: "На странице", value: rows.length },
-          { label: "Активны на странице", value: activeOnPage, tone: "success" },
-          {
-            label: "Лицензии требуют внимания",
-            value: licenseAttentionOnPage,
-            tone: licenseAttentionOnPage > 0 ? "warning" : "default",
-          },
-        ]}
-      />
+      {!hasInitialLoadError && (
+        <LocationsSummary
+          label="Сводка торговых точек"
+          loading={isLoading}
+          metrics={[
+            { label: "Всего по фильтрам", value: data?.total ?? 0 },
+            { label: "Показано на странице", value: rows.length },
+            { label: "Активных на странице", value: activeOnPage, tone: "success" },
+            {
+              label: "Лицензии требуют внимания на странице",
+              value: licenseAttentionOnPage,
+              tone: licenseAttentionOnPage > 0 ? "warning" : "default",
+            },
+          ]}
+        />
+      )}
 
       <ConfigurableFilterBar
         preferenceKey={filterPreferenceKey}
@@ -142,10 +164,10 @@ export function BranchesPage(): JSX.Element {
           },
           {
             id: "type",
-            label: "Тип точки",
+            label: "Тип торговой точки",
             content: (
               <div>
-                <Label htmlFor="branch_type_filter">Тип точки</Label>
+                <Label htmlFor="branch_type_filter">Тип торговой точки</Label>
                 <Select
                   id="branch_type_filter"
                   value={branchType}
@@ -214,7 +236,7 @@ export function BranchesPage(): JSX.Element {
           role="alert"
           className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm leading-5 text-danger-foreground"
         >
-          <span>{describeApiError(error, "Не удалось загрузить список точек")}</span>
+          <span>{describeApiError(error, "Не удалось загрузить торговые точки")}</span>
           <Button variant="secondary" size="sm" onClick={() => void refetch()}>
             Повторить
           </Button>
@@ -222,7 +244,7 @@ export function BranchesPage(): JSX.Element {
       )}
       {isLoading ? (
         <SkeletonRows rows={6} />
-      ) : rows.length === 0 ? (
+      ) : hasInitialLoadError ? null : rows.length === 0 ? (
         hasFilters ? (
           <TableEmpty title="Ничего не найдено">Измените запрос или выбранные фильтры.</TableEmpty>
         ) : (
@@ -230,7 +252,7 @@ export function BranchesPage(): JSX.Element {
             title="Торговых точек пока нет"
             action={
               canCreate ? (
-                <Button onClick={() => setCreating(true)}>+ Новая точка</Button>
+                <Button onClick={() => setCreating(true)}>Добавить торговую точку</Button>
               ) : undefined
             }
           >
@@ -320,28 +342,27 @@ export function BranchesPage(): JSX.Element {
       {(canCreate || canUpdate) && (
         <Modal
           open={creating || editing !== null}
-          onClose={() => {
-            setCreating(false);
-            setEditing(null);
-          }}
-          title={editing ? `Редактирование: ${editing.name}` : "Новая точка"}
+          onClose={requestEditorClose}
+          title={editing ? `Изменить торговую точку: ${editing.name}` : "Добавить торговую точку"}
         >
           <BranchForm
             branch={editing}
-            onClose={() => {
-              setCreating(false);
-              setEditing(null);
-            }}
+            onClose={closeEditor}
+            onCancel={requestEditorClose}
+            onDirtyChange={setEditorDirty}
           />
         </Modal>
       )}
       {canDelete && (
         <ConfirmDialog
           open={pendingDelete !== null}
-          title="Деактивировать точку"
+          title="Деактивировать торговую точку"
           message={
             <>
-              Деактивировать точку «{pendingDelete?.name}»?
+              <span className="block">
+                Деактивировать торговую точку «{pendingDelete?.name}»? Продажи на всех её рабочих
+                кассах станут недоступны.
+              </span>
               {deleteError && (
                 <span
                   role="alert"
@@ -362,6 +383,16 @@ export function BranchesPage(): JSX.Element {
           }}
         />
       )}
+      <ConfirmDialog
+        open={discardOpen}
+        title="Закрыть без сохранения?"
+        message="Изменения торговой точки не сохранятся."
+        cancelLabel="Продолжить редактирование"
+        confirmLabel="Закрыть без сохранения"
+        variant="danger"
+        onCancel={() => setDiscardOpen(false)}
+        onConfirm={closeEditor}
+      />
     </div>
   );
 }

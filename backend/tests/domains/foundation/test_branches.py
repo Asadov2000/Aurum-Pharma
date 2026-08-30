@@ -100,10 +100,26 @@ async def test_can_deactivate_one_when_two_exist(db_session: AsyncSession, make_
 
     b1 = await service.create_branch(tenant_id=tenant.id, fields={"name": "A"})
     b2 = await service.create_branch(tenant_id=tenant.id, fields={"name": "B"})
+    register = await service.create_register(
+        tenant_id=tenant.id,
+        fields={"branch_id": b1.id, "name": "A register"},
+    )
 
-    # Deactivating one is fine — another is still active.
+    # Deactivating one is fine — another is still active. Its workstations
+    # are disabled atomically so the UI cannot offer an unusable register.
     result = await service.soft_delete_branch(b1.id)
     assert result.is_active is False
+    await db_session.refresh(register)
+    assert register.is_active is False
+
+    # Restoring a point must not silently restore each workstation: an owner
+    # reviews those individually before the next shift.
+    restored = await service.update_branch(b1.id, fields={"is_active": True})
+    assert restored.is_active is True
+    await db_session.refresh(register)
+    assert register.is_active is False
+
+    await service.soft_delete_branch(b1.id)
 
     # But the *new* last active branch cannot be touched.
     with pytest.raises(BusinessRuleError):

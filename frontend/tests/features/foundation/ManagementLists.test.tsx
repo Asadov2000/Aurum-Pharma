@@ -119,17 +119,20 @@ describe("management list filters", () => {
   it("searches and filters branches through the paginated contract", async () => {
     renderPage(<BranchesPage />);
     expect(await screen.findByText("Аптека Рудаки")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Точки" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Торговые точки" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(
       within(screen.getByRole("region", { name: "Сводка торговых точек" })).getByText(
-        "Лицензии требуют внимания",
+        "Лицензии требуют внимания на странице",
       ),
     ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Поиск"), {
       target: { value: "  Рудаки  " },
     });
-    fireEvent.change(screen.getByLabelText("Тип точки"), {
+    fireEvent.change(screen.getByLabelText("Тип торговой точки"), {
       target: { value: "pharmacy" },
     });
 
@@ -150,19 +153,24 @@ describe("management list filters", () => {
   it("filters registers by an allowed branch and keeps printer optional", async () => {
     renderPage(<RegistersPage />);
     expect(await screen.findByText("Касса 01")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Кассы" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Рабочие кассы" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(
-      within(screen.getByRole("region", { name: "Сводка касс" })).getByText("Печать настроена"),
+      within(screen.getByRole("region", { name: "Сводка касс" })).getByText(
+        "Формат чека выбран на странице",
+      ),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Тип принтера")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Формат чека")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Точка"), {
+    fireEvent.change(screen.getByLabelText("Торговая точка"), {
       target: { value: BRANCH.id },
     });
     fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Тип принтера" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Формат чека" }));
     fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
-    fireEvent.change(screen.getByLabelText("Тип принтера"), {
+    fireEvent.change(screen.getByLabelText("Формат чека"), {
       target: { value: "thermal_80" },
     });
 
@@ -180,7 +188,7 @@ describe("management list filters", () => {
     );
   });
 
-  it("does not show or load the branch filter without branches.view", async () => {
+  it("shows allowed branch names to a user with registers.view", async () => {
     mockUser = {
       id: "cashier-1",
       home_tenant_id: "tenant-1",
@@ -189,9 +197,61 @@ describe("management list filters", () => {
 
     renderPage(<RegistersPage />);
     await screen.findByText("Касса 01");
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
 
-    expect(screen.queryByRole("checkbox", { name: "Точка" })).not.toBeInTheDocument();
-    expect(listBranches).not.toHaveBeenCalled();
+    const branchFilter = screen.getByLabelText("Торговая точка");
+    expect(branchFilter).toBeInTheDocument();
+    expect(within(branchFilter).getByRole("option", { name: "Аптека Рудаки" })).toBeInTheDocument();
+    expect(listBranches).toHaveBeenCalledWith(true);
+    expect(screen.queryByRole("link", { name: "Торговые точки" })).not.toBeInTheDocument();
+  });
+
+  it("warns before discarding a new trading point", async () => {
+    renderPage(<BranchesPage />);
+    await screen.findByText("Аптека Рудаки");
+    fireEvent.click(screen.getByRole("button", { name: "Добавить торговую точку" }));
+    const editor = screen.getByRole("dialog", { name: "Добавить торговую точку" });
+    fireEvent.change(within(editor).getByLabelText("Название"), {
+      target: { value: "Аптека Сомони" },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Отмена" }));
+
+    expect(screen.getByRole("dialog", { name: "Закрыть без сохранения?" })).toBeInTheDocument();
+    expect(editor).toBeInTheDocument();
+  });
+
+  it("warns before discarding a new register", async () => {
+    renderPage(<RegistersPage />);
+    await screen.findByText("Касса 01");
+    fireEvent.click(screen.getByRole("button", { name: "Добавить рабочую кассу" }));
+    const editor = screen.getByRole("dialog", { name: "Добавить рабочую кассу" });
+    fireEvent.change(within(editor).getByLabelText("Название кассы"), {
+      target: { value: "Касса 02" },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Отмена" }));
+
+    expect(screen.getByRole("dialog", { name: "Закрыть без сохранения?" })).toBeInTheDocument();
+    expect(editor).toBeInTheDocument();
+  });
+
+  it("does not present a load failure as an empty branch list", async () => {
+    searchBranches.mockRejectedValueOnce(new Error("offline"));
+    renderPage(<BranchesPage />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить торговые точки");
+    expect(screen.queryByText("Торговых точек пока нет")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Сводка торговых точек" })).not.toBeInTheDocument();
+  });
+
+  it("blocks register creation until branch options can be loaded", async () => {
+    listBranches.mockRejectedValue(new Error("offline"));
+    renderPage(<RegistersPage />);
+    await screen.findByText("Касса 01");
+    fireEvent.click(screen.getByRole("button", { name: "Добавить рабочую кассу" }));
+    const editor = screen.getByRole("dialog", { name: "Добавить рабочую кассу" });
+
+    expect(await within(editor).findByRole("alert")).toHaveTextContent(
+      "Не удалось загрузить торговые точки",
+    );
+    expect(within(editor).getByRole("button", { name: "Добавить кассу" })).toBeDisabled();
   });
 });

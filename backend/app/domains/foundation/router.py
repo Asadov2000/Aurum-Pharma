@@ -58,6 +58,9 @@ from app.domains.roles.service import RolesService
 BRANCH_DISCOVERY_PERMISSIONS = (
     "branches.view",
     "registers.view",
+    "registers.create",
+    "registers.update",
+    "registers.delete",
     "pos.shift_open",
     "pos.shift_close",
     "pos.sell",
@@ -561,9 +564,13 @@ async def update_register(
     existing = await service.get_register(register_id)
     if not user.can_access_branch("registers.update", existing.branch_id):
         raise PermissionDeniedError("Register access denied")
+    fields = payload.model_dump(exclude_unset=True, exclude_none=True)
+    for nullable_field in ("printer_type", "printer_config"):
+        if nullable_field in payload.model_fields_set:
+            fields[nullable_field] = getattr(payload, nullable_field)
     register = await service.update_register(
         register_id,
-        fields=payload.model_dump(exclude_none=True),
+        fields=fields,
         updated_by=user.user_id,
     )
     return RegisterRead.model_validate(register)

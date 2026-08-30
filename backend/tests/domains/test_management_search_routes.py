@@ -135,3 +135,64 @@ async def test_management_search_permissions_contracts_and_no_store(
     finally:
         app.dependency_overrides.pop(current_user, None)
         app.dependency_overrides.pop(get_db, None)
+
+
+async def test_register_editor_discovers_scoped_branch_and_clears_printer(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    suffix = uuid4().hex[:8]
+    foundation = FoundationService(FoundationRepository(db_session))
+    tenant = await foundation.create_tenant(
+        payload={
+            "name": f"Register editor {suffix}",
+            "contact_email": f"register-editor-{suffix}@aurum.tj",
+        }
+    )
+    branch = await foundation.create_branch(
+        tenant_id=tenant.id,
+        fields={"name": "Scoped branch"},
+    )
+    register = await foundation.create_register(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "name": "Scoped register",
+            "printer_type": "thermal_80",
+        },
+    )
+    actor = CurrentUser(
+        user_id=uuid4(),
+        tenant_id=tenant.id,
+        is_developer=False,
+        is_administrator=False,
+        permissions={"registers.create", "registers.update"},
+        permission_scopes={
+            "registers.create": frozenset({branch.id}),
+            "registers.update": frozenset({branch.id}),
+        },
+    )
+
+    async def _override_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    async def _override_user() -> CurrentUser:
+        return actor
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[current_user] = _override_user
+    try:
+        branches = await client.get("/api/v1/branches")
+        assert branches.status_code == 200
+        assert [item["id"] for item in branches.json()] == [str(branch.id)]
+
+        clear_printer = await client.patch(
+            f"/api/v1/registers/{register.id}",
+            json={"name": None, "printer_type": None},
+        )
+        assert clear_printer.status_code == 200
+        assert clear_printer.json()["name"] == "Scoped register"
+        assert clear_printer.json()["printer_type"] is None
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+        app.dependency_overrides.pop(get_db, None)
