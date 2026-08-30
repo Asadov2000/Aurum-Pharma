@@ -136,6 +136,27 @@ async def test_catalog_search_accepts_an_exact_barcode(
     assert [found.id for found in items] == [item.id]
 
 
+async def test_picker_search_prefers_exact_name_without_full_catalog_count(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    exact = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Ксарелто", "inn": "Ривароксабан"},
+    )
+    extended = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Ксарелто Форте", "inn": "Ривароксабан"},
+    )
+
+    items, stock = await service.search_picker(q="  Ксарелто  ", branch_id=None, limit=10)
+    mine = [item for item in items if item.tenant_id == tenant.id]
+
+    assert [item.id for item in mine[:2]] == [exact.id, extended.id]
+    assert stock == {}
+
+
 async def test_unique_barcode_per_tenant(db_session: AsyncSession, make_tenant) -> None:
     tenant = await make_tenant()
     service = CatalogService(CatalogRepository(db_session))

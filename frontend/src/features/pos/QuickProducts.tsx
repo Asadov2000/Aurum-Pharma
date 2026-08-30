@@ -69,7 +69,7 @@ export function QuickProducts({
   return (
     <section
       aria-labelledby="quick-products-title"
-      className="flex min-h-[30rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface xl:h-[36rem]"
+      className="flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface sm:min-h-[30rem] xl:h-full xl:min-h-0"
     >
       <header className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4">
         <div className="min-w-0">

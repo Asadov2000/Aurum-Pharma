@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, exists, func, not_, or_, select, text, update
+from sqlalchemy import and_, case, delete, exists, func, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
@@ -182,6 +182,51 @@ class CatalogRepository:
         )
         result = await self.session.execute(list_stmt)
         return list(result.scalars().all()), total
+
+    async def search_picker(self, *, q: str, limit: int) -> list[TenantCatalog]:
+        """Return a small relevance-ranked result set without a full COUNT query."""
+
+        normalized = " ".join(q.split())
+        escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        contains_pattern = f"%{escaped}%"
+        prefix_pattern = f"{escaped}%"
+        barcode_match = exists(
+            select(1).where(
+                Barcode.catalog_id == TenantCatalog.id,
+                Barcode.code == normalized,
+            )
+        )
+        text_match = or_(
+            TenantCatalog.brand_name.ilike(contains_pattern, escape="\\"),
+            TenantCatalog.inn.ilike(contains_pattern, escape="\\"),
+            TenantCatalog.manufacturer.ilike(contains_pattern, escape="\\"),
+            text(
+                "(brand_name % :picker_q OR inn % :picker_q " "OR manufacturer % :picker_q)"
+            ).bindparams(picker_q=normalized),
+        )
+        relevance_group = case(
+            (func.lower(TenantCatalog.brand_name) == normalized.lower(), 0),
+            (TenantCatalog.brand_name.ilike(prefix_pattern, escape="\\"), 1),
+            (func.lower(TenantCatalog.inn) == normalized.lower(), 2),
+            (TenantCatalog.inn.ilike(prefix_pattern, escape="\\"), 3),
+            else_=4,
+        )
+        stmt = (
+            select(TenantCatalog)
+            .where(
+                TenantCatalog.deleted_at.is_(None),
+                TenantCatalog.is_active.is_(True),
+                or_(barcode_match, text_match),
+            )
+            .order_by(
+                barcode_match.desc(),
+                relevance_group.asc(),
+                TenantCatalog.brand_name.asc(),
+                TenantCatalog.id.asc(),
+            )
+            .limit(limit)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def summary(self) -> dict[str, int]:
         alive = TenantCatalog.deleted_at.is_(None)

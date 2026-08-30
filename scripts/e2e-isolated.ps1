@@ -144,11 +144,22 @@ try {
     $exitCode = 1
     $ErrorActionPreference = "Continue"
     try {
-        if ($PlaywrightArgs.Count -gt 0) {
-            & pnpm e2e -- @PlaywrightArgs
+        $playwrightShim = Join-Path (Get-Location) "node_modules/.bin/playwright.cmd"
+        $playwrightCli = Join-Path (Get-Location) "node_modules/@playwright/test/cli.js"
+        if (Test-Path -LiteralPath $playwrightShim) {
+            if ($PlaywrightArgs.Count -gt 0) {
+                & pnpm e2e -- @PlaywrightArgs
+            }
+            else {
+                & pnpm e2e
+            }
+        }
+        elseif (Test-Path -LiteralPath $playwrightCli) {
+            # pnpm's generated .bin shims may be removed by aggressive cache cleanup.
+            & node $playwrightCli test --reporter=list @PlaywrightArgs
         }
         else {
-            & pnpm e2e
+            throw "Playwright is not installed in frontend/node_modules"
         }
         $exitCode = $LASTEXITCODE
     }

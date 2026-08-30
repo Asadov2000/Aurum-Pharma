@@ -4,9 +4,11 @@ import { listCatalogForPicker, type CatalogPickerSearchParams } from "./pickerAp
 
 export function useCatalogPickerQuery(params: CatalogPickerSearchParams, enabled: boolean) {
   return useQuery({
-    queryKey: ["catalog", "list", params],
-    queryFn: () => listCatalogForPicker(params),
+    queryKey: ["catalog", "picker", params],
+    queryFn: ({ signal }) => listCatalogForPicker(params, signal),
     placeholderData: keepPreviousData,
     enabled,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
   });
 }

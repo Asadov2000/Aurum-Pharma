@@ -24,7 +24,7 @@ interface Props {
   onFavoriteToggle?: (item: CatalogItem) => void;
 }
 
-// Lightweight typeahead over /api/v1/catalog. Defers fetching until the
+// Lightweight typeahead over /api/v1/catalog/picker. Defers fetching until the
 // user types something — a blank input does NOT spam the server. The
 // forwarded ref points at the text input (POS focuses it via "/").
 //
@@ -68,7 +68,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
   }, [value]);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(text.trim()), 200);
+    const t = setTimeout(() => setDebounced(text.trim()), 100);
     return () => clearTimeout(t);
   }, [text]);
 

@@ -78,7 +78,7 @@ export const SearchBar = forwardRef<
   };
 
   return (
-    <div className="relative grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-[3px] border-primary bg-surface p-2 shadow-sm sm:grid-cols-[minmax(0,1fr)_4.5rem_auto]">
+    <div className="relative grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-2 border-primary bg-surface p-1 shadow-sm sm:grid-cols-[minmax(0,1fr)_4rem_auto]">
       <div className="relative col-span-2 min-w-0 sm:col-span-1">
         <Label htmlFor="pos-product-search" className="sr-only">
           Товар
@@ -111,8 +111,8 @@ export const SearchBar = forwardRef<
           favoritePendingId={favoritePendingId}
           onFavoriteToggle={onFavoriteToggle}
           inputClassName={cn(
-            "h-20 border-transparent bg-transparent pl-14 text-xl shadow-none hover:border-transparent focus:border-transparent focus:bg-transparent sm:text-2xl",
-            touch && "h-20 text-xl sm:text-2xl",
+            "h-12 border-transparent bg-transparent pl-12 text-lg shadow-none hover:border-transparent focus:border-transparent focus:bg-transparent sm:text-xl",
+            touch && "h-14 text-xl",
           )}
         />
         {scanner !== "off" ? (
@@ -151,7 +151,7 @@ export const SearchBar = forwardRef<
         aria-describedby={qtyError ? "pos-quantity-error" : undefined}
         className={cn(
           "rounded-md border border-input bg-surface px-2 text-center font-mono text-foreground",
-          touch ? "h-16 w-[4.5rem] text-xl" : "h-14 w-[4.5rem] text-lg",
+          touch ? "h-14 w-16 text-xl" : "h-12 w-16 text-lg",
         )}
       />
       <Button
@@ -159,7 +159,7 @@ export const SearchBar = forwardRef<
         isLoading={busy}
         disabled={!catalogId}
         size="xl"
-        className={cn("w-full min-w-28 sm:w-auto", touch && "h-16")}
+        className={cn("h-12 w-full min-w-28 sm:w-auto", touch && "h-14")}
       >
         Добавить
       </Button>

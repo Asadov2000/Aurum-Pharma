@@ -127,6 +127,22 @@ class CatalogService:
             )
         return items, total, stock
 
+    async def search_picker(
+        self,
+        *,
+        q: str,
+        branch_id: UUID | None,
+        limit: int,
+    ) -> tuple[list[TenantCatalog], dict[UUID, Decimal]]:
+        items = await self.repo.search_picker(q=q, limit=limit)
+        stock: dict[UUID, Decimal] = {}
+        if branch_id is not None and items:
+            stock = await self.repo.stock_by_catalog(
+                branch_id=branch_id,
+                catalog_ids=[item.id for item in items],
+            )
+        return items, stock
+
     async def summary(self) -> dict[str, int]:
         return await self.repo.summary()
 

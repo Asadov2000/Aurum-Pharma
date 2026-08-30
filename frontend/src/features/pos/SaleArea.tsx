@@ -1744,8 +1744,8 @@ function ActiveWorkspace({
         />
       )}
 
-      <div className="space-y-3">
-        <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
+      <div className="space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-2 xl:space-y-0">
+        <div className="grid min-w-0 shrink-0 gap-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
           {workstationControls ? (
             <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
               {workstationControls}
@@ -1797,7 +1797,7 @@ function ActiveWorkspace({
         ) : null}
 
         {isDraft && (
-          <fieldset disabled={saleEditingBlocked} className="min-w-0 border-0 p-0">
+          <fieldset disabled={saleEditingBlocked} className="min-w-0 shrink-0 border-0 p-0">
             <SearchBar
               ref={searchRef}
               onAdd={onAdd}
@@ -1814,8 +1814,8 @@ function ActiveWorkspace({
           </fieldset>
         )}
 
-        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:grid-cols-[minmax(18rem,1.15fr)_minmax(22rem,1fr)_minmax(18rem,0.78fr)]">
-          <div className="min-w-0 lg:col-span-5 xl:col-auto">
+        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(18rem,1.15fr)_minmax(22rem,1fr)_minmax(18rem,0.78fr)] xl:gap-2">
+          <div className="min-w-0 lg:col-span-5 xl:col-auto xl:min-h-0">
             <QuickProducts
               branchId={branchId ?? undefined}
               onAdd={onAdd}
@@ -1827,8 +1827,7 @@ function ActiveWorkspace({
           <section
             aria-labelledby="current-receipt-title"
             className={cn(
-              "flex min-h-[30rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface lg:col-span-7 xl:col-auto",
-              "xl:h-[36rem]",
+              "flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface sm:min-h-[30rem] lg:col-span-7 xl:col-auto xl:h-full xl:min-h-0",
               isDraft && totalDue > 0 && "mb-20 xl:mb-0",
             )}
           >
@@ -1929,9 +1928,9 @@ function ActiveWorkspace({
 
           <div
             ref={paymentPanelRef}
-            className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto"
+            className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto xl:min-h-0"
           >
-            <div className="xl:sticky xl:top-[calc(var(--app-header-height)+0.75rem)]">
+            <div className="xl:h-full xl:min-h-0">
               <PaymentPanel
                 totalDue={totalDue}
                 totalPaid={totalPaid}

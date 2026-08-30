@@ -48,6 +48,7 @@ export function ShiftBar({
   const openingCashRef = useRef<HTMLInputElement>(null);
 
   const shift = shiftQuery.data;
+  const openedTime = shift ? new Date(shift.opened_at).toLocaleTimeString("ru-RU") : "";
 
   const onOpen = async () => {
     if (!canOpen || !online) return;
@@ -226,16 +227,13 @@ export function ShiftBar({
   return (
     <>
       {/* Slim status strip — compact so it doesn't crowd the selling area. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm xl:gap-x-2 xl:px-3 xl:py-2 xl:text-xs 2xl:flex-nowrap 2xl:gap-y-0">
         <Badge tone="success">Смена открыта</Badge>
-        <span className="text-foreground-muted">
-          Открыта{" "}
-          <span className="text-foreground-secondary">
-            {new Date(shift.opened_at).toLocaleString("ru-RU")}
-          </span>
+        <span className="shrink-0 whitespace-nowrap text-foreground-muted" title={openedTime}>
+          С {openedTime}
         </span>
-        <span className="text-foreground-muted">
-          Начальная касса{" "}
+        <span className="shrink-0 whitespace-nowrap text-foreground-muted">
+          Касса{" "}
           <span className="font-mono tabular-nums text-foreground-secondary">
             {Number(shift.opening_cash).toFixed(2)} {shift.currency}
           </span>
@@ -249,7 +247,7 @@ export function ShiftBar({
           <Button
             variant="secondary"
             size="sm"
-            className="ml-auto"
+            className="ml-auto shrink-0"
             disabled={closeBlocked || !online}
             onClick={() => setCloseOpen(true)}
             title={

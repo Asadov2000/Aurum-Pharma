@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 from httpx import AsyncClient
@@ -18,8 +18,15 @@ from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
 from app.domains.pos.models import POSFavorite
 from app.domains.pos.repository import POSRepository
+from app.domains.pos.schemas import POSFavoriteCreate
 from app.domains.pos.service import POSService
 from app.main import app
+
+
+def test_favorite_contract_accepts_deterministic_catalog_uuid() -> None:
+    catalog_id = uuid5(NAMESPACE_URL, "aurum-showcase-catalog")
+
+    assert POSFavoriteCreate(catalog_id=catalog_id).catalog_id == catalog_id
 
 
 async def _make_user(session: AsyncSession, *, tenant_id: UUID) -> AppUser:
