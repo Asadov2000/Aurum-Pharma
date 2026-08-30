@@ -266,6 +266,18 @@ async def test_tenant_a_does_not_see_registers_of_tenant_b(
         if tenant_ids:
             async with support_engine_iso.begin() as conn:
                 await conn.execute(
+                    text("DELETE FROM sync_stream WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM sync_writer_epoch WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM sync_node WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
                     text("DELETE FROM register WHERE tenant_id = ANY(:ids)"),
                     {"ids": tenant_ids},
                 )

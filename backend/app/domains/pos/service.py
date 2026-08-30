@@ -1096,8 +1096,6 @@ class POSService:
         register = register_result.scalar_one_or_none()
         if register is None or register.tenant_id != tenant_id:
             raise NotFoundError("Register not found")
-        if not register.is_active:
-            raise BusinessRuleError("Register is inactive")
         branch_result = await self.repo.session.execute(
             select(Branch).where(Branch.id == register.branch_id).with_for_update()
         )
@@ -1107,6 +1105,8 @@ class POSService:
         self._assert_branch_allowed(branch.id, allowed_branch_ids=allowed_branch_ids)
         if not branch.is_active:
             raise BusinessRuleError("Branch is inactive")
+        if not register.is_active:
+            raise BusinessRuleError("Register is inactive")
 
         existing = await self.repo.get_open_shift_for_register(register_id)
         if existing is not None:

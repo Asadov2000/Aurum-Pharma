@@ -161,8 +161,13 @@ async def test_register_editor_discovers_scoped_branch_and_clears_printer(
             "printer_type": "thermal_80",
         },
     )
+    actor_user, _ = await RolesService(RolesRepository(db_session)).create_tenant_account(
+        tenant_id=tenant.id,
+        email=f"register-actor-{suffix}@aurum.tj",
+        full_name="Register Editor",
+    )
     actor = CurrentUser(
-        user_id=uuid4(),
+        user_id=actor_user.id,
         tenant_id=tenant.id,
         is_developer=False,
         is_administrator=False,
