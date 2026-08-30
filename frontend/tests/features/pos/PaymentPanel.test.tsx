@@ -227,7 +227,7 @@ describe("PaymentPanel", () => {
     );
 
     const reset = screen.getByRole("button", { name: "Удалить введённую оплату" });
-    expect(reset).toHaveAttribute("title", expect.stringMatching(/внешнего терминала/i));
+    expect(reset).toHaveAttribute("title", expect.stringMatching(/банковского терминала/i));
     expect(screen.getByText(/Товары останутся в чеке/i)).toBeInTheDocument();
   });
 
