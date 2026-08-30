@@ -27,12 +27,13 @@ test.describe("Catalog flow (owner)", () => {
 
     const name = uniqueName("E2E Item");
     await page.getByRole("button", { name: /Добавить товар/ }).click();
-    await page.getByLabel("Торговое название").fill(name);
-    await page.getByLabel("Условия отпуска", { exact: true }).selectOption("otc");
-    await page.getByLabel("Условия хранения", { exact: true }).selectOption("normal");
-    await page.getByLabel(/Цена по умолчанию/).fill("12.50");
-    await page.getByRole("button", { name: /^Добавить товар$/ }).click();
-    await expect(page.getByRole("dialog")).toBeHidden({ timeout: 15_000 });
+    const dialog = page.getByRole("dialog", { name: "Добавить товар" });
+    await dialog.getByLabel("Торговое название").fill(name);
+    await dialog.getByLabel("Условия отпуска", { exact: true }).selectOption("otc");
+    await dialog.getByLabel("Условия хранения", { exact: true }).selectOption("normal");
+    await dialog.getByLabel(/Цена по умолчанию/).fill("12.50");
+    await dialog.getByRole("button", { name: /^Добавить товар$/ }).click();
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
 
     // Modal closes and the row appears. Catalog page uses a trigram search;
     // search by the unique name tail so accumulated same-prefix rows don't

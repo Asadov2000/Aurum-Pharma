@@ -119,7 +119,7 @@ describe("CatalogPage", () => {
     expect(screen.getAllByText(/Без рецепта/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/5\.50 TJS/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Доступен для продажи").length).toBeGreaterThan(0);
-    expect(screen.getByText("Доступны для продажи")).toBeInTheDocument();
+    expect(screen.getAllByText("Доступны для продажи").length).toBeGreaterThan(0);
   });
 
   it("shows accurate summary and applies the no-photo preset", async () => {
@@ -150,11 +150,12 @@ describe("CatalogPage", () => {
     renderPage();
     await screen.findByText(/Каталог пуст/i);
     fireEvent.click(screen.getAllByRole("button", { name: /Добавить товар/i })[0]!);
-    const submit = await screen.findByRole("button", { name: /^Добавить товар$/i });
+    const dialog = await screen.findByRole("dialog", { name: "Добавить товар" });
+    const submit = within(dialog).getByRole("button", { name: /^Добавить товар$/i });
     fireEvent.click(submit);
-    expect(await screen.findByText(/Введите название/i)).toBeInTheDocument();
-    expect(screen.getByText(/Выберите условия отпуска/i)).toBeInTheDocument();
-    expect(screen.getByText(/Выберите условия хранения/i)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/Введите название/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Выберите условия отпуска/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Выберите условия хранения/i)).toBeInTheDocument();
     expect(createCatalogItem).not.toHaveBeenCalled();
   });
 
@@ -164,16 +165,17 @@ describe("CatalogPage", () => {
     renderPage();
     await screen.findByText(/Каталог пуст/i);
     fireEvent.click(screen.getAllByRole("button", { name: /Добавить товар/i })[0]!);
-    fireEvent.change(await screen.findByLabelText(/Торговое название/i), {
+    const dialog = await screen.findByRole("dialog", { name: "Добавить товар" });
+    fireEvent.change(within(dialog).getByLabelText(/Торговое название/i), {
       target: { value: "Анальгин" },
     });
-    fireEvent.change(screen.getByLabelText(/^Условия отпуска$/i), {
+    fireEvent.change(within(dialog).getByLabelText(/^Условия отпуска$/i), {
       target: { value: "otc" },
     });
-    fireEvent.change(screen.getByLabelText(/^Условия хранения$/i), {
+    fireEvent.change(within(dialog).getByLabelText(/^Условия хранения$/i), {
       target: { value: "normal" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Добавить товар$/i }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Добавить товар$/i }));
     await waitFor(() => {
       expect(createCatalogItem).toHaveBeenCalledTimes(1);
     });

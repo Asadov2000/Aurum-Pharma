@@ -143,9 +143,7 @@ class CatalogRepository:
         normalized_category = _normalize_search_text(category) if category else ""
         if normalized_category:
             filters.append(
-                TenantCatalog.category.ilike(
-                    _contains_pattern(normalized_category), escape="\\"
-                )
+                TenantCatalog.category.ilike(_contains_pattern(normalized_category), escape="\\")
             )
         if dispensing_type:
             filters.append(TenantCatalog.dispensing_type == dispensing_type)
@@ -187,8 +185,7 @@ class CatalogRepository:
                 TenantCatalog.inn.ilike(contains_pattern, escape="\\"),
                 TenantCatalog.manufacturer.ilike(contains_pattern, escape="\\"),
                 text(
-                    "(brand_name % :catalog_q OR inn % :catalog_q "
-                    "OR manufacturer % :catalog_q)"
+                    "(brand_name % :catalog_q OR inn % :catalog_q " "OR manufacturer % :catalog_q)"
                 ).bindparams(catalog_q=normalized),
             )
             filters.append(or_(barcode_match, text_match))
