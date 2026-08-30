@@ -14,7 +14,7 @@ test.describe("Configurable filters", () => {
     await page.goto("/catalog");
 
     const dispensingFilter = page.locator('[data-filter-id="dispensing"]');
-    const dispensingSelect = dispensingFilter.getByLabel("Тип отпуска", {
+    const dispensingSelect = dispensingFilter.getByLabel("Условия отпуска", {
       exact: true,
     });
     await expect(dispensingSelect).toBeVisible();
@@ -22,13 +22,13 @@ test.describe("Configurable filters", () => {
     await dispensingSelect.selectOption("prescription");
     await expect(page.getByRole("button", { name: "Сбросить (1)" })).toBeEnabled();
 
-    await page.getByRole("button", { name: "Убрать фильтр «Тип отпуска»" }).click();
+    await page.getByRole("button", { name: "Убрать фильтр «Условия отпуска»" }).click();
     await expect(dispensingFilter).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^Сбросить/ })).toBeDisabled();
 
     await page.getByRole("button", { name: /^Фильтры/ }).click();
     const settings = page.getByRole("dialog", { name: "Настройка фильтров" });
-    await settings.getByRole("checkbox", { name: /^Тип отпуска/ }).check();
+    await settings.getByRole("checkbox", { name: /^Условия отпуска/ }).check();
     await page.keyboard.press("Escape");
 
     await expect(dispensingSelect).toHaveValue("");
@@ -40,11 +40,7 @@ test.describe("Configurable filters", () => {
     }, FILTER_LAYOUT_PREFIX);
 
     expect(storedPreferences).toHaveLength(1);
-    expect(JSON.parse(storedPreferences[0]!.value)).toEqual([
-      "search",
-      "lifecycle",
-      "dispensing",
-    ]);
+    expect(JSON.parse(storedPreferences[0]!.value)).toEqual(["search", "lifecycle", "dispensing"]);
     expect(storedPreferences[0]!.value).not.toContain("prescription");
 
     await page.reload();

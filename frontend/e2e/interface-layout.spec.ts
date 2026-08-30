@@ -347,6 +347,22 @@ test.describe("Interface layout", () => {
     expect(await page.evaluate(() => window.localStorage.getItem("ui:density"))).toBe("touch");
   });
 
+  test("keeps the catalog usable at intermediate desktop widths", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+
+    for (const viewport of [
+      { width: 1280, height: 800 },
+      { width: 768, height: 800 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/catalog");
+      await expect(page.getByRole("heading", { level: 1, name: "Каталог" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Сводка по каталогу" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^Открыть карточку / }).first()).toBeVisible();
+      await expectNoHorizontalOverflow(page, `/catalog @ ${viewport.width}x${viewport.height}`);
+    }
+  });
+
   test("avoids expensive blur effects in operational screens", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.goto("/pos");

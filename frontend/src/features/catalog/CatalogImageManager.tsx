@@ -56,7 +56,7 @@ export function CatalogImageManager({
 
   return (
     <section className="space-y-3" aria-label="Фотография">
-      <CatalogImage item={current} variant="detail" />
+      <CatalogImage item={current} variant="detail" showRetry />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-foreground">

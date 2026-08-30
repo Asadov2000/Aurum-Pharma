@@ -13,9 +13,15 @@ import {
 import { type DuplicateStrategy, type ImportJob } from "./types";
 
 const strategyLabel: Record<DuplicateStrategy, string> = {
-  skip: "Пропустить",
-  update: "Обновить",
-  create_copy: "Создать копию",
+  skip: "Не изменять существующие товары",
+  update: "Обновить существующие товары",
+  create_copy: "Добавить как новые товары",
+};
+
+const strategyDescription: Record<DuplicateStrategy, string> = {
+  skip: "Совпавшие товары останутся без изменений; будут добавлены только новые.",
+  update: "Данные совпавших товаров будут заменены значениями из файла.",
+  create_copy: "Каждая строка будет добавлена отдельно, даже если похожий товар уже существует.",
 };
 
 const statusLabel: Record<ImportJob["status"], string> = {
@@ -41,7 +47,7 @@ const statusBadgeTone = (
 
 function readStoredJob(storageKey: string): string | null {
   try {
-    return window.sessionStorage.getItem(storageKey);
+    return window.localStorage.getItem(storageKey);
   } catch {
     return null;
   }
@@ -49,8 +55,8 @@ function readStoredJob(storageKey: string): string | null {
 
 function storeJob(storageKey: string, jobId: string | null): void {
   try {
-    if (jobId) window.sessionStorage.setItem(storageKey, jobId);
-    else window.sessionStorage.removeItem(storageKey);
+    if (jobId) window.localStorage.setItem(storageKey, jobId);
+    else window.localStorage.removeItem(storageKey);
   } catch {
     // Import remains usable when browser storage is unavailable.
   }
@@ -163,7 +169,8 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
         <div className="space-y-1 text-sm text-foreground-secondary">
           <p>Загрузите CSV или Excel (.xlsx). Сначала система покажет превью и ошибки.</p>
           <p className="text-xs text-foreground-muted">
-            Обязательна колонка «brand_name». CSV поддерживает UTF-8 и Windows-1251.
+            Обязательна колонка «brand_name» (торговое название). CSV поддерживает UTF-8 и
+            Windows-1251.
           </p>
         </div>
         <input
@@ -241,29 +248,32 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
                   </option>
                 ))}
               </Select>
+              <p className="mt-1 max-w-md text-xs text-foreground-muted">
+                {strategyDescription[strategy]}
+              </p>
             </div>
           )}
           <div className="ml-auto flex flex-wrap justify-end gap-2">
             {job.status === "pending" && (
               <Button onClick={() => void onPreview()} isLoading={preview.isPending}>
-                Подготовить превью
+                Проверить файл
               </Button>
             )}
             {job.status === "validating" && (
               <Button onClick={() => void onConfirm()} isLoading={confirm.isPending}>
-                Запустить импорт
+                Импортировать товары
               </Button>
             )}
             {job.status === "success" && !job.rolled_back_at && canRollback && (
               <Button variant="secondary" onClick={() => setRollbackOpen(true)}>
-                Откатить
+                Отменить результаты импорта
               </Button>
             )}
             {(job.status === "success" ||
               job.status === "failed" ||
               job.status === "rolled_back") && (
               <Button variant="secondary" onClick={resetJob}>
-                Новый файл
+                Новый импорт
               </Button>
             )}
             <Button variant="ghost" onClick={onClose}>
@@ -274,9 +284,9 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
       </div>
       <ConfirmDialog
         open={rollbackOpen}
-        title="Откатить импорт"
-        message="Позиции, созданные этим импортом, будут перенесены в архив. Другие данные не изменятся."
-        confirmLabel="Откатить"
+        title="Отменить результаты импорта?"
+        message="Товары, созданные этим импортом, будут перенесены в архив. Товары, которые были обновлены, не изменятся обратно."
+        confirmLabel="Перенести созданные товары в архив"
         variant="danger"
         isLoading={rollback.isPending}
         onConfirm={() => void onRollback()}

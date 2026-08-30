@@ -19,7 +19,11 @@ function Detail({
 }
 
 export function CatalogItemDetails({ item }: { item: CatalogItem }): JSX.Element {
-  const status = item.deleted_at ? "В архиве" : item.is_active ? "Активна" : "Отключена";
+  const status = item.deleted_at
+    ? "В архиве"
+    : item.is_active
+      ? "Доступен для продажи"
+      : "Не показывается в кассе";
   const tone = item.deleted_at ? "neutral" : item.is_active ? "success" : "warning";
 
   return (
@@ -36,24 +40,19 @@ export function CatalogItemDetails({ item }: { item: CatalogItem }): JSX.Element
       </div>
 
       <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-        <Detail label="МНН" value={item.inn} />
+        <Detail label="МНН (действующее вещество)" value={item.inn} />
         <Detail label="Производитель" value={item.manufacturer} />
         <Detail label="Категория" value={item.category} />
         <Detail label="ATX-код" value={item.atx_code} />
         <Detail label="Условия отпуска" value={dispensingLabel[item.dispensing_type]} />
-        <Detail label="Хранение" value={storageLabel[item.storage_type]} />
+        <Detail label="Условия хранения" value={storageLabel[item.storage_type]} />
         <Detail
-          label="Базовая цена"
+          label="Цена по умолчанию"
           value={item.base_price ? `${Number(item.base_price).toFixed(2)} ${item.currency}` : null}
         />
-        <Detail
-          label="Доступный остаток"
-          value={
-            item.stock_available === undefined || item.stock_available === null
-              ? null
-              : `${item.stock_available} уп.`
-          }
-        />
+        {item.stock_available !== undefined && item.stock_available !== null ? (
+          <Detail label="Доступный остаток" value={`${item.stock_available} уп.`} />
+        ) : null}
       </dl>
     </div>
   );

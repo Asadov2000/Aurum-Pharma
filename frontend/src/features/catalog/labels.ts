@@ -2,14 +2,14 @@ import { type BarcodeType, type DispensingType, type StorageType } from "./types
 
 export const dispensingLabel: Record<DispensingType, string> = {
   prescription: "По рецепту",
-  otc: "Безрецептурный",
-  special: "Особый",
+  otc: "Без рецепта",
+  special: "Особый порядок отпуска",
 };
 
 export const storageLabel: Record<StorageType, string> = {
-  normal: "Обычное",
-  cold: "Холодильник",
-  frozen: "Морозильник",
+  normal: "Обычные условия",
+  cold: "Хранить в холодильнике",
+  frozen: "Хранить в морозильнике",
 };
 
 export const barcodeLabel: Record<BarcodeType, string> = {

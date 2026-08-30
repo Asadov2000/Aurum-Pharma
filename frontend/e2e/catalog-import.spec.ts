@@ -14,21 +14,21 @@ test.describe("Catalog import (owner)", () => {
     // Open the import wizard (the button also appears in the empty state — take
     // the first match, which is the header action).
     await page
-      .getByRole("button", { name: /Импорт из файла/ })
+      .getByRole("button", { name: /Загрузить из Excel\/CSV/ })
       .first()
       .click();
 
     // Upload the sample workbook (3 rows); the wizard advances to the job step.
     await page.locator('input[type="file"]').setInputFiles("e2e/fixtures/import-sample.xlsx");
 
-    await page.getByRole("button", { name: /Подготовить превью/ }).click();
+    await page.getByRole("button", { name: /Проверить файл/ }).click();
     await expect(page.getByText("Корректных")).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("button", { name: /Запустить импорт/ }).click();
+    await page.getByRole("button", { name: /Импортировать товары/ }).click();
 
     // Celery processes the upload in the worker; the wizard polls until the job
     // reaches success, at which point the rollback action appears.
-    await expect(page.getByRole("button", { name: /Откатить/ })).toBeVisible({
+    await expect(page.getByRole("button", { name: /Отменить результаты импорта/ })).toBeVisible({
       timeout: 30_000,
     });
 
@@ -39,7 +39,7 @@ test.describe("Catalog import (owner)", () => {
     await page.getByLabel(/Поиск/).fill("ИмпортXLSX Аспирин");
     await expect(
       page
-        .locator('section[aria-label="Позиции каталога"] article')
+        .locator('section[aria-label="Товары каталога"] article')
         .filter({ hasText: "ИмпортXLSX Аспирин" }),
     ).toBeVisible({ timeout: 15_000 });
   });
