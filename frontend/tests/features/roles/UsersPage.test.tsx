@@ -396,7 +396,9 @@ describe("UsersPage", () => {
     expect(within(confirmation).getByText("Аптека Рудаки")).toBeInTheDocument();
     expect(within(confirmation).getByText(/Разделы: Касса, Сотрудники/)).toBeInTheDocument();
     expect(within(confirmation).getByText("Проводить продажи")).toBeInTheDocument();
-    expect(within(confirmation).getByText("Отключать сотрудников от аптеки")).toBeInTheDocument();
+    expect(
+      within(confirmation).getAllByText("Отключать сотрудников от аптеки"),
+    ).toHaveLength(2);
     expect(within(confirmation).getByText("Обратите внимание")).toBeInTheDocument();
     expect(within(confirmation).queryByText("Системное управление Aurum")).not.toBeInTheDocument();
     expect(within(confirmation).queryByText("roles.not-visible")).not.toBeInTheDocument();
