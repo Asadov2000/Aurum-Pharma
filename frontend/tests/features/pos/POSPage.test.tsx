@@ -147,18 +147,45 @@ describe("POSPage", () => {
     act(() => useAuthStore.getState().clear());
   });
 
-  it("hints to create a register when none exist", async () => {
+  it("tells a cashier who can provide a working register", async () => {
     listRegisters.mockResolvedValueOnce([]);
     await renderPage();
-    expect(await screen.findByText("Нет активных касс")).toBeInTheDocument();
-    expect(screen.getByText(/Создайте рабочую кассу/i)).toBeInTheDocument();
+    expect(await screen.findByText("Нет доступной рабочей кассы")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Обратитесь к владельцу или ответственному сотруднику/i),
+    ).toBeInTheDocument();
+  });
+
+  it("directs an authorized user to create a working register", async () => {
+    useAuthStore.getState().setUser({
+      ...POS_USER,
+      permissions: [...POS_USER.permissions, "registers.create"],
+    });
+    listRegisters.mockResolvedValueOnce([]);
+    await renderPage();
+
+    expect(
+      await screen.findByText(/Добавьте рабочую кассу в разделе «Рабочие кассы»/i),
+    ).toBeInTheDocument();
+  });
+
+  it("retries loading working registers without reloading the page", async () => {
+    listRegisters.mockRejectedValueOnce(new Error("network"));
+    listRegisters.mockResolvedValueOnce([]);
+    await renderPage();
+
+    expect(await screen.findByText(/Продажа пока недоступна/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+
+    expect(await screen.findByText("Нет доступной рабочей кассы")).toBeInTheDocument();
+    expect(listRegisters).toHaveBeenCalledTimes(2);
   });
 
   it("auto-selects the only register (no manual choice) and shows the open-shift form", async () => {
     listRegisters.mockResolvedValue([REGISTER]);
     getCurrentShift.mockResolvedValue(null);
     await renderPage();
-    expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/Наличные в кассе на начало смены/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Открыть смену/i })).toBeInTheDocument();
     // No dropdown to choose from — the single register is shown in a disabled field.
     expect(screen.queryByText("— выберите —")).not.toBeInTheDocument();
@@ -178,11 +205,11 @@ describe("POSPage", () => {
     await screen.findByRole("option", { name: "Касса 2" });
     expect(screen.getByText("— выберите —")).toBeInTheDocument();
     // Nothing is auto-selected, so the open-shift form is not shown yet.
-    expect(screen.queryByLabelText(/Касса на начало смены/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Наличные в кассе на начало смены/i)).not.toBeInTheDocument();
 
     // Choosing a register proceeds to the shift form.
     fireEvent.change(screen.getByLabelText("Касса"), { target: { value: second.id } });
-    expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/Наличные в кассе на начало смены/i)).toBeInTheDocument();
     expect(
       loadDevicePreferences(devicePreferencesScope(POS_USER.id, POS_USER.active_tenant_id))
         .lastRegisterId,
@@ -271,7 +298,7 @@ describe("POSPage", () => {
     getCurrentShift.mockResolvedValue(null);
     openShift.mockResolvedValueOnce(OPEN_SHIFT);
     await renderPage();
-    const cashInput = await screen.findByLabelText(/Касса на начало смены/i);
+    const cashInput = await screen.findByLabelText(/Наличные в кассе на начало смены/i);
     fireEvent.change(cashInput, { target: { value: "250" } });
     fireEvent.click(screen.getByRole("button", { name: /Открыть смену/i }));
     await waitFor(() => {
@@ -289,7 +316,7 @@ describe("POSPage", () => {
       getCurrentShift.mockResolvedValue(null);
       await renderPage();
 
-      const cashInput = await screen.findByLabelText(/Касса на начало смены/i);
+      const cashInput = await screen.findByLabelText(/Наличные в кассе на начало смены/i);
       fireEvent.change(cashInput, { target: { value: invalidAmount } });
       fireEvent.click(screen.getByRole("button", { name: /Открыть смену/i }));
 
@@ -308,7 +335,7 @@ describe("POSPage", () => {
     getCurrentShift.mockResolvedValue(null);
     await renderPage();
 
-    const cashInput = await screen.findByLabelText(/Касса на начало смены/i);
+    const cashInput = await screen.findByLabelText(/Наличные в кассе на начало смены/i);
     fireEvent.keyDown(window, { key: "F9" });
 
     expect(cashInput).toHaveFocus();
@@ -364,7 +391,7 @@ describe("POSPage", () => {
 
     try {
       await renderPage();
-      expect(await screen.findByLabelText(/Касса на начало смены/i)).toBeInTheDocument();
+      expect(await screen.findByLabelText(/Наличные в кассе на начало смены/i)).toBeInTheDocument();
       expect(screen.getByDisplayValue(REGISTER.name)).toBeInTheDocument();
     } finally {
       getItem.mockRestore();
@@ -383,7 +410,7 @@ describe("POSPage", () => {
     try {
       await renderPage();
       fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
-      fireEvent.change(screen.getByLabelText("Фактическая касса"), {
+      fireEvent.change(screen.getByLabelText("Наличные после пересчёта"), {
         target: { value: "100" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Подтвердить закрытие смены" }));
@@ -411,7 +438,7 @@ describe("POSPage", () => {
     await renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
-    fireEvent.change(screen.getByLabelText("Фактическая касса"), {
+    fireEvent.change(screen.getByLabelText("Наличные после пересчёта"), {
       target: { value: "100,25" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить закрытие смены" }));

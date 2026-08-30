@@ -78,7 +78,7 @@ test.describe("Reports export", () => {
     await page.goto("/pos");
     await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
 
-    await page.getByLabel("Касса на начало смены").fill("100");
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
     await page.getByRole("button", { name: "Открыть смену" }).click();
     await expect(page.getByText("Смена открыта")).toBeVisible();
 
@@ -102,7 +102,7 @@ test.describe("Reports export", () => {
     // (2) Z-report XLSX: auto-downloads when the shift closes.
     await page.getByRole("button", { name: "Закрыть смену" }).click();
     const dialog = page.locator('div[role="dialog"]');
-    await dialog.getByLabel("Фактическая касса").fill("150");
+    await dialog.getByLabel("Наличные после пересчёта").fill("150");
     const zDownload = page.waitForEvent("download");
     await dialog.getByRole("button", { name: "Подтвердить закрытие смены" }).click();
     expect((await zDownload).suggestedFilename()).toMatch(/\.xlsx$/);

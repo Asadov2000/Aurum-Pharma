@@ -155,7 +155,7 @@ test.describe("POS sale (branch-scoped cashier)", () => {
     await expect(registerField).toHaveValue(assignedRegister.name);
     await expect(page.getByText(hiddenRegister.name, { exact: true })).toHaveCount(0);
 
-    await page.getByLabel("Касса на начало смены").fill("100");
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
     await page.getByRole("button", { name: "Открыть смену" }).click();
     await expect(page.getByText("Смена открыта")).toBeVisible();
 

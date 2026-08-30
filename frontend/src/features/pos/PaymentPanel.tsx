@@ -147,6 +147,15 @@ export function PaymentPanel({
     pendingPaymentMethod !== null ||
     (selectedMethod === "cash" &&
       (availableCash <= 0.001 || (!mixedPaymentEnabled && cashTenderInsufficient)));
+  const completionGuidance = getCompletionGuidance({
+    remaining,
+    currency,
+    settled,
+    overpaid,
+    pendingPaymentMethod,
+    interactionBlocked,
+    completionBlocked,
+  });
 
   useEffect(() => {
     setActiveMethod((current) =>
@@ -436,15 +445,20 @@ export function PaymentPanel({
                   ))}
                 </ul>
                 {onClearPayments ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={onClearPayments}
-                    title="Удалить только расчёт оплаты до завершения продажи. Товары и операции внешнего терминала не изменятся."
-                  >
-                    Сбросить расчёт
-                  </Button>
+                  <div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={onClearPayments}
+                      title="Товары останутся в чеке. Операция банковского терминала или QR-сервиса не отменяется."
+                    >
+                      Удалить введённую оплату
+                    </Button>
+                    <p className="mt-1 px-2 text-xs text-foreground-muted">
+                      Товары останутся в чеке; операция внешнего терминала не отменяется.
+                    </p>
+                  </div>
                 ) : null}
               </div>
             ) : null}
@@ -462,6 +476,15 @@ export function PaymentPanel({
                 {paymentActionLabel(selectedMethod)}
               </Button>
             ) : null}
+            {isDraft && completionGuidance ? (
+              <p
+                id="completion-guidance"
+                className="px-1 text-xs text-foreground-muted"
+                aria-live="polite"
+              >
+                {completionGuidance}
+              </p>
+            ) : null}
             <Button
               size="xl"
               variant="success"
@@ -475,7 +498,8 @@ export function PaymentPanel({
                 interactionBlocked ||
                 completionBlocked
               }
-              title={settled ? completeHint : "Сначала подтвердите полную оплату"}
+              title={completionGuidance ?? completeHint}
+              aria-describedby={completionGuidance ? "completion-guidance" : undefined}
             >
               <CheckIcon />
               Завершить продажу
@@ -503,6 +527,33 @@ export function PaymentPanel({
       ) : null}
     </section>
   );
+}
+
+function getCompletionGuidance({
+  remaining,
+  currency,
+  settled,
+  overpaid,
+  pendingPaymentMethod,
+  interactionBlocked,
+  completionBlocked,
+}: {
+  remaining: number;
+  currency: string;
+  settled: boolean;
+  overpaid: boolean;
+  pendingPaymentMethod: PaymentMethodRead | null;
+  interactionBlocked: boolean;
+  completionBlocked: boolean;
+}): string | null {
+  if (pendingPaymentMethod !== null) return "Сначала проверьте ранее начатую оплату.";
+  if (overpaid) return "Уберите переплату, затем завершите продажу.";
+  if (!settled)
+    return `Сначала примите оставшиеся ${Math.max(0, remaining).toFixed(2)} ${currency}.`;
+  if (interactionBlocked || completionBlocked) {
+    return "Дождитесь завершения текущей операции оплаты.";
+  }
+  return null;
 }
 
 function parseCash(value: string): number {

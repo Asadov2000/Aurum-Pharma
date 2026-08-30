@@ -58,7 +58,7 @@ test.describe("Shift close → Z-report", () => {
     await page.goto("/pos");
     await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
 
-    await page.getByLabel("Касса на начало смены").fill("100");
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
     await page.getByRole("button", { name: "Открыть смену" }).click();
     await expect(page.getByText("Смена открыта")).toBeVisible();
 
@@ -74,13 +74,13 @@ test.describe("Shift close → Z-report", () => {
     // Close the shift, declaring 140 cash (expected 150 = 100 + 50 sale).
     await page.getByRole("button", { name: "Закрыть смену" }).click();
     const dialog = page.locator('div[role="dialog"]');
-    await dialog.getByLabel("Фактическая касса").fill("140");
+    await dialog.getByLabel("Наличные после пересчёта").fill("140");
     // Closing also auto-downloads the Z-report XLSX; that download is asserted in
     // reports-export.spec.ts — here we only check the close + /reports badge.)
     await dialog.getByRole("button", { name: "Подтвердить закрытие смены" }).click();
 
     // Shift returns to the open-form state — wait for it to settle.
-    await expect(page.getByLabel("Касса на начало смены")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel("Наличные в кассе на начало смены")).toBeVisible({ timeout: 15_000 });
 
     // ---- /reports: choose the closed shift from readable history ----
     await page.evaluate(() => window.localStorage.removeItem("pos:lastClosedShiftId"));

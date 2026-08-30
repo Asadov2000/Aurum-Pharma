@@ -151,12 +151,21 @@ export function ShiftBar({
 
   if (shiftQuery.error) {
     return (
-      <p
+      <div
         className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
         role="alert"
       >
-        Не удалось загрузить состояние смены. Проверьте соединение и повторите попытку.
-      </p>
+        <p>Не удалось проверить состояние смены. Продажа пока недоступна.</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="mt-2"
+          onClick={() => void shiftQuery.refetch()}
+        >
+          Повторить
+        </Button>
+      </div>
     );
   }
 
@@ -177,7 +186,7 @@ export function ShiftBar({
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-0 flex-1">
-              <Label htmlFor="opening_cash">Касса на начало смены</Label>
+              <Label htmlFor="opening_cash">Наличные в кассе на начало смены</Label>
               <Input
                 ref={openingCashRef}
                 id="opening_cash"
@@ -272,7 +281,7 @@ export function ShiftBar({
       >
         <div className="space-y-3">
           <div>
-            <Label htmlFor="closing_cash">Фактическая касса</Label>
+            <Label htmlFor="closing_cash">Наличные после пересчёта</Label>
             <Input
               id="closing_cash"
               type="text"

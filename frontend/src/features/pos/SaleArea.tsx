@@ -23,7 +23,6 @@ import { BarcodeListener } from "./BarcodeListener";
 import { CartList } from "./CartList";
 import { PaymentPanel } from "./PaymentPanel";
 import { PrescriptionModal } from "./PrescriptionModal";
-import { QuickProducts } from "./QuickProducts";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
 import { getCheckoutResult } from "./api";
@@ -90,6 +89,13 @@ import { type PosMode } from "./usePosMode";
 const ReceiptPrintModal = lazy(async () => {
   const module = await import("./ReceiptPrintModal");
   return { default: module.ReceiptPrintModal };
+});
+
+// Favorites are useful but not required to scan the first item, so they load
+// after the critical sale controls are ready.
+const QuickProducts = lazy(async () => {
+  const module = await import("./QuickProducts");
+  return { default: module.QuickProducts };
 });
 
 // Lazy so the on-screen keypad chunk only loads when a cashier taps a field.
@@ -1603,7 +1609,7 @@ function ActiveWorkspace({
       setTopError(
         electronicPaymentPendingResolution
           ? "Подтверждённую электронную оплату нельзя удалить. Завершите чек или передайте сверку ответственному сотруднику."
-          : "Сначала нажмите «Сбросить расчёт», затем начните новую продажу.",
+          : "Сначала нажмите «Удалить введённую оплату», затем начните новую продажу.",
       );
       return false;
     }
@@ -1816,12 +1822,25 @@ function ActiveWorkspace({
 
         <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(18rem,1.15fr)_minmax(22rem,1fr)_minmax(18rem,0.78fr)] xl:gap-2">
           <div className="min-w-0 lg:col-span-5 xl:col-auto xl:min-h-0">
-            <QuickProducts
-              branchId={branchId ?? undefined}
-              onAdd={onAdd}
-              busy={!isDraft || saleEditingBlocked || posCommand.blocked}
-              touch={touch}
-            />
+            <Suspense
+              fallback={
+                <section
+                  role="region"
+                  aria-label="Быстрый выбор"
+                  aria-busy="true"
+                  className="flex min-h-[26rem] items-center justify-center rounded-lg border border-border bg-surface text-sm text-foreground-muted sm:min-h-[30rem] xl:h-full xl:min-h-0"
+                >
+                  Загрузка избранного…
+                </section>
+              }
+            >
+              <QuickProducts
+                branchId={branchId ?? undefined}
+                onAdd={onAdd}
+                busy={!isDraft || saleEditingBlocked || posCommand.blocked}
+                touch={touch}
+              />
+            </Suspense>
           </div>
 
           <section

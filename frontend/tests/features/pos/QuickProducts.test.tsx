@@ -6,6 +6,7 @@ import { QuickProducts } from "@/features/pos/QuickProducts";
 
 const usePosFavoritesQuery = vi.fn();
 const removeFavorite = vi.fn();
+const refetchFavorites = vi.fn();
 
 vi.mock("@/features/pos/queries", () => ({
   usePosFavoritesQuery: (...args: unknown[]) => usePosFavoritesQuery(...args),
@@ -62,6 +63,8 @@ describe("QuickProducts", () => {
   beforeEach(() => {
     removeFavorite.mockReset();
     removeFavorite.mockResolvedValue(undefined);
+    refetchFavorites.mockReset();
+    refetchFavorites.mockResolvedValue(undefined);
     usePosFavoritesQuery.mockReturnValue({
       data: products.map((catalog, index) => ({
         id: `favorite-${index + 1}`,
@@ -71,6 +74,7 @@ describe("QuickProducts", () => {
       })),
       error: null,
       isLoading: false,
+      refetch: refetchFavorites,
     });
   });
 
@@ -104,5 +108,33 @@ describe("QuickProducts", () => {
     );
 
     await waitFor(() => expect(removeFavorite).toHaveBeenCalledWith("product-1"));
+  });
+
+  it("explains how to add the first favorite", () => {
+    usePosFavoritesQuery.mockReturnValue({
+      data: [],
+      error: null,
+      isLoading: false,
+      refetch: refetchFavorites,
+    });
+
+    render(<QuickProducts branchId="branch-1" onAdd={vi.fn()} />);
+
+    expect(screen.getByText("Избранных товаров пока нет")).toBeInTheDocument();
+    expect(screen.getByText(/Найдите товар в строке поиска и нажмите звезду/i)).toBeInTheDocument();
+  });
+
+  it("lets the cashier retry after favorites fail to load", () => {
+    usePosFavoritesQuery.mockReturnValue({
+      data: undefined,
+      error: new Error("network"),
+      isLoading: false,
+      refetch: refetchFavorites,
+    });
+
+    render(<QuickProducts branchId="branch-1" onAdd={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+
+    expect(refetchFavorites).toHaveBeenCalledTimes(1);
   });
 });
