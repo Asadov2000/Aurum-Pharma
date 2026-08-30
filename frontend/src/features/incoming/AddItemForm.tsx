@@ -4,10 +4,10 @@ import { z } from "zod";
 
 import { Button, FormError, Input, Label } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
+import { createOperationId } from "@/lib/operationId";
 
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { pharmacyCalendarDate } from "./calendar";
-import { createIncomingOperationId } from "./operationId";
 import { useAddIncomingItem, useUpdateIncomingItem } from "./queries";
 import { type IncomingItem } from "./types";
 
@@ -99,7 +99,7 @@ export function AddItemForm({
   const addItem = useAddIncomingItem();
   const updateItem = useUpdateIncomingItem();
   const [topError, setTopError] = useState<string | null>(null);
-  const [operationId] = useState(createIncomingOperationId);
+  const [operationId] = useState(createOperationId);
   const isEditing = item !== undefined;
 
   const form = useForm<FormValues>({

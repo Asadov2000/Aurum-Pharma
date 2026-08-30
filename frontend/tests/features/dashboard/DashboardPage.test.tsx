@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getDashboardSummary = vi.fn();
@@ -104,9 +104,9 @@ describe("DashboardPage", () => {
 
     // Section titles
     expect(await screen.findByText("Сегодня")).toBeInTheDocument();
-    expect(screen.getByText("Скоро истекает")).toBeInTheDocument();
+    expect(screen.getByText("Сроки годности и лицензии")).toBeInTheDocument();
     expect(screen.getByText("Финансы")).toBeInTheDocument();
-    expect(screen.getByText("Чек-лист")).toBeInTheDocument();
+    expect(screen.getByText("Требует проверки")).toBeInTheDocument();
 
     // Today numbers
     expect(screen.getByText(/1\s500,00 TJS/)).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("DashboardPage", () => {
     // Finance overdue badge
     expect(screen.getByText(/Есть просрочка/)).toBeInTheDocument();
     // Checklist counts
-    expect(screen.getByText("Черновики приходов")).toBeInTheDocument();
+    expect(screen.getByText("Черновики приёмок")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Обновить сводку" })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /Открыть кассу|Новая продажа/ }).length).toBe(2);
   });
@@ -134,7 +134,7 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByText("Сегодня")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Открыть кассу" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Новый приход" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Новая приёмка" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Партия LOT-7/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Открыть партии" })).not.toBeInTheDocument();
   });
@@ -145,5 +145,20 @@ describe("DashboardPage", () => {
     expect(screen.getByText(/Сводка по аптеке доступна/)).toBeInTheDocument();
     // Must NOT have called the tenant-scoped endpoint.
     expect(getDashboardSummary).not.toHaveBeenCalled();
+  });
+
+  it("bypasses the server cache for an explicit refresh", async () => {
+    getDashboardSummary.mockResolvedValueOnce(SUMMARY).mockResolvedValueOnce({
+      ...SUMMARY,
+      today: { ...SUMMARY.today, revenue: "1750.00" },
+      generated_at: "2026-05-27T10:01:00Z",
+    });
+    renderPage();
+
+    await screen.findByText(/1\s500,00 TJS/);
+    fireEvent.click(screen.getByRole("button", { name: "Обновить сводку" }));
+
+    await waitFor(() => expect(getDashboardSummary).toHaveBeenLastCalledWith(true));
+    expect(await screen.findByText(/1\s750,00 TJS/)).toBeInTheDocument();
   });
 });

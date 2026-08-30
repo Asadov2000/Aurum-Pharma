@@ -190,17 +190,25 @@ class DashboardRepository:
             ).scalar_one()
         )
 
-    async def closed_shifts(self, tenant_id: UUID) -> dict[str, Any]:
+    async def closed_shifts(
+        self,
+        tenant_id: UUID,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> dict[str, Any]:
         row = (
             (
                 await self.session.execute(
                     text(
                         "SELECT COUNT(*) AS cnt, "
                         "(SELECT id FROM shift WHERE tenant_id = :tid AND status = 'closed' "
+                        " AND closed_at >= :start AND closed_at < :end "
                         " ORDER BY closed_at DESC NULLS LAST LIMIT 1) AS latest_id "
-                        "FROM shift WHERE tenant_id = :tid AND status = 'closed'"
+                        "FROM shift WHERE tenant_id = :tid AND status = 'closed' "
+                        "AND closed_at >= :start AND closed_at < :end"
                     ),
-                    {"tid": str(tenant_id)},
+                    {"tid": str(tenant_id), "start": start, "end": end},
                 )
             )
             .mappings()

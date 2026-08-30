@@ -31,6 +31,22 @@ import { type ShiftHistoryItem, type ShiftHistoryParams } from "./types";
 const PAGE_SIZE = 25;
 const LAST_CLOSED_KEY = "pos:lastClosedShiftId";
 
+function readLastClosedShiftId(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_CLOSED_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function clearLastClosedShiftId(): void {
+  try {
+    window.localStorage.removeItem(LAST_CLOSED_KEY);
+  } catch {
+    // This one-time navigation hint is optional.
+  }
+}
+
 const filterSchema = z
   .object({
     date_from: z.string(),
@@ -91,15 +107,15 @@ export function ShiftHistoryPanel({
   const branches = useBranchesQuery(false);
   const registers = useRegistersQuery(branchId || null, false);
   const history = useShiftHistoryQuery(toParams(filters, page));
-  const lastClosedShiftId = useMemo(() => window.localStorage.getItem(LAST_CLOSED_KEY), []);
-  const didAutoOpenLastShift = useRef(false);
+  const lastClosedShiftId = useMemo(readLastClosedShiftId, []);
+  const didProcessLastShift = useRef(false);
 
   useEffect(() => {
-    if (didAutoOpenLastShift.current || selectedShift || !lastClosedShiftId || !history.data)
-      return;
+    if (didProcessLastShift.current || selectedShift || !lastClosedShiftId || !history.data) return;
+    didProcessLastShift.current = true;
+    clearLastClosedShiftId();
     const recent = history.data.items.find((shift) => shift.id === lastClosedShiftId);
     if (recent) {
-      didAutoOpenLastShift.current = true;
       onSelect(recent);
     }
   }, [history.data, lastClosedShiftId, onSelect, selectedShift]);
@@ -129,21 +145,21 @@ export function ShiftHistoryPanel({
 
   const filterOptionsError = branches.error ?? registers.error;
   const total = history.data?.total ?? 0;
+  const resultsUpdating = history.isPlaceholderData;
 
   return (
     <section className="space-y-3" aria-labelledby="shift-history-title">
       <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="shift-history-title" className="text-lg font-semibold text-foreground">
-            Смены и Z-отчёты
+            Закрытые смены и итоги
           </h2>
           <p className="mt-0.5 text-sm text-foreground-muted">
             Сверка выручки, возвратов и фактической кассы по закрытым сменам.
           </p>
         </div>
         <span className="text-sm text-foreground-muted" aria-live="polite">
-          Найдено: {total}
-          {history.isFetching && !history.isLoading ? " · обновление" : ""}
+          {resultsUpdating ? "Обновляем список…" : `Найдено: ${total}`}
         </span>
       </div>
 
@@ -189,10 +205,10 @@ export function ShiftHistoryPanel({
             },
             {
               id: "branch",
-              label: "Точка",
+              label: "Аптечная точка",
               content: (
                 <div>
-                  <Label htmlFor="shift_branch">Точка</Label>
+                  <Label htmlFor="shift_branch">Аптечная точка</Label>
                   <Select
                     id="shift_branch"
                     className="w-44"
@@ -276,9 +292,21 @@ export function ShiftHistoryPanel({
         />
       </form>
       {filterOptionsError && (
-        <p className="text-xs text-danger">
-          {describeApiError(filterOptionsError, "Не удалось загрузить точки и кассы")}
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-danger" role="alert">
+          <span>
+            {describeApiError(filterOptionsError, "Не удалось загрузить аптечные точки и кассы")}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              void branches.refetch();
+              void registers.refetch();
+            }}
+          >
+            Повторить
+          </Button>
+        </div>
       )}
 
       {history.error && (
@@ -290,7 +318,7 @@ export function ShiftHistoryPanel({
         </div>
       )}
 
-      {history.isLoading ? (
+      {history.isLoading || resultsUpdating ? (
         <SkeletonRows rows={5} />
       ) : !history.data || history.data.items.length === 0 ? (
         <TableEmpty title="Закрытых смен не найдено">Измените период или фильтры.</TableEmpty>
@@ -300,10 +328,10 @@ export function ShiftHistoryPanel({
             <THead>
               <TR>
                 <TH>Смена</TH>
-                <TH>Точка / касса</TH>
+                <TH>Аптечная точка / касса</TH>
                 <TH>Кассир</TH>
-                <TH className="text-right">Продажи / возвраты</TH>
-                <TH>Чеки</TH>
+                <TH className="text-right">Суммы продаж / возвратов</TH>
+                <TH>Количество</TH>
                 <TH className="text-right">Расхождение</TH>
                 <TH className="w-24">
                   <span className="sr-only">Действия</span>

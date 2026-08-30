@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import UUID4, BaseModel, ConfigDict, Field
 
 
 class WizardStateRead(BaseModel):
@@ -53,7 +53,7 @@ class StartTrialResponse(BaseModel):
 class StartTrialRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    operation_id: UUID
+    operation_id: UUID4
 
 
 ReadinessStepCode = Literal[

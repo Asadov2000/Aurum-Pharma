@@ -147,8 +147,8 @@ export function SalesOverviewPanel({ reportTimezone }: { reportTimezone: string 
         {query.data && (
           <p className="text-sm text-foreground-muted" aria-live="polite">
             {formatPeriod(query.data.date_from, query.data.date_to)}
-            {query.data.branch_name ? ` · ${query.data.branch_name}` : " · все точки"}
-            {query.isFetching && !query.isLoading ? " · обновление" : ""}
+            {query.data.branch_name ? ` · ${query.data.branch_name}` : " · все аптечные точки"}
+            {query.isFetching && !query.isLoading ? " · обновляем данные…" : ""}
           </p>
         )}
       </div>
@@ -199,10 +199,10 @@ export function SalesOverviewPanel({ reportTimezone }: { reportTimezone: string 
             },
             {
               id: "branch",
-              label: "Точка",
+              label: "Аптечная точка",
               content: (
                 <div>
-                  <Label htmlFor="sales_summary_branch">Точка</Label>
+                  <Label htmlFor="sales_summary_branch">Аптечная точка</Label>
                   <Select
                     id="sales_summary_branch"
                     className="w-full sm:w-56"
@@ -228,7 +228,7 @@ export function SalesOverviewPanel({ reportTimezone }: { reportTimezone: string 
           onResetValues={resetFilters}
           actions={
             <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-              <Button type="submit" className="flex-1 sm:flex-none">
+              <Button type="submit" className="flex-1 sm:flex-none" isLoading={query.isFetching}>
                 Обновить сводку
               </Button>
               <Button
@@ -246,8 +246,16 @@ export function SalesOverviewPanel({ reportTimezone }: { reportTimezone: string 
       </form>
 
       {(branches.error || downloadError) && (
-        <div role="alert" className="text-sm text-danger">
-          {downloadError ?? describeApiError(branches.error, "Не удалось загрузить точки")}
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
+          <span>
+            {downloadError ??
+              describeApiError(branches.error, "Не удалось загрузить аптечные точки")}
+          </span>
+          {branches.error && (
+            <Button variant="secondary" size="sm" onClick={() => void branches.refetch()}>
+              Повторить
+            </Button>
+          )}
         </div>
       )}
 

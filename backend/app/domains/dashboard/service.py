@@ -12,9 +12,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.core.errors import AurumError
-from app.core.time import utc_now
+from app.core.time import local_day_range, utc_now
 from app.domains.dashboard.repository import DashboardRepository, as_decimal
 from app.domains.dashboard.schemas import (
     ChecklistSection,
@@ -42,9 +43,15 @@ class DashboardService:
         self.repo = repo
         self.redis = redis
 
-    async def get_summary(self, tenant_id: UUID) -> DashboardSummary:
-        if self.redis is not None:
-            cached = await self.redis.get(cache_key(tenant_id))
+    async def get_summary(
+        self, tenant_id: UUID, *, force_refresh: bool = False
+    ) -> DashboardSummary:
+        if self.redis is not None and not force_refresh:
+            try:
+                cached = await self.redis.get(cache_key(tenant_id))
+            except RedisError:
+                cached = None
+                logger.warning("dashboard_cache_read_failed")
             if cached:
                 try:
                     return DashboardSummary.model_validate_json(cached)
@@ -54,11 +61,14 @@ class DashboardService:
         summary = await self._compute(tenant_id)
 
         if self.redis is not None:
-            await self.redis.set(
-                cache_key(tenant_id),
-                summary.model_dump_json(),
-                ex=CACHE_TTL_SECONDS,
-            )
+            try:
+                await self.redis.set(
+                    cache_key(tenant_id),
+                    summary.model_dump_json(),
+                    ex=CACHE_TTL_SECONDS,
+                )
+            except RedisError:
+                logger.warning("dashboard_cache_write_failed")
         return summary
 
     async def _compute(self, tenant_id: UUID) -> DashboardSummary:
@@ -79,7 +89,12 @@ class DashboardService:
         sub = await self.repo.current_subscription(tenant_id)
         invoices = await self.repo.open_invoices(tenant_id)
         draft_incoming = await self.repo.draft_incoming_count(tenant_id)
-        closed = await self.repo.closed_shifts(tenant_id)
+        day_start, day_end = local_day_range(today, timezone_name)
+        closed = await self.repo.closed_shifts(
+            tenant_id,
+            start=day_start,
+            end=day_end,
+        )
 
         return DashboardSummary(
             today=TodaySection(

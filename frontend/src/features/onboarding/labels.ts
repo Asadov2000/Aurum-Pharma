@@ -20,8 +20,8 @@ export const readinessSteps: ReadinessStepDefinition[] = [
   },
   {
     code: "licensed_branch",
-    title: "Точка и лицензия",
-    description: "Нужна активная точка с адресом и действующей лицензией.",
+    title: "Аптечная точка и лицензия",
+    description: "Добавьте действующую аптечную точку, её адрес и срок лицензии.",
     to: "/branches",
     actionLabel: "Настроить точку",
   },
@@ -40,7 +40,8 @@ export const readinessSteps: ReadinessStepDefinition[] = [
   {
     code: "catalog",
     title: "Каталог товаров",
-    description: "Добавьте не меньше 100 активных товаров для реальной работы кассы.",
+    description:
+      "Добавьте не меньше 100 активных товаров, чтобы протестировать реальную работу кассы.",
     to: "/catalog",
     actionLabel: "Заполнить каталог",
   },
@@ -82,10 +83,10 @@ export function readinessStepAction(
 }
 
 export const taskLabel: Record<ReadinessTaskCode, string> = {
-  catalog_loaded: "Каталог загружен (≥100 товаров)",
-  first_incoming: "Создан первый приход",
-  first_sale: "Первая тестовая продажа",
-  second_user: "Приглашён второй сотрудник",
-  shift_opened: "Открыта смена",
-  test_receipt_printed: "Распечатан тестовый чек",
+  catalog_loaded: "В каталоге не меньше 100 товаров",
+  first_incoming: "Первая приёмка принята на склад",
+  first_sale: "Первая тестовая продажа завершена",
+  second_user: "Второй сотрудник подключён",
+  shift_opened: "Первая кассовая смена открыта",
+  test_receipt_printed: "Тестовый чек распечатан",
 };
