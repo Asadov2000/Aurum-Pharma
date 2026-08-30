@@ -87,7 +87,10 @@ from app.domains.pos.schemas import (
     SalesSummaryOverview,
     SalesSummaryRow,
     StockOnDateData,
+    StockOnDateOverview,
     StockRow,
+    TopProductRow,
+    TopProductsOverview,
     ZReportData,
     ZReportPaymentBreakdown,
 )
@@ -2752,6 +2755,65 @@ class POSService:
             daily=daily,
         )
 
+    async def get_top_products_overview(
+        self,
+        *,
+        tenant_id: UUID,
+        date_from: date,
+        date_to: date,
+        branch_id: UUID | None,
+        sort_by: str,
+        limit: int,
+    ) -> TopProductsOverview:
+        if date_from > date_to:
+            raise BusinessRuleError(
+                "date_from must not be after date_to",
+                details={"from": date_from.isoformat(), "to": date_to.isoformat()},
+            )
+        if date_to - date_from >= timedelta(days=_MAX_SALES_OVERVIEW_DAYS):
+            raise BusinessRuleError(
+                "top products period must not exceed 366 days",
+                details={"max_days": _MAX_SALES_OVERVIEW_DAYS},
+            )
+        if sort_by not in {"revenue", "quantity"}:
+            raise BusinessRuleError("Unsupported top products sort")
+
+        raw = await self.repo.top_products(
+            tenant_id=tenant_id,
+            date_from=date_from,
+            date_to=date_to,
+            branch_id=branch_id,
+            sort_by=sort_by,
+            limit=limit,
+            tz=await self._report_tz(tenant_id),
+        )
+        branch_name: str | None = None
+        if branch_id is not None:
+            branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
+            branch_name = branch.name if branch is not None else None
+
+        currency = str(raw[0]["currency"]) if raw else "TJS"
+        return TopProductsOverview(
+            date_from=date_from,
+            date_to=date_to,
+            branch_name=branch_name,
+            currency=currency,
+            sort_by=sort_by,
+            rows=[
+                TopProductRow(
+                    catalog_id=row["catalog_id"],
+                    name=row["name"] or "Без названия",
+                    form=row["form"],
+                    dosage=row["dosage"],
+                    pack_size=row["pack_size"],
+                    quantity=Decimal(str(row["quantity"])),
+                    revenue=Decimal(str(row["revenue"])).quantize(Decimal("0.01")),
+                    receipts_count=int(row["receipts_count"]),
+                )
+                for row in raw
+            ],
+        )
+
     # ---- stock on date (accountant XLSX) ----
 
     async def build_stock_on_date(
@@ -2824,6 +2886,65 @@ class POSService:
             tenant_id=tenant_id, on_date=on_date, branch_id=branch_id
         )
         return await anyio.to_thread.run_sync(render_stock_on_date_xlsx, data)
+
+    async def get_stock_on_date_overview(
+        self,
+        *,
+        tenant_id: UUID,
+        on_date: date,
+        branch_id: UUID | None,
+        query: str | None,
+        expires_within_days: int | None,
+        page: int,
+        page_size: int,
+    ) -> StockOnDateOverview:
+        expiry_limit = (
+            on_date + timedelta(days=expires_within_days)
+            if expires_within_days is not None
+            else None
+        )
+        raw, total, total_qty, total_value = await self.repo.stock_on_date_overview(
+            tenant_id=tenant_id,
+            on_date=on_date,
+            branch_id=branch_id,
+            query=query,
+            expires_before=expiry_limit,
+            page=page,
+            page_size=page_size,
+            tz=await self._report_tz(tenant_id),
+        )
+        branch_name: str | None = None
+        if branch_id is not None:
+            branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
+            branch_name = branch.name if branch is not None else None
+        currency = str(raw[0]["currency"]) if raw else "TJS"
+        rows: list[StockRow] = []
+        for row in raw:
+            qty = Decimal(str(row["qty"]))
+            purchase_price = Decimal(str(row["purchase_price"]))
+            rows.append(
+                StockRow(
+                    name=row["name"] or "—",
+                    inn=row["inn"],
+                    branch_name=row["branch_name"],
+                    batch_number=row["batch_number"],
+                    expires_at=row["expires_at"],
+                    qty=qty,
+                    purchase_price=purchase_price,
+                    value=(qty * purchase_price).quantize(Decimal("0.01")),
+                )
+            )
+        return StockOnDateOverview(
+            on_date=on_date,
+            branch_name=branch_name,
+            currency=currency,
+            rows=rows,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_qty=total_qty,
+            total_value=total_value.quantize(Decimal("0.01")),
+        )
 
     @staticmethod
     def _assert_draft(sale: Sale) -> None:

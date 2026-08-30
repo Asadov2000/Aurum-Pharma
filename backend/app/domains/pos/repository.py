@@ -1696,8 +1696,10 @@ class POSRepository:
             FROM batch b
             JOIN batch_movement bm
               ON bm.batch_id = b.id AND bm.created_at < :on_end
-            LEFT JOIN tenant_catalog tc ON tc.id = b.catalog_id
-            LEFT JOIN branch br ON br.id = b.branch_id
+            LEFT JOIN tenant_catalog tc
+              ON tc.id = b.catalog_id AND tc.tenant_id = b.tenant_id
+            LEFT JOIN branch br
+              ON br.id = b.branch_id AND br.tenant_id = b.tenant_id
             WHERE {where}
             GROUP BY b.id, tc.brand_name, tc.inn, br.name,
                      b.batch_number, b.expires_at, b.purchase_price, b.currency
@@ -1705,3 +1707,161 @@ class POSRepository:
             ORDER BY tc.brand_name NULLS LAST, b.expires_at
             """)
         return [dict(r) for r in (await self.session.execute(sql, params)).mappings().all()]
+
+    async def stock_on_date_overview(
+        self,
+        *,
+        tenant_id: UUID,
+        on_date: Any,
+        branch_id: UUID | None,
+        query: str | None,
+        expires_before: Any | None,
+        page: int,
+        page_size: int,
+        tz: str = "Asia/Dushanbe",
+    ) -> tuple[list[dict[str, Any]], int, Decimal, Decimal]:
+        """Filtered page and totals for the screen stock report."""
+        _, on_end = local_day_range(on_date, tz)
+        clauses = ["b.tenant_id = :tid"]
+        params: dict[str, Any] = {
+            "tid": str(tenant_id),
+            "on_end": on_end,
+            "limit": page_size,
+            "offset": (page - 1) * page_size,
+        }
+        if branch_id is not None:
+            clauses.append("b.branch_id = :branch")
+            params["branch"] = str(branch_id)
+        where = " AND ".join(clauses)
+
+        filtered_clauses = ["qty > 0"]
+        if query:
+            filtered_clauses.append(
+                "(name ILIKE :search OR inn ILIKE :search OR batch_number ILIKE :search)"
+            )
+            params["search"] = f"%{query.strip()}%"
+        if expires_before is not None:
+            filtered_clauses.append("expires_at <= :expires_before")
+            params["expires_before"] = expires_before
+        filtered_where = " AND ".join(filtered_clauses)
+
+        balances_sql = f"""
+            SELECT
+              b.id,
+              tc.brand_name AS name,
+              tc.inn AS inn,
+              br.name AS branch_name,
+              b.batch_number,
+              b.expires_at,
+              b.purchase_price,
+              b.currency,
+              SUM(bm.qty_delta) AS qty
+            FROM batch b
+            JOIN batch_movement bm
+              ON bm.batch_id = b.id AND bm.created_at < :on_end
+            LEFT JOIN tenant_catalog tc
+              ON tc.id = b.catalog_id AND tc.tenant_id = b.tenant_id
+            LEFT JOIN branch br
+              ON br.id = b.branch_id AND br.tenant_id = b.tenant_id
+            WHERE {where}
+            GROUP BY b.id, tc.brand_name, tc.inn, br.name,
+                     b.batch_number, b.expires_at, b.purchase_price, b.currency
+        """
+        summary_sql = text(f"""
+            WITH balances AS ({balances_sql})
+            SELECT
+              COUNT(*) AS total,
+              COALESCE(SUM(qty), 0) AS total_qty,
+              COALESCE(SUM(qty * purchase_price), 0) AS total_value
+            FROM balances
+            WHERE {filtered_where}
+        """)
+        summary = (await self.session.execute(summary_sql, params)).mappings().one()
+
+        page_sql = text(f"""
+            WITH balances AS ({balances_sql})
+            SELECT name, inn, branch_name, batch_number, expires_at,
+                   purchase_price, currency, qty
+            FROM balances
+            WHERE {filtered_where}
+            ORDER BY name NULLS LAST, expires_at, id
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = [
+            dict(row) for row in (await self.session.execute(page_sql, params)).mappings().all()
+        ]
+        return (
+            rows,
+            int(summary["total"]),
+            Decimal(str(summary["total_qty"])),
+            Decimal(str(summary["total_value"])),
+        )
+
+    async def top_products(
+        self,
+        *,
+        tenant_id: UUID,
+        date_from: Any,
+        date_to: Any,
+        branch_id: UUID | None,
+        sort_by: str,
+        limit: int,
+        tz: str = "Asia/Dushanbe",
+    ) -> list[dict[str, Any]]:
+        """Net product ranking over a tenant-local period.
+
+        Completed return documents subtract their quantity and value from the
+        original product. Test sales are excluded, matching the sales summary.
+        """
+        start, _ = local_day_range(date_from, tz)
+        _, end = local_day_range(date_to, tz)
+        clauses = [
+            "s.tenant_id = :tid",
+            "s.completed_at >= :dfrom_ts",
+            "s.completed_at < :dto_ts",
+            "s.is_test = false",
+        ]
+        params: dict[str, Any] = {
+            "tid": str(tenant_id),
+            "dfrom_ts": start,
+            "dto_ts": end,
+            "limit": limit,
+        }
+        if branch_id is not None:
+            clauses.append("s.branch_id = :branch")
+            params["branch"] = str(branch_id)
+        where = " AND ".join(clauses)
+        order_expression = "revenue" if sort_by == "revenue" else "quantity"
+        sql = text(f"""
+            SELECT
+              si.catalog_id,
+              tc.brand_name AS name,
+              tc.form,
+              tc.dosage,
+              tc.pack_size,
+              COALESCE(SUM(
+                CASE WHEN s.sale_type = 'return' THEN -si.qty ELSE si.qty END
+              ), 0) AS quantity,
+              COALESCE(SUM(
+                CASE WHEN s.sale_type = 'return'
+                  THEN -(si.total_price - si.discount_amount)
+                  ELSE si.total_price - si.discount_amount
+                END
+              ), 0) AS revenue,
+              COUNT(DISTINCT s.id) FILTER (WHERE s.sale_type = 'sale') AS receipts_count,
+              COALESCE(MAX(si.currency), 'TJS') AS currency
+            FROM sale_item si
+            JOIN sale s ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
+            JOIN tenant_catalog tc
+              ON tc.id = si.catalog_id AND tc.tenant_id = si.tenant_id
+            WHERE {where}
+            GROUP BY si.catalog_id, tc.brand_name, tc.form, tc.dosage, tc.pack_size
+            HAVING
+              SUM(CASE WHEN s.sale_type = 'return' THEN -si.qty ELSE si.qty END) <> 0
+              OR SUM(CASE WHEN s.sale_type = 'return'
+                    THEN -(si.total_price - si.discount_amount)
+                    ELSE si.total_price - si.discount_amount END) <> 0
+            ORDER BY {order_expression} DESC, tc.brand_name ASC, si.catalog_id ASC
+            LIMIT :limit
+        """)
+        return [dict(row) for row in (await self.session.execute(sql, params)).mappings().all()]

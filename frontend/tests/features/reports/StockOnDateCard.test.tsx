@@ -1,7 +1,9 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getStockOnDateXlsx = vi.fn();
+const getStockOnDate = vi.fn();
 const downloadBlob = vi.fn();
 
 vi.mock("@/features/reports/api", () => ({
@@ -10,6 +12,8 @@ vi.mock("@/features/reports/api", () => ({
   getSalesSummary: vi.fn(),
   getSalesSummaryXlsx: vi.fn(),
   getStockOnDateXlsx: (...a: unknown[]) => getStockOnDateXlsx(...a),
+  getStockOnDate: (...a: unknown[]) => getStockOnDate(...a),
+  getTopProducts: vi.fn(),
 }));
 
 vi.mock("@/lib/download", () => ({
@@ -26,7 +30,32 @@ vi.mock("@/features/foundation/queries", () => ({
 
 import { StockOnDateCard } from "@/features/reports/ReportsPage";
 
+function renderCard() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StockOnDateCard />
+    </QueryClientProvider>,
+  );
+}
+
 describe("StockOnDateCard", () => {
+  beforeEach(() => {
+    getStockOnDate.mockResolvedValue({
+      on_date: "2026-05-31",
+      branch_name: null,
+      currency: "TJS",
+      rows: [],
+      total: 0,
+      page: 1,
+      page_size: 25,
+      total_qty: "0",
+      total_value: "0.00",
+    });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
   });
@@ -34,12 +63,12 @@ describe("StockOnDateCard", () => {
   it("downloads the stock XLSX for the selected date", async () => {
     const blob = new Blob(["x"]);
     getStockOnDateXlsx.mockResolvedValueOnce(blob);
-    render(<StockOnDateCard />);
+    renderCard();
 
-    const dateInput = screen.getByLabelText("Дата") as HTMLInputElement;
+    const dateInput = screen.getByLabelText("Дата остатка") as HTMLInputElement;
     fireEvent.change(dateInput, { target: { value: "2026-05-31" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /Скачать остатки XLSX/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Скачать в Excel/i }));
 
     await waitFor(() => {
       expect(getStockOnDateXlsx).toHaveBeenCalledWith("2026-05-31", undefined);
@@ -47,8 +76,8 @@ describe("StockOnDateCard", () => {
     expect(downloadBlob).toHaveBeenCalledWith(blob, "stock-2026-05-31.xlsx");
   });
 
-  it("hides the branch select when no branches are available", () => {
-    render(<StockOnDateCard />);
-    expect(screen.queryByLabelText("Точка")).not.toBeInTheDocument();
+  it("keeps the all-branches option when no branches are available", () => {
+    renderCard();
+    expect(screen.getByLabelText("Аптечная точка")).toHaveValue("");
   });
 });

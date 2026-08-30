@@ -988,6 +988,28 @@ class SalesSummaryOverview(BaseModel):
     daily: list[SalesSummaryDay]
 
 
+class TopProductRow(BaseModel):
+    """Net product performance for a period; completed returns reduce totals."""
+
+    catalog_id: UUID
+    name: str
+    form: str | None
+    dosage: str | None
+    pack_size: str | None
+    quantity: Decimal
+    revenue: Decimal
+    receipts_count: int
+
+
+class TopProductsOverview(BaseModel):
+    date_from: date
+    date_to: date
+    branch_name: str | None
+    currency: str
+    sort_by: Literal["revenue", "quantity"]
+    rows: list[TopProductRow]
+
+
 # ---- stock on date (accountant XLSX) ----
 
 
@@ -1011,5 +1033,19 @@ class StockOnDateData(BaseModel):
     show_branch_column: bool
     currency: str
     rows: list[StockRow]
+    total_qty: Decimal
+    total_value: Decimal
+
+
+class StockOnDateOverview(BaseModel):
+    """Paginated, screen-friendly view of stock reconstructed for a date."""
+
+    on_date: date
+    branch_name: str | None
+    currency: str
+    rows: list[StockRow]
+    total: int
+    page: int
+    page_size: int
     total_qty: Decimal
     total_value: Decimal

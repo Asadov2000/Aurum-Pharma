@@ -68,6 +68,8 @@ from app.domains.pos.schemas import (
     ShiftHistoryList,
     ShiftOpenRequest,
     ShiftRead,
+    StockOnDateOverview,
+    TopProductsOverview,
     ZReport,
 )
 from app.domains.pos.service import POSService
@@ -760,6 +762,54 @@ async def sales_summary_overview(
         date_from=date_from,
         date_to=date_to,
         branch_id=effective_branch_id,
+    )
+
+
+@router.get("/reports/top-products", response_model=TopProductsOverview)
+async def top_products_overview(
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
+    ],
+    service: Annotated[POSService, Depends(_service)],
+    date_from: Annotated[date, Query(alias="from")],
+    date_to: Annotated[date, Query(alias="to")],
+    branch_id: Annotated[UUID | None, Query()] = None,
+    sort_by: Annotated[Literal["revenue", "quantity"], Query()] = "revenue",
+    limit: Annotated[int, Query(ge=5, le=100)] = 20,
+) -> TopProductsOverview:
+    effective_branch_id = _effective_report_branch_id(user, branch_id)
+    return await service.get_top_products_overview(
+        tenant_id=_current_tenant_or_400(user),
+        date_from=date_from,
+        date_to=date_to,
+        branch_id=effective_branch_id,
+        sort_by=sort_by,
+        limit=limit,
+    )
+
+
+@router.get("/reports/stock-on-date", response_model=StockOnDateOverview)
+async def stock_on_date_overview(
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
+    ],
+    service: Annotated[POSService, Depends(_service)],
+    on_date: Annotated[date | None, Query(alias="date")] = None,
+    branch_id: Annotated[UUID | None, Query()] = None,
+    query: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
+    expires_within_days: Annotated[int | None, Query(ge=0, le=3650)] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=10, le=100)] = 25,
+) -> StockOnDateOverview:
+    effective_branch_id = _effective_report_branch_id(user, branch_id)
+    return await service.get_stock_on_date_overview(
+        tenant_id=_current_tenant_or_400(user),
+        on_date=on_date or date.today(),
+        branch_id=effective_branch_id,
+        query=query,
+        expires_within_days=expires_within_days,
+        page=page,
+        page_size=page_size,
     )
 
 

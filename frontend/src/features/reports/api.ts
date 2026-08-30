@@ -6,6 +6,10 @@ import {
   type SalesSummaryParams,
   type ShiftHistoryList,
   type ShiftHistoryParams,
+  type StockOnDateOverview,
+  type StockOnDateParams,
+  type TopProductsOverview,
+  type TopProductsParams,
 } from "./types";
 
 export async function getZReport(shiftId: string): Promise<ZReport> {
@@ -20,6 +24,16 @@ export async function listShiftHistory(params: ShiftHistoryParams): Promise<Shif
 
 export async function getSalesSummary(params: SalesSummaryParams): Promise<SalesSummaryOverview> {
   const { data } = await api.get<SalesSummaryOverview>("/reports/sales-summary", { params });
+  return data;
+}
+
+export async function getTopProducts(params: TopProductsParams): Promise<TopProductsOverview> {
+  const { data } = await api.get<TopProductsOverview>("/reports/top-products", { params });
+  return data;
+}
+
+export async function getStockOnDate(params: StockOnDateParams): Promise<StockOnDateOverview> {
+  const { data } = await api.get<StockOnDateOverview>("/reports/stock-on-date", { params });
   return data;
 }
 
