@@ -204,7 +204,7 @@ function EmployeeDirectoryRow({
   if (canReissueInvitation) {
     actions.push({ label: "Обновить приглашение", onSelect: onReissueInvitation });
   }
-  if (canAssignMember) actions.push({ label: "Роли", onSelect: onAssignments });
+  if (canAssignMember) actions.push({ label: "Настроить доступ", onSelect: onAssignments });
   if (canRevokeMemberSessions) {
     actions.push({ label: "Завершить сеансы", onSelect: onRevokeSessions });
   }

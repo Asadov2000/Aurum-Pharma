@@ -713,7 +713,7 @@ export function UsersPage(): JSX.Element {
       <Modal
         open={assignmentUser !== null}
         onClose={closeAssignments}
-        title={assignmentUser ? `Роли: ${assignmentUser.full_name}` : ""}
+        title={assignmentUser ? `Доступ сотрудника: ${assignmentUser.full_name}` : ""}
         className="sm:max-w-2xl"
       >
         {assignmentUser ? (
