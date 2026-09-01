@@ -11,100 +11,17 @@ import { AccountSettingsPanel, MenuSettingsPanel } from "./AccountAndMenuPanels"
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { InterfaceSettingsPanel } from "./InterfaceSettingsPanel";
 import { OwnerSettingsPanel, type OwnerSettingsSection } from "./OwnerSettingsPanel";
-import { parseSettingsSearch, type SettingsSectionId } from "./search";
+import {
+  parseSettingsSearch,
+  settingsCategories,
+  settingsCategoryGroups,
+  settingsGroupLabels,
+  type SettingsSectionId,
+} from "./search";
 import { SettingsSectionHeader } from "./SettingsPrimitives";
 import { settingsKeys, useUserPreferencesQuery } from "./queries";
 
 type CategoryId = SettingsSectionId | OwnerSettingsSection;
-
-type CategoryGroup = "personal" | "device" | "owner";
-
-interface CategoryDefinition {
-  id: CategoryId;
-  group: CategoryGroup;
-  title: string;
-  description: string;
-  keywords: string;
-}
-
-const categories: readonly CategoryDefinition[] = [
-  {
-    id: "account",
-    group: "personal",
-    title: "Мой аккаунт",
-    description: "Имя, email и доступ",
-    keywords: "профиль пользователь учётная запись",
-  },
-  {
-    id: "interface",
-    group: "personal",
-    title: "Интерфейс",
-    description: "Тема, размер и контраст",
-    keywords: "цвет оформление сенсор анимация",
-  },
-  {
-    id: "menu",
-    group: "personal",
-    title: "Меню и старт",
-    description: "Порядок и избранные разделы",
-    keywords: "боковая панель скрыть порядок",
-  },
-  {
-    id: "notifications",
-    group: "personal",
-    title: "Уведомления",
-    description: "События и каналы",
-    keywords: "оповещения события",
-  },
-  {
-    id: "security",
-    group: "personal",
-    title: "Безопасность",
-    description: "Активные сеансы",
-    keywords: "вход устройства выйти защита",
-  },
-  {
-    id: "device",
-    group: "device",
-    title: "Касса и оборудование",
-    description: "Режим, звук и печать",
-    keywords: "сканер чек принтер клавиатура сенсор",
-  },
-  {
-    id: "pharmacy",
-    group: "owner",
-    title: "Настройки аптеки",
-    description: "Сессии и общие правила",
-    keywords: "владелец черновик рецепт",
-  },
-  {
-    id: "sales",
-    group: "owner",
-    title: "Продажи и возвраты",
-    description: "Оплата и возврат",
-    keywords: "наличные карта qr смешанная оплата",
-  },
-  {
-    id: "inventory",
-    group: "owner",
-    title: "Склад и сроки",
-    description: "Пороги срока годности",
-    keywords: "партии остатки просрочено",
-  },
-  {
-    id: "reports",
-    group: "owner",
-    title: "Отчёты и время",
-    description: "Часовой пояс и валюта",
-    keywords: "tjs сомони душанбе дата",
-  },
-];
-
-const groupLabels: Record<CategoryGroup, string> = {
-  personal: "Личные",
-  device: "Это устройство",
-  owner: "Только владельцу",
-};
 
 export function SettingsPage(): JSX.Element {
   const { user } = useAuth();
@@ -127,7 +44,10 @@ export function SettingsPage(): JSX.Element {
     user.support_access == null,
   );
   const available = useMemo(
-    () => categories.filter((category) => category.group !== "owner" || canManagePharmacySettings),
+    () =>
+      settingsCategories.filter(
+        (category) => category.group !== "owner" || canManagePharmacySettings,
+      ),
     [canManagePharmacySettings],
   );
   const filtered = useMemo(
@@ -219,13 +139,13 @@ export function SettingsPage(): JSX.Element {
           {filtered.length === 0 ? (
             <p className="px-3 py-6 text-sm text-foreground-muted">Настройки не найдены.</p>
           ) : (
-            (["personal", "device", "owner"] as const).map((group) => {
+            settingsCategoryGroups.map((group) => {
               const items = filtered.filter((category) => category.group === group);
               if (items.length === 0) return null;
               return (
                 <div key={group} className="mb-4 last:mb-0">
                   <p className="mb-1 px-3 text-xs font-semibold uppercase text-foreground-muted">
-                    {groupLabels[group]}
+                    {settingsGroupLabels[group]}
                   </p>
                   <div className="space-y-1">
                     {items.map((category) => (

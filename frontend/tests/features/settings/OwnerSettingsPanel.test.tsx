@@ -41,7 +41,7 @@ describe("OwnerSettingsPanel", () => {
     mutateAsync.mockResolvedValue(SETTINGS);
   });
 
-  it("uses optimistic versioning when saving pharmacy payment rules", async () => {
+  it("saves only the open payment section with optimistic versioning", async () => {
     render(<OwnerSettingsPanel section="sales" />);
 
     const qr = screen.getByRole("button", { name: "QR-код" });
@@ -51,13 +51,28 @@ describe("OwnerSettingsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
 
     await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({
-          expected_version: 4,
-          pos_payment_methods: ["cash", "card"],
-          pos_mixed_payment_enabled: false,
-        }),
-      );
+      expect(mutateAsync).toHaveBeenCalledWith({
+        expected_version: 4,
+        refund_reason_mode: "optional",
+        pos_payment_methods: ["cash", "card"],
+        pos_mixed_payment_enabled: false,
+      });
+    });
+  });
+
+  it("saves inventory thresholds without resubmitting sales or session rules", async () => {
+    render(<OwnerSettingsPanel section="inventory" />);
+
+    fireEvent.change(screen.getByLabelText("Раннее предупреждение, месяцев"), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({
+        expected_version: 4,
+        expiry_thresholds: { yellow: 10, orange: 6, red: 3 },
+      });
     });
   });
 

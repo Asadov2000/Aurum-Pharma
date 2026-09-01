@@ -11,7 +11,11 @@ import {
   type PosPaymentMethod,
 } from "@/features/foundation/paymentSettings";
 import { useTenantSettingsQuery, useUpdateTenantSettings } from "@/features/foundation/queries";
-import { type RefundReasonMode, type TenantSettings } from "@/features/foundation/types";
+import {
+  type RefundReasonMode,
+  type TenantSettings,
+  type TenantSettingsUpdatePayload,
+} from "@/features/foundation/types";
 
 import { SettingRow, SettingsNotice, SettingsSectionHeader } from "./SettingsPrimitives";
 
@@ -52,6 +56,39 @@ const defaults: FormValues = {
   report_timezone: "Asia/Dushanbe",
 };
 
+const sectionFields: Record<OwnerSettingsSection, readonly (keyof FormValues)[]> = {
+  pharmacy: [
+    "session_admin_minutes",
+    "session_pos_minutes",
+    "draft_sale_lifetime_min",
+    "prescription_warning_text",
+  ],
+  sales: ["refund_reason_mode", "pos_payment_methods", "pos_mixed_payment_enabled"],
+  inventory: ["yellow", "orange", "red"],
+  reports: ["report_timezone"],
+};
+
+const sectionImpact: Record<OwnerSettingsSection, string> = {
+  pharmacy: "Изменения действуют для всех сотрудников и касс аптеки.",
+  sales: "Способы оплаты и возвраты обновятся на всех кассах после синхронизации.",
+  inventory: "Пороги изменят предупреждения о сроках во всех точках аптеки.",
+  reports: "Изменения применятся к новым отчётам всей аптеки.",
+};
+
+const sectionSavedLabel: Record<OwnerSettingsSection, string> = {
+  pharmacy: "Рабочие правила сохранены.",
+  sales: "Правила оплаты и возвратов сохранены.",
+  inventory: "Пороги срока годности сохранены.",
+  reports: "Настройки отчётов сохранены.",
+};
+
+const sectionTitle: Record<OwnerSettingsSection, string> = {
+  pharmacy: "Рабочие правила",
+  sales: "Оплата и возвраты",
+  inventory: "Склад и сроки",
+  reports: "Отчёты и рабочий день",
+};
+
 const refundModes: ReadonlyArray<{ value: RefundReasonMode; label: string }> = [
   { value: "required", label: "Обязательна" },
   { value: "required_with_text", label: "Обязательна с комментарием" },
@@ -71,6 +108,9 @@ export function OwnerSettingsPanel({ section }: { section: OwnerSettingsSection 
   const [topError, setTopError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const form = useForm<FormValues>({ defaultValues: defaults });
+  const sectionIsDirty = sectionFields[section].some((field) =>
+    Boolean(form.formState.dirtyFields[field]),
+  );
 
   useEffect(() => {
     if (!settings.data) return;
@@ -78,7 +118,7 @@ export function OwnerSettingsPanel({ section }: { section: OwnerSettingsSection 
   }, [form, settings.data]);
 
   const onSubmit = form.handleSubmit(async (values) => {
-    if (!settings.data) return;
+    if (!settings.data || !sectionIsDirty) return;
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
@@ -95,19 +135,7 @@ export function OwnerSettingsPanel({ section }: { section: OwnerSettingsSection 
     try {
       await update.mutateAsync({
         expected_version: settings.data.version,
-        expiry_thresholds: {
-          yellow: data.yellow,
-          orange: data.orange,
-          red: data.red,
-        },
-        refund_reason_mode: data.refund_reason_mode,
-        session_admin_minutes: data.session_admin_minutes,
-        session_pos_minutes: data.session_pos_minutes,
-        draft_sale_lifetime_min: data.draft_sale_lifetime_min,
-        prescription_warning_text: data.prescription_warning_text,
-        pos_payment_methods: data.pos_payment_methods,
-        pos_mixed_payment_enabled: data.pos_mixed_payment_enabled,
-        report_timezone: data.report_timezone,
+        ...tenantSettingsPatchForSection(section, data),
       });
       form.reset(data);
       setSaved(true);
@@ -123,7 +151,7 @@ export function OwnerSettingsPanel({ section }: { section: OwnerSettingsSection 
   if (settings.error || !settings.data) {
     return (
       <div className="space-y-3">
-        <SettingsSectionHeader title="Настройки аптеки" ownerOnly />
+        <SettingsSectionHeader title={sectionTitle[section]} ownerOnly />
         <SettingsNotice tone="danger">
           {describeApiError(settings.error, "Не удалось загрузить настройки аптеки")}
         </SettingsNotice>
@@ -142,26 +170,60 @@ export function OwnerSettingsPanel({ section }: { section: OwnerSettingsSection 
       {section === "reports" ? <ReportFields form={form} /> : null}
 
       {topError ? <SettingsNotice tone="danger">{topError}</SettingsNotice> : null}
-      {saved ? <SettingsNotice tone="success">Настройки аптеки сохранены.</SettingsNotice> : null}
+      {saved ? <SettingsNotice tone="success">{sectionSavedLabel[section]}</SettingsNotice> : null}
 
       <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface py-3">
-        <p className="text-xs text-foreground-muted">Сохранение создаст запись в журнале аудита.</p>
+        <div className="text-xs text-foreground-muted">
+          <p>{sectionImpact[section]}</p>
+          <p>Сохранение создаст запись в журнале аудита.</p>
+        </div>
         <div className="flex gap-2">
           <Button
             type="button"
             variant="secondary"
-            disabled={!form.formState.isDirty || update.isPending}
+            disabled={!sectionIsDirty || update.isPending}
             onClick={() => settings.data && form.reset(formValuesFromSettings(settings.data))}
           >
             Отменить
           </Button>
-          <Button type="submit" disabled={!form.formState.isDirty} isLoading={update.isPending}>
+          <Button type="submit" disabled={!sectionIsDirty} isLoading={update.isPending}>
             Сохранить изменения
           </Button>
         </div>
       </div>
     </form>
   );
+}
+
+function tenantSettingsPatchForSection(
+  section: OwnerSettingsSection,
+  data: FormValues,
+): Omit<TenantSettingsUpdatePayload, "expected_version"> {
+  switch (section) {
+    case "pharmacy":
+      return {
+        session_admin_minutes: data.session_admin_minutes,
+        session_pos_minutes: data.session_pos_minutes,
+        draft_sale_lifetime_min: data.draft_sale_lifetime_min,
+        prescription_warning_text: data.prescription_warning_text,
+      };
+    case "sales":
+      return {
+        refund_reason_mode: data.refund_reason_mode,
+        pos_payment_methods: data.pos_payment_methods,
+        pos_mixed_payment_enabled: data.pos_mixed_payment_enabled,
+      };
+    case "inventory":
+      return {
+        expiry_thresholds: {
+          yellow: data.yellow,
+          orange: data.orange,
+          red: data.red,
+        },
+      };
+    case "reports":
+      return { report_timezone: data.report_timezone };
+  }
 }
 
 function formValuesFromSettings(settings: TenantSettings): FormValues {
@@ -186,8 +248,8 @@ function PharmacyFields({ form }: { form: SettingsForm }): JSX.Element {
   return (
     <div>
       <SettingsSectionHeader
-        title="Настройки аптеки"
-        description="Общие правила сессий, черновиков кассы и предупреждений."
+        title="Рабочие правила"
+        description="Общие правила сессий, черновиков кассы и рецептурных предупреждений."
         ownerOnly
       />
       <SettingRow
@@ -250,7 +312,7 @@ function SalesFields({ form }: { form: SettingsForm }): JSX.Element {
   return (
     <div>
       <SettingsSectionHeader
-        title="Продажи и возвраты"
+        title="Оплата и возвраты"
         description="Способы оплаты и обязательные правила кассовых операций."
         ownerOnly
       />
@@ -365,7 +427,7 @@ function ReportFields({ form }: { form: SettingsForm }): JSX.Element {
   return (
     <div>
       <SettingsSectionHeader
-        title="Отчёты и время"
+        title="Отчёты и рабочий день"
         description="Единая временная зона для рабочих дней, чеков и аналитики аптеки."
         ownerOnly
       />

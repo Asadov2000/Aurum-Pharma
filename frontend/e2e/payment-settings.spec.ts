@@ -59,7 +59,7 @@ test.describe("POS payment settings (owner)", () => {
         await expectNoHorizontalOverflow(page, `/settings @ ${viewport.width}x${viewport.height}`);
       }
       await page.setViewportSize({ width: 1600, height: 900 });
-      await page.getByRole("button", { name: /Продажи и возвраты/ }).click();
+      await page.getByRole("button", { name: /Оплата и возвраты/ }).click();
 
       const cash = page.getByRole("button", { name: "Наличные", exact: true });
       const card = page.getByRole("button", { name: "Карта", exact: true });
@@ -87,10 +87,16 @@ test.describe("POS payment settings (owner)", () => {
       await page.getByRole("button", { name: "Сохранить изменения" }).click();
       const savedResponse = await saveResponse;
       expect(savedResponse.ok()).toBe(true);
+      expect(Object.keys(savedResponse.request().postDataJSON() as object).sort()).toEqual([
+        "expected_version",
+        "pos_mixed_payment_enabled",
+        "pos_payment_methods",
+        "refund_reason_mode",
+      ]);
       const saved = (await savedResponse.json()) as PaymentSettingsSnapshot;
       expect(saved.pos_payment_methods).toEqual(["qr"]);
       expect(saved.pos_mixed_payment_enabled).toBe(false);
-      await expect(page.getByText("Настройки аптеки сохранены.")).toBeVisible();
+      await expect(page.getByText("Правила оплаты и возвратов сохранены.")).toBeVisible();
 
       const persistedResponse = await api.get("tenant/settings");
       expect(persistedResponse.ok()).toBe(true);
