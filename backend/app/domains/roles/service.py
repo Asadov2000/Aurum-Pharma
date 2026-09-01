@@ -1199,7 +1199,6 @@ class RolesService:
         role_id: UUID,
         branch_ids: list[UUID | None],
         password_required: bool,
-        lock_assignments: bool = False,
     ) -> tuple[Role, list[UserAssignment]]:
         if actor_id == target_user_id:
             raise PermissionDeniedError("You cannot assign privileges to yourself")
@@ -1271,10 +1270,10 @@ class RolesService:
                 actor_is_administrator=actor_is_administrator,
             )
 
+        await self.repo.lock_user_assignments(tenant_id, target_user_id)
         existing = await self.repo.list_assignments_for_user(
             target_user_id,
             tenant_id=tenant_id,
-            for_update=lock_assignments,
         )
         return role, existing
 
@@ -1355,7 +1354,6 @@ class RolesService:
             role_id=role_id,
             branch_ids=branch_ids,
             password_required=password_required,
-            lock_assignments=True,
         )
         by_scope = {assignment.branch_id: assignment for assignment in existing}
         updated: list[UserAssignment] = []
@@ -1416,6 +1414,7 @@ class RolesService:
     ) -> None:
         if actor_id == target_user_id:
             raise PermissionDeniedError("You cannot revoke your own privileges")
+        await self.repo.lock_user_assignments(tenant_id, target_user_id)
         assignment = await self.repo.get_assignment(assignment_id)
         if (
             assignment is None

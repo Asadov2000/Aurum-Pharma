@@ -1018,16 +1018,22 @@ class RolesRepository:
         user_id: UUID,
         *,
         tenant_id: UUID | None = None,
-        for_update: bool = False,
     ) -> list[UserAssignment]:
         stmt = select(UserAssignment).where(UserAssignment.user_id == user_id)
         if tenant_id is not None:
             stmt = stmt.where(UserAssignment.tenant_id == tenant_id)
-        if for_update:
-            stmt = stmt.with_for_update()
         stmt = stmt.execution_options(populate_existing=True)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def lock_user_assignments(self, tenant_id: UUID, user_id: UUID) -> None:
+        await self.session.execute(
+            text(
+                "SELECT pg_catalog.pg_advisory_xact_lock("
+                "pg_catalog.hashtextextended(:lock_key, 0))"
+            ),
+            {"lock_key": f"user-assignment:{tenant_id}:{user_id}"},
+        )
 
     async def active_branch_ids(self, tenant_id: UUID, branch_ids: set[UUID]) -> set[UUID]:
         if not branch_ids:
