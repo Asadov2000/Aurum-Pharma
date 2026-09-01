@@ -318,7 +318,7 @@ describe("UsersPage", () => {
 
     expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Профиль" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Роли" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Настроить доступ" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Приостановить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Завершить сеансы" })).not.toBeInTheDocument();
@@ -358,7 +358,7 @@ describe("UsersPage", () => {
 
     await openUserActions();
     expect(await screen.findByRole("menuitem", { name: "Профиль" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Роли" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Настроить доступ" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Приостановить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
   });
@@ -456,7 +456,7 @@ describe("UsersPage", () => {
     renderPage();
 
     await openUserActions();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
     expect(screen.queryByRole("option", { name: "Aurum Administrator" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Роль"), {
@@ -504,7 +504,7 @@ describe("UsersPage", () => {
       await screen.findByText(/Начнёт действовать после первого подтверждённого входа/),
     ).toBeInTheDocument();
     await openUserActions();
-    expect(await screen.findByRole("menuitem", { name: "Роли" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "Настроить доступ" })).toBeInTheDocument();
   });
 
   it("reviews only visible capabilities and warns about important permissions", async () => {
@@ -537,7 +537,7 @@ describe("UsersPage", () => {
     renderPage();
 
     await openUserActions();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
     fireEvent.change(screen.getByLabelText("Роль"), { target: { value: reviewRole.id } });
     fireEvent.change(screen.getByLabelText("Где действует роль"), {
@@ -577,7 +577,7 @@ describe("UsersPage", () => {
     renderPage();
 
     await openUserActions();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
 
     expect(
       await screen.findByText("Нет доступных для назначения ролей.", {}, LAZY_PANEL_WAIT),
@@ -596,7 +596,7 @@ describe("UsersPage", () => {
     renderPage();
 
     await openUserActions();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
 
     expect(
@@ -620,7 +620,7 @@ describe("UsersPage", () => {
     renderPage();
 
     await openUserActions();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
@@ -651,7 +651,7 @@ describe("UsersPage", () => {
     renderPage();
 
     await openUserActions();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Роли" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
@@ -662,6 +662,39 @@ describe("UsersPage", () => {
       await screen.findByText("Эта роль уже назначена сотруднику для выбранной области"),
     ).toBeInTheDocument();
     expect(createAssignment).not.toHaveBeenCalled();
+  });
+
+  it("explains that an occupied scope must be revoked before assigning another role", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    const replacementRole = {
+      ...MANAGED_ROLE,
+      id: "role-replacement",
+      name: "Фармацевт",
+    };
+    listRoles.mockResolvedValue([MANAGED_ROLE, replacementRole]);
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
+    fireEvent.change(screen.getByLabelText("Роль"), {
+      target: { value: replacementRole.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
+
+    expect(
+      await screen.findByText(
+        "Для выбранной области уже действует роль «Кассир». Сначала отзовите её, затем назначьте новую.",
+      ),
+    ).toBeInTheDocument();
+    expect(createAssignment).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Проверьте доступ сотрудника" })).toBeNull();
   });
 
   it("protects owner membership from assignment and lifecycle actions", async () => {
@@ -685,7 +718,7 @@ describe("UsersPage", () => {
     expect(await screen.findByText("владелец")).toBeInTheDocument();
     await openUserActions();
     expect(screen.getByRole("menuitem", { name: "Профиль" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Роли" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Настроить доступ" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Приостановить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Завершить сеансы" })).not.toBeInTheDocument();

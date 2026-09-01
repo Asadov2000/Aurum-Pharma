@@ -12,6 +12,7 @@ RUN go mod init aurum.local/restic \
     && go get golang.org/x/net@v0.56.0 \
         golang.org/x/text@v0.39.0 \
         google.golang.org/grpc@v1.82.1 \
+    && go get golang.org/x/crypto@v0.55.0 \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
         -o /out/restic github.com/restic/restic/cmd/restic
 
@@ -19,12 +20,12 @@ WORKDIR /src/minio-client
 RUN go mod init aurum.local/minio-client \
     && go get github.com/minio/mc@7394ce0dd2a80935aded936b09fa12cbb3cb8096 \
     && go get github.com/prometheus/prometheus@v0.311.3 \
-        golang.org/x/crypto@v0.53.0 \
         golang.org/x/net@v0.56.0 \
         golang.org/x/text@v0.39.0 \
         google.golang.org/grpc@v1.82.1 \
     && go get github.com/prometheus/common/model@v0.67.5 \
         github.com/prometheus/prometheus/model/labels@v0.311.3 \
+    && go get golang.org/x/crypto@v0.55.0 \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
         -o /out/mc github.com/minio/mc
 

@@ -51,6 +51,7 @@ export function AssignmentsPanel({
   const [pendingRevokeId, setPendingRevokeId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const [pendingAdd, setPendingAdd] = useState<FormValues | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const form = useForm<FormValues>({
     defaultValues: EMPTY_ASSIGNMENT_FORM,
@@ -78,14 +79,14 @@ export function AssignmentsPanel({
       return "Эта торговая точка недоступна для назначения";
     }
     const branchId = values.branch_id === "" ? null : values.branch_id;
-    const duplicateAssignment = user.assignments.some(
-      (assignment) =>
-        assignment.is_active &&
-        assignment.role_id === values.role_id &&
-        assignment.branch_id === branchId,
+    const scopeAssignment = user.assignments.find(
+      (assignment) => assignment.is_active && assignment.branch_id === branchId,
     );
-    if (duplicateAssignment) {
+    if (scopeAssignment?.role_id === values.role_id) {
       return "Эта роль уже назначена сотруднику для выбранной области";
+    }
+    if (scopeAssignment) {
+      return `Для выбранной области уже действует роль «${assignmentRoleName(scopeAssignment)}». Сначала отзовите её, затем назначьте новую.`;
     }
     return { role: selectedRole, branchId };
   };
@@ -103,6 +104,7 @@ export function AssignmentsPanel({
       return;
     }
     setTopError(null);
+    setSuccessMessage(null);
     const resolved = resolveAssignment(parsed.data);
     if (typeof resolved === "string") {
       setTopError(resolved);
@@ -130,6 +132,9 @@ export function AssignmentsPanel({
         },
       });
       closeAddForm();
+      setSuccessMessage(
+        `Роль «${resolved.role.name}» назначена. Доступ для области «${branchName(resolved.branchId)}» уже действует.`,
+      );
     } catch (err) {
       setPendingAdd(null);
       setTopError(describeApiError(err, "Не удалось назначить роль"));
@@ -139,9 +144,16 @@ export function AssignmentsPanel({
   const confirmRevoke = async () => {
     if (!pendingRevokeId) return;
     setRevokeError(null);
+    setSuccessMessage(null);
+    const assignment = user.assignments.find((item) => item.id === pendingRevokeId) ?? null;
     try {
       await revokeAssignment.mutateAsync({ userId: user.id, assignmentId: pendingRevokeId });
       setPendingRevokeId(null);
+      setSuccessMessage(
+        assignment
+          ? `Роль «${assignmentRoleName(assignment)}» отозвана. Сервер уже блокирует этот доступ сотрудника.`
+          : "Роль отозвана. Сервер уже блокирует этот доступ сотрудника.",
+      );
     } catch (err) {
       setRevokeError(describeApiError(err, "Не удалось отозвать"));
     }
@@ -149,9 +161,7 @@ export function AssignmentsPanel({
 
   const manageableRoles = (roles.data ?? []).filter(
     (role) =>
-      role.is_active &&
-      !hasUnavailableRolePermissions(role) &&
-      isManageableRole(role, tenantId),
+      role.is_active && !hasUnavailableRolePermissions(role) && isManageableRole(role, tenantId),
   );
   const roleById = (roleId: string) => roles.data?.find((role) => role.id === roleId);
   const assignmentRoleName = (assignment: Assignment) =>
@@ -213,6 +223,7 @@ export function AssignmentsPanel({
           size="sm"
           className="self-end sm:self-auto"
           onClick={() => {
+            setSuccessMessage(null);
             setRevokeError(null);
             setPendingRevokeId(assignment.id);
           }}
@@ -232,9 +243,18 @@ export function AssignmentsPanel({
           <p className="break-all text-sm text-foreground-muted">{user.email}</p>
         </div>
         <Badge tone={activeAssignments.length > 0 ? "success" : "warning"}>
-          Активных: {activeAssignments.length}
+          Активных назначений: {activeAssignments.length}
         </Badge>
       </div>
+
+      {successMessage ? (
+        <p
+          className="rounded-lg border border-success/30 bg-success-subtle px-3 py-2 text-sm text-success-foreground"
+          role="status"
+        >
+          {successMessage}
+        </p>
+      ) : null}
 
       <section aria-labelledby="active-assignments-heading">
         <div className="flex items-center justify-between gap-3">
@@ -378,7 +398,13 @@ export function AssignmentsPanel({
         !branches.error &&
         !permissions.error &&
         manageableRoles.length > 0 ? (
-        <Button variant="secondary" onClick={() => setAddOpen(true)}>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setSuccessMessage(null);
+            setAddOpen(true);
+          }}
+        >
           <PlusIcon />
           Назначить роль
         </Button>
@@ -422,16 +448,11 @@ export function AssignmentsPanel({
                 {pendingPermissions.length > 0 ? (
                   <>
                     <p className="mt-1 leading-5">Разделы: {pendingCapabilityGroups.join(", ")}.</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground-secondary">
-                      {pendingPermissions.slice(0, 5).map((permission) => (
+                    <ul className="mt-2 max-h-56 list-disc space-y-1 overflow-y-auto pl-5 pr-2 text-foreground-secondary">
+                      {pendingPermissions.map((permission) => (
                         <li key={permission.code}>{permission.name}</li>
                       ))}
                     </ul>
-                    {pendingPermissions.length > 5 ? (
-                      <p className="mt-2 text-xs text-foreground-muted">
-                        И ещё возможностей: {pendingPermissions.length - 5}
-                      </p>
-                    ) : null}
                   </>
                 ) : (
                   <p className="mt-1 leading-5 text-foreground-muted">
