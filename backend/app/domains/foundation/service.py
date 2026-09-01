@@ -18,7 +18,7 @@ import structlog
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.core.time import utc_now
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
-from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.repository import BranchLifecycleImpact, FoundationRepository
 
 logger = structlog.get_logger("foundation.service")
 
@@ -159,17 +159,23 @@ class FoundationService:
         fields: dict[str, object],
         updated_by: UUID | None = None,
     ) -> Branch:
-        if fields.get("is_active") is False:
+        requested_active = fields.get("is_active")
+        if isinstance(requested_active, bool):
+            current = await self.get_branch(branch_id)
+            tenant = await self.repo.get_tenant_for_update(current.tenant_id)
+            if tenant is None:
+                raise NotFoundError("Tenant not found")
             branch = await self.repo.get_branch_for_update(branch_id)
             if branch is None:
                 raise NotFoundError("Branch not found")
         else:
             branch = await self.get_branch(branch_id)
         # Guard the "last active branch" rule on deactivation only.
-        if fields.get("is_active") is False and branch.is_active:
+        if requested_active is False and branch.is_active:
             active = await self.repo.count_active_branches(branch.tenant_id)
             if active <= 1:
                 raise BusinessRuleError("Cannot deactivate the last active branch of the tenant")
+            await self.repo.lock_registers_for_branch(branch.id)
             if await self.repo.has_open_shift_for_branch(branch.id):
                 raise BusinessRuleError("Cannot deactivate a branch with an open shift")
             await self.repo.deactivate_registers_for_branch(
@@ -179,6 +185,16 @@ class FoundationService:
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_branch(branch, **fields)
+
+    async def get_branch_lifecycle_impact(
+        self, branch_id: UUID
+    ) -> tuple[Branch, BranchLifecycleImpact]:
+        branch = await self.get_branch(branch_id)
+        impact = await self.repo.branch_lifecycle_impact(
+            tenant_id=branch.tenant_id,
+            branch_id=branch.id,
+        )
+        return branch, impact
 
     async def soft_delete_branch(
         self, branch_id: UUID, *, updated_by: UUID | None = None
@@ -201,7 +217,7 @@ class FoundationService:
         branch_id = fields.get("branch_id")
         if not isinstance(branch_id, UUID):
             raise BusinessRuleError("branch_id is required and must be a UUID")
-        branch = await self.repo.get_branch(branch_id)
+        branch = await self.repo.get_branch_for_update(branch_id)
         if branch is None or branch.tenant_id != tenant_id:
             # Without RLS-bypass the cross-tenant branch would already be
             # invisible (SELECT returns None). The explicit check is here for
@@ -260,14 +276,22 @@ class FoundationService:
         fields: dict[str, object],
         updated_by: UUID | None = None,
     ) -> Register:
-        if fields.get("is_active") is False:
+        requested_active = fields.get("is_active")
+        if isinstance(requested_active, bool):
+            current = await self.get_register(register_id)
+            branch = await self.repo.get_branch_for_update(current.branch_id)
+            if branch is None:
+                raise NotFoundError("Branch not found")
             register = await self.repo.get_register_for_update(register_id)
             if register is None:
                 raise NotFoundError("Register not found")
         else:
             register = await self.get_register(register_id)
+            branch = None
+        if requested_active is True and branch is not None and not branch.is_active:
+            raise BusinessRuleError("Cannot activate a register in an inactive branch")
         if (
-            fields.get("is_active") is False
+            requested_active is False
             and register.is_active
             and await self.repo.has_open_shift_for_register(register.id)
         ):

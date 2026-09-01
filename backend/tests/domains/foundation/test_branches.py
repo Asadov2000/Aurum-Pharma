@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.deps import CurrentUser
 from app.core.errors import BusinessRuleError
+from app.domains.foundation.models import Branch
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.router import update_branch as update_branch_route
 from app.domains.foundation.schemas import BranchUpdate
@@ -153,6 +157,12 @@ async def test_branch_deactivation_rejects_open_shift_but_allows_closed_shift(
     with pytest.raises(BusinessRuleError, match="open shift"):
         await service.update_branch(blocked.id, fields={"is_active": False})
 
+    _, impact = await service.get_branch_lifecycle_impact(blocked.id)
+    assert impact.active_register_count == 1
+    assert impact.open_shift_count == 1
+    assert impact.active_assignment_count == 0
+    assert impact.active_edge_node_count == 0
+
     await db_session.refresh(blocked)
     assert blocked.is_active is True
 
@@ -166,6 +176,88 @@ async def test_branch_deactivation_rejects_open_shift_but_allows_closed_shift(
 
     deleted = await service.soft_delete_branch(blocked.id)
     assert deleted.is_active is False
+
+
+async def test_cannot_activate_register_in_inactive_branch(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    tenant = await make_tenant()
+    service = FoundationService(FoundationRepository(db_session))
+    branch = await service.create_branch(tenant_id=tenant.id, fields={"name": "Paused"})
+    await service.create_branch(tenant_id=tenant.id, fields={"name": "Active"})
+    register = await service.create_register(
+        tenant_id=tenant.id,
+        fields={"branch_id": branch.id, "name": "Paused register"},
+    )
+
+    await service.soft_delete_branch(branch.id)
+
+    with pytest.raises(BusinessRuleError, match="inactive branch"):
+        await service.update_register(register.id, fields={"is_active": True})
+
+
+async def test_parallel_deactivation_keeps_one_active_branch(
+    db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
+) -> None:
+    factory = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
+    tenant_id = None
+    branch_ids: list[UUID] = []
+    try:
+        async with factory.begin() as session:
+            service = FoundationService(FoundationRepository(session))
+            tenant = await service.create_tenant(
+                payload={
+                    "name": "Parallel branch lifecycle",
+                    "contact_email": f"parallel-branch-{uuid4().hex[:10]}@aurum.tj",
+                }
+            )
+            tenant_id = tenant.id
+            first = await service.create_branch(tenant_id=tenant.id, fields={"name": "First"})
+            second = await service.create_branch(tenant_id=tenant.id, fields={"name": "Second"})
+            branch_ids = [first.id, second.id]
+
+        async def deactivate(branch_id: UUID):
+            async with factory.begin() as session:
+                return await FoundationService(FoundationRepository(session)).soft_delete_branch(
+                    branch_id
+                )
+
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(deactivate(branch_id) for branch_id in branch_ids),
+                return_exceptions=True,
+            ),
+            timeout=10,
+        )
+        assert sum(not isinstance(result, Exception) for result in results) == 1
+        assert sum(isinstance(result, BusinessRuleError) for result in results) == 1
+
+        async with factory() as session:
+            active_count = await session.scalar(
+                select(func.count())
+                .select_from(Branch)
+                .where(
+                    Branch.tenant_id == tenant_id,
+                    Branch.is_active.is_(True),
+                )
+            )
+        assert active_count == 1
+    finally:
+        if tenant_id is not None:
+            async with maintenance_engine.begin() as connection:
+                await connection.execute(
+                    text("DELETE FROM public.audit_log WHERE tenant_id = :tenant_id"),
+                    {"tenant_id": tenant_id},
+                )
+            async with db_engine.begin() as connection:
+                await connection.execute(
+                    text("SELECT set_config('app.support_session', 'true', true)")
+                )
+                await connection.execute(
+                    text("DELETE FROM public.tenant WHERE id = :tenant_id"),
+                    {"tenant_id": tenant_id},
+                )
 
 
 async def test_search_branches_filters_scope_status_and_tenant(

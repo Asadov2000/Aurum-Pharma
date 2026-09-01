@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Button, FormError, Input, Label, Select, Switch, Textarea } from "@/components/ui";
+import { Button, FormError, Input, Label, Select, Textarea } from "@/components/ui";
 
 import { describeApiError } from "./errors";
 import { useCreateBranch, useUpdateBranch } from "./queries";
@@ -25,7 +25,6 @@ const schema = z.object({
   receipt_line2: z.string().max(200, "Не больше 200 символов").optional(),
   receipt_phone: z.string().max(50, "Не больше 50 символов").optional(),
   receipt_inn_or_tin: z.string().max(50, "Не больше 50 символов").optional(),
-  is_active: z.boolean(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -54,7 +53,6 @@ export function BranchForm({ branch, onClose, onCancel, onDirtyChange }: Props):
       receipt_line2: branch?.receipt_header?.line2 ?? "",
       receipt_phone: branch?.receipt_header?.phone ?? "",
       receipt_inn_or_tin: branch?.receipt_header?.inn_or_tin ?? "",
-      is_active: branch?.is_active ?? true,
     },
   });
 
@@ -69,7 +67,6 @@ export function BranchForm({ branch, onClose, onCancel, onDirtyChange }: Props):
       receipt_line2: branch?.receipt_header?.line2 ?? "",
       receipt_phone: branch?.receipt_header?.phone ?? "",
       receipt_inn_or_tin: branch?.receipt_header?.inn_or_tin ?? "",
-      is_active: branch?.is_active ?? true,
     });
   }, [branch, form]);
 
@@ -117,7 +114,6 @@ export function BranchForm({ branch, onClose, onCancel, onDirtyChange }: Props):
             license_number: trim(d.license_number),
             license_expires_at: trim(d.license_expires_at),
             receipt_header: receiptHeader,
-            is_active: d.is_active,
           },
         });
       } else {
@@ -213,7 +209,6 @@ export function BranchForm({ branch, onClose, onCancel, onDirtyChange }: Props):
           </div>
         </div>
       </div>
-      {isEdit && <Switch label="Торговая точка активна" {...form.register("is_active")} />}
       {topError && (
         <div
           role="alert"

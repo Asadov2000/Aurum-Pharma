@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const listBranches = vi.fn();
 const searchBranches = vi.fn();
 const searchRegisters = vi.fn();
+const getBranchLifecycleImpact = vi.fn();
+const deleteBranch = vi.fn();
+const updateBranch = vi.fn();
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -30,8 +33,9 @@ vi.mock("@/features/foundation/api", () => ({
   listBranches: (...args: unknown[]) => listBranches(...args),
   searchBranches: (...args: unknown[]) => searchBranches(...args),
   createBranch: vi.fn(),
-  updateBranch: vi.fn(),
-  deleteBranch: vi.fn(),
+  updateBranch: (...args: unknown[]) => updateBranch(...args),
+  deleteBranch: (...args: unknown[]) => deleteBranch(...args),
+  getBranchLifecycleImpact: (...args: unknown[]) => getBranchLifecycleImpact(...args),
   listRegisters: vi.fn(),
   searchRegisters: (...args: unknown[]) => searchRegisters(...args),
   createRegister: vi.fn(),
@@ -99,6 +103,9 @@ describe("management list filters", () => {
     listBranches.mockReset();
     searchBranches.mockReset();
     searchRegisters.mockReset();
+    getBranchLifecycleImpact.mockReset();
+    deleteBranch.mockReset();
+    updateBranch.mockReset();
     listBranches.mockResolvedValue([BRANCH]);
     searchBranches.mockResolvedValue({
       items: [BRANCH],
@@ -112,6 +119,18 @@ describe("management list filters", () => {
       page: 1,
       page_size: 25,
     });
+    getBranchLifecycleImpact.mockResolvedValue({
+      branch_id: BRANCH.id,
+      branch_name: BRANCH.name,
+      is_active: true,
+      can_deactivate: true,
+      active_register_count: 2,
+      open_shift_count: 0,
+      active_assignment_count: 4,
+      active_edge_node_count: 1,
+    });
+    deleteBranch.mockResolvedValue({ ...BRANCH, is_active: false });
+    updateBranch.mockResolvedValue(BRANCH);
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -219,6 +238,26 @@ describe("management list filters", () => {
     expect(editor).toBeInTheDocument();
   });
 
+  it("explains branch lifecycle impact before deactivation", async () => {
+    renderPage(<BranchesPage />);
+    await screen.findByText("Аптека Рудаки");
+
+    fireEvent.click(screen.getByRole("button", { name: "Отключить" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Отключить точку: Аптека Рудаки",
+    });
+
+    expect(
+      await within(dialog).findByText("Точка готова к безопасному отключению"),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Назначенные сотрудники")).toBeInTheDocument();
+    expect(within(dialog).getByText("4")).toBeInTheDocument();
+    expect(getBranchLifecycleImpact).toHaveBeenCalledWith(BRANCH.id);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отключить точку" }));
+    await waitFor(() => expect(deleteBranch).toHaveBeenCalledWith(BRANCH.id));
+  });
+
   it("warns before discarding a new register", async () => {
     renderPage(<RegistersPage />);
     await screen.findByText("Касса 01");
@@ -237,7 +276,9 @@ describe("management list filters", () => {
     searchBranches.mockRejectedValueOnce(new Error("offline"));
     renderPage(<BranchesPage />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить торговые точки");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Не удалось загрузить торговые точки",
+    );
     expect(screen.queryByText("Торговых точек пока нет")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Сводка торговых точек" })).not.toBeInTheDocument();
   });

@@ -1090,18 +1090,21 @@ class POSService:
         opening_cash: Decimal,
         allowed_branch_ids: set[UUID] | None = None,
     ) -> Shift:
-        register_result = await self.repo.session.execute(
-            select(Register).where(Register.id == register_id).with_for_update()
-        )
-        register = register_result.scalar_one_or_none()
-        if register is None or register.tenant_id != tenant_id:
+        register_snapshot = await self.repo.session.get(Register, register_id)
+        if register_snapshot is None or register_snapshot.tenant_id != tenant_id:
             raise NotFoundError("Register not found")
         branch_result = await self.repo.session.execute(
-            select(Branch).where(Branch.id == register.branch_id).with_for_update()
+            select(Branch).where(Branch.id == register_snapshot.branch_id).with_for_update()
         )
         branch = branch_result.scalar_one_or_none()
         if branch is None or branch.tenant_id != tenant_id:
             raise NotFoundError("Branch not found")
+        register_result = await self.repo.session.execute(
+            select(Register).where(Register.id == register_id).with_for_update()
+        )
+        register = register_result.scalar_one_or_none()
+        if register is None or register.tenant_id != tenant_id or register.branch_id != branch.id:
+            raise NotFoundError("Register not found")
         self._assert_branch_allowed(branch.id, allowed_branch_ids=allowed_branch_ids)
         if not branch.is_active:
             raise BusinessRuleError("Branch is inactive")

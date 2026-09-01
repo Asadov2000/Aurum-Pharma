@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import {
   type Branch,
   type BranchCreatePayload,
+  type BranchLifecycleImpact,
   type BranchListResponse,
   type BranchSearchParams,
   type BranchUpdatePayload,
@@ -140,6 +141,11 @@ export async function updateBranch(
 
 export async function deleteBranch(branchId: string): Promise<Branch> {
   const { data } = await api.delete<Branch>(`/branches/${branchId}`);
+  return data;
+}
+
+export async function getBranchLifecycleImpact(branchId: string): Promise<BranchLifecycleImpact> {
+  const { data } = await api.get<BranchLifecycleImpact>(`/branches/${branchId}/lifecycle-impact`);
   return data;
 }
 
