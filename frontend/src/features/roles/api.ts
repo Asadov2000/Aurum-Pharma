@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 
 import {
   type Assignment,
+  type AssignmentBatchReplacePayload,
   type AssignmentCreatePayload,
   type OwnershipTransfer,
   type OwnershipTransferActionResponse,
@@ -126,6 +127,14 @@ export async function createAssignment(
   payload: AssignmentCreatePayload,
 ): Promise<Assignment> {
   const { data } = await api.post<Assignment>(`/users/${userId}/assignments`, payload);
+  return data;
+}
+
+export async function replaceAssignments(
+  userId: string,
+  payload: AssignmentBatchReplacePayload,
+): Promise<Assignment[]> {
+  const { data } = await api.put<Assignment[]>(`/users/${userId}/assignments`, payload);
   return data;
 }
 

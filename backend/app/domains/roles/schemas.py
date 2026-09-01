@@ -211,6 +211,23 @@ class AssignmentCreate(BaseModel):
     password_required: bool = False
 
 
+class AssignmentBatchReplace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role_id: UUID
+    branch_ids: list[UUID | None] = Field(min_length=1, max_length=100)
+    password_required: bool = False
+
+    @field_validator("branch_ids")
+    @classmethod
+    def _unique_scopes(cls, value: list[UUID | None]) -> list[UUID | None]:
+        if len(set(value)) != len(value):
+            raise ValueError("Assignment scopes must be unique")
+        if None in value and len(value) > 1:
+            raise ValueError("Tenant-wide access cannot be combined with branch access")
+        return value
+
+
 class UserUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

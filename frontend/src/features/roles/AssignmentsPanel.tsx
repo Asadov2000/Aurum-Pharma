@@ -2,13 +2,23 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Badge, Button, ConfirmDialog, FormError, Label, Select, Switch } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  ConfirmDialog,
+  FormError,
+  Label,
+  SegmentedControl,
+  Select,
+  Switch,
+} from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 
 import {
-  useCreateAssignment,
   usePermissionsQuery,
+  useReplaceAssignments,
   useRevokeAssignment,
   useRolesQuery,
 } from "./queries";
@@ -16,17 +26,33 @@ import { GROUP_LABEL } from "./labels";
 import { hasUnavailableRolePermissions, isManageableRole } from "./roleAccess";
 import { type Assignment, type Permission, type Role, type UserWithAssignments } from "./types";
 
-const schema = z.object({
-  role_id: z.string().min(1, "Выберите роль"),
-  branch_id: z.string(),
-  password_required: z.boolean(),
-});
+const schema = z
+  .object({
+    role_id: z.string().min(1, "Выберите роль"),
+    scope_mode: z.enum(["tenant", "branches"]),
+    branch_ids: z.array(z.string()),
+    password_required: z.boolean(),
+  })
+  .superRefine((values, context) => {
+    if (values.scope_mode === "branches" && values.branch_ids.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["branch_ids"],
+        message: "Выберите хотя бы одну торговую точку",
+      });
+    }
+  });
 
 type FormValues = z.infer<typeof schema>;
-type ResolvedAssignment = { role: Role; branchId: string | null };
+type ResolvedAssignment = {
+  role: Role;
+  branchIds: Array<string | null>;
+  replacements: Assignment[];
+};
 const EMPTY_ASSIGNMENT_FORM: FormValues = {
   role_id: "",
-  branch_id: "",
+  scope_mode: "tenant",
+  branch_ids: [],
   password_required: false,
 };
 
@@ -44,7 +70,7 @@ export function AssignmentsPanel({
   const roles = useRolesQuery(canManage);
   const branches = useBranchesQuery(true, canManage);
   const permissions = usePermissionsQuery(canManage);
-  const createAssignment = useCreateAssignment();
+  const replaceAssignments = useReplaceAssignments();
   const revokeAssignment = useRevokeAssignment();
   const [topError, setTopError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -56,6 +82,7 @@ export function AssignmentsPanel({
   const form = useForm<FormValues>({
     defaultValues: EMPTY_ASSIGNMENT_FORM,
   });
+  const scopeMode = form.watch("scope_mode");
 
   const closeAddForm = () => {
     form.reset(EMPTY_ASSIGNMENT_FORM);
@@ -75,20 +102,39 @@ export function AssignmentsPanel({
     ) {
       return "Эта роль недоступна для назначения";
     }
-    if (values.branch_id && !branches.data?.some((branch) => branch.id === values.branch_id)) {
-      return "Эта торговая точка недоступна для назначения";
+    const branchIds: Array<string | null> =
+      values.scope_mode === "tenant" ? [null] : values.branch_ids;
+    if (branchIds.length === 0) return "Выберите хотя бы одну торговую точку";
+    if (
+      branchIds.some(
+        (branchId) => branchId !== null && !branches.data?.some((branch) => branch.id === branchId),
+      )
+    ) {
+      return "Одна из торговых точек недоступна для назначения";
     }
-    const branchId = values.branch_id === "" ? null : values.branch_id;
-    const scopeAssignment = user.assignments.find(
-      (assignment) => assignment.is_active && assignment.branch_id === branchId,
+    const activeByScope = branchIds.flatMap((branchId) => {
+      const assignment = user.assignments.find(
+        (item) => item.is_active && item.branch_id === branchId,
+      );
+      return assignment ? [assignment] : [];
+    });
+    const unchanged = activeByScope.filter(
+      (assignment) =>
+        assignment.role_id === values.role_id &&
+        assignment.password_required === values.password_required,
     );
-    if (scopeAssignment?.role_id === values.role_id) {
-      return "Эта роль уже назначена сотруднику для выбранной области";
+    if (unchanged.length === branchIds.length) {
+      return "Эта роль с такими настройками уже действует во всех выбранных областях";
     }
-    if (scopeAssignment) {
-      return `Для выбранной области уже действует роль «${assignmentRoleName(scopeAssignment)}». Сначала отзовите её, затем назначьте новую.`;
-    }
-    return { role: selectedRole, branchId };
+    return {
+      role: selectedRole,
+      branchIds,
+      replacements: activeByScope.filter(
+        (assignment) =>
+          assignment.role_id !== values.role_id ||
+          assignment.password_required !== values.password_required,
+      ),
+    };
   };
 
   const onReview = form.handleSubmit((values) => {
@@ -123,17 +169,17 @@ export function AssignmentsPanel({
       return;
     }
     try {
-      await createAssignment.mutateAsync({
+      await replaceAssignments.mutateAsync({
         userId: user.id,
         payload: {
           role_id: resolved.role.id,
-          branch_id: resolved.branchId,
+          branch_ids: resolved.branchIds,
           password_required: pendingAdd.password_required,
         },
       });
       closeAddForm();
       setSuccessMessage(
-        `Роль «${resolved.role.name}» назначена. Доступ для области «${branchName(resolved.branchId)}» уже действует.`,
+        `Роль «${resolved.role.name}» применена: ${resolved.branchIds.length} ${scopeWord(resolved.branchIds.length)}. Доступ уже действует.`,
       );
     } catch (err) {
       setPendingAdd(null);
@@ -181,6 +227,10 @@ export function AssignmentsPanel({
   const pendingResolved = pendingAdd ? resolveAssignment(pendingAdd) : null;
   const pendingRole =
     pendingResolved && typeof pendingResolved !== "string" ? pendingResolved.role : null;
+  const pendingBranchIds =
+    pendingResolved && typeof pendingResolved !== "string" ? pendingResolved.branchIds : [];
+  const pendingReplacements =
+    pendingResolved && typeof pendingResolved !== "string" ? pendingResolved.replacements : [];
   const visiblePermissionByCode = new Map(
     (permissions.data ?? [])
       .filter(isVisibleTenantPermission)
@@ -190,10 +240,16 @@ export function AssignmentsPanel({
     const permission = visiblePermissionByCode.get(code);
     return permission ? [permission] : [];
   });
-  const pendingRiskPermissions = pendingPermissions.filter(isRiskPermission);
+  const pendingTenantWideOmissions = pendingBranchIds.includes(null)
+    ? []
+    : pendingPermissions.filter((permission) => permission.scope_type === "TENANT_ALL");
+  const pendingEffectivePermissions = pendingPermissions.filter(
+    (permission) => !pendingTenantWideOmissions.includes(permission),
+  );
+  const pendingRiskPermissions = pendingEffectivePermissions.filter(isRiskPermission);
   const pendingCapabilityGroups = [
     ...new Set(
-      pendingPermissions.map(
+      pendingEffectivePermissions.map(
         (permission) => GROUP_LABEL[permission.group_code] ?? "Другие функции",
       ),
     ),
@@ -340,17 +396,46 @@ export function AssignmentsPanel({
             </Select>
             <FormError id="role-id-error">{form.formState.errors.role_id?.message}</FormError>
           </div>
-          <div>
-            <Label htmlFor="branch_id">Где действует роль</Label>
-            <Select id="branch_id" {...form.register("branch_id")}>
-              <option value="">Все точки аптеки</option>
-              {branches.data?.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
-          </div>
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-medium text-foreground">Где действует роль</legend>
+            <SegmentedControl
+              label="Область действия роли"
+              value={scopeMode}
+              options={[
+                { value: "tenant", label: "Во всей аптеке" },
+                { value: "branches", label: "В выбранных точках" },
+              ]}
+              onChange={(value) => {
+                form.setValue("scope_mode", value, { shouldValidate: true });
+                form.setValue("branch_ids", [], { shouldValidate: true });
+              }}
+              className="w-full sm:w-auto"
+            />
+            {scopeMode === "tenant" ? (
+              <p className="rounded-lg border border-info/30 bg-info-subtle px-3 py-2 text-sm text-info-foreground">
+                Роль будет действовать во всех текущих и новых торговых точках этой аптеки.
+              </p>
+            ) : branches.data && branches.data.length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {branches.data.map((branch) => (
+                  <label
+                    key={branch.id}
+                    className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2 text-sm hover:border-primary/50"
+                  >
+                    <Checkbox value={branch.id} {...form.register("branch_ids")} />
+                    <span className="min-w-0 break-words font-medium text-foreground">
+                      {branch.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
+                Активных торговых точек пока нет.
+              </p>
+            )}
+            <FormError id="branch-ids-error">{form.formState.errors.branch_ids?.message}</FormError>
+          </fieldset>
           {user.can_require_password ? (
             <Switch
               label="Запрашивать пароль при входе с этой ролью"
@@ -438,18 +523,35 @@ export function AssignmentsPanel({
                 <div>
                   <dt className="text-xs text-foreground-muted">Где действует</dt>
                   <dd className="mt-1 font-semibold text-foreground">
-                    {branchName(pendingAdd?.branch_id || null)}
+                    {pendingBranchIds.map(branchName).join(", ")}
                   </dd>
                 </div>
               </dl>
 
+              {pendingReplacements.length > 0 ? (
+                <div className="rounded-lg border border-info/40 bg-info-subtle p-3 text-info-foreground">
+                  <p className="font-semibold">Роль будет заменена без разрыва доступа</p>
+                  <ul className="mt-2 space-y-1">
+                    {pendingReplacements.map((assignment) => (
+                      <li key={assignment.id}>
+                        {branchName(assignment.branch_id)}: «{assignmentRoleName(assignment)}» → «
+                        {pendingRole.name}»
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-sm">
+                    Все изменения применятся одной операцией. При ошибке старый доступ сохранится.
+                  </p>
+                </div>
+              ) : null}
+
               <div>
                 <p className="font-medium text-foreground">Кратко о возможностях</p>
-                {pendingPermissions.length > 0 ? (
+                {pendingEffectivePermissions.length > 0 ? (
                   <>
                     <p className="mt-1 leading-5">Разделы: {pendingCapabilityGroups.join(", ")}.</p>
                     <ul className="mt-2 max-h-56 list-disc space-y-1 overflow-y-auto pl-5 pr-2 text-foreground-secondary">
-                      {pendingPermissions.map((permission) => (
+                      {pendingEffectivePermissions.map((permission) => (
                         <li key={permission.code}>{permission.name}</li>
                       ))}
                     </ul>
@@ -460,6 +562,20 @@ export function AssignmentsPanel({
                   </p>
                 )}
               </div>
+
+              {pendingTenantWideOmissions.length > 0 ? (
+                <div className="rounded-lg border border-warning/40 bg-warning-subtle p-3 text-warning-foreground">
+                  <p className="font-semibold">Не включатся для отдельных точек</p>
+                  <p className="mt-1 text-sm leading-5">
+                    Эти возможности работают только при выборе «Во всей аптеке»:
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    {pendingTenantWideOmissions.map((permission) => (
+                      <li key={permission.code}>{permission.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
               {pendingRiskPermissions.length > 0 ? (
                 <div className="rounded-lg border border-warning/40 bg-warning-subtle p-3 text-warning-foreground">
@@ -478,8 +594,8 @@ export function AssignmentsPanel({
             </div>
           ) : null
         }
-        confirmLabel="Назначить роль"
-        isLoading={createAssignment.isPending}
+        confirmLabel={pendingReplacements.length > 0 ? "Заменить и применить" : "Применить доступ"}
+        isLoading={replaceAssignments.isPending}
         onConfirm={() => void confirmAdd()}
         onCancel={() => setPendingAdd(null)}
       />
@@ -566,4 +682,12 @@ function isRiskPermission(permission: Permission): boolean {
     permission.requires_confirmation ||
     permission.requires_step_up
   );
+}
+
+function scopeWord(count: number): string {
+  if (count % 10 === 1 && count % 100 !== 11) return "область";
+  if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) {
+    return "области";
+  }
+  return "областей";
 }

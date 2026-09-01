@@ -50,9 +50,7 @@ test.describe("Owner employee access assignment", () => {
     clearLoginRateLimit(CASHIER.email);
   });
 
-  test("assigns, blocks a conflicting scope, revokes, and applies the new access immediately", async ({
-    page,
-  }) => {
+  test("assigns one role to multiple branches and replaces it atomically", async ({ page }) => {
     const anonymousApi = await request.newContext();
     const ownerTokens = await apiLogin(anonymousApi, OWNER);
     const ownerApi = await apiContext(ownerTokens.access_token);
@@ -62,8 +60,8 @@ test.describe("Owner employee access assignment", () => {
       const branchesResponse = await ownerApi.get("branches");
       expect(branchesResponse.ok()).toBe(true);
       const branches = (await branchesResponse.json()) as Branch[];
-      expect(branches.length).toBeGreaterThan(0);
-      const branch = branches[0]!;
+      expect(branches.length).toBeGreaterThan(1);
+      const selectedBranches = branches.slice(0, 2);
 
       const usersResponse = await ownerApi.get("users");
       expect(usersResponse.ok()).toBe(true);
@@ -96,68 +94,43 @@ test.describe("Owner employee access assignment", () => {
         name: `Доступ сотрудника: ${cashier!.full_name}`,
       });
       await expect(accessDialog).toBeVisible();
-      let assignmentPosts = 0;
+      let assignmentReplacements = 0;
       page.on("request", (requestEvent) => {
         if (
-          requestEvent.method() === "POST" &&
+          requestEvent.method() === "PUT" &&
           requestEvent.url().endsWith(`/api/v1/users/${cashier!.id}/assignments`)
         ) {
-          assignmentPosts += 1;
+          assignmentReplacements += 1;
         }
       });
 
-      await assignRole(accessDialog, reportsRole, branch);
+      await assignRole(accessDialog, reportsRole, selectedBranches, false);
       await expect(accessDialog.getByRole("status")).toContainText(
-        `Роль «${reportsRole.name}» назначена`,
+        `Роль «${reportsRole.name}» применена`,
       );
-      expect(assignmentPosts).toBe(1);
+      expect(assignmentReplacements).toBe(1);
 
       const cashierTokens = await apiLogin(anonymousApi, CASHIER);
       cashierApi = await apiContext(cashierTokens.access_token);
       await expectCurrentAccess(cashierApi, {
-        branchId: branch.id,
+        branchAssignments: Object.fromEntries(
+          selectedBranches.map((branch) => [branch.id, reportsRole.id]),
+        ),
         grantedPermission: "reports.view",
         rejectedPermission: "pos.sell",
-        roleId: reportsRole.id,
       });
 
-      await accessDialog.getByRole("button", { name: "Назначить роль" }).click();
-      await accessDialog.getByLabel("Роль", { exact: true }).selectOption(salesRole.id);
-      await accessDialog.getByLabel("Где действует роль").selectOption(branch.id);
-      await accessDialog.getByRole("button", { name: "Проверить доступ" }).click();
-      await expect(accessDialog.getByRole("alert")).toContainText(
-        `Для выбранной области уже действует роль «${reportsRole.name}»`,
-      );
-      expect(assignmentPosts).toBe(1);
-      await accessDialog.getByRole("button", { name: "Отмена" }).click();
-
-      const activeAssignment = accessDialog
-        .getByRole("listitem")
-        .filter({ hasText: reportsRole.name });
-      await activeAssignment.getByRole("button", { name: "Отозвать" }).click();
-      const revokeDialog = page.getByRole("dialog", { name: "Отозвать роль" });
-      const revokeResponse = page.waitForResponse(
-        (response) =>
-          response.request().method() === "DELETE" &&
-          response.url().includes(`/api/v1/users/${cashier!.id}/assignments/`) &&
-          response.ok(),
-      );
-      await revokeDialog.getByRole("button", { name: "Отозвать" }).click();
-      await revokeResponse;
+      await assignRole(accessDialog, salesRole, selectedBranches, true);
       await expect(accessDialog.getByRole("status")).toContainText(
-        `Роль «${reportsRole.name}» отозвана`,
+        `Роль «${salesRole.name}» применена`,
       );
+      expect(assignmentReplacements).toBe(2);
       await expectCurrentAccess(cashierApi, {
-        rejectedPermission: "reports.view",
-      });
-
-      await assignRole(accessDialog, salesRole, branch);
-      expect(assignmentPosts).toBe(2);
-      await expectCurrentAccess(cashierApi, {
-        branchId: branch.id,
+        branchAssignments: Object.fromEntries(
+          selectedBranches.map((branch) => [branch.id, salesRole.id]),
+        ),
         grantedPermission: "pos.sell",
         rejectedPermission: "reports.view",
-        roleId: salesRole.id,
       });
     } finally {
       await cashierApi?.dispose();
@@ -179,35 +152,49 @@ async function createRole(
   return (await response.json()) as TenantRole;
 }
 
-async function assignRole(dialog: Locator, role: TenantRole, branch: Branch): Promise<void> {
+async function assignRole(
+  dialog: Locator,
+  role: TenantRole,
+  branches: Branch[],
+  replacesExisting: boolean,
+): Promise<void> {
   await dialog.getByRole("button", { name: "Назначить роль" }).click();
   await dialog.getByLabel("Роль", { exact: true }).selectOption(role.id);
-  await dialog.getByLabel("Где действует роль").selectOption(branch.id);
+  await dialog.getByRole("button", { name: "В выбранных точках" }).click();
+  for (const branch of branches) {
+    await dialog.getByLabel(branch.name).check();
+  }
   await dialog.getByRole("button", { name: "Проверить доступ" }).click();
   const confirmation = dialog.page().getByRole("dialog", {
     name: "Проверьте доступ сотрудника",
   });
   await expect(confirmation).toContainText(role.name);
+  if (replacesExisting) {
+    await expect(confirmation).toContainText("Роль будет заменена без разрыва доступа");
+  }
   const response = dialog
     .page()
     .waitForResponse(
       (apiResponse) =>
-        apiResponse.request().method() === "POST" &&
+        apiResponse.request().method() === "PUT" &&
         apiResponse.url().includes("/api/v1/users/") &&
         apiResponse.url().endsWith("/assignments") &&
-        apiResponse.status() === 201,
+        apiResponse.status() === 200,
     );
-  await confirmation.getByRole("button", { name: "Назначить роль" }).click();
+  await confirmation
+    .getByRole("button", {
+      name: replacesExisting ? "Заменить и применить" : "Применить доступ",
+    })
+    .click();
   await response;
 }
 
 async function expectCurrentAccess(
   api: Awaited<ReturnType<typeof apiContext>>,
   expected: {
-    branchId?: string;
+    branchAssignments: Record<string, string>;
     grantedPermission?: string;
     rejectedPermission: string;
-    roleId?: string;
   },
 ): Promise<void> {
   const response = await api.get("auth/me");
@@ -217,9 +204,5 @@ async function expectCurrentAccess(
     expect(currentUser.permissions).toContain(expected.grantedPermission);
   }
   expect(currentUser.permissions).not.toContain(expected.rejectedPermission);
-  if (expected.branchId && expected.roleId) {
-    expect(currentUser.branch_assignments).toEqual({ [expected.branchId]: expected.roleId });
-  } else {
-    expect(currentUser.branch_assignments).toEqual({});
-  }
+  expect(currentUser.branch_assignments).toEqual(expected.branchAssignments);
 }

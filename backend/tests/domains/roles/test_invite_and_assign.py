@@ -780,6 +780,155 @@ async def test_owner_cannot_assign_role_to_self(
         )
 
 
+async def test_owner_atomically_replaces_role_across_multiple_branches(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    cashier_role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    pharmacist_role, _codes = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        name=f"Фармацевт {str(owner.id)[:8]}",
+        description=None,
+        permission_codes=["catalog.view", "pos.sell"],
+    )
+    branch_a = Branch(tenant_id=tenant.id, name="Рудаки")
+    branch_b = Branch(tenant_id=tenant.id, name="Сино")
+    db_session.add_all([branch_a, branch_b])
+    await db_session.flush()
+    account, _membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="multi-branch-assignee@aurum.tj",
+        full_name="Multi Branch Assignee",
+    )
+    original = await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=cashier_role.id,
+        branch_id=branch_a.id,
+        password_required=False,
+    )
+
+    replacements = await service.replace_role_assignments(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=pharmacist_role.id,
+        branch_ids=[branch_a.id, branch_b.id],
+        password_required=False,
+    )
+
+    assert [assignment.branch_id for assignment in replacements] == [branch_a.id, branch_b.id]
+    assert {assignment.role_id for assignment in replacements} == {pharmacist_role.id}
+    assert replacements[0].id == original.id
+    active = [
+        assignment
+        for assignment in await service.repo.list_assignments_for_user(
+            account.id,
+            tenant_id=tenant.id,
+        )
+        if assignment.is_active
+    ]
+    assert {(assignment.branch_id, assignment.role_id) for assignment in active} == {
+        (branch_a.id, pharmacist_role.id),
+        (branch_b.id, pharmacist_role.id),
+    }
+
+
+async def test_batch_assignment_scope_validation_preserves_existing_access(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    replacement_role, _codes = await service.create_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        name=f"Старший кассир {str(owner.id)[:8]}",
+        description=None,
+        permission_codes=["catalog.view", "pos.sell"],
+    )
+    branch = Branch(tenant_id=tenant.id, name="Центр")
+    unauthorized_branch = Branch(tenant_id=tenant.id, name="Недоступная точка")
+    db_session.add_all([branch, unauthorized_branch])
+    await db_session.flush()
+    account, _membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="preserved-assignee@aurum.tj",
+        full_name="Preserved Assignee",
+    )
+    original = await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=role.id,
+        branch_id=branch.id,
+        password_required=False,
+    )
+
+    scoped_permissions = _tenantwide_scopes(owner_permissions)
+    scoped_permissions["roles.assign"] = frozenset({branch.id})
+    with pytest.raises(PermissionDeniedError, match="outside your authorized branch scope"):
+        await service.replace_role_assignments(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=scoped_permissions,
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=account.id,
+            role_id=replacement_role.id,
+            branch_ids=[branch.id, unauthorized_branch.id],
+            password_required=False,
+        )
+
+    await db_session.refresh(original)
+    assert original.is_active is True
+    assert original.role_id == role.id
+
+
 async def test_support_cannot_assign_regular_role_to_active_owner(
     db_session: AsyncSession,
     make_tenant,

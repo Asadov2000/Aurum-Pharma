@@ -62,6 +62,11 @@ def _is_password_requirement_guard_error(exc: DBAPIError) -> bool:
     return sqlstate == "P2001"
 
 
+def _is_assignment_concurrency_error(exc: DBAPIError) -> bool:
+    sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    return sqlstate in {"23505", "40001", "40P01"}
+
+
 def _ownership_transfer_error(exc: DBAPIError) -> Exception:
     sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
     if sqlstate == "42501":
@@ -1146,6 +1151,10 @@ class RolesService:
                     PASSWORD_CONFIGURATION_REQUIRED,
                     details={"reason": "password_not_configured"},
                 ) from exc
+            if _is_assignment_concurrency_error(exc):
+                raise ConflictError(
+                    "Доступ сотрудника изменился; обновите страницу и повторите"
+                ) from exc
             raise
 
     async def _insert_assignment_with_password_guard(
@@ -1171,9 +1180,13 @@ class RolesService:
                     PASSWORD_CONFIGURATION_REQUIRED,
                     details={"reason": "password_not_configured"},
                 ) from exc
+            if _is_assignment_concurrency_error(exc):
+                raise ConflictError(
+                    "Доступ сотрудника изменился; обновите страницу и повторите"
+                ) from exc
             raise
 
-    async def assign_role(
+    async def _prepare_role_assignment(
         self,
         *,
         actor_id: UUID,
@@ -1184,11 +1197,16 @@ class RolesService:
         tenant_id: UUID,
         target_user_id: UUID,
         role_id: UUID,
-        branch_id: UUID | None,
+        branch_ids: list[UUID | None],
         password_required: bool,
-    ) -> UserAssignment:
+        lock_assignments: bool = False,
+    ) -> tuple[Role, list[UserAssignment]]:
         if actor_id == target_user_id:
             raise PermissionDeniedError("You cannot assign privileges to yourself")
+        if not branch_ids or len(set(branch_ids)) != len(branch_ids):
+            raise ValidationError("Assignment scopes must be present and unique")
+        if None in branch_ids and len(branch_ids) > 1:
+            raise ValidationError("Tenant-wide access cannot be combined with branch access")
 
         role = await self.repo.get_role(role_id)
         if role is None or not role.is_active or role.tenant_id != tenant_id or role.is_system:
@@ -1229,24 +1247,62 @@ class RolesService:
                 details={"reason": "password_not_configured"},
             )
 
-        self._assert_assignment_scope(
-            branch_id=branch_id,
-            actor_permissions=actor_permissions,
-            actor_permission_scopes=actor_permission_scopes,
-            actor_is_developer=actor_is_developer,
-            actor_is_administrator=actor_is_administrator,
+        requested_branch_ids = {branch_id for branch_id in branch_ids if branch_id is not None}
+        available_branch_ids = await self.repo.active_branch_ids(
+            tenant_id,
+            requested_branch_ids,
         )
-        self._assert_role_delegation_at_scope(
-            role_codes=role_codes,
-            branch_id=branch_id,
-            actor_permissions=actor_permissions,
-            actor_permission_scopes=actor_permission_scopes,
-            actor_is_developer=actor_is_developer,
-            actor_is_administrator=actor_is_administrator,
-        )
+        if available_branch_ids != requested_branch_ids:
+            raise NotFoundError("Торговая точка не найдена или отключена")
+        for branch_id in branch_ids:
+            self._assert_assignment_scope(
+                branch_id=branch_id,
+                actor_permissions=actor_permissions,
+                actor_permission_scopes=actor_permission_scopes,
+                actor_is_developer=actor_is_developer,
+                actor_is_administrator=actor_is_administrator,
+            )
+            self._assert_role_delegation_at_scope(
+                role_codes=role_codes,
+                branch_id=branch_id,
+                actor_permissions=actor_permissions,
+                actor_permission_scopes=actor_permission_scopes,
+                actor_is_developer=actor_is_developer,
+                actor_is_administrator=actor_is_administrator,
+            )
+
         existing = await self.repo.list_assignments_for_user(
             target_user_id,
             tenant_id=tenant_id,
+            for_update=lock_assignments,
+        )
+        return role, existing
+
+    async def assign_role(
+        self,
+        *,
+        actor_id: UUID,
+        actor_permissions: set[str],
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+        tenant_id: UUID,
+        target_user_id: UUID,
+        role_id: UUID,
+        branch_id: UUID | None,
+        password_required: bool,
+    ) -> UserAssignment:
+        _role, existing = await self._prepare_role_assignment(
+            actor_id=actor_id,
+            actor_permissions=actor_permissions,
+            actor_permission_scopes=actor_permission_scopes,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+            tenant_id=tenant_id,
+            target_user_id=target_user_id,
+            role_id=role_id,
+            branch_ids=[branch_id],
+            password_required=password_required,
         )
         for assignment in existing:
             if assignment.branch_id != branch_id:
@@ -1273,6 +1329,78 @@ class RolesService:
         )
         await self.invalidate_user_perms(target_user_id, tenant_id)
         return assignment
+
+    async def replace_role_assignments(
+        self,
+        *,
+        actor_id: UUID,
+        actor_permissions: set[str],
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+        tenant_id: UUID,
+        target_user_id: UUID,
+        role_id: UUID,
+        branch_ids: list[UUID | None],
+        password_required: bool,
+    ) -> list[UserAssignment]:
+        _role, existing = await self._prepare_role_assignment(
+            actor_id=actor_id,
+            actor_permissions=actor_permissions,
+            actor_permission_scopes=actor_permission_scopes,
+            actor_is_developer=actor_is_developer,
+            actor_is_administrator=actor_is_administrator,
+            tenant_id=tenant_id,
+            target_user_id=target_user_id,
+            role_id=role_id,
+            branch_ids=branch_ids,
+            password_required=password_required,
+            lock_assignments=True,
+        )
+        by_scope = {assignment.branch_id: assignment for assignment in existing}
+        updated: list[UserAssignment] = []
+        for branch_id in branch_ids:
+            current = by_scope.get(branch_id)
+            if (
+                current is not None
+                and current.is_active
+                and current.role_id == role_id
+                and current.password_required == password_required
+            ):
+                updated.append(current)
+                continue
+            if current is not None and current.is_active:
+                await self.repo.deactivate_assignment(current.id, tenant_id=tenant_id)
+            if current is not None:
+                replacement = await self._reactivate_assignment_with_password_guard(
+                    assignment_id=current.id,
+                    tenant_id=tenant_id,
+                    role_id=role_id,
+                    password_required=password_required,
+                )
+                if replacement is None:
+                    raise ConflictError(
+                        "Доступ сотрудника изменился; обновите страницу и повторите"
+                    )
+            else:
+                replacement = await self._insert_assignment_with_password_guard(
+                    user_id=target_user_id,
+                    tenant_id=tenant_id,
+                    branch_id=branch_id,
+                    role_id=role_id,
+                    password_required=password_required,
+                )
+            updated.append(replacement)
+
+        await self.invalidate_user_perms(target_user_id, tenant_id)
+        logger.info(
+            "role_assignments_replaced",
+            actor_id=str(actor_id),
+            tenant_id=str(tenant_id),
+            target_user_id=str(target_user_id),
+            scopes=len(branch_ids),
+        )
+        return updated
 
     async def revoke_assignment(
         self,

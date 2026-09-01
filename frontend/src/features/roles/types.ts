@@ -137,6 +137,12 @@ export interface AssignmentCreatePayload {
   password_required?: boolean;
 }
 
+export interface AssignmentBatchReplacePayload {
+  role_id: string;
+  branch_ids: Array<string | null>;
+  password_required?: boolean;
+}
+
 export interface InviteEmployeePayload {
   operation_id: string;
   email: string;
