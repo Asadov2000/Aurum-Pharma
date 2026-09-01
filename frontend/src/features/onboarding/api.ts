@@ -13,3 +13,7 @@ export async function startTrial(operationId: string): Promise<StartTrialRespons
   });
   return data;
 }
+
+export async function markReceiptPrintTested(): Promise<void> {
+  await api.post("/onboarding/tasks/receipt-print-tested");
+}

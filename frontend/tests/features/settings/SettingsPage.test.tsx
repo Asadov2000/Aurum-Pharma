@@ -71,6 +71,7 @@ function renderPage(): void {
 
 describe("SettingsPage access boundaries", () => {
   beforeEach(() => {
+    window.history.replaceState({}, "", "/settings");
     state.isOwner = false;
     state.isDeveloper = false;
     state.isAdministrator = false;
@@ -94,6 +95,14 @@ describe("SettingsPage access boundaries", () => {
     fireEvent.click(screen.getByRole("button", { name: /Продажи и возвраты/ }));
 
     expect(screen.getByText("Только владельцу")).toBeInTheDocument();
+    expect(screen.getByText("Панель владельца: sales")).toBeInTheDocument();
+  });
+
+  it("opens the owner section selected by a Start deep link", () => {
+    state.isOwner = true;
+    window.history.replaceState({}, "", "/settings?section=sales");
+    renderPage();
+
     expect(screen.getByText("Панель владельца: sales")).toBeInTheDocument();
   });
 

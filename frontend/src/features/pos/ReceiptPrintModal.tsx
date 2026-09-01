@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import { Button, Select } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { markReceiptPrintTested } from "@/features/onboarding/api";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { getReceiptPdf } from "./api";
@@ -33,6 +35,7 @@ export function ReceiptPrintModal({
   registerId: string;
   onClose: () => void;
 }): JSX.Element {
+  const { user } = useAuth();
   const { data, isLoading, error } = useReceiptQuery(saleId);
   const [width, setWidth] = useState<ReceiptWidth>(() => loadReceiptWidth(registerId));
   const [downloading, setDownloading] = useState(false);
@@ -65,6 +68,13 @@ export function ReceiptPrintModal({
     }
   };
 
+  const onPrint = (): void => {
+    window.print();
+    if (user?.is_tenant_owner) {
+      void markReceiptPrintTested().catch(() => undefined);
+    }
+  };
+
   return (
     <div
       className="bg-overlay fixed inset-0 z-modal flex flex-col items-center overflow-y-auto p-4"
@@ -93,7 +103,7 @@ export function ReceiptPrintModal({
             </option>
           ))}
         </Select>
-        <Button onClick={() => window.print()} disabled={!data}>
+        <Button onClick={onPrint} disabled={!data}>
           {data?.is_refund ? "Печать возврата" : "Печать чека"}
         </Button>
         <Button

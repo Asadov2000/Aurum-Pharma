@@ -9,7 +9,12 @@ import { describeApiError } from "@/lib/errorMessages";
 import { createOperationId } from "@/lib/operationId";
 import { cn } from "@/lib/utils";
 
-import { readinessStepAction, readinessSteps, taskLabel } from "./labels";
+import {
+  readinessStepAction,
+  readinessSteps,
+  readinessTaskByCode,
+  type ReadinessAction,
+} from "./labels";
 import { useOnboardingOverviewQuery, useStartTrial } from "./queries";
 import { type OnboardingOverview, type ReadinessStep, type ReadinessStepCode } from "./types";
 
@@ -278,7 +283,7 @@ export function OnboardingPage(): JSX.Element {
             online={online}
             onStart={openTrialConfirmation}
           />
-          <RecommendedPanel overview={overview} canOpenPos={canOpenPos} />
+          <RecommendedPanel overview={overview} canOpenPos={canOpenPos} access={access} />
         </aside>
       </div>
 
@@ -356,12 +361,12 @@ function LaunchSummary({
   total: number;
   progress: number;
   showProgress: boolean;
-  firstAction: { to: Parameters<typeof canAccessPath>[0]; label: string } | undefined;
+  firstAction: ReadinessAction | undefined;
   canOpenBilling: boolean;
 }): JSX.Element {
   const setupPhase = overview.tenant_status === "setup";
   const primaryAction = firstAction ? (
-    <Link to={firstAction.to} className={primaryLinkClass}>
+    <Link to={firstAction.to} search={firstAction.search} className={primaryLinkClass}>
       {firstAction.label}
       <ArrowRightIcon />
     </Link>
@@ -469,19 +474,23 @@ function ReadinessPanel({
                 {actionAvailable && action ? (
                   <Link
                     to={action.to}
+                    search={action.search}
                     aria-label={`Открыть раздел: ${definition.title}`}
                     className="inline-flex min-h-[var(--control-height-sm)] shrink-0 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-semibold text-foreground shadow-sm transition-colors duration-fast hover:border-primary hover:text-primary"
                   >
-                    Открыть
+                    {action.label}
                     <ArrowRightIcon />
                   </Link>
                 ) : (
-                  <span
-                    className="grid h-9 w-9 shrink-0 place-items-center text-foreground-muted"
-                    aria-hidden="true"
-                  >
-                    <ChevronRightIcon />
-                  </span>
+                  <Badge tone={step.is_complete ? "success" : isLocked ? "neutral" : "warning"}>
+                    {step.is_complete
+                      ? "Готово"
+                      : isLocked
+                        ? "После остальных шагов"
+                        : action === null
+                          ? "Нужна помощь Aurum Pharma"
+                          : "Не настроено"}
+                  </Badge>
                 )}
               </div>
             </li>
@@ -559,14 +568,19 @@ function TrialPanel({
 function RecommendedPanel({
   overview,
   canOpenPos,
+  access,
 }: {
   overview: OnboardingOverview;
   canOpenPos: boolean;
+  access: ReturnType<typeof getRouteAccessContext>;
 }): JSX.Element {
+  const posStep = overview.steps.find((step) => step.code === "pos_settings");
+  const catalogStep = overview.steps.find((step) => step.code === "catalog");
   const posAvailable =
-    overview.is_ready &&
     canOpenPos &&
-    (overview.tenant_status === "trial" || overview.tenant_status === "active");
+    posStep?.is_complete === true &&
+    (catalogStep?.current ?? 0) > 0 &&
+    ["setup", "trial", "active"].includes(overview.tenant_status);
 
   return (
     <section className="rounded-lg border border-border bg-surface px-5 py-4">
@@ -577,29 +591,60 @@ function RecommendedPanel({
         </span>
       </div>
       <ul className="mt-4 space-y-2.5">
-        {overview.recommended_tasks.map((task) => (
-          <li
-            key={task.code}
-            className={cn(
-              "flex min-w-0 items-start gap-2 text-sm",
-              task.is_complete ? "text-foreground-secondary" : "text-foreground",
-            )}
-          >
-            <StepStateIcon complete={task.is_complete} active={false} locked={false} compact />
-            <span>{taskLabel[task.code]}</span>
-          </li>
-        ))}
+        {overview.recommended_tasks.map((task) => {
+          const definition = readinessTaskByCode.get(task.code);
+          if (!definition) return null;
+          const actionAvailable =
+            !task.is_complete &&
+            canAccessPath(definition.action.to, access) &&
+            (!definition.requiresPos || posAvailable);
+          return (
+            <li
+              key={task.code}
+              className={cn(
+                "grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-2 gap-y-2 border-b border-border pb-3 text-sm last:border-b-0 last:pb-0",
+                task.is_complete ? "text-foreground-secondary" : "text-foreground",
+              )}
+            >
+              <StepStateIcon complete={task.is_complete} active={false} locked={false} compact />
+              <div className="min-w-0">
+                <p className="font-medium">{definition.title}</p>
+                <p className="mt-0.5 text-xs leading-4 text-foreground-muted">
+                  {definition.description}
+                </p>
+              </div>
+              <div className="col-start-2">
+                {task.is_complete ? (
+                  <Badge tone="success">Выполнено</Badge>
+                ) : actionAvailable ? (
+                  <Link
+                    to={definition.action.to}
+                    search={definition.action.search}
+                    className="inline-flex min-h-[var(--control-height-sm)] items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
+                  >
+                    {definition.action.label}
+                    <ArrowRightIcon />
+                  </Link>
+                ) : (
+                  <span className="text-xs text-foreground-muted">
+                    {definition.requiresPos ? "Сначала настройте кассу и каталог" : "Нет доступа"}
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
 
       {posAvailable ? (
         <Link to="/pos" className={cn(primaryLinkClass, "mt-5 w-full")}>
-          Открыть кассу
+          {overview.tenant_status === "setup" ? "Проверить кассу" : "Открыть кассу"}
           <ArrowRightIcon />
         </Link>
       ) : (
         <Button className="mt-5 w-full" size="lg" variant="secondary" disabled>
           <LockIcon />
-          Открыть кассу
+          Сначала настройте кассу
         </Button>
       )}
     </section>
@@ -704,21 +749,6 @@ function ArrowRightIcon(): JSX.Element {
       aria-hidden="true"
     >
       <path d="M4 10h12M11 5l5 5-5 5" />
-    </svg>
-  );
-}
-
-function ChevronRightIcon(): JSX.Element {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      className="h-4 w-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      <path d="m7 4 6 6-6 6" />
     </svg>
   );
 }

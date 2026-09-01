@@ -258,26 +258,18 @@ const reportsRoute = createRoute({
   component: ReportsPage,
 });
 
-function parseLoginSearch(raw: Record<string, unknown>): { from?: string } {
-  return typeof raw.from === "string" ? { from: raw.from } : {};
-}
-
 const loginRoute = createRoute({
   getParentRoute,
   path: "/login",
   component: LoginPage,
-  validateSearch: parseLoginSearch,
+  validateSearch: ({ from }): { from?: string } => (typeof from === "string" ? { from } : {}),
 });
-
-function parseActivationSearch(raw: Record<string, unknown>): { token?: string } {
-  return typeof raw.token === "string" ? { token: raw.token } : {};
-}
 
 const platformActivationRoute = createRoute({
   getParentRoute,
   path: "/activate-platform",
   component: PlatformActivationPage,
-  validateSearch: parseActivationSearch,
+  validateSearch: ({ token }): { token?: string } => (typeof token === "string" ? { token } : {}),
 });
 
 const routeTree = rootRoute.addChildren([

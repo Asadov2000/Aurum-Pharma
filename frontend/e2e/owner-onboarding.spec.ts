@@ -95,5 +95,20 @@ test.describe("Owner onboarding (dev)", () => {
     await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Роли" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Центр управления" })).toHaveCount(0);
+
+    // ---- the owner gets a concrete, actionable launch checklist ----
+    await page.goto("/onboarding");
+    await expect(page.getByRole("heading", { level: 1, name: "Старт" })).toBeVisible();
+    await expect(page.getByText("Профиль аптеки")).toBeVisible();
+    await expect(page.getByText("Владелец аптеки")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Настроить точку" }).first()).toBeVisible();
+
+    await page.getByRole("link", { name: "Настроить точку" }).first().click();
+    await expect(page).toHaveURL(/\/branches$/);
+    await expect(
+      page
+        .locator("#main-content")
+        .getByRole("heading", { level: 1, name: "Торговые точки", exact: true }),
+    ).toBeVisible();
   });
 });

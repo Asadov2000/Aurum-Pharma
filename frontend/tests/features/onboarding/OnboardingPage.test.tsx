@@ -23,6 +23,8 @@ const user = {
     "branches.view",
     "registers.view",
     "catalog.view",
+    "incoming.view",
+    "users.view",
     "pos.sell",
     "billing.overview.view",
     "billing.invoice.view",
@@ -37,17 +39,22 @@ vi.mock("@/features/auth/queries", () => ({
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
     to,
+    search,
     children,
     className,
   }: {
     to: string;
+    search?: Record<string, string>;
     children: React.ReactNode;
     className?: string;
-  }) => (
-    <a href={to} className={className}>
-      {children}
-    </a>
-  ),
+  }) => {
+    const query = search ? `?${new URLSearchParams(search).toString()}` : "";
+    return (
+      <a href={`${to}${query}`} className={className}>
+        {children}
+      </a>
+    );
+  },
 }));
 
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
@@ -71,7 +78,6 @@ const incompleteOverview: OnboardingOverview = {
     { code: "ready", is_complete: false, required: true, current: null, target: null },
   ],
   recommended_tasks: [
-    { code: "catalog_loaded", is_complete: false },
     { code: "first_incoming", is_complete: false },
     { code: "first_sale", is_complete: true },
     { code: "second_user", is_complete: false },
@@ -81,7 +87,7 @@ const incompleteOverview: OnboardingOverview = {
   required_completed: 3,
   required_total: 8,
   recommended_completed: 1,
-  recommended_total: 6,
+  recommended_total: 5,
   is_ready: false,
   can_start_trial: false,
   blocker_codes: ["licensed_branch", "receipt_details", "catalog", "pos_settings"],
@@ -124,10 +130,9 @@ describe("OnboardingPage", () => {
 
     expect(await screen.findByText("3 из 8")).toBeInTheDocument();
     expect(getOnboardingOverview).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("link", { name: /Настроить точку/i })).toHaveAttribute(
-      "href",
-      "/branches",
-    );
+    for (const link of screen.getAllByRole("link", { name: /Настроить точку/i })) {
+      expect(link).toHaveAttribute("href", "/branches");
+    }
     expect(screen.getByText("42 из 100")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Начать пробный период/i })).toBeDisabled();
   });
@@ -173,10 +178,45 @@ describe("OnboardingPage", () => {
     getOnboardingOverview.mockResolvedValueOnce(paymentBlocked);
     renderPage();
 
-    expect(await screen.findByRole("link", { name: /Настроить оплату/i })).toHaveAttribute(
+    for (const link of await screen.findAllByRole("link", { name: /Настроить оплату/i })) {
+      expect(link).toHaveAttribute("href", "/settings?section=sales");
+    }
+  });
+
+  it("offers direct actions for every unfinished owner recommendation", async () => {
+    getOnboardingOverview.mockResolvedValueOnce(incompleteOverview);
+    renderPage();
+
+    expect(await screen.findByRole("link", { name: "Открыть приёмки" })).toHaveAttribute(
       "href",
-      "/settings",
+      "/incoming",
     );
+    expect(screen.getByRole("link", { name: "Добавить сотрудника" })).toHaveAttribute(
+      "href",
+      "/users",
+    );
+    expect(screen.getAllByText("Сначала настройте кассу и каталог")).toHaveLength(2);
+  });
+
+  it("allows the owner to test POS before starting the trial", async () => {
+    const setupReadyForPos: OnboardingOverview = {
+      ...incompleteOverview,
+      steps: incompleteOverview.steps.map((step) =>
+        step.code === "pos_settings"
+          ? { ...step, is_complete: true, current: 1 }
+          : step.code === "catalog"
+            ? { ...step, current: 42 }
+            : step,
+      ),
+      recommended_tasks: incompleteOverview.recommended_tasks.map((task) =>
+        task.code === "first_sale" ? { ...task, is_complete: false } : task,
+      ),
+    };
+    getOnboardingOverview.mockResolvedValueOnce(setupReadyForPos);
+    renderPage();
+
+    expect(await screen.findAllByRole("link", { name: "Проверить кассу" })).not.toHaveLength(0);
+    expect(screen.getByRole("link", { name: "Провести продажу" })).toHaveAttribute("href", "/pos");
   });
 
   it("prioritizes unfinished required setup over POS for an active tenant", async () => {
@@ -188,10 +228,9 @@ describe("OnboardingPage", () => {
     renderPage();
 
     expect(await screen.findByText("Завершите обязательную настройку")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Настроить точку/i })).toHaveAttribute(
-      "href",
-      "/branches",
-    );
+    for (const link of screen.getAllByRole("link", { name: /Настроить точку/i })) {
+      expect(link).toHaveAttribute("href", "/branches");
+    }
     expect(screen.queryByRole("link", { name: /Открыть кассу/i })).toBeNull();
     expect(screen.getAllByText("Не выполнено:").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Выполнено:").length).toBeGreaterThan(0);

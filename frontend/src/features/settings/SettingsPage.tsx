@@ -11,17 +11,11 @@ import { AccountSettingsPanel, MenuSettingsPanel } from "./AccountAndMenuPanels"
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { InterfaceSettingsPanel } from "./InterfaceSettingsPanel";
 import { OwnerSettingsPanel, type OwnerSettingsSection } from "./OwnerSettingsPanel";
+import { parseSettingsSearch, type SettingsSectionId } from "./search";
 import { SettingsSectionHeader } from "./SettingsPrimitives";
 import { settingsKeys, useUserPreferencesQuery } from "./queries";
 
-type CategoryId =
-  | "account"
-  | "interface"
-  | "menu"
-  | "notifications"
-  | "security"
-  | "device"
-  | OwnerSettingsSection;
+type CategoryId = SettingsSectionId | OwnerSettingsSection;
 
 type CategoryGroup = "personal" | "device" | "owner";
 
@@ -119,7 +113,11 @@ export function SettingsPage(): JSX.Element {
     filters: { mutationKey: settingsKeys.preferencesUpdate },
     select: (mutation) => mutation.state.status,
   });
-  const [active, setActive] = useState<CategoryId>("interface");
+  const [active, setActive] = useState<CategoryId>(() => {
+    if (typeof window === "undefined") return "interface";
+    const search = Object.fromEntries(new URLSearchParams(window.location.search));
+    return parseSettingsSearch(search).section ?? "interface";
+  });
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase("ru"));
   const canManagePharmacySettings = Boolean(

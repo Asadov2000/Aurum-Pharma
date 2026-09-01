@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,6 +18,8 @@ from app.domains.foundation.service import FoundationService
 from app.domains.onboarding.models import TrialActivation
 from app.domains.onboarding.repository import OnboardingRepository
 from app.domains.onboarding.service import OnboardingService
+from app.domains.pos.repository import POSRepository
+from app.domains.pos.service import POSService
 
 
 async def _make_tenant(db_session: AsyncSession):  # type: ignore[no-untyped-def]
@@ -216,6 +219,37 @@ async def test_overview_uses_canonical_domain_data(db_session: AsyncSession) -> 
     assert ready.is_ready is True
     assert ready.can_start_trial is True
     assert ready.required_completed == ready.required_total
+    assert ready.recommended_total == 5
+    assert all(task.code != "catalog_loaded" for task in ready.recommended_tasks)
+
+
+async def test_recommended_first_sale_accepts_a_live_sale(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    scaffold = await pos_scaffold(tenant_status="active", sale_price=10)
+    pos = POSService(POSRepository(db_session))
+    await pos.open_shift(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        opened_by_user_id=scaffold["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    sale = await pos.create_sale(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+    )
+    await pos.add_item(sale_id=sale.id, catalog_id=scaffold["item"].id, qty=Decimal("1"))
+    await pos.add_payment(sale_id=sale.id, payment_method="cash", amount=Decimal("10"))
+    completed = await pos.complete(sale_id=sale.id)
+    assert completed.is_test is False
+
+    overview = await OnboardingService(OnboardingRepository(db_session)).get_overview(
+        scaffold["tenant"].id
+    )
+    first_sale = next(task for task in overview.recommended_tasks if task.code == "first_sale")
+    assert first_sale.is_complete is True
 
 
 async def test_overview_requires_one_fully_operational_branch(
@@ -252,6 +286,7 @@ async def test_overview_requires_one_fully_operational_branch(
     assert by_code["licensed_branch"].is_complete is True
     assert by_code["receipt_details"].is_complete is False
     assert by_code["pos_settings"].is_complete is False
+    assert by_code["pos_settings"].current == 0
     assert overview.is_ready is False
 
 
