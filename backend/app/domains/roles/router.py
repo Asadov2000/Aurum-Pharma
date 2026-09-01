@@ -25,6 +25,7 @@ from app.domains.roles.repository import DirectoryUser, OwnershipTransferRecord,
 from app.domains.roles.schemas import (
     AssignmentBatchReplace,
     AssignmentCreate,
+    AssignmentHistoryRead,
     AssignmentRead,
     InvitationRead,
     InvitationReissueRequest,
@@ -649,8 +650,29 @@ async def replace_assignments(
         role_id=payload.role_id,
         branch_ids=payload.branch_ids,
         password_required=payload.password_required,
+        replace_all=payload.replace_all,
     )
     return [AssignmentRead.model_validate(assignment) for assignment in assignments]
+
+
+@router.get(
+    "/users/{user_id}/access-history",
+    response_model=list[AssignmentHistoryRead],
+)
+async def assignment_history(
+    user_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> list[AssignmentHistoryRead]:
+    history = await service.assignment_history(
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+        actor_permission_scopes=user.permission_scopes,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
+    )
+    return [AssignmentHistoryRead.model_validate(event, from_attributes=True) for event in history]
 
 
 @router.delete("/users/{user_id}/assignments/{assignment_id}")

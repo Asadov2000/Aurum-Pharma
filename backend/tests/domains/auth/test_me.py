@@ -9,6 +9,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_access_token, decode_access_token
+from app.domains.foundation.models import Branch
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.roles.models import (
@@ -362,3 +363,67 @@ async def test_me_ignores_inactive_assignments(
     assert body["permissions"] == []
     assert body["branch_assignments"] == {}
     assert body["level"] == 4
+
+
+async def test_me_ignores_assignments_from_inactive_branches(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    foundation = FoundationService(FoundationRepository(db_session))
+    tenant = await foundation.create_tenant(
+        payload={"name": "Closed Branch Tenant", "contact_email": "closed-branch@aurum.tj"}
+    )
+    user = await make_user(
+        email="closed-branch-user@aurum.tj",
+        home_tenant_id=tenant.id,
+    )
+    role = await create_published_test_role(
+        db_session,
+        tenant_id=tenant.id,
+        name="Closed branch cashier",
+        permission_codes=["pos.sell"],
+        level=4,
+    )
+    membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        full_name=user.full_name,
+        status="active",
+    )
+    branch = Branch(tenant_id=tenant.id, name="Closed", is_active=False)
+    db_session.add_all([membership, branch])
+    await db_session.flush()
+    db_session.add(
+        UserAssignment(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            membership_id=membership.id,
+            role_id=role.id,
+            branch_id=branch.id,
+        )
+    )
+    await db_session.flush()
+    await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
+    await db_session.execute(text("SELECT set_config('app.support_access_session_id', '', true)"))
+    await db_session.execute(text("SELECT set_config('app.auth_session_id', '', true)"))
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(user.id)},
+    )
+    token = create_access_token(
+        user.id,
+        tenant_id=tenant.id,
+        is_developer=False,
+        is_administrator=False,
+    )
+
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["permissions"] == []
+    assert body["branch_assignments"] == {}

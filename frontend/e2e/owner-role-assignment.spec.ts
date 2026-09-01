@@ -60,7 +60,17 @@ test.describe("Owner employee access assignment", () => {
       const branchesResponse = await ownerApi.get("branches");
       expect(branchesResponse.ok()).toBe(true);
       const branches = (await branchesResponse.json()) as Branch[];
-      expect(branches.length).toBeGreaterThan(1);
+      if (branches.length < 2) {
+        const createBranchResponse = await ownerApi.post("branches", {
+          data: {
+            name: uniqueName("Точка для проверки доступа"),
+            address: "Душанбе, тестовый адрес",
+            branch_type: "pharmacy",
+          },
+        });
+        expect(createBranchResponse.ok()).toBe(true);
+        branches.push((await createBranchResponse.json()) as Branch);
+      }
       const selectedBranches = branches.slice(0, 2);
 
       const usersResponse = await ownerApi.get("users");
@@ -132,6 +142,21 @@ test.describe("Owner employee access assignment", () => {
         grantedPermission: "pos.sell",
         rejectedPermission: "reports.view",
       });
+
+      await assignRole(accessDialog, reportsRole, [selectedBranches[1]!], true, true);
+      await expect(accessDialog.getByRole("status")).toContainText(
+        `Роль «${reportsRole.name}» применена`,
+      );
+      expect(assignmentReplacements).toBe(3);
+      await expectCurrentAccess(cashierApi, {
+        branchAssignments: { [selectedBranches[1]!.id]: reportsRole.id },
+        grantedPermission: "reports.view",
+        rejectedPermission: "pos.sell",
+      });
+
+      await accessDialog.getByText(/Журнал изменений доступа/).click();
+      await expect(accessDialog.getByText("Отозвано").first()).toBeVisible();
+      await expect(accessDialog.getByText("Восстановлено").first()).toBeVisible();
     } finally {
       await cashierApi?.dispose();
       await ownerApi.dispose();
@@ -157,12 +182,18 @@ async function assignRole(
   role: TenantRole,
   branches: Branch[],
   replacesExisting: boolean,
+  replaceAll = false,
 ): Promise<void> {
   await dialog.getByRole("button", { name: "Назначить роль" }).click();
   await dialog.getByLabel("Роль", { exact: true }).selectOption(role.id);
   await dialog.getByRole("button", { name: "В выбранных точках" }).click();
   for (const branch of branches) {
     await dialog.getByLabel(branch.name).check();
+  }
+  if (replaceAll) {
+    const replaceAllSwitch = dialog.getByLabel("Оставить только выбранный доступ");
+    await dialog.getByText("Оставить только выбранный доступ", { exact: true }).click();
+    await expect(replaceAllSwitch).toBeChecked();
   }
   await dialog.getByRole("button", { name: "Проверить доступ" }).click();
   const confirmation = dialog.page().getByRole("dialog", {
@@ -171,6 +202,9 @@ async function assignRole(
   await expect(confirmation).toContainText(role.name);
   if (replacesExisting) {
     await expect(confirmation).toContainText("Роль будет заменена без разрыва доступа");
+  }
+  if (replaceAll) {
+    await expect(confirmation).toContainText("Другой доступ будет отозван");
   }
   const response = dialog
     .page()
@@ -183,7 +217,11 @@ async function assignRole(
     );
   await confirmation
     .getByRole("button", {
-      name: replacesExisting ? "Заменить и применить" : "Применить доступ",
+      name: replaceAll
+        ? "Перевести и применить"
+        : replacesExisting
+          ? "Заменить и применить"
+          : "Применить доступ",
     })
     .click();
   await response;

@@ -128,6 +128,19 @@ class AssignmentRead(BaseModel):
     is_active: bool
 
 
+class AssignmentHistoryRead(BaseModel):
+    id: UUID
+    event_type: Literal["assigned", "changed", "restored", "revoked"]
+    actor_name: str
+    role_id: UUID
+    role_name: str
+    branch_id: UUID | None
+    branch_name: str | None
+    password_required: bool
+    is_active: bool
+    created_at: datetime
+
+
 class UserInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -217,6 +230,7 @@ class AssignmentBatchReplace(BaseModel):
     role_id: UUID
     branch_ids: list[UUID | None] = Field(min_length=1, max_length=100)
     password_required: bool = False
+    replace_all: bool = False
 
     @field_validator("branch_ids")
     @classmethod

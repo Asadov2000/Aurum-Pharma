@@ -148,6 +148,50 @@ async def test_capability_scope_stays_bound_to_the_assignment_that_granted_it(
     assert not current.can_access_branch("pos.sell", branch_b.id)
 
 
+async def test_inactive_branch_suspends_scoped_permissions_without_losing_assignment(
+    db_session: AsyncSession,
+    make_tenant,
+    make_tenant_role,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    role = await make_tenant_role(
+        tenant_id=tenant.id,
+        template_name="Кассир",
+        level=4,
+    )
+    branch = Branch(tenant_id=tenant.id, name="Temporarily closed")
+    db_session.add(branch)
+    await db_session.flush()
+    assignment = await _assign(
+        db_session,
+        user_id=user.id,
+        tenant_id=tenant.id,
+        role_id=role.id,
+        branch_id=branch.id,
+    )
+    repository = RolesRepository(db_session)
+    before = await repository.authorization_snapshot(user.id, tenant.id)
+
+    branch.is_active = False
+    await db_session.flush()
+    suspended = await repository.authorization_snapshot(user.id, tenant.id)
+
+    assert before.permission_scopes["pos.sell"] == frozenset({branch.id})
+    assert suspended.policy_revision > before.policy_revision
+    assert "pos.sell" not in suspended.permissions
+    assert assignment.is_active is True
+
+    branch.is_active = True
+    await db_session.flush()
+    restored = await repository.authorization_snapshot(user.id, tenant.id)
+
+    assert restored.policy_revision > suspended.policy_revision
+    assert restored.permission_scopes["pos.sell"] == frozenset({branch.id})
+    assert assignment.is_active is True
+
+
 async def test_assignment_mutation_advances_only_subject_revision(
     db_session: AsyncSession,
     make_tenant,

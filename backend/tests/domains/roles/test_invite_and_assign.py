@@ -809,7 +809,8 @@ async def test_owner_atomically_replaces_role_across_multiple_branches(
     )
     branch_a = Branch(tenant_id=tenant.id, name="Рудаки")
     branch_b = Branch(tenant_id=tenant.id, name="Сино")
-    db_session.add_all([branch_a, branch_b])
+    branch_c = Branch(tenant_id=tenant.id, name="Фирдавси")
+    db_session.add_all([branch_a, branch_b, branch_c])
     await db_session.flush()
     account, _membership = await service.create_tenant_account(
         tenant_id=tenant.id,
@@ -828,6 +829,18 @@ async def test_owner_atomically_replaces_role_across_multiple_branches(
         branch_id=branch_a.id,
         password_required=False,
     )
+    removed = await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=cashier_role.id,
+        branch_id=branch_c.id,
+        password_required=False,
+    )
 
     replacements = await service.replace_role_assignments(
         actor_id=owner.id,
@@ -840,6 +853,7 @@ async def test_owner_atomically_replaces_role_across_multiple_branches(
         role_id=pharmacist_role.id,
         branch_ids=[branch_a.id, branch_b.id],
         password_required=False,
+        replace_all=True,
     )
 
     assert [assignment.branch_id for assignment in replacements] == [branch_a.id, branch_b.id]
@@ -857,6 +871,26 @@ async def test_owner_atomically_replaces_role_across_multiple_branches(
         (branch_a.id, pharmacist_role.id),
         (branch_b.id, pharmacist_role.id),
     }
+    await db_session.refresh(removed)
+    assert removed.is_active is False
+    history = await service.assignment_history(
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+    )
+    assert {event.event_type for event in history} >= {"assigned", "restored", "revoked"}
+    assert {event.branch_id for event in history} == {branch_a.id, branch_b.id, branch_c.id}
+    branch_a_history = await service.assignment_history(
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        actor_permission_scopes={"roles.assign": frozenset({branch_a.id})},
+        actor_is_developer=False,
+        actor_is_administrator=False,
+    )
+    assert branch_a_history
+    assert {event.branch_id for event in branch_a_history} == {branch_a.id}
 
 
 async def test_batch_assignment_scope_validation_preserves_existing_access(
@@ -907,6 +941,18 @@ async def test_batch_assignment_scope_validation_preserves_existing_access(
         branch_id=branch.id,
         password_required=False,
     )
+    outside_scope = await service.assign_role(
+        actor_id=owner.id,
+        actor_permissions=owner_permissions,
+        actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+        actor_is_developer=False,
+        actor_is_administrator=False,
+        tenant_id=tenant.id,
+        target_user_id=account.id,
+        role_id=role.id,
+        branch_id=unauthorized_branch.id,
+        password_required=False,
+    )
 
     scoped_permissions = _tenantwide_scopes(owner_permissions)
     scoped_permissions["roles.assign"] = frozenset({branch.id})
@@ -924,9 +970,27 @@ async def test_batch_assignment_scope_validation_preserves_existing_access(
             password_required=False,
         )
 
+    with pytest.raises(PermissionDeniedError, match="outside your authorized branch scope"):
+        await service.replace_role_assignments(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=scoped_permissions,
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            target_user_id=account.id,
+            role_id=replacement_role.id,
+            branch_ids=[branch.id],
+            password_required=False,
+            replace_all=True,
+        )
+
     await db_session.refresh(original)
+    await db_session.refresh(outside_scope)
     assert original.is_active is True
     assert original.role_id == role.id
+    assert outside_scope.is_active is True
+    assert outside_scope.role_id == role.id
 
 
 async def test_support_cannot_assign_regular_role_to_active_owner(

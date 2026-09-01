@@ -29,6 +29,7 @@ from app.domains.roles.models import (
     UserAssignment,
 )
 from app.domains.roles.repository import (
+    AssignmentHistoryRecord,
     AuthorizationSnapshot,
     DirectoryUser,
     InvitationRecord,
@@ -827,6 +828,7 @@ class RolesService:
     ) -> None:
         if actor_id == target_user_id:
             raise BusinessRuleError("You cannot resume your own membership")
+        await self.repo.lock_user_assignments(tenant_id, target_user_id)
         membership = await self.repo.get_membership_for_user(
             tenant_id=tenant_id,
             user_id=target_user_id,
@@ -915,6 +917,7 @@ class RolesService:
     ) -> None:
         if actor_id == target_user_id:
             raise BusinessRuleError("You cannot change your own membership status")
+        await self.repo.lock_user_assignments(tenant_id, target_user_id)
         membership = await self.repo.get_membership_for_user(
             tenant_id=tenant_id,
             user_id=target_user_id,
@@ -1342,6 +1345,7 @@ class RolesService:
         role_id: UUID,
         branch_ids: list[UUID | None],
         password_required: bool,
+        replace_all: bool = False,
     ) -> list[UserAssignment]:
         _role, existing = await self._prepare_role_assignment(
             actor_id=actor_id,
@@ -1355,6 +1359,41 @@ class RolesService:
             branch_ids=branch_ids,
             password_required=password_required,
         )
+        requested_scopes = set(branch_ids)
+        assignments_to_revoke = [
+            assignment
+            for assignment in existing
+            if replace_all and assignment.is_active and assignment.branch_id not in requested_scopes
+        ]
+        for assignment in assignments_to_revoke:
+            existing_role = await self.repo.get_role(assignment.role_id)
+            if existing_role is None or existing_role.is_protected:
+                raise PermissionDeniedError("Protected role assignments cannot be replaced")
+            existing_role_codes = await self.repo.get_role_permissions(existing_role.id)
+            await self._validated_role_permissions(
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                actor_permissions=actor_permissions,
+                actor_is_developer=actor_is_developer,
+                actor_is_administrator=actor_is_administrator,
+                requested=existing_role_codes,
+            )
+            self._assert_assignment_scope(
+                branch_id=assignment.branch_id,
+                actor_permissions=actor_permissions,
+                actor_permission_scopes=actor_permission_scopes,
+                actor_is_developer=actor_is_developer,
+                actor_is_administrator=actor_is_administrator,
+            )
+            self._assert_role_delegation_at_scope(
+                role_codes=existing_role_codes,
+                branch_id=assignment.branch_id,
+                actor_permissions=actor_permissions,
+                actor_permission_scopes=actor_permission_scopes,
+                actor_is_developer=actor_is_developer,
+                actor_is_administrator=actor_is_administrator,
+            )
+
         by_scope = {assignment.branch_id: assignment for assignment in existing}
         updated: list[UserAssignment] = []
         for branch_id in branch_ids:
@@ -1390,6 +1429,9 @@ class RolesService:
                 )
             updated.append(replacement)
 
+        for assignment in assignments_to_revoke:
+            await self.repo.deactivate_assignment(assignment.id, tenant_id=tenant_id)
+
         await self.invalidate_user_perms(target_user_id, tenant_id)
         logger.info(
             "role_assignments_replaced",
@@ -1397,8 +1439,37 @@ class RolesService:
             tenant_id=str(tenant_id),
             target_user_id=str(target_user_id),
             scopes=len(branch_ids),
+            revoked_scopes=len(assignments_to_revoke),
+            replace_all=replace_all,
         )
         return updated
+
+    async def assignment_history(
+        self,
+        *,
+        tenant_id: UUID,
+        target_user_id: UUID,
+        actor_permission_scopes: Mapping[str, frozenset[UUID] | None],
+        actor_is_developer: bool,
+        actor_is_administrator: bool,
+    ) -> list[AssignmentHistoryRecord]:
+        membership = await self.repo.get_membership_for_user(
+            tenant_id=tenant_id,
+            user_id=target_user_id,
+        )
+        if membership is None:
+            raise NotFoundError("Tenant membership not found")
+        history = await self.repo.assignment_history(tenant_id, target_user_id)
+        if actor_is_developer or actor_is_administrator:
+            return history
+        visible_scope = actor_permission_scopes.get("roles.assign", frozenset())
+        if visible_scope is None:
+            return history
+        return [
+            event
+            for event in history
+            if event.branch_id is not None and event.branch_id in visible_scope
+        ]
 
     async def revoke_assignment(
         self,

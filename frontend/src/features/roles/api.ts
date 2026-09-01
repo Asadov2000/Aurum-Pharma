@@ -4,6 +4,7 @@ import {
   type Assignment,
   type AssignmentBatchReplacePayload,
   type AssignmentCreatePayload,
+  type AssignmentHistoryEvent,
   type OwnershipTransfer,
   type OwnershipTransferActionResponse,
   type OwnershipTransferCreatePayload,
@@ -140,6 +141,11 @@ export async function replaceAssignments(
 
 export async function revokeAssignment(userId: string, assignmentId: string): Promise<void> {
   await api.delete(`/users/${userId}/assignments/${assignmentId}`);
+}
+
+export async function listAssignmentHistory(userId: string): Promise<AssignmentHistoryEvent[]> {
+  const { data } = await api.get<AssignmentHistoryEvent[]>(`/users/${userId}/access-history`);
+  return data;
 }
 
 export async function listOwnershipTransfers(): Promise<OwnershipTransfer[]> {

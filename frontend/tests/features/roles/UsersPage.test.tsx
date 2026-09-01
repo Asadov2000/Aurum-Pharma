@@ -13,6 +13,7 @@ const reissueUserInvitation = vi.fn();
 const inviteEmployee = vi.fn();
 const createAssignment = vi.fn();
 const replaceAssignments = vi.fn();
+const listAssignmentHistory = vi.fn();
 const createOwnershipTransfer = vi.fn();
 const listBranches = vi.fn();
 const LAZY_PANEL_WAIT = { timeout: 5_000 };
@@ -32,6 +33,7 @@ vi.mock("@/features/roles/api", () => ({
   inviteEmployee: (...args: unknown[]) => inviteEmployee(...args),
   createAssignment: (...args: unknown[]) => createAssignment(...args),
   replaceAssignments: (...args: unknown[]) => replaceAssignments(...args),
+  listAssignmentHistory: (...args: unknown[]) => listAssignmentHistory(...args),
   createOwnershipTransfer: (...args: unknown[]) => createOwnershipTransfer(...args),
   listOwnershipTransfers: vi.fn().mockResolvedValue([]),
   cancelOwnershipTransfer: vi.fn(),
@@ -184,6 +186,7 @@ describe("UsersPage", () => {
     inviteEmployee.mockReset();
     createAssignment.mockReset();
     replaceAssignments.mockReset();
+    listAssignmentHistory.mockReset();
     createOwnershipTransfer.mockReset();
     listBranches.mockReset();
     listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE]);
@@ -202,6 +205,7 @@ describe("UsersPage", () => {
     inviteEmployee.mockResolvedValue({ id: "assignment-invited" });
     createAssignment.mockResolvedValue({ id: "assignment-new" });
     replaceAssignments.mockResolvedValue([{ id: "assignment-new" }]);
+    listAssignmentHistory.mockResolvedValue([]);
     createOwnershipTransfer.mockResolvedValue({
       transfer: { id: "transfer-1" },
       sessions_revoked: false,
@@ -481,6 +485,7 @@ describe("UsersPage", () => {
       role_id: MANAGED_ROLE.id,
       branch_ids: [null],
       password_required: false,
+      replace_all: false,
     });
   });
 
@@ -519,8 +524,8 @@ describe("UsersPage", () => {
       permissions: ["users.view", "roles.assign"],
     };
     listBranches.mockResolvedValue([
-      { id: "branch-1", name: "Аптека Рудаки" },
-      { id: "branch-2", name: "Аптека Сино" },
+      { id: "branch-1", name: "Аптека Рудаки", is_active: true },
+      { id: "branch-2", name: "Аптека Сино", is_active: true },
     ]);
     listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
     renderPage();
@@ -545,7 +550,115 @@ describe("UsersPage", () => {
       role_id: MANAGED_ROLE.id,
       branch_ids: ["branch-1", "branch-2"],
       password_required: false,
+      replace_all: false,
     });
+  });
+
+  it("transfers access and revokes unselected assignments only after confirmation", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listBranches.mockResolvedValue([
+      { id: "branch-1", name: "Аптека Рудаки", is_active: true },
+      { id: "branch-2", name: "Аптека Сино", is_active: true },
+    ]);
+    const assignments = ["branch-1", "branch-2"].map((branchId, index) => ({
+      ...USER_ACTIVE.assignments[0],
+      id: `assignment-${index + 1}`,
+      branch_id: branchId,
+    }));
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments }]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
+    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: MANAGED_ROLE.id } });
+    fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
+    fireEvent.click(screen.getByLabelText("Аптека Сино"));
+    fireEvent.click(screen.getByLabelText("Оставить только выбранный доступ"));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
+
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Проверьте доступ сотрудника",
+    });
+    expect(within(confirmation).getByText("Другой доступ будет отозван")).toBeInTheDocument();
+    expect(within(confirmation).getByText(/Аптека Рудаки: «Кассир»/)).toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Перевести и применить" }));
+
+    await waitFor(() => expect(replaceAssignments).toHaveBeenCalledTimes(1));
+    expect(replaceAssignments).toHaveBeenCalledWith("member-1", {
+      role_id: MANAGED_ROLE.id,
+      branch_ids: ["branch-2"],
+      password_required: false,
+      replace_all: true,
+    });
+  });
+
+  it("shows disabled branch access as paused and excludes the branch from new assignments", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listBranches.mockResolvedValue([
+      { id: "branch-closed", name: "Аптека Закрытая", is_active: false },
+    ]);
+    listUsers.mockResolvedValue(
+      usersResponse([
+        {
+          ...USER_ACTIVE,
+          assignments: [{ ...USER_ACTIVE.assignments[0], branch_id: "branch-closed" }],
+        },
+      ]),
+    );
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
+    expect(await screen.findByText("приостановлена", {}, LAZY_PANEL_WAIT)).toBeInTheDocument();
+    expect(screen.getByText(/Аптека Закрытая · точка отключена/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Назначить роль" }));
+    fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
+    expect(screen.queryByLabelText("Аптека Закрытая")).not.toBeInTheDocument();
+    expect(screen.getByText("Активных торговых точек пока нет.")).toBeInTheDocument();
+    expect(await screen.findByText("Журнал изменений доступа · 0")).toBeInTheDocument();
+  });
+
+  it("shows a focused access history without raw audit data", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    listAssignmentHistory.mockResolvedValue([
+      {
+        id: "history-1",
+        event_type: "assigned",
+        actor_name: "Владелец аптеки",
+        role_id: MANAGED_ROLE.id,
+        role_name: MANAGED_ROLE.name,
+        branch_id: null,
+        branch_name: null,
+        password_required: false,
+        is_active: true,
+        created_at: "2026-09-01T08:30:00Z",
+      },
+    ]);
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
+    fireEvent.click(await screen.findByText("Журнал изменений доступа · 1", {}, LAZY_PANEL_WAIT));
+
+    expect(screen.getByText("Назначено")).toBeInTheDocument();
+    expect(screen.getByText(/Вся аптека · Владелец аптеки/)).toBeInTheDocument();
   });
 
   it("reviews only visible capabilities and warns about important permissions", async () => {
@@ -573,7 +686,7 @@ describe("UsersPage", () => {
         target_role_type: "platform",
       },
     ]);
-    listBranches.mockResolvedValue([{ id: "branch-1", name: "Аптека Рудаки" }]);
+    listBranches.mockResolvedValue([{ id: "branch-1", name: "Аптека Рудаки", is_active: true }]);
     listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
     renderPage();
 
@@ -678,6 +791,7 @@ describe("UsersPage", () => {
       role_id: MANAGED_ROLE.id,
       branch_ids: [null],
       password_required: true,
+      replace_all: false,
     });
   });
 
@@ -745,6 +859,7 @@ describe("UsersPage", () => {
       role_id: replacementRole.id,
       branch_ids: [null],
       password_required: false,
+      replace_all: false,
     });
   });
 

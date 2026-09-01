@@ -17,6 +17,7 @@ import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 
 import {
+  useAssignmentHistoryQuery,
   usePermissionsQuery,
   useReplaceAssignments,
   useRevokeAssignment,
@@ -32,6 +33,7 @@ const schema = z
     scope_mode: z.enum(["tenant", "branches"]),
     branch_ids: z.array(z.string()),
     password_required: z.boolean(),
+    replace_all: z.boolean(),
   })
   .superRefine((values, context) => {
     if (values.scope_mode === "branches" && values.branch_ids.length === 0) {
@@ -48,12 +50,14 @@ type ResolvedAssignment = {
   role: Role;
   branchIds: Array<string | null>;
   replacements: Assignment[];
+  removals: Assignment[];
 };
 const EMPTY_ASSIGNMENT_FORM: FormValues = {
   role_id: "",
   scope_mode: "tenant",
   branch_ids: [],
   password_required: false,
+  replace_all: false,
 };
 
 export function AssignmentsPanel({
@@ -70,6 +74,7 @@ export function AssignmentsPanel({
   const roles = useRolesQuery(canManage);
   const branches = useBranchesQuery(true, canManage);
   const permissions = usePermissionsQuery(canManage);
+  const history = useAssignmentHistoryQuery(user.id, canManage);
   const replaceAssignments = useReplaceAssignments();
   const revokeAssignment = useRevokeAssignment();
   const [topError, setTopError] = useState<string | null>(null);
@@ -107,7 +112,9 @@ export function AssignmentsPanel({
     if (branchIds.length === 0) return "Выберите хотя бы одну торговую точку";
     if (
       branchIds.some(
-        (branchId) => branchId !== null && !branches.data?.some((branch) => branch.id === branchId),
+        (branchId) =>
+          branchId !== null &&
+          !branches.data?.some((branch) => branch.id === branchId && branch.is_active),
       )
     ) {
       return "Одна из торговых точек недоступна для назначения";
@@ -123,7 +130,12 @@ export function AssignmentsPanel({
         assignment.role_id === values.role_id &&
         assignment.password_required === values.password_required,
     );
-    if (unchanged.length === branchIds.length) {
+    const removals = values.replace_all
+      ? user.assignments.filter(
+          (assignment) => assignment.is_active && !branchIds.includes(assignment.branch_id),
+        )
+      : [];
+    if (unchanged.length === branchIds.length && removals.length === 0) {
       return "Эта роль с такими настройками уже действует во всех выбранных областях";
     }
     return {
@@ -134,6 +146,7 @@ export function AssignmentsPanel({
           assignment.role_id !== values.role_id ||
           assignment.password_required !== values.password_required,
       ),
+      removals,
     };
   };
 
@@ -175,6 +188,7 @@ export function AssignmentsPanel({
           role_id: resolved.role.id,
           branch_ids: resolved.branchIds,
           password_required: pendingAdd.password_required,
+          replace_all: pendingAdd.replace_all,
         },
       });
       closeAddForm();
@@ -216,12 +230,22 @@ export function AssignmentsPanel({
     const role = roleById(roleId);
     return Boolean(role && isManageableRole(role, tenantId));
   };
-  const branchName = (branchId: string | null) =>
-    branchId
-      ? (branches.data?.find((branch) => branch.id === branchId)?.name ?? "Недоступная точка")
-      : "Все точки аптеки";
+  const branchById = (branchId: string | null) =>
+    branchId ? branches.data?.find((branch) => branch.id === branchId) : undefined;
+  const branchName = (branchId: string | null) => {
+    if (!branchId) return "Все точки аптеки";
+    const branch = branchById(branchId);
+    if (!branch) return "Недоступная точка";
+    return branch.is_active ? branch.name : `${branch.name} · точка отключена`;
+  };
+  const assignmentIsPaused = (assignment: Assignment) =>
+    assignment.is_active &&
+    assignment.branch_id !== null &&
+    branchById(assignment.branch_id)?.is_active === false;
   const activeAssignments = user.assignments.filter((assignment) => assignment.is_active);
   const revokedAssignments = user.assignments.filter((assignment) => !assignment.is_active);
+  const pausedAssignmentCount = activeAssignments.filter(assignmentIsPaused).length;
+  const effectiveAssignmentCount = activeAssignments.length - pausedAssignmentCount;
   const pendingAssignment =
     user.assignments.find((assignment) => assignment.id === pendingRevokeId) ?? null;
   const pendingResolved = pendingAdd ? resolveAssignment(pendingAdd) : null;
@@ -231,6 +255,8 @@ export function AssignmentsPanel({
     pendingResolved && typeof pendingResolved !== "string" ? pendingResolved.branchIds : [];
   const pendingReplacements =
     pendingResolved && typeof pendingResolved !== "string" ? pendingResolved.replacements : [];
+  const pendingRemovals =
+    pendingResolved && typeof pendingResolved !== "string" ? pendingResolved.removals : [];
   const visiblePermissionByCode = new Map(
     (permissions.data ?? [])
       .filter(isVisibleTenantPermission)
@@ -263,8 +289,20 @@ export function AssignmentsPanel({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{assignmentRoleName(assignment)}</span>
-          <Badge tone={assignment.is_active ? "success" : "neutral"}>
-            {assignment.is_active ? "активна" : "отозвана"}
+          <Badge
+            tone={
+              assignmentIsPaused(assignment)
+                ? "warning"
+                : assignment.is_active
+                  ? "success"
+                  : "neutral"
+            }
+          >
+            {assignmentIsPaused(assignment)
+              ? "приостановлена"
+              : assignment.is_active
+                ? "активна"
+                : "отозвана"}
           </Badge>
           {assignment.password_required && <Badge tone="info">пароль при входе</Badge>}
         </div>
@@ -298,8 +336,9 @@ export function AssignmentsPanel({
           <p className="break-words font-semibold text-foreground">{user.full_name}</p>
           <p className="break-all text-sm text-foreground-muted">{user.email}</p>
         </div>
-        <Badge tone={activeAssignments.length > 0 ? "success" : "warning"}>
-          Активных назначений: {activeAssignments.length}
+        <Badge tone={effectiveAssignmentCount > 0 ? "success" : "warning"}>
+          Действует: {effectiveAssignmentCount}
+          {pausedAssignmentCount > 0 ? ` · приостановлено: ${pausedAssignmentCount}` : ""}
         </Badge>
       </div>
 
@@ -338,6 +377,57 @@ export function AssignmentsPanel({
           </details>
         )}
       </section>
+
+      {canManage ? (
+        <section aria-labelledby="access-history-heading" className="border-t border-border pt-3">
+          <details>
+            <summary
+              id="access-history-heading"
+              className="cursor-pointer text-sm font-semibold text-foreground hover:text-primary"
+            >
+              Журнал изменений доступа
+              {history.data ? ` · ${history.data.length}` : ""}
+            </summary>
+            {history.isLoading ? (
+              <p className="mt-3 text-sm text-foreground-muted">Загружаем историю…</p>
+            ) : history.error ? (
+              <p
+                className="mt-3 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+                role="alert"
+              >
+                {describeApiError(history.error, "Не удалось загрузить историю доступа")}
+              </p>
+            ) : history.data && history.data.length > 0 ? (
+              <ol className="mt-3 space-y-2">
+                {history.data.map((event) => (
+                  <li
+                    key={event.id}
+                    className="rounded-lg border border-border bg-background px-3 py-2.5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone={historyEventTone(event.event_type)}>
+                          {historyEventLabel(event.event_type)}
+                        </Badge>
+                        <span className="font-medium text-foreground">{event.role_name}</span>
+                      </div>
+                      <time className="text-xs text-foreground-muted" dateTime={event.created_at}>
+                        {formatHistoryDate(event.created_at)}
+                      </time>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-foreground-muted">
+                      {event.branch_id ? event.branch_name || "Недоступная точка" : "Вся аптека"}
+                      {` · ${event.actor_name}`}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-3 text-sm text-foreground-muted">Изменений доступа пока нет.</p>
+            )}
+          </details>
+        </section>
+      ) : null}
 
       {roles.error && (
         <p
@@ -415,19 +505,21 @@ export function AssignmentsPanel({
               <p className="rounded-lg border border-info/30 bg-info-subtle px-3 py-2 text-sm text-info-foreground">
                 Роль будет действовать во всех текущих и новых торговых точках этой аптеки.
               </p>
-            ) : branches.data && branches.data.length > 0 ? (
+            ) : branches.data && branches.data.some((branch) => branch.is_active) ? (
               <div className="grid gap-2 sm:grid-cols-2">
-                {branches.data.map((branch) => (
-                  <label
-                    key={branch.id}
-                    className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2 text-sm hover:border-primary/50"
-                  >
-                    <Checkbox value={branch.id} {...form.register("branch_ids")} />
-                    <span className="min-w-0 break-words font-medium text-foreground">
-                      {branch.name}
-                    </span>
-                  </label>
-                ))}
+                {branches.data
+                  .filter((branch) => branch.is_active)
+                  .map((branch) => (
+                    <label
+                      key={branch.id}
+                      className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2 text-sm hover:border-primary/50"
+                    >
+                      <Checkbox value={branch.id} {...form.register("branch_ids")} />
+                      <span className="min-w-0 break-words font-medium text-foreground">
+                        {branch.name}
+                      </span>
+                    </label>
+                  ))}
               </div>
             ) : (
               <p className="rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground">
@@ -446,6 +538,15 @@ export function AssignmentsPanel({
               Обязательный пароль станет доступен после настройки пароля сотрудником.
             </p>
           )}
+          {activeAssignments.length > 0 ? (
+            <div className="rounded-lg border border-border bg-surface-subtle p-3">
+              <Switch label="Оставить только выбранный доступ" {...form.register("replace_all")} />
+              <p className="mt-1 pl-12 text-xs leading-5 text-foreground-muted">
+                Используйте при переводе сотрудника. Все другие активные назначения будут отозваны
+                одной операцией; при ошибке прежний доступ сохранится.
+              </p>
+            </div>
+          ) : null}
           {topError && (
             <p
               className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
@@ -545,6 +646,23 @@ export function AssignmentsPanel({
                 </div>
               ) : null}
 
+              {pendingRemovals.length > 0 ? (
+                <div className="rounded-lg border border-warning/40 bg-warning-subtle p-3 text-warning-foreground">
+                  <p className="font-semibold">Другой доступ будет отозван</p>
+                  <ul className="mt-2 space-y-1">
+                    {pendingRemovals.map((assignment) => (
+                      <li key={assignment.id}>
+                        {branchName(assignment.branch_id)}: «{assignmentRoleName(assignment)}»
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-sm">
+                    Это перевод сотрудника: после подтверждения останутся только выбранные выше
+                    назначения.
+                  </p>
+                </div>
+              ) : null}
+
               <div>
                 <p className="font-medium text-foreground">Кратко о возможностях</p>
                 {pendingEffectivePermissions.length > 0 ? (
@@ -594,7 +712,13 @@ export function AssignmentsPanel({
             </div>
           ) : null
         }
-        confirmLabel={pendingReplacements.length > 0 ? "Заменить и применить" : "Применить доступ"}
+        confirmLabel={
+          pendingRemovals.length > 0
+            ? "Перевести и применить"
+            : pendingReplacements.length > 0
+              ? "Заменить и применить"
+              : "Применить доступ"
+        }
         isLoading={replaceAssignments.isPending}
         onConfirm={() => void confirmAdd()}
         onCancel={() => setPendingAdd(null)}
@@ -682,6 +806,32 @@ function isRiskPermission(permission: Permission): boolean {
     permission.requires_confirmation ||
     permission.requires_step_up
   );
+}
+
+function historyEventLabel(event: "assigned" | "changed" | "restored" | "revoked"): string {
+  if (event === "assigned") return "Назначено";
+  if (event === "restored") return "Восстановлено";
+  if (event === "revoked") return "Отозвано";
+  return "Изменено";
+}
+
+function historyEventTone(
+  event: "assigned" | "changed" | "restored" | "revoked",
+): "success" | "info" | "warning" | "neutral" {
+  if (event === "assigned" || event === "restored") return "success";
+  if (event === "revoked") return "warning";
+  return "info";
+}
+
+function formatHistoryDate(value: string): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Dushanbe",
+  }).format(new Date(value));
 }
 
 function scopeWord(count: number): string {
