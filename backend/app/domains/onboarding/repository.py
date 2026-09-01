@@ -35,7 +35,7 @@ class OnboardingReadinessSnapshot:
     payment_methods: tuple[str, ...]
     regulatory_complete: bool
     accepted_incoming_count: int
-    completed_test_sale_count: int
+    completed_sale_count: int
     opened_shift_count: int
     recorded_tasks: frozenset[str]
     subscription_id: UUID | None
@@ -369,8 +369,7 @@ class OnboardingRepository:
                     WHERE sale.tenant_id = tenant.id
                       AND sale.status = 'completed'
                       AND sale.sale_type = 'sale'
-                      AND sale.is_test
-                  ) AS completed_test_sale_count,
+                  ) AS completed_sale_count,
                   (
                     SELECT COUNT(*)
                     FROM public.shift AS shift
@@ -419,7 +418,7 @@ class OnboardingRepository:
             payment_methods=tuple(row["payment_methods"]),
             regulatory_complete=bool(row["regulatory_complete"]),
             accepted_incoming_count=int(row["accepted_incoming_count"]),
-            completed_test_sale_count=int(row["completed_test_sale_count"]),
+            completed_sale_count=int(row["completed_sale_count"]),
             opened_shift_count=int(row["opened_shift_count"]),
             recorded_tasks=frozenset(row["recorded_tasks"]),
             subscription_id=row["subscription_id"],

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_db, require_tenant_owner
@@ -72,6 +72,21 @@ async def get_checklist(
 ) -> ChecklistRead:
     checklist = await service.get_checklist(_tenant_or_400(user))
     return ChecklistRead.model_validate(checklist)
+
+
+@router.post("/tasks/receipt-print-tested", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_receipt_print_tested(
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
+    service: Annotated[OnboardingService, Depends(_service)],
+) -> Response:
+    """Record the owner's non-critical receipt print check idempotently."""
+    checklist = await service.track_event(
+        tenant_id=_tenant_or_400(user),
+        event_name="test_receipt_printed",
+    )
+    if checklist is None:
+        raise BusinessRuleError("Onboarding checklist is not initialised")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

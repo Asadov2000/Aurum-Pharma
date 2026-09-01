@@ -273,7 +273,9 @@ class OnboardingService:
                 "pos_settings",
                 snapshot.operational_branch_count > 0 and bool(snapshot.payment_methods),
                 True,
-                current=snapshot.operational_branch_count,
+                current=int(
+                    snapshot.operational_branch_count > 0 and bool(snapshot.payment_methods)
+                ),
                 target=1,
                 action_hint=(
                     "register_missing"
@@ -291,12 +293,8 @@ class OnboardingService:
         steps = (*base_steps, ReadinessStepData("ready", base_ready, True))
 
         tasks = (
-            ReadinessTaskData(
-                "catalog_loaded",
-                snapshot.catalog_items_count >= TRIAL_MIN_CATALOG_ITEMS,
-            ),
             ReadinessTaskData("first_incoming", snapshot.accepted_incoming_count > 0),
-            ReadinessTaskData("first_sale", snapshot.completed_test_sale_count > 0),
+            ReadinessTaskData("first_sale", snapshot.completed_sale_count > 0),
             ReadinessTaskData("second_user", snapshot.active_membership_count >= 2),
             ReadinessTaskData("shift_opened", snapshot.opened_shift_count > 0),
             ReadinessTaskData(

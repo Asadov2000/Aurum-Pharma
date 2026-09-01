@@ -1,6 +1,13 @@
 import { type AppRoutePath } from "@/components/layout/routeAccess";
+import { type SettingsSectionId } from "@/features/settings/search";
 
 import { type ReadinessStep, type ReadinessStepCode, type ReadinessTaskCode } from "./types";
+
+export interface ReadinessAction {
+  to: AppRoutePath;
+  label: string;
+  search?: { section: SettingsSectionId };
+}
 
 export interface ReadinessStepDefinition {
   code: ReadinessStepCode;
@@ -14,9 +21,7 @@ export const readinessSteps: ReadinessStepDefinition[] = [
   {
     code: "pharmacy_profile",
     title: "Профиль аптеки",
-    description: "Название и контактный email сохранены.",
-    to: "/settings",
-    actionLabel: "Заполнить профиль",
+    description: "Название и контактный email зарегистрированы в Aurum Pharma.",
   },
   {
     code: "licensed_branch",
@@ -69,24 +74,72 @@ export const readinessSteps: ReadinessStepDefinition[] = [
 export function readinessStepAction(
   definition: ReadinessStepDefinition,
   step: ReadinessStep,
-): { to: AppRoutePath; label: string } | null {
+): ReadinessAction | null {
   if (!definition.to || !definition.actionLabel) return null;
   if (definition.code === "pos_settings") {
     if (step.action_hint === "payment_methods_missing") {
-      return { to: "/settings", label: "Настроить оплату" };
+      return {
+        to: "/settings",
+        label: "Настроить оплату",
+        search: { section: "sales" },
+      };
     }
     if (step.action_hint === "operational_branch_missing") {
       return { to: "/registers", label: "Связать кассу с точкой" };
     }
   }
+  if (definition.code === "regulatory") {
+    return {
+      to: "/settings",
+      label: definition.actionLabel,
+      search: { section: "pharmacy" },
+    };
+  }
   return { to: definition.to, label: definition.actionLabel };
 }
 
-export const taskLabel: Record<ReadinessTaskCode, string> = {
-  catalog_loaded: "В каталоге не меньше 100 товаров",
-  first_incoming: "Первая приёмка принята на склад",
-  first_sale: "Первая тестовая продажа завершена",
-  second_user: "Второй сотрудник подключён",
-  shift_opened: "Первая кассовая смена открыта",
-  test_receipt_printed: "Тестовый чек распечатан",
-};
+export interface ReadinessTaskDefinition {
+  code: ReadinessTaskCode;
+  title: string;
+  description: string;
+  action: ReadinessAction;
+  requiresPos?: boolean;
+}
+
+export const readinessTasks: readonly ReadinessTaskDefinition[] = [
+  {
+    code: "first_incoming",
+    title: "Примите первую поставку",
+    description: "Проверьте добавление партий, количества и сроков годности.",
+    action: { to: "/incoming", label: "Открыть приёмки" },
+  },
+  {
+    code: "second_user",
+    title: "Добавьте сотрудника",
+    description: "Создайте аккаунт сотрудника и назначьте ему подходящую роль.",
+    action: { to: "/users", label: "Добавить сотрудника" },
+  },
+  {
+    code: "shift_opened",
+    title: "Откройте первую смену",
+    description: "Убедитесь, что рабочая касса готова к началу дня.",
+    action: { to: "/pos", label: "Проверить кассу" },
+    requiresPos: true,
+  },
+  {
+    code: "first_sale",
+    title: "Завершите первую продажу",
+    description: "Во время настройки она тестовая и не меняет реальные остатки и выручку.",
+    action: { to: "/pos", label: "Провести продажу" },
+    requiresPos: true,
+  },
+  {
+    code: "test_receipt_printed",
+    title: "Проверьте печать чека",
+    description: "Откройте готовый чек и запустите печать на этом устройстве.",
+    action: { to: "/pos", label: "Проверить печать" },
+    requiresPos: true,
+  },
+];
+
+export const readinessTaskByCode = new Map(readinessTasks.map((task) => [task.code, task]));
