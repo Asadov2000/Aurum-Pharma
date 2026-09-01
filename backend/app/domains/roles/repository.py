@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.domains.auth.models import AppUser
+from app.domains.foundation.models import Branch
 from app.domains.roles.models import (
     AccessRoleVersion,
     AccessRoleVersionPermission,
@@ -1013,7 +1014,10 @@ class RolesRepository:
     # -------------------------------------------------------------------------
 
     async def list_assignments_for_user(
-        self, user_id: UUID, *, tenant_id: UUID | None = None
+        self,
+        user_id: UUID,
+        *,
+        tenant_id: UUID | None = None,
     ) -> list[UserAssignment]:
         stmt = select(UserAssignment).where(UserAssignment.user_id == user_id)
         if tenant_id is not None:
@@ -1021,6 +1025,27 @@ class RolesRepository:
         stmt = stmt.execution_options(populate_existing=True)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def lock_user_assignments(self, tenant_id: UUID, user_id: UUID) -> None:
+        await self.session.execute(
+            text(
+                "SELECT pg_catalog.pg_advisory_xact_lock("
+                "pg_catalog.hashtextextended(:lock_key, 0))"
+            ),
+            {"lock_key": f"user-assignment:{tenant_id}:{user_id}"},
+        )
+
+    async def active_branch_ids(self, tenant_id: UUID, branch_ids: set[UUID]) -> set[UUID]:
+        if not branch_ids:
+            return set()
+        result = await self.session.execute(
+            select(Branch.id).where(
+                Branch.tenant_id == tenant_id,
+                Branch.id.in_(branch_ids),
+                Branch.is_active.is_(True),
+            )
+        )
+        return set(result.scalars().all())
 
     async def assignments_for_users(
         self, user_ids: list[UUID], *, tenant_id: UUID

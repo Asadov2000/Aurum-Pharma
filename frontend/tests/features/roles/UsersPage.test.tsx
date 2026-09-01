@@ -12,6 +12,7 @@ const revokeUserSessions = vi.fn();
 const reissueUserInvitation = vi.fn();
 const inviteEmployee = vi.fn();
 const createAssignment = vi.fn();
+const replaceAssignments = vi.fn();
 const createOwnershipTransfer = vi.fn();
 const listBranches = vi.fn();
 const LAZY_PANEL_WAIT = { timeout: 5_000 };
@@ -30,6 +31,7 @@ vi.mock("@/features/roles/api", () => ({
   reissueUserInvitation: (...args: unknown[]) => reissueUserInvitation(...args),
   inviteEmployee: (...args: unknown[]) => inviteEmployee(...args),
   createAssignment: (...args: unknown[]) => createAssignment(...args),
+  replaceAssignments: (...args: unknown[]) => replaceAssignments(...args),
   createOwnershipTransfer: (...args: unknown[]) => createOwnershipTransfer(...args),
   listOwnershipTransfers: vi.fn().mockResolvedValue([]),
   cancelOwnershipTransfer: vi.fn(),
@@ -181,6 +183,7 @@ describe("UsersPage", () => {
     reissueUserInvitation.mockReset();
     inviteEmployee.mockReset();
     createAssignment.mockReset();
+    replaceAssignments.mockReset();
     createOwnershipTransfer.mockReset();
     listBranches.mockReset();
     listRoles.mockResolvedValue([MANAGED_ROLE, SYSTEM_ROLE]);
@@ -198,6 +201,7 @@ describe("UsersPage", () => {
     });
     inviteEmployee.mockResolvedValue({ id: "assignment-invited" });
     createAssignment.mockResolvedValue({ id: "assignment-new" });
+    replaceAssignments.mockResolvedValue([{ id: "assignment-new" }]);
     createOwnershipTransfer.mockResolvedValue({
       transfer: { id: "transfer-1" },
       sessions_revoked: false,
@@ -469,13 +473,13 @@ describe("UsersPage", () => {
     });
     expect(within(confirmation).getByText("Кассир")).toBeInTheDocument();
     expect(within(confirmation).getByText("Все точки аптеки")).toBeInTheDocument();
-    expect(createAssignment).not.toHaveBeenCalled();
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Назначить роль" }));
+    expect(replaceAssignments).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Применить доступ" }));
 
-    await waitFor(() => expect(createAssignment).toHaveBeenCalledTimes(1));
-    expect(createAssignment).toHaveBeenCalledWith("member-1", {
+    await waitFor(() => expect(replaceAssignments).toHaveBeenCalledTimes(1));
+    expect(replaceAssignments).toHaveBeenCalledWith("member-1", {
       role_id: MANAGED_ROLE.id,
-      branch_id: null,
+      branch_ids: [null],
       password_required: false,
     });
   });
@@ -505,6 +509,43 @@ describe("UsersPage", () => {
     ).toBeInTheDocument();
     await openUserActions();
     expect(await screen.findByRole("menuitem", { name: "Настроить доступ" })).toBeInTheDocument();
+  });
+
+  it("applies one role to multiple selected branches in one request", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listBranches.mockResolvedValue([
+      { id: "branch-1", name: "Аптека Рудаки" },
+      { id: "branch-2", name: "Аптека Сино" },
+    ]);
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
+    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: MANAGED_ROLE.id } });
+    fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
+    fireEvent.click(screen.getByLabelText("Аптека Рудаки"));
+    fireEvent.click(screen.getByLabelText("Аптека Сино"));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
+
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Проверьте доступ сотрудника",
+    });
+    expect(within(confirmation).getByText("Аптека Рудаки, Аптека Сино")).toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Применить доступ" }));
+
+    await waitFor(() => expect(replaceAssignments).toHaveBeenCalledTimes(1));
+    expect(replaceAssignments).toHaveBeenCalledWith("member-1", {
+      role_id: MANAGED_ROLE.id,
+      branch_ids: ["branch-1", "branch-2"],
+      password_required: false,
+    });
   });
 
   it("reviews only visible capabilities and warns about important permissions", async () => {
@@ -540,9 +581,8 @@ describe("UsersPage", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
     fireEvent.change(screen.getByLabelText("Роль"), { target: { value: reviewRole.id } });
-    fireEvent.change(screen.getByLabelText("Где действует роль"), {
-      target: { value: "branch-1" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
+    fireEvent.click(screen.getByLabelText("Аптека Рудаки"));
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
 
     const confirmation = await screen.findByRole("dialog", {
@@ -550,10 +590,11 @@ describe("UsersPage", () => {
     });
     expect(within(confirmation).getByText("Старший кассир")).toBeInTheDocument();
     expect(within(confirmation).getByText("Аптека Рудаки")).toBeInTheDocument();
-    expect(within(confirmation).getByText(/Разделы: Касса, Сотрудники/)).toBeInTheDocument();
+    expect(within(confirmation).getByText(/Разделы: Касса/)).toBeInTheDocument();
     expect(within(confirmation).getByText("Проводить продажи")).toBeInTheDocument();
-    expect(within(confirmation).getAllByText("Отключать сотрудников от аптеки")).toHaveLength(2);
-    expect(within(confirmation).getByText("Обратите внимание")).toBeInTheDocument();
+    expect(within(confirmation).getByText("Отключать сотрудников от аптеки")).toBeInTheDocument();
+    expect(within(confirmation).getByText("Не включатся для отдельных точек")).toBeInTheDocument();
+    expect(within(confirmation).queryByText("Обратите внимание")).not.toBeInTheDocument();
     expect(within(confirmation).queryByText("Системное управление Aurum")).not.toBeInTheDocument();
     expect(within(confirmation).queryByText("roles.not-visible")).not.toBeInTheDocument();
   });
@@ -630,12 +671,12 @@ describe("UsersPage", () => {
     const confirmation = await screen.findByRole("dialog", {
       name: "Проверьте доступ сотрудника",
     });
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Назначить роль" }));
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Применить доступ" }));
 
-    await waitFor(() => expect(createAssignment).toHaveBeenCalledTimes(1));
-    expect(createAssignment).toHaveBeenCalledWith("member-1", {
+    await waitFor(() => expect(replaceAssignments).toHaveBeenCalledTimes(1));
+    expect(replaceAssignments).toHaveBeenCalledWith("member-1", {
       role_id: MANAGED_ROLE.id,
-      branch_id: null,
+      branch_ids: [null],
       password_required: true,
     });
   });
@@ -659,12 +700,14 @@ describe("UsersPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
 
     expect(
-      await screen.findByText("Эта роль уже назначена сотруднику для выбранной области"),
+      await screen.findByText(
+        "Эта роль с такими настройками уже действует во всех выбранных областях",
+      ),
     ).toBeInTheDocument();
-    expect(createAssignment).not.toHaveBeenCalled();
+    expect(replaceAssignments).not.toHaveBeenCalled();
   });
 
-  it("explains that an occupied scope must be revoked before assigning another role", async () => {
+  it("replaces an occupied scope atomically after explicit confirmation", async () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
@@ -688,13 +731,21 @@ describe("UsersPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
 
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Проверьте доступ сотрудника",
+    });
     expect(
-      await screen.findByText(
-        "Для выбранной области уже действует роль «Кассир». Сначала отзовите её, затем назначьте новую.",
-      ),
+      within(confirmation).getByText("Роль будет заменена без разрыва доступа"),
     ).toBeInTheDocument();
-    expect(createAssignment).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog", { name: "Проверьте доступ сотрудника" })).toBeNull();
+    expect(within(confirmation).getByText(/«Кассир» → «Фармацевт»/)).toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Заменить и применить" }));
+
+    await waitFor(() => expect(replaceAssignments).toHaveBeenCalledTimes(1));
+    expect(replaceAssignments).toHaveBeenCalledWith("member-1", {
+      role_id: replacementRole.id,
+      branch_ids: [null],
+      password_required: false,
+    });
   });
 
   it("protects owner membership from assignment and lifecycle actions", async () => {

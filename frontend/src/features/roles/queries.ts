@@ -18,11 +18,13 @@ import {
   revokeAssignment,
   revokeUserSessions,
   reissueUserInvitation,
+  replaceAssignments,
   suspendUser,
   updateRole,
   updateUser,
 } from "./api";
 import {
+  type AssignmentBatchReplacePayload,
   type AssignmentCreatePayload,
   type InviteEmployeePayload,
   type OwnershipTransferCreatePayload,
@@ -220,6 +222,17 @@ export function useCreateAssignment() {
   return useMutation({
     mutationFn: (args: { userId: string; payload: AssignmentCreatePayload }) =>
       createAssignment(args.userId, args.payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rolesKeys.users });
+    },
+  });
+}
+
+export function useReplaceAssignments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { userId: string; payload: AssignmentBatchReplacePayload }) =>
+      replaceAssignments(args.userId, args.payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rolesKeys.users });
     },

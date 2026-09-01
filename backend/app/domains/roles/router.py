@@ -23,6 +23,7 @@ from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.roles.models import Role, UserAssignment
 from app.domains.roles.repository import DirectoryUser, OwnershipTransferRecord, RolesRepository
 from app.domains.roles.schemas import (
+    AssignmentBatchReplace,
     AssignmentCreate,
     AssignmentRead,
     InvitationRead,
@@ -624,6 +625,32 @@ async def create_assignment(
         password_required=payload.password_required,
     )
     return AssignmentRead.model_validate(assignment)
+
+
+@router.put(
+    "/users/{user_id}/assignments",
+    response_model=list[AssignmentRead],
+)
+async def replace_assignments(
+    user_id: UUID,
+    payload: AssignmentBatchReplace,
+    user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    service: Annotated[RolesService, Depends(_service)],
+) -> list[AssignmentRead]:
+    assignments = await service.replace_role_assignments(
+        actor_id=user.user_id,
+        actor_permissions=user.permissions,
+        actor_permission_scopes=user.permission_scopes,
+        actor_is_developer=user.is_developer,
+        actor_is_administrator=user.is_administrator,
+        tenant_id=_current_tenant_or_400(user),
+        target_user_id=user_id,
+        role_id=payload.role_id,
+        branch_ids=payload.branch_ids,
+        password_required=payload.password_required,
+    )
+    return [AssignmentRead.model_validate(assignment) for assignment in assignments]
 
 
 @router.delete("/users/{user_id}/assignments/{assignment_id}")
