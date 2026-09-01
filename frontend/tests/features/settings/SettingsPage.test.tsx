@@ -83,18 +83,20 @@ describe("SettingsPage access boundaries", () => {
 
     expect(screen.getByRole("button", { name: /Мой аккаунт/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Касса и оборудование/ })).toBeInTheDocument();
-    expect(screen.queryByText("Только владельцу")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Настройки аптеки/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Продажи и возвраты/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Только для вас")).toBeInTheDocument();
+    expect(screen.getByText("На этом устройстве")).toBeInTheDocument();
+    expect(screen.queryByText("Для всей аптеки")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Рабочие правила/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Оплата и возвраты/ })).not.toBeInTheDocument();
   });
 
   it("shows owner categories only to the active tenant owner", () => {
     state.isOwner = true;
     renderPage();
 
-    fireEvent.click(screen.getByRole("button", { name: /Продажи и возвраты/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Оплата и возвраты/ }));
 
-    expect(screen.getByText("Только владельцу")).toBeInTheDocument();
+    expect(screen.getByText("Для всей аптеки")).toBeInTheDocument();
     expect(screen.getByText("Панель владельца: sales")).toBeInTheDocument();
   });
 
@@ -111,8 +113,8 @@ describe("SettingsPage access boundaries", () => {
     state.isDeveloper = true;
     renderPage();
 
-    expect(screen.queryByText("Только владельцу")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Настройки аптеки/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Для всей аптеки")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Рабочие правила/ })).not.toBeInTheDocument();
   });
 
   it("filters the navigation without changing the active panel", () => {
