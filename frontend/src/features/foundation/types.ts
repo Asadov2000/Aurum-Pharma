@@ -168,6 +168,17 @@ export interface BranchListResponse {
   page_size: number;
 }
 
+export interface BranchLifecycleImpact {
+  branch_id: string;
+  branch_name: string;
+  is_active: boolean;
+  can_deactivate: boolean;
+  active_register_count: number;
+  open_shift_count: number;
+  active_assignment_count: number;
+  active_edge_node_count: number;
+}
+
 export interface BranchSearchParams {
   q?: string;
   branch_type?: BranchType;

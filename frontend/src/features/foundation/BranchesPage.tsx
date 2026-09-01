@@ -26,8 +26,13 @@ import { hasPermission } from "@/features/auth/permissions";
 import { BranchForm } from "./BranchForm";
 import { describeApiError, describeFoundationError } from "./errors";
 import { LocationsSummary, LocationsWorkspaceHeader } from "./LocationsWorkspace";
-import { useBranchSearchQuery, useDeleteBranch } from "./queries";
-import { type Branch, type BranchType } from "./types";
+import {
+  useBranchLifecycleImpactQuery,
+  useBranchSearchQuery,
+  useDeleteBranch,
+  useUpdateBranch,
+} from "./queries";
+import { type Branch, type BranchLifecycleImpact, type BranchType } from "./types";
 
 const PAGE_SIZE = 25;
 
@@ -56,8 +61,8 @@ export function BranchesPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const [editorDirty, setEditorDirty] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<Branch | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [lifecycleTarget, setLifecycleTarget] = useState<Branch | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -75,6 +80,11 @@ export function BranchesPage(): JSX.Element {
     page_size: PAGE_SIZE,
   });
   const deleteMutation = useDeleteBranch();
+  const updateMutation = useUpdateBranch();
+  const lifecycleImpact = useBranchLifecycleImpactQuery(
+    lifecycleTarget?.id ?? null,
+    lifecycleTarget !== null,
+  );
   const rows = data?.items ?? [];
   const hasInitialLoadError = Boolean(error && data === undefined);
   const hasFilters = Boolean(q || branchType || status !== "active");
@@ -95,14 +105,30 @@ export function BranchesPage(): JSX.Element {
     else closeEditor();
   };
 
-  const confirmDelete = async () => {
-    if (!pendingDelete || !canDelete) return;
-    setDeleteError(null);
+  const confirmLifecycleChange = async () => {
+    if (!lifecycleTarget) return;
+    setLifecycleError(null);
     try {
-      await deleteMutation.mutateAsync(pendingDelete.id);
-      setPendingDelete(null);
+      if (lifecycleTarget.is_active) {
+        if (!canDelete || !lifecycleImpact.data?.can_deactivate) return;
+        await deleteMutation.mutateAsync(lifecycleTarget.id);
+      } else {
+        if (!canUpdate) return;
+        await updateMutation.mutateAsync({
+          id: lifecycleTarget.id,
+          payload: { is_active: true },
+        });
+      }
+      setLifecycleTarget(null);
     } catch (err) {
-      setDeleteError(describeFoundationError(err, "Не удалось деактивировать торговую точку"));
+      setLifecycleError(
+        describeFoundationError(
+          err,
+          lifecycleTarget.is_active
+            ? "Не удалось отключить торговую точку"
+            : "Не удалось восстановить торговую точку",
+        ),
+      );
     }
   };
 
@@ -315,18 +341,17 @@ export function BranchesPage(): JSX.Element {
                           Открыть
                         </Button>
                       )}
-                      {canDelete && branch.is_active && (
+                      {((canDelete && branch.is_active) || (canUpdate && !branch.is_active)) && (
                         <Button
                           variant="ghost"
                           size="sm"
                           disabled={isFetching}
                           onClick={() => {
-                            setDeleteError(null);
-                            setPendingDelete(branch);
+                            setLifecycleError(null);
+                            setLifecycleTarget(branch);
                           }}
-                          isLoading={deleteMutation.isPending}
                         >
-                          Деактивировать
+                          {branch.is_active ? "Отключить" : "Восстановить"}
                         </Button>
                       )}
                     </TD>
@@ -353,36 +378,72 @@ export function BranchesPage(): JSX.Element {
           />
         </Modal>
       )}
-      {canDelete && (
-        <ConfirmDialog
-          open={pendingDelete !== null}
-          title="Деактивировать торговую точку"
-          message={
+      <Modal
+        open={lifecycleTarget !== null}
+        onClose={() => {
+          if (deleteMutation.isPending || updateMutation.isPending) return;
+          setLifecycleTarget(null);
+          setLifecycleError(null);
+        }}
+        title={
+          lifecycleTarget?.is_active
+            ? `Отключить точку: ${lifecycleTarget?.name ?? ""}`
+            : `Восстановить точку: ${lifecycleTarget?.name ?? ""}`
+        }
+      >
+        <div className="space-y-4 text-sm leading-5">
+          {lifecycleImpact.isLoading ? (
+            <div role="status" className="text-foreground-muted">
+              Проверяем смены, кассы и доступ сотрудников…
+            </div>
+          ) : lifecycleImpact.error ? (
+            <div role="alert" className="rounded-md border border-danger/30 bg-danger-subtle p-3">
+              <p className="text-danger-foreground">
+                {describeApiError(lifecycleImpact.error, "Не удалось проверить состояние точки")}
+              </p>
+              <Button
+                className="mt-3"
+                variant="secondary"
+                size="sm"
+                onClick={() => void lifecycleImpact.refetch()}
+              >
+                Повторить проверку
+              </Button>
+            </div>
+          ) : lifecycleImpact.data ? (
             <>
-              <span className="block">
-                Деактивировать торговую точку «{pendingDelete?.name}»? Продажи на всех её рабочих
-                кассах станут недоступны.
-              </span>
-              {deleteError && (
-                <span
-                  role="alert"
-                  className="mt-2 block rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-danger-foreground"
-                >
-                  {deleteError}
-                </span>
+              {lifecycleTarget?.is_active ? (
+                <BranchDeactivationSummary impact={lifecycleImpact.data} />
+              ) : (
+                <BranchRestorationSummary impact={lifecycleImpact.data} />
               )}
+              {lifecycleError && (
+                <div
+                  role="alert"
+                  className="rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-danger-foreground"
+                >
+                  {lifecycleError}
+                </div>
+              )}
+              <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+                <Button variant="secondary" onClick={() => setLifecycleTarget(null)}>
+                  Отмена
+                </Button>
+                <Button
+                  variant={lifecycleTarget?.is_active ? "danger" : "primary"}
+                  disabled={Boolean(
+                    lifecycleTarget?.is_active && !lifecycleImpact.data.can_deactivate,
+                  )}
+                  isLoading={deleteMutation.isPending || updateMutation.isPending}
+                  onClick={() => void confirmLifecycleChange()}
+                >
+                  {lifecycleTarget?.is_active ? "Отключить точку" : "Восстановить точку"}
+                </Button>
+              </div>
             </>
-          }
-          confirmLabel="Деактивировать"
-          variant="danger"
-          isLoading={deleteMutation.isPending}
-          onConfirm={() => void confirmDelete()}
-          onCancel={() => {
-            setPendingDelete(null);
-            setDeleteError(null);
-          }}
-        />
-      )}
+          ) : null}
+        </div>
+      </Modal>
       <ConfirmDialog
         open={discardOpen}
         title="Закрыть без сохранения?"
@@ -395,6 +456,98 @@ export function BranchesPage(): JSX.Element {
       />
     </div>
   );
+}
+
+function BranchDeactivationSummary({ impact }: { impact: BranchLifecycleImpact }): JSX.Element {
+  const blockedByShift = impact.open_shift_count > 0;
+  const blockedAsLastBranch = !impact.can_deactivate && !blockedByShift;
+
+  return (
+    <>
+      <div
+        className={
+          impact.can_deactivate
+            ? "rounded-md border border-warning/35 bg-warning-subtle p-3"
+            : "rounded-md border border-danger/30 bg-danger-subtle p-3"
+        }
+      >
+        <p className="font-semibold">
+          {impact.can_deactivate
+            ? "Точка готова к безопасному отключению"
+            : "Сейчас отключить точку нельзя"}
+        </p>
+        {blockedByShift && (
+          <p className="mt-1">
+            Сначала закройте {impact.open_shift_count} {pluralizeShift(impact.open_shift_count)}.
+          </p>
+        )}
+        {blockedAsLastBranch && (
+          <p className="mt-1">У организации должна оставаться хотя бы одна активная точка.</p>
+        )}
+      </div>
+      <LifecycleCounts impact={impact} />
+      <div>
+        <p className="font-semibold">После отключения</p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground-secondary">
+          <li>Все активные кассы этой точки будут выключены.</li>
+          <li>Доступ назначенных сотрудников временно перестанет действовать.</li>
+          <li>Синхронизация Edge и офлайн-касс этой точки будет приостановлена.</li>
+          <li>Продажи, чеки, остатки, назначения и история сохранятся.</li>
+        </ul>
+      </div>
+    </>
+  );
+}
+
+function BranchRestorationSummary({ impact }: { impact: BranchLifecycleImpact }): JSX.Element {
+  return (
+    <>
+      <div className="rounded-md border border-primary/25 bg-primary-subtle p-3">
+        <p className="font-semibold">Данные точки сохранены и готовы к восстановлению</p>
+        <p className="mt-1 text-foreground-secondary">
+          Восстановление включает саму точку. Рабочие кассы останутся выключенными, пока владелец не
+          проверит и не включит каждую из них.
+        </p>
+      </div>
+      <LifecycleCounts impact={impact} />
+      <div>
+        <p className="font-semibold">После восстановления</p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground-secondary">
+          <li>Доступ {impact.active_assignment_count} назначенных сотрудников возобновится.</li>
+          <li>Кассы нужно проверить и включить отдельно перед открытием смены.</li>
+          <li>Edge-узлы, привязанные к кассам, заработают только после включения этих касс.</li>
+        </ul>
+      </div>
+    </>
+  );
+}
+
+function LifecycleCounts({ impact }: { impact: BranchLifecycleImpact }): JSX.Element {
+  const metrics = [
+    ["Активные кассы", impact.active_register_count],
+    ["Открытые смены", impact.open_shift_count],
+    ["Назначенные сотрудники", impact.active_assignment_count],
+    ["Edge-узлы", impact.active_edge_node_count],
+  ] as const;
+  return (
+    <div className="grid grid-cols-2 overflow-hidden rounded-md border border-border sm:grid-cols-4">
+      {metrics.map(([label, value]) => (
+        <div key={label} className="border-border p-3 [&:not(:last-child)]:border-r">
+          <span className="block text-xs text-foreground-muted">{label}</span>
+          <span className="mt-1 block text-lg font-semibold tabular-nums">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function pluralizeShift(count: number): string {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "смен";
+  if (mod10 === 1) return "смену";
+  if (mod10 >= 2 && mod10 <= 4) return "смены";
+  return "смен";
 }
 
 function licenseNeedsAttention(number: string | null, expiresAt: string | null): boolean {

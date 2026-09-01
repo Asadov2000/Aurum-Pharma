@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
+
+
+@dataclass(frozen=True)
+class BranchLifecycleImpact:
+    active_branch_count: int
+    active_register_count: int
+    open_shift_count: int
+    active_assignment_count: int
+    active_edge_node_count: int
 
 
 class FoundationRepository:
@@ -180,6 +190,11 @@ class FoundationRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_tenant_for_update(self, tenant_id: UUID) -> Tenant | None:
+        stmt = select(Tenant).where(Tenant.id == tenant_id).with_for_update()
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def update_branch(self, branch: Branch, **fields: Any) -> Branch:
         for key, value in fields.items():
             setattr(branch, key, value)
@@ -202,6 +217,49 @@ class FoundationRepository:
             {"branch_id": str(branch_id)},
         )
         return result.scalar_one_or_none() is not None
+
+    async def branch_lifecycle_impact(
+        self, *, tenant_id: UUID, branch_id: UUID
+    ) -> BranchLifecycleImpact:
+        result = await self.session.execute(
+            text("""
+                SELECT
+                  (SELECT count(*) FROM branch
+                   WHERE tenant_id = :tenant_id AND is_active) AS active_branch_count,
+                  (SELECT count(*) FROM register
+                   WHERE tenant_id = :tenant_id AND branch_id = :branch_id
+                     AND is_active) AS active_register_count,
+                  (SELECT count(*) FROM shift
+                   WHERE tenant_id = :tenant_id AND branch_id = :branch_id
+                     AND status = 'open') AS open_shift_count,
+                  (SELECT count(DISTINCT user_id) FROM user_assignment
+                   WHERE tenant_id = :tenant_id AND branch_id = :branch_id
+                     AND is_active) AS active_assignment_count,
+                  public.count_active_edge_nodes_for_branch(
+                    CAST(:tenant_id AS UUID),
+                    CAST(:branch_id AS UUID)
+                  ) AS active_edge_node_count
+                """),
+            {"tenant_id": str(tenant_id), "branch_id": str(branch_id)},
+        )
+        row = result.mappings().one()
+        return BranchLifecycleImpact(
+            active_branch_count=int(row["active_branch_count"]),
+            active_register_count=int(row["active_register_count"]),
+            open_shift_count=int(row["open_shift_count"]),
+            active_assignment_count=int(row["active_assignment_count"]),
+            active_edge_node_count=int(row["active_edge_node_count"]),
+        )
+
+    async def lock_registers_for_branch(self, branch_id: UUID) -> list[Register]:
+        stmt = (
+            select(Register)
+            .where(Register.branch_id == branch_id)
+            .order_by(Register.id.asc())
+            .with_for_update()
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def deactivate_registers_for_branch(
         self,

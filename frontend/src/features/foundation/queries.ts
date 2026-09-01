@@ -7,6 +7,7 @@ import {
   createTenantMember,
   createTenantOwner,
   deleteBranch,
+  getBranchLifecycleImpact,
   deleteRegister,
   getTenantSettings,
   getTenantOperationalSettings,
@@ -41,6 +42,7 @@ export const foundationKeys = {
   operationalSettings: ["foundation", "operational-settings"] as const,
   branches: (includeInactive: boolean) => ["foundation", "branches", { includeInactive }] as const,
   branchSearch: (params: BranchSearchParams) => ["foundation", "branch-search", params] as const,
+  branchLifecycle: (branchId: string) => ["foundation", "branch-lifecycle", branchId] as const,
   registers: (branchId: string | null, includeInactive: boolean) =>
     ["foundation", "registers", { branchId, includeInactive }] as const,
   registerSearch: (params: RegisterSearchParams) =>
@@ -126,10 +128,7 @@ export function useUpdateTenantSettings() {
   });
 }
 
-export function useTenantOperationalSettingsQuery(
-  enabled = true,
-  refetchOnWindowFocus = false,
-) {
+export function useTenantOperationalSettingsQuery(enabled = true, refetchOnWindowFocus = false) {
   return useQuery({
     queryKey: foundationKeys.operationalSettings,
     queryFn: getTenantOperationalSettings,
@@ -157,6 +156,14 @@ export function useBranchSearchQuery(params: BranchSearchParams, enabled = true)
   });
 }
 
+export function useBranchLifecycleImpactQuery(branchId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: foundationKeys.branchLifecycle(branchId ?? "none"),
+    queryFn: () => getBranchLifecycleImpact(branchId ?? ""),
+    enabled: enabled && branchId !== null,
+  });
+}
+
 export function useCreateBranch() {
   const qc = useQueryClient();
   return useMutation({
@@ -164,6 +171,7 @@ export function useCreateBranch() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["foundation", "branches"] });
       void qc.invalidateQueries({ queryKey: ["foundation", "branch-search"] });
+      void qc.invalidateQueries({ queryKey: ["foundation", "branch-lifecycle"] });
     },
   });
 }
@@ -176,6 +184,7 @@ export function useUpdateBranch() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["foundation", "branches"] });
       void qc.invalidateQueries({ queryKey: ["foundation", "branch-search"] });
+      void qc.invalidateQueries({ queryKey: ["foundation", "branch-lifecycle"] });
     },
   });
 }

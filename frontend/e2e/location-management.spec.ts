@@ -42,14 +42,12 @@ test.describe("Trading points and registers", () => {
 
     await page.goto("/branches");
     const branchRow = page.getByRole("row", { name: new RegExp(branchName) });
-    await branchRow.getByRole("button", { name: "Деактивировать" }).click();
+    await branchRow.getByRole("button", { name: "Отключить" }).click();
     const blockedDialog = page.getByRole("dialog", {
-      name: "Деактивировать торговую точку",
+      name: `Отключить точку: ${branchName}`,
     });
-    await blockedDialog.getByRole("button", { name: "Деактивировать" }).click();
-    await expect(blockedDialog).toContainText(
-      "Нельзя деактивировать торговую точку, пока на одной из её касс открыта смена.",
-    );
+    await expect(blockedDialog).toContainText("Сначала закройте 1 смену.");
+    await expect(blockedDialog.getByRole("button", { name: "Отключить точку" })).toBeDisabled();
     await blockedDialog.getByRole("button", { name: "Отмена" }).click();
 
     await page.goto("/pos");
@@ -66,14 +64,26 @@ test.describe("Trading points and registers", () => {
     await page
       .getByRole("row", { name: new RegExp(branchName) })
       .getByRole("button", {
-        name: "Деактивировать",
+        name: "Отключить",
       })
       .click();
     const confirmDialog = page.getByRole("dialog", {
-      name: "Деактивировать торговую точку",
+      name: `Отключить точку: ${branchName}`,
     });
-    await confirmDialog.getByRole("button", { name: "Деактивировать" }).click();
+    await expect(confirmDialog).toContainText("Все активные кассы этой точки будут выключены.");
+    await confirmDialog.getByRole("button", { name: "Отключить точку" }).click();
     await expect(page.getByRole("row", { name: new RegExp(branchName) })).toHaveCount(0);
+
+    await page.getByLabel("Статус", { exact: true }).selectOption("inactive");
+    const inactiveBranchRow = page.getByRole("row", { name: new RegExp(branchName) });
+    await expect(inactiveBranchRow).toContainText("Неактивна");
+    await inactiveBranchRow.getByRole("button", { name: "Восстановить" }).click();
+    const restoreDialog = page.getByRole("dialog", {
+      name: `Восстановить точку: ${branchName}`,
+    });
+    await expect(restoreDialog).toContainText("Рабочие кассы останутся выключенными");
+    await restoreDialog.getByRole("button", { name: "Восстановить точку" }).click();
+    await expect(inactiveBranchRow).toHaveCount(0);
 
     await page.goto("/registers");
     await expect(page.getByRole("row", { name: new RegExp(registerName) })).toHaveCount(0);

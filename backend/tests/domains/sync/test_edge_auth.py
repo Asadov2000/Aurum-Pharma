@@ -214,6 +214,41 @@ async def test_expired_edge_credential_is_rejected(
     assert result.mappings().one_or_none() is None
 
 
+async def test_inactive_branch_pauses_edge_credential_until_restored(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    foundation = FoundationService(FoundationRepository(db_session))
+    await foundation.create_branch(
+        tenant_id=scaffold["tenant"].id,
+        fields={"name": "Keep active"},
+    )
+    service = SyncAdminService(SyncCloudRepository(db_session))
+    issued = await service.create_node(
+        SyncNodeCreate(
+            tenant_id=scaffold["tenant"].id,
+            branch_id=scaffold["branch"].id,
+            display_name="Paused with branch",
+        )
+    )
+    parsed = parse_edge_credential(issued.credential)
+
+    await foundation.soft_delete_branch(scaffold["branch"].id)
+    result = await db_session.execute(
+        text("SELECT * FROM public.authenticate_edge_node(:kid, :digest)"),
+        {"kid": parsed.kid, "digest": parsed.digest},
+    )
+    assert result.mappings().one_or_none() is None
+
+    await foundation.update_branch(scaffold["branch"].id, fields={"is_active": True})
+    result = await db_session.execute(
+        text("SELECT * FROM public.authenticate_edge_node(:kid, :digest)"),
+        {"kid": parsed.kid, "digest": parsed.digest},
+    )
+    assert result.mappings().one()["node_id"] == issued.id
+
+
 def test_user_bearer_token_is_not_machine_auth() -> None:
     with pytest.raises(AuthenticationError):
         _parse_request_auth(

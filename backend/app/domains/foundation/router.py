@@ -32,6 +32,7 @@ from app.core.errors import AuthenticationError, BusinessRuleError, PermissionDe
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.schemas import (
     BranchCreate,
+    BranchLifecycleImpactRead,
     BranchRead,
     BranchSearchRequest,
     BranchSearchResponse,
@@ -71,6 +72,7 @@ BRANCH_DISCOVERY_PERMISSIONS = (
     "batches.view",
     "reports.view",
 )
+BRANCH_LIFECYCLE_PERMISSIONS = ("branches.update", "branches.delete")
 REGISTER_DISCOVERY_PERMISSIONS = (
     "registers.view",
     "pos.shift_open",
@@ -417,6 +419,40 @@ async def get_branch(
     if not user.can_access_branch_for_any(branch.id, *BRANCH_DISCOVERY_PERMISSIONS):
         raise PermissionDeniedError("Branch access denied")
     return BranchRead.model_validate(branch)
+
+
+@tenant_router.get(
+    "/branches/{branch_id}/lifecycle-impact",
+    response_model=BranchLifecycleImpactRead,
+)
+async def get_branch_lifecycle_impact(
+    branch_id: UUID,
+    user: Annotated[
+        CurrentUser,
+        Depends(
+            require_any_branch_permission(
+                *BRANCH_LIFECYCLE_PERMISSIONS,
+                policy="resource",
+            )
+        ),
+    ],
+    service: Annotated[FoundationService, Depends(_service)],
+) -> BranchLifecycleImpactRead:
+    if not user.can_access_branch_for_any(branch_id, *BRANCH_LIFECYCLE_PERMISSIONS):
+        raise PermissionDeniedError("Branch access denied")
+    branch, impact = await service.get_branch_lifecycle_impact(branch_id)
+    return BranchLifecycleImpactRead(
+        branch_id=branch.id,
+        branch_name=branch.name,
+        is_active=branch.is_active,
+        can_deactivate=(
+            branch.is_active and impact.active_branch_count > 1 and impact.open_shift_count == 0
+        ),
+        active_register_count=impact.active_register_count,
+        open_shift_count=impact.open_shift_count,
+        active_assignment_count=impact.active_assignment_count,
+        active_edge_node_count=impact.active_edge_node_count,
+    )
 
 
 @tenant_router.patch("/branches/{branch_id}", response_model=BranchRead)

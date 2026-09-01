@@ -202,6 +202,7 @@ CUSTOM_FUNCTIONS = {
     "assert_tenant_billing_payment_submission_context",
     "assert_current_branch_writer",
     "authenticate_edge_node",
+    "authenticate_edge_node_credential_unchecked",
     "auth_account_requires_mfa",
     "auth_email_code_matches",
     "audit_redact_jsonb",
@@ -306,6 +307,7 @@ CUSTOM_FUNCTIONS = {
     "platform_actor_has_recent_capability",
     "claim_platform_invitation_email",
     "claim_auth_login_email",
+    "count_active_edge_nodes_for_branch",
     "platform_staff_invitation_is_usable",
     "ownership_transfer_assignment_allowed",
     "ownership_transfer_mfa_is_recent",
@@ -443,6 +445,7 @@ APP_EXECUTABLE_FUNCTIONS = {
     "append_audit_event",
     "archive_tenant_role_with_replacement",
     "authenticate_edge_node",
+    "count_active_edge_nodes_for_branch",
     "auth_email_code_matches",
     "current_app_user_id",
     "current_tenant_id",
@@ -1492,3 +1495,49 @@ async def test_runtime_views_apply_invoker_tenant_rls(
                     text("DELETE FROM tenant WHERE id = ANY(CAST(:tenant_ids AS UUID[]))"),
                     {"tenant_ids": tenant_ids},
                 )
+
+
+async def test_runtime_edge_node_count_is_bound_to_current_tenant(
+    app_engine_privileges: AsyncEngine,
+) -> None:
+    current_tenant_id = uuid4()
+    other_tenant_id = uuid4()
+    branch_id = uuid4()
+
+    async with app_engine_privileges.begin() as conn:
+        await conn.execute(
+            text("SELECT set_config('app.tenant_id', :tenant_id, false)"),
+            {"tenant_id": str(current_tenant_id)},
+        )
+        count = await conn.scalar(
+            text("""
+                SELECT public.count_active_edge_nodes_for_branch(
+                  CAST(:tenant_id AS UUID),
+                  CAST(:branch_id AS UUID)
+                )
+                """),
+            {
+                "tenant_id": str(current_tenant_id),
+                "branch_id": str(branch_id),
+            },
+        )
+        assert count == 0
+
+    with pytest.raises(DBAPIError, match="Edge node count is unavailable"):
+        async with app_engine_privileges.begin() as conn:
+            await conn.execute(
+                text("SELECT set_config('app.tenant_id', :tenant_id, false)"),
+                {"tenant_id": str(current_tenant_id)},
+            )
+            await conn.execute(
+                text("""
+                    SELECT public.count_active_edge_nodes_for_branch(
+                      CAST(:tenant_id AS UUID),
+                      CAST(:branch_id AS UUID)
+                    )
+                    """),
+                {
+                    "tenant_id": str(other_tenant_id),
+                    "branch_id": str(branch_id),
+                },
+            )

@@ -298,6 +298,17 @@ class BranchRead(BaseModel):
     updated_at: datetime
 
 
+class BranchLifecycleImpactRead(BaseModel):
+    branch_id: UUID
+    branch_name: str
+    is_active: bool
+    can_deactivate: bool
+    active_register_count: int = Field(ge=0)
+    open_shift_count: int = Field(ge=0)
+    active_assignment_count: int = Field(ge=0)
+    active_edge_node_count: int = Field(ge=0)
+
+
 class BranchSearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
