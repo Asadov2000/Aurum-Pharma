@@ -141,6 +141,20 @@ export interface AssignmentBatchReplacePayload {
   role_id: string;
   branch_ids: Array<string | null>;
   password_required?: boolean;
+  replace_all?: boolean;
+}
+
+export interface AssignmentHistoryEvent {
+  id: string;
+  event_type: "assigned" | "changed" | "restored" | "revoked";
+  actor_name: string;
+  role_id: string;
+  role_name: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  password_required: boolean;
+  is_active: boolean;
+  created_at: string;
 }
 
 export interface InviteEmployeePayload {

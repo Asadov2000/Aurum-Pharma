@@ -8,6 +8,7 @@ import {
   createOwnershipTransfer,
   createRole,
   inviteEmployee,
+  listAssignmentHistory,
   listPermissions,
   listOwnershipTransfers,
   listRoles,
@@ -41,6 +42,7 @@ export const rolesKeys = {
   permissions: ["roles", "permissions"] as const,
   templates: ["roles", "templates"] as const,
   ownershipTransfers: ["roles", "ownership-transfers"] as const,
+  accessHistory: (userId: string) => ["roles", "access-history", userId] as const,
   versions: (roleId: string) => ["roles", "versions", roleId] as const,
 };
 
@@ -73,6 +75,14 @@ export function usePermissionsQuery(enabled = true) {
   return useQuery({
     queryKey: rolesKeys.permissions,
     queryFn: listPermissions,
+    enabled,
+  });
+}
+
+export function useAssignmentHistoryQuery(userId: string, enabled = true) {
+  return useQuery({
+    queryKey: rolesKeys.accessHistory(userId),
+    queryFn: () => listAssignmentHistory(userId),
     enabled,
   });
 }
@@ -233,8 +243,9 @@ export function useReplaceAssignments() {
   return useMutation({
     mutationFn: (args: { userId: string; payload: AssignmentBatchReplacePayload }) =>
       replaceAssignments(args.userId, args.payload),
-    onSuccess: () => {
+    onSuccess: (_data, args) => {
       void qc.invalidateQueries({ queryKey: rolesKeys.users });
+      void qc.invalidateQueries({ queryKey: rolesKeys.accessHistory(args.userId) });
     },
   });
 }
@@ -244,8 +255,9 @@ export function useRevokeAssignment() {
   return useMutation({
     mutationFn: (args: { userId: string; assignmentId: string }) =>
       revokeAssignment(args.userId, args.assignmentId),
-    onSuccess: () => {
+    onSuccess: (_data, args) => {
       void qc.invalidateQueries({ queryKey: rolesKeys.users });
+      void qc.invalidateQueries({ queryKey: rolesKeys.accessHistory(args.userId) });
     },
   });
 }

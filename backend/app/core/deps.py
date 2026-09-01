@@ -524,10 +524,18 @@ async def _load_authorization_context(
     context.subject_revision = snapshot.subject_revision
 
     assignments = await service.repo.list_assignments_for_user(user_id, tenant_id=tenant_id)
+    assigned_branch_ids = {
+        assignment.branch_id
+        for assignment in assignments
+        if assignment.branch_id is not None and assignment.is_active
+    }
+    active_branch_ids = await service.repo.active_branch_ids(tenant_id, assigned_branch_ids)
     active = [
         assignment
         for assignment in assignments
-        if assignment.is_active and context.membership_status == "active"
+        if assignment.is_active
+        and context.membership_status == "active"
+        and (assignment.branch_id is None or assignment.branch_id in active_branch_ids)
     ]
     roles_by_id = await service.repo.roles_by_ids([assignment.role_id for assignment in active])
     for assignment in active:

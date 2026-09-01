@@ -48,6 +48,20 @@ class DirectoryUser:
 
 
 @dataclass(frozen=True)
+class AssignmentHistoryRecord:
+    id: UUID
+    event_type: str
+    actor_name: str
+    role_id: UUID
+    role_name: str
+    branch_id: UUID | None
+    branch_name: str | None
+    password_required: bool
+    is_active: bool
+    created_at: datetime
+
+
+@dataclass(frozen=True)
 class InvitationRecord:
     id: UUID
     status: str
@@ -1035,6 +1049,74 @@ class RolesRepository:
             {"lock_key": f"user-assignment:{tenant_id}:{user_id}"},
         )
 
+    async def assignment_history(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        *,
+        limit: int = 200,
+    ) -> list[AssignmentHistoryRecord]:
+        result = await self.session.execute(
+            text("""
+                SELECT
+                  audit.id,
+                  CASE
+                    WHEN audit.action = 'INSERT' THEN 'assigned'
+                    WHEN audit.action = 'UPDATE'
+                     AND COALESCE((audit.old_values ->> 'is_active')::BOOLEAN, FALSE)
+                     AND NOT COALESCE((audit.new_values ->> 'is_active')::BOOLEAN, FALSE)
+                      THEN 'revoked'
+                    WHEN audit.action = 'UPDATE'
+                     AND NOT COALESCE((audit.old_values ->> 'is_active')::BOOLEAN, FALSE)
+                     AND COALESCE((audit.new_values ->> 'is_active')::BOOLEAN, FALSE)
+                      THEN 'restored'
+                    ELSE 'changed'
+                  END AS event_type,
+                  COALESCE(actor_membership.full_name, 'Aurum Pharma') AS actor_name,
+                  role.id AS role_id,
+                  role.name AS role_name,
+                  branch.id AS branch_id,
+                  branch.name AS branch_name,
+                  COALESCE((state.values ->> 'password_required')::BOOLEAN, FALSE)
+                    AS password_required,
+                  COALESCE((state.values ->> 'is_active')::BOOLEAN, FALSE) AS is_active,
+                  audit.created_at
+                FROM public.audit_log AS audit
+                CROSS JOIN LATERAL (
+                  SELECT COALESCE(audit.new_values, audit.old_values) AS values
+                ) AS state
+                JOIN public.role AS role
+                  ON role.id = (state.values ->> 'role_id')::UUID
+                LEFT JOIN public.branch AS branch
+                  ON branch.id = NULLIF(state.values ->> 'branch_id', '')::UUID
+                 AND branch.tenant_id = audit.tenant_id
+                LEFT JOIN public.tenant_membership AS actor_membership
+                  ON actor_membership.tenant_id = audit.tenant_id
+                 AND actor_membership.user_id = audit.user_id
+                WHERE audit.tenant_id = :tenant_id
+                  AND audit.table_name = 'user_assignment'
+                  AND state.values ->> 'user_id' = CAST(:user_id AS TEXT)
+                ORDER BY audit.created_at DESC, audit.id DESC
+                LIMIT :limit
+                """),
+            {"tenant_id": tenant_id, "user_id": str(user_id), "limit": limit},
+        )
+        return [
+            AssignmentHistoryRecord(
+                id=cast(UUID, row["id"]),
+                event_type=str(row["event_type"]),
+                actor_name=str(row["actor_name"]),
+                role_id=cast(UUID, row["role_id"]),
+                role_name=str(row["role_name"]),
+                branch_id=cast(UUID | None, row["branch_id"]),
+                branch_name=cast(str | None, row["branch_name"]),
+                password_required=bool(row["password_required"]),
+                is_active=bool(row["is_active"]),
+                created_at=cast(datetime, row["created_at"]),
+            )
+            for row in result.mappings().all()
+        ]
+
     async def active_branch_ids(self, tenant_id: UUID, branch_ids: set[UUID]) -> set[UUID]:
         if not branch_ids:
             return set()
@@ -1356,6 +1438,16 @@ class RolesRepository:
                  AND assignment.user_id = :user_id
                  AND assignment.membership_id = membership.id
                  AND assignment.is_active
+                 AND (
+                   assignment.branch_id IS NULL
+                   OR EXISTS (
+                     SELECT 1
+                     FROM public.branch AS active_branch
+                     WHERE active_branch.id = assignment.branch_id
+                       AND active_branch.tenant_id = policy.tenant_id
+                       AND active_branch.is_active
+                   )
+                 )
                 LEFT JOIN public.role AS assigned_role
                   ON assigned_role.id = assignment.role_id
                  AND assigned_role.is_active
