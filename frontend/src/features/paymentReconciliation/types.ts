@@ -7,6 +7,7 @@ export interface PaymentReconciliationItem {
   branch_name: string;
   register_id: string;
   register_name: string;
+  configured_terminal_id: string | null;
   cashier_name: string | null;
   payment_method: "card" | "qr";
   amount: string;

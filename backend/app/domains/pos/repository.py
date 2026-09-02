@@ -64,6 +64,7 @@ class PaymentReconciliationRow:
     branch_name: str
     register_id: UUID
     register_name: str
+    configured_terminal_id: str | None
     cashier_name: str | None
     sale_total_amount: Decimal
     item_count: int
@@ -726,6 +727,13 @@ class POSRepository:
                 Branch.name.label("branch_name"),
                 Sale.register_id,
                 Register.name.label("register_name"),
+                case(
+                    (
+                        POSPaymentAttempt.payment_method == "card",
+                        Register.card_terminal_id,
+                    ),
+                    else_=Register.qr_terminal_id,
+                ).label("configured_terminal_id"),
                 AppUser.full_name.label("cashier_name"),
                 Sale.total_amount.label("sale_total_amount"),
                 item_count.label("item_count"),
@@ -750,6 +758,7 @@ class POSRepository:
                 branch_name=row.branch_name,
                 register_id=row.register_id,
                 register_name=row.register_name,
+                configured_terminal_id=row.configured_terminal_id,
                 cashier_name=row.cashier_name,
                 sale_total_amount=row.sale_total_amount,
                 item_count=int(row.item_count),

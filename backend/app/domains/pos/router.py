@@ -259,6 +259,7 @@ async def list_pos_payment_reconciliation(
                 branch_name=row.branch_name,
                 register_id=row.register_id,
                 register_name=row.register_name,
+                configured_terminal_id=row.configured_terminal_id,
                 cashier_name=row.cashier_name,
                 payment_method=cast(Literal["card", "qr"], row.attempt.payment_method),
                 amount=row.attempt.amount,

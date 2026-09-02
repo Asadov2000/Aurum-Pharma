@@ -213,6 +213,8 @@ class Register(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     printer_type: Mapped[str | None] = mapped_column(Text)
     printer_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    card_terminal_id: Mapped[str | None] = mapped_column(Text)
+    qr_terminal_id: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
@@ -231,5 +233,14 @@ class Register(Base):
         CheckConstraint(
             "printer_type IS NULL OR printer_type IN " "('browser','thermal_58','thermal_80','a4')",
             name="ck_register_printer_type",
+        ),
+        CheckConstraint(
+            "card_terminal_id IS NULL OR card_terminal_id ~ "
+            "'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$'",
+            name="ck_register_card_terminal_id",
+        ),
+        CheckConstraint(
+            "qr_terminal_id IS NULL OR qr_terminal_id ~ " "'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$'",
+            name="ck_register_qr_terminal_id",
         ),
     )

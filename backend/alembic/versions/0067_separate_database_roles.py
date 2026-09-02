@@ -596,6 +596,9 @@ $$
 
 
 DOWNGRADE_SQL = (
+    # PostgreSQL requires the target owner to create objects in their schema.
+    # The later legacy grants deliberately retain this privilege for support.
+    "GRANT CREATE ON SCHEMA public TO aurum_support",
     "REASSIGN OWNED BY aurum_schema_owner TO aurum_support",
     """
 DO $$

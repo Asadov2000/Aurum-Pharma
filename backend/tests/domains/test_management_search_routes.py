@@ -193,11 +193,26 @@ async def test_register_editor_discovers_scoped_branch_and_clears_printer(
 
         clear_printer = await client.patch(
             f"/api/v1/registers/{register.id}",
-            json={"name": None, "printer_type": None},
+            json={
+                "name": None,
+                "printer_type": None,
+                "card_terminal_id": "TERM-ROUTE-01",
+                "qr_terminal_id": "QR-ROUTE-01",
+            },
         )
         assert clear_printer.status_code == 200
         assert clear_printer.json()["name"] == "Scoped register"
         assert clear_printer.json()["printer_type"] is None
+        assert clear_printer.json()["card_terminal_id"] == "TERM-ROUTE-01"
+        assert clear_printer.json()["qr_terminal_id"] == "QR-ROUTE-01"
+
+        clear_terminals = await client.patch(
+            f"/api/v1/registers/{register.id}",
+            json={"card_terminal_id": None, "qr_terminal_id": None},
+        )
+        assert clear_terminals.status_code == 200
+        assert clear_terminals.json()["card_terminal_id"] is None
+        assert clear_terminals.json()["qr_terminal_id"] is None
     finally:
         app.dependency_overrides.pop(current_user, None)
         app.dependency_overrides.pop(get_db, None)

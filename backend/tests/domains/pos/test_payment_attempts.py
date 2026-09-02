@@ -1045,6 +1045,8 @@ async def test_payment_reconciliation_queue_is_manager_scoped_and_resolvable_wit
     pos_scaffold,
 ) -> None:  # type: ignore[no-untyped-def]
     scaffold = await pos_scaffold()
+    scaffold["register"].card_terminal_id = "TERM-CONFIGURED"
+    await db_session.flush()
     service = POSService(POSRepository(db_session))
     sale = await _draft_sale(service, scaffold)
     attempt = await service.create_payment_attempt(
@@ -1096,6 +1098,7 @@ async def test_payment_reconciliation_queue_is_manager_scoped_and_resolvable_wit
         assert body["items"][0]["id"] == str(attempt.id)
         assert body["items"][0]["branch_name"] == scaffold["branch"].name
         assert body["items"][0]["register_name"] == scaffold["register"].name
+        assert body["items"][0]["configured_terminal_id"] == "TERM-CONFIGURED"
         assert body["items"][0]["cashier_name"] == scaffold["cashier"].full_name
         assert body["items"][0]["item_count"] == 1
         assert body["summary"]["requires_reconciliation_count"] == 1

@@ -34,6 +34,7 @@ interface Props {
   method: "card" | "qr";
   amount: string;
   currency: string;
+  defaultTerminalId?: string | null;
   isLoading: boolean;
   canResolveDecline: boolean;
   error?: string | null;
@@ -47,6 +48,7 @@ export function ExternalPaymentEvidenceDialog({
   method,
   amount,
   currency,
+  defaultTerminalId,
   isLoading,
   canResolveDecline,
   error,
@@ -59,9 +61,9 @@ export function ExternalPaymentEvidenceDialog({
 
   useEffect(() => {
     if (open) {
-      form.reset({ terminal_id: "", external_reference: "" });
+      form.reset({ terminal_id: defaultTerminalId ?? "", external_reference: "" });
     }
-  }, [attemptId, form, open]);
+  }, [attemptId, defaultTerminalId, form, open]);
 
   const submit = (action: Props["onConfirm"] | Props["onDecline"]) =>
     form.handleSubmit(async (values) => {
@@ -115,6 +117,11 @@ export function ExternalPaymentEvidenceDialog({
             invalid={Boolean(form.formState.errors.terminal_id)}
             {...form.register("terminal_id")}
           />
+          {defaultTerminalId ? (
+            <p className="mt-1.5 text-xs text-foreground-muted">
+              Подставлен из настроек рабочей кассы. Сверьте с фактическим чеком терминала.
+            </p>
+          ) : null}
           {form.formState.errors.terminal_id?.message ? (
             <p className="mt-1.5 text-sm text-danger" role="alert">
               {form.formState.errors.terminal_id.message}

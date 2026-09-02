@@ -28,6 +28,7 @@ const ITEM = {
   branch_name: "Аптека Рудаки",
   register_id: "00000000-0000-4000-8000-000000000004",
   register_name: "Касса 01",
+  configured_terminal_id: "TERM-CONFIGURED",
   cashier_name: "Сорбон Ахмедов",
   payment_method: "card" as const,
   amount: "59.00",
@@ -83,7 +84,7 @@ describe("PaymentReconciliationPage", () => {
 
     expect((await screen.findAllByText("Аптека Рудаки")).length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole("button", { name: "Принять решение" })[0]!);
-    fireEvent.change(screen.getByLabelText("Терминал"), { target: { value: "TERM-01" } });
+    expect(screen.getByLabelText("Терминал")).toHaveValue("TERM-CONFIGURED");
     fireEvent.change(screen.getByLabelText("Номер операции/документа"), {
       target: { value: "BANK-100500" },
     });
@@ -96,7 +97,7 @@ describe("PaymentReconciliationPage", () => {
 
     await waitFor(() => expect(confirmPaymentAttempt).toHaveBeenCalledTimes(1));
     expect(confirmPaymentAttempt).toHaveBeenCalledWith(ITEM.id, {
-      terminal_id: "TERM-01",
+      terminal_id: "TERM-CONFIGURED",
       external_reference: "BANK-100500",
     });
     expect(voidPaymentAttempt).not.toHaveBeenCalled();

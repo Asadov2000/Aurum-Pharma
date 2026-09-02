@@ -86,6 +86,9 @@ export function RegistersPage(): JSX.Element {
   const hasFilters = Boolean(q || branchFilter || printerType || status !== "active");
   const activeOnPage = rows.filter((register) => register.is_active).length;
   const printersOnPage = rows.filter((register) => register.printer_type !== null).length;
+  const paymentDevicesOnPage = rows.filter(
+    (register) => register.card_terminal_id !== null || register.qr_terminal_id !== null,
+  ).length;
 
   const branchNameById = (id: string): string =>
     branches.data?.find((branch) => branch.id === id)?.name ?? `Точка ${id.slice(0, 8)}`;
@@ -136,6 +139,10 @@ export function RegistersPage(): JSX.Element {
             { label: "Показано на странице", value: rows.length },
             { label: "Активных на странице", value: activeOnPage, tone: "success" },
             { label: "Формат чека выбран на странице", value: printersOnPage },
+            {
+              label: "Электронная оплата настроена на странице",
+              value: paymentDevicesOnPage,
+            },
           ]}
         />
       )}
@@ -321,6 +328,7 @@ export function RegistersPage(): JSX.Element {
                 <TH>Название</TH>
                 <TH>Торговая точка</TH>
                 <TH>Формат чека</TH>
+                <TH>Платёжные устройства</TH>
                 <TH>Статус</TH>
                 {showActions && <TH className="text-right">Действия</TH>}
               </TR>
@@ -340,6 +348,26 @@ export function RegistersPage(): JSX.Element {
                       printerLabel[register.printer_type]
                     ) : (
                       <span className="text-foreground-muted">Не настроен</span>
+                    )}
+                  </TD>
+                  <TD>
+                    {register.card_terminal_id || register.qr_terminal_id ? (
+                      <div className="space-y-0.5 text-sm">
+                        {register.card_terminal_id ? (
+                          <p>
+                            <span className="text-foreground-muted">Карта:</span>{" "}
+                            <span className="font-mono">{register.card_terminal_id}</span>
+                          </p>
+                        ) : null}
+                        {register.qr_terminal_id ? (
+                          <p>
+                            <span className="text-foreground-muted">QR:</span>{" "}
+                            <span className="font-mono">{register.qr_terminal_id}</span>
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <span className="text-foreground-muted">Не настроены</span>
                     )}
                   </TD>
                   <TD>

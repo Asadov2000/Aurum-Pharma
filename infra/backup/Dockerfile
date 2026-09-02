@@ -11,7 +11,7 @@ RUN go mod init aurum.local/restic \
     && go get github.com/restic/restic/cmd/restic@v0.19.1 \
     && go get golang.org/x/net@v0.56.0 \
         golang.org/x/text@v0.39.0 \
-        google.golang.org/grpc@v1.82.1 \
+        google.golang.org/grpc@v1.83.1 \
     && go get golang.org/x/crypto@v0.55.0 \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
         -o /out/restic github.com/restic/restic/cmd/restic
@@ -22,14 +22,14 @@ RUN go mod init aurum.local/minio-client \
     && go get github.com/prometheus/prometheus@v0.311.3 \
         golang.org/x/net@v0.56.0 \
         golang.org/x/text@v0.39.0 \
-        google.golang.org/grpc@v1.82.1 \
+        google.golang.org/grpc@v1.83.1 \
     && go get github.com/prometheus/common/model@v0.67.5 \
         github.com/prometheus/prometheus/model/labels@v0.311.3 \
     && go get golang.org/x/crypto@v0.55.0 \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
         -o /out/mc github.com/minio/mc
 
-FROM postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
+FROM postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
 
 COPY --from=tools-builder /out/mc /usr/local/bin/mc
 COPY --from=tools-builder /out/restic /usr/local/bin/restic
