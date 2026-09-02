@@ -16,10 +16,21 @@ const printerLabel: Record<PrinterType, string> = {
   a4: "Принтер A4",
 };
 
+const terminalId = z
+  .string()
+  .trim()
+  .max(64, "Не более 64 символов")
+  .refine(
+    (value) => value === "" || /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value),
+    "Используйте латинские буквы, цифры и символы . _ : / -",
+  );
+
 const schema = z.object({
   name: z.string().trim().min(1, "Введите название").max(200, "Не более 200 символов"),
   branch_id: z.string().min(1, "Выберите торговую точку"),
   printer_type: z.union([z.enum(["browser", "thermal_58", "thermal_80", "a4"]), z.literal("")]),
+  card_terminal_id: terminalId,
+  qr_terminal_id: terminalId,
   is_active: z.boolean(),
 });
 
@@ -51,6 +62,8 @@ export function RegisterForm({
       name: row?.name ?? "",
       branch_id: row?.branch_id ?? "",
       printer_type: row?.printer_type ?? "",
+      card_terminal_id: row?.card_terminal_id ?? "",
+      qr_terminal_id: row?.qr_terminal_id ?? "",
       is_active: row?.is_active ?? true,
     },
   });
@@ -60,6 +73,8 @@ export function RegisterForm({
       name: row?.name ?? "",
       branch_id: row?.branch_id ?? "",
       printer_type: row?.printer_type ?? "",
+      card_terminal_id: row?.card_terminal_id ?? "",
+      qr_terminal_id: row?.qr_terminal_id ?? "",
       is_active: row?.is_active ?? true,
     });
   }, [row, form]);
@@ -87,6 +102,8 @@ export function RegisterForm({
     setTopError(null);
     const d = parsed.data;
     const printer = d.printer_type === "" ? null : d.printer_type;
+    const cardTerminalId = d.card_terminal_id || null;
+    const qrTerminalId = d.qr_terminal_id || null;
     try {
       if (isEdit && row) {
         await updateMutation.mutateAsync({
@@ -94,6 +111,8 @@ export function RegisterForm({
           payload: {
             name: d.name,
             printer_type: printer,
+            card_terminal_id: cardTerminalId,
+            qr_terminal_id: qrTerminalId,
             is_active: d.is_active,
           },
         });
@@ -102,6 +121,8 @@ export function RegisterForm({
           name: d.name,
           branch_id: d.branch_id,
           printer_type: printer,
+          card_terminal_id: cardTerminalId,
+          qr_terminal_id: qrTerminalId,
         });
       }
       onClose();
@@ -179,6 +200,39 @@ export function RegisterForm({
           Кассир сможет проверить формат перед печатью на своём устройстве.
         </p>
       </div>
+      <fieldset className="space-y-3 rounded-lg border border-border bg-background p-3">
+        <legend className="px-1 text-sm font-semibold">Платёжное оборудование</legend>
+        <p className="text-xs leading-5 text-foreground-muted">
+          Укажите постоянные ID с корпуса, чека или журнала устройства. Кассир увидит их
+          автоматически. Пароли, API-ключи и секреты банка сюда вводить нельзя.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="card_terminal_id">Терминал для карты</Label>
+            <Input
+              id="card_terminal_id"
+              autoComplete="off"
+              maxLength={64}
+              placeholder="Например, TERM-01"
+              invalid={Boolean(form.formState.errors.card_terminal_id)}
+              {...form.register("card_terminal_id")}
+            />
+            <FormError>{form.formState.errors.card_terminal_id?.message}</FormError>
+          </div>
+          <div>
+            <Label htmlFor="qr_terminal_id">Точка оплаты QR</Label>
+            <Input
+              id="qr_terminal_id"
+              autoComplete="off"
+              maxLength={64}
+              placeholder="Например, QR-SINO-01"
+              invalid={Boolean(form.formState.errors.qr_terminal_id)}
+              {...form.register("qr_terminal_id")}
+            />
+            <FormError>{form.formState.errors.qr_terminal_id?.message}</FormError>
+          </div>
+        </div>
+      </fieldset>
       {isEdit && <Switch label="Рабочая касса активна" {...form.register("is_active")} />}
       {topError && (
         <div

@@ -85,6 +85,8 @@ const REGISTER = {
   name: "Касса 1",
   printer_type: null,
   printer_config: null,
+  card_terminal_id: "TERM-POS-01",
+  qr_terminal_id: "QR-POS-01",
   is_active: true,
   created_at: "2026-05-23T00:00:00Z",
   updated_at: "2026-05-23T00:00:00Z",

@@ -192,6 +192,8 @@ export function SaleArea({
   mixedPaymentEnabled,
   paymentSettingsLoading,
   paymentSettingsUnavailable,
+  cardTerminalId,
+  qrTerminalId,
   canOpenShift = true,
   canCloseShift = true,
   canSell = true,
@@ -207,6 +209,8 @@ export function SaleArea({
   mixedPaymentEnabled: boolean;
   paymentSettingsLoading: boolean;
   paymentSettingsUnavailable: boolean;
+  cardTerminalId?: string | null;
+  qrTerminalId?: string | null;
   canOpenShift?: boolean;
   canCloseShift?: boolean;
   canSell?: boolean;
@@ -233,6 +237,8 @@ export function SaleArea({
           mixedPaymentEnabled={mixedPaymentEnabled}
           paymentSettingsLoading={paymentSettingsLoading}
           paymentSettingsUnavailable={paymentSettingsUnavailable}
+          cardTerminalId={cardTerminalId}
+          qrTerminalId={qrTerminalId}
           canCloseShift={canCloseShift}
           canReconcileExternalPayment={canReconcileExternalPayment}
           online={isOnline}
@@ -274,6 +280,8 @@ function ActiveWorkspace({
   mixedPaymentEnabled,
   paymentSettingsLoading,
   paymentSettingsUnavailable,
+  cardTerminalId,
+  qrTerminalId,
   canCloseShift,
   canReconcileExternalPayment,
   online,
@@ -289,6 +297,8 @@ function ActiveWorkspace({
   mixedPaymentEnabled: boolean;
   paymentSettingsLoading: boolean;
   paymentSettingsUnavailable: boolean;
+  cardTerminalId?: string | null;
+  qrTerminalId?: string | null;
   canCloseShift: boolean;
   canReconcileExternalPayment: boolean;
   online: boolean;
@@ -2082,6 +2092,9 @@ function ActiveWorkspace({
             method={externalPaymentConfirmation.method}
             amount={externalPaymentConfirmation.amount}
             currency={currency}
+            defaultTerminalId={
+              externalPaymentConfirmation.method === "card" ? cardTerminalId : qrTerminalId
+            }
             canResolveDecline={canReconcileExternalPayment}
             error={topError}
             isLoading={

@@ -215,6 +215,8 @@ export interface Register {
   name: string;
   printer_type: PrinterType | null;
   printer_config: Record<string, unknown> | null;
+  card_terminal_id: string | null;
+  qr_terminal_id: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -240,10 +242,14 @@ export interface RegisterCreatePayload {
   branch_id: string;
   name: string;
   printer_type?: PrinterType | null;
+  card_terminal_id?: string | null;
+  qr_terminal_id?: string | null;
 }
 
 export interface RegisterUpdatePayload {
   name?: string;
   printer_type?: PrinterType | null;
+  card_terminal_id?: string | null;
+  qr_terminal_id?: string | null;
   is_active?: boolean;
 }

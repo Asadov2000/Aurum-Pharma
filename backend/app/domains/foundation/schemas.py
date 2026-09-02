@@ -344,6 +344,18 @@ class RegisterCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     printer_type: str | None = None
     printer_config: dict[str, Any] | None = None
+    card_terminal_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$",
+    )
+    qr_terminal_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$",
+    )
 
     @field_validator("printer_type")
     @classmethod
@@ -352,11 +364,31 @@ class RegisterCreate(BaseModel):
             raise ValueError("printer_type must be one of browser|thermal_58|thermal_80|a4")
         return v
 
+    @field_validator("card_terminal_id", "qr_terminal_id", mode="before")
+    @classmethod
+    def _normalize_terminal_id(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        return normalized or None
+
 
 class RegisterUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     printer_type: str | None = None
     printer_config: dict[str, Any] | None = None
+    card_terminal_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$",
+    )
+    qr_terminal_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$",
+    )
     is_active: bool | None = None
 
     @field_validator("printer_type")
@@ -365,6 +397,14 @@ class RegisterUpdate(BaseModel):
         if v is not None and v not in {"browser", "thermal_58", "thermal_80", "a4"}:
             raise ValueError("printer_type must be one of browser|thermal_58|thermal_80|a4")
         return v
+
+    @field_validator("card_terminal_id", "qr_terminal_id", mode="before")
+    @classmethod
+    def _normalize_terminal_id(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        return normalized or None
 
 
 class RegisterRead(BaseModel):
@@ -376,6 +416,8 @@ class RegisterRead(BaseModel):
     name: str
     printer_type: str | None
     printer_config: dict[str, Any] | None
+    card_terminal_id: str | None
+    qr_terminal_id: str | None
     is_active: bool
     created_at: datetime
     updated_at: datetime

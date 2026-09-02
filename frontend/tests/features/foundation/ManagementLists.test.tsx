@@ -9,6 +9,8 @@ const searchRegisters = vi.fn();
 const getBranchLifecycleImpact = vi.fn();
 const deleteBranch = vi.fn();
 const updateBranch = vi.fn();
+const createRegister = vi.fn();
+const updateRegister = vi.fn();
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -38,8 +40,8 @@ vi.mock("@/features/foundation/api", () => ({
   getBranchLifecycleImpact: (...args: unknown[]) => getBranchLifecycleImpact(...args),
   listRegisters: vi.fn(),
   searchRegisters: (...args: unknown[]) => searchRegisters(...args),
-  createRegister: vi.fn(),
-  updateRegister: vi.fn(),
+  createRegister: (...args: unknown[]) => createRegister(...args),
+  updateRegister: (...args: unknown[]) => updateRegister(...args),
   deleteRegister: vi.fn(),
 }));
 
@@ -73,6 +75,8 @@ const REGISTER = {
   name: "Касса 01",
   printer_type: "thermal_80" as const,
   printer_config: null,
+  card_terminal_id: "TERM-01",
+  qr_terminal_id: "QR-SINO-01",
   is_active: true,
   created_at: "2026-07-01T00:00:00Z",
   updated_at: "2026-07-01T00:00:00Z",
@@ -106,6 +110,8 @@ describe("management list filters", () => {
     getBranchLifecycleImpact.mockReset();
     deleteBranch.mockReset();
     updateBranch.mockReset();
+    createRegister.mockReset();
+    updateRegister.mockReset();
     listBranches.mockResolvedValue([BRANCH]);
     searchBranches.mockResolvedValue({
       items: [BRANCH],
@@ -131,6 +137,8 @@ describe("management list filters", () => {
     });
     deleteBranch.mockResolvedValue({ ...BRANCH, is_active: false });
     updateBranch.mockResolvedValue(BRANCH);
+    createRegister.mockResolvedValue(REGISTER);
+    updateRegister.mockResolvedValue(REGISTER);
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -178,9 +186,11 @@ describe("management list filters", () => {
     );
     expect(
       within(screen.getByRole("region", { name: "Сводка касс" })).getByText(
-        "Формат чека выбран на странице",
+        "Электронная оплата настроена на странице",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByText("TERM-01")).toBeInTheDocument();
+    expect(screen.getByText("QR-SINO-01")).toBeInTheDocument();
     expect(screen.queryByLabelText("Формат чека")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Торговая точка"), {
@@ -270,6 +280,29 @@ describe("management list filters", () => {
 
     expect(screen.getByRole("dialog", { name: "Закрыть без сохранения?" })).toBeInTheDocument();
     expect(editor).toBeInTheDocument();
+  });
+
+  it("edits payment device identifiers for one register", async () => {
+    renderPage(<RegistersPage />);
+    await screen.findByText("Касса 01");
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+    const editor = screen.getByRole("dialog", { name: "Изменить рабочую кассу: Касса 01" });
+
+    expect(within(editor).getByLabelText("Терминал для карты")).toHaveValue("TERM-01");
+    expect(within(editor).getByLabelText("Точка оплаты QR")).toHaveValue("QR-SINO-01");
+    fireEvent.change(within(editor).getByLabelText("Терминал для карты"), {
+      target: { value: "TERM-UPDATED" },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Сохранить изменения" }));
+
+    await waitFor(() => expect(updateRegister).toHaveBeenCalledTimes(1));
+    expect(updateRegister).toHaveBeenCalledWith(REGISTER.id, {
+      name: "Касса 01",
+      printer_type: "thermal_80",
+      card_terminal_id: "TERM-UPDATED",
+      qr_terminal_id: "QR-SINO-01",
+      is_active: true,
+    });
   });
 
   it("does not present a load failure as an empty branch list", async () => {

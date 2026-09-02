@@ -203,7 +203,7 @@ function apiError(status: number, detail: string): unknown {
   };
 }
 
-function renderArea(canReconcileExternalPayment: boolean = true) {
+function renderArea(canReconcileExternalPayment: boolean = true, cardTerminalId?: string) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -221,6 +221,7 @@ function renderArea(canReconcileExternalPayment: boolean = true) {
         mixedPaymentEnabled={mixedPaymentEnabled}
         paymentSettingsLoading={false}
         paymentSettingsUnavailable={false}
+        cardTerminalId={cardTerminalId}
         canReconcileExternalPayment={canReconcileExternalPayment}
       />
     </QueryClientProvider>
@@ -734,7 +735,7 @@ describe("SaleArea atomic checkout", () => {
       return Promise.resolve(checkoutResult(operationId, "card"));
     });
 
-    renderArea();
+    renderArea(true, "TERM-CONFIGURED");
     await screen.findByText(/Остаток/);
     beginExternalPayment("Карта");
     fireEvent.click(
@@ -743,7 +744,10 @@ describe("SaleArea atomic checkout", () => {
       ).getByRole("button", { name: "ОК" }),
     );
     const confirmation = await screen.findByRole("dialog", { name: "Сверка оплаты картой" });
-    fillExternalPaymentEvidence(confirmation, "TERM-01", "CARD-1234");
+    expect(within(confirmation).getByLabelText("Терминал")).toHaveValue("TERM-CONFIGURED");
+    fireEvent.change(within(confirmation).getByLabelText("Номер операции/документа"), {
+      target: { value: "CARD-1234" },
+    });
     const confirmationButton = within(confirmation).getByRole("button", {
       name: "Оплата прошла",
     });
@@ -751,7 +755,7 @@ describe("SaleArea atomic checkout", () => {
     fireEvent.click(confirmationButton);
     await waitFor(() => expect(confirmPaymentAttempt).toHaveBeenCalledTimes(1));
     expect(confirmPaymentAttempt).toHaveBeenCalledWith("30000000-0000-4000-8000-000000000001", {
-      terminal_id: "TERM-01",
+      terminal_id: "TERM-CONFIGURED",
       external_reference: "CARD-1234",
     });
     expect(

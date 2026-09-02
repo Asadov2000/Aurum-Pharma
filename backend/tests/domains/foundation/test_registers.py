@@ -5,10 +5,12 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError
 from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.schemas import RegisterCreate
 from app.domains.foundation.service import FoundationService
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
@@ -22,10 +24,18 @@ async def test_register_crud(db_session: AsyncSession, make_tenant) -> None:
 
     r = await service.create_register(
         tenant_id=tenant.id,
-        fields={"branch_id": branch.id, "name": "Касса №1", "printer_type": "thermal_80"},
+        fields={
+            "branch_id": branch.id,
+            "name": "Касса №1",
+            "printer_type": "thermal_80",
+            "card_terminal_id": "TERM-01",
+            "qr_terminal_id": "QR-SINO-01",
+        },
     )
     assert r.branch_id == branch.id
     assert r.printer_type == "thermal_80"
+    assert r.card_terminal_id == "TERM-01"
+    assert r.qr_terminal_id == "QR-SINO-01"
     assert r.is_active is True
 
     listed = await service.list_registers(branch_id=branch.id)
@@ -36,6 +46,25 @@ async def test_register_crud(db_session: AsyncSession, make_tenant) -> None:
 
     deleted = await service.soft_delete_register(r.id)
     assert deleted.is_active is False
+
+
+def test_register_terminal_ids_are_normalized_and_restricted() -> None:
+    branch_id = "00000000-0000-4000-8000-000000000001"
+    payload = RegisterCreate(
+        branch_id=branch_id,
+        name="Касса",
+        card_terminal_id="  TERM-01  ",
+        qr_terminal_id="",
+    )
+    assert payload.card_terminal_id == "TERM-01"
+    assert payload.qr_terminal_id is None
+
+    with pytest.raises(ValidationError):
+        RegisterCreate(
+            branch_id=branch_id,
+            name="Касса",
+            card_terminal_id="секрет банка",
+        )
 
 
 async def test_register_cross_tenant_branch_rejected(db_session: AsyncSession, make_tenant) -> None:

@@ -181,6 +181,7 @@ class POSPaymentReconciliationItem(BaseModel):
     branch_name: str
     register_id: UUID
     register_name: str
+    configured_terminal_id: str | None
     cashier_name: str | None
     payment_method: Literal["card", "qr"]
     amount: Decimal

@@ -63,7 +63,7 @@ export function PaymentReconciliationDecisionModal({
   const isLoading = confirmMutation.isPending || voidMutation.isPending;
   const form = useForm<FormValues>({
     defaultValues: {
-      terminal_id: "",
+      terminal_id: item.configured_terminal_id ?? "",
       external_reference: "",
       operator_note: "",
       confirmed: false,
@@ -71,10 +71,11 @@ export function PaymentReconciliationDecisionModal({
   });
 
   useEffect(() => {
+    form.setValue("terminal_id", item.configured_terminal_id ?? "");
     form.setValue("confirmed", false);
     form.clearErrors();
     setTopError(null);
-  }, [decision, form]);
+  }, [decision, form, item.configured_terminal_id]);
 
   const submit = form.handleSubmit(async (values) => {
     const parsed = formSchema.safeParse(values);
@@ -161,6 +162,11 @@ export function PaymentReconciliationDecisionModal({
               invalid={Boolean(form.formState.errors.terminal_id)}
               {...form.register("terminal_id")}
             />
+            {item.configured_terminal_id ? (
+              <p className="mt-1.5 text-xs text-foreground-muted">
+                Подставлен из настроек рабочей кассы. Сверьте с фактическим чеком.
+              </p>
+            ) : null}
           </Field>
           <Field
             label="Номер операции/документа"

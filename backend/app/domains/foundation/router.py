@@ -605,7 +605,12 @@ async def update_register(
     if not user.can_access_branch("registers.update", existing.branch_id):
         raise PermissionDeniedError("Register access denied")
     fields = payload.model_dump(exclude_unset=True, exclude_none=True)
-    for nullable_field in ("printer_type", "printer_config"):
+    for nullable_field in (
+        "printer_type",
+        "printer_config",
+        "card_terminal_id",
+        "qr_terminal_id",
+    ):
         if nullable_field in payload.model_fields_set:
             fields[nullable_field] = getattr(payload, nullable_field)
     register = await service.update_register(

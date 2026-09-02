@@ -200,6 +200,15 @@ test.describe("POS sale (owner)", () => {
 
     const branch = await seedBranch(api, uniqueName("CARD-Branch"));
     const register = await seedRegister(api, branch.id, uniqueName("CARD-Cash"));
+    const terminalId = `E2E-TERM-${Date.now()}`;
+    const terminalUpdate = await api.patch(`registers/${register.id}`, {
+      data: { card_terminal_id: terminalId },
+    });
+    if (!terminalUpdate.ok()) {
+      throw new Error(
+        `PATCH registers/{id} → ${terminalUpdate.status()} ${await terminalUpdate.text()}`,
+      );
+    }
     const supplier = await seedSupplier(api, uniqueName("CARD-Supp"));
     const item = await seedCatalogItem(api, uniqueName("CARD-Med"), "24.00");
     await seedAcceptedBatch(api, {
@@ -266,12 +275,12 @@ test.describe("POS sale (owner)", () => {
       );
       const paymentReference = `E2E-SALE-${Date.now()}`;
       const confirmation = page.getByRole("dialog", { name: "Сверка оплаты картой" });
-      await confirmation.getByLabel("Терминал").fill("E2E-TERM-01");
+      await expect(confirmation.getByLabel("Терминал")).toHaveValue(terminalId);
       await confirmation.getByLabel("Номер операции/документа").fill(paymentReference);
       await confirmation.getByRole("button", { name: "Оплата прошла" }).click();
       const confirmedAttemptResponse = await confirmAttemptResponse;
       expect(confirmedAttemptResponse.request().postDataJSON()).toEqual({
-        terminal_id: "E2E-TERM-01",
+        terminal_id: terminalId,
         external_reference: paymentReference,
       });
       expect(((await confirmedAttemptResponse.json()) as { status: string }).status).toBe(

@@ -108,6 +108,7 @@ export function POSPage(): JSX.Element {
 
   const registerList = registers.data;
   const onlyRegister = registerList?.length === 1 ? registerList[0] : undefined;
+  const selectedRegister = registerList?.find((register) => register.id === registerId);
   const workstationControls = (
     <div className="flex w-full max-w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
       {registers.isLoading ? (
@@ -228,6 +229,8 @@ export function POSPage(): JSX.Element {
           mixedPaymentEnabled={mixedPaymentEnabled}
           paymentSettingsLoading={paymentSettingsLoading}
           paymentSettingsUnavailable={paymentSettingsUnavailable}
+          cardTerminalId={selectedRegister?.card_terminal_id}
+          qrTerminalId={selectedRegister?.qr_terminal_id}
           canOpenShift={canOpenShift}
           canCloseShift={canCloseShift}
           canSell={canSell}
