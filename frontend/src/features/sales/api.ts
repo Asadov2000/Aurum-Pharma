@@ -71,6 +71,14 @@ export async function getRefundAttempt(attemptId: string): Promise<RefundAttempt
   return data;
 }
 
+export async function getActiveRefundAttempt(parentSaleId: string): Promise<RefundAttempt | null> {
+  const { data } = await api.get<RefundAttempt | null>(
+    `/sales/${parentSaleId}/refund-attempts/active`,
+    { timeout: MONEY_OPERATION_TIMEOUT_MS },
+  );
+  return data;
+}
+
 export async function confirmRefundAttempt(
   attemptId: string,
   confirmations: RefundAttemptConfirmation[],
