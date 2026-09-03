@@ -12,7 +12,7 @@ from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.catalog.models import TenantCatalog
-from app.domains.foundation.models import Branch
+from app.domains.foundation.models import Branch, Tenant
 from app.domains.incoming.models import IncomingDocument, IncomingItem
 from app.domains.suppliers.models import Supplier
 
@@ -87,6 +87,47 @@ class IncomingRepository:
             .execution_options(populate_existing=True)
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_acceptance_references_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        supplier_id: UUID,
+        catalog_ids: set[UUID],
+    ) -> tuple[Branch | None, Supplier | None, list[TenantCatalog]]:
+        # Match branch lifecycle's tenant -> branch order before batch FK checks.
+        await self.session.execute(
+            select(Tenant.id)
+            .where(Tenant.id == tenant_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        branch_stmt = (
+            select(Branch)
+            .where(Branch.id == branch_id, Branch.tenant_id == tenant_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        supplier_stmt = (
+            select(Supplier)
+            .where(Supplier.id == supplier_id, Supplier.tenant_id == tenant_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        catalog_stmt = (
+            select(TenantCatalog)
+            .where(
+                TenantCatalog.tenant_id == tenant_id,
+                TenantCatalog.id.in_(sorted(catalog_ids, key=str)),
+            )
+            .order_by(TenantCatalog.id.asc())
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        branch = (await self.session.execute(branch_stmt)).scalar_one_or_none()
+        supplier = (await self.session.execute(supplier_stmt)).scalar_one_or_none()
+        catalog_items = list((await self.session.execute(catalog_stmt)).scalars().all())
+        return branch, supplier, catalog_items
 
     async def get_document_details(self, document_id: UUID) -> IncomingDocumentDetails | None:
         stmt = (
