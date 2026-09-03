@@ -6,20 +6,36 @@ import {
   type PaymentAttemptVoidPayload,
 } from "@/features/pos/types";
 
-import { listPaymentReconciliation } from "./api";
-import { type PaymentReconciliationParams } from "./types";
+import { listPaymentReconciliation, listRefundReconciliation } from "./api";
+import { type PaymentReconciliationParams, type RefundReconciliationParams } from "./types";
 
 export const paymentReconciliationKeys = {
   root: ["payment-reconciliation"] as const,
   list: (params: PaymentReconciliationParams) => ["payment-reconciliation", params] as const,
 };
 
-export function usePaymentReconciliationQuery(params: PaymentReconciliationParams) {
+export const refundReconciliationKeys = {
+  root: ["refund-reconciliation"] as const,
+  list: (params: RefundReconciliationParams) => ["refund-reconciliation", params] as const,
+};
+
+export function usePaymentReconciliationQuery(params: PaymentReconciliationParams, enabled = true) {
   return useQuery({
     queryKey: paymentReconciliationKeys.list(params),
     queryFn: () => listPaymentReconciliation(params),
     placeholderData: keepPreviousData,
     refetchInterval: 30_000,
+    enabled,
+  });
+}
+
+export function useRefundReconciliationQuery(params: RefundReconciliationParams, enabled = true) {
+  return useQuery({
+    queryKey: refundReconciliationKeys.list(params),
+    queryFn: () => listRefundReconciliation(params),
+    placeholderData: keepPreviousData,
+    refetchInterval: 30_000,
+    enabled,
   });
 }
 

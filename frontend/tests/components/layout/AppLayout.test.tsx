@@ -132,7 +132,7 @@ describe("buildNav — owner-only pages", () => {
   it("hides financial/reporting pages from a seller", () => {
     const items = buildNav(false, true, false, SELLER_PERMS);
     expect(labels(items)).not.toContain("Партии");
-    expect(labels(items)).not.toContain("Тариф и оплата");
+    expect(labels(items)).not.toContain("Тариф");
     expect(labels(items)).not.toContain("Отчёты");
     expect(labels(items)).toContain("Настройки");
   });
@@ -140,7 +140,7 @@ describe("buildNav — owner-only pages", () => {
   it("shows financial/reporting pages to an owner", () => {
     const items = buildNav(false, true, true, OWNER_PERMS);
     expect(labels(items)).toContain("Партии");
-    expect(labels(items)).toContain("Тариф и оплата");
+    expect(labels(items)).toContain("Тариф");
     expect(labels(items)).toContain("Отчёты");
     expect(labels(items)).toContain("Настройки");
   });
@@ -148,6 +148,6 @@ describe("buildNav — owner-only pages", () => {
   it("shows parties to any tenant role that has batches.view", () => {
     const items = buildNav(false, true, false, [...SELLER_PERMS, "batches.view"]);
     expect(labels(items)).toContain("Партии");
-    expect(labels(items)).not.toContain("Тариф и оплата");
+    expect(labels(items)).not.toContain("Тариф");
   });
 });

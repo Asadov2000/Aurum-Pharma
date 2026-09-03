@@ -6,6 +6,7 @@ import { type RefundAttempt } from "@/features/sales/types";
 const mutateAsync = vi.fn();
 const getRefundResult = vi.fn();
 const createRefundAttempt = vi.fn();
+const getActiveRefundAttempt = vi.fn();
 const getRefundAttempt = vi.fn();
 const beginRefundAttemptReconciliation = vi.fn();
 const confirmRefundAttempt = vi.fn();
@@ -47,6 +48,7 @@ vi.mock("@/features/sales/queries", () => ({
 vi.mock("@/features/sales/api", () => ({
   getRefundResult: (...args: unknown[]) => getRefundResult(...args),
   createRefundAttempt: (...args: unknown[]) => createRefundAttempt(...args),
+  getActiveRefundAttempt: (...args: unknown[]) => getActiveRefundAttempt(...args),
   getRefundAttempt: (...args: unknown[]) => getRefundAttempt(...args),
   beginRefundAttemptReconciliation: (...args: unknown[]) =>
     beginRefundAttemptReconciliation(...args),
@@ -123,6 +125,9 @@ const PENDING_ATTEMPT: RefundAttempt = {
   confirmed_by_user_id: null,
   operation_id: "11111111-1111-4111-8111-111111111111",
   items: [{ sale_item_id: "item-1", qty: "1" }],
+  intent_locked: true,
+  reason: null,
+  comment: null,
   payments: [
     {
       payment_method: "card",
@@ -169,6 +174,8 @@ describe("RefundModal", () => {
     getRefundResult.mockReset();
     createRefundAttempt.mockReset();
     createRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
+    getActiveRefundAttempt.mockReset();
+    getActiveRefundAttempt.mockResolvedValue(null);
     getRefundAttempt.mockReset();
     getRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
     beginRefundAttemptReconciliation.mockReset();
@@ -312,6 +319,15 @@ describe("RefundModal", () => {
 
   it("binds a card refund to terminal document details before posting the return", async () => {
     const onRefunded = vi.fn();
+    const boundAttempt = { ...PENDING_ATTEMPT, reason: "quality_issue" as const };
+    const reconcilingAttempt = { ...boundAttempt, status: "requires_reconciliation" as const };
+    const confirmedAttempt = {
+      ...CONFIRMED_ATTEMPT,
+      reason: "quality_issue" as const,
+    };
+    createRefundAttempt.mockResolvedValueOnce(boundAttempt);
+    beginRefundAttemptReconciliation.mockResolvedValueOnce(reconcilingAttempt);
+    confirmRefundAttempt.mockResolvedValueOnce(confirmedAttempt);
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
 
     expect(screen.getByRole("note")).toHaveTextContent("Возвращённый товар не поступит в продажу");
@@ -323,6 +339,13 @@ describe("RefundModal", () => {
     selectRefundItem();
     fireEvent.click(screen.getByRole("button", { name: "Зафиксировать сумму возврата" }));
     await waitFor(() => expect(createRefundAttempt).toHaveBeenCalledTimes(1));
+    expect(createRefundAttempt).toHaveBeenCalledWith(
+      SALE.id,
+      expect.any(String),
+      [{ sale_item_id: "item-1", qty: "1" }],
+      "quality_issue",
+      null,
+    );
     expect(beginRefundAttemptReconciliation).toHaveBeenCalledWith("attempt-1");
     expect(mutateAsync).not.toHaveBeenCalled();
     expect(screen.getByText("К возврату: 10,00 TJS")).toBeInTheDocument();

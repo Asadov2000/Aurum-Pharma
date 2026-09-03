@@ -1,5 +1,6 @@
 import { api } from "@/lib/api";
 import { type Sale, type SaleDetails } from "@/features/pos/types";
+import { type RefundReasonCode } from "@/lib/refundReasons";
 
 import {
   type RefundAttempt,
@@ -55,10 +56,12 @@ export async function createRefundAttempt(
   parentSaleId: string,
   operationId: string,
   items: RefundLine[],
+  reason: RefundReasonCode | null,
+  comment: string | null,
 ): Promise<RefundAttempt> {
   const { data } = await api.post<RefundAttempt>(
     `/sales/${parentSaleId}/refund-attempts`,
-    { operation_id: operationId, items },
+    { operation_id: operationId, items, reason, comment },
     { timeout: MONEY_OPERATION_TIMEOUT_MS },
   );
   return data;

@@ -18,7 +18,6 @@ export const ROLE_MANAGEMENT_PERMISSIONS = [
 ] as const;
 export const POS_PERMISSIONS = ["pos.shift_open", "pos.shift_close", "pos.sell"] as const;
 export const SALES_VIEW_PERMISSIONS = ["sales.view.own", "sales.view.tenant"] as const;
-export const PAYMENT_RECONCILIATION_PERMISSIONS = ["pos.manage_sales"] as const;
 export const TENANT_BILLING_VIEW_PERMISSIONS = [
   "billing.overview.view",
   "billing.invoice.view",
@@ -232,7 +231,12 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
     return hasAnyPermission(context, SALES_VIEW_PERMISSIONS);
   }
   if (isPath(pathname, "/payment-reconciliation")) {
-    return hasAnyPermission(context, PAYMENT_RECONCILIATION_PERMISSIONS);
+    return (
+      hasPermission(context, "pos.manage_sales") ||
+      (context.permissions.includes("pos.refund_external_confirm") &&
+        context.permissions.includes("pos.refund") &&
+        SALES_VIEW_PERMISSIONS.some((permission) => context.permissions.includes(permission)))
+    );
   }
   if (isPath(pathname, "/billing")) {
     return TENANT_BILLING_VIEW_PERMISSIONS.every((permission) =>

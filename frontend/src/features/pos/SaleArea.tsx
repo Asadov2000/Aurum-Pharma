@@ -25,7 +25,7 @@ import { PaymentPanel } from "./PaymentPanel";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
-import { getCheckoutResult } from "./api";
+import { getActivePaymentAttempt, getCheckoutResult } from "./api";
 import { beep } from "./beep";
 import {
   clearPendingCheckoutOperation,
@@ -65,6 +65,7 @@ import {
   clearPaymentAttemptOperation,
   createPaymentAttemptOperation,
   loadPaymentAttemptOperation,
+  saveRecoveredPaymentAttemptOperation,
 } from "./paymentAttemptOperation";
 import {
   clearPendingPaymentOperation,
@@ -364,6 +365,10 @@ function ActiveWorkspace({
   const externalPaymentConfirmationRef = useRef<ExternalPaymentConfirmation | null>(null);
   const externalPaymentMutationRef = useRef(false);
   const externalPaymentReviewRef = useRef(externalPaymentReviewRequired);
+  const paymentAttemptRecoverySaleRef = useRef<string | null>(null);
+  const prepareExternalPaymentRef = useRef<
+    (method: "card" | "qr", amount: string) => Promise<void>
+  >(async () => undefined);
   const saleIdRef = useRef<string | null>(saleId);
   const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
   saleIdRef.current = saleId;
@@ -1162,6 +1167,40 @@ function ActiveWorkspace({
       setPayingMethod(null);
     }
   };
+
+  prepareExternalPaymentRef.current = prepareExternalPayment;
+
+  useEffect(() => {
+    if (!saleId || sale?.status !== "draft") return;
+    if (paymentAttemptRecoverySaleRef.current === saleId) return;
+    paymentAttemptRecoverySaleRef.current = saleId;
+    void (async () => {
+      let storedAttempt = loadPaymentAttemptOperation(saleId);
+      if (!storedAttempt) {
+        try {
+          const serverAttempt = await getActivePaymentAttempt(saleId);
+          if (!serverAttempt) return;
+          storedAttempt = saveRecoveredPaymentAttemptOperation(serverAttempt);
+          if (!storedAttempt) {
+            setTopError(
+              "Найдена незавершённая электронная оплата, но её не удалось безопасно сохранить. Не повторяйте оплату; освободите место и перезапустите приложение.",
+            );
+            return;
+          }
+        } catch (error) {
+          paymentAttemptRecoverySaleRef.current = null;
+          setTopError(
+            describeApiError(
+              error,
+              "Не удалось проверить незавершённую электронную оплату. Не повторяйте оплату до восстановления связи.",
+            ),
+          );
+          return;
+        }
+      }
+      await prepareExternalPaymentRef.current(storedAttempt.paymentMethod, storedAttempt.amount);
+    })();
+  }, [sale?.status, saleId]);
 
   const closeExternalPaymentConfirmation = () => {
     externalPaymentConfirmationRef.current = null;

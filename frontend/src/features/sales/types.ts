@@ -82,6 +82,9 @@ export interface RefundAttempt {
   confirmed_by_user_id: string | null;
   operation_id: string;
   items: RefundLine[];
+  intent_locked: boolean;
+  reason: RefundReasonCode | null;
+  comment: string | null;
   payments: RefundAttemptPayment[];
   total_amount: string;
   external_amount: string;

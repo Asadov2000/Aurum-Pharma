@@ -9,7 +9,7 @@ const WORKSPACES = [
   { path: "/users", heading: "Сотрудники" },
   { path: "/roles", heading: "Роли" },
   { path: "/pos", heading: "Касса" },
-  { path: "/billing", heading: "Тариф и оплата" },
+  { path: "/billing", heading: "Тариф", mobileHeading: "Тариф и оплата" },
 ] as const;
 
 async function expectNoHorizontalOverflow(page: Page, workspace: string) {
@@ -40,8 +40,12 @@ test.describe("Interface layout", () => {
 
       for (const workspace of WORKSPACES) {
         await page.goto(workspace.path);
+        const heading =
+          viewport.width < 1024 && "mobileHeading" in workspace
+            ? workspace.mobileHeading
+            : workspace.heading;
         await expect(
-          page.getByRole("heading", { level: 1, name: workspace.heading, exact: true }),
+          page.getByRole("heading", { level: 1, name: heading, exact: true }),
         ).toBeVisible();
         await expectNoHorizontalOverflow(
           page,

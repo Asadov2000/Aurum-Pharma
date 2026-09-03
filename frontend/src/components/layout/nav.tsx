@@ -9,12 +9,12 @@ export function findActiveNavItem(
   items: readonly NavItem[],
   pathname: string,
 ): NavItem | undefined {
-  return items.reduce<NavItem | undefined>((bestMatch, item) => {
-    const matches =
-      pathname === item.to || (item.to !== "/" && pathname.startsWith(`${item.to}/`));
-    if (!matches) return bestMatch;
-    return !bestMatch || item.to.length > bestMatch.to.length ? item : bestMatch;
-  }, undefined);
+  let active: NavItem | undefined;
+  for (const item of items) {
+    const matches = pathname === item.to || (item.to !== "/" && pathname.startsWith(item.to + "/"));
+    if (matches && (!active || item.to.length > active.to.length)) active = item;
+  }
+  return active;
 }
 
 /** Builds the sidebar items for the current user. Kept out of AppLayout so it
@@ -39,11 +39,11 @@ export function buildNav(
   };
   const candidates: AppNavItem[] = [
     { to: "/", label: "Главная", icon: <HomeIcon /> },
-    { to: "/admin", label: "Центр управления" },
+    { to: "/admin", label: "Управление" },
     { to: "/admin/billing", label: "Расчёты Aurum" },
     { to: "/onboarding", label: "Старт" },
-    { to: "/branches", label: "Торговые точки" },
-    { to: "/registers", label: "Рабочие кассы" },
+    { to: "/branches", label: "Точки" },
+    { to: "/registers", label: "Кассы" },
     { to: "/users", label: "Сотрудники" },
     { to: "/roles", label: "Роли" },
     { to: "/catalog", label: "Каталог" },
@@ -52,8 +52,8 @@ export function buildNav(
     { to: "/batches", label: "Партии" },
     { to: "/pos", label: "Касса" },
     { to: "/sales", label: "Чеки" },
-    { to: "/payment-reconciliation", label: "Сверка оплат" },
-    { to: "/billing", label: "Тариф и оплата" },
+    { to: "/payment-reconciliation", label: "Сверка" },
+    { to: "/billing", label: "Тариф" },
     { to: "/reports", label: "Отчёты" },
     { to: "/audit", label: "Аудит" },
     { to: "/notifications", label: "Уведомления" },

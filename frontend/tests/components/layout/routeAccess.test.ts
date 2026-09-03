@@ -44,6 +44,18 @@ describe("route access", () => {
     expect(accessibleInternalPath("/payment-reconciliation", manager)).toBe(
       "/payment-reconciliation",
     );
+
+    const incompleteRefundManager = {
+      ...SELLER,
+      permissions: ["pos.refund_external_confirm"],
+    };
+    expect(canAccessPath("/payment-reconciliation", incompleteRefundManager)).toBe(false);
+
+    const refundManager = {
+      ...SELLER,
+      permissions: ["pos.refund_external_confirm", "pos.refund", "sales.view.own"],
+    };
+    expect(canAccessPath("/payment-reconciliation", refundManager)).toBe(true);
   });
 
   it("uses the POS as the primary fallback for a cashier", () => {

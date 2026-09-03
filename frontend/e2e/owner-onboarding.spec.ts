@@ -94,7 +94,7 @@ test.describe("Owner onboarding (dev)", () => {
     // appear (POS + role management), and the owner is NOT a support user.
     await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Роли" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Центр управления" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Управление", exact: true })).toHaveCount(0);
 
     // ---- the owner gets a concrete, actionable launch checklist ----
     await page.goto("/onboarding");

@@ -44,6 +44,10 @@ from app.domains.pos.schemas import (
     POSRefundAttemptCreate,
     POSRefundAttemptRead,
     POSRefundAttemptVoid,
+    POSRefundReconciliationBranch,
+    POSRefundReconciliationItem,
+    POSRefundReconciliationList,
+    POSRefundReconciliationSummary,
     PrescriptionLogCreate,
     PrescriptionLogRead,
     ReceiptData,
@@ -315,6 +319,31 @@ async def create_pos_payment_attempt(
 
 
 @router.get(
+    "/sales/{sale_id}/payment-attempts/active",
+    response_model=POSPaymentAttemptRead | None,
+)
+async def get_active_pos_payment_attempt(
+    sale_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_branch_permission("pos.sell", "pos.manage_sales", policy="resource")),
+    ],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSPaymentAttemptRead | None:
+    attempt = await service.get_active_payment_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        sale_id=sale_id,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for_any("pos.sell", "pos.manage_sales"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return POSPaymentAttemptRead.model_validate(attempt) if attempt is not None else None
+
+
+@router.get(
     "/pos/payment-attempts/{attempt_id}",
     response_model=POSPaymentAttemptRead,
 )
@@ -419,6 +448,86 @@ async def void_pos_payment_attempt(
 # =============================================================================
 
 
+@router.get(
+    "/pos/refund-reconciliation",
+    response_model=POSRefundReconciliationList,
+)
+async def list_pos_refund_reconciliation(
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("pos.refund_external_confirm", policy="filter")),
+    ],
+    service: Annotated[POSService, Depends(_service)],
+    branch_id: Annotated[UUID | None, Query()] = None,
+    reconciliation_status: Annotated[
+        Literal["pending", "requires_reconciliation", "confirmed"] | None,
+        Query(alias="status"),
+    ] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> POSRefundReconciliationList:
+    rows, total, raw_summary, branches = await service.list_refund_reconciliation(
+        tenant_id=_current_tenant_or_400(user),
+        branch_ids=user.branch_scope_for("pos.refund_external_confirm"),
+        branch_id=branch_id,
+        status=reconciliation_status,
+        page=page,
+        page_size=page_size,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    zero = (0, Decimal("0.00"))
+    pending_count, pending_amount = raw_summary.get("pending", zero)
+    requires_count, requires_amount = raw_summary.get("requires_reconciliation", zero)
+    confirmed_count, confirmed_amount = raw_summary.get("confirmed", zero)
+    return POSRefundReconciliationList(
+        items=[
+            POSRefundReconciliationItem(
+                id=row.attempt.id,
+                parent_sale_id=row.attempt.parent_sale_id,
+                parent_receipt_number=row.parent_receipt_number,
+                branch_id=row.branch_id,
+                branch_name=row.branch_name,
+                register_id=row.register_id,
+                register_name=row.register_name,
+                requested_by_name=row.requested_by_name,
+                total_amount=row.attempt.total_amount,
+                external_amount=row.attempt.external_amount,
+                currency=cast(Literal["TJS"], row.attempt.currency),
+                status=cast(
+                    Literal["pending", "requires_reconciliation", "confirmed"],
+                    row.attempt.status,
+                ),
+                item_count=len(row.attempt.items_json),
+                payment_methods=[
+                    cast(
+                        Literal["card", "qr", "bank_transfer"],
+                        allocation["payment_method"],
+                    )
+                    for allocation in row.attempt.external_allocations_json
+                ],
+                created_at=row.attempt.created_at,
+                confirmed_at=row.attempt.confirmed_at,
+            )
+            for row in rows
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+        summary=POSRefundReconciliationSummary(
+            pending_count=pending_count,
+            pending_external_amount=pending_amount,
+            requires_reconciliation_count=requires_count,
+            requires_reconciliation_external_amount=requires_amount,
+            confirmed_count=confirmed_count,
+            confirmed_external_amount=confirmed_amount,
+        ),
+        branches=[
+            POSRefundReconciliationBranch(id=item_id, name=name) for item_id, name in branches
+        ],
+    )
+
+
 @router.post(
     "/sales/{parent_id}/refund-attempts",
     response_model=POSRefundAttemptRead,
@@ -439,10 +548,38 @@ async def create_pos_refund_attempt(
         items=[(item.sale_item_id, item.qty) for item in payload.items],
         actor_id=user.user_id,
         operation_id=payload.operation_id,
+        reason=payload.reason,
+        comment=payload.comment,
         can_manage_tenant=_can_manage_tenant_shifts(user),
         allowed_branch_ids=user.branch_scope_for("pos.refund"),
         allowed_manage_branch_ids=_shift_manage_branch_scope(user),
     )
+
+
+@router.get(
+    "/sales/{parent_id}/refund-attempts/active",
+    response_model=POSRefundAttemptRead | None,
+)
+async def get_active_pos_refund_attempt(
+    parent_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(
+            require_any_branch_permission(
+                "pos.refund", "pos.refund_external_confirm", policy="resource"
+            )
+        ),
+    ],
+    service: Annotated[POSService, Depends(_service)],
+) -> POSRefundAttemptRead | None:
+    attempt = await service.get_active_refund_attempt(
+        tenant_id=_current_tenant_or_400(user),
+        parent_sale_id=parent_id,
+        allowed_branch_ids=_refund_attempt_branch_scope(user),
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return attempt
 
 
 @router.get(

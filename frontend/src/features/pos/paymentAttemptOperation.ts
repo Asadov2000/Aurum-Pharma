@@ -1,4 +1,4 @@
-import { type PaymentMethod } from "./types";
+import { type PaymentAttempt, type PaymentMethod } from "./types";
 import { generateUuidV4, isUuidV4 } from "./operationId";
 import { readStoredJson, removeStoredValue, writeStoredJson } from "./operationStorage";
 
@@ -52,6 +52,34 @@ export function createPaymentAttemptOperation(
   };
   if (!isOperation(operation, saleId)) return null;
   return writeStoredJson(operationKey(saleId), operation) ? operation : null;
+}
+
+export function saveRecoveredPaymentAttemptOperation(
+  attempt: PaymentAttempt,
+): PendingPaymentAttemptOperation | null {
+  if (
+    !isUuidV4(attempt.operation_id) ||
+    (attempt.payment_method !== "card" && attempt.payment_method !== "qr") ||
+    !AMOUNT_PATTERN.test(attempt.amount) ||
+    Number(attempt.amount) <= 0
+  ) {
+    return null;
+  }
+  const existing = loadPaymentAttemptOperation(attempt.sale_id);
+  if (existing) {
+    return existing.operationId === attempt.operation_id &&
+      existing.paymentMethod === attempt.payment_method &&
+      existing.amount === attempt.amount
+      ? existing
+      : null;
+  }
+  const operation: PendingPaymentAttemptOperation = {
+    operationId: attempt.operation_id,
+    saleId: attempt.sale_id,
+    paymentMethod: attempt.payment_method,
+    amount: attempt.amount,
+  };
+  return writeStoredJson(operationKey(attempt.sale_id), operation) ? operation : null;
 }
 
 export function hasPaymentAttemptOperation(saleId: string): boolean {

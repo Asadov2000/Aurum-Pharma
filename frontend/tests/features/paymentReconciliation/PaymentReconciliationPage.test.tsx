@@ -3,8 +3,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listPaymentReconciliation = vi.fn();
+const listRefundReconciliation = vi.fn();
 const confirmPaymentAttempt = vi.fn();
 const voidPaymentAttempt = vi.fn();
+const authState = {
+  user: { is_developer: false, permissions: ["pos.manage_sales"] as string[] },
+};
+
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => authState,
+}));
 
 vi.mock("@/features/auth/filterPreferences", () => ({
   useFilterPreferenceKey: () => "test:payment-reconciliation",
@@ -12,6 +20,7 @@ vi.mock("@/features/auth/filterPreferences", () => ({
 
 vi.mock("@/features/paymentReconciliation/api", () => ({
   listPaymentReconciliation: (...args: unknown[]) => listPaymentReconciliation(...args),
+  listRefundReconciliation: (...args: unknown[]) => listRefundReconciliation(...args),
 }));
 
 vi.mock("@/features/pos/api", () => ({
@@ -41,6 +50,25 @@ const ITEM = {
   confirmed_at: null,
 };
 
+const REFUND_ITEM = {
+  id: "00000000-0000-4000-8000-000000000010",
+  parent_sale_id: ITEM.sale_id,
+  parent_receipt_number: "01-01-000123",
+  branch_id: ITEM.branch_id,
+  branch_name: ITEM.branch_name,
+  register_id: ITEM.register_id,
+  register_name: ITEM.register_name,
+  requested_by_name: ITEM.cashier_name,
+  total_amount: "59.00",
+  external_amount: "59.00",
+  currency: "TJS" as const,
+  status: "requires_reconciliation" as const,
+  item_count: 2,
+  payment_methods: ["card" as const],
+  created_at: ITEM.created_at,
+  confirmed_at: null,
+};
+
 function response(status = ITEM.status) {
   return {
     items: [{ ...ITEM, status }],
@@ -52,6 +80,24 @@ function response(status = ITEM.status) {
       requires_reconciliation_amount: status === "requires_reconciliation" ? "59.00" : "0.00",
       confirmed_count: status === "confirmed" ? 1 : 0,
       confirmed_amount: status === "confirmed" ? "59.00" : "0.00",
+    },
+    branches: [{ id: ITEM.branch_id, name: ITEM.branch_name }],
+  };
+}
+
+function refundResponse() {
+  return {
+    items: [REFUND_ITEM],
+    total: 1,
+    page: 1,
+    page_size: 25,
+    summary: {
+      pending_count: 0,
+      pending_external_amount: "0.00",
+      requires_reconciliation_count: 1,
+      requires_reconciliation_external_amount: "59.00",
+      confirmed_count: 0,
+      confirmed_external_amount: "0.00",
     },
     branches: [{ id: ITEM.branch_id, name: ITEM.branch_name }],
   };
@@ -71,8 +117,11 @@ function renderPage() {
 describe("PaymentReconciliationPage", () => {
   beforeEach(() => {
     localStorage.clear();
+    authState.user.permissions = ["pos.manage_sales"];
     listPaymentReconciliation.mockReset();
     listPaymentReconciliation.mockResolvedValue(response());
+    listRefundReconciliation.mockReset();
+    listRefundReconciliation.mockResolvedValue(refundResponse());
     confirmPaymentAttempt.mockReset();
     confirmPaymentAttempt.mockResolvedValue({ ...ITEM, status: "confirmed" });
     voidPaymentAttempt.mockReset();
@@ -140,5 +189,18 @@ describe("PaymentReconciliationPage", () => {
       operator_note: "Операции нет в журнале",
     });
     expect(confirmPaymentAttempt).not.toHaveBeenCalled();
+  });
+
+  it("shows unresolved refunds to a refund reviewer without exposing payment review", async () => {
+    authState.user.permissions = ["pos.refund_external_confirm", "pos.refund", "sales.view.own"];
+
+    renderPage();
+
+    expect(await screen.findByText("Чек № 01-01-000123")).toBeInTheDocument();
+    expect(screen.getAllByText("Нужна сверка").length).toBeGreaterThan(0);
+    expect(screen.getByText("Возврат не начат")).toBeInTheDocument();
+    expect(listRefundReconciliation).toHaveBeenCalledTimes(1);
+    expect(listPaymentReconciliation).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Оплаты" })).not.toBeInTheDocument();
   });
 });

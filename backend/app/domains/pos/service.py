@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import date, datetime, timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import Any
@@ -59,7 +59,12 @@ from app.domains.pos.models import (
     Shift,
 )
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
-from app.domains.pos.repository import FavoriteCatalogRow, PaymentReconciliationRow, POSRepository
+from app.domains.pos.repository import (
+    FavoriteCatalogRow,
+    PaymentReconciliationRow,
+    POSRepository,
+    RefundReconciliationRow,
+)
 from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.schemas import (
     PAYMENT_METHODS,
@@ -354,6 +359,32 @@ class POSService:
         )
         return attempt
 
+    async def get_active_payment_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+        actor_id: UUID,
+        can_manage_tenant: bool = False,
+        allowed_branch_ids: set[UUID] | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+    ) -> POSPaymentAttempt | None:
+        attempt = await self.repo.get_active_payment_attempt_for_sale(
+            tenant_id=tenant_id,
+            sale_id=sale_id,
+        )
+        if attempt is None:
+            return None
+        await self._assert_payment_attempt_access(
+            attempt,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            can_manage_tenant=can_manage_tenant,
+            allowed_branch_ids=allowed_branch_ids,
+            allowed_manage_branch_ids=allowed_manage_branch_ids,
+        )
+        return attempt
+
     async def list_payment_reconciliation(
         self,
         *,
@@ -600,17 +631,36 @@ class POSService:
         *,
         parent_sale_id: UUID,
         items: dict[UUID, Decimal],
+        reason: str | None,
+        comment: str | None,
+        intent_version: int = 2,
     ) -> str:
-        return canonical_json_hash(
-            {
-                "kind": "pos_refund_attempt_v1",
-                "parent_sale_id": str(parent_sale_id),
-                "items": [
-                    [str(item_id), format(qty.normalize(), "f")]
-                    for item_id, qty in sorted(items.items(), key=lambda pair: str(pair[0]))
-                ],
-            }
-        )
+        payload: dict[str, object] = {
+            "kind": f"pos_refund_attempt_v{intent_version}",
+            "parent_sale_id": str(parent_sale_id),
+            "items": [
+                [str(item_id), format(qty.normalize(), "f")]
+                for item_id, qty in sorted(items.items(), key=lambda pair: str(pair[0]))
+            ],
+        }
+        if intent_version >= 2:
+            payload.update({"reason": reason, "comment": comment})
+        return canonical_json_hash(payload)
+
+    @staticmethod
+    def _normalize_refund_intent(
+        reason: str | None,
+        comment: str | None,
+    ) -> tuple[str | None, str | None]:
+        normalized_reason = reason.strip() if reason is not None else None
+        normalized_comment = comment.strip() if comment is not None else None
+        normalized_reason = normalized_reason or None
+        normalized_comment = normalized_comment or None
+        if normalized_reason is not None and normalized_reason not in REFUND_REASON_CODES:
+            raise BusinessRuleError("Unsupported refund reason code")
+        if normalized_comment is not None and len(normalized_comment) > 500:
+            raise BusinessRuleError("Refund comment is too long")
+        return normalized_reason, normalized_comment
 
     @staticmethod
     def _refund_attempt_items_json(
@@ -761,6 +811,9 @@ class POSService:
             confirmed_by_user_id=attempt.confirmed_by_user_id,
             operation_id=attempt.operation_id,
             items=[RefundItem.model_validate(item) for item in attempt.items_json],
+            intent_locked=attempt.intent_version >= 2,
+            reason=attempt.reason_code,
+            comment=attempt.comment,
             payments=payments,
             total_amount=attempt.total_amount,
             external_amount=attempt.external_amount,
@@ -836,14 +889,19 @@ class POSService:
         items: list[tuple[UUID, Decimal]],
         actor_id: UUID,
         operation_id: UUID,
+        reason: str | None = None,
+        comment: str | None = None,
         can_manage_tenant: bool = False,
         allowed_branch_ids: set[UUID] | None = None,
         allowed_manage_branch_ids: set[UUID] | None = None,
     ) -> POSRefundAttemptRead:
         per_item = self._aggregate_refund_items(items)
+        normalized_reason, normalized_comment = self._normalize_refund_intent(reason, comment)
         operation_hash = self._refund_attempt_operation_hash(
             parent_sale_id=parent_sale_id,
             items=per_item,
+            reason=normalized_reason,
+            comment=normalized_comment,
         )
         await self.repo.lock_operation_id(tenant_id=tenant_id, operation_id=operation_id)
         existing = await self.repo.get_refund_attempt_by_operation_id(
@@ -856,7 +914,16 @@ class POSService:
                 tenant_id=tenant_id,
                 allowed_branch_ids=allowed_branch_ids,
             )
-            if existing.operation_hash != operation_hash:
+            expected_hash = operation_hash
+            if existing.intent_version == 1:
+                expected_hash = self._refund_attempt_operation_hash(
+                    parent_sale_id=parent_sale_id,
+                    items=per_item,
+                    reason=None,
+                    comment=None,
+                    intent_version=1,
+                )
+            if existing.operation_hash != expected_hash:
                 raise ConflictError("Operation ID was already used for another refund attempt")
             return await self._refund_attempt_read(existing)
         if await self.repo.get_pos_operation_kinds(
@@ -897,6 +964,9 @@ class POSService:
             operation_hash=operation_hash,
             items_json=self._refund_attempt_items_json(per_item),
             external_allocations_json=external_allocations,
+            intent_version=2,
+            reason_code=normalized_reason,
+            comment=normalized_comment,
             total_amount=refund_total,
             external_amount=sum(
                 (Decimal(item["amount"]) for item in external_allocations),
@@ -918,6 +988,54 @@ class POSService:
         attempt = await self.repo.get_refund_attempt(attempt_id)
         if attempt is None:
             raise NotFoundError("Refund attempt not found")
+        await self._assert_refund_attempt_access(
+            attempt,
+            tenant_id=tenant_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        return await self._refund_attempt_read(attempt)
+
+    async def list_refund_reconciliation(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_ids: set[UUID] | None,
+        branch_id: UUID | None,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[
+        list[RefundReconciliationRow],
+        int,
+        dict[str, tuple[int, Decimal]],
+        list[tuple[UUID, str]],
+    ]:
+        if branch_ids == set():
+            raise PermissionDeniedError("Branch access denied")
+        if branch_id is not None and branch_ids is not None and branch_id not in branch_ids:
+            raise PermissionDeniedError("Branch access denied")
+        return await self.repo.list_refund_reconciliation(
+            tenant_id=tenant_id,
+            branch_ids=branch_ids,
+            branch_id=branch_id,
+            status=status,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def get_active_refund_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        parent_sale_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> POSRefundAttemptRead | None:
+        attempt = await self.repo.get_active_refund_attempt_for_sale(
+            tenant_id=tenant_id,
+            parent_sale_id=parent_sale_id,
+        )
+        if attempt is None:
+            return None
         await self._assert_refund_attempt_access(
             attempt,
             tenant_id=tenant_id,
@@ -3769,9 +3887,12 @@ class POSService:
         parent_sale_id: UUID,
         items: dict[UUID, Decimal],
         refund_attempt_id: UUID | None,
+        reason: str | None,
+        comment: str | None,
+        version: int = 4,
     ) -> str:
         payload = {
-            "kind": "refund_financial_command_v3",
+            "kind": f"refund_financial_command_v{version}",
             "parent_sale_id": str(parent_sale_id),
             "items": [
                 [str(item_id), format(qty.normalize(), "f")]
@@ -3781,6 +3902,8 @@ class POSService:
                 str(refund_attempt_id) if refund_attempt_id is not None else None
             ),
         }
+        if version >= 4:
+            payload.update({"reason": reason, "comment": comment})
         canonical = json.dumps(
             payload,
             ensure_ascii=False,
@@ -3871,7 +3994,7 @@ class POSService:
         *,
         parent: Sale,
         operation_id: UUID,
-        operation_hash: str,
+        operation_hashes: Collection[str],
     ) -> Sale | None:
         operation_kinds = await self.repo.get_pos_operation_kinds(
             tenant_id=parent.tenant_id,
@@ -3895,7 +4018,7 @@ class POSService:
         if (
             existing.sale_type != "return"
             or existing.parent_sale_id != parent.id
-            or existing.operation_hash != operation_hash
+            or existing.operation_hash not in operation_hashes
         ):
             raise ConflictError("Operation ID was already used for another refund")
         if outbox_event is None:
@@ -4296,6 +4419,18 @@ class POSService:
             raise BusinessRuleError("Resolve the electronic refund attempt before a cash refund")
         return (*financials, attempt)
 
+    @staticmethod
+    def _assert_refund_intent_matches_attempt(
+        attempt: POSRefundAttempt | None,
+        *,
+        reason: str | None,
+        comment: str | None,
+    ) -> None:
+        if attempt is None or attempt.intent_version < 2:
+            return
+        if attempt.reason_code != reason or attempt.comment != comment:
+            raise ConflictError("Refund details do not match the confirmed refund attempt")
+
     async def refund(
         self,
         *,
@@ -4320,17 +4455,22 @@ class POSService:
         derived from completed linked return documents.
         """
         per_item = self._aggregate_refund_items(items)
-        normalized_reason = reason.strip() if reason is not None else None
-        normalized_comment = comment.strip() if comment is not None else None
-        normalized_reason = normalized_reason or None
-        normalized_comment = normalized_comment or None
-        if normalized_reason is not None and normalized_reason not in REFUND_REASON_CODES:
-            raise BusinessRuleError("Unsupported refund reason code")
+        normalized_reason, normalized_comment = self._normalize_refund_intent(reason, comment)
         effective_operation_id = operation_id or uuid4()
         operation_hash = self._refund_operation_hash(
             parent_sale_id=parent_sale_id,
             items=per_item,
             refund_attempt_id=refund_attempt_id,
+            reason=normalized_reason,
+            comment=normalized_comment,
+        )
+        legacy_operation_hash = self._refund_operation_hash(
+            parent_sale_id=parent_sale_id,
+            items=per_item,
+            refund_attempt_id=refund_attempt_id,
+            reason=None,
+            comment=None,
+            version=3,
         )
         visible_parent = await self.repo.get_sale(parent_sale_id)
         if visible_parent is None:
@@ -4344,7 +4484,7 @@ class POSService:
         existing = await self._find_existing_refund(
             parent=parent,
             operation_id=effective_operation_id,
-            operation_hash=operation_hash,
+            operation_hashes=(operation_hash, legacy_operation_hash),
         )
         if existing is not None:
             return existing
@@ -4383,6 +4523,11 @@ class POSService:
             parent=parent,
             per_item=per_item,
             refund_attempt_id=refund_attempt_id,
+        )
+        self._assert_refund_intent_matches_attempt(
+            active_refund_attempt,
+            reason=normalized_reason,
+            comment=normalized_comment,
         )
 
         # The original shift may be closed days ago. Book the refund in the

@@ -18,6 +18,9 @@ const SERVER_ATTEMPT: RefundAttempt = {
   confirmed_by_user_id: null,
   operation_id: "11111111-1111-4111-8111-111111111111",
   items: [{ sale_item_id: "item-1", qty: "1" }],
+  intent_locked: true,
+  reason: "quality_issue",
+  comment: "Упаковка повреждена",
   payments: [],
   total_amount: "10.00",
   external_amount: "10.00",
@@ -34,7 +37,7 @@ const SERVER_ATTEMPT: RefundAttempt = {
 describe("pending refund operation", () => {
   beforeEach(() => window.localStorage.clear());
 
-  it("persists one UUIDv4 marker without refund or customer details", () => {
+  it("persists only opaque technical recovery data", () => {
     const operation = createPendingRefundOperation(
       "sale-1",
       [{ sale_item_id: "item-1", qty: "1.000" }],
@@ -56,9 +59,9 @@ describe("pending refund operation", () => {
     expect(
       JSON.parse(window.localStorage.getItem(pendingRefundOperationKey("sale-1")) ?? "{}"),
     ).toEqual(operation);
-    const serialized = JSON.stringify(operation);
-    expect(serialized).not.toContain("reason");
-    expect(serialized).not.toContain("comment");
+    expect(window.localStorage.getItem(pendingRefundOperationKey("sale-1"))).not.toContain(
+      "Упаковка повреждена",
+    );
   });
 
   it("clears only the matching operation", () => {
@@ -85,6 +88,9 @@ describe("pending refund operation", () => {
       parentSaleId: SERVER_ATTEMPT.parent_sale_id,
       items: SERVER_ATTEMPT.items,
     });
+    expect(window.localStorage.getItem(pendingRefundOperationKey("sale-1"))).not.toContain(
+      "Упаковка повреждена",
+    );
     expect(recovered?.operationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );

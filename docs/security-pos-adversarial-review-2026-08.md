@@ -1,11 +1,12 @@
 # Adversarial review: POS, payments, receipts and refunds
 
 Date: 2026-08-29
-Last updated: 2026-08-30
+Last updated: 2026-09-04
 Scope: seller and pharmacy-owner flows from sale creation through payment,
 receipt, refund and shift close.
-Method: read-only code and test review against the current `main`; the shared
-development database was not changed.
+Method: code, migration and test review on the hardening branch. Migrations and
+E2E flows were exercised only in disposable databases; the shared development
+database was not reset or recreated.
 
 ## Executive summary
 
@@ -16,9 +17,9 @@ money retries. No critical RLS bypass or direct mutation of completed sales was
 found.
 
 The server-side business-safety gaps AP-POS-001 through AP-POS-006 are now
-covered by implementation and regression tests. AP-POS-003 still needs an
-owner-facing reconciliation queue so unresolved operations are operationally
-visible without opening an individual sale. AP-POS-007 remains a separate Edge
+covered by implementation and regression tests. Owners have one reconciliation
+workspace for unresolved electronic payments and refunds, without allowing a
+cashier to decide an uncertain money outcome. AP-POS-007 remains a separate Edge
 release milestone, not a small web-POS patch.
 
 ## Findings
@@ -103,7 +104,7 @@ different tenants may legitimately reuse the same provider reference.
 
 Severity: High
 Affected roles: seller, pharmacy owner
-Status: Core safety invariant resolved; owner reconciliation queue pending.
+Status: Resolved, including the owner reconciliation queue.
 
 Evidence:
 
@@ -131,8 +132,8 @@ empty draft but active attempt, and the checkout-versus-close race.
 Resolution: active attempts lock amount-changing draft operations and prevent
 shift close. A deterministic PostgreSQL race test proves that checkout and
 shift close leave one consistent order with no duplicate sale, stock movement
-or outbox event. The remaining work is the owner-facing queue, not an accounting
-or authorization bypass.
+or outbox event. The owner-facing queue shows pending, uncertain and confirmed
+electronic payment/refund attempts and opens the linked receipt for recovery.
 
 ### AP-POS-004 - Customer returns immediately increase sellable stock
 
@@ -212,8 +213,11 @@ snapshots, and make browser/PDF return receipts explicitly say "Возврат",
 
 Resolution: the API and database enforce controlled reason codes; payment and
 audit metadata carry the code without the service comment, while the restricted
-quarantine record keeps that optional comment. Browser and PDF receipts
-identify the original receipt and use refund-specific totals and footer text.
+quarantine record keeps that optional comment. For new electronic attempts the
+server also binds the selected items, reason code and comment to one immutable
+refund intent. A browser reload or lost local storage restores that intent from
+the server instead of silently changing it. Browser and PDF receipts identify
+the original receipt and use refund-specific totals and footer text.
 
 ### AP-POS-007 - Offline cash core is not yet an executable branch runtime
 
@@ -242,13 +246,22 @@ and one audit trail after synchronization.
 - exact mixed-payment allocation and rejection of unsupported methods;
 - consumed payment attempts cannot be reused or voided;
 - electronic refund attempts require terminal references and cannot reuse a
-  terminal document for another sale.
+  terminal document for another refund;
+- one terminal document cannot be reused across payment and refund attempt
+  tables, including concurrent requests;
+- new refund attempts bind items, reason and comment to a recoverable
+  server-side intent;
+- an active electronic payment is rediscovered from the server when its local
+  browser marker is lost, so the cashier does not repeat the terminal charge;
+- refund comments and reason codes are not persisted in browser storage;
+- owner reconciliation lists unresolved electronic payments and refunds while
+  cashier navigation remains permission-scoped and refund reviewers receive
+  the page only when they also have the permissions needed to finish the flow.
 
 ## Implementation order
 
-1. Owner reconciliation queue for unresolved payment attempts.
-2. Separate Branch Edge executable milestone: AP-POS-007.
-3. Bank/provider sandbox integration after contracts are available.
+1. Separate Branch Edge executable milestone: AP-POS-007.
+2. Bank/provider sandbox integration after contracts are available.
 
 ## Regression matrix
 
@@ -256,10 +269,18 @@ and one audit trail after synchronization.
 | --- | --- |
 | Cashier discards an uncertain electronic payment | Backend permission denial and frontend action-hiding test |
 | One terminal document confirms two sales | Sequential and concurrent same-tenant uniqueness tests |
+| One terminal document is reused for a sale and a refund | Database trigger tests in both directions and concurrent service tests |
 | Provider references overlap between pharmacies | Cross-tenant reuse test |
 | Checkout races with payment void | PostgreSQL barrier test: checkout wins, attempt is consumed once |
 | Checkout races with shift close | PostgreSQL barrier test with consistent totals, stock and outbox |
 | Checkout response and first lookup are lost | Browser reload recovery with the original operation ID and no second checkout POST |
+| Refund local state is lost after terminal work started | Browser reload restores the server-bound intent and never creates a second terminal operation |
+
+Current verification baseline: 1,012 backend tests, 695 frontend unit tests and
+all 66 E2E scenarios pass in complete isolated runs. Migration `0132` also
+passes a disposable-database `upgrade -> downgrade -> upgrade` cycle.
+Production frontend build, Ruff, Black, mypy, TypeScript typecheck and ESLint
+also pass.
 
 Each package must pass targeted tests first, then full backend pytest, full
 Vitest and the sale/refund/shift Playwright flows in a disposable environment.

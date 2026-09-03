@@ -27,6 +27,7 @@ import {
   beginRefundAttemptReconciliation,
   confirmRefundAttempt,
   createRefundAttempt,
+  getActiveRefundAttempt,
   getRefundAttempt,
   getRefundResult,
   voidRefundAttempt,
@@ -142,9 +143,9 @@ export function RefundModal({
   const reasonMode = settings.data?.refund_reason_mode;
   const [topError, setTopError] = useState<string | null>(null);
   const [topMessageTone, setTopMessageTone] = useState<"danger" | "warning" | "info">("danger");
+  const [initialPendingOperation] = useState(() => loadPendingRefundOperation(sale.id));
   const [reason, setReason] = useState<RefundReasonCode | "">("");
   const [comment, setComment] = useState("");
-  const [initialPendingOperation] = useState(() => loadPendingRefundOperation(sale.id));
   const [refundAttempt, setRefundAttempt] = useState<RefundAttempt | null>(null);
   const [terminalReferences, setTerminalReferences] = useState<TerminalReferences>({});
   const [reconciling, setReconciling] = useState(false);
@@ -218,6 +219,10 @@ export function RefundModal({
   const applyRefundAttempt = useCallback((attempt: RefundAttempt) => {
     setRefundAttempt(attempt);
     setTerminalReferences(referencesFromAttempt(attempt));
+    if (attempt.intent_locked) {
+      setReason(attempt.reason ?? "");
+      setComment(attempt.comment ?? "");
+    }
   }, []);
 
   const restoreRefundAttempt = useCallback(
@@ -225,13 +230,31 @@ export function RefundModal({
       if (!operation.refundAttemptOperationId) return true;
       setAttemptBusy(true);
       try {
-        let attempt = operation.refundAttemptId
-          ? await getRefundAttempt(operation.refundAttemptId)
-          : await createRefundAttempt(
-              operation.parentSaleId,
-              operation.refundAttemptOperationId,
-              operation.items,
+        let attempt: RefundAttempt;
+        if (operation.refundAttemptId) {
+          attempt = await getRefundAttempt(operation.refundAttemptId);
+        } else {
+          const discovered = await getActiveRefundAttempt(operation.parentSaleId);
+          if (!discovered) {
+            clearPendingRefundOperation(operation.parentSaleId, operation.operationId);
+            pendingOperationRef.current = null;
+            setFinancialOperationPending(false);
+            setRecoveryBlocked(false);
+            setTopMessageTone("info");
+            setTopError(
+              "Сервер не получил прежнюю заявку. Проверьте выбранные позиции и введите причину возврата заново.",
             );
+            return true;
+          }
+          if (discovered.operation_id !== operation.refundAttemptOperationId) {
+            setRecoveryBlocked(true);
+            setTopError(
+              "Найдена другая активная заявка возврата. Не повторяйте денежную операцию и обратитесь к администратору.",
+            );
+            return false;
+          }
+          attempt = discovered;
+        }
         if (!sameRefundItems(attempt.items, operation.items)) {
           setRecoveryBlocked(true);
           setTopError(
@@ -552,6 +575,8 @@ export function RefundModal({
           sale.id,
           operation.refundAttemptOperationId,
           operation.items,
+          reason || null,
+          comment.trim() || null,
         );
         const updated = persistAttempt(operation, created);
         if (!updated) return;
@@ -599,8 +624,8 @@ export function RefundModal({
         payload: {
           operation_id: operation.operationId,
           items: operation.items,
-          reason: reason || null,
-          comment: comment.trim() || null,
+          reason: activeAttempt?.intent_locked ? activeAttempt.reason : reason || null,
+          comment: activeAttempt?.intent_locked ? activeAttempt.comment : comment.trim() || null,
           refund_attempt_id: activeAttempt?.id ?? null,
         },
       });
@@ -757,6 +782,7 @@ export function RefundModal({
               <Select
                 id="refund_reason"
                 value={reason}
+                disabled={refundAttempt?.intent_locked === true}
                 onChange={(event) => setReason(event.target.value as RefundReasonCode | "")}
               >
                 <option value="">Не выбрана</option>
@@ -776,6 +802,7 @@ export function RefundModal({
                 rows={1}
                 value={comment}
                 maxLength={500}
+                disabled={refundAttempt?.intent_locked === true}
                 onChange={(event) => setComment(event.target.value)}
                 placeholder="Только служебное пояснение, без ФИО, телефона и данных покупателя"
               />

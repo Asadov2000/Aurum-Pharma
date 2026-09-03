@@ -347,7 +347,7 @@ test.describe("POS sale (owner)", () => {
       });
       await saleDialog.getByRole("button", { name: "Оформить возврат" }).click();
 
-      const refundDialog = page.getByRole("dialog", {
+      let refundDialog = page.getByRole("dialog", {
         name: `Возврат по чеку № ${completedSale.receipt_number}`,
       });
       await refundDialog.getByRole("checkbox").first().check();
@@ -377,6 +377,44 @@ test.describe("POS sale (owner)", () => {
       expect(((await reconciledRefundAttemptResponse.json()) as { status: string }).status).toBe(
         "requires_reconciliation",
       );
+
+      await page.evaluate(
+        (saleId) => window.localStorage.removeItem(`sales:pendingRefund:${saleId}`),
+        completedSale.sale_id,
+      );
+      await page.reload();
+      const recoveredSalesResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET" &&
+          url.pathname.endsWith("/api/v1/sales") &&
+          url.searchParams.get("receipt_number") === completedSale.receipt_number
+        );
+      });
+      await page.getByLabel("№ чека").fill(completedSale.receipt_number);
+      const recoveredSales = (await (await recoveredSalesResponse).json()) as {
+        items: { id: string }[];
+      };
+      const recoveredSaleIndex = recoveredSales.items.findIndex(
+        (sale) => sale.id === completedSale.sale_id,
+      );
+      expect(recoveredSaleIndex).toBeGreaterThanOrEqual(0);
+      await page
+        .getByRole("button", { name: `Открыть чек № ${completedSale.receipt_number}` })
+        .nth(recoveredSaleIndex)
+        .click();
+      await page
+        .getByRole("dialog", { name: `Чек № ${completedSale.receipt_number}` })
+        .getByRole("button", { name: "Оформить возврат" })
+        .click();
+      refundDialog = page.getByRole("dialog", {
+        name: `Возврат по чеку № ${completedSale.receipt_number}`,
+      });
+      await expect(
+        refundDialog.getByText(
+          "Найдена заявка, требующая сверки. Не повторяйте возврат во внешнем терминале; проверьте его документ.",
+        ),
+      ).toBeVisible();
 
       const refundDocument = `E2E-REFUND-${Date.now()}`;
       await refundDialog.getByLabel("Терминал").fill("E2E-TERM-01");

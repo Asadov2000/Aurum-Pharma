@@ -23,7 +23,7 @@ test.describe("Auth", () => {
     await page.getByLabel("Код подтверждения").fill(currentTotp(DEV.totpSecret!));
     await page.getByRole("button", { name: "Подтвердить" }).click();
 
-    await expect(page.getByRole("link", { name: "Центр управления" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Управление", exact: true })).toBeVisible();
   });
 
   test("owner completes MFA in the UI and keeps tenant access", async ({ page }) => {
@@ -39,7 +39,7 @@ test.describe("Auth", () => {
     await page.getByRole("button", { name: "Подтвердить" }).click();
 
     await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Центр управления" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Управление", exact: true })).toHaveCount(0);
   });
 
   test("retries a protected request after global MFA step-up", async ({ page }) => {
@@ -52,7 +52,7 @@ test.describe("Auth", () => {
     );
     await page.goto("/audit");
     await deniedRequest;
-    await expect(page.getByRole("link", { name: "Центр управления" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Управление", exact: true })).toBeVisible();
     await expect(page.locator("#scope")).toHaveValue("global");
 
     const dialog = page.getByRole("dialog", { name: "Подтверждение действия" });
@@ -74,7 +74,7 @@ test.describe("Auth", () => {
 
     await expect(page.getByRole("link", { name: "Точки" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Центр управления" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Управление", exact: true })).toHaveCount(0);
   });
 
   test("owner reviews and revokes other active sessions", async ({ page }) => {

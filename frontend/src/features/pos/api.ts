@@ -39,6 +39,11 @@ export async function createPaymentAttempt(
   return data;
 }
 
+export async function getActivePaymentAttempt(saleId: string): Promise<PaymentAttempt | null> {
+  const { data } = await api.get<PaymentAttempt | null>(`/sales/${saleId}/payment-attempts/active`);
+  return data;
+}
+
 export async function confirmPaymentAttempt(
   attemptId: string,
   payload: PaymentAttemptConfirmPayload,
