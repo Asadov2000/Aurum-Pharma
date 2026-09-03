@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
@@ -106,6 +106,54 @@ async def test_personal_favorites_are_idempotent_ordered_and_include_branch_stoc
     )
     assert [row.favorite.id for row in rows] == [first.id]
     assert rows[0].catalog.is_active is False
+
+
+async def test_personal_favorite_stock_excludes_unsellable_batches(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    scaffold = await pos_scaffold()
+    service = POSService(
+        POSRepository(db_session),
+        now=lambda: datetime(2026, 4, 30, 20, 30, tzinfo=UTC),
+    )
+    await service.add_favorite(
+        tenant_id=scaffold["tenant"].id,
+        user_id=scaffold["cashier"].id,
+        catalog_id=scaffold["item"].id,
+    )
+
+    scaffold["batch"].expires_at = date(2026, 5, 1)
+    await db_session.flush()
+    rows = await service.list_favorites(
+        tenant_id=scaffold["tenant"].id,
+        user_id=scaffold["cashier"].id,
+        branch_id=scaffold["branch"].id,
+        allowed_branch_ids=None,
+    )
+    assert rows[0].stock_available == 0
+
+    scaffold["batch"].expires_at = date(2026, 6, 1)
+    scaffold["batch"].is_blocked = True
+    await db_session.flush()
+    rows = await service.list_favorites(
+        tenant_id=scaffold["tenant"].id,
+        user_id=scaffold["cashier"].id,
+        branch_id=scaffold["branch"].id,
+        allowed_branch_ids=None,
+    )
+    assert rows[0].stock_available == 0
+
+    scaffold["batch"].is_blocked = False
+    scaffold["batch"].qty_remaining = 0
+    await db_session.flush()
+    rows = await service.list_favorites(
+        tenant_id=scaffold["tenant"].id,
+        user_id=scaffold["cashier"].id,
+        branch_id=scaffold["branch"].id,
+        allowed_branch_ids=None,
+    )
+    assert rows[0].stock_available == 0
 
 
 async def test_favorites_are_isolated_by_user_tenant_and_branch_scope(

@@ -26,6 +26,50 @@ from app.domains.suppliers.models import Supplier
 Scaffold = Callable[[], Awaitable[tuple[Tenant, Branch, TenantCatalog, Supplier]]]
 
 
+async def _create_populated_draft(
+    db_session: AsyncSession,
+    *,
+    tenant: Tenant,
+    branch: Branch,
+    item: TenantCatalog,
+    supplier: Supplier,
+) -> tuple[IncomingService, IncomingDocument]:
+    service = IncomingService(IncomingRepository(db_session))
+    doc = await service.create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+        },
+    )
+    await service.add_item(
+        doc.id,
+        fields={
+            "catalog_id": item.id,
+            "expires_at": date.today() + timedelta(days=365),
+            "qty": Decimal("1"),
+            "purchase_price": Decimal("5.00"),
+            "sale_price": Decimal("8.00"),
+        },
+    )
+    return service, doc
+
+
+async def _assert_acceptance_created_no_batches(
+    db_session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    doc: IncomingDocument,
+) -> None:
+    await db_session.refresh(doc)
+    assert doc.status == "draft"
+    batches = (
+        await db_session.execute(select(Batch).where(Batch.tenant_id == tenant_id))
+    ).scalars()
+    assert batches.all() == []
+
+
 async def test_create_incoming_draft(db_session: AsyncSession, scaffold) -> None:
     tenant, branch, _item, supplier = await scaffold()
     service = IncomingService(IncomingRepository(db_session))
@@ -316,24 +360,12 @@ async def test_supplier_deactivated_after_draft_blocks_acceptance(
     db_session: AsyncSession, scaffold: Scaffold
 ) -> None:
     tenant, branch, item, supplier = await scaffold()
-    service = IncomingService(IncomingRepository(db_session))
-    doc = await service.create_document(
-        tenant_id=tenant.id,
-        fields={
-            "branch_id": branch.id,
-            "supplier_id": supplier.id,
-            "document_date": date.today(),
-        },
-    )
-    await service.add_item(
-        doc.id,
-        fields={
-            "catalog_id": item.id,
-            "expires_at": date.today() + timedelta(days=365),
-            "qty": Decimal("1"),
-            "purchase_price": Decimal("5.00"),
-            "sale_price": Decimal("8.00"),
-        },
+    service, doc = await _create_populated_draft(
+        db_session,
+        tenant=tenant,
+        branch=branch,
+        item=item,
+        supplier=supplier,
     )
     supplier.is_active = False
     await db_session.flush()
@@ -341,10 +373,54 @@ async def test_supplier_deactivated_after_draft_blocks_acceptance(
     with pytest.raises(ConflictError, match="unavailable for new incoming"):
         await service.accept(doc.id)
 
-    batches = (
-        await db_session.execute(select(Batch).where(Batch.tenant_id == tenant.id))
-    ).scalars()
-    assert batches.all() == []
+    await _assert_acceptance_created_no_batches(db_session, tenant_id=tenant.id, doc=doc)
+
+
+async def test_branch_deactivated_after_draft_blocks_acceptance(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    service, doc = await _create_populated_draft(
+        db_session,
+        tenant=tenant,
+        branch=branch,
+        item=item,
+        supplier=supplier,
+    )
+    branch.is_active = False
+    await db_session.flush()
+
+    with pytest.raises(BusinessRuleError, match="Branch is inactive"):
+        await service.accept(doc.id)
+
+    await _assert_acceptance_created_no_batches(db_session, tenant_id=tenant.id, doc=doc)
+
+
+@pytest.mark.parametrize("catalog_state", ["inactive", "archived"])
+async def test_catalog_item_unavailable_after_draft_blocks_acceptance(
+    db_session: AsyncSession,
+    scaffold: Scaffold,
+    catalog_state: str,
+) -> None:
+    tenant, branch, item, supplier = await scaffold()
+    service, doc = await _create_populated_draft(
+        db_session,
+        tenant=tenant,
+        branch=branch,
+        item=item,
+        supplier=supplier,
+    )
+    if catalog_state == "inactive":
+        item.is_active = False
+    else:
+        item.deleted_at = datetime.now(UTC)
+    await db_session.flush()
+
+    with pytest.raises(ConflictError, match="Catalog item is unavailable") as exc_info:
+        await service.accept(doc.id)
+
+    assert exc_info.value.details == {"catalog_id": str(item.id)}
+    await _assert_acceptance_created_no_batches(db_session, tenant_id=tenant.id, doc=doc)
 
 
 async def test_add_items_recomputes_total(db_session: AsyncSession, scaffold) -> None:

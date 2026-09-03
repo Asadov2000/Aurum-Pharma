@@ -114,6 +114,7 @@ class POSRepository:
         tenant_id: UUID,
         user_id: UUID,
         branch_id: UUID,
+        today: date,
     ) -> list[FavoriteCatalogRow]:
         stock = (
             select(
@@ -121,8 +122,11 @@ class POSRepository:
                 func.coalesce(func.sum(Batch.qty_remaining), 0).label("stock_available"),
             )
             .where(
+                Batch.tenant_id == tenant_id,
                 Batch.branch_id == branch_id,
+                Batch.qty_remaining > 0,
                 Batch.is_blocked.is_(False),
+                Batch.expires_at > today,
             )
             .group_by(Batch.catalog_id)
             .subquery()

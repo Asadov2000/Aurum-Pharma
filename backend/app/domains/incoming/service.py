@@ -316,14 +316,10 @@ class IncomingService:
         if doc.status == "accepted":
             return doc
         self._assert_draft(doc)
-        await self._assert_document_refs_in_tenant(
-            tenant_id=doc.tenant_id,
-            branch_id=None,
-            supplier_id=doc.supplier_id,
-        )
         items = await self.repo.list_items(document_id)
         if not items:
             raise BusinessRuleError("Cannot accept a document with no items")
+        await self._assert_acceptance_refs_available(doc=doc, items=items)
         settings = await FoundationRepository(self.repo.session).get_settings(doc.tenant_id)
         timezone_name = settings.report_timezone if settings is not None else "Asia/Dushanbe"
         try:
@@ -502,6 +498,38 @@ class IncomingService:
         item = await self.repo.session.get(TenantCatalog, catalog_id)
         if item is None or item.tenant_id != tenant_id:
             raise NotFoundError("Catalog item not found")
+
+    async def _assert_acceptance_refs_available(
+        self,
+        *,
+        doc: IncomingDocument,
+        items: list[IncomingItem],
+    ) -> None:
+        branch, supplier, catalog_items = await self.repo.get_acceptance_references_for_update(
+            tenant_id=doc.tenant_id,
+            branch_id=doc.branch_id,
+            supplier_id=doc.supplier_id,
+            catalog_ids={item.catalog_id for item in items},
+        )
+        if branch is None:
+            raise NotFoundError("Branch not found")
+        if not branch.is_active:
+            raise BusinessRuleError("Branch is inactive")
+        if supplier is None:
+            raise NotFoundError("Supplier not found")
+        if not supplier.is_active:
+            raise ConflictError("Supplier is unavailable for new incoming documents")
+
+        catalog_by_id = {item.id: item for item in catalog_items}
+        for incoming_item in items:
+            catalog_item = catalog_by_id.get(incoming_item.catalog_id)
+            if catalog_item is None:
+                raise NotFoundError("Catalog item not found")
+            if not catalog_item.is_active or catalog_item.deleted_at is not None:
+                raise ConflictError(
+                    "Catalog item is unavailable for incoming documents",
+                    details={"catalog_id": str(incoming_item.catalog_id)},
+                )
 
     async def _recompute_total(self, doc: IncomingDocument) -> None:
         total = await self.repo.total_amount(doc.id)

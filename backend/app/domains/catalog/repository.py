@@ -41,7 +41,12 @@ class CatalogRepository:
             yield
 
     async def stock_by_catalog(
-        self, *, branch_id: UUID, catalog_ids: list[UUID]
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        catalog_ids: list[UUID],
+        today: date,
     ) -> dict[UUID, Decimal]:
         """Available stock per catalog item at one branch, in a single grouped,
         sargable query (filters on indexed columns, no functions, no N+1).
@@ -51,15 +56,19 @@ class CatalogRepository:
         stmt = (
             select(Batch.catalog_id, func.coalesce(func.sum(Batch.qty_remaining), 0))
             .where(
+                Batch.tenant_id == tenant_id,
                 Batch.branch_id == branch_id,
+                Batch.qty_remaining > 0,
                 Batch.is_blocked.is_(False),
-                Batch.expires_at > date.today(),
+                Batch.expires_at > today,
                 Batch.catalog_id.in_(catalog_ids),
             )
             .group_by(Batch.catalog_id)
         )
         rows = (await self.session.execute(stmt)).all()
-        return {cid: Decimal(str(total)) for cid, total in rows}
+        stock = dict.fromkeys(catalog_ids, Decimal("0"))
+        stock.update({cid: Decimal(str(total)) for cid, total in rows})
+        return stock
 
     # -------------------------------------------------------------------------
     # tenant_catalog
@@ -123,15 +132,15 @@ class CatalogRepository:
         lifecycle: str = "active",
         image_state: str = "any",
         barcode_state: str = "any",
+        tenant_id: UUID,
     ) -> tuple[list[TenantCatalog], int]:
         """Search brand, INN, manufacturer, and barcode with relevance ordering.
 
         Category and manufacturer support case-insensitive partial matching; enum filters
-        remain exact. Tenant scoping is handled by RLS;
-        we still add deleted_at IS NULL because the policy doesn't filter
-        soft-deletes."""
+        remain exact. Explicit tenant scoping complements RLS; lifecycle filters
+        handle soft-deletes separately."""
 
-        filters: list[Any] = []
+        filters: list[Any] = [TenantCatalog.tenant_id == tenant_id]
         if lifecycle == "active":
             filters.extend([TenantCatalog.deleted_at.is_(None), TenantCatalog.is_active.is_(True)])
         elif lifecycle == "inactive":
@@ -218,7 +227,13 @@ class CatalogRepository:
         result = await self.session.execute(list_stmt)
         return list(result.scalars().all()), total
 
-    async def search_picker(self, *, q: str, limit: int) -> list[TenantCatalog]:
+    async def search_picker(
+        self,
+        *,
+        q: str,
+        limit: int,
+        tenant_id: UUID,
+    ) -> list[TenantCatalog]:
         """Return a small relevance-ranked result set without a full COUNT query."""
 
         normalized = _normalize_search_text(q)
@@ -251,6 +266,7 @@ class CatalogRepository:
         stmt = (
             select(TenantCatalog)
             .where(
+                TenantCatalog.tenant_id == tenant_id,
                 TenantCatalog.deleted_at.is_(None),
                 TenantCatalog.is_active.is_(True),
                 or_(barcode_match, text_match),
