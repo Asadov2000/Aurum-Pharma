@@ -145,7 +145,12 @@ async def search_catalog_picker(
     limit: Annotated[int, Query(ge=1, le=20)] = 10,
 ) -> CatalogPickerList:
     _authorize_catalog_search(user, branch_id)
-    items, stock = await service.search_picker(q=q, branch_id=branch_id, limit=limit)
+    items, stock = await service.search_picker(
+        q=q,
+        branch_id=branch_id,
+        limit=limit,
+        tenant_id=_current_tenant_or_400(user),
+    )
     return CatalogPickerList(
         items=[
             CatalogItemRead.model_validate(item).model_copy(
@@ -194,6 +199,7 @@ async def list_catalog(
         page=page,
         page_size=page_size,
         branch_id=branch_id,
+        tenant_id=_current_tenant_or_400(user),
     )
     return CatalogList(
         items=[

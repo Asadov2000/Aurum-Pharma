@@ -22,6 +22,27 @@ async def test_create_catalog_item(db_session: AsyncSession, make_tenant) -> Non
     assert item.is_active is True
 
 
+async def test_search_and_picker_are_explicitly_scoped_even_on_support_connection(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    service = CatalogService(CatalogRepository(db_session))
+    tenant = await make_tenant()
+    other_tenant = await make_tenant()
+    own = await service.create_item(tenant_id=tenant.id, fields={"brand_name": "Shared name"})
+    await service.create_item(tenant_id=other_tenant.id, fields={"brand_name": "Shared name"})
+
+    items, total, _ = await service.search(
+        tenant_id=tenant.id, q=None, category=None, dispensing_type=None, page=1, page_size=50
+    )
+    assert total == 1
+    assert [item.id for item in items] == [own.id]
+
+    picker, _ = await service.search_picker(
+        tenant_id=tenant.id, q="Shared name", branch_id=None, limit=10
+    )
+    assert [item.id for item in picker] == [own.id]
+
+
 async def test_search_by_brand_trigram(db_session: AsyncSession, make_tenant) -> None:
     tenant = await make_tenant()
     service = CatalogService(CatalogRepository(db_session))
@@ -29,7 +50,7 @@ async def test_search_by_brand_trigram(db_session: AsyncSession, make_tenant) ->
     await service.create_item(tenant_id=tenant.id, fields={"brand_name": "Парацетамол"})
 
     items, total, _ = await service.search(
-        q="амикс", category=None, dispensing_type=None, page=1, page_size=50
+        q="амикс", category=None, dispensing_type=None, page=1, page_size=50, tenant_id=tenant.id
     )
     names = [i.brand_name for i in items]
     assert "Амиксин" in names
@@ -48,15 +69,10 @@ async def test_search_by_inn_trigram(db_session: AsyncSession, make_tenant) -> N
     )
 
     items, _, _ = await service.search(
-        q="пара", category=None, dispensing_type=None, page=1, page_size=50
+        q="пара", category=None, dispensing_type=None, page=1, page_size=50, tenant_id=tenant.id
     )
-    # search() is RLS-scoped in production, but tests run on the BYPASSRLS
-    # support pool with no app.tenant_id GUC, so they also see other tenants
-    # (incl. the demo seeder's «Парацетамол»). Scope the assertion to this
-    # test's own tenant rather than the global result count.
-    mine = [i for i in items if i.tenant_id == tenant.id]
-    assert len(mine) == 1
-    assert mine[0].inn == "Парацетамол"
+    assert len(items) == 1
+    assert items[0].inn == "Парацетамол"
 
 
 async def test_search_by_manufacturer_trigram(db_session: AsyncSession, make_tenant) -> None:
@@ -72,7 +88,7 @@ async def test_search_by_manufacturer_trigram(db_session: AsyncSession, make_ten
     )
 
     items, _, _ = await service.search(
-        q="berlin", category=None, dispensing_type=None, page=1, page_size=50
+        q="berlin", category=None, dispensing_type=None, page=1, page_size=50, tenant_id=tenant.id
     )
 
     mine = [item for item in items if item.tenant_id == tenant.id]
@@ -93,6 +109,7 @@ async def test_search_filter_by_category(db_session: AsyncSession, make_tenant) 
     items, _, _ = await service.search(
         q=None,
         category="Vitamins",
+        tenant_id=tenant.id,
         dispensing_type=None,
         page=1,
         page_size=50,
@@ -129,7 +146,12 @@ async def test_catalog_search_accepts_an_exact_barcode(
     )
 
     items, total, _ = await service.search(
-        q="4607013192999", category=None, dispensing_type=None, page=1, page_size=50
+        q="4607013192999",
+        category=None,
+        dispensing_type=None,
+        page=1,
+        page_size=50,
+        tenant_id=tenant.id,
     )
 
     assert total == 1
@@ -150,7 +172,9 @@ async def test_picker_search_prefers_exact_name_without_full_catalog_count(
         fields={"brand_name": "Ксарелто Форте", "inn": "Ривароксабан"},
     )
 
-    items, stock = await service.search_picker(q="  Ксарелто  ", branch_id=None, limit=10)
+    items, stock = await service.search_picker(
+        q="  Ксарелто  ", branch_id=None, limit=10, tenant_id=tenant.id
+    )
     mine = [item for item in items if item.tenant_id == tenant.id]
 
     assert [item.id for item in mine[:2]] == [exact.id, extended.id]
@@ -175,6 +199,7 @@ async def test_catalog_search_prefers_exact_brand_name(
 
     items, _total, _stock = await service.search(
         q=exact_name,
+        tenant_id=tenant.id,
         category=None,
         dispensing_type=None,
         page=1,
@@ -209,7 +234,12 @@ async def test_soft_delete_hides_from_search(db_session: AsyncSession, make_tena
     await service.soft_delete_item(item.id)
 
     items, total, _ = await service.search(
-        q="todelete", category=None, dispensing_type=None, page=1, page_size=50
+        q="todelete",
+        category=None,
+        dispensing_type=None,
+        page=1,
+        page_size=50,
+        tenant_id=tenant.id,
     )
     assert items == []
     assert total == 0
@@ -263,7 +293,12 @@ async def test_lifecycle_search_archive_detail_and_restore(
     await service.soft_delete_item(archived.id)
 
     active_items, _, _ = await service.search(
-        q=None, category=category, dispensing_type=None, page=1, page_size=50
+        q=None,
+        category=category,
+        dispensing_type=None,
+        page=1,
+        page_size=50,
+        tenant_id=tenant.id,
     )
     inactive_items, _, _ = await service.search(
         q=None,
@@ -272,6 +307,7 @@ async def test_lifecycle_search_archive_detail_and_restore(
         page=1,
         page_size=50,
         lifecycle="inactive",
+        tenant_id=tenant.id,
     )
     archived_items, _, _ = await service.search(
         q=None,
@@ -280,6 +316,7 @@ async def test_lifecycle_search_archive_detail_and_restore(
         page=1,
         page_size=50,
         lifecycle="archived",
+        tenant_id=tenant.id,
     )
     all_items, _, _ = await service.search(
         q=None,
@@ -288,6 +325,7 @@ async def test_lifecycle_search_archive_detail_and_restore(
         page=1,
         page_size=50,
         lifecycle="all",
+        tenant_id=tenant.id,
     )
 
     assert [item.id for item in active_items] == [active.id]
@@ -333,6 +371,7 @@ async def test_search_combines_manufacturer_and_storage_filters(
     items, total, _ = await service.search(
         q=None,
         category=f"простудные {unique_part}",
+        tenant_id=tenant.id,
         dispensing_type=None,
         manufacturer=f"test maker {unique_part}",
         storage_type="cold",

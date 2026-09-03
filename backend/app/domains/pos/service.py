@@ -145,10 +145,16 @@ class POSService:
         self._assert_branch_allowed(branch.id, allowed_branch_ids=allowed_branch_ids)
         if not branch.is_active:
             raise BusinessRuleError("Branch is inactive")
+        timezone_name = await self._report_tz(tenant_id)
+        try:
+            today = self._now().astimezone(ZoneInfo(timezone_name)).date()
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
         return await self.repo.list_favorites(
             tenant_id=tenant_id,
             user_id=user_id,
             branch_id=branch_id,
+            today=today,
         )
 
     async def add_favorite(

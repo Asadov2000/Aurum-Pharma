@@ -11,14 +11,22 @@ duplicate-handling branches.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, ValidationError
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from app.core.time import utc_now
 from app.domains.catalog.image_processing import CatalogImageVariants
 from app.domains.catalog.import_parser import parse_import
@@ -28,6 +36,7 @@ from app.domains.catalog.models import (
     TenantCatalog,
 )
 from app.domains.catalog.repository import CatalogRepository
+from app.domains.foundation.repository import FoundationRepository
 
 logger = structlog.get_logger("catalog.service")
 
@@ -36,8 +45,22 @@ ROLLBACK_WINDOW = timedelta(hours=24)
 
 
 class CatalogService:
-    def __init__(self, repo: CatalogRepository) -> None:
+    def __init__(
+        self,
+        repo: CatalogRepository,
+        *,
+        now: Callable[[], datetime] = utc_now,
+    ) -> None:
         self.repo = repo
+        self._now = now
+
+    async def _local_today(self, tenant_id: UUID) -> date:
+        settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
+        timezone_name = settings.report_timezone if settings is not None else "Asia/Dushanbe"
+        try:
+            return self._now().astimezone(ZoneInfo(timezone_name)).date()
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
 
     # -------------------------------------------------------------------------
     # CRUD
@@ -105,6 +128,7 @@ class CatalogService:
         lifecycle: str = "active",
         image_state: str = "any",
         barcode_state: str = "any",
+        tenant_id: UUID,
     ) -> tuple[list[TenantCatalog], int, dict[UUID, Decimal]]:
         items, total = await self.repo.search(
             q=q,
@@ -117,13 +141,17 @@ class CatalogService:
             lifecycle=lifecycle,
             image_state=image_state,
             barcode_state=barcode_state,
+            tenant_id=tenant_id,
         )
         # Available stock per result is computed only when a branch is given
         # (POS), in one grouped query over this page — never per-item (no N+1).
         stock: dict[UUID, Decimal] = {}
         if branch_id is not None and items:
             stock = await self.repo.stock_by_catalog(
-                branch_id=branch_id, catalog_ids=[i.id for i in items]
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                catalog_ids=[i.id for i in items],
+                today=await self._local_today(tenant_id),
             )
         return items, total, stock
 
@@ -133,13 +161,16 @@ class CatalogService:
         q: str,
         branch_id: UUID | None,
         limit: int,
+        tenant_id: UUID,
     ) -> tuple[list[TenantCatalog], dict[UUID, Decimal]]:
-        items = await self.repo.search_picker(q=q, limit=limit)
+        items = await self.repo.search_picker(q=q, limit=limit, tenant_id=tenant_id)
         stock: dict[UUID, Decimal] = {}
         if branch_id is not None and items:
             stock = await self.repo.stock_by_catalog(
+                tenant_id=tenant_id,
                 branch_id=branch_id,
                 catalog_ids=[item.id for item in items],
+                today=await self._local_today(tenant_id),
             )
         return items, stock
 
