@@ -1,4 +1,5 @@
-const CACHE_NAME = "aurum-pharma-static-v1";
+const CACHE_NAME = "aurum-pharma-static-v2";
+const MAX_STATIC_CACHE_ENTRIES = 80;
 const STATIC_ASSET_PATTERN = /\.(?:css|ico|js|png|svg|webmanifest|woff2?)$/i;
 
 self.addEventListener("install", () => {
@@ -48,7 +49,12 @@ self.addEventListener("fetch", (event) => {
           event.waitUntil(
             caches
               .open(CACHE_NAME)
-              .then((cache) => cache.put(request, responseCopy))
+              .then(async (cache) => {
+                await cache.put(request, responseCopy);
+                const keys = await cache.keys();
+                const staleKeys = keys.slice(0, Math.max(0, keys.length - MAX_STATIC_CACHE_ENTRIES));
+                await Promise.all(staleKeys.map((key) => cache.delete(key)));
+              })
               .catch(() => undefined),
           );
         }

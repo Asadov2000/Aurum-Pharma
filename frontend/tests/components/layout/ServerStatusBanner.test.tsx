@@ -1,7 +1,9 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ServerStatusBanner } from "@/components/layout/ServerStatusBanner";
+import { ConnectivityProvider } from "@/lib/connectivity";
 
 describe("ServerStatusBanner", () => {
   afterEach(() => {
@@ -12,7 +14,7 @@ describe("ServerStatusBanner", () => {
     setOnlineStatus(true);
     const checkHealth = vi.fn(async () => true);
 
-    render(<ServerStatusBanner checkHealth={checkHealth} pollMs={60_000} />);
+    renderBanner(checkHealth);
 
     await waitFor(() => expect(checkHealth).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -22,7 +24,7 @@ describe("ServerStatusBanner", () => {
     setOnlineStatus(true);
     const checkHealth = vi.fn(async () => false);
 
-    render(<ServerStatusBanner checkHealth={checkHealth} pollMs={60_000} />);
+    renderBanner(checkHealth);
 
     expect(await screen.findByTestId("server-status-banner")).toHaveTextContent(
       "Сервер недоступен",
@@ -35,7 +37,7 @@ describe("ServerStatusBanner", () => {
       throw new Error("health check failed");
     });
 
-    render(<ServerStatusBanner checkHealth={checkHealth} pollMs={60_000} />);
+    renderBanner(checkHealth);
 
     expect(await screen.findByTestId("server-status-banner")).toBeInTheDocument();
   });
@@ -44,7 +46,7 @@ describe("ServerStatusBanner", () => {
     setOnlineStatus(false);
     const checkHealth = vi.fn(async () => false);
 
-    render(<ServerStatusBanner checkHealth={checkHealth} pollMs={60_000} />);
+    renderBanner(checkHealth);
 
     await waitFor(() => expect(checkHealth).not.toHaveBeenCalled());
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -54,7 +56,7 @@ describe("ServerStatusBanner", () => {
     setOnlineStatus(true);
     const checkHealth = vi.fn(async () => false);
 
-    render(<ServerStatusBanner checkHealth={checkHealth} pollMs={60_000} />);
+    renderBanner(checkHealth);
     expect(await screen.findByTestId("server-status-banner")).toBeInTheDocument();
 
     act(() => {
@@ -65,6 +67,19 @@ describe("ServerStatusBanner", () => {
     expect(screen.queryByTestId("server-status-banner")).not.toBeInTheDocument();
   });
 });
+
+function renderBanner(checkHealth: () => Promise<boolean>): void {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ConnectivityProvider checkHealth={checkHealth} pollMs={60_000}>
+        <ServerStatusBanner />
+      </ConnectivityProvider>
+    </QueryClientProvider>,
+  );
+}
 
 function setOnlineStatus(isOnline: boolean): void {
   Object.defineProperty(window.navigator, "onLine", {

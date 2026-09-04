@@ -27,6 +27,8 @@ import {
 } from "./types";
 
 const POS_MONEY_WRITE_TIMEOUT_MS = 15_000;
+const POS_COMMAND_WRITE_TIMEOUT_MS = 15_000;
+const POS_RESULT_TIMEOUT_MS = 8_000;
 
 // ---- electronic payment attempts ----
 
@@ -40,7 +42,9 @@ export async function createPaymentAttempt(
 }
 
 export async function getActivePaymentAttempt(saleId: string): Promise<PaymentAttempt | null> {
-  const { data } = await api.get<PaymentAttempt | null>(`/sales/${saleId}/payment-attempts/active`);
+  const { data } = await api.get<PaymentAttempt | null>(`/sales/${saleId}/payment-attempts/active`, {
+    timeout: POS_RESULT_TIMEOUT_MS,
+  });
   return data;
 }
 
@@ -134,10 +138,14 @@ export async function getZReportXlsx(shiftId: string): Promise<Blob> {
 // ---- Sales ----
 
 export async function createSale(registerId: string, operationId: string): Promise<Sale> {
-  const { data } = await api.post<Sale>("/sales", {
-    register_id: registerId,
-    operation_id: operationId,
-  });
+  const { data } = await api.post<Sale>(
+    "/sales",
+    {
+      register_id: registerId,
+      operation_id: operationId,
+    },
+    { timeout: POS_COMMAND_WRITE_TIMEOUT_MS },
+  );
   return data;
 }
 
@@ -153,12 +161,16 @@ export async function addSaleItem(
   operationId: string,
   expiredSaleConfirmed = false,
 ): Promise<SaleItemAddedResponse> {
-  const { data } = await api.post<SaleItemAddedResponse>(`/sales/${saleId}/items`, {
-    catalog_id: catalogId,
-    qty,
-    expired_sale_confirmed: expiredSaleConfirmed,
-    operation_id: operationId,
-  });
+  const { data } = await api.post<SaleItemAddedResponse>(
+    `/sales/${saleId}/items`,
+    {
+      catalog_id: catalogId,
+      qty,
+      expired_sale_confirmed: expiredSaleConfirmed,
+      operation_id: operationId,
+    },
+    { timeout: POS_COMMAND_WRITE_TIMEOUT_MS },
+  );
   return data;
 }
 
@@ -168,10 +180,14 @@ export async function updateSaleItem(
   qty: string,
   operationId: string,
 ): Promise<SaleItem> {
-  const { data } = await api.patch<SaleItem>(`/sales/${saleId}/items/${itemId}`, {
-    qty,
-    operation_id: operationId,
-  });
+  const { data } = await api.patch<SaleItem>(
+    `/sales/${saleId}/items/${itemId}`,
+    {
+      qty,
+      operation_id: operationId,
+    },
+    { timeout: POS_COMMAND_WRITE_TIMEOUT_MS },
+  );
   return data;
 }
 
@@ -182,12 +198,15 @@ export async function deleteSaleItem(
 ): Promise<SaleItemDeletedResponse> {
   const { data } = await api.delete<SaleItemDeletedResponse>(`/sales/${saleId}/items/${itemId}`, {
     data: { operation_id: operationId },
+    timeout: POS_COMMAND_WRITE_TIMEOUT_MS,
   });
   return data;
 }
 
 export async function getPosCommandResult(operationId: string): Promise<PosCommandResult> {
-  const { data } = await api.get<PosCommandResult>(`/pos/commands/${operationId}`);
+  const { data } = await api.get<PosCommandResult>(`/pos/commands/${operationId}`, {
+    timeout: POS_RESULT_TIMEOUT_MS,
+  });
   return data;
 }
 
@@ -217,7 +236,9 @@ export async function checkoutSale(payload: SaleCheckoutPayload): Promise<SaleCh
 }
 
 export async function getCheckoutResult(operationId: string): Promise<SaleCheckoutResult> {
-  const { data } = await api.get<SaleCheckoutResult>(`/sales/operations/${operationId}`);
+  const { data } = await api.get<SaleCheckoutResult>(`/sales/operations/${operationId}`, {
+    timeout: POS_RESULT_TIMEOUT_MS,
+  });
   return data;
 }
 

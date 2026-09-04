@@ -1,21 +1,8 @@
-import { useEffect, useState } from "react";
+import { useConnectivity } from "@/lib/connectivityContext";
 
 export function OfflineStatusBanner(): JSX.Element | null {
-  const [isOnline, setIsOnline] = useState(() => getNavigatorOnline());
-
-  useEffect(() => {
-    const update = () => setIsOnline(getNavigatorOnline());
-
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, []);
-
-  if (isOnline) {
+  const { status } = useConnectivity();
+  if (status !== "offline") {
     return null;
   }
 
@@ -30,8 +17,4 @@ export function OfflineStatusBanner(): JSX.Element | null {
       восстановления интернета.
     </div>
   );
-}
-
-function getNavigatorOnline(): boolean {
-  return typeof navigator === "undefined" ? true : navigator.onLine;
 }

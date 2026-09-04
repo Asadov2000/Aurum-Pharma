@@ -154,6 +154,45 @@ test.describe("Runtime surface", () => {
       await page.context().setOffline(false);
     }
   });
+
+  test("locks POS while the API is unavailable and recovers without repeating writes", async ({
+    page,
+  }) => {
+    let serverHealthy = true;
+    await page.route("**/healthz", async (route) => {
+      await route.fulfill({
+        body: JSON.stringify({ status: serverHealthy ? "ok" : "unavailable" }),
+        contentType: "application/json",
+        status: serverHealthy ? 200 : 503,
+      });
+    });
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos", { waitUntil: "domcontentloaded" });
+
+    const register = page.getByLabel(/^Касса$/);
+    await expect(register).toBeVisible();
+    if ((await register.evaluate((element) => element.tagName)) === "SELECT") {
+      await register.selectOption({ index: 1 });
+    }
+
+    const search = page.getByPlaceholder("Найти товар или отсканировать штрих-код");
+    await expect(search).toBeVisible();
+    await expect(search).toBeEnabled();
+
+    serverHealthy = false;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+
+    await expect(page.getByTestId("server-status-banner")).toBeVisible();
+    await expect(search).toBeDisabled();
+
+    serverHealthy = true;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+
+    await expect(page.getByTestId("server-status-banner")).toHaveCount(0);
+    await expect(search).toBeEnabled();
+  });
 });
 
 async function expectWindowsDesktopShell(page: Page): Promise<void> {

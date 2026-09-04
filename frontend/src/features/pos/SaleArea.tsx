@@ -99,12 +99,13 @@ const QuickProducts = lazy(async () => {
   return { default: module.QuickProducts };
 });
 
-// Lazy so the on-screen keypad chunk only loads when a cashier taps a field.
-const NumPad = lazy(() => import("./NumPad"));
-const ExternalPaymentEvidenceDialog = lazy(async () => {
+const loadNumPad = () => import("./NumPad");
+const loadExternalPaymentEvidenceDialog = async () => {
   const module = await import("./ExternalPaymentEvidenceDialog");
   return { default: module.ExternalPaymentEvidenceDialog };
-});
+};
+const NumPad = lazy(loadNumPad);
+const ExternalPaymentEvidenceDialog = lazy(loadExternalPaymentEvidenceDialog);
 
 type NumPadState =
   | { kind: "qty"; itemId: string; initial: string }
@@ -221,6 +222,12 @@ export function SaleArea({
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
+  useEffect(() => {
+    // Payment controls are separate chunks, but should be ready before the
+    // cashier needs them during a brief network interruption.
+    void loadNumPad();
+    void loadExternalPaymentEvidenceDialog();
+  }, []);
   const isOnline = useOnlineStatus();
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);

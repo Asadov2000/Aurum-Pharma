@@ -1,76 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useConnectivity } from "@/lib/connectivityContext";
 
-import { checkServerHealth } from "@/lib/serverHealth";
-
-const DEFAULT_HEALTH_POLL_MS = 30_000;
-
-type ServerStatus = "unknown" | "available" | "unavailable";
-
-interface ServerStatusBannerProps {
-  readonly checkHealth?: (signal: AbortSignal) => Promise<boolean>;
-  readonly getOnline?: () => boolean;
-  readonly pollMs?: number;
-}
-
-export function ServerStatusBanner({
-  checkHealth = defaultCheckHealth,
-  getOnline = getNavigatorOnline,
-  pollMs = DEFAULT_HEALTH_POLL_MS,
-}: ServerStatusBannerProps): JSX.Element | null {
-  const [isOnline, setIsOnline] = useState(() => getOnline());
-  const [status, setStatus] = useState<ServerStatus>("unknown");
-
-  const runCheck = useCallback(
-    async (signal: AbortSignal) => {
-      if (!getOnline()) {
-        setIsOnline(false);
-        setStatus("unknown");
-        return;
-      }
-
-      setIsOnline(true);
-      let isHealthy: boolean;
-      try {
-        isHealthy = await checkHealth(signal);
-      } catch {
-        isHealthy = false;
-      }
-
-      if (signal.aborted) {
-        return;
-      }
-
-      setStatus(isHealthy ? "available" : "unavailable");
-    },
-    [checkHealth, getOnline],
-  );
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const handleConnectivityChange = () => {
-      void runCheck(controller.signal);
-    };
-
-    void runCheck(controller.signal);
-
-    const interval = window.setInterval(() => {
-      void runCheck(controller.signal);
-    }, pollMs);
-
-    window.addEventListener("online", handleConnectivityChange);
-    window.addEventListener("offline", handleConnectivityChange);
-    window.addEventListener("focus", handleConnectivityChange);
-
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-      window.removeEventListener("online", handleConnectivityChange);
-      window.removeEventListener("offline", handleConnectivityChange);
-      window.removeEventListener("focus", handleConnectivityChange);
-    };
-  }, [pollMs, runCheck]);
-
-  if (!isOnline || status !== "unavailable") {
+export function ServerStatusBanner(): JSX.Element | null {
+  const { status, checkNow } = useConnectivity();
+  if (status !== "server-unavailable") {
     return null;
   }
 
@@ -81,16 +13,10 @@ export function ServerStatusBanner({
       data-testid="server-status-banner"
       role="status"
     >
-      Сервер недоступен. Интернет есть, но API не отвечает; кассовые операции временно
-      заблокированы.
+      <span>Сервер недоступен. Текущий чек сохранён. Новые операции заблокированы.</span>
+      <button className="ml-2 underline" onClick={checkNow} type="button">
+        Проверить
+      </button>
     </div>
   );
-}
-
-function defaultCheckHealth(signal: AbortSignal): Promise<boolean> {
-  return checkServerHealth({ signal });
-}
-
-function getNavigatorOnline(): boolean {
-  return typeof navigator === "undefined" ? true : navigator.onLine;
 }
