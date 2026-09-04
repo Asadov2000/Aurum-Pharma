@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.deps import _seed_request_db_context, get_db
+from app.domains.audit.models import AuditLog
 from app.domains.auth.models import AppUser
 from app.domains.catalog.image_processing import CatalogImageVariants
 from app.domains.catalog.repository import CatalogRepository
@@ -517,6 +518,66 @@ async def test_sensitive_reads_require_domain_permission(
 
         admin_resp = await client.get(path, headers={"Authorization": f"Bearer {admin_token}"})
         assert admin_resp.status_code == 200, path
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_report_export_requires_explicit_permission_and_is_audited(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    await _override_db(db_session)
+    try:
+        tenant, viewer, exporter = await _seed_tenant_subjects(db_session)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=viewer.id,
+            permission_codes={"reports.view"},
+        )
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=exporter.id,
+            permission_codes={"reports.view", "reports.export"},
+        )
+        today = date.today().isoformat()
+        path = f"/api/v1/reports/sales-summary.xlsx?from={today}&to={today}"
+
+        viewer_response = await client.get(
+            path,
+            headers={"Authorization": f"Bearer {await _token(db_session, viewer)}"},
+        )
+        assert viewer_response.status_code == 403
+
+        exporter_response = await client.get(
+            path,
+            headers={"Authorization": f"Bearer {await _token(db_session, exporter)}"},
+        )
+        assert exporter_response.status_code == 200
+        assert exporter_response.content[:2] == b"PK"
+
+        audit_rows = list(
+            (
+                await db_session.execute(
+                    select(AuditLog).where(
+                        AuditLog.tenant_id == tenant.id,
+                        AuditLog.user_id == exporter.id,
+                        AuditLog.action == "EXPORT",
+                        AuditLog.table_name == "sales_summary",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(audit_rows) == 1
+        assert audit_rows[0].metadata_json == {
+            "date_from": today,
+            "date_to": today,
+            "branch_id": None,
+            "format": "xlsx",
+        }
     finally:
         app.dependency_overrides.pop(get_db, None)
 

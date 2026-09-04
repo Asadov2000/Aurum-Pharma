@@ -39,6 +39,7 @@ export function POSPage(): JSX.Element {
   const canCloseShift = hasPermission(user, "pos.shift_close");
   const canSell = hasPermission(user, "pos.sell");
   const canManageSales = hasPermission(user, "pos.manage_sales");
+  const canExportReports = hasPermission(user, "reports.export");
   const canCreateRegister = hasPermission(user, "registers.create");
   const registers = useRegistersQuery(null, false);
   // POS draft TTL comes from tenant settings; fall back until they load (or if
@@ -235,6 +236,7 @@ export function POSPage(): JSX.Element {
           canCloseShift={canCloseShift}
           canSell={canSell}
           canReconcileExternalPayment={canManageSales}
+          canExportReports={canExportReports}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={updateRegisterSwitchState}
         />

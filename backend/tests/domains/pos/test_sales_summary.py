@@ -256,6 +256,13 @@ async def test_sales_summary_rejects_inverted_range(db_session: AsyncSession, po
             date_to=today,
             branch_id=None,
         )
+    with pytest.raises(BusinessRuleError):
+        await service.get_sales_summary_xlsx(
+            tenant_id=s["tenant"].id,
+            date_from=today - timedelta(days=366),
+            date_to=today,
+            branch_id=None,
+        )
 
 
 async def test_sales_summary_empty_period_is_valid_zero_file(

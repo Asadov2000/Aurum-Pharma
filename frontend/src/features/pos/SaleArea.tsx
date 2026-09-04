@@ -199,6 +199,7 @@ export function SaleArea({
   canCloseShift = true,
   canSell = true,
   canReconcileExternalPayment = false,
+  canExportReports = false,
   workstationControls,
   onRegisterSwitchStateChange,
 }: {
@@ -216,6 +217,7 @@ export function SaleArea({
   canCloseShift?: boolean;
   canSell?: boolean;
   canReconcileExternalPayment?: boolean;
+  canExportReports?: boolean;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
@@ -242,6 +244,7 @@ export function SaleArea({
           qrTerminalId={qrTerminalId}
           canCloseShift={canCloseShift}
           canReconcileExternalPayment={canReconcileExternalPayment}
+          canExportReports={canExportReports}
           online={isOnline}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={onRegisterSwitchStateChange}
@@ -258,6 +261,7 @@ export function SaleArea({
             mode={mode}
             canOpen={canOpenShift}
             canClose={canCloseShift}
+            canExportReport={canExportReports}
             online={isOnline}
           />
         </div>
@@ -285,6 +289,7 @@ function ActiveWorkspace({
   qrTerminalId,
   canCloseShift,
   canReconcileExternalPayment,
+  canExportReports,
   online,
   workstationControls,
   onRegisterSwitchStateChange,
@@ -302,6 +307,7 @@ function ActiveWorkspace({
   qrTerminalId?: string | null;
   canCloseShift: boolean;
   canReconcileExternalPayment: boolean;
+  canExportReports: boolean;
   online: boolean;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
@@ -1815,6 +1821,7 @@ function ActiveWorkspace({
             registerId={registerId}
             mode={mode}
             canClose={canCloseShift}
+            canExportReport={canExportReports}
             closeBlocked={shiftCloseBlocked}
             online={online}
           />

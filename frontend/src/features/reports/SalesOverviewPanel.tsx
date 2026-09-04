@@ -59,7 +59,13 @@ const PAYMENT_LABELS: Array<[keyof ReportPaymentBreakdown, string]> = [
   ["mixed", "Смешанная оплата"],
 ];
 
-export function SalesOverviewPanel({ reportTimezone }: { reportTimezone: string }): JSX.Element {
+export function SalesOverviewPanel({
+  reportTimezone,
+  canExport,
+}: {
+  reportTimezone: string;
+  canExport: boolean;
+}): JSX.Element {
   const filterPreferenceKey = useFilterPreferenceKey("reports-sales-overview");
   const defaults = useMemo(() => currentReportMonthRange(reportTimezone), [reportTimezone]);
   const initialValues = useMemo<FilterValues>(
@@ -231,15 +237,17 @@ export function SalesOverviewPanel({ reportTimezone }: { reportTimezone: string 
               <Button type="submit" className="flex-1 sm:flex-none" isLoading={query.isFetching}>
                 Обновить сводку
               </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1 sm:flex-none"
-                isLoading={downloading}
-                onClick={() => void onDownload()}
-              >
-                Скачать XLSX
-              </Button>
+              {canExport && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="flex-1 sm:flex-none"
+                  isLoading={downloading}
+                  onClick={() => void onDownload()}
+                >
+                  Скачать XLSX
+                </Button>
+              )}
             </div>
           }
         />

@@ -20,9 +20,12 @@ from app.core.deps import (
     get_db,
     require_any_branch_permission,
     require_branch_permission,
+    require_permission,
     require_writable_tenant,
 )
 from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.domains.audit.repository import AuditRepository
+from app.domains.audit.service import AuditService
 from app.domains.catalog.schemas import CatalogItemRead
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import (
@@ -85,6 +88,12 @@ async def _service(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> POSService:
     return POSService(POSRepository(db))
+
+
+async def _audit_service(
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> AuditService:
+    return AuditService(AuditRepository(db))
 
 
 def _current_tenant_or_400(user: CurrentUser) -> UUID:
@@ -824,6 +833,7 @@ async def z_report(
 @router.get(
     "/shifts/{shift_id}/z-report.xlsx",
     response_class=Response,
+    dependencies=[Depends(require_permission("reports.export"))],
     responses={
         200: {"content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}}}
     },
@@ -834,12 +844,19 @@ async def z_report_xlsx(
         CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
     ],
     service: Annotated[POSService, Depends(_service)],
+    audit: Annotated[AuditService, Depends(_audit_service)],
 ) -> Response:
     """Z-report as an Excel workbook (closed shifts only), lazily generated and
     cached in MinIO."""
     xlsx = await service.get_z_report_xlsx(
         shift_id,
         allowed_branch_ids=user.branch_scope_for("reports.view"),
+    )
+    await audit.log_export(
+        tenant_id=_current_tenant_or_400(user),
+        user_id=user.user_id,
+        what="z_report",
+        metadata={"shift_id": str(shift_id), "format": "xlsx"},
     )
     return Response(
         content=xlsx,
@@ -851,6 +868,7 @@ async def z_report_xlsx(
 @router.get(
     "/reports/sales-summary.xlsx",
     response_class=Response,
+    dependencies=[Depends(require_permission("reports.export"))],
     responses={
         200: {"content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}}}
     },
@@ -860,18 +878,31 @@ async def sales_summary_xlsx(
         CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
     ],
     service: Annotated[POSService, Depends(_service)],
+    audit: Annotated[AuditService, Depends(_audit_service)],
     date_from: Annotated[date, Query(alias="from")],
     date_to: Annotated[date, Query(alias="to")],
     branch_id: Annotated[UUID | None, Query()] = None,
 ) -> Response:
     """Accountant sales summary over [from, to] as XLSX. Generated on the fly
     (not cached). from > to → 400; an empty period → a valid zero-total file."""
+    tenant_id = _current_tenant_or_400(user)
     effective_branch_id = _effective_report_branch_id(user, branch_id)
     xlsx = await service.get_sales_summary_xlsx(
-        tenant_id=_current_tenant_or_400(user),
+        tenant_id=tenant_id,
         date_from=date_from,
         date_to=date_to,
         branch_id=effective_branch_id,
+    )
+    await audit.log_export(
+        tenant_id=tenant_id,
+        user_id=user.user_id,
+        what="sales_summary",
+        metadata={
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "branch_id": str(effective_branch_id) if effective_branch_id is not None else None,
+            "format": "xlsx",
+        },
     )
     return Response(
         content=xlsx,
@@ -954,6 +985,7 @@ async def stock_on_date_overview(
 @router.get(
     "/reports/stock-on-date.xlsx",
     response_class=Response,
+    dependencies=[Depends(require_permission("reports.export"))],
     responses={
         200: {"content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}}}
     },
@@ -963,18 +995,30 @@ async def stock_on_date_xlsx(
         CurrentUser, Depends(require_branch_permission("reports.view", policy="filter"))
     ],
     service: Annotated[POSService, Depends(_service)],
+    audit: Annotated[AuditService, Depends(_audit_service)],
     on_date: Annotated[date | None, Query(alias="date")] = None,
     branch_id: Annotated[UUID | None, Query()] = None,
 ) -> Response:
     """Stock as of a date (default today) as XLSX, reconstructed from the
     batch_movement ledger. Generated on the fly (not cached). Empty stock → a
     valid zero file."""
+    tenant_id = _current_tenant_or_400(user)
     effective_date = on_date or date.today()
     effective_branch_id = _effective_report_branch_id(user, branch_id)
     xlsx = await service.get_stock_on_date_xlsx(
-        tenant_id=_current_tenant_or_400(user),
+        tenant_id=tenant_id,
         on_date=effective_date,
         branch_id=effective_branch_id,
+    )
+    await audit.log_export(
+        tenant_id=tenant_id,
+        user_id=user.user_id,
+        what="stock_on_date",
+        metadata={
+            "on_date": effective_date.isoformat(),
+            "branch_id": str(effective_branch_id) if effective_branch_id is not None else None,
+            "format": "xlsx",
+        },
     )
     return Response(
         content=xlsx,

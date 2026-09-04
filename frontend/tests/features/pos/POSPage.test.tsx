@@ -423,10 +423,31 @@ describe("POSPage", () => {
           notes: null,
         }),
       );
+      expect(getZReportXlsx).not.toHaveBeenCalled();
       expect(screen.queryByText(/Не удалось закрыть смену/i)).not.toBeInTheDocument();
     } finally {
       setItem.mockRestore();
     }
+  });
+
+  it("downloads the closed-shift report only for an account with export permission", async () => {
+    useAuthStore.getState().setUser({
+      ...POS_USER,
+      permissions: [...POS_USER.permissions, "reports.export"],
+    });
+    listRegisters.mockResolvedValue([REGISTER]);
+    getCurrentShift.mockResolvedValue(OPEN_SHIFT);
+    closeShift.mockResolvedValue({ ...OPEN_SHIFT, status: "closed" });
+    getZReportXlsx.mockResolvedValue(new Blob(["xlsx"]));
+
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
+    fireEvent.change(screen.getByLabelText("Наличные после пересчёта"), {
+      target: { value: "100" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить закрытие смены" }));
+
+    await waitFor(() => expect(getZReportXlsx).toHaveBeenCalledWith(OPEN_SHIFT.id));
   });
 
   it("recovers a closed shift when the close response is lost", async () => {

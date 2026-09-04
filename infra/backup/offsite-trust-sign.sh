@@ -42,9 +42,12 @@ signing_key_id="$(
 jq -e \
     --arg export_id "$export_id" \
     --arg key_id "$signing_key_id" \
-    '.schema_version == 1 and .trust_domain == "aurum-offsite-recovery-v1" and
+    '.schema_version == 2 and .trust_domain == "aurum-offsite-recovery-v1" and
      .export_id == $export_id and .signing_algorithm == "ed25519-v1" and
-     .signing_key_id == $key_id' \
+     .signing_key_id == $key_id and
+     (.restic_snapshots.combined | type == "string" and length > 0) and
+     (.restic_snapshots.pitr_base | type == "string" and length > 0) and
+     (.restic_snapshots.wal | type == "string" and length > 0)' \
     "$verified" >/dev/null || aurum_fail "Verified checkpoint scope is invalid"
 
 signature=/workspace/sign/checkpoint.sig

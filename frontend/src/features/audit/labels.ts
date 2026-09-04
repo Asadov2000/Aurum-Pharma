@@ -74,4 +74,7 @@ export const tableLabel: Record<string, string> = {
   payment: "Платёж",
   tenant_subscription: "Подписка",
   platform_access_grant_permission: "Служебный доступ",
+  z_report: "Z-отчёт смены",
+  sales_summary: "Сводка продаж",
+  stock_on_date: "Остатки на дату",
 };

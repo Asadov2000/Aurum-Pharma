@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getZReport = vi.fn();
@@ -35,6 +35,7 @@ vi.mock("@/features/foundation/api", () => ({
 }));
 
 import { ReportsPage } from "@/features/reports/ReportsPage";
+import { useAuthStore } from "@/stores/auth";
 
 function renderPage() {
   const queryClient = new QueryClient({
@@ -72,6 +73,24 @@ const SHIFT = {
   returns_count: 1,
   currency: "TJS",
 } as const;
+
+const REPORT_USER = {
+  id: "report-user-1",
+  email: "owner@aurum.tj",
+  full_name: "Владелец",
+  is_developer: false,
+  is_administrator: false,
+  home_tenant_id: "tenant-1",
+  active_tenant_id: "tenant-1",
+  status: "active",
+  last_login_at: null,
+  level: 3,
+  is_tenant_owner: true,
+  branch_assignments: {},
+  permission_scopes: { "reports.view": null, "reports.export": null },
+  permissions: ["reports.view", "reports.export"],
+  support_access: null,
+};
 
 const SHIFT_LIST = {
   items: [SHIFT],
@@ -134,6 +153,7 @@ const SALES_SUMMARY = {
 describe("ReportsPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    act(() => useAuthStore.getState().setUser(REPORT_USER));
     getZReport.mockReset();
     listShiftHistory.mockReset();
     getSalesSummary.mockReset();
@@ -173,6 +193,30 @@ describe("ReportsPage", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    act(() => useAuthStore.getState().clear());
+  });
+
+  it("hides every export action when the account can only view reports", async () => {
+    act(() =>
+      useAuthStore.getState().setUser({
+        ...REPORT_USER,
+        permissions: ["reports.view"],
+        permission_scopes: { "reports.view": null },
+      }),
+    );
+    getZReport.mockResolvedValueOnce(Z_REPORT);
+    renderPage();
+
+    expect(await screen.findByText("Чистая выручка")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Скачать XLSX" })).toBeNull();
+
+    await openReportTab(/^Остатки/);
+    expect(screen.queryByRole("button", { name: "Скачать в Excel" })).toBeNull();
+
+    await openReportTab(/^Смены/);
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    expect(await screen.findByText("На начало")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Скачать XLSX" })).toBeNull();
   });
 
   it("shows resolved shift history and opens a Z-report without a UUID field", async () => {

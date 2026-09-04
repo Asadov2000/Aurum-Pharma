@@ -299,9 +299,13 @@ docker compose \
   --profile offsite-restore run --rm offsite-trusted-restore
 ```
 
-Restore проверяет подпись, bucket/prefix, точные версии, размеры и SHA-256. Он не
-использует `latest`, поэтому новая версия, добавленная после подписания, не меняет
-выбранную точку восстановления. Полный протокол зафиксирован в ADR-0026.
+Restore проверяет подпись, bucket/prefix, точные версии, размеры и SHA-256. В
+подписанную точку входят combined backup, физическая база PostgreSQL и WAL.
+Проверяются dump, объекты MinIO, `pg_verifybackup` и наличие WAL. Команда не
+использует `latest`, поэтому новая версия после подписания не меняет выбранную
+точку. Это проверка полного payload, а не доказательство service RTO: запуск
+приложения и пользовательский smoke выполняются на независимом recovery-host.
+Полный протокол зафиксирован в ADR-0026.
 
 После первой ручной проверки установите три пары unit-файлов из
 `infra/systemd`: full backup выполняется ежедневно, WAL snapshot и WORM export -
@@ -332,25 +336,24 @@ sudo AURUM_RECOVERY_METRICS_DIR=/var/lib/aurum/recovery-metrics \
   ./scripts/run-production-restore-drill.sh
 ```
 
-Локальный drill подтверждает восстановимость repository, но не измеряет RPO и
-полный service RTO: exact-version WORM restore реализован отдельно, однако
-service RTO также включает запуск приложения и пользовательский smoke-тест. Успех содержит
+Wrapper сам создаёт уникальную именованную restore point, дожидается архивации
+соответствующего WAL, фиксирует свежий WAL snapshot и проверяет достигнутый LSN.
+Поэтому успешный PITR drill не может ограничиться запуском одной base backup.
+
+Локальный drill подтверждает восстановимость repository, но не измеряет полный
+service RTO: exact-version WORM payload проверяется отдельно, а service RTO также
+включает запуск приложения и пользовательский smoke-тест. Успех содержит
 `Restore drill passed`, фактическую Alembic revision и число
 объектов, их SHA-256, RLS и доступ runtime-ролей. PostgreSQL dump и текущий
 снимок объектов MinIO создаются последовательно, поэтому межсистемная
 транзакционная согласованность не гарантируется без окна запрета записей. Этот
 backup остаётся логическим и дополняет физический PITR-контур.
 
-PITR всегда репетируется только в пустом scratch. Для именованной контрольной
-точки задайте `AURUM_PITR_TARGET_NAME` во внешнем env и выполните:
-
-```bash
-docker compose -p "$drill" \
-  --env-file /etc/aurum/production.env \
-  --file docker-compose.production.yml \
-  --file docker-compose.recovery.yml \
-  --profile restore-drill run --rm pitr-restore-drill
-```
+PITR всегда репетируется только в пустом scratch. Не запускайте контейнер
+`pitr-restore-drill` вручную без пары `AURUM_PITR_TARGET_NAME` и
+`AURUM_PITR_TARGET_LSN`: оба значения должны относиться к одной свежей restore
+point, а её WAL уже должен входить в зашифрованный snapshot. Штатный безопасный
+путь - wrapper выше; пустые значения завершают проверку ошибкой.
 
 Никогда не удаляйте WAL только по возрасту. Очистка разрешена лишь после
 подтверждённого off-site manifest и проверенного base backup, который начинается

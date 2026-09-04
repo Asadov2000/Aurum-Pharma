@@ -619,6 +619,7 @@ services:
       dockerfile: Dockerfile
     environment:
       AURUM_PITR_TARGET_NAME: "${AURUM_PITR_TARGET_NAME:-}"
+      AURUM_PITR_TARGET_LSN: "${AURUM_PITR_TARGET_LSN:-}"
     secrets:
       - source: restic_password
         target: RESTIC_PASSWORD

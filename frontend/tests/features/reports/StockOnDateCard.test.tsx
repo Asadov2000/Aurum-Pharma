@@ -30,13 +30,13 @@ vi.mock("@/features/foundation/queries", () => ({
 
 import { StockOnDateCard } from "@/features/reports/ReportsPage";
 
-function renderCard() {
+function renderCard(canExport = false) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <StockOnDateCard />
+      <StockOnDateCard canExport={canExport} />
     </QueryClientProvider>,
   );
 }
@@ -63,7 +63,7 @@ describe("StockOnDateCard", () => {
   it("downloads the stock XLSX for the selected date", async () => {
     const blob = new Blob(["x"]);
     getStockOnDateXlsx.mockResolvedValueOnce(blob);
-    renderCard();
+    renderCard(true);
 
     const dateInput = screen.getByLabelText("Дата остатка") as HTMLInputElement;
     fireEvent.change(dateInput, { target: { value: "2026-05-31" } });
@@ -79,5 +79,10 @@ describe("StockOnDateCard", () => {
   it("keeps the all-branches option when no branches are available", () => {
     renderCard();
     expect(screen.getByLabelText("Аптечная точка")).toHaveValue("");
+  });
+
+  it("does not expose XLSX export without the export permission", () => {
+    renderCard();
+    expect(screen.queryByRole("button", { name: /Скачать в Excel/i })).not.toBeInTheDocument();
   });
 });

@@ -282,7 +282,7 @@ compose run --rm --entrypoint /bin/sh minio-init -ec '
 compose --profile backup run --rm backup
 compose --profile backup run --rm pitr-basebackup
 
-expected_wal="$(docker exec -i "${project}-postgres-1" psql \
+checkpoint="$(docker exec -i "${project}-postgres-1" psql \
     -U postgres \
     -d aurum \
     --tuples-only \
@@ -293,7 +293,9 @@ INSERT INTO public.pitr_probe (id, value) VALUES (3, 'must_not_survive');
 SELECT pg_walfile_name(pg_switch_wal());
 SQL
 )"
-expected_wal="$(printf '%s\n' "$expected_wal" | tail -n 1 | tr -d '[:space:]')"
+export AURUM_PITR_TARGET_LSN="$(printf '%s\n' "$checkpoint" | sed -n '2p' | tr -d '[:space:]')"
+expected_wal="$(printf '%s\n' "$checkpoint" | tail -n 1 | tr -d '[:space:]')"
+test -n "$AURUM_PITR_TARGET_LSN"
 test -n "$expected_wal"
 
 attempt=1

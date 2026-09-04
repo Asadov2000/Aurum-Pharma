@@ -38,8 +38,10 @@ const PAGE_SIZE = 25;
 
 export function StockOnDatePanel({
   reportTimezone = DEFAULT_REPORT_TIME_ZONE,
+  canExport = false,
 }: {
   reportTimezone?: string;
+  canExport?: boolean;
 }): JSX.Element {
   const defaults = useMemo<FilterValues>(
     () => ({
@@ -96,9 +98,11 @@ export function StockOnDatePanel({
             Остаток на выбранную дату. Фильтр срока помогает заранее увидеть риск просрочки.
           </p>
         </div>
-        <Button variant="secondary" isLoading={downloading} onClick={() => void download()}>
-          Скачать в Excel
-        </Button>
+        {canExport && (
+          <Button variant="secondary" isLoading={downloading} onClick={() => void download()}>
+            Скачать в Excel
+          </Button>
+        )}
       </div>
 
       <form

@@ -86,6 +86,9 @@ combined_snapshot_id="$(
 pitr_snapshot_id="$(
     restic --no-lock snapshots --tag aurum-pitr-base --latest 1 --json | jq -er '.[0].id'
 )"
+wal_snapshot_id="$(
+    restic --no-lock snapshots --tag aurum-wal --latest 1 --json | jq -er '.[0].id'
+)"
 signing_key_id="$(
     openssl pkey -pubin -in "$public_key" -outform DER 2>/dev/null | \
         sha256sum | awk '{print $1}'
@@ -114,9 +117,10 @@ jq -S -n \
     --argjson object_count "$object_count" \
     --arg combined_snapshot_id "$combined_snapshot_id" \
     --arg pitr_snapshot_id "$pitr_snapshot_id" \
+    --arg wal_snapshot_id "$wal_snapshot_id" \
     --arg signing_key_id "$signing_key_id" \
     '{
-        schema_version: 1,
+        schema_version: 2,
         trust_domain: "aurum-offsite-recovery-v1",
         export_id: $export_id,
         approved_at_utc: $approved_at,
@@ -135,7 +139,8 @@ jq -S -n \
         },
         restic_snapshots: {
             combined: $combined_snapshot_id,
-            pitr_base: $pitr_snapshot_id
+            pitr_base: $pitr_snapshot_id,
+            wal: $wal_snapshot_id
         },
         signing_algorithm: "ed25519-v1",
         signing_key_id: $signing_key_id

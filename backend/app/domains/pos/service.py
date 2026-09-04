@@ -2791,6 +2791,11 @@ class POSService:
                 "date_from must not be after date_to",
                 details={"from": date_from.isoformat(), "to": date_to.isoformat()},
             )
+        if date_to - date_from >= timedelta(days=_MAX_SALES_OVERVIEW_DAYS):
+            raise BusinessRuleError(
+                "sales export period must not exceed 366 days",
+                details={"max_days": _MAX_SALES_OVERVIEW_DAYS},
+            )
         data = await self.build_sales_summary(
             tenant_id=tenant_id, date_from=date_from, date_to=date_to, branch_id=branch_id
         )
