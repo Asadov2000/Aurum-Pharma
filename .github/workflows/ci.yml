@@ -37,6 +37,7 @@ jobs:
         run: |
           ./scripts/test-verification-tools.ps1
           ./scripts/test-pilot-readiness.ps1
+          ./scripts/test-production-host-preflight.ps1
 
       - name: Test Windows PowerShell 5.1 compatibility
         if: runner.os == 'Windows'
@@ -44,6 +45,7 @@ jobs:
         run: |
           ./scripts/test-verification-tools.ps1
           ./scripts/test-pilot-readiness.ps1
+          ./scripts/test-production-host-preflight.ps1
           ./scripts/test-manage-edge-cash-identity.ps1
 
       - name: Test Edge identity Windows wrapper

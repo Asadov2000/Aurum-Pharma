@@ -156,4 +156,4 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     }
 }
 
-Write-Host "Created 29 production secret files in a protected external directory."
+Write-Host "Created 31 production secret files in a protected external directory."

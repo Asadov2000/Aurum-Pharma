@@ -92,7 +92,21 @@ sudo chmod 0600 /etc/aurum/recovery-trust-secrets/*.pem
 
 ## 4. Проверка конфигурации
 
-Из корня проекта:
+Сначала выполните fail-closed preflight на production Linux-хосте. Он проверяет
+точное соответствие домена и HTTPS origin, отсутствие шаблонных адресов, внешние
+и раздельные каталоги, полный комплект секретов, отсутствие ссылок и доступ к
+секретам только владельцу. Значения секретов не выводятся:
+
+```bash
+pwsh ./scripts/Test-ProductionHostPreflight.ps1 \
+  -EnvFile /etc/aurum/production.env
+```
+
+Параметры `-SkipUnixPermissionCheck` и `-SkipBackupMountCheck` предназначены
+только для изолированных тестов валидатора и запрещены при реальном
+развёртывании. `AURUM_BACKUP_FILESYSTEM_ROOT` должен быть отдельной смонтированной
+файловой системой; одного существующего каталога недостаточно. После успешного
+preflight из корня проекта выполните проверку Compose:
 
 ```bash
 docker compose \
