@@ -403,6 +403,18 @@ services:
 
   celery-worker:
     <<: *backend-service
+    environment:
+      ENVIRONMENT: production
+      AURUM_SECRETS_DIR: /run/secrets
+      LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
+      PYTHONPATH: /app
+    secrets:
+      - source: database_url_support
+        target: DATABASE_URL_SUPPORT
+      - source: redis_url
+        target: REDIS_URL
+    networks:
+      - data
     mem_limit: "${AURUM_CELERY_MEMORY_LIMIT:-1g}"
     cpus: "${AURUM_CELERY_CPU_LIMIT:-1.5}"
     stop_grace_period: 60s
@@ -417,6 +429,48 @@ services:
         "--prefetch-multiplier=1",
         "-Q",
         "default",
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  catalog-worker:
+    <<: *backend-service
+    environment:
+      ENVIRONMENT: production
+      AURUM_SECRETS_DIR: /run/secrets
+      MINIO_ENDPOINT: minio:9000
+      MINIO_BUCKET: aurum
+      MINIO_SECURE: "false"
+      LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
+      PYTHONPATH: /app
+    secrets:
+      - source: database_url_app
+        target: DATABASE_URL_APP
+      - source: redis_url
+        target: REDIS_URL
+      - source: minio_access_key
+        target: MINIO_ACCESS_KEY
+      - source: minio_secret_key
+        target: MINIO_SECRET_KEY
+    networks:
+      - data
+    mem_limit: "${AURUM_CATALOG_WORKER_MEMORY_LIMIT:-768m}"
+    cpus: "${AURUM_CATALOG_WORKER_CPU_LIMIT:-1.0}"
+    stop_grace_period: 60s
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasks.catalog_app",
+        "worker",
+        "--loglevel=warning",
+        "--concurrency=${AURUM_CATALOG_WORKER_CONCURRENCY:-1}",
+        "--prefetch-multiplier=1",
+        "-Q",
+        "catalog-worker",
       ]
     depends_on:
       postgres:
@@ -542,6 +596,16 @@ services:
 
   celery-beat:
     <<: *backend-service
+    environment:
+      ENVIRONMENT: production
+      AURUM_SECRETS_DIR: /run/secrets
+      LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
+      PYTHONPATH: /app
+    secrets:
+      - source: redis_url
+        target: REDIS_URL
+    networks:
+      - data
     mem_limit: "${AURUM_CELERY_BEAT_MEMORY_LIMIT:-384m}"
     cpus: "${AURUM_CELERY_BEAT_CPU_LIMIT:-0.5}"
     stop_grace_period: 30s
@@ -555,8 +619,6 @@ services:
         "--schedule=/tmp/celerybeat-schedule",
       ]
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
 

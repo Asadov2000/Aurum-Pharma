@@ -14,11 +14,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.catalog_worker_db import CatalogWorkerSessionLocal
-from app.core.storage import get_object
+from app.core.catalog_worker_storage import get_catalog_object
 from app.core.time import utc_now
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
-from app.tasks.celery_app import celery_app
+from app.tasks.catalog_app import catalog_app
 
 logger = structlog.get_logger("tasks.catalog")
 IMPORT_SOFT_TIME_LIMIT_SECONDS = 120
@@ -44,7 +44,11 @@ async def _run_import(job_id: str, tenant_id: str) -> dict[str, int]:
             if job is None or str(job.tenant_id) != tenant_id or not job.source_path:
                 logger.warning("import_job_missing", job_id=job_id)
                 return {"created": 0, "errors": 0}
-            raw = await asyncio.to_thread(get_object, job.source_path)
+            raw = await asyncio.to_thread(
+                get_catalog_object,
+                job.source_path,
+                tenant_id=tenant_id,
+            )
             updated = await service.process_import(job_id=UUID(job_id), raw=raw)
             return {
                 "valid": updated.valid_rows or 0,
@@ -70,7 +74,7 @@ async def _mark_import_failed(job_id: str, tenant_id: str) -> None:
             )
 
 
-@celery_app.task(  # type: ignore[misc]
+@catalog_app.task(  # type: ignore[misc]
     name="catalog.import_catalog_job",
     soft_time_limit=IMPORT_SOFT_TIME_LIMIT_SECONDS,
     time_limit=IMPORT_HARD_TIME_LIMIT_SECONDS,

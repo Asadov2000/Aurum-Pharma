@@ -96,7 +96,7 @@ Aurum Pharma уже имеет сильную защиту бизнес-цело
 | PostgreSQL | Источник истины для tenant-данных, денег, остатков, ролей и аудита; RLS и DB-инварианты | `backend/app/core/db.py`, `backend/alembic/versions/0027_harden_rls_support_context.py`, `backend/alembic/versions/0069_enforce_finalized_sale_immutability.py` |
 | Redis | MFA attempt budget, authorization cache, Celery broker/state | `backend/app/core/redis.py`, `backend/app/domains/auth/service.py`, `backend/app/tasks/` |
 | MinIO | Импорты каталога, нормализованные изображения и документы/объекты | `backend/app/core/storage.py`, `backend/app/domains/catalog/router.py`, `infra/minio/aurum-app-policy.json` |
-| Celery workers | Асинхронный импорт, mail outbox и billing transitions с раздельными DB-ролями | `backend/app/tasks/`, `docker-compose.production.yml` (`celery-worker`, `platform-mailer`, `billing-worker`) |
+| Celery workers | Системные задачи, импорт каталога, mail outbox и billing transitions в отдельных процессах с точными allowlist секретов; выделенная DB-роль системного worker остаётся pilot blocker | `backend/app/tasks/`, `docker-compose.production.yml` (`celery-worker`, `catalog-worker`, `platform-mailer`, `billing-worker`), `docs/adr/0030-celery-process-boundaries.md` |
 | Monitoring | Внутренние Prometheus metrics и recovery health | `backend/app/main.py` (`metrics`), `infra/prometheus/`, `docker-compose.production.yml` |
 | Recovery plane | Logical backup, WAL/PITR, Restic, off-site WORM и restore drills | `infra/backup/`, `docker-compose.recovery.yml`, `docs/adr/0025-recovery-slo-and-evidence.md` |
 | CI/build | Тесты, dependency audit, secret/image scanning и SBOM | `.github/workflows/ci.yml`, `backend/pyproject.toml`, `frontend/package.json` |

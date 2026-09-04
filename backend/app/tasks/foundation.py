@@ -14,8 +14,8 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.db import WorkerSessionLocal
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.system_worker_db import SystemWorkerSessionLocal
 from app.core.time import utc_now
 from app.domains.foundation.models import Tenant
 from app.domains.onboarding.models import OnboardingChecklist
@@ -28,7 +28,7 @@ logger = structlog.get_logger("tasks.foundation")
 
 async def _auto_start_trials_async(
     *,
-    session_factory: async_sessionmaker[AsyncSession] = WorkerSessionLocal,
+    session_factory: async_sessionmaker[AsyncSession] = SystemWorkerSessionLocal,
     candidate_tenant_ids: frozenset[UUID] | None = None,
 ) -> dict[str, int]:
     now = utc_now()

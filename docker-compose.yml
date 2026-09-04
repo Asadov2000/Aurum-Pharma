@@ -4,6 +4,7 @@ x-backend-dev-volumes: &backend-dev-volumes
   - ./backend/tests:/app/tests
   - ./backend/alembic.ini:/app/alembic.ini:ro
   - ./backend/pyproject.toml:/app/pyproject.toml:ro
+  - ./infra:/infra:ro
 
 x-backend-runtime-environment: &backend-runtime-environment
   - ENVIRONMENT
@@ -251,7 +252,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aurum-celery-worker
-    environment: *backend-runtime-environment
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_SUPPORT: ${DATABASE_URL_SUPPORT:-postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/aurum}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      PYTHONPATH: /app
     volumes: *backend-dev-volumes
     depends_on:
       redis:
@@ -259,6 +264,32 @@ services:
       postgres:
         condition: service_healthy
     command: celery -A app.tasks.celery_app worker --loglevel=info -Q default
+    restart: unless-stopped
+
+  catalog-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aurum-catalog-worker
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_APP: ${DATABASE_URL_APP:-postgresql+asyncpg://aurum_app:aurum_app_pw@postgres:5432/aurum}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-aurum}
+      MINIO_SECURE: ${MINIO_SECURE:-false}
+      PYTHONPATH: /app
+    volumes: *backend-dev-volumes
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: celery -A app.tasks.catalog_app worker --loglevel=info -Q catalog-worker --concurrency=1
     restart: unless-stopped
 
   billing-worker:
@@ -334,7 +365,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aurum-celery-beat
-    environment: *backend-runtime-environment
+    environment:
+      ENVIRONMENT: development
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      PYTHONPATH: /app
     volumes: *backend-dev-volumes
     depends_on:
       redis:

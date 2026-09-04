@@ -3,9 +3,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.core.config import get_settings
+from app.core.catalog_worker_config import get_catalog_worker_settings
 
-settings = get_settings()
+settings = get_catalog_worker_settings()
 catalog_worker_engine = create_async_engine(
     settings.DATABASE_URL_APP,
     echo=False,

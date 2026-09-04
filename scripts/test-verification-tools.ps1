@@ -245,6 +245,10 @@ Assert-Equal `
     -Expected $true `
     -Because "the local launcher starts the billing worker"
 Assert-Equal `
+    -Actual ($launcherText -match "catalog-worker") `
+    -Expected $true `
+    -Because "the local launcher starts the catalog worker"
+Assert-Equal `
     -Actual ($launcherText -match "Verify shared frontend matches local frontend") `
     -Expected $true `
     -Because "the local launcher rejects a stale shared frontend"

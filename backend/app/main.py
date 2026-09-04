@@ -29,26 +29,26 @@ from app.core.logging import configure_logging, get_logger
 from app.core.redis import redis_client
 from app.domains.audit import admin_router as audit_admin_router
 from app.domains.audit import router as audit_router
-from app.domains.auth import router as auth_router
+from app.domains.auth.router import router as auth_router
 from app.domains.billing.router import admin_router as billing_admin_router
 from app.domains.billing.router import platform_router as billing_platform_router
 from app.domains.billing.router import tenant_router as billing_tenant_router
-from app.domains.catalog import router as catalog_router
+from app.domains.catalog.router import router as catalog_router
 from app.domains.customer_returns.router import router as customer_returns_router
 from app.domains.dashboard import router as dashboard_router
 from app.domains.foundation.router import admin_router as foundation_admin_router
 from app.domains.foundation.router import tenant_router as foundation_tenant_router
 from app.domains.incoming import router as incoming_router
-from app.domains.inventory import router as inventory_router
-from app.domains.notifications import router as notifications_router
-from app.domains.onboarding import router as onboarding_router
+from app.domains.inventory.router import router as inventory_router
+from app.domains.notifications.router import router as notifications_router
+from app.domains.onboarding.router import router as onboarding_router
 from app.domains.platform_access import router as platform_access_router
 from app.domains.platform_accounts.router import (
     activation_router as platform_accounts_activation_router,
 )
 from app.domains.platform_accounts.router import admin_router as platform_accounts_admin_router
 from app.domains.pos.router import router as pos_router
-from app.domains.roles import router as roles_router
+from app.domains.roles.router import router as roles_router
 from app.domains.suppliers import router as suppliers_router
 from app.domains.support_access import router as support_access_router
 from app.domains.sync.router import admin_router as sync_admin_router

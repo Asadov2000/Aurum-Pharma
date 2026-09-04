@@ -166,8 +166,21 @@ services:
       start_period: 20s
 
   celery-worker:
-    <<: *backend-service
+    image: aurum-pharma-demo-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: aurum-demo-celery-worker
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_SUPPORT: "postgresql+asyncpg://aurum_support:${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}@postgres:5432/aurum_demo"
+      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command:
       - celery
       - -A
@@ -178,6 +191,44 @@ services:
       - --prefetch-multiplier=1
       - -Q
       - default
+    init: true
+    restart: unless-stopped
+
+  catalog-worker:
+    image: aurum-pharma-demo-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aurum-demo-catalog-worker
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_APP: "postgresql+asyncpg://aurum_app:${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}@postgres:5432/aurum_demo"
+      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: "${AURUM_DEMO_MINIO_ACCESS_KEY:?AURUM_DEMO_MINIO_ACCESS_KEY is required}"
+      MINIO_SECRET_KEY: "${AURUM_DEMO_MINIO_SECRET_KEY:?AURUM_DEMO_MINIO_SECRET_KEY is required}"
+      MINIO_BUCKET: aurum-demo
+      MINIO_SECURE: "false"
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command:
+      - celery
+      - -A
+      - app.tasks.catalog_app
+      - worker
+      - --loglevel=warning
+      - --concurrency=1
+      - --prefetch-multiplier=1
+      - -Q
+      - catalog-worker
+    init: true
+    restart: unless-stopped
 
   billing-worker:
     image: aurum-pharma-demo-backend:local
@@ -239,14 +290,26 @@ services:
     restart: unless-stopped
 
   celery-beat:
-    <<: *backend-service
+    image: aurum-pharma-demo-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: aurum-demo-celery-beat
+    environment:
+      ENVIRONMENT: development
+      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      PYTHONPATH: /app
+    depends_on:
+      redis:
+        condition: service_healthy
     command:
       - celery
       - -A
       - app.tasks.celery_app
       - beat
       - --loglevel=warning
+    init: true
+    restart: unless-stopped
 
   frontend:
     image: aurum-pharma-demo-frontend:local

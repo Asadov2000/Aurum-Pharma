@@ -20,7 +20,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import WorkerSessionLocal
+from app.core.system_worker_db import SystemWorkerSessionLocal
 from app.core.time import utc_now
 from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Branch
@@ -59,7 +59,7 @@ async def _active_tenant_owners(db: AsyncSession, *, tenant_id: UUID) -> list[Ap
 async def _process_pending_async() -> dict[str, int]:
     sent = 0
     failed = 0
-    async with WorkerSessionLocal() as db:
+    async with SystemWorkerSessionLocal() as db:
         async with db.begin():
             repo = NotificationsRepository(db)
             service = NotificationsService(repo)
@@ -81,7 +81,7 @@ def process_pending_deliveries() -> dict[str, int]:
 
 
 async def _purge_old_async() -> int:
-    async with WorkerSessionLocal() as db:
+    async with SystemWorkerSessionLocal() as db:
         async with db.begin():
             repo = NotificationsRepository(db)
             service = NotificationsService(repo)
@@ -99,7 +99,7 @@ async def _check_expiring_licenses_async() -> int:
     """Notify active tenant owners about licenses expiring within 30 days."""
     notified = 0
     cutoff: date = utc_now().date() + timedelta(days=30)
-    async with WorkerSessionLocal() as db:
+    async with SystemWorkerSessionLocal() as db:
         async with db.begin():
             stmt = select(Branch).where(
                 Branch.is_active.is_(True),
