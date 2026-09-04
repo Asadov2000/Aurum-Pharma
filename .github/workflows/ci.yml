@@ -34,13 +34,16 @@ jobs:
 
       - name: Test change classifier and verification planner
         shell: pwsh
-        run: ./scripts/test-verification-tools.ps1
+        run: |
+          ./scripts/test-verification-tools.ps1
+          ./scripts/test-pilot-readiness.ps1
 
       - name: Test Windows PowerShell 5.1 compatibility
         if: runner.os == 'Windows'
         shell: powershell
         run: |
           ./scripts/test-verification-tools.ps1
+          ./scripts/test-pilot-readiness.ps1
           ./scripts/test-manage-edge-cash-identity.ps1
 
       - name: Test Edge identity Windows wrapper

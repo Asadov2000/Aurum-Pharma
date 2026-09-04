@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "release_scope": "restricted-web-pilot-one-pharmacy",
+  "gates": [
+    { "id": "APP-001", "category": "pos", "required": true, "verification": "repository", "allow_disabled": false },
+    { "id": "APP-002", "category": "inventory", "required": true, "verification": "repository", "allow_disabled": false },
+    { "id": "APP-003", "category": "supply", "required": true, "verification": "repository", "allow_disabled": false },
+    { "id": "APP-004", "category": "authorization", "required": true, "verification": "repository", "allow_disabled": false },
+    { "id": "APP-005", "category": "onboarding", "required": true, "verification": "repository", "allow_disabled": false },
+    { "id": "APP-006", "category": "assurance", "required": true, "verification": "repository", "allow_disabled": false },
+    { "id": "APP-007", "category": "resilience", "required": true, "verification": "repository", "allow_disabled": false },
+    { "id": "APP-008", "category": "security", "required": true, "verification": "repository", "allow_disabled": false },
+    { "id": "LEGAL-001", "category": "legal", "required": true, "verification": "external", "allow_disabled": false },
+    { "id": "LEGAL-002", "category": "legal", "required": true, "verification": "external", "allow_disabled": false },
+    { "id": "PRIVACY-001", "category": "privacy", "required": true, "verification": "hybrid", "allow_disabled": false },
+    { "id": "PRIVACY-002", "category": "privacy", "required": true, "verification": "external", "allow_disabled": false },
+    { "id": "PHARMA-001", "category": "pharmacy", "required": true, "verification": "external", "allow_disabled": false },
+    { "id": "PHARMA-002", "category": "pharmacy", "required": true, "verification": "external", "allow_disabled": false },
+    { "id": "FISCAL-001", "category": "fiscal", "required": true, "verification": "hybrid", "allow_disabled": false },
+    { "id": "PAYMENT-001", "category": "payments", "required": true, "verification": "hybrid", "allow_disabled": false },
+    { "id": "SECURITY-001", "category": "security", "required": true, "verification": "external", "allow_disabled": false },
+    { "id": "SECURITY-002", "category": "security", "required": true, "verification": "hybrid", "allow_disabled": false },
+    { "id": "RECOVERY-001", "category": "recovery", "required": true, "verification": "hybrid", "allow_disabled": false },
+    { "id": "IP-001", "category": "intellectual-property", "required": true, "verification": "hybrid", "allow_disabled": false },
+    { "id": "REGULATOR-001", "category": "regulatory", "required": true, "verification": "external", "allow_disabled": false },
+    { "id": "PILOT-001", "category": "pilot", "required": true, "verification": "external", "allow_disabled": false },
+    { "id": "PILOT-002", "category": "pilot", "required": true, "verification": "external", "allow_disabled": false }
+  ]
+}
