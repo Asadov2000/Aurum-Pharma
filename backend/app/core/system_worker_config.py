@@ -24,8 +24,8 @@ class SystemWorkerSettings(CeleryBrokerSettings):
     )
 
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
-    DATABASE_URL_SUPPORT: str = Field(
-        default="postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/aurum",
+    DATABASE_URL_WORKER: str = Field(
+        default="postgresql+asyncpg://aurum_worker:aurum_worker_pw@postgres:5432/aurum",
         repr=False,
     )
 
@@ -34,18 +34,18 @@ class SystemWorkerSettings(CeleryBrokerSettings):
         if self.ENVIRONMENT == "development":
             return self
         try:
-            database = make_url(self.DATABASE_URL_SUPPORT)
+            database = make_url(self.DATABASE_URL_WORKER)
         except ArgumentError:
             database = None
         if (
             database is None
-            or database.username != "aurum_support"
+            or database.username != "aurum_worker"
             or not database.password
             or not database.host
-            or "aurum_support_pw" in self.DATABASE_URL_SUPPORT
+            or "aurum_worker_pw" in self.DATABASE_URL_WORKER
         ):
             raise ValueError(
-                "DATABASE_URL_SUPPORT must use non-placeholder aurum_support credentials"
+                "DATABASE_URL_WORKER must use non-placeholder aurum_worker credentials"
             )
         return self
 

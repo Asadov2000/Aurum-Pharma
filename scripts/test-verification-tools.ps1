@@ -252,6 +252,12 @@ Assert-Equal `
     -Actual ($launcherText -match "Verify shared frontend matches local frontend") `
     -Expected $true `
     -Because "the local launcher rejects a stale shared frontend"
+if ($launcherText -match "needs a one-time secret upgrade") {
+    Assert-Equal `
+        -Actual ($launcherText -match "normal launcher will add it without replacing existing secrets") `
+        -Expected $true `
+        -Because "dry run explains the non-destructive local secret upgrade"
+}
 
 $currentLauncherArguments = @("-NoProfile")
 if ($env:OS -eq "Windows_NT") {

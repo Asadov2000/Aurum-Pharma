@@ -7,7 +7,7 @@ from app.core.system_worker_config import get_system_worker_settings
 
 settings = get_system_worker_settings()
 system_worker_engine = create_async_engine(
-    settings.DATABASE_URL_SUPPORT,
+    settings.DATABASE_URL_WORKER,
     echo=False,
     hide_parameters=True,
     poolclass=NullPool,

@@ -101,6 +101,15 @@ function Write-TestEnvironment {
     foreach ($name in $secretNames) {
         [IO.File]::WriteAllText((Join-Path $paths.secrets $name), "test-value")
     }
+    $workerPassword = "worker-test-password"
+    [IO.File]::WriteAllText(
+        (Join-Path $paths.secrets "AURUM_WORKER_PASSWORD"),
+        $workerPassword
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $paths.secrets "DATABASE_URL_WORKER"),
+        "postgresql+asyncpg://aurum_worker:$workerPassword@postgres:5432/aurum"
+    )
 
     $settings = [ordered]@{
         AURUM_DOMAIN = "staging.aurum.tj"
@@ -180,6 +189,14 @@ try {
     $multiline = Write-TestEnvironment -Root $multilineRoot
     [IO.File]::WriteAllText((Join-Path $multiline.Paths.secrets "JWT_SECRET"), "line-one`nline-two")
     Assert-Equal -Actual (Invoke-Validator -Path $multiline.EnvFile) -Expected 2 -Because "multiline secrets are rejected"
+
+    $workerUrlRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "worker-url")).FullName
+    $workerUrl = Write-TestEnvironment -Root $workerUrlRoot
+    [IO.File]::WriteAllText(
+        (Join-Path $workerUrl.Paths.secrets "DATABASE_URL_WORKER"),
+        "postgresql+asyncpg://aurum_support:wrong@postgres:5432/aurum"
+    )
+    Assert-Equal -Actual (Invoke-Validator -Path $workerUrl.EnvFile) -Expected 2 -Because "the system worker cannot reuse support credentials"
 
     $sharedRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "shared")).FullName
     $shared = Write-TestEnvironment -Root $sharedRoot

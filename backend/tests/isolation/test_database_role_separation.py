@@ -66,6 +66,7 @@ async def test_database_roles_have_exact_attributes_and_memberships(
                       'aurum_backup',
                       'aurum_pitr',
                       'aurum_mailer',
+                      'aurum_worker',
                       'aurum_support',
                       'aurum_migrator',
                       'aurum_schema_owner'
@@ -194,6 +195,16 @@ async def test_database_roles_have_exact_attributes_and_memberships(
             "rolreplication": False,
             "rolbypassrls": True,
         },
+        "aurum_worker": {
+            "rolname": "aurum_worker",
+            "rolcanlogin": True,
+            "rolinherit": False,
+            "rolsuper": False,
+            "rolcreatedb": False,
+            "rolcreaterole": False,
+            "rolreplication": False,
+            "rolbypassrls": False,
+        },
     }
     assert [dict(row) for row in memberships] == [
         {
@@ -241,6 +252,7 @@ async def test_runtime_roles_have_no_transitive_elevated_membership(
                       'aurum_edge_cash_owner',
                       'aurum_billing_worker',
                       'aurum_mailer',
+                      'aurum_worker',
                       'aurum_support'
                     )
                       AND elevated.rolname IN (
@@ -308,6 +320,16 @@ async def test_runtime_roles_have_no_transitive_elevated_membership(
         },
         {
             "runtime_role": "aurum_support",
+            "elevated_role": "aurum_schema_owner",
+            "is_member": False,
+        },
+        {
+            "runtime_role": "aurum_worker",
+            "elevated_role": "aurum_migrator",
+            "is_member": False,
+        },
+        {
+            "runtime_role": "aurum_worker",
             "elevated_role": "aurum_schema_owner",
             "is_member": False,
         },

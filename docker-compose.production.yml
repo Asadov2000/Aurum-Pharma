@@ -85,6 +85,7 @@ services:
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -100,6 +101,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_worker_password
+        target: AURUM_WORKER_PASSWORD
       - source: aurum_backup_password
         target: AURUM_BACKUP_PASSWORD
       - source: aurum_pitr_password
@@ -136,6 +139,10 @@ services:
           SELECT FROM pg_roles WHERE rolname = 'aurum_backup'
           ) AND EXISTS (
           SELECT FROM pg_roles WHERE rolname = 'aurum_pitr' AND rolreplication
+          ) AND EXISTS (
+          SELECT FROM pg_roles WHERE rolname = 'aurum_worker'
+          AND rolcanlogin AND NOT rolinherit AND NOT rolbypassrls
+          AND rolconnlimit = 2
           ) AND has_function_privilege(
           'aurum_app', to_regprocedure('public.similarity_op(text,text)'), 'EXECUTE'
           )" | grep -qx 1
@@ -289,6 +296,7 @@ services:
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -304,6 +312,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_worker_password
+        target: AURUM_WORKER_PASSWORD
       - source: aurum_backup_password
         target: AURUM_BACKUP_PASSWORD
       - source: aurum_pitr_password
@@ -347,8 +357,8 @@ services:
     networks:
       - data
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-role-bootstrap:
+        condition: service_completed_successfully
     command: ["python", "-m", "app.migrate", "upgrade", "head"]
     read_only: true
     tmpfs:
@@ -409,8 +419,8 @@ services:
       LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
       PYTHONPATH: /app
     secrets:
-      - source: database_url_support
-        target: DATABASE_URL_SUPPORT
+      - source: database_url_worker
+        target: DATABASE_URL_WORKER
       - source: redis_url
         target: REDIS_URL
     networks:
@@ -435,6 +445,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          celery -A app.tasks.celery_app inspect ping
+          -d celery@$$HOSTNAME --timeout 5 | grep -q pong
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   catalog-worker:
     <<: *backend-service
@@ -732,6 +752,8 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_MAILER_PASSWORD"
   aurum_billing_worker_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_BILLING_WORKER_PASSWORD"
+  aurum_worker_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_WORKER_PASSWORD"
   aurum_backup_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_BACKUP_PASSWORD"
   aurum_pitr_password:
@@ -746,6 +768,8 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_MAILER"
   database_url_billing_worker:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_BILLING_WORKER"
+  database_url_worker:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_WORKER"
   database_url_backup:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_BACKUP"
   database_url_pitr:

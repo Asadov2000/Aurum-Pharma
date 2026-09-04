@@ -8,19 +8,13 @@ partially changing billing or tenant state.
 from __future__ import annotations
 
 import asyncio
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.core.system_worker_db import SystemWorkerSessionLocal
-from app.core.time import utc_now
-from app.domains.foundation.models import Tenant
-from app.domains.onboarding.models import OnboardingChecklist
-from app.domains.onboarding.repository import OnboardingRepository
-from app.domains.onboarding.service import OnboardingService
 from app.tasks.celery_app import celery_app
 
 logger = structlog.get_logger("tasks.foundation")
@@ -31,51 +25,50 @@ async def _auto_start_trials_async(
     session_factory: async_sessionmaker[AsyncSession] = SystemWorkerSessionLocal,
     candidate_tenant_ids: frozenset[UUID] | None = None,
 ) -> dict[str, int]:
-    now = utc_now()
-    started = 0
-    skipped = 0
     async with session_factory() as db:
         async with db.begin():
-            candidates = (
-                select(Tenant.id)
-                .join(
-                    OnboardingChecklist,
-                    OnboardingChecklist.tenant_id == Tenant.id,
-                )
-                .where(
-                    Tenant.status == "setup",
-                    OnboardingChecklist.setup_ends_at <= now,
-                )
-                .order_by(OnboardingChecklist.setup_ends_at, Tenant.id)
-                .limit(100)
+            result = await db.execute(
+                text(
+                    "SELECT tenant_id "
+                    "FROM public.worker_list_automatic_trial_candidates("
+                    ":limit, :tenant_ids)"
+                ),
+                {
+                    "limit": 100,
+                    "tenant_ids": (
+                        list(candidate_tenant_ids) if candidate_tenant_ids is not None else None
+                    ),
+                },
             )
-            if candidate_tenant_ids is not None:
-                if not candidate_tenant_ids:
-                    return {"started": 0, "skipped": 0}
-                candidates = candidates.where(Tenant.id.in_(candidate_tenant_ids))
-            candidate_ids = list((await db.execute(candidates)).scalars())
+            tenant_ids = [UUID(str(row["tenant_id"])) for row in result.mappings()]
 
-    for tenant_id in candidate_ids:
+    started = 0
+    skipped = 0
+    for tenant_id in tenant_ids:
         try:
             async with session_factory() as db:
                 async with db.begin():
-                    service = OnboardingService(OnboardingRepository(db))
-                    await service.start_trial(
-                        tenant_id=tenant_id,
-                        source="automatic",
-                        operation_id=uuid5(
-                            NAMESPACE_URL,
-                            f"aurum-pharma:automatic-trial:{tenant_id}",
+                    result = await db.execute(
+                        text(
+                            "SELECT started, reason "
+                            "FROM public.worker_start_automatic_trial(:tenant_id)"
                         ),
+                        {"tenant_id": tenant_id},
                     )
+                    outcome = result.mappings().one()
+        except Exception:
+            skipped += 1
+            logger.exception("auto_start_trial_failed", tenant_id=str(tenant_id))
+            continue
+
+        if bool(outcome["started"]):
             started += 1
-            logger.info("trial_started_automatically", tenant_id=str(tenant_id))
-        except (BusinessRuleError, ConflictError, NotFoundError) as exc:
+        else:
             skipped += 1
             logger.info(
-                "trial_auto_start_skipped",
+                "auto_start_trial_skipped",
                 tenant_id=str(tenant_id),
-                reason=exc.code,
+                reason=str(outcome["reason"]),
             )
     return {"started": started, "skipped": skipped}
 

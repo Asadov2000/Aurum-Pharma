@@ -9,8 +9,9 @@
 
 It writes the in-app notification, looks up the user's subscription
 for this event_type, and for every non-`in_app` channel listed there
-queues a `notification_delivery(status='pending')`. The actual
-sending happens in the Celery worker (`process_pending_deliveries`).
+queues a `notification_delivery(status='pending')`. A provider adapter must be
+configured before the delivery worker is enabled; queued messages remain
+pending until then.
 
 `channels` defaults to `["in_app"]` if the user has no subscription
 on record — that matches the spec ("on by default, opt-out to
@@ -45,7 +46,6 @@ from app.domains.notifications.repository import NotificationsRepository
 logger = structlog.get_logger("notifications.service")
 
 DEFAULT_RETENTION = timedelta(days=30)
-MAX_DELIVERY_ATTEMPTS = 3
 
 
 class NotificationsService:
@@ -188,35 +188,8 @@ class NotificationsService:
     # =========================================================================
 
     async def attempt_delivery(self, delivery: NotificationDelivery) -> NotificationDelivery:
-        """Phase-1 stub: logs the payload, marks the row as sent.
-        Phase-2 implementation will plug in SMTP / Telegram bot API and
-        keep the retry loop (already encoded by attempts < MAX_ATTEMPTS).
-        """
-        now = utc_now()
-        attempts = delivery.attempts + 1
-        try:
-            # No real network call yet — phase 1 is log-only.
-            logger.info(
-                "delivery_attempt",
-                delivery_id=str(delivery.id),
-                channel=delivery.channel,
-                attempt=attempts,
-            )
-            return await self.repo.update_delivery(
-                delivery,
-                status="sent",
-                attempts=attempts,
-                sent_at=now,
-                error_message=None,
-            )
-        except Exception as exc:
-            new_status = "failed" if attempts >= MAX_DELIVERY_ATTEMPTS else "pending"
-            return await self.repo.update_delivery(
-                delivery,
-                status=new_status,
-                attempts=attempts,
-                error_message=str(exc),
-            )
+        """Fail closed until a real delivery adapter confirms the send."""
+        raise RuntimeError(f"Delivery adapter is not configured for channel {delivery.channel}")
 
     async def purge_old(self, *, older_than: datetime | None = None) -> int:
         cutoff = older_than or (utc_now() - DEFAULT_RETENTION)

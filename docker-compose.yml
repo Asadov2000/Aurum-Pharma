@@ -77,6 +77,7 @@ services:
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
+      AURUM_WORKER_PASSWORD: ${AURUM_WORKER_PASSWORD:-aurum_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
       AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
       AURUM_PITR_PASSWORD: ${AURUM_PITR_PASSWORD:-aurum_pitr_pw}
@@ -109,6 +110,7 @@ services:
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
+      AURUM_WORKER_PASSWORD: ${AURUM_WORKER_PASSWORD:-aurum_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
       AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
       AURUM_PITR_PASSWORD: ${AURUM_PITR_PASSWORD:-aurum_pitr_pw}
@@ -207,6 +209,7 @@ services:
       AURUM_SUPPORT_PASSWORD: ${AURUM_SUPPORT_PASSWORD:-aurum_support_pw}
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
+      AURUM_WORKER_PASSWORD: ${AURUM_WORKER_PASSWORD:-aurum_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
       AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
       AURUM_PITR_PASSWORD: ${AURUM_PITR_PASSWORD:-aurum_pitr_pw}
@@ -254,7 +257,7 @@ services:
     container_name: aurum-celery-worker
     environment:
       ENVIRONMENT: development
-      DATABASE_URL_SUPPORT: ${DATABASE_URL_SUPPORT:-postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/aurum}
+      DATABASE_URL_WORKER: ${DATABASE_URL_WORKER:-postgresql+asyncpg://aurum_worker:aurum_worker_pw@postgres:5432/aurum}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       PYTHONPATH: /app
     volumes: *backend-dev-volumes

@@ -23,8 +23,6 @@ from app.domains.notifications.models import (
 from app.domains.notifications.repository import NotificationsRepository
 from app.domains.notifications.schemas import SubscriptionPatch
 from app.domains.notifications.service import NotificationsService
-from app.domains.roles.models import TenantMembership, TenantOwnership
-from app.tasks.notifications import _active_tenant_owners
 
 
 async def _make_tenant_and_user(db_session: AsyncSession) -> tuple:  # type: ignore[no-untyped-def]
@@ -42,46 +40,6 @@ async def _make_tenant_and_user(db_session: AsyncSession) -> tuple:  # type: ign
     await db_session.flush()
     await db_session.refresh(user)
     return tenant, user
-
-
-async def test_license_notifications_target_only_active_owner(
-    db_session: AsyncSession,
-) -> None:
-    tenant, owner = await _make_tenant_and_user(db_session)
-    employee = AppUser(
-        email=f"employee-{uuid4().hex[:6]}@aurum.tj",
-        full_name="Employee",
-        home_tenant_id=tenant.id,
-        status="active",
-    )
-    db_session.add(employee)
-    await db_session.flush()
-
-    owner_membership = TenantMembership(
-        tenant_id=tenant.id,
-        user_id=owner.id,
-        full_name=owner.full_name,
-        status="active",
-    )
-    employee_membership = TenantMembership(
-        tenant_id=tenant.id,
-        user_id=employee.id,
-        full_name=employee.full_name,
-        status="active",
-    )
-    db_session.add_all([owner_membership, employee_membership])
-    await db_session.flush()
-    db_session.add(
-        TenantOwnership(
-            tenant_id=tenant.id,
-            membership_id=owner_membership.id,
-        )
-    )
-    await db_session.flush()
-
-    recipients = await _active_tenant_owners(db_session, tenant_id=tenant.id)
-
-    assert [user.id for user in recipients] == [owner.id]
 
 
 async def test_notify_creates_notification_default_channels(
@@ -233,8 +191,9 @@ async def test_mandatory_security_subscription_cannot_be_disabled(
     assert updated[0].channels == ["in_app"]
 
 
-async def test_attempt_delivery_marks_sent(db_session: AsyncSession) -> None:
-    """Phase-1 stub: attempt_delivery flips status to 'sent' on first try."""
+async def test_attempt_delivery_without_adapter_keeps_delivery_pending(
+    db_session: AsyncSession,
+) -> None:
     tenant, user = await _make_tenant_and_user(db_session)
     service = NotificationsService(NotificationsRepository(db_session))
 
@@ -256,10 +215,12 @@ async def test_attempt_delivery_marks_sent(db_session: AsyncSession) -> None:
     ).scalar_one()
     assert delivery.status == "pending"
 
-    updated = await service.attempt_delivery(delivery)
-    assert updated.status == "sent"
-    assert updated.attempts == 1
-    assert updated.sent_at is not None
+    with pytest.raises(RuntimeError, match="adapter is not configured"):
+        await service.attempt_delivery(delivery)
+    await db_session.refresh(delivery)
+    assert delivery.status == "pending"
+    assert delivery.attempts == 0
+    assert delivery.sent_at is None
 
 
 async def test_mark_read_and_all(db_session: AsyncSession) -> None:

@@ -484,6 +484,7 @@ services:
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -499,6 +500,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_worker_password
+        target: AURUM_WORKER_PASSWORD
       - source: aurum_backup_password
         target: AURUM_BACKUP_PASSWORD
       - source: aurum_pitr_password
@@ -516,6 +519,10 @@ services:
           psql -U postgres -d aurum_restore -tAc
           "SELECT 1 WHERE EXISTS (
           SELECT FROM pg_roles WHERE rolname = 'aurum_backup'
+          ) AND EXISTS (
+          SELECT FROM pg_roles WHERE rolname = 'aurum_worker'
+          AND rolcanlogin AND NOT rolinherit AND NOT rolbypassrls
+          AND rolconnlimit = 2
           ) AND has_function_privilege(
           'aurum_app', to_regprocedure('public.similarity_op(text,text)'), 'EXECUTE'
           )" | grep -qx 1

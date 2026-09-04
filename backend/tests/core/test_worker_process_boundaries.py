@@ -33,29 +33,29 @@ def test_beat_configuration_rejects_unauthenticated_redis() -> None:
         )
 
 
-def test_system_worker_accepts_only_support_identity() -> None:
+def test_system_worker_accepts_only_worker_identity() -> None:
     settings = SystemWorkerSettings(
         ENVIRONMENT="production",
-        DATABASE_URL_SUPPORT=("postgresql+asyncpg://aurum_support:Str0ng-Support-Pw@db:5432/aurum"),
+        DATABASE_URL_WORKER=("postgresql+asyncpg://aurum_worker:Str0ng-Worker-Pw@db:5432/aurum"),
         REDIS_URL=_REDIS_URL,
     )
 
-    assert "Str0ng-Support-Pw" not in repr(settings)
+    assert "Str0ng-Worker-Pw" not in repr(settings)
 
 
 @pytest.mark.parametrize(
     "database_url",
     (
         "postgresql+asyncpg://aurum_app:secret@db:5432/aurum",
-        "postgresql+asyncpg://aurum_support@db:5432/aurum",
-        "postgresql+asyncpg://aurum_support:aurum_support_pw@db:5432/aurum",
+        "postgresql+asyncpg://aurum_worker@db:5432/aurum",
+        "postgresql+asyncpg://aurum_worker:aurum_worker_pw@db:5432/aurum",
     ),
 )
 def test_system_worker_rejects_wrong_database_identity(database_url: str) -> None:
-    with pytest.raises(ValidationError, match="DATABASE_URL_SUPPORT"):
+    with pytest.raises(ValidationError, match="DATABASE_URL_WORKER"):
         SystemWorkerSettings(
             ENVIRONMENT="production",
-            DATABASE_URL_SUPPORT=database_url,
+            DATABASE_URL_WORKER=database_url,
             REDIS_URL=_REDIS_URL,
         )
 
@@ -154,27 +154,15 @@ def test_catalog_tasks_are_routed_only_to_dedicated_queue() -> None:
         ("app.tasks.celery_app", {}),
         (
             "app.tasks.auth",
-            {
-                "DATABASE_URL_SUPPORT": (
-                    "postgresql+asyncpg://aurum_support:worker-pw@db:5432/aurum"
-                )
-            },
+            {"DATABASE_URL_WORKER": ("postgresql+asyncpg://aurum_worker:worker-pw@db:5432/aurum")},
         ),
         (
             "app.tasks.foundation",
-            {
-                "DATABASE_URL_SUPPORT": (
-                    "postgresql+asyncpg://aurum_support:worker-pw@db:5432/aurum"
-                )
-            },
+            {"DATABASE_URL_WORKER": ("postgresql+asyncpg://aurum_worker:worker-pw@db:5432/aurum")},
         ),
         (
             "app.tasks.notifications",
-            {
-                "DATABASE_URL_SUPPORT": (
-                    "postgresql+asyncpg://aurum_support:worker-pw@db:5432/aurum"
-                )
-            },
+            {"DATABASE_URL_WORKER": ("postgresql+asyncpg://aurum_worker:worker-pw@db:5432/aurum")},
         ),
         (
             "app.tasks.catalog",
@@ -196,6 +184,7 @@ def test_worker_modules_import_without_unrelated_application_secrets(
     for name in (
         "DATABASE_URL_APP",
         "DATABASE_URL_SUPPORT",
+        "DATABASE_URL_WORKER",
         "JWT_SECRET",
         "MFA_ENCRYPTION_KEY",
         "EMAIL_OUTBOX_ENCRYPTION_KEY",

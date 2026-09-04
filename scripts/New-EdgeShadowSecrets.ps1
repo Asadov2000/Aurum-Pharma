@@ -59,6 +59,7 @@ $passwords = @{
     AURUM_MIGRATOR_PASSWORD = New-RandomHex -Bytes 32
     AURUM_MAILER_PASSWORD = New-RandomHex -Bytes 32
     AURUM_BILLING_WORKER_PASSWORD = New-RandomHex -Bytes 32
+    AURUM_WORKER_PASSWORD = New-RandomHex -Bytes 32
     AURUM_BACKUP_PASSWORD = New-RandomHex -Bytes 32
     AURUM_PITR_PASSWORD = New-RandomHex -Bytes 32
 }
@@ -107,4 +108,4 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     Get-ChildItem -LiteralPath $output -File | ForEach-Object { & chmod 600 -- $_.FullName }
 }
 
-Write-Host "Created 13 Edge shadow secret files in a protected external directory."
+Write-Host "Created 14 Edge shadow secret files in a protected external directory."

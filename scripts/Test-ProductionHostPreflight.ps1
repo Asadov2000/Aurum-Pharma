@@ -49,6 +49,7 @@ $requiredSecrets = @(
     "AURUM_SUPPORT_PASSWORD",
     "AURUM_MAILER_PASSWORD",
     "AURUM_BILLING_WORKER_PASSWORD",
+    "AURUM_WORKER_PASSWORD",
     "AURUM_MIGRATOR_PASSWORD",
     "AURUM_BACKUP_PASSWORD",
     "AURUM_PITR_PASSWORD",
@@ -56,6 +57,7 @@ $requiredSecrets = @(
     "DATABASE_URL_SUPPORT",
     "DATABASE_URL_MAILER",
     "DATABASE_URL_BILLING_WORKER",
+    "DATABASE_URL_WORKER",
     "DATABASE_URL_MIGRATION",
     "DATABASE_URL_BACKUP",
     "DATABASE_URL_PITR",
@@ -193,6 +195,38 @@ function Test-DescendantPath {
     return $Child.StartsWith($parentPrefix, $comparison)
 }
 
+function Assert-WorkerDatabaseUrl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Value,
+        [Parameter(Mandatory = $true)][string]$ExpectedPassword
+    )
+
+    $uri = $null
+    if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri)) {
+        throw "DATABASE_URL_WORKER must be an absolute PostgreSQL URL."
+    }
+    if (
+        $uri.Scheme -cne "postgresql+asyncpg" -or
+        $uri.Host -cne "postgres" -or
+        $uri.Port -ne 5432 -or
+        $uri.AbsolutePath -cne "/aurum" -or
+        $uri.Query.Length -gt 0 -or
+        $uri.Fragment.Length -gt 0
+    ) {
+        throw "DATABASE_URL_WORKER must target aurum_worker on postgres:5432/aurum."
+    }
+
+    $separator = $uri.UserInfo.IndexOf(":", [StringComparison]::Ordinal)
+    if ($separator -lt 1) {
+        throw "DATABASE_URL_WORKER must contain dedicated credentials."
+    }
+    $username = [Uri]::UnescapeDataString($uri.UserInfo.Substring(0, $separator))
+    $password = [Uri]::UnescapeDataString($uri.UserInfo.Substring($separator + 1))
+    if ($username -cne "aurum_worker" -or $password -cne $ExpectedPassword) {
+        throw "DATABASE_URL_WORKER credentials must match AURUM_WORKER_PASSWORD."
+    }
+}
+
 try {
     $settings = Read-EnvironmentFile -Path $EnvFile
     foreach ($name in $requiredSettings) {
@@ -283,6 +317,7 @@ try {
         throw "AURUM_SECRET_FILES_DIR cannot be a symbolic link."
     }
 
+    $secretValues = @{}
     foreach ($name in $requiredSecrets) {
         $path = Join-Path $secretDirectory $name
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -300,7 +335,12 @@ try {
         ) {
             throw "Production secret must contain exactly one non-empty line: $name."
         }
+        $secretValues[$name] = $value
     }
+
+    Assert-WorkerDatabaseUrl `
+        -Value $secretValues.DATABASE_URL_WORKER `
+        -ExpectedPassword $secretValues.AURUM_WORKER_PASSWORD
 
     if (-not $SkipUnixPermissionCheck) {
         if ($isWindowsPlatform) {

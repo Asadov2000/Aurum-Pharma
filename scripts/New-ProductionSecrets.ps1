@@ -64,6 +64,7 @@ $appPassword = New-RandomHex -Bytes 32
 $supportPassword = New-RandomHex -Bytes 32
 $mailerPassword = New-RandomHex -Bytes 32
 $billingWorkerPassword = New-RandomHex -Bytes 32
+$workerPassword = New-RandomHex -Bytes 32
 $migratorPassword = New-RandomHex -Bytes 32
 $backupPassword = New-RandomHex -Bytes 32
 $pitrPassword = New-RandomHex -Bytes 32
@@ -91,6 +92,7 @@ Write-Secret -Name "AURUM_APP_PASSWORD" -Value $appPassword
 Write-Secret -Name "AURUM_SUPPORT_PASSWORD" -Value $supportPassword
 Write-Secret -Name "AURUM_MAILER_PASSWORD" -Value $mailerPassword
 Write-Secret -Name "AURUM_BILLING_WORKER_PASSWORD" -Value $billingWorkerPassword
+Write-Secret -Name "AURUM_WORKER_PASSWORD" -Value $workerPassword
 Write-Secret -Name "AURUM_MIGRATOR_PASSWORD" -Value $migratorPassword
 Write-Secret -Name "AURUM_BACKUP_PASSWORD" -Value $backupPassword
 Write-Secret -Name "AURUM_PITR_PASSWORD" -Value $pitrPassword
@@ -106,6 +108,9 @@ Write-Secret -Name "DATABASE_URL_MAILER" -Value (
 Write-Secret -Name "DATABASE_URL_BILLING_WORKER" -Value (
     "postgresql+asyncpg://aurum_billing_worker:{0}@postgres:5432/aurum" -f `
         $billingWorkerPassword
+)
+Write-Secret -Name "DATABASE_URL_WORKER" -Value (
+    "postgresql+asyncpg://aurum_worker:{0}@postgres:5432/aurum" -f $workerPassword
 )
 Write-Secret -Name "DATABASE_URL_MIGRATION" -Value (
     "postgresql+asyncpg://aurum_migrator:{0}@postgres:5432/aurum" -f $migratorPassword
@@ -156,4 +161,4 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     }
 }
 
-Write-Host "Created 31 production secret files in a protected external directory."
+Write-Host "Created 33 production secret files in a protected external directory."
