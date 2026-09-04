@@ -9,7 +9,6 @@ export type ReadinessStepCode =
   | "ready";
 
 export type ReadinessTaskCode =
-  | "catalog_loaded"
   | "first_incoming"
   | "first_sale"
   | "second_user"
@@ -63,7 +62,7 @@ export interface OnboardingOverview {
 
 export interface StartTrialResponse {
   tenant_id: string;
-  status: string;
+  status: TenantLaunchStatus;
   trial_started_at: string;
   trial_ends_at: string;
   subscription_id: string;

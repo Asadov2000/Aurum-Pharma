@@ -62,6 +62,7 @@ test.describe("Interface layout", () => {
       { width: 1440, height: 900 },
       { width: 1024, height: 768 },
       { width: 390, height: 844 },
+      { width: 320, height: 720 },
     ]) {
       await page.setViewportSize(viewport);
       await page.goto("/onboarding");
