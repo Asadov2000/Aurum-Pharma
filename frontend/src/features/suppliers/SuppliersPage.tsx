@@ -22,6 +22,7 @@ import {
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
+import { permissionBranchScope } from "@/features/auth/branchPermissions";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,7 @@ export function SuppliersPage(): JSX.Element {
   const canCreate = hasPermission(user, "suppliers.create");
   const canUpdate = hasPermission(user, "suppliers.update");
   const canCreateReturn = hasPermission(user, "incoming.return");
+  const returnBranchScope = permissionBranchScope(user, "incoming.return");
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<StatusFilter>("active");
@@ -373,6 +375,7 @@ export function SuppliersPage(): JSX.Element {
           {returning && (
             <SupplierReturnForm
               supplier={returning}
+              allowedBranchIds={returnBranchScope}
               onClose={requestReturnClose}
               onDirtyChange={setReturnDirty}
             />

@@ -10,14 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.deps import _seed_request_db_context, get_db
-from app.core.security import create_access_token, decode_access_token
+from app.core.security import decode_access_token
 from app.domains.roles.models import Permission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 from app.domains.support_access.repository import SupportAccessRepository
 from app.domains.support_access.service import SupportAccessService
 from app.main import app
-from tests.auth_helpers import create_support_access_token
+from tests.auth_helpers import create_support_access_token, create_tenant_access_token
 
 PROTECTED_GOVERNANCE_CODES = {
     "roles.assign",
@@ -235,12 +235,7 @@ async def test_non_owner_cannot_read_delegation_catalog(
             )
         )
         await db_session.flush()
-        token = create_access_token(
-            user.id,
-            tenant_id=tenant.id,
-            is_developer=False,
-            is_administrator=False,
-        )
+        token = await create_tenant_access_token(db_session, user, tenant_id=tenant.id)
 
         response = await client.get(
             "/api/v1/permissions",
@@ -271,12 +266,7 @@ async def test_role_catalog_does_not_disclose_protected_owner_role(
             level=4,
             name="Visible cashier",
         )
-        token = create_access_token(
-            owner.id,
-            tenant_id=tenant.id,
-            is_developer=False,
-            is_administrator=False,
-        )
+        token = await create_tenant_access_token(db_session, owner, tenant_id=tenant.id)
 
         response = await client.get(
             "/api/v1/roles",

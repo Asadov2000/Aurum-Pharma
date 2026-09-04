@@ -8,6 +8,7 @@ const rejectIncoming = vi.fn();
 const deleteIncomingItem = vi.fn();
 
 let permissions = ["incoming.view", "incoming.create", "incoming.finalize"];
+let permissionScopes: Record<string, string[] | null> = {};
 
 vi.mock("@/features/incoming/api", () => ({
   getIncoming: (...args: unknown[]) => getIncoming(...args),
@@ -22,7 +23,9 @@ vi.mock("@/features/incoming/api", () => ({
 }));
 
 vi.mock("@/features/auth/hooks", () => ({
-  useAuth: () => ({ user: { permissions } }),
+  useAuth: () => ({
+    user: { is_developer: false, permissions, permission_scopes: permissionScopes },
+  }),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -85,6 +88,11 @@ function renderPage(): void {
 describe("IncomingDetailPage", () => {
   beforeEach(() => {
     permissions = ["incoming.view", "incoming.create", "incoming.finalize"];
+    permissionScopes = {
+      "incoming.view": ["branch-1"],
+      "incoming.create": ["branch-1"],
+      "incoming.finalize": ["branch-1"],
+    };
     getIncoming.mockReset();
     acceptIncoming.mockReset();
     rejectIncoming.mockReset();
@@ -131,6 +139,7 @@ describe("IncomingDetailPage", () => {
 
   it("hides every modifying action from a read-only user", async () => {
     permissions = ["incoming.view"];
+    permissionScopes = { "incoming.view": ["branch-1"] };
     renderPage();
 
     expect(await screen.findByText("Приёмка № ПР-1042")).toBeInTheDocument();
@@ -138,6 +147,20 @@ describe("IncomingDetailPage", () => {
     expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Отклонить" })).not.toBeInTheDocument();
+  });
+
+  it("hides modifying actions outside the permission branch scope", async () => {
+    permissionScopes = {
+      "incoming.view": ["branch-1"],
+      "incoming.create": ["branch-2"],
+      "incoming.finalize": ["branch-2"],
+    };
+
+    renderPage();
+
+    expect(await screen.findByText("Приёмка № ПР-1042")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Добавить позицию" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
   });
 
   it("lets a preparer edit the draft but not finalize it", async () => {

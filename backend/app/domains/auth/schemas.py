@@ -179,6 +179,10 @@ class MeResponse(BaseModel):
     # Effective permission codes (resolved from roles, cached in Redis). Lets the
     # UI hide nav/actions the user can't use. Not in the JWT — sent in the body.
     permissions: list[str] = []
+    # ``null`` means tenant-wide access; a list contains the exact branches where
+    # a BRANCH_SET permission is effective. The UI uses this only to hide actions;
+    # the backend remains the authorization authority.
+    permission_scopes: dict[str, list[UUID] | None] = Field(default_factory=dict)
     # Global control-plane capabilities stay separate from tenant permissions.
     platform_capabilities: list[str] = []
     support_access: SupportAccessContextResponse | None = None

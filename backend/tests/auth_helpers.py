@@ -85,3 +85,53 @@ async def create_support_access_token(
         session_id=session.id,
         mfa_verified_at=verified_at,
     )
+
+
+async def create_tenant_access_token(
+    db_session: AsyncSession,
+    user: AppUser,
+    *,
+    tenant_id: UUID | None = None,
+    is_developer: bool | None = None,
+    is_administrator: bool | None = None,
+    mfa_verified_at: datetime | None = None,
+) -> str:
+    """Create a revocable tenant access token backed by a live auth session."""
+    return await create_session_access_token(
+        db_session,
+        user_id=user.id,
+        tenant_id=tenant_id if tenant_id is not None else user.home_tenant_id,
+        is_developer=user.is_developer if is_developer is None else is_developer,
+        is_administrator=(user.is_administrator if is_administrator is None else is_administrator),
+        mfa_verified_at=mfa_verified_at,
+    )
+
+
+async def create_session_access_token(
+    db_session: AsyncSession,
+    *,
+    user_id: UUID,
+    tenant_id: UUID | None,
+    is_developer: bool = False,
+    is_administrator: bool = False,
+    mfa_verified_at: datetime | None = None,
+) -> str:
+    """Create a revocable access token when a test only has the user id."""
+    issued_at = utc_now()
+    session = Session(
+        user_id=user_id,
+        refresh_token_hash=hash_token(secrets.token_hex(32)),
+        expires_at=issued_at + timedelta(days=1),
+        mfa_verified_at=mfa_verified_at,
+    )
+    db_session.add(session)
+    await db_session.flush()
+    await db_session.refresh(session)
+    return create_access_token(
+        user_id,
+        tenant_id=tenant_id,
+        is_developer=is_developer,
+        is_administrator=is_administrator,
+        session_id=session.id,
+        mfa_verified_at=mfa_verified_at,
+    )

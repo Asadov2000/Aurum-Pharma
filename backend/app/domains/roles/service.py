@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
@@ -58,6 +60,27 @@ PASSWORD_CONFIGURATION_REQUIRED = "Password must be configured before it can be 
 OWNERSHIP_TRANSFER_TTL = timedelta(hours=72)
 
 
+def _employee_invitation_fingerprint(
+    *,
+    email: str,
+    full_name: str,
+    phone: str | None,
+    role_id: UUID,
+    branch_id: UUID | None,
+    password_required: bool,
+) -> str:
+    payload = {
+        "branch_id": str(branch_id) if branch_id is not None else None,
+        "email": email.strip().lower(),
+        "full_name": full_name.strip(),
+        "password_required": password_required,
+        "phone": phone.strip() if phone and phone.strip() else None,
+        "role_id": str(role_id),
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _is_password_requirement_guard_error(exc: DBAPIError) -> bool:
     sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
     return sqlstate == "P2001"
@@ -82,6 +105,11 @@ def _ownership_transfer_error(exc: DBAPIError) -> Exception:
 
 def _employee_invitation_error(exc: DBAPIError) -> Exception:
     sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    if sqlstate == "P2002":
+        return ConflictError(
+            "Повтор приглашения отличается от исходного запроса; обновите страницу",
+            details={"reason": "operation_payload_mismatch"},
+        )
     if sqlstate == "23505":
         return ConflictError(
             "Не удалось создать новый аккаунт с этим email",
@@ -117,6 +145,10 @@ class RolesService:
     def __init__(self, repo: RolesRepository, redis: Redis | None = None) -> None:
         self.repo = repo
         self.redis = redis
+
+    async def _lock_tenant_authorization(self, tenant_id: UUID) -> None:
+        if not await self.repo.lock_tenant_authorization(tenant_id):
+            raise NotFoundError("Tenant not found")
 
     # -------------------------------------------------------------------------
     # Delegable catalogue
@@ -541,6 +573,8 @@ class RolesService:
         description: str | None,
         permission_codes: list[str],
     ) -> tuple[Role, list[str]]:
+        if not await self.repo.lock_tenant_authorization(tenant_id):
+            raise NotFoundError("Tenant not found")
         self._assert_role_name_available(name)
         codes = await self._validated_role_permissions(
             actor_id=actor_id,
@@ -586,6 +620,7 @@ class RolesService:
         description: str | None,
         permission_codes: list[str] | None,
     ) -> tuple[Role, list[str]]:
+        await self._lock_tenant_authorization(tenant_id)
         role = await self.repo.get_role_for_update(role_id)
         if role is None or role.tenant_id != tenant_id:
             raise NotFoundError("Role not found")
@@ -704,6 +739,8 @@ class RolesService:
         expected_version: int,
         replacement_role_id: UUID,
     ) -> RoleArchiveResult:
+        if not await self.repo.lock_tenant_authorization(tenant_id):
+            raise NotFoundError("Tenant not found")
         role = await self.repo.get_role(role_id)
         if role is None or role.tenant_id != tenant_id:
             raise NotFoundError("Role not found")
@@ -828,6 +865,8 @@ class RolesService:
     ) -> None:
         if actor_id == target_user_id:
             raise BusinessRuleError("You cannot resume your own membership")
+        if not await self.repo.lock_tenant_authorization(tenant_id):
+            raise NotFoundError("Tenant not found")
         await self.repo.lock_user_assignments(tenant_id, target_user_id)
         membership = await self.repo.get_membership_for_user(
             tenant_id=tenant_id,
@@ -917,6 +956,8 @@ class RolesService:
     ) -> None:
         if actor_id == target_user_id:
             raise BusinessRuleError("You cannot change your own membership status")
+        if not await self.repo.lock_tenant_authorization(tenant_id):
+            raise NotFoundError("Tenant not found")
         await self.repo.lock_user_assignments(tenant_id, target_user_id)
         membership = await self.repo.get_membership_for_user(
             tenant_id=tenant_id,
@@ -1055,6 +1096,8 @@ class RolesService:
         password_required: bool,
     ) -> tuple[DirectoryUser, UserAssignment, bool]:
         """Create or complete an employee invitation inside the owner's tenant."""
+        if not await self.repo.lock_tenant_authorization(tenant_id):
+            raise NotFoundError("Tenant not found")
         if (
             actor_is_developer
             or actor_is_administrator
@@ -1081,6 +1124,14 @@ class RolesService:
                     full_name=full_name,
                     phone=phone,
                     operation_id=operation_id,
+                    request_fingerprint=_employee_invitation_fingerprint(
+                        email=email,
+                        full_name=full_name,
+                        phone=phone,
+                        role_id=role_id,
+                        branch_id=branch_id,
+                        password_required=password_required,
+                    ),
                     issued_at=utc_now(),
                 )
             except DBAPIError as exc:
@@ -1203,6 +1254,8 @@ class RolesService:
         branch_ids: list[UUID | None],
         password_required: bool,
     ) -> tuple[Role, list[UserAssignment]]:
+        if not await self.repo.lock_tenant_authorization(tenant_id):
+            raise NotFoundError("Tenant not found")
         if actor_id == target_user_id:
             raise PermissionDeniedError("You cannot assign privileges to yourself")
         if not branch_ids or len(set(branch_ids)) != len(branch_ids):
@@ -1485,6 +1538,8 @@ class RolesService:
     ) -> None:
         if actor_id == target_user_id:
             raise PermissionDeniedError("You cannot revoke your own privileges")
+        if not await self.repo.lock_tenant_authorization(tenant_id):
+            raise NotFoundError("Tenant not found")
         await self.repo.lock_user_assignments(tenant_id, target_user_id)
         assignment = await self.repo.get_assignment(assignment_id)
         if (

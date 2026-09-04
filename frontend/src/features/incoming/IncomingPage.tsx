@@ -24,6 +24,7 @@ import {
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
+import { hasPermissionForBranch, permissionBranchScope } from "@/features/auth/branchPermissions";
 import { hasAnyPermission, hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
@@ -63,6 +64,7 @@ export function IncomingPage(): JSX.Element {
     "incoming.finalize",
   ]);
   const canViewSuppliers = hasPermission(user, "suppliers.view");
+  const createBranchScope = permissionBranchScope(user, "incoming.create");
   const [branchFilter, setBranchFilter] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -418,7 +420,10 @@ export function IncomingPage(): JSX.Element {
                   error={selectedQuery.error}
                   onRetry={() => void selectedQuery.refetch()}
                   onOpenFull={() => navigateToDocument(selectedDocument)}
-                  canFinalize={canFinalize}
+                  canFinalize={
+                    canFinalize &&
+                    hasPermissionForBranch(user, "incoming.finalize", selectedDocument.branch_id)
+                  }
                 />
               )}
             </div>
@@ -438,6 +443,7 @@ export function IncomingPage(): JSX.Element {
       {canCreate && (
         <Modal open={creating} onClose={requestCloseCreating} title="Новая приёмка">
           <NewIncomingForm
+            allowedBranchIds={createBranchScope}
             onClose={closeCreating}
             onCancel={requestCloseCreating}
             onDirtyChange={setCreatingDirty}
@@ -758,9 +764,7 @@ function IncomingPreviewPanel({
           variant={canFinalize && current.status === "draft" ? "primary" : "secondary"}
           onClick={onOpenFull}
         >
-          {canFinalize && current.status === "draft"
-            ? "Проверить и принять"
-            : "Открыть документ"}
+          {canFinalize && current.status === "draft" ? "Проверить и принять" : "Открыть документ"}
           <ArrowRightIcon />
         </Button>
       </footer>

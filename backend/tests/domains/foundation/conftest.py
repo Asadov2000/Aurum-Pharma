@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.deps import _seed_request_db_context, get_db
-from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Tenant
 from app.domains.foundation.repository import FoundationRepository
@@ -22,7 +21,7 @@ from app.domains.roles.models import (
     UserAssignment,
 )
 from app.main import app
-from tests.auth_helpers import create_support_access_token
+from tests.auth_helpers import create_support_access_token, create_tenant_access_token
 from tests.platform_access_helpers import create_test_platform_user
 from tests.role_version_helpers import create_published_test_role, provision_test_owner
 
@@ -150,11 +149,10 @@ async def tenant_admin_token(
                 email=f"settings-owner-{uuid4().hex[:8]}@aurum.tj",
                 full_name="Settings Owner",
             )
-            token = create_access_token(
-                owner.id,
+            token = await create_tenant_access_token(
+                db_session,
+                owner,
                 tenant_id=t.id,
-                is_developer=False,
-                is_administrator=False,
             )
             await db_session.execute(
                 text("SELECT set_config('app.support_session', 'false', true)")
@@ -208,11 +206,10 @@ async def tenant_admin_token(
             text("SELECT set_config('app.user_id', :user_id, true)"),
             {"user_id": str(user.id)},
         )
-        token = create_access_token(
-            user.id,
+        token = await create_tenant_access_token(
+            db_session,
+            user,
             tenant_id=t.id,
-            is_developer=False,
-            is_administrator=False,
         )
         return token, t, user
 

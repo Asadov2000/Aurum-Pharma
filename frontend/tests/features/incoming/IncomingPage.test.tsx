@@ -58,6 +58,13 @@ vi.mock("@/features/auth/hooks", () => ({
         "branches.view",
         "suppliers.view",
       ],
+      permission_scopes: {
+        "incoming.view": ["b-1"],
+        "incoming.create": ["b-1"],
+        "incoming.finalize": ["b-1"],
+        "branches.view": ["b-1"],
+        "suppliers.view": null,
+      },
     },
   }),
 }));

@@ -4,7 +4,6 @@ import { Link } from "@tanstack/react-router";
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import { Badge, Button, PageHeader, SkeletonRows } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
-import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/lib/errorMessages";
 import { cn } from "@/lib/utils";
 
@@ -58,10 +57,12 @@ function count(value: string | number): string {
 
 export function DashboardPage(): JSX.Element {
   const { user } = useAuth();
+  const permissions = user?.permissions ?? [];
+  const hasAccess = (code: string): boolean =>
+    (user?.is_developer === true && !user.support_access) || permissions.includes(code);
   const hasTenant = Boolean(user?.home_tenant_id);
   const canView =
-    Boolean(user?.is_developer || user?.is_administrator) ||
-    (user?.permissions ?? []).includes("reports.view");
+    Boolean(user?.is_developer || user?.is_administrator) || permissions.includes("reports.view");
   const query = useDashboardSummary(hasTenant && canView);
 
   if (hasTenant && !canView) {
@@ -77,15 +78,13 @@ export function DashboardPage(): JSX.Element {
     return <SupportProfile />;
   }
 
-  const canOpenPos = hasPermission(user, "pos.sell");
-  const canViewIncoming = hasPermission(user, "incoming.view");
-  const canCreateIncoming = canViewIncoming && hasPermission(user, "incoming.create");
-  const canOpenCatalog = hasPermission(user, "catalog.view");
-  const canOpenBatches = hasPermission(user, "batches.view");
-  const canOpenBranches = hasPermission(user, "branches.view");
-  const canOpenBilling = ["billing.overview.view", "billing.invoice.view"].every((permission) =>
-    hasPermission(user, permission),
-  );
+  const canOpenPos = hasAccess("pos.sell");
+  const canViewIncoming = hasAccess("incoming.view");
+  const canCreateIncoming = canViewIncoming && hasAccess("incoming.create");
+  const canOpenCatalog = hasAccess("catalog.view");
+  const canOpenBatches = hasAccess("batches.view");
+  const canOpenBranches = hasAccess("branches.view");
+  const canOpenBilling = ["billing.overview.view", "billing.invoice.view"].every(hasAccess);
   const generatedAt = query.data ? formatGeneratedAt(query.data.generated_at) : null;
   const dashboardError = query.error;
   const refreshing = query.isFetching;

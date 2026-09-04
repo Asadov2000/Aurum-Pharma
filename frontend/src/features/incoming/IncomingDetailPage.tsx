@@ -19,7 +19,7 @@ import {
   TR,
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
-import { hasPermission } from "@/features/auth/permissions";
+import { hasPermissionForBranch, permissionBranchScope } from "@/features/auth/branchPermissions";
 import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
 
@@ -37,8 +37,6 @@ import { type IncomingItem } from "./types";
 
 export function IncomingDetailPage(): JSX.Element {
   const { user } = useAuth();
-  const canEdit = hasPermission(user, "incoming.create");
-  const canFinalize = hasPermission(user, "incoming.finalize");
   const { id } = useParams({ from: "/incoming/$id" });
   const incoming = useIncomingDocQuery(id);
   const accept = useAcceptIncoming();
@@ -89,6 +87,9 @@ export function IncomingDetailPage(): JSX.Element {
   }
 
   const isDraft = doc.status === "draft";
+  const canEdit = hasPermissionForBranch(user, "incoming.create", doc.branch_id);
+  const canFinalize = hasPermissionForBranch(user, "incoming.finalize", doc.branch_id);
+  const editableBranchScope = permissionBranchScope(user, "incoming.create");
   const title = doc.document_number ? `Приёмка № ${doc.document_number}` : "Приёмка без номера";
   const branchName = doc.branch_name ?? `Точка ${doc.branch_id.slice(0, 8)}`;
   const supplierName = doc.supplier_name ?? `Поставщик ${doc.supplier_id.slice(0, 8)}`;
@@ -192,8 +193,8 @@ export function IncomingDetailPage(): JSX.Element {
               summary.margin === null
                 ? "Себестоимость скрыта"
                 : summary.margin >= 0
-                ? `Наценка ${formatMoney(summary.margin, doc.currency)}`
-                : `Убыток ${formatMoney(Math.abs(summary.margin), doc.currency)}`
+                  ? `Наценка ${formatMoney(summary.margin, doc.currency)}`
+                  : `Убыток ${formatMoney(Math.abs(summary.margin), doc.currency)}`
             }
             tone={summary.margin !== null && summary.margin < 0 ? "danger" : "default"}
           />
@@ -361,6 +362,7 @@ export function IncomingDetailPage(): JSX.Element {
         >
           <NewIncomingForm
             document={doc}
+            allowedBranchIds={editableBranchScope}
             onClose={closeDocumentForm}
             onCancel={requestCloseForm}
             onDirtyChange={setFormDirty}

@@ -18,6 +18,7 @@ from app.core.deps import (
     get_db,
     require_recent_account_mfa,
     require_recent_owner_mfa,
+    require_writable_tenant,
 )
 from app.core.security import create_access_token
 from app.core.time import utc_now
@@ -49,9 +50,36 @@ def test_ownership_transfer_routes_keep_role_specific_mfa_boundaries() -> None:
 
     assert current_user in listing
     assert require_recent_owner_mfa in creation
+    assert require_writable_tenant in creation
     assert require_recent_owner_mfa in cancellation
     assert require_recent_account_mfa in acceptance
+    assert require_writable_tenant in acceptance
+    assert require_writable_tenant not in cancellation
     assert require_recent_owner_mfa not in acceptance
+
+
+def test_role_and_employee_mutations_respect_tenant_write_state() -> None:
+    blocked_when_read_only = (
+        ("/api/v1/roles", "POST"),
+        ("/api/v1/roles/{role_id}", "PATCH"),
+        ("/api/v1/roles/{role_id}/archive", "POST"),
+        ("/api/v1/users/invite", "POST"),
+        ("/api/v1/users/{user_id}", "PATCH"),
+        ("/api/v1/users/{user_id}/invitation/reissue", "POST"),
+        ("/api/v1/users/{user_id}/assignments", "POST"),
+        ("/api/v1/users/{user_id}/assignments", "PUT"),
+        ("/api/v1/users/{user_id}/assignments/{assignment_id}", "DELETE"),
+    )
+    for path, method in blocked_when_read_only:
+        assert require_writable_tenant in _direct_dependencies(_route(path, method))
+
+    security_containment = (
+        ("/api/v1/users/{user_id}/block", "POST"),
+        ("/api/v1/users/{user_id}/sessions/revoke", "POST"),
+        ("/api/v1/users/{user_id}", "DELETE"),
+    )
+    for path, method in security_containment:
+        assert require_writable_tenant not in _direct_dependencies(_route(path, method))
 
 
 @pytest_asyncio.fixture
@@ -68,6 +96,12 @@ async def ownership_history_scenario(  # type: ignore[no-untyped-def]
     target_user_id = uuid4()
     outsider_user_id = uuid4()
     foreign_user_id = uuid4()
+    session_ids = {
+        initiator_user_id: uuid4(),
+        target_user_id: uuid4(),
+        outsider_user_id: uuid4(),
+        foreign_user_id: uuid4(),
+    }
     initiator_membership_id = uuid4()
     target_membership_id = uuid4()
     outsider_membership_id = uuid4()
@@ -145,6 +179,36 @@ async def ownership_history_scenario(  # type: ignore[no-untyped-def]
             },
         )
         await connection.execute(
+            text("""
+                INSERT INTO public.session (
+                  id, user_id, refresh_token_hash, expires_at
+                ) VALUES
+                  (:initiator_session_id, :initiator_id,
+                   :initiator_refresh_hash, :expires_at),
+                  (:target_session_id, :target_id,
+                   :target_refresh_hash, :expires_at),
+                  (:outsider_session_id, :outsider_id,
+                   :outsider_refresh_hash, :expires_at),
+                  (:foreign_session_id, :foreign_id,
+                   :foreign_refresh_hash, :expires_at)
+                """),
+            {
+                "initiator_session_id": session_ids[initiator_user_id],
+                "target_session_id": session_ids[target_user_id],
+                "outsider_session_id": session_ids[outsider_user_id],
+                "foreign_session_id": session_ids[foreign_user_id],
+                "initiator_id": initiator_user_id,
+                "target_id": target_user_id,
+                "outsider_id": outsider_user_id,
+                "foreign_id": foreign_user_id,
+                "initiator_refresh_hash": session_ids[initiator_user_id].hex * 2,
+                "target_refresh_hash": session_ids[target_user_id].hex * 2,
+                "outsider_refresh_hash": session_ids[outsider_user_id].hex * 2,
+                "foreign_refresh_hash": session_ids[foreign_user_id].hex * 2,
+                "expires_at": now + timedelta(days=1),
+            },
+        )
+        await connection.execute(
             text("SELECT set_config('app.user_id', :user_id, true)"),
             {"user_id": str(initiator_user_id)},
         )
@@ -182,6 +246,7 @@ async def ownership_history_scenario(  # type: ignore[no-untyped-def]
             tenant_id=request_tenant_id,
             is_developer=False,
             is_administrator=False,
+            session_id=session_ids[user_id],
         )
         return await client.get(
             "/api/v1/ownership-transfers",

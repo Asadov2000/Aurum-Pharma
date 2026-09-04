@@ -39,6 +39,7 @@ async def test_only_owner_can_create_employee_inside_current_tenant(  # noqa: PL
     manager_role_id = uuid4()
     operation_id = uuid4()
     employee_email = f"employee-{operation_id}@aurum.test"
+    request_fingerprint = "a" * 64
     existing_email = f"existing-{operation_id}@aurum.test"
     employee_id: UUID | None = None
     now = utc_now()
@@ -173,7 +174,8 @@ async def test_only_owner_can_create_employee_inside_current_tenant(  # noqa: PL
                     await connection.execute(
                         text("""
                         SELECT * FROM public.create_tenant_employee_invitation(
-                          :tenant_id, :email, :full_name, :phone, :operation_id, :issued_at
+                          :tenant_id, :email, :full_name, :phone, :operation_id,
+                          :request_fingerprint, :issued_at
                         )
                         """),
                         {
@@ -182,6 +184,7 @@ async def test_only_owner_can_create_employee_inside_current_tenant(  # noqa: PL
                             "full_name": "New employee",
                             "phone": "+992900000001",
                             "operation_id": operation_id,
+                            "request_fingerprint": request_fingerprint,
                             "issued_at": now,
                         },
                     )
@@ -194,7 +197,8 @@ async def test_only_owner_can_create_employee_inside_current_tenant(  # noqa: PL
                     await connection.execute(
                         text("""
                         SELECT * FROM public.create_tenant_employee_invitation(
-                          :tenant_id, :email, :full_name, :phone, :operation_id, :issued_at
+                          :tenant_id, :email, :full_name, :phone, :operation_id,
+                          :request_fingerprint, :issued_at
                         )
                         """),
                         {
@@ -203,6 +207,7 @@ async def test_only_owner_can_create_employee_inside_current_tenant(  # noqa: PL
                             "full_name": "New employee",
                             "phone": "+992900000001",
                             "operation_id": operation_id,
+                            "request_fingerprint": request_fingerprint,
                             "issued_at": now,
                         },
                     )
@@ -216,19 +221,43 @@ async def test_only_owner_can_create_employee_inside_current_tenant(  # noqa: PL
             assert repeated["employee_user_id"] == employee_id
             assert repeated["employee_invitation_id"] == first["employee_invitation_id"]
 
+        with pytest.raises(DBAPIError) as changed_request_error:
+            async with app_engine.begin() as connection:
+                await _set_actor(connection, user_id=owner_id, tenant_id=tenant_id)
+                await connection.execute(
+                    text("""
+                        SELECT * FROM public.create_tenant_employee_invitation(
+                          :tenant_id, :email, :full_name, :phone, :operation_id,
+                          :request_fingerprint, :issued_at
+                        )
+                        """),
+                    {
+                        "tenant_id": tenant_id,
+                        "email": employee_email,
+                        "full_name": "New employee",
+                        "phone": "+992900000001",
+                        "operation_id": operation_id,
+                        "request_fingerprint": "b" * 64,
+                        "issued_at": now,
+                    },
+                )
+        assert getattr(changed_request_error.value.orig, "sqlstate", None) == "P2002"
+
         with pytest.raises(DBAPIError) as non_owner_error:
             async with app_engine.begin() as connection:
                 await _set_actor(connection, user_id=manager_id, tenant_id=tenant_id)
                 await connection.execute(
                     text("""
                         SELECT * FROM public.create_tenant_employee_invitation(
-                          :tenant_id, :email, 'Forbidden', NULL, :operation_id, :issued_at
+                          :tenant_id, :email, 'Forbidden', NULL, :operation_id,
+                          :request_fingerprint, :issued_at
                         )
                         """),
                     {
                         "tenant_id": tenant_id,
                         "email": f"forbidden-{operation_id}@aurum.test",
                         "operation_id": uuid4(),
+                        "request_fingerprint": request_fingerprint,
                         "issued_at": now,
                     },
                 )
@@ -240,13 +269,15 @@ async def test_only_owner_can_create_employee_inside_current_tenant(  # noqa: PL
                 await connection.execute(
                     text("""
                         SELECT * FROM public.create_tenant_employee_invitation(
-                          :tenant_id, :email, 'Existing', NULL, :operation_id, :issued_at
+                          :tenant_id, :email, 'Existing', NULL, :operation_id,
+                          :request_fingerprint, :issued_at
                         )
                         """),
                     {
                         "tenant_id": tenant_id,
                         "email": existing_email,
                         "operation_id": uuid4(),
+                        "request_fingerprint": request_fingerprint,
                         "issued_at": now,
                     },
                 )

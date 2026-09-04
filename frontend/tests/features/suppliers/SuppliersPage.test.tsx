@@ -31,6 +31,13 @@ vi.mock("@/features/auth/hooks", () => ({
         "incoming.view",
         "incoming.return",
       ],
+      permission_scopes: {
+        "suppliers.view": null,
+        "suppliers.create": null,
+        "suppliers.update": null,
+        "incoming.view": null,
+        "incoming.return": null,
+      },
     },
   }),
 }));

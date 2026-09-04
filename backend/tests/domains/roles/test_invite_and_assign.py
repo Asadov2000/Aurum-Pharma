@@ -380,6 +380,7 @@ async def test_owner_invite_creates_employee_only_in_current_tenant_and_is_idemp
     )
 
     async def create_employee_invitation(**fields: object) -> EmployeeInvitationCreation:
+        assert len(str(fields["request_fingerprint"])) == 64
         account, membership = await service.create_tenant_account(
             tenant_id=tenant.id,
             email=str(fields["email"]),

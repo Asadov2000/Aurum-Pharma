@@ -60,10 +60,12 @@ export function SupplierReturnForm({
   supplier,
   onClose,
   onDirtyChange,
+  allowedBranchIds = null,
 }: {
   supplier: Supplier;
   onClose: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  allowedBranchIds?: readonly string[] | null;
 }): JSX.Element {
   const operationId = useMemo(createOperationId, []);
   const createReturn = useCreateSupplierReturn();
@@ -89,6 +91,12 @@ export function SupplierReturnForm({
     },
   });
   const branches = useBranchesQuery(false);
+  const availableBranches = useMemo(() => {
+    const items = branches.data ?? [];
+    if (allowedBranchIds === null) return items;
+    const allowed = new Set(allowedBranchIds);
+    return items.filter((branch) => allowed.has(branch.id));
+  }, [allowedBranchIds, branches.data]);
   const candidates = useSupplierReturnCandidatesQuery(
     {
       supplier_id: supplier.id,
@@ -113,8 +121,8 @@ export function SupplierReturnForm({
   useEffect(() => setHighlight(0), [branchId, search]);
 
   useEffect(() => {
-    if (!branchId && branches.data?.length === 1) setBranchId(branches.data[0]!.id);
-  }, [branchId, branches.data]);
+    if (!branchId && availableBranches.length === 1) setBranchId(availableBranches[0]!.id);
+  }, [availableBranches, branchId]);
 
   useEffect(() => {
     onDirtyChange(
@@ -254,12 +262,15 @@ export function SupplierReturnForm({
           }}
         >
           <option value="">Выберите точку</option>
-          {branches.data?.map((branch) => (
+          {availableBranches.map((branch) => (
             <option key={branch.id} value={branch.id}>
               {branch.name}
             </option>
           ))}
         </Select>
+        {!branches.isLoading && !branches.error && availableBranches.length === 0 ? (
+          <FormError>Нет доступных точек для возврата поставщику.</FormError>
+        ) : null}
         {branches.error ? (
           <div
             className="mt-2 flex flex-wrap items-center gap-2 text-sm text-danger-foreground"
@@ -307,9 +318,7 @@ export function SupplierReturnForm({
             }
             if (event.key === "ArrowDown") {
               event.preventDefault();
-              setHighlight((current) =>
-                Math.min(current + 1, selectableCandidateItems.length - 1),
-              );
+              setHighlight((current) => Math.min(current + 1, selectableCandidateItems.length - 1));
             } else if (event.key === "ArrowUp") {
               event.preventDefault();
               setHighlight((current) => Math.max(current - 1, 0));

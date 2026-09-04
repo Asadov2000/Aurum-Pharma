@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { hasAnyPermission, hasPermission } from "@/features/auth/permissions";
+import { hasPermissionForBranch, permissionBranchScope } from "@/features/auth/branchPermissions";
 
 describe("permission helpers", () => {
   it("accepts an explicit permission and rejects an absent one", () => {
@@ -34,5 +35,25 @@ describe("permission helpers", () => {
 
     expect(hasPermission(scopedDeveloper, "catalog.view")).toBe(true);
     expect(hasPermission(scopedDeveloper, "catalog.update")).toBe(false);
+  });
+
+  it("checks the exact branch scope and fails closed when scope data is absent", () => {
+    const user = {
+      is_developer: false,
+      permissions: ["incoming.create", "catalog.view"],
+      permission_scopes: {
+        "incoming.create": ["branch-a"],
+        "catalog.view": null,
+      },
+    };
+
+    expect(hasPermissionForBranch(user, "incoming.create", "branch-a")).toBe(true);
+    expect(hasPermissionForBranch(user, "incoming.create", "branch-b")).toBe(false);
+    expect(hasPermissionForBranch(user, "catalog.view", "branch-b")).toBe(true);
+    expect(
+      hasPermissionForBranch({ ...user, permission_scopes: {} }, "incoming.create", "branch-a"),
+    ).toBe(false);
+    expect(permissionBranchScope(user, "incoming.create")).toEqual(["branch-a"]);
+    expect(permissionBranchScope(user, "catalog.view")).toBeNull();
   });
 });

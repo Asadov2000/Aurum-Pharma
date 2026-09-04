@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import create_access_token, decode_access_token
+from app.core.security import decode_access_token, encode_token
 from app.domains.foundation.models import Branch
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
@@ -16,7 +18,7 @@ from app.domains.roles.models import (
     TenantMembership,
     UserAssignment,
 )
-from tests.auth_helpers import create_support_access_token
+from tests.auth_helpers import create_support_access_token, create_tenant_access_token
 from tests.platform_access_helpers import create_test_platform_user
 from tests.role_version_helpers import create_published_test_role, provision_test_owner
 
@@ -34,12 +36,7 @@ async def test_me_with_valid_token_returns_user(
     make_user,
 ) -> None:
     user = await make_user(email="me@aurum.tj", full_name="Me User")
-    token = create_access_token(
-        user.id,
-        tenant_id=user.home_tenant_id,
-        is_developer=user.is_developer,
-        is_administrator=user.is_administrator,
-    )
+    token = await create_tenant_access_token(db_session, user)
 
     response = await auth_client.get(
         "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
@@ -114,17 +111,37 @@ async def test_me_with_garbage_token_returns_401(auth_client: AsyncClient) -> No
     assert response.status_code == 401
 
 
-async def test_me_rejects_token_after_user_is_blocked(
+async def test_me_rejects_legacy_token_without_session(
     auth_client: AsyncClient,
     make_user,
 ) -> None:
-    user = await make_user(email="blocked-me@aurum.tj", status="blocked")
-    token = create_access_token(
-        user.id,
-        tenant_id=user.home_tenant_id,
-        is_developer=False,
-        is_administrator=False,
+    user = await make_user(email="legacy-sessionless@aurum.tj")
+    token = encode_token(
+        str(user.id),
+        expires_in=timedelta(minutes=5),
+        extra={
+            "tenant_id": str(user.home_tenant_id),
+            "is_developer": False,
+            "is_administrator": False,
+        },
     )
+
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+async def test_me_rejects_token_after_user_is_blocked(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user(email="blocked-me@aurum.tj", status="blocked")
+    token = await create_tenant_access_token(db_session, user)
 
     response = await auth_client.get(
         "/api/v1/auth/me",
@@ -137,15 +154,11 @@ async def test_me_rejects_token_after_user_is_blocked(
 
 async def test_me_rejects_stale_support_claims(
     auth_client: AsyncClient,
+    db_session: AsyncSession,
     make_user,
 ) -> None:
     user = await make_user(email="stale-support@aurum.tj")
-    token = create_access_token(
-        user.id,
-        tenant_id=user.home_tenant_id,
-        is_developer=True,
-        is_administrator=False,
-    )
+    token = await create_tenant_access_token(db_session, user, is_developer=True)
 
     response = await auth_client.get(
         "/api/v1/auth/me",
@@ -185,12 +198,7 @@ async def test_me_rejects_inactive_tenant_membership(
         )
     )
     await db_session.flush()
-    token = create_access_token(
-        user.id,
-        tenant_id=tenant.id,
-        is_developer=False,
-        is_administrator=False,
-    )
+    token = await create_tenant_access_token(db_session, user, tenant_id=tenant.id)
 
     response = await auth_client.get(
         "/api/v1/auth/me",
@@ -217,12 +225,7 @@ async def test_me_reports_active_tenant_ownership(
         email="me-owner@aurum.tj",
         full_name="Owner",
     )
-    token = create_access_token(
-        owner.id,
-        tenant_id=tenant.id,
-        is_developer=False,
-        is_administrator=False,
-    )
+    token = await create_tenant_access_token(db_session, owner, tenant_id=tenant.id)
 
     response = await auth_client.get(
         "/api/v1/auth/me",
@@ -281,12 +284,7 @@ async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
         {"user_id": str(user.id)},
     )
 
-    token = create_access_token(
-        user.id,
-        tenant_id=tenant.id,
-        is_developer=False,
-        is_administrator=False,
-    )
+    token = await create_tenant_access_token(db_session, user, tenant_id=tenant.id)
 
     response = await auth_client.get(
         "/api/v1/auth/me",
@@ -296,7 +294,62 @@ async def test_me_level_comes_from_assigned_role_not_permission_heuristic(
     assert response.status_code == 200
     body = response.json()
     assert body["permissions"] == ["batches.create"]
+    assert body["permission_scopes"] == {"batches.create": None}
     assert body["level"] == 4
+
+
+async def test_me_exposes_exact_branch_permission_scope(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    foundation = FoundationService(FoundationRepository(db_session))
+    tenant = await foundation.create_tenant(
+        payload={"name": "Scoped Tenant", "contact_email": "scoped-me@aurum.tj"}
+    )
+    branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Рудаки"})
+    user = await make_user(email="scoped-user@aurum.tj", home_tenant_id=tenant.id)
+    role = await create_published_test_role(
+        db_session,
+        tenant_id=tenant.id,
+        name="Scoped cashier",
+        permission_codes=["pos.sell"],
+        level=4,
+    )
+    membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        full_name=user.full_name,
+        status="active",
+    )
+    db_session.add(membership)
+    await db_session.flush()
+    db_session.add(
+        UserAssignment(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            membership_id=membership.id,
+            role_id=role.id,
+            branch_id=branch.id,
+        )
+    )
+    await db_session.flush()
+    await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
+    await db_session.execute(text("SELECT set_config('app.support_access_session_id', '', true)"))
+    await db_session.execute(text("SELECT set_config('app.auth_session_id', '', true)"))
+    await db_session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": str(user.id)},
+    )
+
+    token = await create_tenant_access_token(db_session, user, tenant_id=tenant.id)
+    response = await auth_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["permission_scopes"] == {"pos.sell": [str(branch.id)]}
 
 
 async def test_me_ignores_inactive_assignments(
@@ -346,12 +399,7 @@ async def test_me_ignores_inactive_assignments(
         {"user_id": str(user.id)},
     )
 
-    token = create_access_token(
-        user.id,
-        tenant_id=tenant.id,
-        is_developer=False,
-        is_administrator=False,
-    )
+    token = await create_tenant_access_token(db_session, user, tenant_id=tenant.id)
 
     response = await auth_client.get(
         "/api/v1/auth/me",
@@ -411,12 +459,7 @@ async def test_me_ignores_assignments_from_inactive_branches(
         text("SELECT set_config('app.user_id', :user_id, true)"),
         {"user_id": str(user.id)},
     )
-    token = create_access_token(
-        user.id,
-        tenant_id=tenant.id,
-        is_developer=False,
-        is_administrator=False,
-    )
+    token = await create_tenant_access_token(db_session, user, tenant_id=tenant.id)
 
     response = await auth_client.get(
         "/api/v1/auth/me",

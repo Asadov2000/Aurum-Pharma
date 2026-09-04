@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
-from tests.auth_helpers import create_support_access_token
+from tests.auth_helpers import create_support_access_token, create_tenant_access_token
 
 
 async def test_create_tenant_creates_default_settings(db_session: AsyncSession) -> None:
@@ -324,17 +324,15 @@ async def test_admin_create_tenant_endpoint(auth_client: AsyncClient, support_to
 
 async def test_admin_endpoints_reject_non_support(
     auth_client: AsyncClient,
+    db_session: AsyncSession,
     make_user,
 ) -> None:
     """An active regular user is authenticated but cannot enter support APIs."""
-    from app.core.security import create_access_token
-
     regular_user = await make_user()
-    token = create_access_token(
-        user_id=regular_user.id,
+    token = await create_tenant_access_token(
+        db_session,
+        regular_user,
         tenant_id=None,
-        is_developer=False,
-        is_administrator=False,
     )
     response = await auth_client.get(
         "/api/v1/admin/tenants",

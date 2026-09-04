@@ -7,12 +7,24 @@ from pathlib import Path
 
 import pytest
 
+from alembic.script import ScriptDirectory
 from app import migrate
 
 SUPPORT_URL = "postgresql+asyncpg://aurum_support:support-test-password@postgres:5432/aurum_test"
 MIGRATION_URL = (
     "postgresql+asyncpg://aurum_migrator:migrator-test-password@postgres:5432/aurum_test"
 )
+
+
+def test_database_role_bootstrap_accepts_exactly_the_current_migration_head() -> None:
+    script = ScriptDirectory.from_config(migrate._alembic_config(MIGRATION_URL, None))
+    current_head = script.get_current_head()
+    assert current_head is not None
+
+    contract_path = Path(__file__).resolve().parents[3] / "infra" / "postgres" / "role-contract.sql"
+    contract = contract_path.read_text(encoding="utf-8")
+
+    assert f"revision_number > {int(current_head)}" in contract
 
 
 def test_migration_urls_require_distinct_roles_on_same_database() -> None:

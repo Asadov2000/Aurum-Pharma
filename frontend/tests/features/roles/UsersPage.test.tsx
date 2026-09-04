@@ -304,6 +304,30 @@ describe("UsersPage", () => {
     expect(screen.queryByRole("button", { name: /Добавить сотрудника/i })).not.toBeInTheDocument();
   });
 
+  it("does not show employee creation during scoped support access", async () => {
+    mockUser = {
+      id: "support-admin",
+      active_tenant_id: "tenant-1",
+      home_tenant_id: null,
+      is_tenant_owner: false,
+      permissions: ["users.view", "users.invite", "roles.assign"],
+      support_access: {
+        id: "support-session-1",
+        tenant_id: "tenant-1",
+        tenant_name: "Аптека Сино",
+        reason: "Проверка учетных записей",
+        capabilities: ["users.view", "users.invite", "roles.assign"],
+        is_read_only: false,
+        expires_at: "2030-01-01T00:00:00Z",
+      },
+    };
+    listUsers.mockResolvedValue(usersResponse([]));
+    renderPage();
+
+    expect(await screen.findByText("Сотрудников пока нет")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Добавить сотрудника/i })).not.toBeInTheDocument();
+  });
+
   it("renders server-provided assignment names without opening the role builder", async () => {
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();

@@ -123,7 +123,7 @@ export function UsersPage(): JSX.Element {
   const canRevokeSessions = canSuspend;
   const canOffboard = (isTenantOwner || isSupportScoped) && permissions.includes("users.delete");
   const canAssign = (isTenantOwner || isSupportScoped) && permissions.includes("roles.assign");
-  const canInvite = (isTenantOwner || isSupportScoped) && permissions.includes("users.invite");
+  const canInvite = isTenantOwner && permissions.includes("users.invite");
   const canViewRoles =
     (isTenantOwner || isSupportScoped) &&
     permissions.some((permission) =>
