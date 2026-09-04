@@ -45,7 +45,7 @@ import {
   type TenantBillingPayment,
   type TenantFinancialInvoice,
 } from "./types";
-import { useOnlineStatus } from "./useOnlineStatus";
+import { useConnectivity } from "@/lib/connectivityContext";
 
 const PAGE_SIZE = 10;
 const EMPTY_INVOICES: readonly TenantFinancialInvoice[] = [];
@@ -63,7 +63,7 @@ export function BillingPage(): JSX.Element {
   const { user } = useAuth();
   const canCreatePaymentSubmission = hasPermission(user, "billing.payment_submission.create");
   const canWithdrawPaymentSubmission = hasPermission(user, "billing.payment_submission.withdraw");
-  const online = useOnlineStatus();
+  const online = useConnectivity().canUseServer;
   const accountQuery = useFinancialAccountQuery();
   const account = accountQuery.data;
   const filterPreferenceKey = useFilterPreferenceKey("billing");

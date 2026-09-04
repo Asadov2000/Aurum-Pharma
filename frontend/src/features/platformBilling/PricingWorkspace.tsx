@@ -25,7 +25,7 @@ import {
   type PlatformPricingStatus,
   type PlatformPricingVersion,
 } from "./types";
-import { useOnlineStatus } from "./useOnlineStatus";
+import { useConnectivity } from "@/lib/connectivityContext";
 
 const PAGE_SIZE = 20;
 
@@ -64,7 +64,7 @@ export function PricingWorkspace({
   const [page, setPage] = useState(1);
   const [command, setCommand] = useState<PricingCommandTarget | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const online = useOnlineStatus();
+  const online = useConnectivity().canUseServer;
   const plans = usePlatformPricingPlans(page, PAGE_SIZE, true);
   const refetchPlans = plans.refetch;
 

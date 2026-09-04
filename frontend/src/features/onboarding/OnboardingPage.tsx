@@ -5,6 +5,7 @@ import { canAccessPath, getRouteAccessContext } from "@/components/layout/routeA
 import { Badge, Button, ConfirmDialog, PageHeader, Skeleton } from "@/components/ui";
 import { useMeQuery } from "@/features/auth/queries";
 import { activeTenantId } from "@/features/auth/tenantContext";
+import { useConnectivity } from "@/lib/connectivityContext";
 import { describeApiError } from "@/lib/errorMessages";
 import { createOperationId } from "@/lib/operationId";
 import { cn } from "@/lib/utils";
@@ -21,24 +22,6 @@ import { type OnboardingOverview, type ReadinessStep, type ReadinessStepCode } f
 
 const primaryLinkClass =
   "inline-flex h-[var(--control-height-lg)] items-center justify-center gap-2 rounded-md border border-transparent bg-primary px-[var(--control-padding-lg)] text-base font-semibold text-primary-foreground shadow-sm transition-colors duration-fast hover:bg-primary/90 focus-visible:outline-none";
-
-function useOnlineStatus(): boolean {
-  const [online, setOnline] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
-
-  useEffect(() => {
-    const update = (): void => setOnline(navigator.onLine);
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, []);
-
-  return online;
-}
 
 function formatDate(value: string | null): string {
   if (!value) return "не указано";
@@ -149,7 +132,7 @@ export function OnboardingPage(): JSX.Element {
   const { data: user } = useMeQuery();
   const tenantId = activeTenantId(user) ?? undefined;
   const access = useMemo(() => getRouteAccessContext(user), [user]);
-  const online = useOnlineStatus();
+  const online = useConnectivity().canUseServer;
   const overviewQuery = useOnboardingOverviewQuery(tenantId);
   const startTrial = useStartTrial(tenantId);
   const [confirmOpen, setConfirmOpen] = useState(false);

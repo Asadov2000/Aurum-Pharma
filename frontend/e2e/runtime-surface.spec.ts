@@ -9,12 +9,13 @@ test.describe("Runtime surface", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await loginInBrowser(page, OWNER);
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("server-status-banner")).toHaveCount(0);
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ has: page.getByRole("button", { name: "Проверить" }) }),
+    ).toHaveCount(0);
 
-    await expect(page.locator("html")).toHaveAttribute(
-      "data-runtime-surface",
-      "browser",
-    );
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-surface", "browser");
 
     const badge = page.getByTestId("runtime-surface-badge");
     await expect(badge).toBeVisible();
@@ -26,9 +27,7 @@ test.describe("Runtime surface", () => {
     ).toHaveCount(0);
   });
 
-  test("detects the Windows desktop bridge and notifies the host", async ({
-    page,
-  }) => {
+  test("detects the Windows desktop bridge and notifies the host", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.addInitScript(() => {
       type DesktopMessage = {
@@ -48,12 +47,7 @@ test.describe("Runtime surface", () => {
       target.__aurumDesktopMessages = [];
       target.aurumDesktop = {
         appVersion: "0.1.0-e2e",
-        capabilities: [
-          "receipt-print",
-          "barcode-scanner",
-          "cash-drawer",
-          "file-export",
-        ],
+        capabilities: ["receipt-print", "barcode-scanner", "cash-drawer", "file-export"],
         platform: "windows",
         postMessage(message) {
           target.__aurumDesktopMessages?.push(message);
@@ -68,9 +62,7 @@ test.describe("Runtime surface", () => {
     await expectDesktopMessageType(page, "aurum.desktop.ready");
   });
 
-  test("detects a raw WebView2 bridge before aurumDesktop is injected", async ({
-    page,
-  }) => {
+  test("detects a raw WebView2 bridge before aurumDesktop is injected", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.addInitScript(() => {
       type DesktopMessage = {
@@ -131,24 +123,25 @@ test.describe("Runtime surface", () => {
     }
   });
 
-  test("shows the online-only warning when the browser goes offline", async ({
-    page,
-  }) => {
+  test("shows the online-only warning when the browser goes offline", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await loginInBrowser(page, OWNER);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("runtime-surface-badge")).toBeVisible();
-    await expect(page.getByTestId("offline-status-banner")).toHaveCount(0);
-    await expect(page.getByTestId("server-status-banner")).toHaveCount(0);
+    const offlineBanner = page.getByRole("status").filter({ hasText: "Нет интернета" });
+    const serverBanner = page
+      .getByRole("status")
+      .filter({ has: page.getByRole("button", { name: "Проверить" }) });
+    await expect(offlineBanner).toHaveCount(0);
+    await expect(serverBanner).toHaveCount(0);
 
     try {
       await page.context().setOffline(true);
 
-      const banner = page.getByTestId("offline-status-banner");
-      await expect(banner).toBeVisible();
-      await expect(banner).toContainText("Касса работает только онлайн");
+      await expect(offlineBanner).toBeVisible();
+      await expect(offlineBanner).toContainText("Новые операции временно недоступны");
       await expect(
-        page.locator("main#main-content").getByTestId("offline-status-banner"),
+        page.locator("main#main-content").getByRole("status").filter({ hasText: "Нет интернета" }),
       ).toHaveCount(0);
     } finally {
       await page.context().setOffline(false);
@@ -184,29 +177,26 @@ test.describe("Runtime surface", () => {
     serverHealthy = false;
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 
-    await expect(page.getByTestId("server-status-banner")).toBeVisible();
+    const serverBanner = page
+      .getByRole("status")
+      .filter({ has: page.getByRole("button", { name: "Проверить" }) });
+    await expect(serverBanner).toBeVisible();
     await expect(search).toBeDisabled();
 
     serverHealthy = true;
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 
-    await expect(page.getByTestId("server-status-banner")).toHaveCount(0);
+    await expect(serverBanner).toHaveCount(0);
     await expect(search).toBeEnabled();
   });
 });
 
 async function expectWindowsDesktopShell(page: Page): Promise<void> {
-  await expect(page.locator("html")).toHaveAttribute(
-    "data-runtime-surface",
-    "windows-desktop",
-  );
+  await expect(page.locator("html")).toHaveAttribute("data-runtime-surface", "windows-desktop");
   await expect(page.getByTestId("runtime-surface-badge")).toHaveText("Windows");
 }
 
-async function expectDesktopMessageType(
-  page: Page,
-  expectedType: string,
-): Promise<void> {
+async function expectDesktopMessageType(page: Page, expectedType: string): Promise<void> {
   await expect
     .poll(() =>
       page.evaluate(() => {

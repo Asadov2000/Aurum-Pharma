@@ -16,7 +16,7 @@ import { findByBarcode } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
-import { useOnlineStatus } from "@/lib/useOnlineStatus";
+import { useConnectivity } from "@/lib/connectivityContext";
 import { cn } from "@/lib/utils";
 
 import { BarcodeListener } from "./BarcodeListener";
@@ -228,7 +228,7 @@ export function SaleArea({
     void loadNumPad();
     void loadExternalPaymentEvidenceDialog();
   }, []);
-  const isOnline = useOnlineStatus();
+  const isOnline = useConnectivity().canUseServer;
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
 

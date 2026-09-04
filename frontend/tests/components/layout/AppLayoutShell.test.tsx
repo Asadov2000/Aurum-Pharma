@@ -48,10 +48,6 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => layoutState.navigate,
 }));
 
-vi.mock("@/components/layout/ServerStatusBanner", () => ({
-  ServerStatusBanner: () => null,
-}));
-
 vi.mock("@/components/AppearanceMenu", () => ({
   AppearanceMenu: () => <span data-testid="appearance-menu-ready" />,
 }));
@@ -124,15 +120,15 @@ describe("AppLayout shell", () => {
       </AppLayout>,
     );
 
-    const banner = screen.getByTestId("offline-status-banner");
-    const notices = banner.closest('[data-testid="app-shell-notices"]');
+    const banner = screen.getByText(/^Нет интернета/);
+    const notices = banner.parentElement;
     const header = screen.getByTestId("app-shell-header");
     const main = screen.getByRole("main");
 
     expect(notices).not.toBeNull();
-    expect(within(notices as HTMLElement).getByTestId("offline-status-banner")).toBe(banner);
+    expect(within(notices as HTMLElement).getByText(/^Нет интернета/)).toBe(banner);
     expect(within(header).getByText("Нет сети")).toBeInTheDocument();
-    expect(within(main).queryByTestId("offline-status-banner")).not.toBeInTheDocument();
+    expect(within(main).queryByText(/^Нет интернета/)).not.toBeInTheDocument();
   });
 
   it("persists personalization without exposing routes outside permissions", async () => {

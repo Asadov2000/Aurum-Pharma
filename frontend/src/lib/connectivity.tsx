@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { onlineManager } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -10,71 +10,113 @@ import {
 import { checkServerHealth } from "@/lib/serverHealth";
 
 const DEFAULT_HEALTH_POLL_MS = 30_000;
+const DEFAULT_FAILURE_RETRY_MS = 1_500;
+const DEFAULT_FAILURE_THRESHOLD = 2;
+const DEFAULT_RECOVERY_POLL_MS = 10_000;
 
 interface ConnectivityProviderProps {
   readonly children: ReactNode;
   readonly checkHealth?: () => Promise<boolean>;
-  readonly getOnline?: () => boolean;
-  readonly pollMs?: number;
 }
 
 export function ConnectivityProvider({
   children,
-  checkHealth = defaultCheckHealth,
-  getOnline = readNavigatorOnline,
-  pollMs = DEFAULT_HEALTH_POLL_MS,
+  checkHealth = checkServerHealth,
 }: ConnectivityProviderProps): JSX.Element {
-  const queryClient = useQueryClient();
   const [status, setStatus] = useState<ConnectivityStatus>(() =>
-    getOnline() ? "checking" : "offline",
+    readNavigatorOnline() ? "checking" : "offline",
   );
   const requestSequence = useRef(0);
-  const previousStatus = useRef(status);
+  const consecutiveFailures = useRef(0);
+  const requestState = useRef<0 | 1 | 2>(0);
+  const retryTimer = useRef<number | null>(null);
+  const runCheckRef = useRef<() => void>(() => undefined);
+
+  const transitionTo = useCallback((nextStatus: ConnectivityStatus) => {
+    setStatus(nextStatus);
+    onlineManager.setOnline(nextStatus === "online" || nextStatus === "checking");
+  }, []);
+
+  const scheduleCheck = useCallback((delayMs?: number) => {
+    if (retryTimer.current !== null) {
+      window.clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    }
+    if (delayMs !== undefined) {
+      retryTimer.current = window.setTimeout(() => {
+        retryTimer.current = null;
+        runCheckRef.current();
+      }, delayMs);
+    }
+  }, []);
 
   const runCheck = useCallback(() => {
-    if (!getOnline()) {
+    scheduleCheck();
+    if (!readNavigatorOnline()) {
       requestSequence.current += 1;
-      setStatus("offline");
+      consecutiveFailures.current = 0;
+      requestState.current = 0;
+      transitionTo("offline");
+      return;
+    }
+    if (requestState.current !== 0) {
+      requestState.current = 2;
       return;
     }
 
-    const sequence = requestSequence.current + 1;
-    requestSequence.current = sequence;
-    void checkHealth()
-      .then((healthy) => {
-        if (requestSequence.current === sequence) {
-          setStatus(healthy ? "online" : "server-unavailable");
-        }
-      })
-      .catch(() => {
-        if (requestSequence.current === sequence) {
-          setStatus("server-unavailable");
-        }
-      });
-  }, [checkHealth, getOnline]);
+    const sequence = ++requestSequence.current;
+    requestState.current = 1;
+    const applyResult = (healthy: boolean) => {
+      if (requestSequence.current !== sequence) {
+        return;
+      }
+      const retryImmediately = requestState.current === 2;
+      requestState.current = 0;
+      if (!readNavigatorOnline()) {
+        consecutiveFailures.current = 0;
+        transitionTo("offline");
+        return;
+      }
+      if (healthy) {
+        consecutiveFailures.current = 0;
+        transitionTo("online");
+        scheduleCheck(DEFAULT_HEALTH_POLL_MS);
+        return;
+      }
+
+      consecutiveFailures.current += 1;
+      if (consecutiveFailures.current >= DEFAULT_FAILURE_THRESHOLD) {
+        transitionTo("server-unavailable");
+        scheduleCheck(retryImmediately ? 0 : DEFAULT_RECOVERY_POLL_MS);
+        return;
+      }
+
+      transitionTo("checking");
+      scheduleCheck(retryImmediately ? 0 : DEFAULT_FAILURE_RETRY_MS);
+    };
+    void checkHealth().then(applyResult, () => applyResult(false));
+  }, [checkHealth, scheduleCheck, transitionTo]);
+  runCheckRef.current = runCheck;
 
   useEffect(() => {
     runCheck();
-    const interval = window.setInterval(runCheck, pollMs);
-    window.addEventListener("online", runCheck);
-    window.addEventListener("offline", runCheck);
-    window.addEventListener("focus", runCheck);
+    const recheckEvents = ["online", "offline", "focus"] as const;
+    const checkWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        runCheck();
+      }
+    };
+    recheckEvents.forEach((event) => window.addEventListener(event, runCheck));
+    document.addEventListener("visibilitychange", checkWhenVisible);
 
     return () => {
       requestSequence.current += 1;
-      window.clearInterval(interval);
-      window.removeEventListener("online", runCheck);
-      window.removeEventListener("offline", runCheck);
-      window.removeEventListener("focus", runCheck);
+      requestState.current = 0;
+      scheduleCheck();
+      recheckEvents.forEach((event) => window.removeEventListener(event, runCheck));
+      document.removeEventListener("visibilitychange", checkWhenVisible);
     };
-  }, [pollMs, runCheck]);
-
-  useEffect(() => {
-    if (previousStatus.current === "server-unavailable" && status === "online") {
-      void queryClient.refetchQueries({ type: "active" }).catch(() => undefined);
-    }
-    previousStatus.current = status;
-  }, [queryClient, status]);
+  }, [runCheck, scheduleCheck]);
 
   const value: ConnectivityState = {
     status,
@@ -83,8 +125,4 @@ export function ConnectivityProvider({
   };
 
   return <ConnectivityContext.Provider value={value}>{children}</ConnectivityContext.Provider>;
-}
-
-function defaultCheckHealth(): Promise<boolean> {
-  return checkServerHealth();
 }

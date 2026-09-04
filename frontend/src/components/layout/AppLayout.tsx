@@ -21,11 +21,10 @@ import { cn } from "@/lib/utils";
 
 import { BrandMark } from "./BrandMark";
 import { ConnectivityIndicator } from "./ConnectivityIndicator";
-import { OfflineStatusBanner } from "./OfflineStatusBanner";
+import { ConnectivityStatusBanner } from "./ConnectivityStatusBanner";
 import { PwaInstallButton } from "./PwaInstallButton";
 import { PwaUpdateBanner } from "./PwaUpdateBanner";
 import { RuntimeSurfaceBadge } from "./RuntimeSurfaceBadge";
-import { ServerStatusBanner } from "./ServerStatusBanner";
 import { Sidebar } from "./Sidebar";
 import { buildNav, findActiveNavItem } from "./nav";
 import {
@@ -470,10 +469,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         </div>
       </header>
 
-      <div data-testid="app-shell-notices">
+      <div>
         <SupportAccessBanner />
-        <OfflineStatusBanner />
-        <ServerStatusBanner />
+        <ConnectivityStatusBanner />
         <PwaUpdateBanner />
       </div>
 

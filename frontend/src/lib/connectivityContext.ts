@@ -12,17 +12,16 @@ export const ConnectivityContext = createContext<ConnectivityState | null>(null)
 
 export function useConnectivity(): ConnectivityState {
   const context = useContext(ConnectivityContext);
-  if (context) {
-    return context;
-  }
-  const browserOnline = readNavigatorOnline();
+  if (context) return context;
+
+  const online = readNavigatorOnline();
   return {
-    status: browserOnline ? "online" : "offline",
-    canUseServer: browserOnline,
+    status: online ? "online" : "offline",
+    canUseServer: online,
     checkNow: () => undefined,
   };
 }
 
 export function readNavigatorOnline(): boolean {
-  return typeof navigator === "undefined" ? true : navigator.onLine;
+  return typeof navigator === "undefined" || navigator.onLine;
 }

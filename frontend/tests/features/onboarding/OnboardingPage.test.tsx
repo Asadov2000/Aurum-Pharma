@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type OnboardingOverview } from "@/features/onboarding/types";
+import { ConnectivityProvider } from "@/lib/connectivity";
 
 const getOnboardingOverview = vi.fn();
 const startTrial = vi.fn();
@@ -108,7 +109,9 @@ function renderPage(): ReturnType<typeof render> {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <OnboardingPage />
+      <ConnectivityProvider checkHealth={async () => true}>
+        <OnboardingPage />
+      </ConnectivityProvider>
     </QueryClientProvider>,
   );
 }
@@ -143,15 +146,13 @@ describe("OnboardingPage", () => {
   });
 
   it("confirms the irreversible trial activation with one operation id", async () => {
-    getOnboardingOverview
-      .mockResolvedValueOnce(readyOverview)
-      .mockResolvedValue({
-        ...readyOverview,
-        tenant_status: "trial",
-        can_start_trial: false,
-        trial_started_at: "2026-08-21T00:00:00Z",
-        trial_ends_at: "2026-09-04T00:00:00Z",
-      });
+    getOnboardingOverview.mockResolvedValueOnce(readyOverview).mockResolvedValue({
+      ...readyOverview,
+      tenant_status: "trial",
+      can_start_trial: false,
+      trial_started_at: "2026-08-21T00:00:00Z",
+      trial_ends_at: "2026-09-04T00:00:00Z",
+    });
     startTrial.mockResolvedValueOnce({
       tenant_id: readyOverview.tenant_id,
       status: "trial",

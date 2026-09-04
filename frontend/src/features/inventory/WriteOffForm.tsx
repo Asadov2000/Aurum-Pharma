@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { Button, FormError, Input, Label, Select, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
+import { useConnectivity } from "@/lib/connectivityContext";
 
 import { formatInventoryMoney, formatInventoryQuantity } from "./formatters";
 import { writeOffReasonLabel, writeOffReasonOptions } from "./labels";
@@ -67,9 +68,7 @@ export function WriteOffForm({
   const operationId = useMemo(createOperationId, []);
   const [topError, setTopError] = useState<string | null>(null);
   const [result, setResult] = useState<WriteOff | null>(null);
-  const [online, setOnline] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
+  const online = useConnectivity().canUseServer;
 
   const form = useForm<FormValues>({
     defaultValues: { qty: "", reason: "", comment: "" },
@@ -77,16 +76,6 @@ export function WriteOffForm({
   const qty = form.watch("qty");
   const normalizedQty = qty.replace(",", ".");
   const amount = purchasePrice === null ? null : Number(normalizedQty) * Number(purchasePrice);
-
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, []);
 
   useEffect(() => {
     onDirtyChange?.(form.formState.isDirty && result === null);

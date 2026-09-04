@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Button, FormError, Input, Label, Select, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
+import { useConnectivity } from "@/lib/connectivityContext";
 import { cn } from "@/lib/utils";
 
 import {
@@ -75,9 +76,7 @@ export function SupplierReturnForm({
   const [selected, setSelected] = useState<SupplierReturnCandidate | null>(null);
   const [createdReturn, setCreatedReturn] = useState<SupplierReturnCreated | null>(null);
   const [topError, setTopError] = useState<string | null>(null);
-  const [online, setOnline] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
+  const online = useConnectivity().canUseServer;
   const [highlight, setHighlight] = useState(0);
   const candidateListId = useId();
 
@@ -129,16 +128,6 @@ export function SupplierReturnForm({
       !createdReturn && (form.formState.isDirty || selected !== null || searchInput.trim() !== ""),
     );
   }, [createdReturn, form.formState.isDirty, onDirtyChange, searchInput, selected]);
-
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, []);
 
   const chooseCandidate = (candidate: SupplierReturnCandidate) => {
     setSelected(candidate);
