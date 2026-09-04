@@ -139,7 +139,7 @@ test.describe("Runtime surface", () => {
       await page.context().setOffline(true);
 
       await expect(offlineBanner).toBeVisible();
-      await expect(offlineBanner).toContainText("Новые операции временно недоступны");
+      await expect(offlineBanner).toContainText("Новые операции заблокированы");
       await expect(
         page.locator("main#main-content").getByRole("status").filter({ hasText: "Нет интернета" }),
       ).toHaveCount(0);

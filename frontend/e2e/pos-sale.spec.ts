@@ -205,6 +205,40 @@ test.describe("POS sale (owner)", () => {
     await page.unroute("**/api/v1/pos/commands/*");
   });
 
+  test("allows only one browser tab to control a register", async ({ page }) => {
+    test.setTimeout(90_000);
+
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+    const branch = await seedBranch(api, uniqueName("LOCK-Branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("LOCK-Cash"));
+    await apiAnon.dispose();
+    await api.dispose();
+
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos");
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
+    await page.getByRole("button", { name: "Открыть смену" }).click();
+    await expect(page.getByRole("region", { name: "Текущий чек" })).toBeVisible();
+
+    const secondPage = await page.context().newPage();
+    await secondPage.goto("/pos");
+    await secondPage.getByLabel(/^Касса$/).selectOption({ label: register.name });
+
+    await expect(secondPage.getByText("Касса занята", { exact: true })).toBeVisible();
+    await expect(secondPage.getByRole("region", { name: "Текущий чек" })).toHaveCount(0);
+
+    await page.close();
+
+    await expect(secondPage.getByRole("region", { name: "Текущий чек" })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(secondPage.getByText("Касса занята", { exact: true })).toHaveCount(0);
+    await secondPage.close();
+  });
+
   test("binds card sale and refund to confirmed terminal attempts", async ({ page }) => {
     test.setTimeout(120_000);
 

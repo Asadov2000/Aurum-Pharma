@@ -53,6 +53,10 @@ vi.mock("@/features/catalog/pickerQueries", () => ({
   useCatalogPickerQuery: () => ({ data: undefined }),
 }));
 
+vi.mock("@/features/pos/usePosRegisterLock", () => ({
+  usePosRegisterLock: () => ({ status: "owned", isOwner: true, message: null }),
+}));
+
 import { POSPage } from "@/features/pos/POSPage";
 import { draftKey } from "@/features/pos/draftStorage";
 import {

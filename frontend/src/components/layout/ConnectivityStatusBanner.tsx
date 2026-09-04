@@ -20,13 +20,13 @@ export function ConnectivityStatusBanner(): JSX.Element | null {
     >
       {serverUnavailable ? (
         <>
-          Сервер недоступен. Чек сохранён. Новые операции временно недоступны.
+          Сервер недоступен. Чек сохранён, операции заблокированы.
           <button className="ml-2 underline" onClick={checkNow} type="button">
             Проверить
           </button>
         </>
       ) : (
-        "Нет интернета. Просмотр доступен. Новые операции временно недоступны."
+        "Нет интернета. Новые операции заблокированы."
       )}
     </div>
   );

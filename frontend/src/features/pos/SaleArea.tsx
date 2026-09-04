@@ -86,6 +86,7 @@ import {
   type SaleDetails,
 } from "./types";
 import { type PosMode } from "./usePosMode";
+import { usePosRegisterLock } from "./usePosRegisterLock";
 
 const ReceiptPrintModal = lazy(async () => {
   const module = await import("./ReceiptPrintModal");
@@ -235,27 +236,33 @@ export function SaleArea({
   return (
     <div className="min-w-0">
       {hasShift && canSell ? (
-        // Key by register so switching registers restores that one's draft.
-        <ActiveWorkspace
+        <RegisterWorkspaceGate
           key={registerId}
           registerId={registerId}
-          branchId={shiftQuery.data?.branch_id ?? null}
-          mode={mode}
-          soundOn={soundOn}
-          draftTtlMin={draftTtlMin}
-          paymentMethods={paymentMethods}
-          mixedPaymentEnabled={mixedPaymentEnabled}
-          paymentSettingsLoading={paymentSettingsLoading}
-          paymentSettingsUnavailable={paymentSettingsUnavailable}
-          cardTerminalId={cardTerminalId}
-          qrTerminalId={qrTerminalId}
-          canCloseShift={canCloseShift}
-          canReconcileExternalPayment={canReconcileExternalPayment}
-          canExportReports={canExportReports}
-          online={isOnline}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={onRegisterSwitchStateChange}
-        />
+        >
+          {/* Key by register so switching registers restores that one's draft. */}
+          <ActiveWorkspace
+            registerId={registerId}
+            branchId={shiftQuery.data?.branch_id ?? null}
+            mode={mode}
+            soundOn={soundOn}
+            draftTtlMin={draftTtlMin}
+            paymentMethods={paymentMethods}
+            mixedPaymentEnabled={mixedPaymentEnabled}
+            paymentSettingsLoading={paymentSettingsLoading}
+            paymentSettingsUnavailable={paymentSettingsUnavailable}
+            cardTerminalId={cardTerminalId}
+            qrTerminalId={qrTerminalId}
+            canCloseShift={canCloseShift}
+            canReconcileExternalPayment={canReconcileExternalPayment}
+            canExportReports={canExportReports}
+            online={isOnline}
+            workstationControls={workstationControls}
+            onRegisterSwitchStateChange={onRegisterSwitchStateChange}
+          />
+        </RegisterWorkspaceGate>
       ) : (
         <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
           {workstationControls ? (
@@ -273,6 +280,50 @@ export function SaleArea({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function RegisterWorkspaceGate({
+  registerId,
+  workstationControls,
+  onRegisterSwitchStateChange,
+  children,
+}: {
+  registerId: string;
+  workstationControls?: ReactNode;
+  onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
+  children: ReactNode;
+}): JSX.Element {
+  const registerLock = usePosRegisterLock(registerId);
+
+  useEffect(() => {
+    if (registerLock.isOwner) return;
+    onRegisterSwitchStateChange?.({ blocked: false, hasDraft: false });
+  }, [onRegisterSwitchStateChange, registerLock.isOwner]);
+
+  if (registerLock.isOwner) return <>{children}</>;
+
+  return (
+    <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
+      {workstationControls ? (
+        <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
+          {workstationControls}
+        </div>
+      ) : null}
+      <div
+        role="status"
+        className="rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning-foreground"
+      >
+        <p className="font-semibold">
+          {registerLock.status === "checking"
+            ? "Подключение к кассе"
+            : registerLock.status === "unsupported"
+              ? "Требуется обновление браузера"
+              : "Касса занята"}
+        </p>
+        <p className="mt-1">{registerLock.message}</p>
+      </div>
     </div>
   );
 }

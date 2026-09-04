@@ -62,6 +62,10 @@ vi.mock("@/lib/desktopBridge", () => ({
   requestDesktopCashDrawerOpen: (...args: unknown[]) => requestDesktopCashDrawerOpen(...args),
 }));
 
+vi.mock("@/features/pos/usePosRegisterLock", () => ({
+  usePosRegisterLock: () => ({ status: "owned", isOwner: true, message: null }),
+}));
+
 import { SaleArea } from "@/features/pos/SaleArea";
 import {
   createPendingCheckoutOperation,
