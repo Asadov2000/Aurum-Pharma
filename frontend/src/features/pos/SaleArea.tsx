@@ -818,8 +818,13 @@ function ActiveWorkspace({
 
   const onScan = async (code: string) => {
     setTopError(null);
+    if (!branchId) {
+      doFlash("danger");
+      setTopError("Выберите кассу с привязанным филиалом перед сканированием");
+      return;
+    }
     try {
-      const item = await findByBarcode(code);
+      const item = await findByBarcode(code, branchId);
       const added = await onAdd(item.id, item.brand_name, 1, true);
       if (!added) {
         doFlash("danger");

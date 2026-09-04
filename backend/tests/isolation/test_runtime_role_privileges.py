@@ -429,6 +429,7 @@ CUSTOM_FUNCTIONS = {
     "trg_audit_subscription_price_application",
     "trg_reject_billing_pricing_event_mutation",
     "trg_reject_immutable_billing_financial_mutation",
+    "trg_guard_batch_qty_ledger",
     "trg_reject_subscription_price_application_mutation",
     "trg_lock_billing_pricing_plan",
     "trg_lock_tenant_billing_scope",

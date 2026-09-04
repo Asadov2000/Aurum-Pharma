@@ -239,10 +239,18 @@ async def create_catalog_item(
 @router.get("/by-barcode/{code}", response_model=CatalogItemRead)
 async def get_by_barcode(
     code: str,
-    _user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
+    user: Annotated[
+        CurrentUser,
+        Depends(require_any_branch_permission("catalog.view", "pos.sell", policy="filter")),
+    ],
     service: Annotated[CatalogService, Depends(_service)],
+    branch_id: Annotated[UUID | None, Query()] = None,
 ) -> CatalogItemRead:
-    item = await service.find_item_by_barcode(code)
+    _authorize_catalog_search(user, branch_id)
+    item = await service.find_item_by_barcode(
+        code,
+        tenant_id=_current_tenant_or_400(user),
+    )
     return CatalogItemRead.model_validate(item)
 
 
@@ -452,7 +460,8 @@ async def import_upload(
     data = await _read_import_file(file, max_bytes=max_mb * 1024 * 1024)
 
     object_name = new_import_object_name(tenant_id)
-    source_path = put_object(
+    source_path = await run_in_threadpool(
+        put_object,
         object_name=object_name,
         data=data,
         content_type=file.content_type or "text/csv",
@@ -475,7 +484,7 @@ async def import_preview(
     job = await service.get_job(job_id)
     if not job.source_path:
         raise BusinessRuleError("Job has no uploaded file")
-    raw = get_object(job.source_path)
+    raw = await run_in_threadpool(get_object, job.source_path)
     job = await service.preview_import(job_id=job_id, raw=raw)
     return ImportJobRead.model_validate(job)
 
@@ -484,12 +493,22 @@ async def import_preview(
 async def import_confirm(
     job_id: UUID,
     payload: ImportConfirmRequest,
+    background_tasks: BackgroundTasks,
     _create_user: Annotated[CurrentUser, Depends(require_permission("catalog.create"))],
     _update_user: Annotated[CurrentUser, Depends(require_permission("catalog.update"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> ImportJobRead:
     job = await service.confirm_import(job_id=job_id, duplicate_strategy=payload.duplicate_strategy)
+    background_tasks.add_task(_enqueue_catalog_import, job.id, job.tenant_id)
     return ImportJobRead.model_validate(job)
+
+
+def _enqueue_catalog_import(job_id: UUID, tenant_id: UUID) -> None:
+    """Queue only after the request transaction has committed."""
+
+    from app.tasks.catalog import import_catalog_job
+
+    import_catalog_job.delay(str(job_id), str(tenant_id))
 
 
 @router.get("/import/{job_id}", response_model=ImportJobRead)

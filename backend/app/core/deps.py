@@ -49,6 +49,7 @@ BRANCH_SCOPED_PERMISSIONS = frozenset(
         "registers.update",
         "registers.delete",
         "batches.view",
+        "batches.view_costs",
         "batches.create",
         "batches.update",
         "batches.write_off",

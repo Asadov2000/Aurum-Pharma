@@ -11,6 +11,7 @@ duplicate-handling branches.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -259,8 +260,8 @@ class CatalogService:
                 ) from exc
             raise
 
-    async def find_item_by_barcode(self, code: str) -> TenantCatalog:
-        item = await self.repo.find_item_by_barcode(code)
+    async def find_item_by_barcode(self, code: str, *, tenant_id: UUID) -> TenantCatalog:
+        item = await self.repo.find_item_by_barcode(code, tenant_id=tenant_id)
         if item is None:
             raise NotFoundError("No catalog item for this barcode")
         return item
@@ -301,7 +302,7 @@ class CatalogService:
                 details={"status": job.status},
             )
         try:
-            rows, errors = parse_import(raw, job.source_filename)
+            rows, errors = await asyncio.to_thread(parse_import, raw, job.source_filename)
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         await self.repo.update_job(
@@ -324,11 +325,27 @@ class CatalogService:
         job_id: UUID,
         duplicate_strategy: str,
     ) -> CatalogImportJob:
-        job = await self._get_job_or_404(job_id)
+        job = await self.repo.get_job_for_update(job_id)
+        if job is None:
+            raise NotFoundError("Import job not found")
+        if job.status == "importing":
+            if job.duplicate_strategy != duplicate_strategy:
+                raise BusinessRuleError(
+                    "Import is already running with another duplicate strategy",
+                    details={"status": job.status},
+                )
+            return job
         if job.status not in ("pending", "validating"):
             raise BusinessRuleError(
                 "Cannot confirm an import that is already running or finished",
                 details={"status": job.status},
+            )
+        await self.repo.lock_import_slot(job.tenant_id)
+        active = await self.repo.get_active_import(job.tenant_id)
+        if active is not None and active.id != job.id:
+            raise BusinessRuleError(
+                "Another catalog import is already running for this pharmacy",
+                details={"reason": "catalog_import_in_progress"},
             )
         await self.repo.update_job(
             job,
@@ -337,10 +354,6 @@ class CatalogService:
             started_at=utc_now(),
         )
 
-        # Kick the Celery task (lazy import — circular-aware).
-        from app.tasks.catalog import import_catalog_job
-
-        import_catalog_job.delay(str(job_id))
         return job
 
     async def process_import(
@@ -353,7 +366,16 @@ class CatalogService:
         already-uploaded bytes, applies the duplicate strategy, writes one
         tenant_catalog row per valid parsed row, tags every row with
         import_job_id so rollback can find it later."""
-        job = await self._get_job_or_404(job_id)
+        job = await self.repo.get_job_for_update(job_id)
+        if job is None:
+            raise NotFoundError("Import job not found")
+        if job.status in ("success", "failed", "rolled_back"):
+            return job
+        if job.status != "importing":
+            raise BusinessRuleError(
+                "Import has not been confirmed",
+                details={"status": job.status},
+            )
         try:
             rows, errors = parse_import(raw, job.source_filename)
         except ValueError as exc:
@@ -462,7 +484,9 @@ class CatalogService:
         return outcome
 
     async def rollback_import(self, job_id: UUID) -> CatalogImportJob:
-        job = await self._get_job_or_404(job_id)
+        job = await self.repo.get_job_for_update(job_id)
+        if job is None:
+            raise NotFoundError("Import job not found")
         if job.status not in ("success", "failed"):
             raise BusinessRuleError(
                 "Import has not finished yet",
@@ -474,6 +498,15 @@ class CatalogService:
             )
         if job.rolled_back_at is not None:
             raise BusinessRuleError("Import has already been rolled back")
+        if await self.repo.import_job_has_operational_dependencies(
+            tenant_id=job.tenant_id,
+            import_job_id=job.id,
+        ):
+            raise BusinessRuleError(
+                "Imported products already have receipts or stock movements "
+                "and cannot be rolled back",
+                details={"reason": "catalog_import_has_operational_dependencies"},
+            )
 
         now = utc_now()
         await self.repo.soft_delete_by_import_job(job.id, when=now)

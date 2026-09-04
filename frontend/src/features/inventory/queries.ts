@@ -12,7 +12,7 @@ export const inventoryKeys = {
 export function useBatchesQuery(params: BatchSearchParams, enabled = true) {
   return useQuery({
     queryKey: inventoryKeys.list(params),
-    queryFn: () => listBatches(params),
+    queryFn: ({ signal }) => listBatches(params, signal),
     placeholderData: keepPreviousData,
     enabled,
   });
@@ -21,7 +21,7 @@ export function useBatchesQuery(params: BatchSearchParams, enabled = true) {
 export function useBatchQuery(id: string | null) {
   return useQuery({
     queryKey: inventoryKeys.batch(id ?? ""),
-    queryFn: () => getBatch(id as string),
+    queryFn: ({ signal }) => getBatch(id as string, signal),
     enabled: id !== null,
   });
 }
@@ -29,7 +29,7 @@ export function useBatchQuery(id: string | null) {
 export function useMovementsQuery(id: string | null) {
   return useQuery({
     queryKey: inventoryKeys.movements(id ?? ""),
-    queryFn: () => listMovements(id as string),
+    queryFn: ({ signal }) => listMovements(id as string, 50, signal),
     enabled: id !== null,
   });
 }

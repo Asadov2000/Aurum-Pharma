@@ -79,32 +79,46 @@ test.describe("POS sale (owner)", () => {
     await expect(paymentPanel).toBeVisible();
     await expect(paymentPanel.getByRole("button", { name: "Завершить продажу" })).toBeVisible();
 
-    const [quickBox, receiptBox, paymentBox] = await Promise.all([
-      quickProducts.boundingBox(),
-      currentReceipt.boundingBox(),
-      paymentPanel.boundingBox(),
-    ]);
-    expect(quickBox).not.toBeNull();
-    expect(receiptBox).not.toBeNull();
-    expect(paymentBox).not.toBeNull();
-    expect(quickBox!.x + quickBox!.width).toBeLessThanOrEqual(receiptBox!.x);
-    expect(receiptBox!.x + receiptBox!.width).toBeLessThanOrEqual(paymentBox!.x);
-    expect(Math.abs(quickBox!.y - receiptBox!.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(receiptBox!.y - paymentBox!.y)).toBeLessThanOrEqual(1);
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
-      ),
-    ).toBe(true);
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1,
-      ),
-    ).toBe(true);
-    expect(
-      Math.max(quickBox!.y + quickBox!.height, receiptBox!.y + receiptBox!.height),
-    ).toBeLessThanOrEqual(768);
-    expect(paymentBox!.y + paymentBox!.height).toBeLessThanOrEqual(768);
+    await expect
+      .poll(
+        async () => {
+          const [quickBox, receiptBox, paymentBox] = await Promise.all([
+            quickProducts.boundingBox(),
+            currentReceipt.boundingBox(),
+            paymentPanel.boundingBox(),
+          ]);
+          if (!quickBox || !receiptBox || !paymentBox) {
+            return null;
+          }
+
+          const documentFitsViewport = await page.evaluate(() => ({
+            horizontally:
+              document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+            vertically:
+              document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1,
+          }));
+
+          return {
+            columnsDoNotOverlap:
+              quickBox.x + quickBox.width <= receiptBox.x &&
+              receiptBox.x + receiptBox.width <= paymentBox.x,
+            columnsShareTop:
+              Math.abs(quickBox.y - receiptBox.y) <= 1 &&
+              Math.abs(receiptBox.y - paymentBox.y) <= 1,
+            documentFitsViewport,
+            panelsFitViewport:
+              Math.max(quickBox.y + quickBox.height, receiptBox.y + receiptBox.height) <= 768 &&
+              paymentBox.y + paymentBox.height <= 768,
+          };
+        },
+        { message: "POS workspace should settle inside the 1366x768 viewport" },
+      )
+      .toEqual({
+        columnsDoNotOverlap: true,
+        columnsShareTop: true,
+        documentFitsViewport: { horizontally: true, vertically: true },
+        panelsFitViewport: true,
+      });
 
     const productSearch = page.getByRole("combobox", { name: "Товар" });
     await productSearch.fill(item.brand_name);

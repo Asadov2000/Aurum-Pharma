@@ -15,12 +15,12 @@ function setOnline(value: boolean): void {
   Object.defineProperty(navigator, "onLine", { configurable: true, value });
 }
 
-function renderForm(onClose = vi.fn()) {
+function renderForm(onClose = vi.fn(), purchasePrice: string | null = "4.00") {
   render(
     <WriteOffForm
       batchId="00000000-0000-0000-0000-000000000001"
       maxQty="5.000"
-      purchasePrice="4.00"
+      purchasePrice={purchasePrice}
       currency="TJS"
       productName="Парацетамол"
       batchNumber="LOT-1"
@@ -99,5 +99,13 @@ describe("WriteOffForm", () => {
 
     expect(screen.getByText(/остаток не будет изменён офлайн/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Подтвердить списание" })).toBeDisabled();
+  });
+
+  it("keeps the form usable without revealing a hidden purchase price", () => {
+    renderForm(vi.fn(), null);
+    fillValidForm();
+
+    expect(screen.queryByText(/Сумма списания по закупочной цене/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Подтвердить списание" })).toBeEnabled();
   });
 });

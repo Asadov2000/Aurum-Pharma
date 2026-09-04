@@ -9,8 +9,12 @@ import {
   type WriteOffCreatePayload,
 } from "./types";
 
-export async function listBatches(params: BatchSearchParams): Promise<BatchList> {
+export async function listBatches(
+  params: BatchSearchParams,
+  signal?: AbortSignal,
+): Promise<BatchList> {
   const { data } = await api.get<BatchList>("/batches", {
+    signal,
     params: {
       catalog_id: params.catalog_id || undefined,
       branch_id: params.branch_id || undefined,
@@ -25,14 +29,19 @@ export async function listBatches(params: BatchSearchParams): Promise<BatchList>
   return data;
 }
 
-export async function getBatch(id: string): Promise<BatchDetails> {
-  const { data } = await api.get<BatchDetails>(`/batches/${id}`);
+export async function getBatch(id: string, signal?: AbortSignal): Promise<BatchDetails> {
+  const { data } = await api.get<BatchDetails>(`/batches/${id}`, { signal });
   return data;
 }
 
-export async function listMovements(batchId: string, limit = 50): Promise<Movement[]> {
+export async function listMovements(
+  batchId: string,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<Movement[]> {
   const { data } = await api.get<Movement[]>(`/batches/${batchId}/movements`, {
     params: { limit },
+    signal,
   });
   return data;
 }

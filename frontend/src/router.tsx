@@ -14,7 +14,6 @@ const DashboardPage = lazyRouteComponent(
 const LoginPage = lazyRouteComponent(() => import("@/features/auth/LoginPage"), "LoginPage");
 const PlatformActivationPage = lazyRouteComponent(
   () => import("@/features/platformAccounts/PlatformActivationPage"),
-  "PlatformActivationPage",
 );
 const TenantsPage = lazyRouteComponent(
   () => import("@/features/foundation/TenantsPage"),

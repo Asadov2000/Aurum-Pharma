@@ -141,6 +141,7 @@ describe("CatalogPage", () => {
     await waitFor(() => {
       expect(listCatalog).toHaveBeenLastCalledWith(
         expect.objectContaining({ image_state: "without_image", lifecycle: "current" }),
+        expect.any(AbortSignal),
       );
     });
   });

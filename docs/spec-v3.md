@@ -183,8 +183,9 @@ Middleware выбирает пул в зависимости от пользов
 - `catalog.update`
 - `catalog.delete`
 
-#### batches (4)
+#### batches (5)
 - `batches.view`
+- `batches.view_costs`
 - `batches.create`
 - `batches.update`
 - `batches.write_off`

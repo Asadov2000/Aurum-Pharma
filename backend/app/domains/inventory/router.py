@@ -26,6 +26,25 @@ from app.domains.inventory.service import InventoryService
 router = APIRouter(prefix="/api/v1/batches", tags=["inventory"])
 
 
+def _can_view_batch_cost(user: CurrentUser, branch_id: UUID) -> bool:
+    scope = user.branch_scope_for("batches.view_costs")
+    return scope is None or branch_id in scope
+
+
+def _can_view_summary_cost(
+    user: CurrentUser,
+    *,
+    branch_id: UUID | None,
+    visible_branch_scope: set[UUID] | None,
+) -> bool:
+    cost_scope = user.branch_scope_for("batches.view_costs")
+    if cost_scope is None:
+        return True
+    if branch_id is not None:
+        return branch_id in cost_scope
+    return visible_branch_scope is not None and visible_branch_scope.issubset(cost_scope)
+
+
 async def _service(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> InventoryService:
@@ -57,7 +76,7 @@ async def list_batches(
             page_size=page_size,
             summary=BatchSummary(
                 total_qty=0,
-                purchase_value=0,
+                purchase_value=None,
                 sale_value=0,
                 attention_count=0,
                 expired_count=0,
@@ -79,7 +98,17 @@ async def list_batches(
     return BatchList(
         items=[
             BatchWithExpiry(
-                **BatchRead.model_validate(row.batch).model_dump(),
+                **BatchRead.model_validate(row.batch)
+                .model_copy(
+                    update={
+                        "purchase_price": (
+                            row.batch.purchase_price
+                            if _can_view_batch_cost(user, row.batch.branch_id)
+                            else None
+                        )
+                    }
+                )
+                .model_dump(),
                 branch_name=row.branch_name,
                 catalog_name=row.catalog_name,
                 catalog_form=row.catalog_form,
@@ -95,7 +124,15 @@ async def list_batches(
         page_size=page_size,
         summary=BatchSummary(
             total_qty=summary.total_qty,
-            purchase_value=summary.purchase_value,
+            purchase_value=(
+                summary.purchase_value
+                if _can_view_summary_cost(
+                    user,
+                    branch_id=branch_id,
+                    visible_branch_scope=branch_scope,
+                )
+                else None
+            ),
             sale_value=summary.sale_value,
             attention_count=summary.attention_count,
             expired_count=summary.expired_count,
@@ -120,7 +157,17 @@ async def get_batch(
         allowed_branch_ids=branch_scope,
     )
     return BatchDetails(
-        **BatchRead.model_validate(details.batch).model_dump(),
+        **BatchRead.model_validate(details.batch)
+        .model_copy(
+            update={
+                "purchase_price": (
+                    details.batch.purchase_price
+                    if _can_view_batch_cost(user, details.batch.branch_id)
+                    else None
+                )
+            }
+        )
+        .model_dump(),
         branch_name=details.branch_name,
         catalog_name=details.catalog_name,
         catalog_form=details.catalog_form,
@@ -176,4 +223,7 @@ async def create_write_off(
         tenant_id=user.tenant_id,
         allowed_branch_ids=user.branch_scope_for("batches.write_off"),
     )
-    return WriteOffRead.model_validate(wo)
+    result = WriteOffRead.model_validate(wo)
+    if not _can_view_batch_cost(user, wo.branch_id):
+        result = result.model_copy(update={"amount": None})
+    return result

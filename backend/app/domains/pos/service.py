@@ -44,6 +44,7 @@ from app.domains.customer_returns.repository import CustomerReturnsRepository
 from app.domains.customer_returns.service import CustomerReturnsService
 from app.domains.foundation.models import Branch, Register, Tenant
 from app.domains.foundation.repository import FoundationRepository
+from app.domains.inventory.models import Batch
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
 from app.domains.pos.models import (
@@ -3706,6 +3707,115 @@ class POSService:
                 )
             self._assert_catalog_dispensing_allowed(catalog)
 
+    async def _lock_selected_sale_batches(
+        self,
+        sale: Sale,
+        items: list[SaleItem],
+        *,
+        local_today: date,
+    ) -> dict[UUID, tuple[Batch, Decimal]]:
+        selected: dict[UUID, tuple[UUID, Decimal]] = {}
+        for item in items:
+            catalog_id, qty = selected.get(
+                item.batch_id,
+                (item.catalog_id, Decimal("0")),
+            )
+            if catalog_id != item.catalog_id:
+                raise AurumError("Sale batch allocation is inconsistent")
+            selected[item.batch_id] = (catalog_id, qty + item.qty)
+
+        locked_batches: dict[UUID, tuple[Batch, Decimal]] = {}
+        for batch_id in sorted(selected, key=str):
+            catalog_id, qty = selected[batch_id]
+            locked = await self.repo.lock_batch(batch_id)
+            if (
+                locked is None
+                or locked.tenant_id != sale.tenant_id
+                or locked.branch_id != sale.branch_id
+                or locked.catalog_id != catalog_id
+            ):
+                raise NotFoundError("Batch disappeared mid-checkout")
+            if locked.is_blocked:
+                raise BusinessRuleError(
+                    "Batch is blocked at checkout",
+                    details={"reason": "blocked_batch", "batch_id": str(batch_id)},
+                )
+            if locked.expires_at <= local_today:
+                raise BusinessRuleError(
+                    "Expired batch cannot be sold",
+                    details={
+                        "reason": "expired_batch_blocked",
+                        "batch_id": str(batch_id),
+                        "expires_at": str(locked.expires_at),
+                    },
+                )
+            if locked.qty_remaining < qty:
+                raise BusinessRuleError(
+                    "Insufficient stock at checkout",
+                    details={
+                        "reason": "insufficient_batch_stock",
+                        "batch_id": str(batch_id),
+                        "available": str(locked.qty_remaining),
+                        "needed": str(qty),
+                    },
+                )
+            locked_batches[batch_id] = (locked, qty)
+        return locked_batches
+
+    async def _assert_current_fefo_allocation(
+        self,
+        sale: Sale,
+        items: list[SaleItem],
+        *,
+        local_today: date,
+    ) -> None:
+        selected_by_catalog: dict[UUID, dict[UUID, Decimal]] = {}
+        for item in items:
+            selected_batches = selected_by_catalog.setdefault(item.catalog_id, {})
+            selected_batches[item.batch_id] = (
+                selected_batches.get(item.batch_id, Decimal("0")) + item.qty
+            )
+
+        inv_repo = InventoryRepository(self.repo.session)
+        for catalog_id in sorted(selected_by_catalog, key=str):
+            selected = selected_by_catalog[catalog_id]
+            needed = sum(selected.values(), Decimal("0"))
+            candidates = await inv_repo.fefo_candidates(
+                tenant_id=sale.tenant_id,
+                catalog_id=catalog_id,
+                branch_id=sale.branch_id,
+                include_expired=False,
+                today=local_today,
+                lock=True,
+            )
+            expected: dict[UUID, Decimal] = {}
+            remaining = needed
+            for batch in candidates:
+                if remaining <= 0:
+                    break
+                take = min(batch.qty_remaining, remaining)
+                if take > 0:
+                    expected[batch.id] = take
+                    remaining -= take
+            if remaining > 0:
+                raise BusinessRuleError(
+                    "Insufficient stock at checkout",
+                    details={
+                        "reason": "insufficient_stock_after_fefo_recheck",
+                        "catalog_id": str(catalog_id),
+                        "needed": str(needed),
+                        "available": str(needed - remaining),
+                    },
+                )
+            if selected != expected:
+                raise BusinessRuleError(
+                    "Cart stock allocation is stale and must be rebuilt before payment",
+                    details={
+                        "reason": "fefo_reallocation_required",
+                        "catalog_id": str(catalog_id),
+                    },
+                )
+
     async def _consume_sale_batches(
         self,
         sale: Sale,
@@ -3722,41 +3832,20 @@ class POSService:
         except (ValueError, ZoneInfoNotFoundError) as exc:
             raise AurumError("Tenant report timezone is invalid") from exc
 
-        # FEFO normally creates one line per batch, but quantity edits may
-        # leave multiple lines referencing the same batch.
-        per_batch: dict[UUID, Decimal] = {}
-        for item in items:
-            per_batch[item.batch_id] = per_batch.get(item.batch_id, Decimal("0")) + item.qty
+        locked_batches = await self._lock_selected_sale_batches(
+            sale,
+            items,
+            local_today=local_today,
+        )
+        await self._assert_current_fefo_allocation(
+            sale,
+            items,
+            local_today=local_today,
+        )
 
         inv_repo = InventoryRepository(self.repo.session)
-        for batch_id in sorted(per_batch, key=str):
-            qty = per_batch[batch_id]
-            locked = await self.repo.lock_batch(batch_id)
-            if locked is None:
-                raise NotFoundError("Batch disappeared mid-checkout")
-            if locked.is_blocked:
-                raise BusinessRuleError(
-                    "Batch is blocked at checkout",
-                    details={"batch_id": str(batch_id)},
-                )
-            if locked.expires_at <= local_today:
-                raise BusinessRuleError(
-                    "Expired batch cannot be sold",
-                    details={
-                        "reason": "expired_batch_blocked",
-                        "batch_id": str(batch_id),
-                        "expires_at": str(locked.expires_at),
-                    },
-                )
-            if locked.qty_remaining < qty:
-                raise BusinessRuleError(
-                    "Insufficient stock at checkout",
-                    details={
-                        "batch_id": str(batch_id),
-                        "available": str(locked.qty_remaining),
-                        "needed": str(qty),
-                    },
-                )
+        for batch_id in sorted(locked_batches, key=str):
+            locked, qty = locked_batches[batch_id]
             if sale.is_test:
                 continue
             try:

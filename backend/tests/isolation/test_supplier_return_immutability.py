@@ -112,7 +112,7 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                         "tenant_id, branch_id, catalog_id, expires_at, purchase_price, "
                         "sale_price, qty_initial, qty_remaining"
                         ") VALUES ("
-                        ":tenant_id, :branch_id, :catalog_id, CURRENT_DATE + 365, 5, 10, 5, 5"
+                        ":tenant_id, :branch_id, :catalog_id, CURRENT_DATE + 365, 5, 10, 5, 0"
                         ") RETURNING id"
                     ),
                     {
@@ -122,6 +122,14 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                     },
                 )
             ).scalar_one()
+            await connection.execute(
+                text(
+                    "INSERT INTO batch_movement ("
+                    "tenant_id, batch_id, movement_type, qty_delta"
+                    ") VALUES (:tenant_id, :batch_id, 'incoming', 5)"
+                ),
+                {"tenant_id": tenant_id, "batch_id": batch_id},
+            )
             await connection.execute(
                 text("ALTER TABLE batch ENABLE TRIGGER trg_batch_writer_guard")
             )

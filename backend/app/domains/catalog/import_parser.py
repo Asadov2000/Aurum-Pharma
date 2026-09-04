@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import io
+import zipfile
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -40,6 +41,8 @@ DISPENSING = {"prescription", "otc", "special"}
 STORAGE = {"normal", "cold", "frozen"}
 MAX_IMPORT_ROWS = 50_000
 MAX_IMPORT_COLUMNS = 64
+MAX_XLSX_ARCHIVE_MEMBERS = 2_048
+MAX_XLSX_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 
 # Shown to the user when they upload the legacy binary .xls format. Reused by
 # the upload endpoint (HTTP 422) and the parser dispatcher so the wording stays
@@ -181,6 +184,7 @@ def _is_blank(cell: Any) -> bool:
 def parse_xlsx(raw: bytes) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Parse the first worksheet of an XLSX file. First row is the header
     (case-insensitive match). Same (rows, errors) contract as parse_csv."""
+    _validate_xlsx_archive(raw)
     try:
         wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
     except Exception as exc:  # openpyxl raises many exception types on malformed input
@@ -228,6 +232,22 @@ def parse_xlsx(raw: bytes) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         return rows, errors
     finally:
         wb.close()
+
+
+def _validate_xlsx_archive(raw: bytes) -> None:
+    """Reject XLSX archives that can expand beyond the import memory budget."""
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            members = archive.infolist()
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError("Could not read XLSX file") from exc
+    if len(members) > MAX_XLSX_ARCHIVE_MEMBERS:
+        raise ValueError("XLSX contains too many internal files")
+    uncompressed = sum(member.file_size for member in members)
+    if uncompressed > MAX_XLSX_UNCOMPRESSED_BYTES:
+        max_mb = MAX_XLSX_UNCOMPRESSED_BYTES // (1024 * 1024)
+        raise ValueError(f"XLSX expands beyond the {max_mb} MB safety limit")
 
 
 def parse_import(
