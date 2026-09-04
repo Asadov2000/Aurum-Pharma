@@ -15,18 +15,36 @@ if ! flock -w "$lock_wait_seconds" 9; then
     exit 75
 fi
 
-project="aurum-restore-$(date -u +%Y%m%dT%H%M%SZ)-$$"
-compose() {
+env_file="${AURUM_PRODUCTION_ENV_FILE:-/etc/aurum/production.env}"
+production_project="${AURUM_PRODUCTION_COMPOSE_PROJECT:-aurum-production}"
+drill_project="aurum-restore-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+case "$production_project" in
+    ""|*[!A-Za-z0-9_-]*|[-_]*)
+        echo "Invalid production Compose project name" >&2
+        exit 64
+        ;;
+esac
+
+production_compose() {
     docker compose \
-        --project-name "$project" \
-        --env-file /etc/aurum/production.env \
+        --project-name "$production_project" \
+        --env-file "$env_file" \
+        --file docker-compose.production.yml \
+        --file docker-compose.recovery.yml \
+        "$@"
+}
+
+drill_compose() {
+    docker compose \
+        --project-name "$drill_project" \
+        --env-file "$env_file" \
         --file docker-compose.production.yml \
         --file docker-compose.recovery.yml \
         "$@"
 }
 
 target_name="aurum_drill_$(date -u +%Y%m%dT%H%M%SZ)_$$"
-checkpoint="$(compose exec -T postgres psql \
+checkpoint="$(production_compose exec -T postgres psql \
     -v ON_ERROR_STOP=1 \
     -U postgres \
     -d aurum \
@@ -43,7 +61,7 @@ export AURUM_PITR_TARGET_NAME="$target_name"
 export AURUM_PITR_TARGET_LSN="$target_lsn"
 
 attempt=1
-until compose exec -T postgres test -f "/wal-archive/$expected_wal.gz"; do
+until production_compose exec -T postgres test -f "/wal-archive/$expected_wal.gz"; do
     if [ "$attempt" -ge 60 ]; then
         echo "PITR checkpoint WAL was not archived: $expected_wal" >&2
         exit 1
@@ -53,12 +71,12 @@ until compose exec -T postgres test -f "/wal-archive/$expected_wal.gz"; do
 done
 aurum_run_recovery_step \
     pitr_checkpoint_wal_snapshot \
-    compose --profile backup run --rm wal-snapshot
+    production_compose --profile backup run --rm wal-snapshot
 
 cleanup() {
     status=$?
     set +e
-    compose --profile restore-drill down --volumes --remove-orphans >/dev/null 2>&1
+    drill_compose --profile restore-drill down --volumes --remove-orphans >/dev/null 2>&1
     trap - EXIT INT TERM
     exit "$status"
 }
@@ -68,9 +86,9 @@ trap 'exit 143' TERM
 
 aurum_run_recovery_step \
     logical_restore_drill \
-    compose --profile restore-drill run --rm restore-drill
+    drill_compose --profile restore-drill run --rm restore-drill
 aurum_run_recovery_step \
     pitr_restore_drill \
-    compose --profile restore-drill run --rm pitr-restore-drill
+    drill_compose --profile restore-drill run --rm pitr-restore-drill
 
-printf 'Local recovery drill completed: %s\n' "$project"
+printf 'Local recovery drill completed: %s\n' "$drill_project"

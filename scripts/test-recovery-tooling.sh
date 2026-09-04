@@ -215,6 +215,48 @@ for recovery_script in \
     sh -n "$recovery_script"
 done
 
+fake_bin="$root/fake-bin"
+wrapper_log="$root/restore-wrapper.log"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/docker" <<'SH'
+#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "${AURUM_TEST_DOCKER_LOG:?}"
+case " $* " in
+    *" exec -T postgres psql "*)
+        printf '%s\n' '0/16B6C50' '000000010000000000000001'
+        ;;
+esac
+SH
+cat > "$fake_bin/flock" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod 700 "$fake_bin/docker" "$fake_bin/flock"
+PATH="$fake_bin:$PATH" \
+    AURUM_TEST_DOCKER_LOG="$wrapper_log" \
+    AURUM_PRODUCTION_ENV_FILE=.env.production.example \
+    AURUM_PRODUCTION_COMPOSE_PROJECT="$project" \
+    AURUM_BACKUP_LOCK_FILE="$root/restore-wrapper.lock" \
+    AURUM_RECOVERY_LOCK_WAIT_SECONDS=0 \
+    AURUM_RECOVERY_METRICS_DIR="$metrics" \
+    sh ./scripts/run-production-restore-drill.sh >/dev/null
+
+grep -q -- "--project-name $project .* exec -T postgres psql" "$wrapper_log"
+grep -q -- "--project-name $project .* run --rm wal-snapshot" "$wrapper_log"
+drill_project="$(sed -n \
+    's/.*--project-name \(aurum-restore-[^ ]*\).* run --rm restore-drill.*/\1/p' \
+    "$wrapper_log" | head -n 1)"
+test -n "$drill_project"
+grep -q -- "--project-name $drill_project .* run --rm pitr-restore-drill" \
+    "$wrapper_log"
+grep -q -- "--project-name $drill_project .* down --volumes --remove-orphans" \
+    "$wrapper_log"
+if grep -q -- "--project-name $project .* run --rm restore-drill" "$wrapper_log"; then
+    echo "Restore drill reused the production Compose project" >&2
+    exit 1
+fi
+
 . ./scripts/recovery-metrics.sh
 aurum_run_recovery_step metrics_probe sh -c 'exit 0'
 metrics_file="$metrics/aurum-recovery-metrics_probe.prom"
