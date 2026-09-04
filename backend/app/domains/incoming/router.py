@@ -27,6 +27,31 @@ from app.domains.incoming.service import IncomingService
 
 router = APIRouter(prefix="/api/v1/incoming", tags=["incoming"])
 
+INCOMING_COST_PERMISSIONS = (
+    "batches.view_costs",
+    "incoming.create",
+    "incoming.finalize",
+)
+
+
+def _can_view_incoming_cost(user: CurrentUser, branch_id: UUID) -> bool:
+    scope = user.branch_scope_for_any(*INCOMING_COST_PERMISSIONS)
+    return scope is None or branch_id in scope
+
+
+def _can_view_incoming_summary_cost(
+    user: CurrentUser,
+    *,
+    branch_id: UUID | None,
+    visible_branch_scope: set[UUID] | None,
+) -> bool:
+    cost_scope = user.branch_scope_for_any(*INCOMING_COST_PERMISSIONS)
+    if cost_scope is None:
+        return True
+    if branch_id is not None:
+        return branch_id in cost_scope
+    return visible_branch_scope is not None and visible_branch_scope.issubset(cost_scope)
+
 
 async def _service(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
@@ -99,6 +124,11 @@ async def list_incoming(
                 update={
                     "branch_name": row.branch_name,
                     "supplier_name": row.supplier_name,
+                    "total_amount": (
+                        row.document.total_amount
+                        if _can_view_incoming_cost(user, row.document.branch_id)
+                        else None
+                    ),
                 }
             )
             for row in docs
@@ -111,7 +141,15 @@ async def list_incoming(
             draft_count=summary.draft_count,
             accepted_count=summary.accepted_count,
             rejected_count=summary.rejected_count,
-            accepted_amount=summary.accepted_amount,
+            accepted_amount=(
+                summary.accepted_amount
+                if _can_view_incoming_summary_cost(
+                    user,
+                    branch_id=branch_id,
+                    visible_branch_scope=branch_scope,
+                )
+                else None
+            ),
         ),
     )
 
@@ -152,14 +190,32 @@ async def get_incoming(
     details = await service.get_document_details(document_id, allowed_branch_ids=branch_scope)
     items = await service.list_item_details(document_id, allowed_branch_ids=branch_scope)
     return IncomingDocumentWithItems(
-        **IncomingDocumentRead.model_validate(details.document).model_dump(
-            exclude={"branch_name", "supplier_name"}
-        ),
+        **IncomingDocumentRead.model_validate(details.document)
+        .model_copy(
+            update={
+                "total_amount": (
+                    details.document.total_amount
+                    if _can_view_incoming_cost(user, details.document.branch_id)
+                    else None
+                )
+            }
+        )
+        .model_dump(exclude={"branch_name", "supplier_name"}),
         branch_name=details.branch_name,
         supplier_name=details.supplier_name,
         items=[
             IncomingItemRead(
-                **IncomingItemRead.model_validate(item.item).model_dump(
+                **IncomingItemRead.model_validate(item.item)
+                .model_copy(
+                    update={
+                        "purchase_price": (
+                            item.item.purchase_price
+                            if _can_view_incoming_cost(user, details.document.branch_id)
+                            else None
+                        )
+                    }
+                )
+                .model_dump(
                     exclude={
                         "catalog_name",
                         "catalog_form",
@@ -271,14 +327,14 @@ async def accept_incoming(
     document_id: UUID,
     user: Annotated[
         CurrentUser,
-        Depends(require_branch_permission("incoming.create", policy="resource")),
+        Depends(require_branch_permission("incoming.finalize", policy="resource")),
     ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentRead:
     doc = await service.accept(
         document_id,
         actor_id=user.user_id,
-        allowed_branch_ids=user.branch_scope_for("incoming.create"),
+        allowed_branch_ids=user.branch_scope_for("incoming.finalize"),
     )
     return IncomingDocumentRead.model_validate(doc)
 
@@ -288,13 +344,13 @@ async def reject_incoming(
     document_id: UUID,
     user: Annotated[
         CurrentUser,
-        Depends(require_branch_permission("incoming.create", policy="resource")),
+        Depends(require_branch_permission("incoming.finalize", policy="resource")),
     ],
     service: Annotated[IncomingService, Depends(_service)],
 ) -> IncomingDocumentRead:
     doc = await service.reject(
         document_id,
         actor_id=user.user_id,
-        allowed_branch_ids=user.branch_scope_for("incoming.create"),
+        allowed_branch_ids=user.branch_scope_for("incoming.finalize"),
     )
     return IncomingDocumentRead.model_validate(doc)

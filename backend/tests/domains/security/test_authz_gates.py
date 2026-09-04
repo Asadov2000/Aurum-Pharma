@@ -740,6 +740,11 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
         own_resp = await client.post("/api/v1/incoming", headers=headers, json=own_payload)
         assert own_resp.status_code == 201
         own_doc_id = own_resp.json()["id"]
+        finalize_without_permission = await client.post(
+            f"/api/v1/incoming/{own_doc_id}/accept",
+            headers=headers,
+        )
+        assert finalize_without_permission.status_code == 403
         await _assert_incoming_update_contract(
             client,
             db_session=db_session,

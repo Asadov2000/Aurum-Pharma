@@ -56,6 +56,7 @@ export interface SupplierOptionList {
 }
 
 export interface SupplierCreatePayload {
+  operation_id: string;
   name: string;
   legal_name?: string | null;
   inn_or_tin?: string | null;
@@ -66,7 +67,7 @@ export interface SupplierCreatePayload {
   notes?: string | null;
 }
 
-export interface SupplierUpdatePayload extends SupplierCreatePayload {
+export interface SupplierUpdatePayload extends Omit<SupplierCreatePayload, "operation_id"> {
   is_active?: boolean;
 }
 
@@ -81,9 +82,9 @@ export interface SupplierReturn {
   id: string;
   supplier_id: string;
   batch_id: string;
-  source_document_id: string | null;
+  source_document_id: string;
   qty: string;
-  amount: string;
+  amount: string | null;
   currency: string;
   reason: SupplierReturnReason;
   comment: string | null;
@@ -134,7 +135,7 @@ export interface SupplierReturnList {
   page_size: number;
   summary: {
     total_qty: string;
-    total_amount: string;
+    total_amount: string | null;
   };
 }
 

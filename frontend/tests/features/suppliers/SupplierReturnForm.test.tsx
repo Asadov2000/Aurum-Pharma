@@ -148,6 +148,18 @@ describe("SupplierReturnForm", () => {
     expect(createSupplierReturn).not.toHaveBeenCalled();
   });
 
+  it("does not expose stale candidates while a new search is debouncing", async () => {
+    renderForm();
+    expect(await screen.findByRole("option", { name: /Амоксициллин/i })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Товар, партия или документ прихода"), {
+      target: { value: "другая партия" },
+    });
+
+    expect(screen.queryByRole("option", { name: /Амоксициллин/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Загрузка доступных партий");
+  });
+
   it("does not mutate inventory while the browser is offline", async () => {
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
     renderForm();

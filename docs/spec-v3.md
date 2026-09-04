@@ -195,9 +195,10 @@ Middleware выбирает пул в зависимости от пользов
 - `suppliers.create`
 - `suppliers.update`
 
-#### incoming (3)
+#### incoming (4)
 - `incoming.view`
 - `incoming.create`
+- `incoming.finalize` — окончательное принятие или отклонение прихода
 - `incoming.return`
 
 #### pos (5)

@@ -20,21 +20,25 @@ IncomingMoney = Annotated[
 
 
 class IncomingDocumentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     operation_id: UUID4
     branch_id: UUID
     supplier_id: UUID
     document_date: date
-    document_number: str | None = None
-    notes: str | None = None
+    document_number: str | None = Field(default=None, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class IncomingDocumentUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     branch_id: UUID | None = None
     supplier_id: UUID | None = None
     document_date: date | None = None
-    document_number: str | None = None
-    notes: str | None = None
-    document_file_path: str | None = None
+    document_number: str | None = Field(default=None, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
+    document_file_path: str | None = Field(default=None, max_length=1000)
 
     @field_validator("branch_id", "supplier_id", "document_date")
     @classmethod
@@ -45,9 +49,11 @@ class IncomingDocumentUpdate(BaseModel):
 
 
 class IncomingItemBase(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     operation_id: UUID4
     catalog_id: UUID
-    batch_number: str | None = None
+    batch_number: str | None = Field(default=None, max_length=120)
     manufactured_at: date | None = None
     expires_at: date
     qty: IncomingQuantity
@@ -56,8 +62,10 @@ class IncomingItemBase(BaseModel):
 
 
 class IncomingItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     catalog_id: UUID | None = None
-    batch_number: str | None = None
+    batch_number: str | None = Field(default=None, max_length=120)
     manufactured_at: date | None = None
     expires_at: date | None = None
     qty: IncomingQuantity | None = None
@@ -82,7 +90,7 @@ class IncomingItemRead(BaseModel):
     manufactured_at: date | None
     expires_at: date
     qty: Decimal
-    purchase_price: Decimal
+    purchase_price: Decimal | None
     sale_price: Decimal
     currency: str
     created_batch_id: UUID | None
@@ -102,7 +110,7 @@ class IncomingDocumentRead(BaseModel):
     document_number: str | None
     document_date: date
     status: str
-    total_amount: Decimal
+    total_amount: Decimal | None
     currency: str
     notes: str | None
     document_file_path: str | None
@@ -118,7 +126,7 @@ class IncomingDocumentSummary(BaseModel):
     draft_count: int
     accepted_count: int
     rejected_count: int
-    accepted_amount: Decimal
+    accepted_amount: Decimal | None
     currency: str = "TJS"
 
 

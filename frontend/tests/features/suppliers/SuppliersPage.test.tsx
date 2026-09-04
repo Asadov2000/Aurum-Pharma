@@ -146,6 +146,9 @@ describe("SuppliersPage", () => {
     // the FastAPI schema where Optional[str] = None is expected.
     expect(createSupplier).toHaveBeenCalledWith(
       expect.objectContaining({
+        operation_id: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
         name: "ОсОО Прима-Фарм",
         legal_name: null,
         inn_or_tin: null,

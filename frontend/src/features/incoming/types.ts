@@ -11,7 +11,7 @@ export interface IncomingDocument {
   document_number: string | null;
   document_date: string; // ISO date
   status: IncomingStatus;
-  total_amount: string; // Decimal
+  total_amount: string | null; // Redacted without cost access
   currency: string;
   notes: string | null;
   document_file_path: string | null;
@@ -30,7 +30,7 @@ export interface IncomingItem {
   manufactured_at: string | null;
   expires_at: string;
   qty: string;
-  purchase_price: string;
+  purchase_price: string | null;
   sale_price: string;
   currency: string;
   created_batch_id: string | null;
@@ -57,7 +57,7 @@ export interface IncomingDocumentSummary {
   draft_count: number;
   accepted_count: number;
   rejected_count: number;
-  accepted_amount: string;
+  accepted_amount: string | null;
   currency: string;
 }
 

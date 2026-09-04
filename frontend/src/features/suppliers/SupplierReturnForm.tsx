@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -76,6 +76,8 @@ export function SupplierReturnForm({
   const [online, setOnline] = useState(() =>
     typeof navigator === "undefined" ? true : navigator.onLine,
   );
+  const [highlight, setHighlight] = useState(0);
+  const candidateListId = useId();
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -99,11 +101,16 @@ export function SupplierReturnForm({
   );
   const qty = form.watch("qty").replace(",", ".");
   const amount = selected ? Number(qty) * Number(selected.purchase_price) : 0;
+  const candidateItems = candidates.data?.items ?? [];
+  const candidateResultsCurrent = searchInput.trim() === search;
+  const selectableCandidateItems = candidateResultsCurrent ? candidateItems : [];
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 250);
     return () => clearTimeout(timeout);
   }, [searchInput]);
+
+  useEffect(() => setHighlight(0), [branchId, search]);
 
   useEffect(() => {
     if (!branchId && branches.data?.length === 1) setBranchId(branches.data[0]!.id);
@@ -284,15 +291,48 @@ export function SupplierReturnForm({
           onChange={(event) => setSearchInput(event.target.value)}
           placeholder="Начните вводить или выберите из списка"
           autoComplete="off"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={Boolean(branchId)}
+          aria-controls={candidateListId}
+          aria-busy={candidates.isFetching || undefined}
+          aria-activedescendant={
+            selectableCandidateItems[highlight]
+              ? `${candidateListId}-${selectableCandidateItems[highlight]?.batch_id}`
+              : undefined
+          }
+          onKeyDown={(event) => {
+            if (candidates.isFetching || selectableCandidateItems.length === 0) {
+              return;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setHighlight((current) =>
+                Math.min(current + 1, selectableCandidateItems.length - 1),
+              );
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setHighlight((current) => Math.max(current - 1, 0));
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              const candidate = selectableCandidateItems[highlight];
+              if (candidate) chooseCandidate(candidate);
+            }
+          }}
         />
       </div>
 
-      <div className="max-h-64 overflow-y-auto rounded-lg border border-border" role="listbox">
+      <div
+        id={candidateListId}
+        className="max-h-64 overflow-y-auto rounded-lg border border-border"
+        role="listbox"
+        aria-label="Доступные партии для возврата"
+      >
         {!branchId ? (
           <p className="px-4 py-5 text-sm text-foreground-muted">
             Сначала выберите аптечную точку.
           </p>
-        ) : candidates.isLoading ? (
+        ) : !candidateResultsCurrent || candidates.isLoading ? (
           <p className="px-4 py-5 text-sm text-foreground-muted" role="status">
             Загрузка доступных партий…
           </p>
@@ -309,16 +349,18 @@ export function SupplierReturnForm({
               Повторить
             </Button>
           </div>
-        ) : candidates.data?.items.length ? (
-          candidates.data.items.map((candidate) => {
+        ) : selectableCandidateItems.length ? (
+          selectableCandidateItems.map((candidate, index) => {
             const subtitle = supplierProductSubtitle(candidate);
             const active = selected?.batch_id === candidate.batch_id;
             return (
               <button
                 key={candidate.batch_id}
+                id={`${candidateListId}-${candidate.batch_id}`}
                 type="button"
                 role="option"
                 aria-selected={active}
+                onPointerEnter={() => setHighlight(index)}
                 onClick={() => chooseCandidate(candidate)}
                 className={cn(
                   "flex min-h-16 w-full items-start justify-between gap-4 border-b border-border px-4 py-3 text-left last:border-b-0",

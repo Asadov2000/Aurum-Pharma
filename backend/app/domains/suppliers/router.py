@@ -61,9 +61,35 @@ def _set_search_no_store(response: Response) -> None:
     response.headers["Pragma"] = "no-cache"
 
 
-def _return_details(row: SupplierReturnRow, *, report_timezone: str) -> SupplierReturnDetails:
+def _can_view_return_cost(user: CurrentUser, branch_id: UUID) -> bool:
+    scope = user.branch_scope_for_any("batches.view_costs", "incoming.return")
+    return scope is None or branch_id in scope
+
+
+def _can_view_return_summary_cost(
+    user: CurrentUser,
+    *,
+    branch_id: UUID | None,
+    visible_branch_scope: set[UUID] | None,
+) -> bool:
+    cost_scope = user.branch_scope_for_any("batches.view_costs", "incoming.return")
+    if cost_scope is None:
+        return True
+    if branch_id is not None:
+        return branch_id in cost_scope
+    return visible_branch_scope is not None and visible_branch_scope.issubset(cost_scope)
+
+
+def _return_details(
+    row: SupplierReturnRow,
+    *,
+    report_timezone: str,
+    include_cost: bool,
+) -> SupplierReturnDetails:
     return SupplierReturnDetails(
-        **SupplierReturnRead.model_validate(row.supplier_return).model_dump(),
+        **SupplierReturnRead.model_validate(row.supplier_return)
+        .model_copy(update={"amount": row.supplier_return.amount if include_cost else None})
+        .model_dump(),
         supplier_name=row.supplier_name,
         branch_id=row.branch_id,
         branch_name=row.branch_name,
@@ -150,13 +176,28 @@ async def search_supplier_returns(
         page_size=payload.page_size,
     )
     return SupplierReturnList(
-        items=[_return_details(row, report_timezone=report_timezone) for row in rows],
+        items=[
+            _return_details(
+                row,
+                report_timezone=report_timezone,
+                include_cost=_can_view_return_cost(user, row.branch_id),
+            )
+            for row in rows
+        ],
         total=summary.total,
         page=payload.page,
         page_size=payload.page_size,
         summary=SupplierReturnSummary(
             total_qty=summary.total_qty,
-            total_amount=summary.total_amount,
+            total_amount=(
+                summary.total_amount
+                if _can_view_return_summary_cost(
+                    user,
+                    branch_id=payload.branch_id,
+                    visible_branch_scope=user.branch_scope_for("incoming.view"),
+                )
+                else None
+            ),
         ),
     )
 
@@ -214,7 +255,18 @@ async def list_supplier_returns(
         page=1,
         page_size=100,
     )
-    return [SupplierReturnRead.model_validate(row.supplier_return) for row in rows]
+    return [
+        SupplierReturnRead.model_validate(row.supplier_return).model_copy(
+            update={
+                "amount": (
+                    row.supplier_return.amount
+                    if _can_view_return_cost(user, row.branch_id)
+                    else None
+                )
+            }
+        )
+        for row in rows
+    ]
 
 
 @router.post("/options/search", response_model=SupplierOptionList)
@@ -300,7 +352,8 @@ async def create_supplier(
 ) -> SupplierRead:
     supplier = await service.create_supplier(
         tenant_id=_current_tenant_or_400(user),
-        fields=payload.model_dump(exclude_none=True),
+        fields=payload.model_dump(exclude_none=True, exclude={"operation_id"}),
+        operation_id=payload.operation_id,
         created_by=user.user_id,
     )
     return SupplierRead.model_validate(supplier)

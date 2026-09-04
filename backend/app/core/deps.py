@@ -55,6 +55,7 @@ BRANCH_SCOPED_PERMISSIONS = frozenset(
         "batches.write_off",
         "incoming.view",
         "incoming.create",
+        "incoming.finalize",
         "incoming.return",
         "pos.shift_open",
         "pos.shift_close",

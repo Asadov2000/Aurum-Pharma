@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ConflictError
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.suppliers.repository import SuppliersRepository
@@ -119,3 +121,68 @@ async def test_search_suppliers_filters_status_and_tenant(
         limit=1,
     )
     assert [supplier.id for supplier in selected_option] == [inactive.id]
+
+
+async def test_create_supplier_retry_is_idempotent_and_tenant_scoped(
+    db_session: AsyncSession,
+) -> None:
+    foundation = FoundationService(FoundationRepository(db_session))
+    service = SuppliersService(SuppliersRepository(db_session))
+    suffix = uuid4().hex[:8]
+    tenant = await foundation.create_tenant(
+        payload={
+            "name": f"Supplier idempotency {suffix}",
+            "contact_email": f"supplier-idempotency-{suffix}@aurum.tj",
+        }
+    )
+    other_tenant = await foundation.create_tenant(
+        payload={
+            "name": f"Other supplier idempotency {suffix}",
+            "contact_email": f"other-supplier-idempotency-{suffix}@aurum.tj",
+        }
+    )
+    operation_id = uuid4()
+    fields = {
+        "name": "Somon Medical",
+        "email": "orders@somon-medical.tj",
+        "notes": "Первичная поставка",
+    }
+
+    first = await service.create_supplier(
+        tenant_id=tenant.id,
+        operation_id=operation_id,
+        fields=fields,
+    )
+    repeated = await service.create_supplier(
+        tenant_id=tenant.id,
+        operation_id=operation_id,
+        fields=fields,
+    )
+
+    assert repeated.id == first.id
+
+    await service.update_supplier(
+        first.id,
+        tenant_id=tenant.id,
+        fields={"name": "Somon Medical Updated"},
+    )
+    repeated_after_update = await service.create_supplier(
+        tenant_id=tenant.id,
+        operation_id=operation_id,
+        fields=fields,
+    )
+    assert repeated_after_update.id == first.id
+
+    with pytest.raises(ConflictError, match="different data"):
+        await service.create_supplier(
+            tenant_id=tenant.id,
+            operation_id=operation_id,
+            fields={**fields, "email": "other@somon-medical.tj"},
+        )
+
+    other = await service.create_supplier(
+        tenant_id=other_tenant.id,
+        operation_id=operation_id,
+        fields=fields,
+    )
+    assert other.id != first.id

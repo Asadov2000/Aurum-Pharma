@@ -150,6 +150,7 @@ export function NewIncomingForm({
           <SupplierPicker
             id="supplier_id"
             value={form.watch("supplier_id")}
+            initialLabel={document?.supplier_name ?? undefined}
             onChange={(supplierId) => {
               form.setValue("supplier_id", supplierId, {
                 shouldDirty: true,
@@ -184,7 +185,11 @@ export function NewIncomingForm({
           <Textarea id="notes" {...form.register("notes")} />
         </div>
       </div>
-      {topError && <p className="text-sm text-danger">{topError}</p>}
+      {topError && (
+        <p className="text-sm text-danger" role="alert">
+          {topError}
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена

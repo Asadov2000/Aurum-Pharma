@@ -45,8 +45,11 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
             supplier_id = (
                 await connection.execute(
                     text(
-                        "INSERT INTO supplier (tenant_id, name) "
-                        "VALUES (:tenant_id, 'Supplier') RETURNING id"
+                        "INSERT INTO supplier ("
+                        "tenant_id, name, create_request_fingerprint"
+                        ") VALUES ("
+                        ":tenant_id, 'Supplier', repeat('a', 64)"
+                        ") RETURNING id"
                     ),
                     {"tenant_id": tenant_id},
                 )
@@ -72,14 +75,20 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                     "DISABLE TRIGGER trg_guard_incoming_document_lifecycle"
                 )
             )
+            await connection.execute(
+                text(
+                    "ALTER TABLE incoming_item " "DISABLE TRIGGER trg_guard_incoming_item_lifecycle"
+                )
+            )
             document_id = (
                 await connection.execute(
                     text(
                         "INSERT INTO incoming_document ("
-                        "tenant_id, branch_id, supplier_id, operation_id, document_date, status"
+                        "tenant_id, branch_id, supplier_id, operation_id, document_date, "
+                        "status, total_amount, accepted_at"
                         ") VALUES ("
                         ":tenant_id, :branch_id, :supplier_id, :operation_id, "
-                        "CURRENT_DATE, 'accepted'"
+                        "CURRENT_DATE, 'accepted', 25, CURRENT_TIMESTAMP"
                         ") RETURNING id"
                     ),
                     {
@@ -90,18 +99,6 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                     },
                 )
             ).scalar_one()
-            await connection.execute(
-                text(
-                    "ALTER TABLE incoming_document "
-                    "ENABLE TRIGGER trg_incoming_document_writer_guard"
-                )
-            )
-            await connection.execute(
-                text(
-                    "ALTER TABLE incoming_document "
-                    "ENABLE TRIGGER trg_guard_incoming_document_lifecycle"
-                )
-            )
             await connection.execute(
                 text("ALTER TABLE batch DISABLE TRIGGER trg_batch_writer_guard")
             )
@@ -122,27 +119,54 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                     },
                 )
             ).scalar_one()
+            incoming_item_id = uuid4()
+            await connection.execute(
+                text(
+                    "INSERT INTO incoming_item ("
+                    "id, tenant_id, operation_id, document_id, catalog_id, expires_at, "
+                    "qty, purchase_price, sale_price, created_batch_id"
+                    ") VALUES ("
+                    ":id, :tenant_id, :operation_id, :document_id, :catalog_id, "
+                    "CURRENT_DATE + 365, 5, 5, 10, :batch_id"
+                    ")"
+                ),
+                {
+                    "id": incoming_item_id,
+                    "tenant_id": tenant_id,
+                    "operation_id": uuid4(),
+                    "document_id": document_id,
+                    "catalog_id": catalog_id,
+                    "batch_id": batch_id,
+                },
+            )
             await connection.execute(
                 text(
                     "INSERT INTO batch_movement ("
-                    "tenant_id, batch_id, movement_type, qty_delta"
-                    ") VALUES (:tenant_id, :batch_id, 'incoming', 5)"
+                    "tenant_id, batch_id, movement_type, qty_delta, source_table, source_id"
+                    ") VALUES ("
+                    ":tenant_id, :batch_id, 'incoming', 5, 'incoming_item', :source_id"
+                    ")"
                 ),
-                {"tenant_id": tenant_id, "batch_id": batch_id},
+                {
+                    "tenant_id": tenant_id,
+                    "batch_id": batch_id,
+                    "source_id": incoming_item_id,
+                },
             )
-            await connection.execute(
-                text("ALTER TABLE batch ENABLE TRIGGER trg_batch_writer_guard")
-            )
+            return_id = uuid4()
             return_id = (
                 await connection.execute(
                     text(
                         "INSERT INTO supplier_return ("
-                        "tenant_id, supplier_id, source_document_id, batch_id, qty, amount, reason"
+                        "id, tenant_id, supplier_id, source_document_id, batch_id, "
+                        "qty, amount, reason"
                         ") VALUES ("
-                        ":tenant_id, :supplier_id, :document_id, :batch_id, 1, 5, 'damaged'"
+                        ":id, :tenant_id, :supplier_id, :document_id, :batch_id, "
+                        "1, 5, 'damaged'"
                         ") RETURNING id"
                     ),
                     {
+                        "id": return_id,
                         "tenant_id": tenant_id,
                         "supplier_id": supplier_id,
                         "document_id": document_id,
@@ -150,6 +174,42 @@ async def test_supplier_return_is_append_only(maintenance_engine: AsyncEngine) -
                     },
                 )
             ).scalar_one()
+            await connection.execute(
+                text(
+                    "INSERT INTO batch_movement ("
+                    "tenant_id, batch_id, movement_type, qty_delta, source_table, source_id"
+                    ") VALUES ("
+                    ":tenant_id, :batch_id, 'supplier_return', -1, "
+                    "'supplier_return', :source_id"
+                    ")"
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "batch_id": batch_id,
+                    "source_id": return_id,
+                },
+            )
+            await connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+            await connection.execute(
+                text(
+                    "ALTER TABLE incoming_document "
+                    "ENABLE TRIGGER trg_incoming_document_writer_guard"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER TABLE incoming_document "
+                    "ENABLE TRIGGER trg_guard_incoming_document_lifecycle"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER TABLE incoming_item " "ENABLE TRIGGER trg_guard_incoming_item_lifecycle"
+                )
+            )
+            await connection.execute(
+                text("ALTER TABLE batch ENABLE TRIGGER trg_batch_writer_guard")
+            )
 
             update_savepoint = await connection.begin_nested()
             with pytest.raises(DBAPIError, match="Supplier return ledger is immutable"):

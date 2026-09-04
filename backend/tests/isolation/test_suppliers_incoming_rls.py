@@ -52,8 +52,9 @@ async def test_supplier_invisible_across_tenants(
             tenant_ids = [str(r[0]) for r in tr.fetchall()]
             await conn.execute(
                 text(
-                    "INSERT INTO supplier (tenant_id, name) VALUES "
-                    "(:a, 'A-Supplier'), (:b, 'B-Supplier')"
+                    "INSERT INTO supplier (tenant_id, name, create_request_fingerprint) VALUES "
+                    "(:a, 'A-Supplier', repeat('a', 64)), "
+                    "(:b, 'B-Supplier', repeat('b', 64))"
                 ),
                 {"a": tenant_ids[0], "b": tenant_ids[1]},
             )

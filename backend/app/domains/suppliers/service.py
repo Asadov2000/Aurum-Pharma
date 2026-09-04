@@ -5,13 +5,19 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfoNotFoundError
 
 import structlog
 from sqlalchemy.exc import IntegrityError, InternalError
 
-from app.core.errors import AurumError, BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.time import local_day_range
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.repository import InventoryRepository
@@ -22,6 +28,8 @@ from app.domains.suppliers.repository import (
     SupplierReturnSummaryData,
     SupplierSearchSummaryData,
     SuppliersRepository,
+    supplier_create_fingerprint,
+    supplier_create_legacy_fingerprint,
 )
 
 logger = structlog.get_logger("suppliers.service")
@@ -36,9 +44,33 @@ class SuppliersService:
         *,
         tenant_id: UUID,
         fields: dict[str, Any],
+        operation_id: UUID | None = None,
         created_by: UUID | None = None,
     ) -> Supplier:
-        payload = {**fields, "tenant_id": tenant_id}
+        operation_id = operation_id or uuid4()
+        request_fingerprint = supplier_create_fingerprint(fields)
+        await self.repo.lock_supplier_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        existing = await self.repo.get_supplier_by_operation_id(
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+        )
+        if existing is not None:
+            self._assert_supplier_retry_matches(
+                existing,
+                request_fingerprint=request_fingerprint,
+                legacy_request_fingerprint=supplier_create_legacy_fingerprint(fields),
+            )
+            return existing
+
+        payload = {
+            **fields,
+            "tenant_id": tenant_id,
+            "operation_id": operation_id,
+            "create_request_fingerprint": request_fingerprint,
+        }
         if created_by is not None:
             payload["created_by"] = created_by
         return await self.repo.create_supplier(**payload)
@@ -102,7 +134,12 @@ class SuppliersService:
         fields: dict[str, Any],
         updated_by: UUID | None = None,
     ) -> Supplier:
-        supplier = await self.get_supplier(supplier_id, tenant_id=tenant_id)
+        supplier = await self.repo.get_supplier_for_update(
+            supplier_id,
+            tenant_id=tenant_id,
+        )
+        if supplier is None:
+            raise NotFoundError("Supplier not found")
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_supplier(supplier, **fields)
@@ -139,7 +176,14 @@ class SuppliersService:
             )
             return existing
 
-        await self.get_supplier(supplier_id, tenant_id=tenant_id)
+        supplier = await self.repo.get_supplier_for_share(
+            supplier_id,
+            tenant_id=tenant_id,
+        )
+        if supplier is None:
+            raise NotFoundError("Supplier not found")
+        if not supplier.is_active:
+            raise BusinessRuleError("Inactive supplier cannot accept returns")
         batch = await self.repo.get_batch_for_update(batch_id, tenant_id=tenant_id)
         if batch is None:
             raise NotFoundError("Batch not found")
@@ -219,6 +263,19 @@ class SuppliersService:
             qty=str(qty),
         )
         return supplier_return
+
+    @staticmethod
+    def _assert_supplier_retry_matches(
+        existing: Supplier,
+        *,
+        request_fingerprint: str,
+        legacy_request_fingerprint: str,
+    ) -> None:
+        if existing.create_request_fingerprint not in {
+            request_fingerprint,
+            legacy_request_fingerprint,
+        }:
+            raise ConflictError("Supplier operation ID was already used with different data")
 
     async def search_return_candidates(
         self,

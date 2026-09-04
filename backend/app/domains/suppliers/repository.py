@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from hashlib import md5, sha256
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -17,6 +19,44 @@ from app.domains.foundation.models import Branch
 from app.domains.incoming.models import IncomingDocument, IncomingItem
 from app.domains.inventory.models import Batch
 from app.domains.suppliers.models import Supplier, SupplierReturn
+
+_SUPPLIER_CREATE_FIELDS = (
+    "name",
+    "legal_name",
+    "inn_or_tin",
+    "contact_person",
+    "phone",
+    "email",
+    "address",
+    "notes",
+)
+
+
+def supplier_create_fingerprint(fields: dict[str, Any]) -> str:
+    """Hash the immutable, normalized create intent used by an operation ID."""
+
+    payload = {
+        field_name: str(fields[field_name]) if fields.get(field_name) is not None else None
+        for field_name in _SUPPLIER_CREATE_FIELDS
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def supplier_create_legacy_fingerprint(fields: dict[str, Any]) -> str:
+    """Match the one-time SQL backfill for suppliers created before revision 0135."""
+
+    payload = {
+        field_name: str(fields[field_name]) if fields.get(field_name) is not None else None
+        for field_name in _SUPPLIER_CREATE_FIELDS
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    primary = md5(canonical.encode("utf-8"), usedforsecurity=False).hexdigest()
+    secondary = md5(
+        f"legacy:{canonical}".encode(),
+        usedforsecurity=False,
+    ).hexdigest()
+    return primary + secondary
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,16 +106,77 @@ class SuppliersRepository:
         self.session = session
 
     async def create_supplier(self, **fields: Any) -> Supplier:
+        fields.setdefault("operation_id", uuid4())
+        fields.setdefault("create_request_fingerprint", supplier_create_fingerprint(fields))
         supplier = Supplier(**fields)
         self.session.add(supplier)
         await self.session.flush()
         await self.session.refresh(supplier)
         return supplier
 
+    async def lock_supplier_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> None:
+        await self.session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended("
+                "'supplier:create:' || CAST(:tenant_id AS TEXT) || ':' || "
+                "CAST(:operation_id AS TEXT), 0))"
+            ),
+            {"tenant_id": str(tenant_id), "operation_id": str(operation_id)},
+        )
+
+    async def get_supplier_by_operation_id(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> Supplier | None:
+        stmt = select(Supplier).where(
+            Supplier.tenant_id == tenant_id,
+            Supplier.operation_id == operation_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def get_supplier(self, supplier_id: UUID, *, tenant_id: UUID) -> Supplier | None:
         stmt = select(Supplier).where(
             Supplier.id == supplier_id,
             Supplier.tenant_id == tenant_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_supplier_for_share(
+        self,
+        supplier_id: UUID,
+        *,
+        tenant_id: UUID,
+    ) -> Supplier | None:
+        stmt = (
+            select(Supplier)
+            .where(
+                Supplier.id == supplier_id,
+                Supplier.tenant_id == tenant_id,
+            )
+            .with_for_update(read=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_supplier_for_update(
+        self,
+        supplier_id: UUID,
+        *,
+        tenant_id: UUID,
+    ) -> Supplier | None:
+        stmt = (
+            select(Supplier)
+            .where(
+                Supplier.id == supplier_id,
+                Supplier.tenant_id == tenant_id,
+            )
+            .with_for_update()
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 

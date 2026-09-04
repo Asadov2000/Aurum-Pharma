@@ -38,6 +38,7 @@ import { type IncomingItem } from "./types";
 export function IncomingDetailPage(): JSX.Element {
   const { user } = useAuth();
   const canEdit = hasPermission(user, "incoming.create");
+  const canFinalize = hasPermission(user, "incoming.finalize");
   const { id } = useParams({ from: "/incoming/$id" });
   const incoming = useIncomingDocQuery(id);
   const accept = useAcceptIncoming();
@@ -94,7 +95,7 @@ export function IncomingDetailPage(): JSX.Element {
   const pendingDeleteItem = doc.items.find((item) => item.id === pendingDeleteItemId) ?? null;
 
   const onAccept = async () => {
-    if (!canEdit || accept.isPending) return;
+    if (!canFinalize || accept.isPending) return;
     setTopError(null);
     setActionMessage(null);
     try {
@@ -107,7 +108,7 @@ export function IncomingDetailPage(): JSX.Element {
   };
 
   const onReject = async () => {
-    if (!canEdit || reject.isPending) return;
+    if (!canFinalize || reject.isPending) return;
     setTopError(null);
     setActionMessage(null);
     try {
@@ -188,11 +189,13 @@ export function IncomingDetailPage(): JSX.Element {
             label="Потенциал продаж"
             value={formatMoney(summary.saleTotal, doc.currency)}
             note={
-              summary.margin >= 0
+              summary.margin === null
+                ? "Себестоимость скрыта"
+                : summary.margin >= 0
                 ? `Наценка ${formatMoney(summary.margin, doc.currency)}`
                 : `Убыток ${formatMoney(Math.abs(summary.margin), doc.currency)}`
             }
-            tone={summary.margin < 0 ? "danger" : "default"}
+            tone={summary.margin !== null && summary.margin < 0 ? "danger" : "default"}
           />
         </dl>
         {(doc.notes || summary.expiredCount > 0 || summary.lossItemCount > 0) && (
@@ -308,7 +311,7 @@ export function IncomingDetailPage(): JSX.Element {
         )}
       </section>
 
-      {canEdit && isDraft && (
+      {canFinalize && isDraft && (
         <div className="sticky bottom-2 z-sticky flex flex-col gap-3 rounded-lg border border-border bg-surface-raised px-3 py-3 shadow-lg sm:static sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:shadow-none">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">Черновик не меняет остатки</p>
@@ -365,7 +368,7 @@ export function IncomingDetailPage(): JSX.Element {
         </Modal>
       )}
 
-      {canEdit && (
+      {canFinalize && (
         <ConfirmDialog
           open={docAction === "accept"}
           title="Принять товары на склад"
@@ -392,7 +395,7 @@ export function IncomingDetailPage(): JSX.Element {
         />
       )}
 
-      {canEdit && (
+      {canFinalize && (
         <ConfirmDialog
           open={docAction === "reject"}
           title="Отклонить приход"
@@ -458,9 +461,11 @@ function IncomingItemRow({
   onEdit: () => void;
   onDelete: () => void;
 }): JSX.Element {
-  const lineTotal = Number(item.qty) * Number(item.purchase_price);
+  const lineTotal =
+    item.purchase_price === null ? null : Number(item.qty) * Number(item.purchase_price);
   const isExpired = item.expires_at <= pharmacyCalendarDate();
-  const isLoss = Number(item.sale_price) < Number(item.purchase_price);
+  const isLoss =
+    item.purchase_price !== null && Number(item.sale_price) < Number(item.purchase_price);
 
   return (
     <TR>
@@ -517,7 +522,8 @@ function IncomingItemCard({
   onDelete: () => void;
 }): JSX.Element {
   const isExpired = item.expires_at <= pharmacyCalendarDate();
-  const lineTotal = Number(item.qty) * Number(item.purchase_price);
+  const lineTotal =
+    item.purchase_price === null ? null : Number(item.qty) * Number(item.purchase_price);
   return (
     <article aria-label={productName(item)} className="space-y-3 px-3 py-4">
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -649,30 +655,35 @@ function IncomingDetailSkeleton(): JSX.Element {
 function summarizeItems(items: readonly IncomingItem[]): {
   quantity: number;
   saleTotal: number;
-  margin: number;
+  margin: number | null;
   expiredCount: number;
   lossItemCount: number;
 } {
   let quantity = 0;
   let purchaseTotal = 0;
+  let hasHiddenCost = false;
   let saleTotal = 0;
   let expiredCount = 0;
   let lossItemCount = 0;
   const today = pharmacyCalendarDate();
   for (const item of items) {
     const qty = Number(item.qty);
-    const purchasePrice = Number(item.purchase_price);
+    const purchasePrice = item.purchase_price === null ? null : Number(item.purchase_price);
     const salePrice = Number(item.sale_price);
     quantity += qty;
-    purchaseTotal += qty * purchasePrice;
+    if (purchasePrice === null) {
+      hasHiddenCost = true;
+    } else {
+      purchaseTotal += qty * purchasePrice;
+    }
     saleTotal += qty * salePrice;
     if (item.expires_at <= today) expiredCount += 1;
-    if (salePrice < purchasePrice) lossItemCount += 1;
+    if (purchasePrice !== null && salePrice < purchasePrice) lossItemCount += 1;
   }
   return {
     quantity,
     saleTotal,
-    margin: saleTotal - purchaseTotal,
+    margin: hasHiddenCost ? null : saleTotal - purchaseTotal,
     expiredCount,
     lossItemCount,
   };
@@ -711,7 +722,8 @@ function formatQuantity(value: string | number): string {
   return QUANTITY_FORMATTER.format(Number(value));
 }
 
-function formatMoney(value: string | number, currency: string): string {
+function formatMoney(value: string | number | null, currency: string): string {
+  if (value === null) return "Скрыто";
   return `${MONEY_FORMATTER.format(Number(value))} ${currency}`;
 }
 

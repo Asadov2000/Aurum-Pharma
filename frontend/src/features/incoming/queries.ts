@@ -27,7 +27,7 @@ export const incomingKeys = {
 export function useIncomingListQuery(params: IncomingSearchParams, enabled = true) {
   return useQuery({
     queryKey: incomingKeys.list(params),
-    queryFn: () => listIncoming(params),
+    queryFn: ({ signal }) => listIncoming(params, signal),
     placeholderData: keepPreviousData,
     enabled,
   });
@@ -36,7 +36,7 @@ export function useIncomingListQuery(params: IncomingSearchParams, enabled = tru
 export function useIncomingDocQuery(id: string | null) {
   return useQuery({
     queryKey: incomingKeys.doc(id ?? ""),
-    queryFn: () => getIncoming(id as string),
+    queryFn: ({ signal }) => getIncoming(id as string, signal),
     enabled: id !== null,
   });
 }

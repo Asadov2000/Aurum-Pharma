@@ -69,6 +69,7 @@ BRANCH_DISCOVERY_PERMISSIONS = (
     # incoming capability when creating or reviewing a document.
     "incoming.view",
     "incoming.create",
+    "incoming.finalize",
     "batches.view",
     "reports.view",
 )

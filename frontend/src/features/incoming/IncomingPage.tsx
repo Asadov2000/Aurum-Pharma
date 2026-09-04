@@ -51,6 +51,7 @@ export function IncomingPage(): JSX.Element {
   const navigate = useNavigate();
   const filterPreferenceKey = useFilterPreferenceKey("incoming");
   const canCreate = hasPermission(user, "incoming.create");
+  const canFinalize = hasPermission(user, "incoming.finalize");
   const canDiscoverBranches = hasAnyPermission(user, [
     "branches.view",
     "registers.view",
@@ -59,6 +60,7 @@ export function IncomingPage(): JSX.Element {
     "pos.sell",
     "incoming.view",
     "incoming.create",
+    "incoming.finalize",
   ]);
   const canViewSuppliers = hasPermission(user, "suppliers.view");
   const [branchFilter, setBranchFilter] = useState("");
@@ -80,8 +82,12 @@ export function IncomingPage(): JSX.Element {
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      setDocumentNumber(documentNumberInput.trim());
-      setPage(1);
+      const nextDocumentNumber = documentNumberInput.trim();
+      setDocumentNumber((currentDocumentNumber) => {
+        if (currentDocumentNumber === nextDocumentNumber) return currentDocumentNumber;
+        setPage(1);
+        return nextDocumentNumber;
+      });
     }, 300);
     return () => clearTimeout(timeout);
   }, [documentNumberInput]);
@@ -412,7 +418,7 @@ export function IncomingPage(): JSX.Element {
                   error={selectedQuery.error}
                   onRetry={() => void selectedQuery.refetch()}
                   onOpenFull={() => navigateToDocument(selectedDocument)}
-                  canEdit={canCreate}
+                  canFinalize={canFinalize}
                 />
               )}
             </div>
@@ -650,7 +656,7 @@ function IncomingPreviewPanel({
   error,
   onRetry,
   onOpenFull,
-  canEdit,
+  canFinalize,
 }: {
   document: IncomingDocument;
   details: IncomingDocumentWithItems | undefined;
@@ -658,7 +664,7 @@ function IncomingPreviewPanel({
   error: Error | null;
   onRetry: () => void;
   onOpenFull: () => void;
-  canEdit: boolean;
+  canFinalize: boolean;
 }): JSX.Element {
   const current = details ?? document;
   const items = details?.items ?? [];
@@ -710,7 +716,11 @@ function IncomingPreviewPanel({
             <PreviewMetric
               label="Потенциал продаж"
               value={formatMoney(itemSummary.saleTotal, details.currency)}
-              note={`Наценка ${formatMoney(itemSummary.margin, details.currency)}`}
+              note={
+                itemSummary.margin === null
+                  ? "Себестоимость скрыта"
+                  : `Наценка ${formatMoney(itemSummary.margin, details.currency)}`
+              }
             />
           </dl>
           <section aria-labelledby="incoming-preview-items" className="border-t border-border">
@@ -745,10 +755,12 @@ function IncomingPreviewPanel({
         </p>
         <Button
           className="w-full justify-between"
-          variant={canEdit && current.status === "draft" ? "primary" : "secondary"}
+          variant={canFinalize && current.status === "draft" ? "primary" : "secondary"}
           onClick={onOpenFull}
         >
-          {canEdit && current.status === "draft" ? "Проверить и принять" : "Открыть документ"}
+          {canFinalize && current.status === "draft"
+            ? "Проверить и принять"
+            : "Открыть документ"}
           <ArrowRightIcon />
         </Button>
       </footer>
@@ -775,7 +787,8 @@ function PreviewMetric({
 }
 
 function IncomingItemPreview({ item }: { item: IncomingItem }): JSX.Element {
-  const amount = Number(item.qty) * Number(item.purchase_price);
+  const amount =
+    item.purchase_price === null ? null : Number(item.qty) * Number(item.purchase_price);
   const subtitle = [item.catalog_form, item.catalog_dosage, item.catalog_pack_size]
     .filter(Boolean)
     .join(" · ");
@@ -866,10 +879,14 @@ function summarizeVisibleRows(rows: IncomingDocument[], total: number): Incoming
     draft_count: rows.filter((document) => document.status === "draft").length,
     accepted_count: rows.filter((document) => document.status === "accepted").length,
     rejected_count: rows.filter((document) => document.status === "rejected").length,
-    accepted_amount: rows
-      .filter((document) => document.status === "accepted")
-      .reduce((sum, document) => sum + Number(document.total_amount), 0)
-      .toFixed(2),
+    accepted_amount: rows.some(
+      (document) => document.status === "accepted" && document.total_amount === null,
+    )
+      ? null
+      : rows
+          .filter((document) => document.status === "accepted")
+          .reduce((sum, document) => sum + Number(document.total_amount), 0)
+          .toFixed(2),
     currency: rows[0]?.currency ?? "TJS",
   };
 }
@@ -877,20 +894,24 @@ function summarizeVisibleRows(rows: IncomingDocument[], total: number): Incoming
 function summarizeItems(items: IncomingItem[]): {
   quantity: number;
   saleTotal: number;
-  margin: number;
+  margin: number | null;
 } {
-  return items.reduce(
-    (summary, item) => {
-      const qty = Number(item.qty);
-      const purchase = qty * Number(item.purchase_price);
-      const sale = qty * Number(item.sale_price);
-      summary.quantity += qty;
-      summary.saleTotal += sale;
-      summary.margin += sale - purchase;
-      return summary;
-    },
-    { quantity: 0, saleTotal: 0, margin: 0 },
-  );
+  let quantity = 0;
+  let saleTotal = 0;
+  let margin = 0;
+  let hasHiddenCost = false;
+  for (const item of items) {
+    const qty = Number(item.qty);
+    const sale = qty * Number(item.sale_price);
+    quantity += qty;
+    saleTotal += sale;
+    if (item.purchase_price === null) {
+      hasHiddenCost = true;
+    } else {
+      margin += sale - qty * Number(item.purchase_price);
+    }
+  }
+  return { quantity, saleTotal, margin: hasHiddenCost ? null : margin };
 }
 
 function formatDate(value: string): string {
@@ -899,7 +920,8 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat("ru-RU").format(new Date(Date.UTC(year, month - 1, day)));
 }
 
-function formatMoney(value: string | number, currency = "TJS"): string {
+function formatMoney(value: string | number | null, currency = "TJS"): string {
+  if (value === null) return "Скрыто";
   const number = Number(value);
   const formatted = Number.isFinite(number)
     ? number.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })

@@ -40,6 +40,7 @@ async def test_permission_scope_metadata_uses_explicit_capability_mapping(
         "pos.sell": "BRANCH_SET",
         "roles.assign": "TENANT_ALL",
         "incoming.create": "BRANCH_SET",
+        "incoming.finalize": "BRANCH_SET",
         "reports.view": "BRANCH_SET",
         "billing.overview.view": "TENANT_ALL",
         "billing.invoice.view": "TENANT_ALL",

@@ -249,7 +249,11 @@ export function AddItemForm({
           <FormError>{form.formState.errors.sale_price?.message}</FormError>
         </div>
       </div>
-      {topError && <p className="text-sm text-danger">{topError}</p>}
+      {topError && (
+        <p className="text-sm text-danger" role="alert">
+          {topError}
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           Отмена

@@ -31,6 +31,8 @@ class Supplier(Base):
         server_default=text("gen_random_uuid()"),
     )
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    create_request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     legal_name: Mapped[str | None] = mapped_column(Text)
     inn_or_tin: Mapped[str | None] = mapped_column(Text)
@@ -60,7 +62,7 @@ class SupplierReturn(Base):
     )
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     supplier_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    source_document_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    source_document_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     batch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)

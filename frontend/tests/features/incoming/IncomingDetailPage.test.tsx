@@ -7,7 +7,7 @@ const acceptIncoming = vi.fn();
 const rejectIncoming = vi.fn();
 const deleteIncomingItem = vi.fn();
 
-let permissions = ["incoming.view", "incoming.create"];
+let permissions = ["incoming.view", "incoming.create", "incoming.finalize"];
 
 vi.mock("@/features/incoming/api", () => ({
   getIncoming: (...args: unknown[]) => getIncoming(...args),
@@ -84,7 +84,7 @@ function renderPage(): void {
 
 describe("IncomingDetailPage", () => {
   beforeEach(() => {
-    permissions = ["incoming.view", "incoming.create"];
+    permissions = ["incoming.view", "incoming.create", "incoming.finalize"];
     getIncoming.mockReset();
     acceptIncoming.mockReset();
     rejectIncoming.mockReset();
@@ -136,6 +136,15 @@ describe("IncomingDetailPage", () => {
     expect(await screen.findByText("Приёмка № ПР-1042")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Добавить позицию" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Отклонить" })).not.toBeInTheDocument();
+  });
+
+  it("lets a preparer edit the draft but not finalize it", async () => {
+    permissions = ["incoming.view", "incoming.create"];
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Добавить позицию" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Отклонить" })).not.toBeInTheDocument();
   });

@@ -35,6 +35,7 @@ export function SupplierPicker({
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const internalValueClearRef = useRef(false);
+  const previousValueRef = useRef(value);
   const listId = useId();
 
   useEffect(() => {
@@ -52,6 +53,18 @@ export function SupplierPicker({
     open || Boolean(value && !text),
   );
   const items = useMemo(() => query.data?.items ?? [], [query.data?.items]);
+  const resultsMatchInput = text.trim() === debounced;
+  const selectableItems = resultsMatchInput ? items : [];
+
+  useEffect(() => {
+    if (previousValueRef.current === value) return;
+    previousValueRef.current = value;
+    if (value) {
+      setText(initialLabel ?? "");
+      setDebounced("");
+      setOpen(false);
+    }
+  }, [initialLabel, value]);
 
   useEffect(() => {
     if (!value || text) return;
@@ -115,16 +128,16 @@ export function SupplierPicker({
             setOpen(false);
             return;
           }
-          if (!listOpen || items.length === 0) return;
+          if (!listOpen || selectableItems.length === 0 || query.isFetching) return;
           if (event.key === "ArrowDown") {
             event.preventDefault();
-            setHighlight((current) => Math.min(current + 1, items.length - 1));
+            setHighlight((current) => Math.min(current + 1, selectableItems.length - 1));
           } else if (event.key === "ArrowUp") {
             event.preventDefault();
             setHighlight((current) => Math.max(current - 1, 0));
           } else if (event.key === "Enter") {
             event.preventDefault();
-            const selected = items[highlight] ?? items[0];
+            const selected = selectableItems[highlight] ?? selectableItems[0];
             if (selected) choose(selected);
           }
         }}
@@ -137,7 +150,9 @@ export function SupplierPicker({
         aria-busy={query.isFetching || undefined}
         aria-controls={listOpen ? listId : undefined}
         aria-activedescendant={
-          listOpen && items[highlight] ? `${listId}-${items[highlight]?.id}` : undefined
+          listOpen && selectableItems[highlight]
+            ? `${listId}-${selectableItems[highlight]?.id}`
+            : undefined
         }
         className={cn(clearable && value && "pr-11")}
       />
@@ -147,7 +162,7 @@ export function SupplierPicker({
           type="button"
           onClick={clear}
           aria-label="Очистить поставщика"
-          className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-md text-foreground-muted hover:bg-foreground/5 hover:text-foreground"
+          className="absolute right-0 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-md text-foreground-muted hover:bg-foreground/5 hover:text-foreground"
         >
           ×
         </button>
@@ -157,20 +172,28 @@ export function SupplierPicker({
         <div
           id={listId}
           role="listbox"
+          aria-label="Результаты поиска поставщиков"
           className="absolute z-dropdown mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-surface-raised shadow-lg"
         >
-          {query.isFetching && !query.data ? (
+          {!resultsMatchInput || (query.isFetching && !query.data) ? (
             <p className="px-3 py-3 text-sm text-foreground-muted" role="status">
               Поиск…
             </p>
           ) : query.error ? (
-            <p className="px-3 py-3 text-sm text-danger-foreground" role="alert">
-              Не удалось загрузить поставщиков
-            </p>
-          ) : items.length === 0 ? (
+            <div className="px-3 py-3 text-sm text-danger-foreground" role="alert">
+              <p>Не удалось загрузить поставщиков</p>
+              <button
+                type="button"
+                className="mt-2 min-h-11 rounded-md border border-border px-3 font-medium"
+                onClick={() => void query.refetch()}
+              >
+                Повторить
+              </button>
+            </div>
+          ) : selectableItems.length === 0 ? (
             <p className="px-3 py-3 text-sm italic text-foreground-muted">Поставщики не найдены</p>
           ) : (
-            items.map((supplier, index) => (
+            selectableItems.map((supplier, index) => (
               <button
                 key={supplier.id}
                 id={`${listId}-${supplier.id}`}

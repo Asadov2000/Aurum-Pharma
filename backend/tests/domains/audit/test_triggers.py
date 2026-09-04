@@ -15,7 +15,10 @@ from app.domains.audit.service import AuditService
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
+from app.domains.incoming.repository import IncomingRepository
+from app.domains.incoming.service import IncomingService
 from app.domains.inventory.repository import InventoryRepository
+from app.domains.suppliers.repository import SuppliersRepository
 
 
 async def test_insert_creates_audit_record(db_session: AsyncSession) -> None:
@@ -193,6 +196,43 @@ async def test_trigger_redacts_sensitive_fields_at_rest(db_session: AsyncSession
     assert updated.changed_fields["sale_price"] != "***"
 
 
+async def test_database_redacts_contextual_purchase_totals(db_session: AsyncSession) -> None:
+    foundation = FoundationService(FoundationRepository(db_session))
+    tenant = await foundation.create_tenant(
+        payload={
+            "name": "Contextual audit",
+            "contact_email": f"contextual-{uuid4().hex[:6]}@aurum.tj",
+        }
+    )
+    branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
+    supplier = await SuppliersRepository(db_session).create_supplier(
+        tenant_id=tenant.id,
+        name="Audit supplier",
+    )
+    document = await IncomingService(IncomingRepository(db_session)).create_document(
+        tenant_id=tenant.id,
+        fields={
+            "branch_id": branch.id,
+            "supplier_id": supplier.id,
+            "document_date": date.today(),
+            "document_number": "IN-1",
+        },
+    )
+    entry = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.table_name == "incoming_document",
+                AuditLog.record_id == document.id,
+                AuditLog.action == "INSERT",
+            )
+        )
+    ).scalar_one()
+
+    assert entry.new_values is not None
+    assert entry.new_values["total_amount"] == "***"
+    assert entry.new_values["document_number"] == "IN-1"
+
+
 async def test_scrub_hides_sensitive_fields() -> None:
     """The service-level scrub() must replace sensitive fields with '***'
     without losing the rest of the payload."""
@@ -244,6 +284,37 @@ async def test_scrub_hides_sensitive_fields() -> None:
     assert scrubbed["old_values"]["profile"]["phone"] == "***"
     assert scrubbed["old_values"]["profile"]["contact_email"] == "***"
     assert scrubbed["changed_fields"]["password_hash"] == "***"
+
+
+async def test_scrub_hides_contextual_purchase_totals() -> None:
+    incoming = AuditLog(
+        id=uuid4(),
+        tenant_id=None,
+        user_id=None,
+        action="INSERT",
+        table_name="incoming_document",
+        record_id=uuid4(),
+        new_values={"total_amount": "120.00", "document_number": "IN-1"},
+    )
+    incoming.created_at = __import__("datetime").datetime.utcnow()
+    supplier_return = AuditLog(
+        id=uuid4(),
+        tenant_id=None,
+        user_id=None,
+        action="INSERT",
+        table_name="supplier_return",
+        record_id=uuid4(),
+        new_values={"amount": "12.00", "qty": "3.000"},
+    )
+    supplier_return.created_at = __import__("datetime").datetime.utcnow()
+
+    incoming_payload = AuditService.scrub(incoming)
+    return_payload = AuditService.scrub(supplier_return)
+
+    assert incoming_payload["new_values"]["total_amount"] == "***"
+    assert incoming_payload["new_values"]["document_number"] == "IN-1"
+    assert return_payload["new_values"]["amount"] == "***"
+    assert return_payload["new_values"]["qty"] == "3.000"
 
 
 async def test_service_search_filters_by_tenant(db_session: AsyncSession) -> None:

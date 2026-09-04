@@ -51,7 +51,13 @@ vi.mock("@/features/auth/hooks", () => ({
     user: {
       home_tenant_id: "t-1",
       is_developer: false,
-      permissions: ["incoming.view", "incoming.create", "branches.view", "suppliers.view"],
+      permissions: [
+        "incoming.view",
+        "incoming.create",
+        "incoming.finalize",
+        "branches.view",
+        "suppliers.view",
+      ],
     },
   }),
 }));
@@ -231,6 +237,7 @@ describe("IncomingPage", () => {
     await waitFor(() =>
       expect(listIncoming).toHaveBeenLastCalledWith(
         expect.objectContaining({ page: 2, page_size: 25 }),
+        expect.any(AbortSignal),
       ),
     );
 
@@ -244,6 +251,7 @@ describe("IncomingPage", () => {
           page: 1,
           page_size: 25,
         }),
+        expect.any(AbortSignal),
       ),
     );
   });
@@ -274,7 +282,9 @@ describe("IncomingPage", () => {
     expect(
       await screen.findByRole("region", { name: "Карточка прихода: INV-002" }),
     ).toBeInTheDocument();
-    await waitFor(() => expect(getIncoming).toHaveBeenLastCalledWith(second.id));
+    await waitFor(() =>
+      expect(getIncoming).toHaveBeenLastCalledWith(second.id, expect.any(AbortSignal)),
+    );
   });
 
   it("warns before closing a new receiving document with unsaved data", async () => {
@@ -285,7 +295,7 @@ describe("IncomingPage", () => {
       page_size: 25,
       summary: { ...SUMMARY, all_count: 0, draft_count: 0 },
     });
-    listBranches.mockResolvedValueOnce([BRANCH]);
+    listBranches.mockResolvedValue([BRANCH]);
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Новая приёмка" }));
