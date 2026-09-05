@@ -127,6 +127,7 @@ test.describe("POS sale (owner)", () => {
 
     await page.reload();
     await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await expect(page.locator('[data-barcode-sink="true"]')).toBeAttached();
     const restoredQuickProducts = page.getByRole("region", { name: "Быстрый выбор" });
     await expect(restoredQuickProducts.getByText(item.brand_name)).toBeVisible();
     await restoredQuickProducts
@@ -178,8 +179,16 @@ test.describe("POS sale (owner)", () => {
       await route.continue();
     });
     await page.locator('[data-barcode-sink="true"]').focus();
-    await page.keyboard.type(barcode, { delay: 5 });
-    await page.keyboard.press("Enter");
+    await page.evaluate((code) => {
+      for (const key of code) {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+        );
+      }
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+      );
+    }, barcode);
 
     await physicalBarcodeLookup;
     await expect(
