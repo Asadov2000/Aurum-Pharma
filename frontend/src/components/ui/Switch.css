@@ -1,0 +1,29 @@
+.aurum-switch-track {
+  transition: background-color 200ms ease-out;
+}
+
+.aurum-switch-track > span {
+  transition: transform 200ms ease-out;
+}
+
+.aurum-switch-track svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transform: scale(0.75);
+  transition:
+    opacity 200ms ease-out,
+    transform 200ms ease-out;
+}
+
+.peer:checked + .aurum-switch-track > span {
+  transform: translateX(1rem);
+}
+
+.peer:checked + .aurum-switch-track svg {
+  opacity: 1;
+  transform: scale(1);
+}
