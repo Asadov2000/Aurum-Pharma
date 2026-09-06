@@ -9,7 +9,7 @@ test.describe("Configurable filters", () => {
     clearLoginRateLimit(OWNER.email);
   });
 
-  test("persists the layout but never persists filter values", async ({ page }) => {
+  test("keeps conditions across drawer close without persisting values", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.goto("/catalog");
 
@@ -17,21 +17,34 @@ test.describe("Configurable filters", () => {
     const dispensingSelect = dispensingFilter.getByLabel("Условия отпуска", {
       exact: true,
     });
+    await expect(dispensingSelect).toHaveCount(0);
+    await page.getByRole("button", { name: /^Фильтры/ }).click();
+    const panel = page.getByRole("dialog", { name: "Фильтры", exact: true });
     await expect(dispensingSelect).toBeVisible();
 
+    const filteredResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname.endsWith("/catalog") &&
+        url.searchParams.get("dispensing_type") === "prescription"
+      );
+    });
     await dispensingSelect.selectOption("prescription");
-    await expect(page.getByRole("button", { name: "Сбросить (1)" })).toBeEnabled();
-
-    await page.getByRole("button", { name: "Убрать фильтр «Условия отпуска»" }).click();
-    await expect(dispensingFilter).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^Сбросить/ })).toBeDisabled();
-
+    expect((await filteredResponse).status()).toBe(200);
+    await panel.getByRole("button", { name: "Готово", exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Сбросить фильтр «Условия отпуска»" }),
+    ).toBeVisible();
     await page.getByRole("button", { name: /^Фильтры/ }).click();
-    const settings = page.getByRole("dialog", { name: "Настройка фильтров" });
-    await settings.getByRole("checkbox", { name: /^Условия отпуска/ }).check();
+    await expect(dispensingSelect).toHaveValue("prescription");
     await page.keyboard.press("Escape");
-
+    await expect(page.getByRole("button", { name: /^Фильтры/ })).toBeFocused();
+    await page.getByRole("button", { name: "Сбросить фильтр «Условия отпуска»" }).click();
+    await page.getByRole("button", { name: /^Фильтры/ }).click();
     await expect(dispensingSelect).toHaveValue("");
+    await dispensingSelect.selectOption("prescription");
+    await panel.getByRole("button", { name: "Готово", exact: true }).click();
 
     const storedPreferences = await page.evaluate((prefix) => {
       return Object.entries(window.localStorage)
@@ -39,22 +52,23 @@ test.describe("Configurable filters", () => {
         .map(([key, value]) => ({ key, value }));
     }, FILTER_LAYOUT_PREFIX);
 
-    expect(storedPreferences).toHaveLength(1);
-    expect(JSON.parse(storedPreferences[0]!.value)).toEqual(["search", "lifecycle", "dispensing"]);
-    expect(storedPreferences[0]!.value).not.toContain("prescription");
+    expect(storedPreferences).toHaveLength(0);
 
     await page.reload();
+    await page.getByRole("button", { name: /^Фильтры/ }).click();
     await expect(dispensingSelect).toBeVisible();
     await expect(dispensingSelect).toHaveValue("");
   });
 
-  test("keeps the settings panel inside a narrow mobile viewport", async ({ page }) => {
+  test("keeps the mobile panel scrollable and restores page scrolling on close", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await loginInBrowser(page, OWNER);
     await page.goto("/catalog");
 
     await page.getByRole("button", { name: /^Фильтры/ }).click();
-    const settings = page.getByRole("dialog", { name: "Настройка фильтров" });
+    const settings = page.getByRole("dialog", { name: "Фильтры", exact: true });
     await expect(settings).toBeVisible();
 
     const bounds = await settings.boundingBox();
@@ -63,6 +77,14 @@ test.describe("Configurable filters", () => {
     expect(bounds!.y).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
+    await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+    const lastField = settings.locator("input, select").last();
+    await lastField.scrollIntoViewIfNeeded();
+    await expect(lastField).toBeInViewport();
+    await settings.getByRole("button", { name: "Готово", exact: true }).click();
+    await expect(settings).toHaveCount(0);
+    await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+    await expect(page.getByRole("button", { name: /^Фильтры/ })).toBeFocused();
   });
 
   test("sends employee search privately and never persists its value", async ({ page }) => {

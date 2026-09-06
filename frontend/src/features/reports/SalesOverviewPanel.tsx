@@ -76,9 +76,14 @@ export function SalesOverviewPanel({
   const watched = form.watch();
   const [preset, setPreset] = useState<PeriodPreset>("month");
   const [params, setParams] = useState<SalesSummaryParams>(() => toParams(initialValues));
+  const hasPendingChanges =
+    watched.from !== params.from ||
+    watched.to !== params.to ||
+    (watched.branch_id || undefined) !== params.branch_id;
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const branches = useBranchesQuery(false);
+  const branchFilterName = branches.data?.find((branch) => branch.id === watched.branch_id)?.name;
   const query = useSalesSummaryQuery(params);
 
   const setValidatedParams = (values: FilterValues): boolean => {
@@ -162,6 +167,11 @@ export function SalesOverviewPanel({
       <form onSubmit={(event) => void applyFilters(event)}>
         <ConfigurableFilterBar
           preferenceKey={filterPreferenceKey}
+          pendingChangesMessage={
+            hasPendingChanges
+              ? "Условия изменены. Нажмите «Обновить сводку», чтобы обновить отчёт."
+              : undefined
+          }
           filters={[
             {
               id: "period",
@@ -200,6 +210,7 @@ export function SalesOverviewPanel({
                 </div>
               ),
               active: watched.from !== initialValues.from || watched.to !== initialValues.to,
+              activeLabel: `Период: ${watched.from ? formatShortDate(watched.from) : "…"} — ${watched.to ? formatShortDate(watched.to) : "…"}`,
               onClear: () => applyPreset("month"),
               alwaysVisible: true,
             },
@@ -224,6 +235,7 @@ export function SalesOverviewPanel({
                 </div>
               ),
               active: Boolean(watched.branch_id),
+              activeLabel: branchFilterName ? `Аптечная точка: ${branchFilterName}` : undefined,
               onClear: () => {
                 form.setValue("branch_id", "");
                 setParams((current) => ({ ...current, branch_id: undefined }));

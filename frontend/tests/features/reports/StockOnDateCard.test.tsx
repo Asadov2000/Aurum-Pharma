@@ -78,11 +78,53 @@ describe("StockOnDateCard", () => {
 
   it("keeps the all-branches option when no branches are available", () => {
     renderCard();
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     expect(screen.getByLabelText("Аптечная точка")).toHaveValue("");
+  });
+
+  it("keeps an invalid date visible after closing the panel and prevents report submission", async () => {
+    renderCard();
+    await screen.findByText("Остатков по этим условиям нет");
+    fireEvent.change(screen.getByLabelText("Дата остатка"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+
+    expect(await screen.findByText("Укажите дату")).toBeVisible();
+    expect(screen.getByLabelText("Дата остатка")).toBeVisible();
+    expect(getStockOnDate).toHaveBeenCalledTimes(1);
   });
 
   it("does not expose XLSX export without the export permission", () => {
     renderCard();
     expect(screen.queryByRole("button", { name: /Скачать в Excel/i })).not.toBeInTheDocument();
+  });
+
+  it("retains panel values until explicit report submission and resets an applied expiry", async () => {
+    renderCard();
+    await screen.findByText("Остатков по этим условиям нет");
+    expect(getStockOnDate).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByLabelText("Дата остатка"), { target: { value: "2026-05-31" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.change(screen.getByLabelText("Срок закончится"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    expect(getStockOnDate).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Условия изменены/)).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await waitFor(() =>
+      expect(getStockOnDate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ date: "2026-05-31", expires_within_days: 30, page: 1 }),
+      ),
+    );
+    expect(screen.queryByText(/Условия изменены/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтр «Срок закончится»" }));
+    await waitFor(() =>
+      expect(getStockOnDate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ date: "2026-05-31", expires_within_days: undefined, page: 1 }),
+      ),
+    );
   });
 });

@@ -81,6 +81,7 @@ export function IncomingPage(): JSX.Element {
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
   const isSplitLayout = useMediaQuery("(min-width: 1280px)");
   const branches = useBranchesQuery(true, canDiscoverBranches);
+  const branchFilterName = branches.data?.find((branch) => branch.id === branchFilter)?.name;
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -246,6 +247,7 @@ export function IncomingPage(): JSX.Element {
               </div>
             ),
             active: Boolean(branchFilter),
+            activeLabel: branchFilterName ? `Аптечная точка: ${branchFilterName}` : undefined,
             onClear: () => {
               setBranchFilter("");
               setPage(1);
@@ -305,6 +307,9 @@ export function IncomingPage(): JSX.Element {
               </div>
             ),
             active: Boolean(statusFilter),
+            activeLabel: statusFilter
+              ? `Статус: ${statusLabel[statusFilter as IncomingStatus]}`
+              : undefined,
             onClear: () => {
               setStatusFilter("");
               setPage(1);
@@ -347,6 +352,7 @@ export function IncomingPage(): JSX.Element {
               </div>
             ),
             active: Boolean(dateFrom || dateTo),
+            activeLabel: `Период: ${dateFrom || "…"} — ${dateTo || "…"}`,
             onClear: () => {
               setDateFrom("");
               setDateTo("");

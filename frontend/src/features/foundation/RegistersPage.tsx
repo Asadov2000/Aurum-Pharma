@@ -72,6 +72,7 @@ export function RegistersPage(): JSX.Element {
   // registers.view is itself a branch-discovery capability on the backend.
   // Loading names here avoids exposing internal branch IDs to restricted roles.
   const branches = useBranchesQuery(true);
+  const branchFilterName = branches.data?.find((branch) => branch.id === branchFilter)?.name;
   const { data, isPending, isFetching, fetchStatus, error, refetch } = useRegisterSearchQuery({
     q,
     branch_id: branchFilter || undefined,
@@ -197,6 +198,7 @@ export function RegistersPage(): JSX.Element {
               </div>
             ),
             active: Boolean(branchFilter),
+            activeLabel: branchFilterName ? `Торговая точка: ${branchFilterName}` : undefined,
             onClear: () => {
               setBranchFilter("");
               setPage(1);
@@ -228,6 +230,7 @@ export function RegistersPage(): JSX.Element {
               </div>
             ),
             active: Boolean(printerType),
+            activeLabel: printerType ? `Формат чека: ${printerLabel[printerType]}` : undefined,
             onClear: () => {
               setPrinterType("");
               setPage(1);
@@ -255,6 +258,7 @@ export function RegistersPage(): JSX.Element {
               </div>
             ),
             active: status !== "active",
+            activeLabel: `Статус: ${status === "inactive" ? "Неактивные" : "Все"}`,
             onClear: () => {
               setStatus("active");
               setPage(1);

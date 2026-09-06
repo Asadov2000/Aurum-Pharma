@@ -166,6 +166,7 @@ describe("management list filters", () => {
     fireEvent.change(screen.getByLabelText("Поиск"), {
       target: { value: "  Рудаки  " },
     });
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Тип торговой точки"), {
       target: { value: "pharmacy" },
     });
@@ -184,7 +185,7 @@ describe("management list filters", () => {
     );
   });
 
-  it("filters registers by an allowed branch and keeps printer optional", async () => {
+  it("filters registers by an allowed branch and printer in the filter panel", async () => {
     renderPage(<RegistersPage />);
     expect(await screen.findByText("Касса 01")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Рабочие кассы" })).toHaveAttribute(
@@ -200,12 +201,10 @@ describe("management list filters", () => {
     expect(screen.getByText("QR-SINO-01")).toBeInTheDocument();
     expect(screen.queryByLabelText("Формат чека")).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Торговая точка"), {
       target: { value: BRANCH.id },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Формат чека" }));
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Формат чека"), {
       target: { value: "thermal_80" },
     });
@@ -234,6 +233,7 @@ describe("management list filters", () => {
     renderPage(<RegistersPage />);
     await screen.findByText("Касса 01");
 
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     const branchFilter = screen.getByLabelText("Торговая точка");
     expect(branchFilter).toBeInTheDocument();
     expect(within(branchFilter).getByRole("option", { name: "Аптека Рудаки" })).toBeInTheDocument();

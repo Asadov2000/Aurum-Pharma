@@ -74,7 +74,12 @@ test.describe("Trading points and registers", () => {
     await confirmDialog.getByRole("button", { name: "Отключить точку" }).click();
     await expect(page.getByRole("row", { name: new RegExp(branchName) })).toHaveCount(0);
 
+    await page.getByRole("button", { name: /^Фильтры/ }).click();
     await page.getByLabel("Статус", { exact: true }).selectOption("inactive");
+    await page
+      .getByRole("dialog", { name: "Фильтры", exact: true })
+      .getByRole("button", { name: "Готово" })
+      .click();
     const inactiveBranchRow = page.getByRole("row", { name: new RegExp(branchName) });
     await expect(inactiveBranchRow).toContainText("Неактивна");
     await inactiveBranchRow.getByRole("button", { name: "Восстановить" }).click();

@@ -525,6 +525,7 @@ export function CatalogPage(): JSX.Element {
               </div>
             ),
             active: lifecycle !== "current",
+            activeLabel: `Статус: ${{ current: "Все товары, кроме архива", active: "Доступны для продажи", inactive: "Не показываются в кассе", archived: "Архив", all: "Все товары, включая архив" }[lifecycle]}`,
             onClear: () => {
               setLifecycle("current");
               setPage(1);
@@ -556,6 +557,7 @@ export function CatalogPage(): JSX.Element {
               </div>
             ),
             active: Boolean(dispensing),
+            activeLabel: dispensing ? `Условия отпуска: ${dispensingLabel[dispensing]}` : undefined,
             onClear: () => {
               setDispensing("");
               setPage(1);
@@ -584,6 +586,7 @@ export function CatalogPage(): JSX.Element {
               </div>
             ),
             active: imageState !== "any",
+            activeLabel: `Фотография: ${imageState === "with_image" ? "С фото" : "Без фото"}`,
             onClear: () => {
               setImageState("any");
               setPage(1);
@@ -611,6 +614,7 @@ export function CatalogPage(): JSX.Element {
               </div>
             ),
             active: barcodeState !== "any",
+            activeLabel: `Штрихкод: ${barcodeState === "with_barcode" ? "Есть" : "Не указан"}`,
             onClear: () => {
               setBarcodeState("any");
               setPage(1);
@@ -633,6 +637,7 @@ export function CatalogPage(): JSX.Element {
               </div>
             ),
             active: Boolean(manufacturerInput.trim()),
+            activeLabel: `Производитель: ${manufacturerInput.trim()}`,
             onClear: () => {
               setManufacturerInput("");
               setManufacturer("");
@@ -656,6 +661,7 @@ export function CatalogPage(): JSX.Element {
               </div>
             ),
             active: Boolean(categoryInput.trim()),
+            activeLabel: `Категория: ${categoryInput.trim()}`,
             onClear: () => {
               setCategoryInput("");
               setCategory("");
@@ -687,6 +693,7 @@ export function CatalogPage(): JSX.Element {
               </div>
             ),
             active: Boolean(storage),
+            activeLabel: storage ? `Хранение: ${storageLabel[storage]}` : undefined,
             onClear: () => {
               setStorage("");
               setPage(1);

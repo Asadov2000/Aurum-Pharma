@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listCustomerReturns = vi.fn();
@@ -118,5 +118,31 @@ describe("CustomerReturnsPanel", () => {
 
     expect((await screen.findAllByText("Парацетамол")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Принять решение" })).not.toBeInTheDocument();
+  });
+
+  it("preserves the return queue default and hides unavailable branch filters", async () => {
+    renderPanel();
+    await screen.findAllByText("Парацетамол");
+    expect(screen.getByLabelText("Поиск")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Статус")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    const panel = within(screen.getByRole("dialog", { name: "Фильтры" }));
+    expect(panel.getByLabelText("Статус")).toHaveValue("pending");
+    expect(panel.queryByLabelText("Точка")).not.toBeInTheDocument();
+    fireEvent.change(panel.getByLabelText("Статус"), { target: { value: "resolved" } });
+    fireEvent.click(panel.getByRole("button", { name: "Готово" }));
+
+    await waitFor(() =>
+      expect(listCustomerReturns).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "resolved", page: 1 }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтр «Статус»" }));
+    await waitFor(() =>
+      expect(listCustomerReturns).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "pending", page: 1 }),
+      ),
+    );
   });
 });

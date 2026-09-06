@@ -167,6 +167,7 @@ describe("AuditPage", () => {
     });
     renderPage();
     await screen.findByText(/События пока не записаны/i);
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText(/^Действие$/), {
       target: { value: "DELETE" },
     });
@@ -185,6 +186,7 @@ describe("AuditPage", () => {
     renderPage();
     await screen.findByText(/События пока не записаны/i);
 
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText(/^От$/), {
       target: { value: "2026-07-19" },
     });

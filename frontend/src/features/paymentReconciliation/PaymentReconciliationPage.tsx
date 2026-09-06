@@ -104,6 +104,7 @@ function PaymentQueue(): JSX.Element {
   );
   const query = usePaymentReconciliationQuery(params);
   const data = query.data;
+  const branchFilterName = data?.branches.find((branch) => branch.id === branchId)?.name;
 
   const resetFilters = () => {
     setBranchId("");
@@ -162,6 +163,7 @@ function PaymentQueue(): JSX.Element {
               </div>
             ),
             active: Boolean(branchId),
+            activeLabel: branchFilterName ? `Точка: ${branchFilterName}` : undefined,
             onClear: () => {
               setBranchId("");
               setPage(1);
@@ -190,6 +192,7 @@ function PaymentQueue(): JSX.Element {
               </div>
             ),
             active: Boolean(paymentMethod),
+            activeLabel: `Способ оплаты: ${paymentMethod === "card" ? "Карта" : "QR-код"}`,
             onClear: () => {
               setPaymentMethod("");
               setPage(1);
@@ -288,6 +291,7 @@ function RefundQueue(): JSX.Element {
   );
   const query = useRefundReconciliationQuery(params);
   const data = query.data;
+  const branchFilterName = data?.branches.find((branch) => branch.id === branchId)?.name;
 
   return (
     <section className="space-y-4" aria-label="Сверка возвратов">
@@ -340,6 +344,7 @@ function RefundQueue(): JSX.Element {
               </div>
             ),
             active: Boolean(branchId),
+            activeLabel: branchFilterName ? `Точка: ${branchFilterName}` : undefined,
             onClear: () => {
               setBranchId("");
               setPage(1);

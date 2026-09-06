@@ -63,7 +63,9 @@ export function SalesPage(): JSX.Element {
   const [openRow, setOpenRow] = useState<SaleListItem | null>(null);
 
   const branches = useBranchesQuery(true, canFilterByLocation);
+  const branchFilterName = branches.data?.find((branch) => branch.id === branchId)?.name;
   const registers = useRegistersQuery(branchId || null, false, canFilterByLocation);
+  const registerFilterName = registers.data?.find((register) => register.id === registerId)?.name;
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -211,6 +213,7 @@ export function SalesPage(): JSX.Element {
               </div>
             ),
             active: Boolean(dateFrom || dateTo),
+            activeLabel: `Период: ${dateFrom || "…"} — ${dateTo || "…"}`,
             onClear: () => {
               setDateFrom("");
               setDateTo("");
@@ -244,6 +247,7 @@ export function SalesPage(): JSX.Element {
               </div>
             ),
             active: Boolean(branchId),
+            activeLabel: branchFilterName ? `Точка: ${branchFilterName}` : undefined,
             onClear: () => {
               setBranchId("");
               setRegisterId("");
@@ -277,6 +281,7 @@ export function SalesPage(): JSX.Element {
               </div>
             ),
             active: Boolean(registerId),
+            activeLabel: registerFilterName ? `Касса: ${registerFilterName}` : undefined,
             onClear: () => {
               setRegisterId("");
               resetPage();
@@ -307,6 +312,7 @@ export function SalesPage(): JSX.Element {
               </div>
             ),
             active: Boolean(hasRefund),
+            activeLabel: `Возвраты: ${hasRefund === "true" ? "С возвратом" : "Без оформленных возвратов"}`,
             onClear: () => {
               setHasRefund("");
               resetPage();

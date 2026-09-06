@@ -87,6 +87,7 @@ export function Inbox(): JSX.Element {
               </div>
             ),
             active: Boolean(severity),
+            activeLabel: severity ? `Уровень: ${severityLabel[severity]}` : undefined,
             onClear: () => setSeverity(""),
             defaultVisible: true,
           },

@@ -213,6 +213,9 @@ export function BranchesPage(): JSX.Element {
               </div>
             ),
             active: Boolean(branchType),
+            activeLabel: branchType
+              ? `Тип торговой точки: ${branchTypeLabel[branchType]}`
+              : undefined,
             onClear: () => {
               setBranchType("");
               setPage(1);
@@ -241,6 +244,7 @@ export function BranchesPage(): JSX.Element {
               </div>
             ),
             active: status !== "active",
+            activeLabel: `Статус: ${status === "inactive" ? "Неактивные" : "Все"}`,
             onClear: () => {
               setStatus("active");
               setPage(1);

@@ -128,8 +128,13 @@ test("platform sync center securely manages credentials on desktop and stays usa
       url.pathname.endsWith("/admin/sync/overview") && url.searchParams.get("health") === "delayed"
     );
   });
+  await page.getByRole("button", { name: /^Фильтры/ }).click();
   await page.getByRole("combobox", { name: "Состояние", exact: true }).selectOption("delayed");
   await filteredRequest;
+  await page
+    .getByRole("dialog", { name: "Фильтры", exact: true })
+    .getByRole("button", { name: "Готово" })
+    .click();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: /Edge Рудаки 01/ })).toBeVisible();

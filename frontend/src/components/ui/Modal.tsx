@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
 import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
@@ -24,6 +25,9 @@ export function Modal({
   children,
   className,
   bodyClassName,
+  placement = "center",
+  footer,
+  id,
 }: {
   open: boolean;
   onClose: () => void;
@@ -31,6 +35,9 @@ export function Modal({
   children: ReactNode;
   className?: string;
   bodyClassName?: string;
+  placement?: "center" | "side";
+  footer?: ReactNode;
+  id?: string;
 }): JSX.Element | null {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
@@ -112,9 +119,12 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  const content = (
     <div
-      className="bg-overlay fixed inset-0 z-modal flex items-end justify-center sm:items-center sm:p-4"
+      className={cn(
+        "bg-overlay fixed inset-0 z-modal flex items-end justify-center",
+        placement === "side" ? "sm:items-stretch sm:justify-end" : "sm:items-center sm:p-4",
+      )}
       onClick={onClose}
       role="presentation"
     >
@@ -122,11 +132,15 @@ export function Modal({
         className={cn(
           // max-h + flex-column keeps long modal bodies scrollable while the
           // header remains pinned to the top.
-          "flex max-h-[calc(100dvh-1rem)] w-full max-w-lg flex-col rounded-t-lg border border-border bg-surface-raised shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-lg",
+          "flex w-full flex-col border border-border bg-surface-raised shadow-xl",
+          placement === "side"
+            ? "max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] max-w-lg rounded-t-xl sm:h-full sm:max-h-full sm:max-w-md sm:rounded-none"
+            : "max-h-[calc(100dvh-1rem)] max-w-lg rounded-t-lg sm:max-h-[calc(100dvh-2rem)] sm:rounded-lg",
           className,
         )}
         onClick={(e) => e.stopPropagation()}
         ref={dialogRef}
+        id={id}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -141,15 +155,31 @@ export function Modal({
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="grid h-[var(--control-height-sm)] w-[var(--control-height-sm)] shrink-0 place-items-center rounded-md text-lg text-foreground-muted transition-colors duration-fast hover:bg-foreground/5 hover:text-foreground"
+            className={cn(
+              "grid h-[var(--control-height-sm)] w-[var(--control-height-sm)] shrink-0 place-items-center rounded-md text-lg text-foreground-muted transition-colors duration-fast hover:bg-foreground/5 hover:text-foreground motion-reduce:transition-none",
+              placement === "side" && "min-h-11 min-w-11",
+            )}
           >
             ✕
           </button>
         </div>
-        <div className={cn("min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5", bodyClassName)}>
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5",
+            placement === "side" && "overscroll-contain",
+            bodyClassName,
+          )}
+        >
           {children}
         </div>
+        {footer && (
+          <div className="shrink-0 border-t border-border px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-5">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );
+
+  return placement === "side" ? createPortal(content, document.body) : content;
 }
