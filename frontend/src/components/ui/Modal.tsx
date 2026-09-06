@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
+import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
 
 const focusableSelector = [
   "a[href]",
@@ -89,8 +90,7 @@ export function Modal({
       }
     };
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const releaseScrollLock = acquireBodyScrollLock();
     window.addEventListener("keydown", onKey);
     const dialog = dialogRef.current;
     const firstFocusable = dialog ? getFocusableElements(dialog)[0] : undefined;
@@ -102,7 +102,7 @@ export function Modal({
     }
 
     return () => {
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       window.removeEventListener("keydown", onKey);
       if (previousActiveElement.current && document.contains(previousActiveElement.current)) {
         previousActiveElement.current.focus();

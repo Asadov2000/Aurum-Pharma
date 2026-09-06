@@ -290,6 +290,72 @@ test.describe("Interface layout", () => {
     ).toBe(true);
   });
 
+  test("restores page scrolling after discarding a mobile profile edit and closing the menu", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/users");
+    await selectTouchDensity(page);
+
+    const actionButton = page
+      .getByRole("table", { name: "Сотрудники аптеки" })
+      .getByRole("row", { name: /Demo Owner/ })
+      .getByRole("button", { name: "Действия для Demo Owner" });
+    await expect(actionButton).toBeVisible();
+    const initialOverflow = await page.evaluate(() => document.body.style.overflow);
+    expect(initialOverflow).not.toBe("hidden");
+
+    const expectPageScrolls = async () => {
+      expect(
+        await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight),
+      ).toBe(true);
+      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+      await page.mouse.move(300, 500);
+      await page.mouse.wheel(0, 400);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    };
+    await expectPageScrolls();
+
+    await actionButton.click();
+    await page.getByRole("menuitem", { name: "Профиль", exact: true }).click();
+    const profileDialog = page.getByRole("dialog", { name: "Профиль: Demo Owner" });
+    await profileDialog.getByLabel("ФИО", { exact: true }).fill("Unsaved profile edit");
+    await expect(
+      profileDialog.getByRole("button", { name: "Сохранить", exact: true }),
+    ).toBeEnabled();
+    await profileDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    const discardDialog = page.getByRole("dialog", { name: "Отменить изменения?" });
+    await expect(discardDialog).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(2);
+    await discardDialog.getByRole("button", { name: "Выйти без сохранения" }).click();
+
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => document.body.style.overflow))
+      .toBe(initialOverflow);
+    await expectPageScrolls();
+
+    await page.getByRole("button", { name: "Открыть меню", exact: true }).click();
+    const drawer = page.getByRole("dialog", { name: "Меню приложения" });
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+    await drawer.getByRole("button", { name: "Закрыть меню", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => document.body.style.overflow))
+      .toBe(initialOverflow);
+    await expectPageScrolls();
+
+    await actionButton.click();
+    await page.getByRole("menuitem", { name: "Профиль", exact: true }).click();
+    await expect(profileDialog.getByLabel("ФИО", { exact: true })).toHaveValue("Demo Owner");
+    await profileDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
   test("keeps billing controls usable with touch on a narrow screen", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript(() => {

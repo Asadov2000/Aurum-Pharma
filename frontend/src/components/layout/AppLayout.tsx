@@ -17,6 +17,7 @@ import { activeTenantId } from "@/features/auth/tenantContext";
 import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
 import { useUserPreferencesQuery } from "@/features/settings/queries";
 import { cn } from "@/lib/utils";
+import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
 
 import { BrandMark } from "./BrandMark";
 import { ConnectivityIndicator } from "./ConnectivityIndicator";
@@ -51,6 +52,8 @@ const SidebarSettingsModal = lazy(async () => {
   return { default: module.SidebarSettingsModal };
 });
 
+const MobileNavigationPanel = lazy(() => import("./MobileNavigationPanel"));
+
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -59,8 +62,6 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const navigationDrawerRef = useRef<HTMLDivElement>(null);
-  const navigationCloseButtonRef = useRef<HTMLButtonElement>(null);
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
   const tenantId = activeTenantId(user);
   const hasTenant = Boolean(tenantId);
@@ -268,59 +269,15 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
     const previousActiveElement =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const navigationTrigger = navigationTriggerRef.current;
-    const focusableSelector = [
-      "a[href]",
-      "button:not([disabled])",
-      "textarea:not([disabled])",
-      "input:not([disabled])",
-      "select:not([disabled])",
-      '[tabindex]:not([tabindex="-1"])',
-    ].join(",");
-
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setNavigationOpen(false);
-        return;
-      }
-      if (event.key !== "Tab") {
-        return;
-      }
-
-      const drawer = navigationDrawerRef.current;
-      if (!drawer) {
-        return;
-      }
-      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-        (el) => el.offsetParent !== null && el.tabIndex >= 0,
-      );
-      if (focusable.length === 0) {
-        event.preventDefault();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (!first || !last) {
-        return;
-      }
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
       }
     };
-    const previousOverflow = document.body.style.overflow;
-    const focusFrame = window.requestAnimationFrame(() => {
-      navigationCloseButtonRef.current?.focus();
-    });
-    document.body.style.overflow = "hidden";
+    const releaseScrollLock = acquireBodyScrollLock();
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      window.cancelAnimationFrame(focusFrame);
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       document.removeEventListener("keydown", onKeyDown);
       if (previousActiveElement && document.contains(previousActiveElement)) {
         previousActiveElement.focus();
@@ -347,31 +304,25 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             onClick={() => setNavigationOpen(false)}
           />
           <div
-            ref={navigationDrawerRef}
             role="dialog"
             aria-modal="true"
             aria-label="Меню приложения"
             className="relative z-modal h-full w-[min(17rem,calc(100vw-1rem))]"
           >
-            <Sidebar
-              items={sidebarItems}
-              mode="drawer"
-              favoriteRoutes={sidebarPreferences.favoriteRoutes}
-              onNavigate={() => setNavigationOpen(false)}
-              onOpenSettings={openSidebarSettings}
-              closeButton={
-                <Button
-                  ref={navigationCloseButtonRef}
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 w-9 px-0"
-                  aria-label="Закрыть меню"
-                  onClick={() => setNavigationOpen(false)}
-                >
-                  <CloseIcon />
+            <Suspense
+              fallback={
+                <Button autoFocus onClick={() => setNavigationOpen(false)}>
+                  Закрыть меню
                 </Button>
               }
-            />
+            >
+              <MobileNavigationPanel
+                items={sidebarItems}
+                favoriteRoutes={sidebarPreferences.favoriteRoutes}
+                onClose={() => setNavigationOpen(false)}
+                onOpenSettings={openSidebarSettings}
+              />
+            </Suspense>
           </div>
         </div>
       )}
@@ -575,23 +526,6 @@ function MenuIcon(): JSX.Element {
       aria-hidden="true"
     >
       <path d="M4 7h16M4 12h16M4 17h16" />
-    </svg>
-  );
-}
-
-function CloseIcon(): JSX.Element {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M6 6l12 12M18 6 6 18" />
     </svg>
   );
 }
