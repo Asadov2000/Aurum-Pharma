@@ -45,6 +45,7 @@ RUN set -eu; \
 FROM ${CADDY_IMAGE} AS runtime
 
 RUN apk upgrade --no-cache \
+    && apk del --no-cache curl libcurl \
     && addgroup -S -g 10001 aurum \
     && adduser -S -D -H -u 10001 -G aurum aurum \
     && chown -R 10001:10001 /config /data /srv
