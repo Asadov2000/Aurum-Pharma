@@ -293,9 +293,11 @@ describe("ReportsPage", () => {
     await screen.findByText("Малика Саидова");
     expect(listShiftHistory).toHaveBeenCalledTimes(1);
 
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Кассир"), {
       target: { value: "Малика" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     expect(listShiftHistory).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Показать" }));
@@ -365,6 +367,36 @@ describe("ReportsPage", () => {
     expect(screen.getByText(/Возвраты уже вычтены/)).toBeInTheDocument();
     expect(getTopProducts).toHaveBeenCalledWith(
       expect.objectContaining({ sort_by: "revenue", limit: 20 }),
+    );
+  });
+
+  it("submits ranking conditions after the panel closes and resets to revenue ranking", async () => {
+    renderPage();
+    await openReportTab(/^Товары/);
+    await screen.findByText("Продаж за выбранный период нет");
+    expect(getTopProducts).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    const panel = within(screen.getByRole("dialog", { name: "Фильтры" }));
+    fireEvent.change(panel.getByLabelText("Рейтинг по"), { target: { value: "quantity" } });
+    fireEvent.change(panel.getByLabelText("Показать"), { target: { value: "50" } });
+    fireEvent.click(panel.getByRole("button", { name: "Готово" }));
+    expect(getTopProducts).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Условия изменены/)).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await waitFor(() =>
+      expect(getTopProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort_by: "quantity", limit: 50 }),
+      ),
+    );
+    expect(screen.queryByText(/Условия изменены/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтр «Рейтинг по»" }));
+    await waitFor(() =>
+      expect(getTopProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort_by: "revenue", limit: 50 }),
+      ),
     );
   });
 

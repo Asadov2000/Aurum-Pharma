@@ -224,6 +224,7 @@ export function SuppliersPage(): JSX.Element {
               </div>
             ),
             active: status !== "active",
+            activeLabel: `Статус: ${status === "inactive" ? "Не используются в новых документах" : "Все поставщики"}`,
             onClear: () => {
               setStatus("active");
               setPage(1);

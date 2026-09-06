@@ -338,6 +338,10 @@ function InvoiceWorkspace({
               label: "Статус",
               defaultVisible: true,
               active: status !== "all",
+              activeLabel:
+                status !== "all"
+                  ? `Статус: ${{ overdue: "Просроченные", pending: "Ожидают оплаты", paid: "Оплаченные", cancelled: "Отменённые" }[status]}`
+                  : undefined,
               onClear: () => {
                 setStatus("all");
                 setPage(1);

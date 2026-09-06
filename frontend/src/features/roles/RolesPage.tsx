@@ -375,6 +375,7 @@ export function RolesPage(): JSX.Element {
               </div>
             ),
             active: statusFilter !== "all",
+            activeLabel: `Статус: ${statusFilter === "active" ? "Активные" : "Неактивные"}`,
             onClear: () => {
               setStatusFilter("all");
               setRolePage(1);

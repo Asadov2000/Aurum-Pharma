@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import {
   Button,
+  ConfigurableFilterBar,
   Input,
   Label,
   Pagination,
@@ -17,6 +18,7 @@ import {
   TR,
   TableEmpty,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { downloadBlob } from "@/lib/download";
@@ -43,6 +45,7 @@ export function StockOnDatePanel({
   reportTimezone?: string;
   canExport?: boolean;
 }): JSX.Element {
+  const filterPreferenceKey = useFilterPreferenceKey("reports-stock-on-date");
   const defaults = useMemo<FilterValues>(
     () => ({
       date: calendarDateInTimeZone(new Date(), reportTimezone),
@@ -53,11 +56,18 @@ export function StockOnDatePanel({
     [reportTimezone],
   );
   const form = useForm<FilterValues>({ defaultValues: defaults });
+  const watched = form.watch();
   const [params, setParams] = useState<StockOnDateParams>(() => toParams(defaults, 1));
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const branches = useBranchesQuery(false);
   const query = useStockOnDateQuery(params);
+  const watchedParams = toParams(watched, params.page);
+  const pendingChanges =
+    watchedParams.date !== params.date ||
+    watchedParams.branch_id !== params.branch_id ||
+    watchedParams.query !== params.query ||
+    watchedParams.expires_within_days !== params.expires_within_days;
 
   const apply = form.handleSubmit((values) => {
     const parsed = filterSchema.safeParse(values);
@@ -105,45 +115,116 @@ export function StockOnDatePanel({
         )}
       </div>
 
-      <form
-        className="grid gap-3 rounded-lg border border-border bg-surface p-4 sm:grid-cols-2 xl:grid-cols-[1fr_1.4fr_2fr_1.3fr_auto] xl:items-end"
-        onSubmit={(event) => void apply(event)}
-      >
-        <div>
-          <Label htmlFor="stock_date">Дата остатка</Label>
-          <Input id="stock_date" type="date" {...form.register("date")} />
-          {form.formState.errors.date && (
-            <p className="mt-1 text-xs text-danger">{form.formState.errors.date.message}</p>
-          )}
-        </div>
-        <div>
-          <Label htmlFor="stock_branch">Аптечная точка</Label>
-          <Select id="stock_branch" {...form.register("branch_id")}>
-            <option value="">Все доступные точки</option>
-            {branches.data?.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branch.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="stock_query">Товар, МНН или партия</Label>
-          <Input id="stock_query" placeholder="Например, парацетамол" {...form.register("query")} />
-        </div>
-        <div>
-          <Label htmlFor="stock_expiry">Срок закончится</Label>
-          <Select id="stock_expiry" {...form.register("expires_within_days")}>
-            <option value="">Любой срок</option>
-            <option value="0">Уже истёк</option>
-            <option value="30">В течение 30 дней</option>
-            <option value="90">В течение 3 месяцев</option>
-            <option value="180">В течение 6 месяцев</option>
-          </Select>
-        </div>
-        <Button type="submit" disabled={branches.isError} isLoading={query.isFetching}>
-          Показать
-        </Button>
+      <form onSubmit={(event) => void apply(event)}>
+        <ConfigurableFilterBar
+          preferenceKey={filterPreferenceKey}
+          pendingChangesMessage={
+            pendingChanges
+              ? "Условия изменены. Нажмите «Показать», чтобы обновить отчёт."
+              : undefined
+          }
+          filters={[
+            {
+              id: "search",
+              label: "Поиск",
+              activeLabel: watched.query,
+              alwaysVisible: true,
+              active: Boolean(watched.query),
+              onClear: () => {
+                form.setValue("query", "");
+                setParams((current) => ({ ...current, query: undefined, page: 1 }));
+              },
+              content: (
+                <div>
+                  <Label htmlFor="stock_query">Товар, МНН или партия</Label>
+                  <Input
+                    id="stock_query"
+                    placeholder="Например, парацетамол"
+                    {...form.register("query")}
+                  />
+                </div>
+              ),
+            },
+            {
+              id: "date",
+              label: "Дата остатка",
+              alwaysVisible: true,
+              activeLabel: watched.date || "Не указана",
+              active: watched.date !== defaults.date,
+              onClear: () => {
+                form.setValue("date", defaults.date);
+                form.clearErrors();
+                setParams((current) => ({ ...current, date: defaults.date, page: 1 }));
+              },
+              content: (
+                <div>
+                  <Label htmlFor="stock_date">Дата остатка</Label>
+                  <Input id="stock_date" type="date" {...form.register("date")} />
+                  {form.formState.errors.date && (
+                    <p className="mt-1 text-xs text-danger">{form.formState.errors.date.message}</p>
+                  )}
+                </div>
+              ),
+            },
+            {
+              id: "branch",
+              label: "Аптечная точка",
+              activeLabel: branches.data?.find((branch) => branch.id === watched.branch_id)?.name,
+              active: Boolean(watched.branch_id),
+              onClear: () => {
+                form.setValue("branch_id", "");
+                setParams((current) => ({ ...current, branch_id: undefined, page: 1 }));
+              },
+              content: (
+                <div>
+                  <Label htmlFor="stock_branch">Аптечная точка</Label>
+                  <Select id="stock_branch" {...form.register("branch_id")}>
+                    <option value="">Все доступные точки</option>
+                    {branches.data?.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              ),
+            },
+            {
+              id: "expiry",
+              label: "Срок закончится",
+              activeLabel:
+                watched.expires_within_days === "0"
+                  ? "Уже истёк"
+                  : `В течение ${watched.expires_within_days} дней`,
+              active: Boolean(watched.expires_within_days),
+              onClear: () => {
+                form.setValue("expires_within_days", "");
+                setParams((current) => ({ ...current, expires_within_days: undefined, page: 1 }));
+              },
+              content: (
+                <div>
+                  <Label htmlFor="stock_expiry">Срок закончится</Label>
+                  <Select id="stock_expiry" {...form.register("expires_within_days")}>
+                    <option value="">Любой срок</option>
+                    <option value="0">Уже истёк</option>
+                    <option value="30">В течение 30 дней</option>
+                    <option value="90">В течение 3 месяцев</option>
+                    <option value="180">В течение 6 месяцев</option>
+                  </Select>
+                </div>
+              ),
+            },
+          ]}
+          onResetValues={() => {
+            form.reset(defaults);
+            setParams(toParams(defaults, 1));
+          }}
+          actions={
+            <Button type="submit" disabled={branches.isError} isLoading={query.isFetching}>
+              Показать
+            </Button>
+          }
+        />
       </form>
 
       {(downloadError || branches.isError) && (

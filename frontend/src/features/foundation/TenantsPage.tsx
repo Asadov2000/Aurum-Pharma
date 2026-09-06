@@ -5,7 +5,7 @@ import {
   ActionMenu,
   Badge,
   Button,
-  FilterBar,
+  ConfigurableFilterBar,
   Input,
   Label,
   Modal,
@@ -21,6 +21,7 @@ import {
   TR,
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { hasPlatformCapability, PLATFORM_CAPABILITIES } from "@/features/auth/platformCapabilities";
 import { SupportAccessForm } from "@/features/supportAccess/SupportAccessForm";
 
@@ -52,6 +53,7 @@ const statusLabel: Record<TenantStatus, string> = {
 
 export function TenantsPage(): JSX.Element {
   const { user } = useAuth();
+  const filterPreferenceKey = useFilterPreferenceKey("tenants");
   const canViewTenants = hasPlatformCapability(user, PLATFORM_CAPABILITIES.tenantsView);
   const canManageTenants = hasPlatformCapability(user, PLATFORM_CAPABILITIES.tenantsManage);
   const canCreateOwner = hasPlatformCapability(user, PLATFORM_CAPABILITIES.ownershipProvision);
@@ -101,20 +103,40 @@ export function TenantsPage(): JSX.Element {
       />
 
       {data && data.length > 0 && (
-        <FilterBar>
-          <div className="flex-1">
-            <Label htmlFor="tenant-q">Поиск (название или email)</Label>
-            <Input
-              id="tenant-q"
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
+        <ConfigurableFilterBar
+          preferenceKey={filterPreferenceKey}
+          filters={[
+            {
+              id: "search",
+              label: "Поиск",
+              activeLabel: q,
+              alwaysVisible: true,
+              active: Boolean(q),
+              onClear: () => {
+                setQ("");
                 setPage(1);
-              }}
-              placeholder="например: Шифо"
-            />
-          </div>
-        </FilterBar>
+              },
+              content: (
+                <div className="flex-1">
+                  <Label htmlFor="tenant-q">Поиск (название или email)</Label>
+                  <Input
+                    id="tenant-q"
+                    value={q}
+                    onChange={(e) => {
+                      setQ(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="например: Шифо"
+                  />
+                </div>
+              ),
+            },
+          ]}
+          onResetValues={() => {
+            setQ("");
+            setPage(1);
+          }}
+        />
       )}
 
       {error ? (

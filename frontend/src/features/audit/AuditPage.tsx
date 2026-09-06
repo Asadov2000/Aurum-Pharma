@@ -145,6 +145,7 @@ export function AuditPage(): JSX.Element {
               </div>
             ),
             active: scope !== defaultScope,
+            activeLabel: `Область: ${scopeLabel[scope]}`,
             onClear: () => {
               setScope(defaultScope);
               setUserId("");
@@ -178,6 +179,7 @@ export function AuditPage(): JSX.Element {
               </div>
             ),
             active: Boolean(action),
+            activeLabel: actionLabel[action] ? `Действие: ${actionLabel[action]}` : undefined,
             onClear: () => {
               setAction("");
               setPage(1);
@@ -209,6 +211,9 @@ export function AuditPage(): JSX.Element {
               </div>
             ),
             active: Boolean(tableName),
+            activeLabel: tableLabel[tableName]
+              ? `Раздел данных: ${tableLabel[tableName]}`
+              : undefined,
             onClear: () => {
               setTableName("");
               setPage(1);
@@ -298,6 +303,7 @@ export function AuditPage(): JSX.Element {
               </div>
             ),
             active: Boolean(dateFrom || dateTo),
+            activeLabel: `Период: ${dateFrom || "…"} — ${dateTo || "…"}`,
             onClear: () => {
               setDateFrom("");
               setDateTo("");

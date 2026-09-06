@@ -93,8 +93,9 @@ export function PlatformAccountsPage(): JSX.Element {
           {
             id: "status",
             label: "Статус",
-            alwaysVisible: true,
+            defaultVisible: true,
             active: status !== "all",
+            activeLabel: status !== "all" ? `Статус: ${statusLabel[status]}` : undefined,
             onClear: () => setStatus("all"),
             content: (
               <div>
@@ -117,7 +118,7 @@ export function PlatformAccountsPage(): JSX.Element {
           {
             id: "search",
             label: "Сотрудник",
-            defaultVisible: true,
+            alwaysVisible: true,
             active: Boolean(search),
             onClear: () => setSearch(""),
             content: (

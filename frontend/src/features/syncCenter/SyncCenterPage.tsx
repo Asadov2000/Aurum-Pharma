@@ -88,6 +88,9 @@ export function SyncCenterPage(): JSX.Element {
     [health, mode, page, search, tenantId],
   );
   const overview = useSyncMonitoringOverview(filters, canView);
+  const tenantFilterName = overview.data?.tenants.find(
+    (tenant) => tenant.tenant_id === tenantId,
+  )?.tenant_name;
 
   useEffect(() => {
     const total = overview.data?.total;
@@ -172,6 +175,7 @@ export function SyncCenterPage(): JSX.Element {
             label: "Аптека",
             defaultVisible: true,
             active: tenantId !== "all",
+            activeLabel: tenantFilterName ? `Аптека: ${tenantFilterName}` : undefined,
             onClear: () => {
               setTenantId("all");
               setPage(1);
@@ -203,6 +207,7 @@ export function SyncCenterPage(): JSX.Element {
             label: "Состояние",
             defaultVisible: true,
             active: health !== "all",
+            activeLabel: health !== "all" ? `Состояние: ${healthLabel[health]}` : undefined,
             onClear: () => {
               setHealth("all");
               setPage(1);
@@ -233,6 +238,7 @@ export function SyncCenterPage(): JSX.Element {
             id: "mode",
             label: "Режим",
             active: mode !== "all",
+            activeLabel: mode !== "all" ? `Режим: ${modeLabel[mode]}` : undefined,
             onClear: () => {
               setMode("all");
               setPage(1);

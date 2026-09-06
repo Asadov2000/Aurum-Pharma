@@ -175,7 +175,9 @@ export function UsersPage(): JSX.Element {
     hasTenant && canView,
   );
   const roles = useRolesQuery(hasTenant && canViewRoles);
+  const roleFilterName = roles.data?.find((role) => role.id === roleFilter)?.name;
   const branches = useBranchesQuery(true, hasTenant && canViewBranches);
+  const branchFilterName = branches.data?.find((branch) => branch.id === branchFilter)?.name;
   const suspendMutation = useSuspendUser();
   const offboardMutation = useOffboardUser();
   const revokeSessionsMutation = useRevokeUserSessions();
@@ -441,6 +443,7 @@ export function UsersPage(): JSX.Element {
               </div>
             ),
             active: Boolean(status),
+            activeLabel: status ? `Статус: ${userStatusLabel[status]}` : undefined,
             onClear: () => {
               setStatus("");
               setPage(1);
@@ -475,6 +478,7 @@ export function UsersPage(): JSX.Element {
               </div>
             ),
             active: Boolean(roleFilter),
+            activeLabel: roleFilterName ? `Роль: ${roleFilterName}` : undefined,
             onClear: () => {
               setRoleFilter("");
               setPage(1);
@@ -507,6 +511,7 @@ export function UsersPage(): JSX.Element {
               </div>
             ),
             active: Boolean(branchFilter),
+            activeLabel: branchFilterName ? `Точка: ${branchFilterName}` : undefined,
             onClear: () => {
               setBranchFilter("");
               setPage(1);

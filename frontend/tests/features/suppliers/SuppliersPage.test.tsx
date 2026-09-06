@@ -205,6 +205,7 @@ describe("SuppliersPage", () => {
     fireEvent.change(screen.getByLabelText("Поиск"), {
       target: { value: "  Прима  " },
     });
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Статус"), {
       target: { value: "inactive" },
     });

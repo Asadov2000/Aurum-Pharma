@@ -204,6 +204,7 @@ describe("BillingPage", () => {
     renderPage();
 
     const history = await screen.findByRole("region", { name: "История счетов" });
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "paid" } });
     await waitFor(() => {
       expect(within(history).queryAllByText(INVOICE.invoice_number)).toHaveLength(0);

@@ -103,9 +103,21 @@ export function ShiftHistoryPanel({
   const [filters, setFilters] = useState<FilterValues>(defaults);
   const [page, setPage] = useState(1);
   const watchedFilters = form.watch();
+  const hasPendingChanges =
+    watchedFilters.date_from !== filters.date_from ||
+    watchedFilters.date_to !== filters.date_to ||
+    watchedFilters.branch_id !== filters.branch_id ||
+    watchedFilters.register_id !== filters.register_id ||
+    watchedFilters.cashier_query.trim() !== filters.cashier_query;
   const branchId = form.watch("branch_id");
   const branches = useBranchesQuery(false);
+  const branchFilterName = branches.data?.find(
+    (branch) => branch.id === watchedFilters.branch_id,
+  )?.name;
   const registers = useRegistersQuery(branchId || null, false);
+  const registerFilterName = registers.data?.find(
+    (register) => register.id === watchedFilters.register_id,
+  )?.name;
   const history = useShiftHistoryQuery(toParams(filters, page));
   const lastClosedShiftId = useMemo(readLastClosedShiftId, []);
   const didProcessLastShift = useRef(false);
@@ -166,6 +178,11 @@ export function ShiftHistoryPanel({
       <form onSubmit={(event) => void applyFilters(event)}>
         <ConfigurableFilterBar
           preferenceKey={filterPreferenceKey}
+          pendingChangesMessage={
+            hasPendingChanges
+              ? "Условия изменены. Нажмите «Показать», чтобы обновить отчёт."
+              : undefined
+          }
           filters={[
             {
               id: "period",
@@ -190,6 +207,7 @@ export function ShiftHistoryPanel({
               active:
                 watchedFilters.date_from !== defaults.date_from ||
                 watchedFilters.date_to !== defaults.date_to,
+              activeLabel: `Период: ${watchedFilters.date_from || "…"} — ${watchedFilters.date_to || "…"}`,
               onClear: () => {
                 form.setValue("date_from", defaults.date_from);
                 form.setValue("date_to", defaults.date_to);
@@ -201,7 +219,7 @@ export function ShiftHistoryPanel({
                 setPage(1);
                 onSelect(null);
               },
-              defaultVisible: true,
+              alwaysVisible: true,
             },
             {
               id: "branch",
@@ -226,6 +244,7 @@ export function ShiftHistoryPanel({
                 </div>
               ),
               active: Boolean(watchedFilters.branch_id),
+              activeLabel: branchFilterName ? `Аптечная точка: ${branchFilterName}` : undefined,
               onClear: () => {
                 form.setValue("branch_id", "");
                 form.setValue("register_id", "");
@@ -256,6 +275,7 @@ export function ShiftHistoryPanel({
                 </div>
               ),
               active: Boolean(watchedFilters.register_id),
+              activeLabel: registerFilterName ? `Касса: ${registerFilterName}` : undefined,
               onClear: () => {
                 form.setValue("register_id", "");
                 setFilters((current) => ({ ...current, register_id: "" }));

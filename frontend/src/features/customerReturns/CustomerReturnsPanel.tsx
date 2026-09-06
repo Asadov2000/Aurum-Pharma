@@ -7,7 +7,7 @@ import {
   Badge,
   Button,
   Checkbox,
-  FilterBar,
+  ConfigurableFilterBar,
   FormError,
   Input,
   Label,
@@ -25,6 +25,7 @@ import {
   Textarea,
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { hasPermission } from "@/features/auth/permissions";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { formatInventoryDate, formatInventoryQuantity } from "@/features/inventory/formatters";
@@ -64,6 +65,7 @@ const dateTimeFormatter = new Intl.DateTimeFormat("ru-RU", {
 
 export function CustomerReturnsPanel(): JSX.Element {
   const { user } = useAuth();
+  const filterPreferenceKey = useFilterPreferenceKey("customer-returns");
   const canResolve = hasPermission(user, "customer_returns.resolve");
   const canFilterBranches = hasPermission(user, "branches.view");
   const [status, setStatus] = useState<CustomerReturnStatus | "">("pending");
@@ -105,56 +107,99 @@ export function CustomerReturnsPanel(): JSX.Element {
   return (
     <section aria-label="Возвраты покупателей" className="space-y-4">
       {query.data ? <ReturnSummary data={query.data} /> : null}
-      <FilterBar>
-        <div className="min-w-56 flex-1">
-          <Label htmlFor="customer_return_search">Поиск</Label>
-          <Input
-            id="customer_return_search"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Товар, партия или номер чека"
-            autoComplete="off"
-          />
-        </div>
-        <div>
-          <Label htmlFor="customer_return_status">Статус</Label>
-          <Select
-            id="customer_return_status"
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value as CustomerReturnStatus | "");
+      <ConfigurableFilterBar
+        preferenceKey={filterPreferenceKey}
+        filters={[
+          {
+            id: "search",
+            label: "Поиск",
+            activeLabel: searchInput,
+            alwaysVisible: true,
+            active: Boolean(searchInput),
+            onClear: () => {
+              setSearchInput("");
+              setSearch("");
               setPage(1);
-            }}
-          >
-            <option value="">Все</option>
-            <option value="pending">Ожидают решения</option>
-            <option value="resolved">Завершённые</option>
-          </Select>
-        </div>
-        {canFilterBranches ? (
-          <div>
-            <Label htmlFor="customer_return_branch">Точка</Label>
-            <Select
-              id="customer_return_branch"
-              value={branchId}
-              onChange={(event) => {
-                setBranchId(event.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">Все точки</option>
-              {branches.data?.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-        ) : null}
-        <Button variant="ghost" size="sm" disabled={!filtersActive} onClick={reset}>
-          Сбросить
-        </Button>
-      </FilterBar>
+            },
+            content: (
+              <div className="min-w-56 flex-1">
+                <Label htmlFor="customer_return_search">Поиск</Label>
+                <Input
+                  id="customer_return_search"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="Товар, партия или номер чека"
+                  autoComplete="off"
+                />
+              </div>
+            ),
+          },
+          {
+            id: "status",
+            label: "Статус",
+            activeLabel:
+              status === "resolved"
+                ? "Завершённые"
+                : status === "pending"
+                  ? "Ожидают решения"
+                  : "Все",
+            active: status !== "pending",
+            onClear: () => {
+              setStatus("pending");
+              setPage(1);
+            },
+            content: (
+              <div>
+                <Label htmlFor="customer_return_status">Статус</Label>
+                <Select
+                  id="customer_return_status"
+                  value={status}
+                  onChange={(event) => {
+                    setStatus(event.target.value as CustomerReturnStatus | "");
+                    setPage(1);
+                  }}
+                >
+                  <option value="">Все</option>
+                  <option value="pending">Ожидают решения</option>
+                  <option value="resolved">Завершённые</option>
+                </Select>
+              </div>
+            ),
+          },
+          {
+            id: "branch",
+            label: "Точка",
+            activeLabel: branches.data?.find((branch) => branch.id === branchId)?.name,
+            available: canFilterBranches,
+            active: Boolean(branchId),
+            onClear: () => {
+              setBranchId("");
+              setPage(1);
+            },
+            content: (
+              <div>
+                <Label htmlFor="customer_return_branch">Точка</Label>
+                <Select
+                  id="customer_return_branch"
+                  value={branchId}
+                  onChange={(event) => {
+                    setBranchId(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">Все точки</option>
+                  {branches.data?.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ),
+          },
+        ]}
+        onResetValues={reset}
+      />
 
       {query.isLoading ? (
         <div role="status" aria-label="Загрузка возвратов">

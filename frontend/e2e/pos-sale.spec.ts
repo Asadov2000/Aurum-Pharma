@@ -671,6 +671,7 @@ test.describe("POS sale (owner)", () => {
 
     // ---- Check that batches are drained: total qty_remaining = 10 - 7 = 3 ----
     await page.goto("/batches");
+    await page.getByRole("button", { name: /^Фильтры/ }).click();
     const batchCatalogPicker = page.getByPlaceholder("Найти товар…");
     await expect(batchCatalogPicker).toBeVisible({ timeout: 30_000 });
     await batchCatalogPicker.fill(searchKey);
@@ -680,16 +681,14 @@ test.describe("POS sale (owner)", () => {
     await expect(batchCatalogOption).toBeVisible({ timeout: 30_000 });
     await batchCatalogOption.click();
     // FEFO drained FEFO-A entirely (qty → 0); the page hides empty batches
-    // by default, so add the optional filter and flip the toggle on first.
-    await page.getByRole("button", { name: /^Фильтры/ }).click();
-    await page
-      .getByRole("dialog", { name: "Настройка фильтров" })
-      .getByRole("checkbox", { name: "Пустые партии" })
-      .check();
-    await page.keyboard.press("Escape");
+    // by default, so include empty batches in the same filter panel.
     // Switch UI hides the real <input> behind a styled span — Playwright's
     // visibility check refuses to click it without force.
     await page.getByLabel(/Показывать пустые партии/).check({ force: true });
+    await page
+      .getByRole("dialog", { name: "Фильтры", exact: true })
+      .getByRole("button", { name: "Готово" })
+      .click();
     const tbody = page.locator("table tbody");
     await expect(tbody.locator("text=FEFO-A")).toBeVisible({ timeout: 15_000 });
     await expect(tbody.locator("text=FEFO-B")).toBeVisible();

@@ -79,6 +79,7 @@ export function BatchesPage(): JSX.Element {
   const isSplitLayout = useMediaQuery("(min-width: 1280px)");
 
   const branches = useBranchesQuery(true);
+  const branchFilterName = branches.data?.find((branch) => branch.id === branchId)?.name;
 
   useEffect(() => {
     if (!canViewCustomerReturns && section !== "saleable") setSection("saleable");
@@ -261,6 +262,7 @@ export function BatchesPage(): JSX.Element {
                   </div>
                 ),
                 active: Boolean(branchId),
+                activeLabel: branchFilterName ? `Точка: ${branchFilterName}` : undefined,
                 onClear: () => {
                   setBranchId("");
                   setPage(1);
@@ -292,6 +294,7 @@ export function BatchesPage(): JSX.Element {
                   </div>
                 ),
                 active: Boolean(expiry),
+                activeLabel: expiry ? `Срок годности: ${expiryLabel[expiry]}` : undefined,
                 onClear: () => {
                   setExpiry("");
                   setPage(1);
@@ -320,6 +323,7 @@ export function BatchesPage(): JSX.Element {
                   </div>
                 ),
                 active: Boolean(blockedFilter),
+                activeLabel: `Доступность: ${blockedFilter === "blocked" ? "Заблокированные" : "Доступные к продаже"}`,
                 onClear: () => {
                   setBlockedFilter("");
                   setPage(1);
@@ -341,6 +345,7 @@ export function BatchesPage(): JSX.Element {
                   </div>
                 ),
                 active: showEmpty,
+                activeLabel: "Пустые партии: Показывать",
                 onClear: () => {
                   setShowEmpty(false);
                   setPage(1);

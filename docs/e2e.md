@@ -12,7 +12,7 @@ docker-стека**. Критические сценарии проходят ц
 | `cashier-pos.spec.ts` | филиальная изоляция кассира, смена, продажа и чек | cashier |
 | `catalog-flow.spec.ts` | позиция, штрихкод, поиск и необязательное фото | owner |
 | `catalog-import.spec.ts` | импорт `.xlsx` через мастер | owner |
-| `configurable-filters.spec.ts` | настройка фильтров и приватность значений | owner |
+| `configurable-filters.spec.ts` | панель условий, запрос API, приватность значений и мобильная прокрутка | owner |
 | `incoming-flow.spec.ts` | приход → приёмка → партия | owner |
 | `interface-layout.spec.ts` | desktop/mobile/touch layout ключевых экранов | owner |
 | `location-management.spec.ts` | создание и управление точками и кассами | owner |

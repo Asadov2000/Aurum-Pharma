@@ -268,6 +268,9 @@ export function BillingPage(): JSX.Element {
                     </div>
                   ),
                   active: Boolean(statusFilter),
+                  activeLabel: statusFilter
+                    ? `Статус: ${financialInvoiceStatusLabel[statusFilter]}`
+                    : undefined,
                   onClear: () => {
                     setStatusFilter("");
                     setInvoicePage(1);
@@ -300,6 +303,7 @@ export function BillingPage(): JSX.Element {
                     </div>
                   ),
                   active: Boolean(yearFilter),
+                  activeLabel: `Год: ${yearFilter}`,
                   onClear: () => {
                     setYearFilter("");
                     setInvoicePage(1);
