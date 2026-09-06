@@ -250,6 +250,19 @@ class AuthService:
     # 2. Verify an email code → issue tokens
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _uses_local_demo_owner_login(user: AuthUserRecord) -> bool:
+        """Allow the explicit local showcase login without claiming MFA was verified."""
+        return (
+            settings.AUTH_LOCAL_DEMO_OWNER_LOGIN
+            and user.email.strip().lower() == "owner@aurum.tj"
+            and not user.is_developer
+            and not user.is_administrator
+            and user.status == "active"
+            and user.membership_status == "active"
+            and user.home_tenant_id is not None
+        )
+
     async def verify_login_code(
         self,
         *,
@@ -322,7 +335,10 @@ class AuthService:
         # The database lookup resolves assignment.password_required without a
         # tenant GUC because login happens before an authenticated context exists.
         is_support = user.is_developer or user.is_administrator
-        needs_password = is_support or bool(user.password_hash) or user.password_required
+        local_demo_login = self._uses_local_demo_owner_login(user)
+        needs_password = (
+            is_support or bool(user.password_hash) or user.password_required or local_demo_login
+        )
         if needs_password:
             password_ok = bool(
                 password and user.password_hash and verify_password(password, user.password_hash)
@@ -337,7 +353,7 @@ class AuthService:
                 )
                 raise AuthenticationError("Invalid credentials")
 
-        if user.mfa_required:
+        if user.mfa_required and not local_demo_login:
             challenge_token = generate_refresh_token()
             challenge = await self.repo.create_mfa_challenge_from_email_code(
                 email_lower=email_lower,
@@ -771,7 +787,11 @@ class AuthService:
             session_id=rotated.id,
             user_id=user.id,
         )
-        if user.mfa_required and (user.mfa_status != "active" or mfa_verified_at is None):
+        if (
+            user.mfa_required
+            and not self._uses_local_demo_owner_login(user)
+            and (user.mfa_status != "active" or mfa_verified_at is None)
+        ):
             raise AuthenticationError("Account MFA is required")
 
         access_token = create_access_token(
