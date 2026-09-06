@@ -1095,7 +1095,7 @@ class RolesService:
         branch_id: UUID | None,
         password_required: bool,
     ) -> tuple[DirectoryUser, UserAssignment, bool]:
-        """Create or complete an employee invitation inside the owner's tenant."""
+        """Create an employee invitation inside the owner's tenant."""
         if not await self.repo.lock_tenant_authorization(tenant_id):
             raise NotFoundError("Tenant not found")
         if (
@@ -1111,38 +1111,32 @@ class RolesService:
                 "Создавать сотрудников может только активный владелец этой аптеки"
             )
 
-        membership = await self.repo.find_membership_by_email(
-            tenant_id=tenant_id,
-            email=email,
-        )
-        created = False
-        if membership is None:
-            try:
-                creation = await self.repo.create_employee_invitation(
-                    tenant_id=tenant_id,
+        try:
+            creation = await self.repo.create_employee_invitation(
+                tenant_id=tenant_id,
+                email=email,
+                full_name=full_name,
+                phone=phone,
+                operation_id=operation_id,
+                request_fingerprint=_employee_invitation_fingerprint(
                     email=email,
                     full_name=full_name,
                     phone=phone,
-                    operation_id=operation_id,
-                    request_fingerprint=_employee_invitation_fingerprint(
-                        email=email,
-                        full_name=full_name,
-                        phone=phone,
-                        role_id=role_id,
-                        branch_id=branch_id,
-                        password_required=password_required,
-                    ),
-                    issued_at=utc_now(),
-                )
-            except DBAPIError as exc:
-                raise _employee_invitation_error(exc) from exc
-            membership = await self.repo.get_membership_for_user(
-                tenant_id=tenant_id,
-                user_id=creation.user_id,
+                    role_id=role_id,
+                    branch_id=branch_id,
+                    password_required=password_required,
+                ),
+                issued_at=utc_now(),
             )
-            if membership is None:
-                raise NotFoundError("Employee membership was not created")
-            created = creation.created
+        except DBAPIError as exc:
+            raise _employee_invitation_error(exc) from exc
+        membership = await self.repo.get_membership_for_user(
+            tenant_id=tenant_id,
+            user_id=creation.user_id,
+        )
+        if membership is None:
+            raise NotFoundError("Employee membership was not created")
+        created = creation.created
 
         existing_assignments = await self.repo.list_assignments_for_user(
             membership.user_id,
@@ -1150,15 +1144,25 @@ class RolesService:
         )
         for existing in existing_assignments:
             if (
-                existing.is_active
-                and existing.role_id == role_id
+                existing.role_id == role_id
                 and existing.branch_id == branch_id
                 and existing.password_required == password_required
             ):
+                if not existing.is_active:
+                    raise ConflictError(
+                        "Доступ из этого приглашения уже изменён; обновите список сотрудников",
+                        details={"reason": "invitation_access_changed"},
+                    )
                 user = await self.repo.get_user(membership.user_id, tenant_id=tenant_id)
                 if user is None:
                     raise NotFoundError("Membership not found")
                 return user, existing, False
+
+        if not created:
+            raise ConflictError(
+                "Доступ из этого приглашения уже изменён; обновите список сотрудников",
+                details={"reason": "invitation_access_changed"},
+            )
 
         assignment = await self.assign_role(
             actor_id=actor_id,

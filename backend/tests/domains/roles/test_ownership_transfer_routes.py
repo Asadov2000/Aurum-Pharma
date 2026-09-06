@@ -82,6 +82,17 @@ def test_role_and_employee_mutations_respect_tenant_write_state() -> None:
         assert require_writable_tenant not in _direct_dependencies(_route(path, method))
 
 
+def test_employee_access_mutations_require_recent_account_mfa() -> None:
+    access_mutations = (
+        ("/api/v1/users/invite", "POST"),
+        ("/api/v1/users/{user_id}/assignments", "POST"),
+        ("/api/v1/users/{user_id}/assignments", "PUT"),
+        ("/api/v1/users/{user_id}/assignments/{assignment_id}", "DELETE"),
+    )
+    for path, method in access_mutations:
+        assert require_recent_account_mfa in _direct_dependencies(_route(path, method))
+
+
 @pytest_asyncio.fixture
 # pytest-asyncio's decorator does not preserve this async-generator fixture type for mypy.
 async def ownership_history_scenario(  # type: ignore[no-untyped-def]

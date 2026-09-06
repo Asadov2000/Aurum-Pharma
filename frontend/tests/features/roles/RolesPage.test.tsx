@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -276,6 +276,8 @@ describe("RolesPage", () => {
 
     expect(await screen.findByText(/Не удалось загрузить список/i)).toBeInTheDocument();
     expect(screen.queryByText(/Управляемых ролей пока нет/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(listRoles).toHaveBeenCalledTimes(2));
   });
 
   it("filters the visible tenant roles without exposing protected roles", async () => {

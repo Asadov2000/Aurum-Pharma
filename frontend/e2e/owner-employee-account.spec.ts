@@ -84,7 +84,7 @@ test.describe("Owner employee accounts", () => {
       await dialog.getByLabel("ФИО сотрудника").fill(fullName);
       await dialog.getByLabel("Email для входа").fill(email);
       await dialog.getByLabel("Роль").selectOption({ label: roleName });
-      await dialog.getByLabel("Торговая точка").selectOption(assignedBranch.id);
+      await dialog.getByLabel("Доступ к торговым точкам").selectOption(assignedBranch.id);
 
       const createdResponse = page.waitForResponse(
         (response) =>
@@ -92,11 +92,14 @@ test.describe("Owner employee accounts", () => {
           response.request().method() === "POST" &&
           response.status() === 201,
       );
-      await dialog.getByRole("button", { name: "Создать и пригласить" }).click();
+      await dialog.getByRole("button", { name: "Проверить данные" }).click();
+      await expect(dialog.getByText("Проверьте данные")).toBeVisible();
+      await expect(dialog.getByText(email)).toBeVisible();
+      await dialog.getByRole("button", { name: "Создать доступ" }).click();
       const assignment = (await (await createdResponse).json()) as EmployeeAssignment;
 
       await expect(
-        page.getByRole("status").filter({ hasText: `Сотрудник «${fullName}» создан` }),
+        page.getByRole("status").filter({ hasText: `Доступ для «${fullName}» создан` }),
       ).toBeVisible();
       await expect(page.getByRole("row", { name: new RegExp(fullName) })).toContainText(
         "Ожидает активации",

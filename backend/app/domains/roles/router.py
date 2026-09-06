@@ -491,7 +491,7 @@ async def search_users(
 async def invite_user(
     payload: InviteUserRequest,
     user: Annotated[CurrentUser, Depends(require_permission("users.invite"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
     _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> AssignmentRead:
@@ -624,7 +624,7 @@ async def create_assignment(
     user_id: UUID,
     payload: AssignmentCreate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
     _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> AssignmentRead:
@@ -651,7 +651,7 @@ async def replace_assignments(
     user_id: UUID,
     payload: AssignmentBatchReplace,
     user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
     _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> list[AssignmentRead]:
@@ -696,7 +696,7 @@ async def revoke_assignment(
     user_id: UUID,
     assignment_id: UUID,
     user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
     _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, str]:

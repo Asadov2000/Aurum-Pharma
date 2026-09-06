@@ -252,6 +252,11 @@ export function RoleBuilderModal({
       return;
     }
     const codes = [...checked].filter((code) => visibleCodes.has(code));
+    if (codes.length === 0) {
+      setTopError("Выберите хотя бы одну функцию, которая будет доступна сотруднику.");
+      setMobilePane("permissions");
+      return;
+    }
     const submission: RoleSubmission = {
       name: parsed.data.name,
       description: parsed.data.description.trim() || null,

@@ -238,6 +238,19 @@ describe("RoleBuilderModal", () => {
     expect(createRole.mock.calls[0]?.[0]).not.toHaveProperty("level");
   });
 
+  it("does not create a role without any available function", async () => {
+    renderModal();
+    fireEvent.change(await screen.findByLabelText("Название"), {
+      target: { value: "Пустая роль" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Создать роль" }));
+
+    expect(
+      await screen.findByText("Выберите хотя бы одну функцию, которая будет доступна сотруднику."),
+    ).toBeInTheDocument();
+    expect(createRole).not.toHaveBeenCalled();
+  });
+
   it("requires explicit confirmation before adding a dangerous permission", async () => {
     renderModal();
     fireEvent.change(await screen.findByLabelText("Название"), {
