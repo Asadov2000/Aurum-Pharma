@@ -1,12 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
+const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:15173";
 const isCI = process.env.CI === "true";
 const ciRetries = process.env.E2E_RETRIES === "0" ? 0 : 1;
 const browserExecutablePath = process.env.E2E_BROWSER_EXECUTABLE_PATH;
 
-// Defaults target the local dev stack. `pnpm e2e:isolated` overrides the URLs
-// and Docker container IDs so tests never mutate shared development data.
+// Defaults target disposable E2E ports. The launcher supplies container IDs;
+// setup verifies their Compose project before any database or Redis mutation.
 export default defineConfig({
   testDir: "./e2e",
   // Generous timeouts: the dev Vite server in Docker can take several

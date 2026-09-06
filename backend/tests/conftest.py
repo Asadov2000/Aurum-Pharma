@@ -33,6 +33,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+from tests.fixture_helpers import clear_test_auth_redis, resolve_test_redis_url
+
 _LOCAL_TEST_DATABASE_URL_APP = (
     "postgresql+asyncpg://aurum_app:aurum_app_pw@postgres-test:5432/aurum_test"
 )
@@ -100,6 +102,9 @@ os.environ["DATABASE_URL_MIGRATION"] = _test_database_url_migration
 os.environ["DATABASE_URL_MAILER"] = _test_database_url_mailer
 os.environ["DATABASE_URL_BILLING_WORKER"] = _test_database_url_billing_worker
 os.environ["DATABASE_URL_WORKER"] = _test_database_url_worker
+# Never inherit the application's Redis endpoint: cleanup belongs exclusively
+# to dedicated test infrastructure (CI can supply TEST_REDIS_URL explicitly).
+os.environ["REDIS_URL"] = resolve_test_redis_url(os.environ)
 # Unit and integration tests exercise the production-grade lockout policy even
 # though the rest of the test stack uses ENVIRONMENT=development.
 os.environ["AUTH_LOCAL_TESTING_MODE"] = "false"
@@ -190,13 +195,7 @@ async def redis() -> AsyncIterator[Redis]:
 
     app.dependency_overrides[get_redis] = _override
     try:
-        # Clean test-owned auth keys so cache and MFA guards start deterministically.
-        try:
-            for pattern in ("auth:perms:*", "auth:mfa-attempts:*"):
-                async for key in client.scan_iter(match=pattern):
-                    await client.delete(key)
-        except Exception:
-            pass
+        await clear_test_auth_redis(client)
         yield client
     finally:
         app.dependency_overrides.pop(get_redis, None)

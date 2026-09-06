@@ -3,7 +3,6 @@ import { request, test, type Page } from "@playwright/test";
 import {
   apiContext,
   apiLogin,
-  clearLoginRateLimit,
   expect,
   loginInBrowser,
   OWNER,
@@ -32,10 +31,6 @@ async function expectNoHorizontalOverflow(page: Page, workspace: string): Promis
 }
 
 test.describe("POS payment settings (owner)", () => {
-  test.beforeEach(() => {
-    clearLoginRateLimit(OWNER.email);
-  });
-
   test("applies owner-selected payment methods to the register", async ({ page }) => {
     const apiAnon = await request.newContext();
     const tokens = await apiLogin(apiAnon, OWNER);

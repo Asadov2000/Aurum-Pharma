@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { AxiosError, type AxiosResponse } from "axios";
 import { describe, expect, it } from "vitest";
 
