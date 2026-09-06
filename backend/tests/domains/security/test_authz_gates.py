@@ -48,15 +48,15 @@ SENSITIVE_READ_PATHS = [
 DOMAIN_READ_PATHS = [
     ("/api/v1/catalog", 200),
     ("/api/v1/catalog/summary", 200),
-    (f"/api/v1/catalog/{uuid4()}/image/{uuid4()}/thumbnail", 404),
-    (f"/api/v1/catalog/import/{uuid4()}", 404),
+    pytest.param(f"/api/v1/catalog/{uuid4()}/image/{uuid4()}/thumbnail", 404, id="catalog-image"),
+    pytest.param(f"/api/v1/catalog/import/{uuid4()}", 404, id="catalog-import"),
     ("/api/v1/branches", 200),
     ("/api/v1/registers", 200),
     ("/api/v1/roles", 200),
     ("/api/v1/permissions", 200),
     ("/api/v1/onboarding/checklist", 200),
     ("/api/v1/onboarding/overview", 200),
-    (f"/api/v1/shifts/current?register_id={uuid4()}", 200),
+    pytest.param(f"/api/v1/shifts/current?register_id={uuid4()}", 200, id="register-shift"),
 ]
 
 
