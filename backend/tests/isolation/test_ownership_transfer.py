@@ -20,9 +20,14 @@ async def _set_actor_context(
     connection: AsyncConnection,
     *,
     user_id: UUID,
+    session_id: UUID,
     tenant_id: UUID,
     mfa_verified_at: int | None = None,
 ) -> None:
+    await connection.execute(
+        text("SELECT set_config('app.auth_session_id', :value, true)"),
+        {"value": str(session_id)},
+    )
     await connection.execute(
         text("SELECT set_config('app.user_id', :value, true)"),
         {"value": str(user_id)},
@@ -58,6 +63,7 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
     employee_role_id = uuid4()
     owner_session_id = uuid4()
     target_session_id = uuid4()
+    outsider_session_id = uuid4()
     request_id = uuid4()
     now = utc_now()
 
@@ -208,7 +214,8 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
                   id, user_id, refresh_token_hash, expires_at, mfa_verified_at
                 ) VALUES
                   (:owner_session_id, :owner_user_id, :owner_hash, :expires_at, :now),
-                  (:target_session_id, :target_user_id, :target_hash, :expires_at, :now)
+                  (:target_session_id, :target_user_id, :target_hash, :expires_at, :now),
+                  (:outsider_session_id, :outsider_user_id, :outsider_hash, :expires_at, :now)
                 """),
             {
                 "owner_session_id": owner_session_id,
@@ -217,6 +224,9 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
                 "target_session_id": target_session_id,
                 "target_user_id": target_user_id,
                 "target_hash": uuid4().hex + uuid4().hex,
+                "outsider_session_id": outsider_session_id,
+                "outsider_user_id": outsider_user_id,
+                "outsider_hash": uuid4().hex + uuid4().hex,
                 "expires_at": now + timedelta(days=1),
                 "now": now,
             },
@@ -228,6 +238,7 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
             await _set_actor_context(
                 connection,
                 user_id=owner_user_id,
+                session_id=owner_session_id,
                 tenant_id=tenant_id,
             )
             first = await connection.scalar(
@@ -257,11 +268,36 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
             assert first == request_id
             assert repeated == request_id
 
+        async with db_engine.begin() as connection:
+            await connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
+            assert (
+                await connection.scalar(
+                    text("SELECT revoked_reason FROM public.session WHERE id=:session_id"),
+                    {"session_id": target_session_id},
+                )
+                == "ownership_transfer_requested"
+            )
+            # The transfer request revokes the recipient's old login. Model their fresh login.
+            target_session_id = uuid4()
+            await connection.execute(
+                text(
+                    "INSERT INTO public.session("
+                    "id,user_id,refresh_token_hash,expires_at,mfa_verified_at) "
+                    "VALUES(:session_id,:user_id,:hash,now()+INTERVAL '1 hour',now())"
+                ),
+                {
+                    "session_id": target_session_id,
+                    "user_id": target_user_id,
+                    "hash": uuid4().hex + uuid4().hex,
+                },
+            )
+
         with pytest.raises(DBAPIError, match="pending"):
             async with app_engine.begin() as connection:
                 await _set_actor_context(
                     connection,
                     user_id=owner_user_id,
+                    session_id=owner_session_id,
                     tenant_id=tenant_id,
                 )
                 await connection.scalar(
@@ -287,6 +323,7 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
             await _set_actor_context(
                 connection,
                 user_id=outsider_user_id,
+                session_id=outsider_session_id,
                 tenant_id=tenant_id,
             )
             assert (
@@ -301,6 +338,7 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
                 await _set_actor_context(
                     connection,
                     user_id=outsider_user_id,
+                    session_id=outsider_session_id,
                     tenant_id=tenant_id,
                 )
                 await connection.scalar(
@@ -313,6 +351,7 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
                 await _set_actor_context(
                     connection,
                     user_id=target_user_id,
+                    session_id=target_session_id,
                     tenant_id=tenant_id,
                     mfa_verified_at=int((utc_now() - timedelta(hours=1)).timestamp()),
                 )
@@ -330,11 +369,13 @@ async def test_ownership_transfer_is_atomic_and_revokes_sessions(  # noqa: PLR09
             await _set_actor_context(
                 first_connection,
                 user_id=target_user_id,
+                session_id=target_session_id,
                 tenant_id=tenant_id,
             )
             await _set_actor_context(
                 second_connection,
                 user_id=target_user_id,
+                session_id=target_session_id,
                 tenant_id=tenant_id,
             )
             assert (

@@ -83,7 +83,7 @@ const MESSAGE_MAP: Record<string, string> = {
   "Invalid or replayed authentication code":
     "Этот код уже использован или устарел. Введите новый код.",
   "Invalid recovery code": "Неверный или уже использованный резервный код.",
-  "Invalid or expired MFA challenge": "Время подтверждения истекло. Начните вход заново.",
+  "Invalid or expired MFA challenge": "Время подтверждения истекло. Начните подтверждение заново.",
   "Support MFA is unavailable": "Двухфакторная защита недоступна. Войдите в систему заново.",
   "Request is not scoped to a tenant":
     "Действие требует выбранной аптеки. Войдите под учётной записью аптеки.",

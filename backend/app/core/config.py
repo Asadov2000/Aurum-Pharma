@@ -170,7 +170,6 @@ class Settings(BaseSettings):
     # Staging and production refuse to start with this flag enabled, so a
     # copied development configuration cannot weaken authentication.
     AUTH_LOCAL_TESTING_MODE: bool = False
-    AUTH_LOCAL_DEMO_OWNER_LOGIN: bool = False
     REFRESH_COOKIE_NAME: str = "aurum_refresh_token"
     REFRESH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     # None means "secure in production, HTTP-friendly in local development".
@@ -231,35 +230,6 @@ class Settings(BaseSettings):
     @property
     def auth_login_guard_enabled(self) -> bool:
         return self.ENVIRONMENT != "development" or not self.AUTH_LOCAL_TESTING_MODE
-
-    @model_validator(mode="after")
-    def _guard_local_demo_owner_login(self) -> Settings:
-        if not self.AUTH_LOCAL_DEMO_OWNER_LOGIN:
-            return self
-        if self.ENVIRONMENT != "development" or not self.AUTH_LOCAL_TESTING_MODE:
-            raise ValueError("Local demo owner login requires development local testing mode")
-        for url in (self.DATABASE_URL_APP, self.DATABASE_URL_SUPPORT):
-            try:
-                database = make_url(url).database
-            except ArgumentError as exc:
-                raise ValueError("Local demo owner login requires the aurum_demo database") from exc
-            if database != "aurum_demo":
-                raise ValueError("Local demo owner login requires the aurum_demo database")
-        if not self.CORS_ORIGINS:
-            raise ValueError("Local demo owner login requires explicit loopback origins")
-        for origin in self.CORS_ORIGINS:
-            parsed = urlsplit(origin)
-            if (
-                parsed.scheme not in {"http", "https"}
-                or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
-                or parsed.username is not None
-                or parsed.password is not None
-                or parsed.path
-                or parsed.query
-                or parsed.fragment
-            ):
-                raise ValueError("Local demo owner login requires explicit loopback origins")
-        return self
 
     @model_validator(mode="after")
     def _guard_edge_nonce_window(self) -> Settings:

@@ -28,6 +28,7 @@ from app.core.errors import (
     BusinessRuleError,
     ConflictError,
     NotFoundError,
+    PermissionDeniedError,
     RateLimitError,
     ServiceUnavailableError,
 )
@@ -44,6 +45,7 @@ from app.core.security import (
     generate_refresh_token,
     generate_totp_secret,
     hash_code,
+    hash_password,
     hash_recovery_code,
     hash_token,
     match_totp_counter,
@@ -56,6 +58,7 @@ from app.domains.auth.repository import (
     ActiveSessionRecord,
     AuthRepository,
     EmailCodeIssueStatus,
+    MfaSettingsRecord,
 )
 
 if TYPE_CHECKING:
@@ -250,19 +253,6 @@ class AuthService:
     # 2. Verify an email code → issue tokens
     # -------------------------------------------------------------------------
 
-    @staticmethod
-    def _uses_local_demo_owner_login(user: AuthUserRecord) -> bool:
-        """Allow the explicit local showcase login without claiming MFA was verified."""
-        return (
-            settings.AUTH_LOCAL_DEMO_OWNER_LOGIN
-            and user.email.strip().lower() == "owner@aurum.tj"
-            and not user.is_developer
-            and not user.is_administrator
-            and user.status == "active"
-            and user.membership_status == "active"
-            and user.home_tenant_id is not None
-        )
-
     async def verify_login_code(
         self,
         *,
@@ -335,10 +325,7 @@ class AuthService:
         # The database lookup resolves assignment.password_required without a
         # tenant GUC because login happens before an authenticated context exists.
         is_support = user.is_developer or user.is_administrator
-        local_demo_login = self._uses_local_demo_owner_login(user)
-        needs_password = (
-            is_support or bool(user.password_hash) or user.password_required or local_demo_login
-        )
+        needs_password = is_support or bool(user.password_hash) or user.password_required
         if needs_password:
             password_ok = bool(
                 password and user.password_hash and verify_password(password, user.password_hash)
@@ -353,7 +340,7 @@ class AuthService:
                 )
                 raise AuthenticationError("Invalid credentials")
 
-        if user.mfa_required and not local_demo_login:
+        if user.mfa_required:
             challenge_token = generate_refresh_token()
             challenge = await self.repo.create_mfa_challenge_from_email_code(
                 email_lower=email_lower,
@@ -423,6 +410,279 @@ class AuthService:
     # -------------------------------------------------------------------------
     # 3. Account MFA
     # -------------------------------------------------------------------------
+
+    async def account_mfa_settings(self, *, user_id: UUID, session_id: UUID) -> MfaSettingsRecord:
+        record = await self.repo.get_mfa_settings(user_id=user_id, session_id=session_id)
+        if record is None:
+            raise AuthenticationError("Authenticated session is inactive")
+        return record
+
+    async def dismiss_mfa_prompt(self, *, user_id: UUID, session_id: UUID) -> None:
+        if not await self.repo.dismiss_mfa_prompt(user_id=user_id, session_id=session_id):
+            raise AuthenticationError("Authenticated session is inactive")
+
+    async def _claim_password_attempt(self, user_id: UUID) -> None:
+        if self.redis is None:
+            return
+        try:
+            pipeline = self.redis.pipeline(transaction=True)
+            pipeline.incr(f"auth:password-confirmation:{user_id}")
+            pipeline.expire(f"auth:password-confirmation:{user_id}", 15 * 60)
+            results = cast(list[object], await pipeline.execute())
+        except RedisError as exc:
+            raise ServiceUnavailableError("Password confirmation guard is unavailable") from exc
+        if int(cast(int, results[0])) > 5:
+            raise RateLimitError("Too many password attempts", details={"retry_after_minutes": 15})
+
+    async def _clear_password_attempts(self, user_id: UUID) -> None:
+        if self.redis is not None:
+            try:
+                await self.redis.delete(f"auth:password-confirmation:{user_id}")
+            except RedisError as exc:
+                raise ServiceUnavailableError("Password confirmation guard is unavailable") from exc
+
+    async def _verify_account_password(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        password: str,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> str:
+        identity = await self.repo.get_user_by_id(user_id, session_id=session_id)
+        if identity is None:
+            raise AuthenticationError("Authenticated session is inactive")
+        password_hash = await self.repo.get_account_password_hash(
+            user_id=user_id, session_id=session_id
+        )
+        if password_hash is None:
+            raise PermissionDeniedError(
+                "Set an account password first", details={"reason": "password_setup_required"}
+            )
+        await self._claim_password_attempt(user_id)
+        if not verify_password(password, password_hash):
+            await self.repo.insert_login_attempt(
+                email_lower=identity.email.lower(),
+                user_id=user_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                outcome="password_failed",
+            )
+            raise AuthenticationError("Invalid password")
+        return password_hash
+
+    async def confirm_account_password(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        password: str,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> str:
+        verified_hash = await self._verify_account_password(
+            user_id=user_id,
+            session_id=session_id,
+            password=password,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        verified_at = await self.repo.confirm_password(
+            user_id=user_id, session_id=session_id, verified_password_hash=verified_hash
+        )
+        identity = await self.repo.get_user_by_id(user_id, session_id=session_id)
+        if verified_at is None or identity is None:
+            raise AuthenticationError("Authenticated session changed")
+        mfa_verified_at = await self.repo.get_session_mfa_verified_at(
+            user_id=user_id, session_id=session_id
+        )
+        await self._clear_password_attempts(user_id)
+        return create_access_token(
+            user_id,
+            tenant_id=(
+                identity.home_tenant_id
+                if not (identity.is_developer or identity.is_administrator)
+                else None
+            ),
+            is_developer=identity.is_developer,
+            is_administrator=identity.is_administrator,
+            session_id=session_id,
+            mfa_verified_at=mfa_verified_at,
+            password_verified_at=verified_at,
+        )
+
+    async def request_password_setup_code(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> str:
+        record = await self.account_mfa_settings(user_id=user_id, session_id=session_id)
+        if record.password_configured:
+            raise ConflictError("Account password is already configured")
+        identity = await self.repo.get_user_by_id(user_id, session_id=session_id)
+        if identity is None:
+            raise AuthenticationError("Authenticated session is inactive")
+        return await self.request_login_code(
+            email=identity.email, ip_address=ip_address, user_agent=user_agent
+        )
+
+    async def setup_account_password(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        code: str,
+        new_password: str,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> None:
+        record = await self.account_mfa_settings(user_id=user_id, session_id=session_id)
+        if record.password_configured:
+            raise ConflictError("Account password is already configured")
+        identity = await self.repo.get_user_by_id(user_id, session_id=session_id)
+        if identity is None:
+            raise AuthenticationError("Authenticated session is inactive")
+        await self._claim_password_attempt(user_id)
+        ec = await self.repo.find_active_email_code(identity.email.lower())
+        candidate_hash = hash_code(code, ec.code_salt) if ec is not None else None
+        if (
+            ec is None
+            or candidate_hash is None
+            or not await self.repo.email_code_matches(
+                code_id=ec.id, email_lower=identity.email.lower(), candidate_hash=candidate_hash
+            )
+        ):
+            await self.repo.insert_login_attempt(
+                email_lower=identity.email.lower(),
+                user_id=user_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                outcome="code_failed",
+            )
+            raise AuthenticationError("Invalid or expired code")
+        changed = await self.repo.set_account_password(
+            user_id=user_id,
+            session_id=session_id,
+            code_id=ec.id,
+            candidate_hash=candidate_hash,
+            password_hash=hash_password(new_password),
+        )
+        if changed is None:
+            raise AuthenticationError("Password setup is no longer valid")
+        await self._clear_password_attempts(user_id)
+
+    async def start_account_mfa_enrollment(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        password: str,
+        ip_address: str,
+        user_agent: str | None,
+    ) -> tuple[str, MfaEnrollmentSetup]:
+        verified_hash = await self._verify_account_password(
+            user_id=user_id,
+            session_id=session_id,
+            password=password,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        challenge_token = generate_refresh_token()
+        challenge = await self.repo.create_authenticated_mfa_challenge(
+            user_id=user_id,
+            session_id=session_id,
+            token_hash=hash_token(challenge_token),
+            verified_password_hash=verified_hash,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            expires_at=utc_now() + MFA_CHALLENGE_DURATION,
+        )
+        if challenge is None:
+            raise ConflictError("MFA setup is unavailable or already enabled")
+        setup = await self.start_mfa_enrollment(
+            challenge_token=challenge_token, ip_address=ip_address
+        )
+        await self._clear_password_attempts(user_id)
+        return challenge_token, setup
+
+    async def complete_account_mfa_enrollment(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        challenge_token: str,
+        code: str,
+        ip_address: str,
+        user_agent: str | None,
+        device_id: str | None,
+    ) -> AuthTokens:
+        if not await self.repo.is_authenticated_mfa_challenge(
+            user_id=user_id, session_id=session_id, token_hash=hash_token(challenge_token)
+        ):
+            raise AuthenticationError("MFA setup session is inactive")
+        return await self.complete_mfa_enrollment(
+            challenge_token=challenge_token,
+            code=code,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            device_id=device_id,
+        )
+
+    async def disable_account_mfa(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        password: str,
+        ip_address: str,
+        user_agent: str | None,
+        device_id: str | None,
+    ) -> AuthTokens:
+        verified_hash = await self._verify_account_password(
+            user_id=user_id,
+            session_id=session_id,
+            password=password,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        refresh_token = generate_refresh_token()
+        new_session_id = await self.repo.disable_mfa(
+            user_id=user_id,
+            session_id=session_id,
+            verified_password_hash=verified_hash,
+            refresh_token_hash=hash_token(refresh_token),
+            user_agent=user_agent,
+            ip_address=ip_address,
+            expires_at=utc_now() + timedelta(days=settings.REFRESH_TOKEN_DAYS),
+        )
+        if new_session_id is None:
+            raise AuthenticationError("MFA confirmation is no longer valid")
+        identity = await self.repo.get_user_by_id(user_id, session_id=new_session_id)
+        if identity is None or identity.mfa_required:
+            raise AuthenticationError("Authenticated session is inactive")
+        await self._register_login_device(
+            session_id=new_session_id, refresh_token=refresh_token, device_id=device_id
+        )
+        await self._clear_password_attempts(user_id)
+        return AuthTokens(
+            create_access_token(
+                user_id,
+                tenant_id=(
+                    identity.home_tenant_id
+                    if not (identity.is_developer or identity.is_administrator)
+                    else None
+                ),
+                is_developer=identity.is_developer,
+                is_administrator=identity.is_administrator,
+                session_id=new_session_id,
+            ),
+            refresh_token,
+            settings.ACCESS_TOKEN_MINUTES * 60,
+        )
 
     async def _get_mfa_challenge(
         self,
@@ -787,11 +1047,7 @@ class AuthService:
             session_id=rotated.id,
             user_id=user.id,
         )
-        if (
-            user.mfa_required
-            and not self._uses_local_demo_owner_login(user)
-            and (user.mfa_status != "active" or mfa_verified_at is None)
-        ):
+        if user.mfa_required and (user.mfa_status != "active" or mfa_verified_at is None):
             raise AuthenticationError("Account MFA is required")
 
         access_token = create_access_token(

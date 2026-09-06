@@ -34,7 +34,7 @@ export function makeSupportSessionRequireStepUp(email: string): void {
   const emailLiteral = sqlLiteral(email);
   const userIdQuery = `(SELECT id FROM app_user WHERE lower(email)=${emailLiteral})`;
   const sql =
-    "UPDATE session SET mfa_verified_at=now()-INTERVAL '11 minutes' " +
+    "UPDATE session SET mfa_verified_at=now()-INTERVAL '11 minutes', password_verified_at=now()-INTERVAL '11 minutes' " +
     `WHERE user_id=${userIdQuery} AND revoked_at IS NULL; ` +
     `UPDATE support_mfa SET last_used_counter=NULL WHERE user_id=${userIdQuery};`;
   dockerExec(E2E_POSTGRES_CONTAINER, ["psql", "-U", "postgres", "-d", E2E_POSTGRES_DB, "-c", sql]);

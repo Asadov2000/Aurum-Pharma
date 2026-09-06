@@ -13,7 +13,6 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
-import { useMfaStepUpRequested } from "@/features/auth/stepUpCoordinator";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
 import { useUserPreferencesQuery } from "@/features/settings/queries";
@@ -45,10 +44,7 @@ const AppearanceMenu = lazy(async () => {
   return { default: module.AppearanceMenu };
 });
 
-const MfaStepUpDialog = lazy(async () => {
-  const module = await import("@/features/auth/MfaStepUpDialog");
-  return { default: module.MfaStepUpDialog };
-});
+const AccountSecuritySurface = lazy(() => import("@/features/auth/AccountSecuritySurface"));
 
 const SidebarSettingsModal = lazy(async () => {
   const module = await import("./SidebarSettingsModal");
@@ -60,7 +56,6 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const preferencesQuery = useUserPreferencesQuery();
-  const mfaStepUpRequested = useMfaStepUpRequested();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -495,6 +490,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
           tabIndex={-1}
           className="min-h-[calc(100dvh-var(--app-header-height))] min-w-0 px-3 py-4 sm:px-4 sm:py-5 xl:px-5"
         >
+          <Suspense fallback={null}>
+            <AccountSecuritySurface
+              showPrompt={pathname !== "/security" && pathname !== "/settings"}
+            />
+          </Suspense>
           {children}
         </main>
       </div>
@@ -509,12 +509,6 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             onChange={updateSidebarPreferences}
             onClose={() => setSidebarSettingsOpen(false)}
           />
-        </Suspense>
-      ) : null}
-
-      {mfaStepUpRequested ? (
-        <Suspense fallback={<MfaStepUpLoading />}>
-          <MfaStepUpDialog />
         </Suspense>
       ) : null}
     </div>
@@ -566,30 +560,6 @@ function setSessionMarker(key: string): void {
   } catch {
     // The component ref prevents repeated redirects for this mounted session.
   }
-}
-
-function MfaStepUpLoading(): JSX.Element {
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
-
-  return (
-    <div
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Загрузка подтверждения действия"
-      aria-busy="true"
-      tabIndex={-1}
-      className="fixed inset-0 z-modal flex items-center justify-center bg-overlay p-4 outline-none"
-    >
-      <div className="rounded-lg border border-border bg-surface-raised px-5 py-4 text-sm text-foreground-muted shadow-xl">
-        Загрузка защиты…
-      </div>
-    </div>
-  );
 }
 
 function MenuIcon(): JSX.Element {

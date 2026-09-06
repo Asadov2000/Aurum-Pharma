@@ -8,6 +8,7 @@ import {
   refreshAccessToken,
   requestStepUpAccessToken,
   resolveApiBaseUrl,
+  withoutStepUp,
 } from "@/lib/api";
 import { useSupportAccessStore } from "@/stores/supportAccess";
 
@@ -119,6 +120,28 @@ describe("refreshAccessToken", () => {
 });
 
 describe("MFA step-up interceptor", () => {
+  it("does not recursively prompt while a password confirmation request reports missing setup", async () => {
+    const requestMfaStepUp = vi.fn(async () => null);
+    configureAuthHooks({
+      getAccessToken: () => "current-access",
+      refreshTokens: async () => null,
+      requestMfaStepUp,
+      onAuthFailure: () => {},
+    });
+    api.defaults.adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
+      throw new AxiosError("Setup needed", "ERR_BAD_RESPONSE", config, undefined, {
+        data: { error: { details: { reason: "password_setup_required" } } },
+        status: 403,
+        statusText: "Forbidden",
+        headers: {},
+        config,
+      });
+    });
+    await expect(
+      api.post("/auth/password/confirm", { password: "test-password" }, withoutStepUp()),
+    ).rejects.toThrow("Setup needed");
+    expect(requestMfaStepUp).not.toHaveBeenCalled();
+  });
   it("recognizes only the structured step-up response", () => {
     const response = {
       status: 403,
@@ -136,6 +159,10 @@ describe("MFA step-up interceptor", () => {
       response,
     );
 
+    expect(isMfaStepUpRequired(error)).toBe(true);
+    response.data.error.details.reason = "password_step_up_required";
+    expect(isMfaStepUpRequired(error)).toBe(true);
+    response.data.error.details.reason = "password_setup_required";
     expect(isMfaStepUpRequired(error)).toBe(true);
     response.data.error.details.reason = "other_reason";
     expect(isMfaStepUpRequired(error)).toBe(false);

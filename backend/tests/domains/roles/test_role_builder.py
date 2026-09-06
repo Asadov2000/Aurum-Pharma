@@ -20,6 +20,7 @@ from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import CUSTOM_ROLE_LEGACY_LEVEL, RolesService
 from app.main import app
 from tests.auth_helpers import create_tenant_access_token
+from tests.role_version_helpers import set_test_recent_confirmation
 
 PROTECTED_GOVERNANCE_CODES = {
     "roles.assign",
@@ -522,6 +523,7 @@ async def test_developer_can_create_tenant_role_but_not_platform_grant(
         email="developer-builder@aurum.tj",
         is_developer=True,
     )
+    await set_test_recent_confirmation(db_session, user_id=developer.id)
     await db_session.execute(
         text("SELECT set_config('app.user_id', :user_id, true)"),
         {"user_id": str(developer.id)},

@@ -184,6 +184,17 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "auth_settings_session_matches",
+    "current_auth_confirmation_at",
+    "lookup_account_mfa_settings",
+    "dismiss_account_mfa_prompt",
+    "lookup_account_password_hash",
+    "confirm_account_password",
+    "lookup_auth_session_password",
+    "set_initial_account_password",
+    "create_authenticated_mfa_challenge",
+    "authenticated_mfa_challenge_matches",
+    "disable_account_mfa",
     "activate_billing_price_version",
     "activate_billing_price_version_unlocked_0095",
     "apply_initial_subscription_price",
@@ -454,6 +465,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "lookup_auth_session_password",
     "accept_platform_staff_invitation",
     "accept_tenant_invitation",
     "accept_tenant_ownership_transfer",

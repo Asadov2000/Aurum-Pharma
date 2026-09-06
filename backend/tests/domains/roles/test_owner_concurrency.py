@@ -20,6 +20,7 @@ from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
+from tests.role_version_helpers import set_test_recent_confirmation
 
 
 @pytest.mark.parametrize("second_operation", ["revoke", "suspend"])
@@ -340,6 +341,10 @@ async def _set_owner_context(
     tenant_id: UUID,
 ) -> None:
     await session.execute(
+        text("SELECT set_config('app.auth_session_id', :session_id, true)"),
+        {"session_id": str(owner_id)},
+    )
+    await session.execute(
         text("SELECT set_config('app.user_id', :user_id, true)"),
         {"user_id": str(owner_id)},
     )
@@ -376,6 +381,7 @@ async def _setup_publication_race(
                 LIMIT 1
                 """))
         assert actor_id is not None
+        provisioning_session_id = await set_test_recent_confirmation(setup, user_id=actor_id)
         await setup.execute(
             text("SELECT set_config('app.user_id', :user_id, true)"),
             {"user_id": str(actor_id)},
@@ -403,6 +409,14 @@ async def _setup_publication_race(
             full_name="Publication owner",
             actor_id=actor_id,
         )
+        await setup.execute(
+            text(
+                "UPDATE public.session SET revoked_at=now(), revoked_reason='fixture_provisioned' "
+                "WHERE id=:session_id"
+            ),
+            {"session_id": provisioning_session_id},
+        )
+        await set_test_recent_confirmation(setup, user_id=owner.id, session_id=owner.id)
         await _set_owner_context(
             setup,
             owner_id=owner.id,

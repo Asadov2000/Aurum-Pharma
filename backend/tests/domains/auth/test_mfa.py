@@ -1,4 +1,4 @@
-"""End-to-end support-account MFA flows against the database functions."""
+"""Voluntary enrollment and protected MFA flows against the database functions."""
 
 from __future__ import annotations
 
@@ -94,6 +94,30 @@ async def _new_mfa_challenge(
     return str(response.json()["challenge_token"])
 
 
+async def _start_optional_enrollment(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    access_token: str,
+    *,
+    password: str = _PASSWORD,
+) -> dict[str, object]:
+    claims = decode_access_token(access_token)
+    await db_session.execute(
+        text(
+            "SELECT set_config('app.user_id', :user_id, true), "
+            "set_config('app.auth_session_id', :session_id, true)"
+        ),
+        {"user_id": str(claims["sub"]), "session_id": str(claims["sid"])},
+    )
+    response = await client.post(
+        "/api/v1/auth/mfa/settings/enroll/start",
+        json={"password": password},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 200
+    return dict(response.json())
+
+
 async def _enroll_support(
     *,
     auth_client: AsyncClient,
@@ -121,23 +145,18 @@ async def _enroll_support(
         },
     )
     assert login.status_code == 200
-    assert login.json()["status"] == "mfa_enrollment_required"
-    assert "access_token" not in login.json()
-    challenge_token = str(login.json()["challenge_token"])
-
-    start = await auth_client.post(
-        "/api/v1/auth/mfa/enroll/start",
-        json={"challenge_token": challenge_token},
+    setup = await _start_optional_enrollment(
+        auth_client, db_session, str(login.json()["access_token"])
     )
-    assert start.status_code == 200
-    setup = start.json()
+    challenge_token = str(setup["challenge_token"])
     secret = str(setup["secret"])
     recovery_codes = [str(code) for code in setup["recovery_codes"]]
     first_totp = _totp_code(secret, base_time)
 
     confirm = await auth_client.post(
-        "/api/v1/auth/mfa/enroll/confirm",
+        "/api/v1/auth/mfa/settings/enroll/confirm",
         json={"challenge_token": challenge_token, "code": first_totp},
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
     )
     assert confirm.status_code == 200
     access_token = str(confirm.json()["access_token"])
@@ -190,9 +209,9 @@ async def test_support_login_requires_password_before_mfa_challenge(
     assert missing.status_code == 401
     assert wrong.status_code == 401
     assert accepted.status_code == 200
-    assert accepted.json()["status"] == "mfa_enrollment_required"
-    assert "access_token" not in accepted.json()
-    assert "aurum_refresh_token=" not in accepted.headers.get("set-cookie", "")
+    assert "access_token" in accepted.json()
+    assert decode_access_token(str(accepted.json()["access_token"])).get("mfa_at") is None
+    assert "aurum_refresh_token=" in accepted.headers.get("set-cookie", "")
     assert accepted.headers["cache-control"] == "no-store"
     assert accepted.headers["pragma"] == "no-cache"
 
@@ -214,29 +233,28 @@ async def test_active_owner_enrolls_mfa_and_keeps_tenant_context(
         email="mfa-owner@aurum.tj",
         full_name="MFA Owner",
     )
+    owner.password_hash = hash_password(_PASSWORD)
+    await db_session.flush()
     base_time = utc_now() - timedelta(seconds=90)
     monkeypatch.setattr(security_module, "utc_now", lambda: base_time)
 
     await _seed_code(db_session, owner.email, code="123456")
     login = await auth_client.post(
         "/api/v1/auth/login/verify",
-        json={"email": owner.email, "code": "123456"},
+        json={"email": owner.email, "code": "123456", "password": _PASSWORD},
     )
     assert login.status_code == 200
-    assert login.json()["status"] == "mfa_enrollment_required"
-    challenge_token = str(login.json()["challenge_token"])
-
-    start = await auth_client.post(
-        "/api/v1/auth/mfa/enroll/start",
-        json={"challenge_token": challenge_token},
+    setup = await _start_optional_enrollment(
+        auth_client, db_session, str(login.json()["access_token"])
     )
-    assert start.status_code == 200
-    secret = str(start.json()["secret"])
+    challenge_token = str(setup["challenge_token"])
+    secret = str(setup["secret"])
     first_totp = _totp_code(secret, base_time)
 
     confirm = await auth_client.post(
-        "/api/v1/auth/mfa/enroll/confirm",
+        "/api/v1/auth/mfa/settings/enroll/confirm",
         json={"challenge_token": challenge_token, "code": first_totp},
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
     )
     assert confirm.status_code == 200
     access_token = str(confirm.json()["access_token"])
@@ -781,7 +799,7 @@ async def test_dangerous_support_write_requires_recent_mfa(
     assert readable.status_code == 200
     assert blocked.status_code == 403
     assert blocked.json()["error"]["details"] == {
-        "reason": "mfa_step_up_required",
+        "reason": "password_step_up_required",
     }
 
 
@@ -828,21 +846,21 @@ async def test_support_mfa_flow_works_through_real_app_and_support_pools(
             json={"email": email, "code": code, "password": _PASSWORD},
         )
         assert login.status_code == 200
-        assert login.json()["status"] == "mfa_enrollment_required"
-        challenge_token = str(login.json()["challenge_token"])
-
         enrollment = await client.post(
-            "/api/v1/auth/mfa/enroll/start",
-            json={"challenge_token": challenge_token},
+            "/api/v1/auth/mfa/settings/enroll/start",
+            json={"password": _PASSWORD},
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
         )
         assert enrollment.status_code == 200
+        challenge_token = str(enrollment.json()["challenge_token"])
         secret = str(enrollment.json()["secret"])
         confirmation = await client.post(
-            "/api/v1/auth/mfa/enroll/confirm",
+            "/api/v1/auth/mfa/settings/enroll/confirm",
             json={
                 "challenge_token": challenge_token,
                 "code": _totp_code(secret, utc_now()),
             },
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
         )
         assert confirmation.status_code == 200
 

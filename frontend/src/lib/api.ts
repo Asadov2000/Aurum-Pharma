@@ -175,7 +175,12 @@ export function requestStepUpAccessToken(): Promise<string | null> {
 export function isMfaStepUpRequired(error: AxiosError): boolean {
   if (error.response?.status !== 403) return false;
   const data = error.response.data as { error?: { details?: { reason?: unknown } } } | undefined;
-  return data?.error?.details?.reason === "mfa_step_up_required";
+  const reason = data?.error?.details?.reason;
+  return (
+    reason === "mfa_step_up_required" ||
+    reason === "password_step_up_required" ||
+    reason === "password_setup_required"
+  );
 }
 
 export function isSupportAccessInactive(error: AxiosError): boolean {
@@ -229,4 +234,9 @@ export function withoutAuth(config?: AxiosRequestConfig): AxiosRequestConfig {
 
 export function withoutRefresh(config?: AxiosRequestConfig): AxiosRequestConfig {
   return { ...(config ?? {}), _skipRefresh: true } as AxiosRequestConfig;
+}
+
+// A proof request must not recursively open the dialog that is submitting it.
+export function withoutStepUp(config?: AxiosRequestConfig): AxiosRequestConfig {
+  return { ...(config ?? {}), _skipRefresh: true, _stepUpRetry: true } as AxiosRequestConfig;
 }

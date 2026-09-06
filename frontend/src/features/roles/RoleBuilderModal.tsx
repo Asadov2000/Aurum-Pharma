@@ -667,8 +667,11 @@ export function RoleBuilderModal({
                                     </Badge>
                                   ) : null}
                                   {permission.requires_step_up ? (
-                                    <Badge tone="info" title="MFA при использовании функции">
-                                      MFA
+                                    <Badge
+                                      tone="info"
+                                      title="Подтверждение паролем при использовании функции"
+                                    >
+                                      Подтверждение
                                     </Badge>
                                   ) : null}
                                   {permission.requires_confirmation && !permission.is_dangerous ? (
@@ -750,7 +753,9 @@ export function RoleBuilderModal({
                 {pendingDangerousSubmission.permissions.map((permission) => (
                   <li key={permission.code}>
                     {permission.name}
-                    {permission.requires_step_up ? " — MFA при использовании" : null}
+                    {permission.requires_step_up
+                      ? " — подтверждение паролем при использовании"
+                      : null}
                   </li>
                 ))}
               </ul>

@@ -37,6 +37,8 @@ vi.mock("@/features/auth/hooks", () => ({
   }),
 }));
 
+vi.mock("@/features/auth/AccountSecuritySurface", () => ({ default: () => null }));
+
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => (
     <a href={to} {...props}>

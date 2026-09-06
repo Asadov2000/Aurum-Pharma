@@ -112,6 +112,37 @@ class MfaStepUpRequest(BaseModel):
     code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
+class AccountMfaSettingsResponse(BaseModel):
+    enabled: bool
+    prompt_pending: bool
+    has_password: bool
+
+
+class AccountSecurityActionResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+
+
+class PasswordConfirmationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class PasswordSetupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=12, max_length=128)
+
+
+class AccountMfaEnrollmentResponse(MfaEnrollmentStartResponse):
+    challenge_token: str
+
+
+class AccountMfaDisableRequest(PasswordConfirmationRequest):
+    """Confirm disabling MFA with the password of the signed-in account."""
+
+
 class RefreshRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

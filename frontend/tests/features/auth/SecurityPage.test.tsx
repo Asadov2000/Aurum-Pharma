@@ -8,6 +8,10 @@ const listActiveSessions = vi.fn();
 const revokeActiveSession = vi.fn();
 const revokeOtherSessions = vi.fn();
 
+vi.mock("@/features/auth/MfaSettingsPanel", () => ({
+  MfaSettingsPanel: () => <div>Настройки двухфакторной защиты</div>,
+}));
+
 vi.mock("@/features/auth/api", () => ({
   fetchMe: vi.fn(),
   listActiveSessions: (...args: unknown[]) => listActiveSessions(...args),

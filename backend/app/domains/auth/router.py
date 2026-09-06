@@ -23,6 +23,10 @@ from app.core.security import generate_device_id
 from app.domains.auth.models import UserPreferences
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
+    AccountMfaDisableRequest,
+    AccountMfaEnrollmentResponse,
+    AccountMfaSettingsResponse,
+    AccountSecurityActionResponse,
     ActiveSessionResponse,
     LoginCodeRequest,
     LoginCodeResponse,
@@ -36,6 +40,8 @@ from app.domains.auth.schemas import (
     MfaEnrollmentStartResponse,
     MfaRecoveryRequest,
     MfaStepUpRequest,
+    PasswordConfirmationRequest,
+    PasswordSetupRequest,
     RefreshRequest,
     SessionListResponse,
     SessionRevokeResponse,
@@ -233,6 +239,171 @@ async def verify_login_code(
         access_token=result.access_token,
         expires_in=result.expires_in,
     )
+
+
+def _account_session_id(user: CurrentUser) -> UUID:
+    if user.session_id is None:
+        raise AuthenticationError("Authenticated session is missing")
+    return user.session_id
+
+
+@router.get("/mfa/settings", response_model=AccountMfaSettingsResponse)
+async def get_account_mfa_settings(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+) -> AccountMfaSettingsResponse:
+    _set_auth_no_store(response)
+    record = await service.account_mfa_settings(
+        user_id=user.user_id, session_id=_account_session_id(user)
+    )
+    enabled = record.status in {"active", "recovery_pending"}
+    return AccountMfaSettingsResponse(
+        enabled=enabled,
+        prompt_pending=not enabled and record.prompt_dismissed_at is None,
+        has_password=record.password_configured,
+    )
+
+
+@router.post("/mfa/settings/dismiss", response_model=AccountSecurityActionResponse)
+async def dismiss_account_mfa_prompt(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+) -> AccountSecurityActionResponse:
+    _set_auth_no_store(response)
+    await service.dismiss_mfa_prompt(user_id=user.user_id, session_id=_account_session_id(user))
+    return AccountSecurityActionResponse()
+
+
+@router.post("/mfa/settings/enroll/start", response_model=AccountMfaEnrollmentResponse)
+async def start_account_mfa_enrollment(
+    payload: PasswordConfirmationRequest,
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+) -> AccountMfaEnrollmentResponse:
+    _set_auth_no_store(response)
+    challenge_token, setup = await service.start_account_mfa_enrollment(
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+        password=payload.password,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return AccountMfaEnrollmentResponse(
+        challenge_token=challenge_token,
+        secret=setup.secret,
+        provisioning_uri=setup.provisioning_uri,
+        recovery_codes=setup.recovery_codes,
+        expires_in=setup.expires_in,
+    )
+
+
+@router.post("/mfa/settings/enroll/confirm", response_model=TokenResponse)
+async def complete_account_mfa_enrollment(
+    payload: MfaCodeRequest,
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+) -> TokenResponse:
+    _set_auth_no_store(response)
+    device_id = _device_id_from_request(request)
+    result = await service.complete_account_mfa_enrollment(
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+        challenge_token=payload.challenge_token,
+        code=payload.code,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        device_id=device_id,
+    )
+    _set_device_cookie(response, device_id)
+    _set_refresh_cookie(response, result.refresh_token)
+    return TokenResponse(access_token=result.access_token, expires_in=result.expires_in)
+
+
+@router.post("/mfa/settings/disable", response_model=TokenResponse)
+async def disable_account_mfa(
+    payload: AccountMfaDisableRequest,
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+) -> TokenResponse:
+    _set_auth_no_store(response)
+    device_id = _device_id_from_request(request)
+    result = await service.disable_account_mfa(
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+        password=payload.password,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        device_id=device_id,
+    )
+    _set_device_cookie(response, device_id)
+    _set_refresh_cookie(response, result.refresh_token)
+    return TokenResponse(access_token=result.access_token, expires_in=result.expires_in)
+
+
+@router.post(
+    "/password/setup/code", response_model=LoginCodeResponse, status_code=status.HTTP_202_ACCEPTED
+)
+async def request_account_password_setup_code(
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+) -> LoginCodeResponse:
+    _set_auth_no_store(response)
+    code = await service.request_password_setup_code(
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return LoginCodeResponse(dev_code=code if get_settings().ENVIRONMENT == "development" else None)
+
+
+@router.post("/password/setup", response_model=AccountSecurityActionResponse)
+async def setup_account_password(
+    payload: PasswordSetupRequest,
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+) -> AccountSecurityActionResponse:
+    _set_auth_no_store(response)
+    await service.setup_account_password(
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+        code=payload.code,
+        new_password=payload.new_password,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return AccountSecurityActionResponse()
+
+
+@router.post("/password/confirm", response_model=TokenResponse)
+async def confirm_account_password(
+    payload: PasswordConfirmationRequest,
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+) -> TokenResponse:
+    _set_auth_no_store(response)
+    token = await service.confirm_account_password(
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+        password=payload.password,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return TokenResponse(access_token=token, expires_in=get_settings().ACCESS_TOKEN_MINUTES * 60)
 
 
 @router.post(

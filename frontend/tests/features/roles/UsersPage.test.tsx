@@ -501,7 +501,9 @@ describe("UsersPage", () => {
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Передать владение" }));
     expect(screen.getByText("Передать владение аптекой?")).toBeInTheDocument();
-    expect(screen.getByText(/при следующем входе потребуется настроить MFA/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/перед принятием владения потребуется подтвердить действие/i),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Отправить запрос" }));
 

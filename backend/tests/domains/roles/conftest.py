@@ -24,6 +24,7 @@ from app.domains.roles.models import (
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 from tests.platform_access_helpers import create_test_platform_user
+from tests.role_version_helpers import set_test_recent_confirmation
 
 
 @pytest_asyncio.fixture
@@ -117,6 +118,7 @@ async def make_owner(db_session: AsyncSession):  # type: ignore[no-untyped-def]
             text("SELECT set_config('app.user_id', :user_id, true)"),
             {"user_id": str(actor.id)},
         )
+        await set_test_recent_confirmation(db_session, user_id=actor.id)
         provisioned = await RolesService(RolesRepository(db_session)).provision_owner(
             tenant_id=tenant_id,
             email=email or f"owner-{uuid4().hex[:8]}@aurum.tj",
@@ -124,6 +126,7 @@ async def make_owner(db_session: AsyncSession):  # type: ignore[no-untyped-def]
             actor_id=actor.id,
         )
         owner, _membership, _ownership, _role = provisioned
+        await set_test_recent_confirmation(db_session, user_id=owner.id)
         await db_session.execute(
             text("SELECT set_config('app.user_id', :user_id, true)"),
             {"user_id": str(owner.id)},
@@ -166,6 +169,7 @@ async def make_tenant_role(db_session: AsyncSession):  # type: ignore[no-untyped
     )
 
     async def _make(*, tenant_id, template_name: str, level: int, name: str | None = None) -> Role:
+        await set_test_recent_confirmation(db_session, user_id=support_actor.id)
         await db_session.execute(
             text("SELECT set_config('app.user_id', :user_id, true)"),
             {"user_id": str(support_actor.id)},

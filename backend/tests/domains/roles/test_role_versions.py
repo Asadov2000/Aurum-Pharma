@@ -21,7 +21,7 @@ from app.domains.roles.models import (
 )
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
-from tests.role_version_helpers import create_published_test_role
+from tests.role_version_helpers import create_published_test_role, set_test_recent_confirmation
 
 
 class TenantFactory(Protocol):
@@ -320,6 +320,7 @@ async def test_archive_rejects_replacement_outside_owner_delegation(
         permission_codes=["tenant.export.full"],
     )
     await db_session.execute(text("SELECT set_config('app.support_access_session_id', '', true)"))
+    await set_test_recent_confirmation(db_session, user_id=owner.id)
     await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))
     await db_session.execute(
         text("SELECT set_config('app.user_id', :user_id, true)"),

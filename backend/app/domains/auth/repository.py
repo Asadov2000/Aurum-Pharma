@@ -95,6 +95,13 @@ class StepUpMfaRecord:
     last_used_counter: int | None
 
 
+@dataclass(frozen=True)
+class MfaSettingsRecord:
+    status: str | None
+    prompt_dismissed_at: datetime | None
+    password_configured: bool
+
+
 class EmailCodeIssueStatus(StrEnum):
     CREATED = "created"
     RATE_LIMIT_MINUTE = "rate_limit_minute"
@@ -118,9 +125,7 @@ def _auth_user_from_row(row: RowMapping) -> AuthUserRecord:
         mfa_required=bool(
             row.get(
                 "mfa_required",
-                bool(row["is_developer"])
-                or bool(row["is_administrator"])
-                or row["mfa_status"] is not None,
+                row["mfa_status"] in {"active", "recovery_pending"},
             )
         ),
     )
@@ -841,6 +846,173 @@ class AuthRepository:
             },
         )
         return cast(UUID | None, result.scalar_one())
+
+    async def get_mfa_settings(
+        self, *, user_id: UUID, session_id: UUID
+    ) -> MfaSettingsRecord | None:
+        result = await self.session.execute(
+            text("SELECT * FROM public.lookup_account_mfa_settings(:user_id, :session_id)"),
+            {"user_id": user_id, "session_id": session_id},
+        )
+        row = result.mappings().one_or_none()
+        return (
+            MfaSettingsRecord(
+                status=cast(str | None, row["status"]),
+                prompt_dismissed_at=cast(datetime | None, row["prompt_dismissed_at"]),
+                password_configured=bool(row["password_configured"]),
+            )
+            if row is not None
+            else None
+        )
+
+    async def dismiss_mfa_prompt(self, *, user_id: UUID, session_id: UUID) -> bool:
+        return bool(
+            await self.session.scalar(
+                text("SELECT public.dismiss_account_mfa_prompt(:user_id, :session_id)"),
+                {"user_id": user_id, "session_id": session_id},
+            )
+        )
+
+    async def get_account_password_hash(self, *, user_id: UUID, session_id: UUID) -> str | None:
+        return cast(
+            str | None,
+            await self.session.scalar(
+                text("SELECT public.lookup_account_password_hash(:user_id, :session_id)"),
+                {"user_id": user_id, "session_id": session_id},
+            ),
+        )
+
+    async def confirm_password(
+        self, *, user_id: UUID, session_id: UUID, verified_password_hash: str
+    ) -> datetime | None:
+        return cast(
+            datetime | None,
+            await self.session.scalar(
+                text(
+                    "SELECT public.confirm_account_password(:user_id, :session_id, :verified_hash)"
+                ),
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "verified_hash": verified_password_hash,
+                },
+            ),
+        )
+
+    async def get_session_password_verified_at(
+        self, *, user_id: UUID, session_id: UUID
+    ) -> datetime | None:
+        return cast(
+            datetime | None,
+            await self.session.scalar(
+                text("SELECT public.lookup_auth_session_password(:user_id, :session_id)"),
+                {"user_id": user_id, "session_id": session_id},
+            ),
+        )
+
+    async def set_account_password(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        code_id: UUID,
+        candidate_hash: str,
+        password_hash: str,
+    ) -> datetime | None:
+        return cast(
+            datetime | None,
+            await self.session.scalar(
+                text(
+                    "SELECT public.set_initial_account_password("
+                    ":user_id, :session_id, :code_id, :candidate_hash, :password_hash)"
+                ),
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "code_id": code_id,
+                    "candidate_hash": candidate_hash,
+                    "password_hash": password_hash,
+                },
+            ),
+        )
+
+    async def create_authenticated_mfa_challenge(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        token_hash: str,
+        verified_password_hash: str,
+        ip_address: str,
+        user_agent: str | None,
+        expires_at: datetime,
+    ) -> MfaChallengeCreated | None:
+        result = await self.session.execute(
+            text(
+                "SELECT * FROM public.create_authenticated_mfa_challenge("
+                ":user_id, :session_id, :token_hash, :verified_hash, "
+                ":ip_address, :user_agent, :expires_at)"
+            ),
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "token_hash": token_hash,
+                "verified_hash": verified_password_hash,
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+                "expires_at": expires_at,
+            },
+        )
+        row = result.mappings().one_or_none()
+        return (
+            MfaChallengeCreated(id=cast(UUID, row["id"]), purpose=str(row["purpose"]))
+            if row
+            else None
+        )
+
+    async def is_authenticated_mfa_challenge(
+        self, *, user_id: UUID, session_id: UUID, token_hash: str
+    ) -> bool:
+        return bool(
+            await self.session.scalar(
+                text(
+                    "SELECT public.authenticated_mfa_challenge_matches("
+                    ":user_id, :session_id, :token_hash)"
+                ),
+                {"user_id": user_id, "session_id": session_id, "token_hash": token_hash},
+            )
+        )
+
+    async def disable_mfa(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        verified_password_hash: str,
+        refresh_token_hash: str,
+        user_agent: str | None,
+        ip_address: str,
+        expires_at: datetime,
+    ) -> UUID | None:
+        return cast(
+            UUID | None,
+            await self.session.scalar(
+                text(
+                    "SELECT public.disable_account_mfa("
+                    ":user_id, :session_id, :verified_hash, :refresh_hash, "
+                    ":user_agent, :ip_address, :expires_at)"
+                ),
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "verified_hash": verified_password_hash,
+                    "refresh_hash": refresh_token_hash,
+                    "user_agent": user_agent,
+                    "ip_address": ip_address,
+                    "expires_at": expires_at,
+                },
+            ),
+        )
 
     async def delete_expired_sessions(self, older_than: datetime) -> int:
         result = await self.session.execute(delete(Session).where(Session.expires_at < older_than))

@@ -23,6 +23,36 @@ from app.domains.support_access.repository import SupportAccessRepository
 from tests.platform_access_helpers import create_test_platform_user
 
 
+async def set_test_recent_confirmation(
+    session: AsyncSession, *, user_id: UUID, session_id: UUID | None = None
+) -> UUID:
+    """Bind direct service fixtures to a real authenticated confirmation session."""
+    now = datetime.now(UTC)
+    auth_session = Session(
+        id=session_id or uuid4(),
+        user_id=user_id,
+        refresh_token_hash=hash_token(f"role-confirmation-{uuid4()}"),
+        expires_at=now + timedelta(hours=1),
+        mfa_verified_at=now,
+    )
+    session.add(auth_session)
+    await session.flush()
+    await session.execute(
+        text(
+            "SELECT set_config('app.user_id', :user_id, true), "
+            "set_config('app.auth_session_id', :session_id, true), "
+            "set_config('app.mfa_verified_at', :verified_at, true), "
+            "set_config('app.password_verified_at', '', true)"
+        ),
+        {
+            "user_id": str(user_id),
+            "session_id": str(auth_session.id),
+            "verified_at": str(int(now.timestamp())),
+        },
+    )
+    return auth_session.id
+
+
 async def _get_publication_actor(session: AsyncSession):  # type: ignore[no-untyped-def]
     await session.execute(text("SELECT set_config('app.support_access_session_id', '', true)"))
     actor = session.info.get("published_role_actor")
@@ -123,10 +153,23 @@ async def provision_test_owner(
     """Provision an owner with the same authenticated support context as the API."""
 
     actor = await _get_publication_actor(session)
+    now = datetime.now(UTC)
+    auth_session = Session(
+        user_id=actor.id,
+        refresh_token_hash=hash_token(f"owner-provision-{uuid4()}"),
+        expires_at=now + timedelta(hours=1),
+        mfa_verified_at=now,
+    )
+    session.add(auth_session)
+    await session.flush()
+    await session.execute(
+        text("SELECT set_config('app.auth_session_id', :session_id, true)"),
+        {"session_id": str(auth_session.id)},
+    )
     await session.execute(text("SELECT set_config('app.support_session', 'true', true)"))
     await session.execute(
         text("SELECT set_config('app.mfa_verified_at', :verified_at, true)"),
-        {"verified_at": str(int(datetime.now(UTC).timestamp()))},
+        {"verified_at": str(int(now.timestamp()))},
     )
     await session.execute(
         text("SELECT set_config('app.user_id', :user_id, true)"),
