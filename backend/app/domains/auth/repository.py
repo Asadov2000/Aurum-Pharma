@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from typing import cast
@@ -247,6 +247,15 @@ class AuthRepository:
                 text("SELECT * FROM public.lookup_auth_user_by_id(:user_id, :session_id)"),
                 {"user_id": user_id, "session_id": session_id},
             )
+            row = result.mappings().one_or_none()
+            if row is None:
+                return None
+            requirement = await self.session.scalar(
+                text("SELECT public.lookup_auth_account_mfa_requirement(:user_id, :session_id)"),
+                {"user_id": user_id, "session_id": session_id},
+            )
+            if requirement is None:
+                return None
         except DBAPIError as error:
             # A revoked/expired sid is deliberately rejected inside the
             # SECURITY DEFINER function. At the auth boundary it is an invalid
@@ -254,8 +263,7 @@ class AuthRepository:
             if _is_insufficient_privilege(error):
                 return None
             raise
-        row = result.mappings().one_or_none()
-        return _auth_user_from_row(row) if row is not None else None
+        return replace(_auth_user_from_row(row), mfa_required=bool(requirement))
 
     async def get_active_platform_capabilities(
         self,
