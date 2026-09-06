@@ -1605,6 +1605,7 @@ jobs:
           file: backend/Dockerfile.production
           pull: true
           load: true
+          no-cache-filters: runtime
           tags: aurum-backend:ci
           cache-from: type=gha,scope=aurum-production-backend
           cache-to: type=gha,mode=max,scope=aurum-production-backend,ignore-error=true
@@ -1616,6 +1617,7 @@ jobs:
           file: frontend/Dockerfile.production
           pull: true
           load: true
+          no-cache-filters: runtime
           tags: aurum-gateway:ci
           cache-from: type=gha,scope=aurum-production-gateway
           cache-to: type=gha,mode=max,scope=aurum-production-gateway,ignore-error=true
@@ -1627,6 +1629,7 @@ jobs:
           file: infra/backup/Dockerfile
           pull: true
           load: true
+          no-cache-filters: runtime
           tags: |
             aurum-backup:ci
             aurum-pharma-backup:ci

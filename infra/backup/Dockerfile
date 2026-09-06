@@ -29,7 +29,7 @@ RUN go mod init aurum.local/minio-client \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
         -o /out/mc github.com/minio/mc
 
-FROM postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+FROM postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 AS runtime
 
 COPY --from=tools-builder /out/mc /usr/local/bin/mc
 COPY --from=tools-builder /out/restic /usr/local/bin/restic
