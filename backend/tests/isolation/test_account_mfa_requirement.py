@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -48,10 +46,11 @@ async def test_account_mfa_requirement_rejects_foreign_and_revoked_sessions(
                 await connection.scalar(lookup, {"user_id": user_id, "session_id": session_id})
             ) is False
 
-        with pytest.raises(DBAPIError) as foreign_error:
-            async with app_engine.connect() as connection:
-                await connection.execute(lookup, {"user_id": uuid4(), "session_id": session_id})
-        assert getattr(foreign_error.value.orig, "sqlstate", None) == "42501"
+        async with app_engine.connect() as connection:
+            assert (
+                await connection.scalar(lookup, {"user_id": uuid4(), "session_id": session_id})
+                is None
+            )
 
         async with db_engine.begin() as connection:
             await connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
@@ -60,10 +59,11 @@ async def test_account_mfa_requirement_rejects_foreign_and_revoked_sessions(
                 {"session_id": session_id},
             )
 
-        with pytest.raises(DBAPIError) as revoked_error:
-            async with app_engine.connect() as connection:
-                await connection.execute(lookup, {"user_id": user_id, "session_id": session_id})
-        assert getattr(revoked_error.value.orig, "sqlstate", None) == "42501"
+        async with app_engine.connect() as connection:
+            assert (
+                await connection.scalar(lookup, {"user_id": user_id, "session_id": session_id})
+                is None
+            )
     finally:
         await app_engine.dispose()
         async with maintenance_engine.begin() as connection:

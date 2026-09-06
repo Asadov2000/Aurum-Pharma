@@ -87,7 +87,7 @@ describe("RoleBuilderModal", () => {
     expect(screen.getAllByText("Касса").length).toBeGreaterThan(0);
     expect(screen.getByText("Продажа товаров на кассе и оформление чеков.")).toBeInTheDocument();
     expect(screen.getByText("критично")).toBeInTheDocument();
-    expect(screen.getByText("MFA")).toBeInTheDocument();
+    expect(screen.getByText("Подтверждение")).toBeInTheDocument();
     expect(screen.getByText("По точкам")).toBeInTheDocument();
     expect(screen.queryByText(/Уровень роли/i)).not.toBeInTheDocument();
   });
@@ -298,7 +298,7 @@ describe("RoleBuilderModal", () => {
     expect(createRole).not.toHaveBeenCalled();
   });
 
-  it("also confirms a permission that requires MFA when used", async () => {
+  it("also confirms a permission that requires reauthentication when used", async () => {
     listPermissions.mockResolvedValue([
       {
         ...PERMISSIONS[1],
@@ -320,7 +320,7 @@ describe("RoleBuilderModal", () => {
     expect(
       await screen.findByRole("dialog", { name: "Подтвердите расширение доступа" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/MFA при использовании/)).toBeInTheDocument();
+    expect(screen.getByText(/подтверждение паролем при использовании/)).toBeInTheDocument();
     expect(createRole).not.toHaveBeenCalled();
   });
 

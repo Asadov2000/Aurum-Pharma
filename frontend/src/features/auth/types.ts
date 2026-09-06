@@ -26,6 +26,20 @@ export interface MfaEnrollmentSetup {
   expires_in: number;
 }
 
+export interface MfaSettings {
+  enabled: boolean;
+  prompt_pending: boolean;
+  has_password: boolean;
+}
+
+export interface MfaSettingsEnrollment extends MfaEnrollmentSetup {
+  challenge_token: string;
+}
+
+export interface MfaDisableRequest {
+  password: string;
+}
+
 export interface MeResponse {
   id: string;
   email: string;

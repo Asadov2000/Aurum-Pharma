@@ -14,15 +14,21 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import timedelta
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import SupportSessionLocal
-from app.core.security import derive_mfa_encryption_key, hash_password
+from app.core.security import (
+    derive_mfa_encryption_key,
+    generate_refresh_token,
+    hash_password,
+    hash_token,
+)
 from app.core.time import utc_now
-from app.domains.auth.models import AppUser
+from app.domains.auth.models import AppUser, Session
 from app.domains.foundation.models import Tenant
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
@@ -189,12 +195,33 @@ async def main() -> None:
                 text("SELECT set_config('app.mfa_verified_at', :verified_at, true)"),
                 {"verified_at": str(int(now.timestamp()))},
             )
-            owner, _membership, _ownership, _role = await RolesService(roles_repo).provision_owner(
-                tenant_id=tenant.id,
-                email="owner@aurum.tj",
-                full_name="Demo Owner",
-                actor_id=developer.id,
+            provisioning_session = Session(
+                user_id=developer.id,
+                refresh_token_hash=hash_token(generate_refresh_token()),
+                user_agent="Aurum isolated E2E provisioning",
+                expires_at=now + timedelta(minutes=5),
+                mfa_verified_at=now,
             )
+            session.add(provisioning_session)
+            await session.flush()
+            await session.execute(
+                text("SELECT set_config('app.auth_session_id', :session_id, true)"),
+                {"session_id": str(provisioning_session.id)},
+            )
+            try:
+                owner, _membership, _ownership, _role = await RolesService(
+                    roles_repo
+                ).provision_owner(
+                    tenant_id=tenant.id,
+                    email="owner@aurum.tj",
+                    full_name="Demo Owner",
+                    actor_id=developer.id,
+                )
+            finally:
+                # On error the enclosing transaction rolls back the entire seed.
+                provisioning_session.revoked_at = utc_now()
+                provisioning_session.revoked_reason = "seed_provisioning_completed"
+            await session.flush()
             owner.password_hash = hash_password("Owner1234")
             owner.activated_at = now
             await session.execute(

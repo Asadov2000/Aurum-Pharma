@@ -408,7 +408,7 @@ async def test_administrator_and_stale_mfa_cannot_read_grants(
 
     assert administrator_response.status_code == 403
     assert stale_response.status_code == 403
-    assert stale_response.json()["error"]["details"]["reason"] == "mfa_step_up_required"
+    assert stale_response.json()["error"]["details"]["reason"] == "password_step_up_required"
     assert list_response.status_code == 200, list_response.text
     listed_grant = list_response.json()["items"][0]
     assert listed_grant["user_id"] == str(developer.id)

@@ -275,6 +275,7 @@ async def _seed_request_db_context(request: Request, session: AsyncSession) -> N
     )
     auth_session_id = getattr(request.state, "auth_session_id", None)
     mfa_verified_at = getattr(request.state, "mfa_verified_at", None)
+    password_verified_at = getattr(request.state, "password_verified_at", None)
     request_id = getattr(request.state, "request_id", None)
     if request_id is not None:
         await session.execute(
@@ -306,6 +307,11 @@ async def _seed_request_db_context(request: Request, session: AsyncSession) -> N
         await session.execute(
             text("SELECT set_config('app.mfa_verified_at', :v, true)"),
             {"v": str(mfa_verified_at)},
+        )
+    if isinstance(password_verified_at, int) and not isinstance(password_verified_at, bool):
+        await session.execute(
+            text("SELECT set_config('app.password_verified_at', :v, true)"),
+            {"v": str(password_verified_at)},
         )
     if bool(getattr(request.state, "is_support_session", False)):
         await session.execute(
@@ -358,6 +364,7 @@ class CurrentUser:
     is_administrator: bool
     session_id: UUID | None = None
     mfa_verified_at: datetime | None = None
+    password_verified_at: datetime | None = None
     platform_capabilities: frozenset[str] = field(default_factory=frozenset)
     permissions: set[str] = field(default_factory=set)
     permission_scopes: dict[str, frozenset[UUID] | None] = field(default_factory=dict)
@@ -566,6 +573,7 @@ async def current_user(
     token_tenant_id = _optional_uuid_claim(claims, "tenant_id")
     session_id = _required_uuid_claim(claims, "sid")
     mfa_verified_at = _optional_timestamp_claim(claims, "mfa_at")
+    password_verified_at = _optional_timestamp_claim(claims, "password_at")
 
     is_dev = bool(claims.get("is_developer", False))
     is_admin = bool(claims.get("is_administrator", False))
@@ -594,7 +602,7 @@ async def current_user(
         raise AuthenticationError("User is inactive")
     if identity.is_developer is not is_dev or identity.is_administrator is not is_admin:
         raise AuthenticationError("Session claims are outdated")
-    if is_dev or is_admin:
+    if identity.mfa_required:
         await _validate_mfa_session(
             repository=auth_repo,
             identity=identity,
@@ -602,6 +610,16 @@ async def current_user(
             session_id=session_id,
             mfa_verified_at=mfa_verified_at,
         )
+    if password_verified_at is not None:
+        stored_password_at = await auth_repo.get_session_password_verified_at(
+            user_id=user_id, session_id=session_id
+        )
+        if (
+            stored_password_at is None
+            or password_verified_at > stored_password_at
+            or password_verified_at > datetime.now(UTC) + timedelta(minutes=1)
+        ):
+            raise AuthenticationError("Password confirmation is inactive")
     if (is_dev or is_admin) and token_tenant_id is not None and support_access_session_id is None:
         raise AuthenticationError("Support tenant access requires a scoped support session")
     if (
@@ -636,6 +654,7 @@ async def current_user(
         is_administrator=is_admin,
         session_id=session_id,
         mfa_verified_at=mfa_verified_at,
+        password_verified_at=password_verified_at,
         platform_capabilities=platform_capabilities,
         permissions=authz.permissions,
         permission_scopes=authz.permission_scopes,
@@ -666,19 +685,20 @@ async def current_user(
 
 
 def _ensure_recent_mfa(user: CurrentUser) -> None:
-    verified_at = user.mfa_verified_at
-    if verified_at is None:
-        raise PermissionDeniedError(
-            "Recent MFA verification required",
-            details={"reason": "mfa_step_up_required"},
-        )
+    """Legacy dependency name; accept an actual recent password or MFA proof."""
     now = datetime.now(UTC)
     max_age = timedelta(minutes=get_settings().MFA_STEP_UP_MINUTES)
-    if verified_at > now + timedelta(minutes=1) or now - verified_at > max_age:
-        raise PermissionDeniedError(
-            "Recent MFA verification required",
-            details={"reason": "mfa_step_up_required"},
-        )
+    for verified_at in (user.password_verified_at, user.mfa_verified_at):
+        if (
+            verified_at is not None
+            and verified_at <= now + timedelta(minutes=1)
+            and now - verified_at <= max_age
+        ):
+            return
+    raise PermissionDeniedError(
+        "Recent password confirmation required",
+        details={"reason": "password_step_up_required"},
+    )
 
 
 async def require_recent_account_mfa(
@@ -732,7 +752,7 @@ def require_platform_capability(code: str):  # type: ignore[no-untyped-def]
 
 
 def require_recent_platform_capability(code: str):  # type: ignore[no-untyped-def]
-    """Require a platform capability plus a recent MFA step-up."""
+    """Require a platform capability plus recent password or MFA confirmation."""
 
     async def _checker(
         user: Annotated[CurrentUser, Depends(require_recent_support_mfa)],

@@ -357,6 +357,7 @@ def create_access_token(
     is_administrator: bool,
     session_id: UUID,
     mfa_verified_at: datetime | None = None,
+    password_verified_at: datetime | None = None,
 ) -> str:
     """Access token = short-lived JWT with identity claims only.
 
@@ -370,6 +371,7 @@ def create_access_token(
         "is_administrator": is_administrator,
         "sid": str(session_id),
         "mfa_at": int(mfa_verified_at.timestamp()) if mfa_verified_at else None,
+        "password_at": int(password_verified_at.timestamp()) if password_verified_at else None,
     }
     return encode_token(
         str(user_id),

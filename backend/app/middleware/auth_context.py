@@ -68,6 +68,13 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
                     else None
                 )
                 is_developer = bool(claims.get("is_developer", False))
+                raw_password_verified_at = claims.get("password_at")
+                request.state.password_verified_at = (
+                    raw_password_verified_at
+                    if isinstance(raw_password_verified_at, int)
+                    and not isinstance(raw_password_verified_at, bool)
+                    else None
+                )
                 is_administrator = bool(claims.get("is_administrator", False))
                 is_admin_route = request.url.path == "/api/v1/admin" or request.url.path.startswith(
                     "/api/v1/admin/"

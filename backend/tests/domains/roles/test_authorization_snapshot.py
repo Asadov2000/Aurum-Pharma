@@ -12,6 +12,7 @@ from app.domains.foundation.models import Branch
 from app.domains.roles.models import Permission, RolePermission, UserAssignment
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
+from tests.role_version_helpers import set_test_recent_confirmation
 
 
 async def _assign(
@@ -368,6 +369,7 @@ async def test_tenant_policy_revisions_do_not_cross_tenants(
     first_before = await repository.authorization_snapshot(first_user.id, first_tenant.id)
     second_before = await repository.authorization_snapshot(second_user.id, second_tenant.id)
 
+    await set_test_recent_confirmation(db_session, user_id=owner.id)
     await db_session.execute(
         text("SELECT set_config('app.user_id', :user_id, true)"),
         {"user_id": str(owner.id)},

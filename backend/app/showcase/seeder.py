@@ -18,9 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.schema import Table
 from sqlalchemy.sql.selectable import FromClause
 
-from app.core.security import hash_password
+from app.core.security import generate_refresh_token, hash_password, hash_token
 from app.core.time import utc_now
-from app.domains.auth.models import AppUser
+from app.domains.auth.models import AppUser, Session
 from app.domains.billing.models import SubscriptionPlan, TenantSubscription
 from app.domains.catalog.models import Barcode, MasterCatalog, TenantCatalog
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
@@ -2314,12 +2314,31 @@ async def seed_showcase_dataset(
         text("SELECT set_config('app.mfa_verified_at', :verified_at, true)"),
         {"verified_at": str(int(utc_now().timestamp()))},
     )
-    await seed_extra_tenants(
-        session,
-        count=profile.extra_tenants,
-        today=today,
-        actor_id=platform_actor_id,
+    provisioning_now = utc_now()
+    provisioning_session = Session(
+        user_id=platform_actor_id,
+        refresh_token_hash=hash_token(generate_refresh_token()),
+        user_agent="Aurum showcase provisioning",
+        expires_at=provisioning_now + timedelta(minutes=5),
+        mfa_verified_at=provisioning_now,
     )
+    session.add(provisioning_session)
+    await session.flush()
+    await session.execute(
+        text("SELECT set_config('app.auth_session_id', :session_id, true)"),
+        {"session_id": str(provisioning_session.id)},
+    )
+    try:
+        await seed_extra_tenants(
+            session,
+            count=profile.extra_tenants,
+            today=today,
+            actor_id=platform_actor_id,
+        )
+    finally:
+        # A failed seed rolls back; successful provisioning leaves no usable session.
+        provisioning_session.revoked_at = utc_now()
+        provisioning_session.revoked_reason = "seed_provisioning_completed"
     await session.flush()
 
     return ShowcaseSummary(

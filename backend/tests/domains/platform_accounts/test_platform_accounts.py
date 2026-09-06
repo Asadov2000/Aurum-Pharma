@@ -471,4 +471,4 @@ async def test_platform_lifecycle_requires_recent_mfa(
     )
 
     assert response.status_code == 403
-    assert response.json()["error"]["details"] == {"reason": "mfa_step_up_required"}
+    assert response.json()["error"]["details"] == {"reason": "password_step_up_required"}

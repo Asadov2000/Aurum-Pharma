@@ -42,7 +42,7 @@ test.describe("Auth", () => {
     await expect(page.getByRole("link", { name: "Управление", exact: true })).toHaveCount(0);
   });
 
-  test("retries a protected request after global MFA step-up", async ({ page }) => {
+  test("retries a protected request after password confirmation", async ({ page }) => {
     await loginInBrowser(page, DEV);
     makeSupportSessionRequireStepUp(DEV.email);
 
@@ -62,7 +62,7 @@ test.describe("Auth", () => {
       (response) =>
         response.url().includes("/api/v1/admin/audit/global") && response.status() === 200,
     );
-    await dialog.getByLabel("Код подтверждения").fill(currentTotp(DEV.totpSecret!));
+    await dialog.getByLabel("Пароль аккаунта").fill(DEV.password);
     await dialog.getByRole("button", { name: "Подтвердить" }).click();
     await retriedRequest;
     await expect(dialog).toBeHidden();

@@ -1,4 +1,4 @@
-"""Critical mutations must keep their recent-MFA route boundary."""
+"""Critical mutations must keep their recent account-confirmation route boundary."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _direct_dependencies(route: APIRoute) -> set[object]:
     return {dependency.call for dependency in route.dependant.dependencies}
 
 
-def test_critical_inventory_and_refund_mutations_require_recent_mfa() -> None:
+def test_critical_inventory_and_refund_mutations_require_recent_confirmation() -> None:
     protected_routes = (
         (incoming_router, "/api/v1/incoming/{document_id}/accept", "POST"),
         (incoming_router, "/api/v1/incoming/{document_id}/reject", "POST"),

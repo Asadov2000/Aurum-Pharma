@@ -56,6 +56,7 @@ class AppUser(Base):
     full_name: Mapped[str] = mapped_column(Text, nullable=False)
     phone: Mapped[str | None] = mapped_column(Text)
     password_hash: Mapped[str | None] = mapped_column(Text)
+    mfa_prompt_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_configured: Mapped[bool] = mapped_column(
         Boolean,
         Computed("password_hash IS NOT NULL", persisted=True),
@@ -241,6 +242,7 @@ class Session(Base):
         ForeignKey("session.id", ondelete="SET NULL"),
     )
     mfa_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SupportMfa(Base):
@@ -315,6 +317,9 @@ class AuthMfaChallenge(Base):
         server_default=text("gen_random_uuid()"),
     )
     token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    initiating_session_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("session.id", ondelete="CASCADE")
+    )
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("app_user.id", ondelete="CASCADE"),

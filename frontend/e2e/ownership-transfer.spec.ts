@@ -19,33 +19,30 @@ interface EnrollmentResult {
 }
 
 async function enrollAccount(api: APIRequestContext, email: string): Promise<EnrollmentResult> {
+  const tokens = await apiLogin(api, { email, password: "" });
+  const headers = { Authorization: `Bearer ${tokens.access_token}` };
   clearLoginRateLimit(email);
-  const codeResponse = await api.post(`${API}/auth/login/code`, { data: { email } });
+  const codeResponse = await api.post(`${API}/auth/password/setup/code`, { headers, data: {} });
   expect(codeResponse.ok()).toBe(true);
-  const { dev_code: devCode } = (await codeResponse.json()) as { dev_code: string | null };
-  expect(devCode).toBeTruthy();
-
-  const verifyResponse = await api.post(`${API}/auth/login/verify`, {
-    data: { email, code: devCode },
+  const { dev_code: devCode } = (await codeResponse.json()) as { dev_code: string };
+  const password = uniqueName("Ownership-password");
+  const passwordResponse = await api.post(`${API}/auth/password/setup`, {
+    headers,
+    data: { code: devCode, new_password: password },
   });
-  expect(verifyResponse.ok()).toBe(true);
-  const challenge = (await verifyResponse.json()) as {
-    status: "mfa_enrollment_required";
-    challenge_token: string;
-  };
-  expect(challenge.status).toBe("mfa_enrollment_required");
-
-  const startResponse = await api.post(`${API}/auth/mfa/enroll/start`, {
-    data: { challenge_token: challenge.challenge_token },
+  expect(passwordResponse.ok()).toBe(true);
+  const startResponse = await api.post(`${API}/auth/mfa/settings/enroll/start`, {
+    headers,
+    data: { password },
   });
   expect(startResponse.ok()).toBe(true);
-  const { secret } = (await startResponse.json()) as { secret: string };
-
-  const confirmResponse = await api.post(`${API}/auth/mfa/enroll/confirm`, {
-    data: {
-      challenge_token: challenge.challenge_token,
-      code: currentTotp(secret),
-    },
+  const { secret, challenge_token: challengeToken } = (await startResponse.json()) as {
+    secret: string;
+    challenge_token: string;
+  };
+  const confirmResponse = await api.post(`${API}/auth/mfa/settings/enroll/confirm`, {
+    headers,
+    data: { challenge_token: challengeToken, code: currentTotp(secret) },
   });
   expect(confirmResponse.ok()).toBe(true);
   return {
@@ -101,7 +98,9 @@ test.describe("Protected ownership transfer", () => {
         await page.getByRole("menuitem", { name: "Передать владение" }).click();
 
         const requestDialog = page.getByRole("dialog", { name: "Передать владение аптекой?" });
-        await expect(requestDialog).toContainText("при следующем входе потребуется настроить MFA");
+        await expect(requestDialog).toContainText(
+          "перед принятием владения потребуется подтвердить действие",
+        );
         const transferCreated = page.waitForResponse(
           (response) =>
             response.url().endsWith("/api/v1/ownership-transfers") &&
