@@ -11,10 +11,14 @@ case "$mode" in
 esac
 
 lock_file="${AURUM_BACKUP_LOCK_FILE:-/run/lock/aurum-recovery.lock}"
+lock_wait_seconds="${AURUM_RECOVERY_LOCK_WAIT_SECONDS:-600}"
+case "$lock_wait_seconds" in
+    ""|*[!0-9]*) echo "Invalid recovery lock wait" >&2; exit 64 ;;
+esac
 exec 9>"$lock_file"
-if ! flock -n 9; then
-    echo "Another Aurum recovery cycle is active; this run is skipped"
-    exit 0
+if ! flock -w "$lock_wait_seconds" 9; then
+    echo "Timed out waiting for the Aurum recovery lock" >&2
+    exit 75
 fi
 
 compose() {

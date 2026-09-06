@@ -14,12 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.core.errors import PermissionDeniedError, ValidationError
-from app.core.security import create_access_token
 from app.domains.audit.models import AuditLog
 from app.domains.roles.models import Permission, Role, RolePermission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import CUSTOM_ROLE_LEGACY_LEVEL, RolesService
 from app.main import app
+from tests.auth_helpers import create_tenant_access_token
 
 PROTECTED_GOVERNANCE_CODES = {
     "roles.assign",
@@ -133,7 +133,10 @@ async def test_owner_cannot_grant_global_protected_or_unknown_permission(
             description=None,
             permission_codes=["audit.view.global"],
         )
-    assert global_error.value.details == {"permissions": ["audit.view.global"]}
+    assert global_error.value.details == {
+        "reason": "delegation_envelope_exceeded",
+        "permissions": ["audit.view.global"],
+    }
 
     with pytest.raises(PermissionDeniedError) as governance_error:
         await service.create_role(
@@ -146,7 +149,10 @@ async def test_owner_cannot_grant_global_protected_or_unknown_permission(
             description=None,
             permission_codes=["roles.assign"],
         )
-    assert governance_error.value.details == {"permissions": ["roles.assign"]}
+    assert governance_error.value.details == {
+        "reason": "delegation_envelope_exceeded",
+        "permissions": ["roles.assign"],
+    }
 
     with pytest.raises(ValidationError) as unknown_error:
         await service.create_role(
@@ -198,7 +204,10 @@ async def test_tenant_role_never_receives_platform_scope_from_malformed_catalog(
             description=None,
             permission_codes=["pos.sell"],
         )
-    assert error.value.details == {"permissions": ["pos.sell"]}
+    assert error.value.details == {
+        "reason": "delegation_envelope_exceeded",
+        "permissions": ["pos.sell"],
+    }
 
 
 async def test_protected_owner_role_cannot_be_edited(
@@ -374,11 +383,10 @@ async def test_public_role_contract_rejects_numeric_level(
     try:
         tenant = await make_tenant()
         owner, _membership, _ownership, _owner_role = await make_owner(tenant_id=tenant.id)
-        token = create_access_token(
-            owner.id,
+        token = await create_tenant_access_token(
+            db_session,
+            owner,
             tenant_id=tenant.id,
-            is_developer=False,
-            is_administrator=False,
             mfa_verified_at=datetime.now(UTC),
         )
 
@@ -393,6 +401,44 @@ async def test_public_role_contract_rejects_numeric_level(
         )
 
         assert response.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_readonly_tenant_cannot_create_role(
+    db_session: AsyncSession,
+    client: AsyncClient,
+    make_tenant,
+    make_owner,
+) -> None:
+    async def _override() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override
+    try:
+        tenant = await make_tenant()
+        owner, _membership, _ownership, _owner_role = await make_owner(tenant_id=tenant.id)
+        token = await create_tenant_access_token(
+            db_session,
+            owner,
+            tenant_id=tenant.id,
+            mfa_verified_at=datetime.now(UTC),
+        )
+        tenant.status = "readonly"
+        await db_session.flush()
+
+        response = await client.post(
+            "/api/v1/roles",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"name": "Недоступная роль", "permissions": ["pos.sell"]},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error"] == {
+            "code": "business_rule_violation",
+            "message": "Аптека работает в режиме только чтения. Изменения недоступны.",
+            "details": {"status": "readonly"},
+        }
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -430,11 +476,10 @@ async def test_role_update_rejects_stale_expected_version_with_409(
             role_id=role.id,
             password_required=False,
         )
-        token = create_access_token(
-            owner.id,
+        token = await create_tenant_access_token(
+            db_session,
+            owner,
             tenant_id=tenant.id,
-            is_developer=False,
-            is_administrator=False,
             mfa_verified_at=datetime.now(UTC),
         )
         headers = {"Authorization": f"Bearer {token}"}

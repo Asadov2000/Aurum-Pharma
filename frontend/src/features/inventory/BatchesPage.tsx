@@ -361,9 +361,29 @@ export function BatchesPage(): JSX.Element {
             }
           />
 
+          {error && data && (
+            <div
+              role="status"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning-foreground"
+            >
+              <span>{describeApiError(error, "Не удалось обновить список партий")}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                isLoading={isFetching}
+                onClick={() => void refetch()}
+              >
+                Повторить
+              </Button>
+            </div>
+          )}
+
           {isLoading ? (
-            <SkeletonRows rows={7} />
-          ) : error ? (
+            <div role="status" aria-label="Загрузка партий">
+              <span className="sr-only">Загружаем список партий</span>
+              <SkeletonRows rows={7} />
+            </div>
+          ) : error && !data ? (
             <div
               role="alert"
               className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-4 text-sm text-danger-foreground"
@@ -462,7 +482,7 @@ function InventorySummary({
   total: number;
   summary: {
     total_qty: string;
-    purchase_value: string;
+    purchase_value: string | null;
     sale_value: string;
     attention_count: number;
     expired_count: number;
@@ -490,9 +510,13 @@ function InventorySummary({
           tone={summary.attention_count > 0 ? "danger" : "success"}
         />
         <SummaryMetric
-          label="Стоимость остатка"
-          value={formatInventoryMoney(summary.purchase_value)}
-          detail={`в рознице: ${formatInventoryMoney(summary.sale_value)}`}
+          label={summary.purchase_value === null ? "Розничная стоимость" : "Стоимость остатка"}
+          value={formatInventoryMoney(summary.purchase_value ?? summary.sale_value)}
+          detail={
+            summary.purchase_value === null
+              ? "по действующим ценам продажи"
+              : `в рознице: ${formatInventoryMoney(summary.sale_value)}`
+          }
         />
       </div>
     </section>

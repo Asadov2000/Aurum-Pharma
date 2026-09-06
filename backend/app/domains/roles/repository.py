@@ -635,6 +635,14 @@ class RolesRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def lock_tenant_authorization(self, tenant_id: UUID) -> bool:
+        """Serialize rare authorization mutations within one tenant."""
+        result = await self.session.execute(
+            text("SELECT id FROM public.tenant WHERE id = :tenant_id FOR UPDATE"),
+            {"tenant_id": tenant_id},
+        )
+        return result.scalar_one_or_none() is not None
+
     async def insert_membership(self, **fields: Any) -> TenantMembership:
         membership = TenantMembership(**fields)
         self.session.add(membership)
@@ -657,6 +665,7 @@ class RolesRepository:
         full_name: str,
         phone: str | None,
         operation_id: UUID,
+        request_fingerprint: str,
         issued_at: datetime,
     ) -> EmployeeInvitationCreation:
         row = (
@@ -664,7 +673,8 @@ class RolesRepository:
                 await self.session.execute(
                     text(
                         "SELECT * FROM public.create_tenant_employee_invitation("
-                        ":tenant_id, :email, :full_name, :phone, :operation_id, :issued_at)"
+                        ":tenant_id, :email, :full_name, :phone, :operation_id, "
+                        ":request_fingerprint, :issued_at)"
                     ),
                     {
                         "tenant_id": tenant_id,
@@ -672,6 +682,7 @@ class RolesRepository:
                         "full_name": full_name,
                         "phone": phone,
                         "operation_id": operation_id,
+                        "request_fingerprint": request_fingerprint,
                         "issued_at": issued_at,
                     },
                 )

@@ -34,13 +34,17 @@ jobs:
 
       - name: Test change classifier and verification planner
         shell: pwsh
-        run: ./scripts/test-verification-tools.ps1
+        run: |
+          ./scripts/test-verification-tools.ps1
+          ./scripts/test-pilot-readiness.ps1
+          ./scripts/test-production-host-preflight.ps1
 
       - name: Test Windows PowerShell 5.1 compatibility
         if: runner.os == 'Windows'
         shell: powershell
         run: |
           ./scripts/test-verification-tools.ps1
+          ./scripts/test-pilot-readiness.ps1
           ./scripts/test-manage-edge-cash-identity.ps1
 
       - name: Test Edge identity Windows wrapper
@@ -60,11 +64,13 @@ jobs:
       DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
       DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test
       DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@localhost:5432/aurum_test
+      DATABASE_URL_WORKER: postgresql+asyncpg://aurum_worker:aurum_worker_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@localhost:5432/aurum_test
+      TEST_DATABASE_URL_WORKER: postgresql+asyncpg://aurum_worker:aurum_worker_pw@localhost:5432/aurum_test
       REDIS_URL: redis://localhost:6379/0
       JWT_SECRET: ci-only-secret-do-not-use-outside-tests-123456
       CORS_ORIGINS: '["http://localhost:5173"]'
@@ -201,6 +207,7 @@ jobs:
             printf %s aurum_migrator_pw > /tmp/aurum-migrator-password
             printf %s aurum_mailer_pw > /tmp/aurum-mailer-password
             printf %s aurum_billing_worker_pw > /tmp/aurum-billing-worker-password
+            printf %s aurum_worker_pw > /tmp/aurum-worker-password
             printf %s aurum_backup_pw > /tmp/aurum-backup-password
             printf %s aurum_pitr_pw > /tmp/aurum-pitr-password
           '
@@ -215,6 +222,7 @@ jobs:
             -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
             -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
             -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
+            -e AURUM_WORKER_PASSWORD_FILE=/tmp/aurum-worker-password \
             -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
             -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
             "$POSTGRES_SERVICE_ID" sh -c '
@@ -225,6 +233,7 @@ jobs:
                 AURUM_MIGRATOR_PASSWORD \
                 AURUM_MAILER_PASSWORD \
                 AURUM_BILLING_WORKER_PASSWORD \
+                AURUM_WORKER_PASSWORD \
                 AURUM_BACKUP_PASSWORD \
                 AURUM_PITR_PASSWORD
               exec sh /tmp/bootstrap-roles.sh
@@ -258,6 +267,7 @@ jobs:
               -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
+              -e AURUM_WORKER_PASSWORD_FILE=/tmp/aurum-worker-password \
               -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
               -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
               "$POSTGRES_SERVICE_ID" sh -c '
@@ -268,6 +278,7 @@ jobs:
                   AURUM_MIGRATOR_PASSWORD \
                   AURUM_MAILER_PASSWORD \
                   AURUM_BILLING_WORKER_PASSWORD \
+                  AURUM_WORKER_PASSWORD \
                   AURUM_BACKUP_PASSWORD \
                   AURUM_PITR_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
@@ -651,6 +662,7 @@ jobs:
               -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
+              -e AURUM_WORKER_PASSWORD_FILE=/tmp/aurum-worker-password \
               -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
               -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
               "$POSTGRES_SERVICE_ID" sh -c '
@@ -661,6 +673,7 @@ jobs:
                   AURUM_MIGRATOR_PASSWORD \
                   AURUM_MAILER_PASSWORD \
                   AURUM_BILLING_WORKER_PASSWORD \
+                  AURUM_WORKER_PASSWORD \
                   AURUM_BACKUP_PASSWORD \
                   AURUM_PITR_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
@@ -877,6 +890,7 @@ jobs:
             -e AURUM_MIGRATOR_PASSWORD_FILE=/tmp/aurum-migrator-password \
             -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
             -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
+            -e AURUM_WORKER_PASSWORD_FILE=/tmp/aurum-worker-password \
             -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
             -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
             -e EDGE_IDENTITY_SCRIPT=/tmp/manage-edge-cash-identity.sh \
@@ -1118,7 +1132,7 @@ jobs:
           docker compose up -d --build postgres redis minio
           docker compose run --rm db-role-bootstrap
           docker compose run --rm --build migrate
-          docker compose up -d --build backend celery-worker billing-worker frontend
+          docker compose up -d --build backend celery-worker catalog-worker billing-worker frontend
           docker compose ps
           echo "E2E_POSTGRES_CONTAINER=$(docker compose ps --quiet postgres)" >> "$GITHUB_ENV"
           echo "E2E_REDIS_CONTAINER=$(docker compose ps --quiet redis)" >> "$GITHUB_ENV"
@@ -1160,7 +1174,7 @@ jobs:
         if: failure()
         run: >-
           docker compose logs --no-color --tail=250
-          postgres redis minio backend celery-worker billing-worker frontend
+          postgres redis minio backend celery-worker catalog-worker billing-worker frontend
 
       - name: Upload Playwright artifacts on failure
         if: failure()
@@ -1278,8 +1292,8 @@ jobs:
               )
 
           hardened = (
-              "backend", "celery-worker", "billing-worker", "celery-beat",
-              "platform-mailer", "gateway"
+              "backend", "celery-worker", "catalog-worker", "billing-worker",
+              "celery-beat", "platform-mailer", "gateway"
           )
           for name in hardened:
               service = model["services"][name]
@@ -1294,7 +1308,7 @@ jobs:
           backend_command = " ".join(model["services"]["backend"]["command"])
           assert "--reload" not in backend_command, "backend Compose command enables reload"
 
-          runtime_services = ("backend", "celery-worker", "celery-beat")
+          runtime_services = ("backend", "celery-worker", "catalog-worker", "celery-beat")
           forbidden_runtime_environment = {
               "DATABASE_URL_MIGRATION",
               "POSTGRES_PASSWORD",
@@ -1303,6 +1317,7 @@ jobs:
               "AURUM_MIGRATOR_PASSWORD",
               "AURUM_MAILER_PASSWORD",
               "AURUM_BILLING_WORKER_PASSWORD",
+              "AURUM_WORKER_PASSWORD",
               "AURUM_BACKUP_PASSWORD",
               "AURUM_PITR_PASSWORD",
               "AURUM_OFFSITE_ACCESS_KEY",
@@ -1312,6 +1327,7 @@ jobs:
               "TEST_DATABASE_URL_MIGRATION",
               "TEST_DATABASE_URL_MAILER",
               "TEST_DATABASE_URL_BILLING_WORKER",
+              "TEST_DATABASE_URL_WORKER",
               "MINIO_ROOT_USER",
               "MINIO_ROOT_PASSWORD",
               "DATABASE_URL_BACKUP",
@@ -1360,6 +1376,73 @@ jobs:
                   f"{sorted(mounted & forbidden_runtime_secrets)}"
               )
 
+          expected_runtime_secrets = {
+              "backend": {
+                  "database_url_app",
+                  "database_url_support",
+                  "redis_url",
+                  "jwt_secret",
+                  "mfa_encryption_key",
+                  "mfa_previous_keys",
+                  "email_outbox_encryption_key",
+                  "metrics_token",
+                  "minio_access_key",
+                  "minio_secret_key",
+              },
+              "celery-worker": {"database_url_worker", "redis_url"},
+              "catalog-worker": {
+                  "database_url_app",
+                  "redis_url",
+                  "minio_access_key",
+                  "minio_secret_key",
+              },
+              "celery-beat": {"redis_url"},
+          }
+          for name, expected in expected_runtime_secrets.items():
+              mounted = {
+                  secret["source"]
+                  for secret in model["services"][name].get("secrets", [])
+              }
+              assert mounted == expected, (
+                  f"unexpected {name} secrets: {sorted(mounted)}"
+              )
+
+          credential_environment = {
+              "DATABASE_URL_APP",
+              "DATABASE_URL_SUPPORT",
+              "DATABASE_URL_WORKER",
+              "REDIS_URL",
+              "JWT_SECRET",
+              "MFA_ENCRYPTION_KEY",
+              "MINIO_ACCESS_KEY",
+              "MINIO_SECRET_KEY",
+              "EMAIL_PASSWORD",
+          }
+          expected_development_credentials = {
+              "celery-worker": {"DATABASE_URL_WORKER", "REDIS_URL"},
+              "catalog-worker": {
+                  "DATABASE_URL_APP",
+                  "REDIS_URL",
+                  "MINIO_ACCESS_KEY",
+                  "MINIO_SECRET_KEY",
+              },
+              "celery-beat": {"REDIS_URL"},
+          }
+          for name, expected in expected_development_credentials.items():
+              present = (
+                  set(development_model["services"][name].get("environment", {}))
+                  & credential_environment
+              )
+              assert present == expected, (
+                  f"unexpected development {name} credentials: {sorted(present)}"
+              )
+
+          catalog_command = " ".join(model["services"]["catalog-worker"]["command"])
+          assert "app.tasks.catalog_app" in catalog_command
+          assert "-Q catalog-worker" in catalog_command
+          assert set(model["services"]["catalog-worker"]["networks"]) == {"data"}
+          assert set(model["services"]["celery-beat"]["networks"]) == {"data"}
+
           migrate_secrets = {
               secret["source"]
               for secret in model["services"]["migrate"].get("secrets", [])
@@ -1380,11 +1463,14 @@ jobs:
               "aurum_migrator_password",
               "aurum_mailer_password",
               "aurum_billing_worker_password",
+              "aurum_worker_password",
               "aurum_backup_password",
               "aurum_pitr_password",
           }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
 
           postgres_command = " ".join(model["services"]["postgres"]["command"])
+          assert "ssl=on" in postgres_command
+          assert "ssl_min_protocol_version=TLSv1.2" in postgres_command
           assert "archive_mode=on" in postgres_command
           assert "archive_timeout=60s" in postgres_command
           assert "archive-wal.sh" in postgres_command
@@ -1392,6 +1478,32 @@ jobs:
               volume["target"] for volume in model["services"]["postgres"]["volumes"]
           }
           assert "/wal-archive" in postgres_targets
+          assert "/run/tls/postgres.key" in postgres_targets
+
+          with open("infra/postgres/pg_hba.production.conf", encoding="utf-8") as source:
+              pg_hba = source.read()
+          assert "hostssl all" in pg_hba
+          assert "\nhost    all" not in pg_hba
+
+          redis_command = " ".join(model["services"]["redis"]["command"])
+          assert "--port 0" in redis_command
+          assert "--tls-port 6379" in redis_command
+          assert "--tls-auth-clients no" in redis_command
+
+          minio_command = " ".join(model["services"]["minio"]["command"])
+          assert "--certs-dir /tmp/certs" in minio_command
+          assert model["services"]["backend"]["environment"]["MINIO_SECURE"] == "true"
+
+          tls_clients = (
+              "backend", "celery-worker", "catalog-worker", "billing-worker",
+              "platform-mailer", "celery-beat", "migrate", "db-role-bootstrap",
+          )
+          for name in tls_clients:
+              targets = {
+                  volume["target"]
+                  for volume in model["services"][name].get("volumes", [])
+              }
+              assert "/run/tls/ca.crt" in targets, f"{name} does not trust internal CA"
 
           assert recovery_model["networks"]["recovery"]["internal"] is True
           assert not any(
@@ -1414,6 +1526,14 @@ jobs:
               for secret in recovery_model["services"]["pitr-basebackup"]["secrets"]
           }
           assert pitr_secrets == {"database_url_pitr", "restic_password"}
+          for name in ("minio-backup-init", "backup", "pitr-basebackup"):
+              targets = {
+                  volume["target"]
+                  for volume in recovery_model["services"][name].get("volumes", [])
+              }
+              assert "/run/tls/ca.crt" in targets, (
+                  f"{name} does not trust the production internal CA"
+              )
           wal_mount = next(
               volume
               for volume in recovery_model["services"]["wal-snapshot"]["volumes"]
@@ -1465,6 +1585,10 @@ jobs:
           }
           PY
 
+      - name: Smoke test production internal TLS
+        shell: pwsh
+        run: ./scripts/test-production-internal-tls.ps1
+
       - name: Check production Dockerfiles
         run: |
           docker build --check --file backend/Dockerfile.production backend
@@ -1481,6 +1605,7 @@ jobs:
           file: backend/Dockerfile.production
           pull: true
           load: true
+          no-cache-filters: runtime
           tags: aurum-backend:ci
           cache-from: type=gha,scope=aurum-production-backend
           cache-to: type=gha,mode=max,scope=aurum-production-backend,ignore-error=true
@@ -1492,6 +1617,7 @@ jobs:
           file: frontend/Dockerfile.production
           pull: true
           load: true
+          no-cache-filters: runtime
           tags: aurum-gateway:ci
           cache-from: type=gha,scope=aurum-production-gateway
           cache-to: type=gha,mode=max,scope=aurum-production-gateway,ignore-error=true
@@ -1503,6 +1629,7 @@ jobs:
           file: infra/backup/Dockerfile
           pull: true
           load: true
+          no-cache-filters: runtime
           tags: |
             aurum-backup:ci
             aurum-pharma-backup:ci

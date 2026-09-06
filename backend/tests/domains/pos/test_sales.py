@@ -163,6 +163,59 @@ async def test_add_item_splits_across_batches(db_session: AsyncSession, pos_scaf
     assert created[1].qty == Decimal("2.000")
 
 
+async def test_complete_rejects_stale_fefo_allocation_after_line_delete(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:
+    s = await pos_scaffold(batch_qty=3, sale_price=10)
+    inv_repo = InventoryRepository(db_session)
+    later_batch = await inv_repo.create_batch(
+        tenant_id=s["tenant"].id,
+        branch_id=s["branch"].id,
+        catalog_id=s["item"].id,
+        expires_at=date.today() + timedelta(days=240),
+        purchase_price=Decimal("3"),
+        sale_price=Decimal("10"),
+        qty_initial=Decimal("5"),
+        qty_remaining=Decimal("0"),
+    )
+    await inv_repo.insert_movement(
+        tenant_id=s["tenant"].id,
+        batch_id=later_batch.id,
+        movement_type="incoming",
+        qty_delta=Decimal("5"),
+    )
+    await db_session.refresh(later_batch)
+
+    service = POSService(POSRepository(db_session))
+    await _open_shift(service, s)
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    created, _ = await service.add_item(
+        sale_id=sale.id,
+        catalog_id=s["item"].id,
+        qty=Decimal("5"),
+    )
+    await service.delete_item(sale_id=sale.id, item_id=created[0].id)
+    await service.add_payment(
+        sale_id=sale.id,
+        payment_method="cash",
+        amount=Decimal("20"),
+    )
+
+    with pytest.raises(BusinessRuleError) as exc_info:
+        await service.complete(sale_id=sale.id)
+
+    assert exc_info.value.details["reason"] == "fefo_reallocation_required"
+    await db_session.refresh(s["batch"])
+    await db_session.refresh(later_batch)
+    assert s["batch"].qty_remaining == Decimal("3.000")
+    assert later_batch.qty_remaining == Decimal("5.000")
+
+
 async def test_complete_decreases_batch_qty(db_session: AsyncSession, pos_scaffold) -> None:
     s = await pos_scaffold(sale_price=10, batch_qty=100)
     service = POSService(POSRepository(db_session))

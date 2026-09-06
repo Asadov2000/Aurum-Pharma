@@ -1,4 +1,5 @@
-export function formatSupplierMoney(value: string | number, currency = "TJS"): string {
+export function formatSupplierMoney(value: string | number | null, currency = "TJS"): string {
+  if (value === null) return "Скрыто";
   const amount = Number(value);
   if (!Number.isFinite(amount)) return `0,00 ${currency}`;
   return `${amount.toLocaleString("ru-RU", {

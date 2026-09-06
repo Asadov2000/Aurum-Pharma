@@ -361,7 +361,7 @@ export interface SeededSupplier {
 
 export async function seedSupplier(api: APIRequestContext, name: string): Promise<SeededSupplier> {
   const res = await api.post("suppliers", {
-    data: { name },
+    data: { operation_id: crypto.randomUUID(), name },
   });
   expectOk(res, "POST /suppliers");
   return (await res.json()) as SeededSupplier;

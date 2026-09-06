@@ -1,4 +1,4 @@
-import { type RefundLine } from "./types";
+import { type RefundAttempt, type RefundLine } from "./types";
 
 const STORAGE_PREFIX = "sales:pendingRefund:";
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -114,6 +114,43 @@ export function createPendingRefundOperation(
     refundAttemptId: null,
     parentSaleId,
     items: items.map((item) => ({ ...item })),
+  };
+  const storage = safeLocalStorage();
+  const serialized = JSON.stringify(operation);
+  try {
+    storage?.setItem(refundOperationKey(parentSaleId), serialized);
+    if (storage?.getItem(refundOperationKey(parentSaleId)) !== serialized) return null;
+  } catch {
+    return null;
+  }
+  return operation;
+}
+
+export function saveRecoveredPendingRefundOperation(
+  parentSaleId: string,
+  attempt: RefundAttempt,
+): PendingRefundOperation | null {
+  const existing = loadPendingRefundOperation(parentSaleId);
+  if (existing) return existing;
+  if (
+    attempt.parent_sale_id !== parentSaleId ||
+    !UUID_V4_PATTERN.test(attempt.operation_id) ||
+    !attempt.id ||
+    attempt.id.length > 128 ||
+    attempt.items.length === 0 ||
+    attempt.items.length > 200 ||
+    !attempt.items.every(isRefundLine) ||
+    new Set(attempt.items.map((item) => item.sale_item_id)).size !== attempt.items.length
+  ) {
+    return null;
+  }
+
+  const operation: PendingRefundOperation = {
+    operationId: generateUuidV4(),
+    refundAttemptOperationId: attempt.operation_id,
+    refundAttemptId: attempt.id,
+    parentSaleId: attempt.parent_sale_id,
+    items: attempt.items.map((item) => ({ ...item })),
   };
   const storage = safeLocalStorage();
   const serialized = JSON.stringify(operation);

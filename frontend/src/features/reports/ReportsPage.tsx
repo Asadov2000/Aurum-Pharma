@@ -1,6 +1,8 @@
 import { type KeyboardEvent, useState } from "react";
 
 import { Button, Modal, PageHeader, SkeletonRows } from "@/components/ui";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 import { useTenantOperationalSettingsQuery } from "@/features/foundation/queries";
 import { getZReportXlsx } from "@/features/pos/api";
@@ -29,6 +31,8 @@ const REPORT_VIEWS: Array<{ value: ReportView; label: string; description: strin
 ];
 
 export function ReportsPage(): JSX.Element {
+  const { user } = useAuth();
+  const canExport = hasPermission(user, "reports.export");
   const [selectedShift, setSelectedShift] = useState<ShiftHistoryItem | null>(null);
   const [view, setView] = useState<ReportView>(readInitialReportView);
   const settings = useTenantOperationalSettingsQuery();
@@ -79,6 +83,7 @@ export function ReportsPage(): JSX.Element {
               <SalesOverviewPanel
                 key={`sales-overview-${reportTimezone}`}
                 reportTimezone={reportTimezone}
+                canExport={canExport}
               />
             ) : view === "products" ? (
               <TopProductsPanel
@@ -96,6 +101,7 @@ export function ReportsPage(): JSX.Element {
               <StockOnDatePanel
                 key={`stock-date-${reportTimezone}`}
                 reportTimezone={reportTimezone}
+                canExport={canExport}
               />
             )}
           </div>
@@ -112,7 +118,13 @@ export function ReportsPage(): JSX.Element {
         }
         className="max-w-5xl"
       >
-        {selectedShift && <ZReportSection shift={selectedShift} reportTimezone={reportTimezone} />}
+        {selectedShift && (
+          <ZReportSection
+            shift={selectedShift}
+            reportTimezone={reportTimezone}
+            canExport={canExport}
+          />
+        )}
       </Modal>
     </div>
   );
@@ -210,9 +222,11 @@ function writeReportView(view: ReportView): void {
 function ZReportSection({
   shift,
   reportTimezone,
+  canExport,
 }: {
   shift: ShiftHistoryItem;
   reportTimezone: string;
+  canExport: boolean;
 }): JSX.Element {
   const { data, isLoading, error, refetch, isFetching } = useZReportQuery(shift.id);
   const [downloading, setDownloading] = useState(false);
@@ -259,9 +273,11 @@ function ZReportSection({
         <p className="text-sm text-foreground-muted">
           {shift.branch_name} · {shift.cashier_name ?? "Кассир не указан"}
         </p>
-        <Button variant="secondary" onClick={() => void onDownload()} isLoading={downloading}>
-          Скачать XLSX
-        </Button>
+        {canExport && (
+          <Button variant="secondary" onClick={() => void onDownload()} isLoading={downloading}>
+            Скачать XLSX
+          </Button>
+        )}
       </div>
       {downloadError && (
         <p
@@ -285,8 +301,10 @@ function ZReportSection({
 
 export function StockOnDateCard({
   reportTimezone = DEFAULT_REPORT_TIME_ZONE,
+  canExport = false,
 }: {
   reportTimezone?: string;
+  canExport?: boolean;
 }): JSX.Element {
-  return <StockOnDatePanel reportTimezone={reportTimezone} />;
+  return <StockOnDatePanel reportTimezone={reportTimezone} canExport={canExport} />;
 }

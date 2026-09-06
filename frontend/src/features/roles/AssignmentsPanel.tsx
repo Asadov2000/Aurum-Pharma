@@ -211,8 +211,8 @@ export function AssignmentsPanel({
       setPendingRevokeId(null);
       setSuccessMessage(
         assignment
-          ? `Роль «${assignmentRoleName(assignment)}» отозвана. Сервер уже блокирует этот доступ сотрудника.`
-          : "Роль отозвана. Сервер уже блокирует этот доступ сотрудника.",
+          ? `Роль «${assignmentRoleName(assignment)}» отозвана. Сотрудник больше не может использовать этот доступ.`
+          : "Роль отозвана. Сотрудник больше не может использовать этот доступ.",
       );
     } catch (err) {
       setRevokeError(describeApiError(err, "Не удалось отозвать"));

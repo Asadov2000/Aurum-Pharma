@@ -1,13 +1,26 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { type RefundAttempt } from "@/features/sales/types";
+
 const mutateAsync = vi.fn();
 const getRefundResult = vi.fn();
 const createRefundAttempt = vi.fn();
+const getActiveRefundAttempt = vi.fn();
 const getRefundAttempt = vi.fn();
 const beginRefundAttemptReconciliation = vi.fn();
 const confirmRefundAttempt = vi.fn();
 const voidRefundAttempt = vi.fn();
+const activeRefundAttemptResult = {
+  data: null as RefundAttempt | null,
+  isFetching: false,
+  isError: false,
+  error: null as unknown,
+  refetch: vi.fn(),
+};
+const useActiveRefundAttemptQuery = vi.fn(
+  (_parentSaleId: string, _enabled: boolean) => activeRefundAttemptResult,
+);
 const authResult = {
   user: {
     is_developer: false,
@@ -24,6 +37,8 @@ vi.mock("@/features/auth/hooks", () => ({
 }));
 
 vi.mock("@/features/sales/queries", () => ({
+  useActiveRefundAttemptQuery: (parentSaleId: string, enabled: boolean) =>
+    useActiveRefundAttemptQuery(parentSaleId, enabled),
   useRefundSale: () => ({
     mutateAsync: (...args: unknown[]) => mutateAsync(...args),
     isPending: false,
@@ -33,6 +48,7 @@ vi.mock("@/features/sales/queries", () => ({
 vi.mock("@/features/sales/api", () => ({
   getRefundResult: (...args: unknown[]) => getRefundResult(...args),
   createRefundAttempt: (...args: unknown[]) => createRefundAttempt(...args),
+  getActiveRefundAttempt: (...args: unknown[]) => getActiveRefundAttempt(...args),
   getRefundAttempt: (...args: unknown[]) => getRefundAttempt(...args),
   beginRefundAttemptReconciliation: (...args: unknown[]) =>
     beginRefundAttemptReconciliation(...args),
@@ -51,7 +67,6 @@ import {
   loadPendingRefundOperation,
   savePendingRefundAttemptId,
 } from "@/features/sales/refundOperation";
-import { type RefundAttempt } from "@/features/sales/types";
 
 const SALE: SaleDetails = {
   id: "sale-1",
@@ -110,6 +125,9 @@ const PENDING_ATTEMPT: RefundAttempt = {
   confirmed_by_user_id: null,
   operation_id: "11111111-1111-4111-8111-111111111111",
   items: [{ sale_item_id: "item-1", qty: "1" }],
+  intent_locked: true,
+  reason: null,
+  comment: null,
   payments: [
     {
       payment_method: "card",
@@ -156,6 +174,8 @@ describe("RefundModal", () => {
     getRefundResult.mockReset();
     createRefundAttempt.mockReset();
     createRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
+    getActiveRefundAttempt.mockReset();
+    getActiveRefundAttempt.mockResolvedValue(null);
     getRefundAttempt.mockReset();
     getRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
     beginRefundAttemptReconciliation.mockReset();
@@ -167,6 +187,12 @@ describe("RefundModal", () => {
     confirmRefundAttempt.mockResolvedValue(CONFIRMED_ATTEMPT);
     voidRefundAttempt.mockReset();
     voidRefundAttempt.mockResolvedValue({ ...PENDING_ATTEMPT, status: "voided" });
+    activeRefundAttemptResult.data = null;
+    activeRefundAttemptResult.isFetching = false;
+    activeRefundAttemptResult.isError = false;
+    activeRefundAttemptResult.error = null;
+    activeRefundAttemptResult.refetch.mockReset();
+    useActiveRefundAttemptQuery.mockClear();
     authResult.user.permissions = ["pos.refund", "pos.refund_external_confirm"];
     settingsResult.data.refund_reason_mode = "optional";
   });
@@ -188,8 +214,120 @@ describe("RefundModal", () => {
     expect(screen.getByLabelText("Количество для возврата: Парацетамол 500 мг")).toBeEnabled();
   });
 
+  it("blocks financial actions while checking for a server-side active attempt", () => {
+    activeRefundAttemptResult.isFetching = true;
+
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    expect(screen.getByText(/Проверяем, нет ли незавершённого/i)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Зафиксировать сумму возврата" })).toBeDisabled();
+  });
+
+  it("restores a server-side pending attempt without starting reconciliation", async () => {
+    activeRefundAttemptResult.data = PENDING_ATTEMPT;
+
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    expect(await screen.findByText(/Деньги ещё не возвращались/i)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Отменить заявку" })).toBeEnabled();
+    expect(beginRefundAttemptReconciliation).not.toHaveBeenCalled();
+    expect(loadPendingRefundOperation(SALE.id)).toMatchObject({
+      refundAttemptOperationId: PENDING_ATTEMPT.operation_id,
+      refundAttemptId: PENDING_ATTEMPT.id,
+      parentSaleId: SALE.id,
+      items: PENDING_ATTEMPT.items,
+    });
+  });
+
+  it("restores a server-side attempt that requires reconciliation", async () => {
+    activeRefundAttemptResult.data = {
+      ...PENDING_ATTEMPT,
+      status: "requires_reconciliation",
+    };
+
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    expect(
+      await screen.findByText(/Не повторяйте возврат во внешнем терминале/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Терминал")).toBeEnabled();
+    expect(beginRefundAttemptReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("restores a confirmed server-side attempt and only creates the return receipt", async () => {
+    activeRefundAttemptResult.data = CONFIRMED_ATTEMPT;
+
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    expect(await screen.findByText(/Осталось создать чек возврата/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Вернуть выбранное/ }));
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    expect(createRefundAttempt).not.toHaveBeenCalled();
+    expect(beginRefundAttemptReconciliation).not.toHaveBeenCalled();
+    expect(confirmRefundAttempt).not.toHaveBeenCalled();
+    expect(mutateAsync.mock.calls[0]?.[0]).toMatchObject({
+      parentSaleId: SALE.id,
+      payload: {
+        refund_attempt_id: CONFIRMED_ATTEMPT.id,
+        items: CONFIRMED_ATTEMPT.items,
+      },
+    });
+  });
+
+  it("keeps the ordinary flow when the server has no active attempt", async () => {
+    activeRefundAttemptResult.data = null;
+
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    await waitFor(() => expect(useActiveRefundAttemptQuery).toHaveBeenCalledWith(SALE.id, true));
+    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Отменить заявку" })).not.toBeInTheDocument();
+  });
+
+  it("fails closed when the active-attempt lookup fails", async () => {
+    activeRefundAttemptResult.isError = true;
+    activeRefundAttemptResult.error = new Error("network unavailable");
+
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    expect(await screen.findByText(/Не удалось проверить незавершённый/i)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Повторить поиск" })).toBeEnabled();
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a server-side attempt cannot be persisted locally", async () => {
+    activeRefundAttemptResult.data = PENDING_ATTEMPT;
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("storage unavailable");
+    });
+
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
+
+    expect(
+      await screen.findByText(/Не удалось безопасно сохранить найденную заявку/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).toBeDisabled();
+    expect(beginRefundAttemptReconciliation).not.toHaveBeenCalled();
+    expect(mutateAsync).not.toHaveBeenCalled();
+    setItem.mockRestore();
+  });
+
   it("binds a card refund to terminal document details before posting the return", async () => {
     const onRefunded = vi.fn();
+    const boundAttempt = { ...PENDING_ATTEMPT, reason: "quality_issue" as const };
+    const reconcilingAttempt = { ...boundAttempt, status: "requires_reconciliation" as const };
+    const confirmedAttempt = {
+      ...CONFIRMED_ATTEMPT,
+      reason: "quality_issue" as const,
+    };
+    createRefundAttempt.mockResolvedValueOnce(boundAttempt);
+    beginRefundAttemptReconciliation.mockResolvedValueOnce(reconcilingAttempt);
+    confirmRefundAttempt.mockResolvedValueOnce(confirmedAttempt);
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
 
     expect(screen.getByRole("note")).toHaveTextContent("Возвращённый товар не поступит в продажу");
@@ -201,6 +339,13 @@ describe("RefundModal", () => {
     selectRefundItem();
     fireEvent.click(screen.getByRole("button", { name: "Зафиксировать сумму возврата" }));
     await waitFor(() => expect(createRefundAttempt).toHaveBeenCalledTimes(1));
+    expect(createRefundAttempt).toHaveBeenCalledWith(
+      SALE.id,
+      expect.any(String),
+      [{ sale_item_id: "item-1", qty: "1" }],
+      "quality_issue",
+      null,
+    );
     expect(beginRefundAttemptReconciliation).toHaveBeenCalledWith("attempt-1");
     expect(mutateAsync).not.toHaveBeenCalled();
     expect(screen.getByText("К возврату: 10,00 TJS")).toBeInTheDocument();

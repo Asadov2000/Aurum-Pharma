@@ -9,7 +9,7 @@ Frontend подготовлен как installable PWA (устанавливае
 - API-запросы, токены, чеки, цены и кассовые данные не кешируются service worker.
 - Service worker отключён в dev-режиме Vite, чтобы локальная разработка не ловила старые файлы из кеша.
 - `frontend/e2e/pwa.spec.ts` проверяет manifest, иконки и запрет кеширования API/HTML-страниц.
-- `frontend/src/components/layout/OfflineStatusBanner.tsx` показывает глобальное предупреждение, когда браузер offline: касса в текущем этапе работает только онлайн.
+- `frontend/src/components/layout/ConnectivityStatusBanner.tsx` различает отсутствие интернета и недоступность backend. Уже загруженные данные остаются доступны для просмотра, но новые операции до восстановления связи блокируются.
 
 Это даёт безопасную основу для установки приложения через Chrome/Edge на Windows без отдельного desktop-интерфейса.
 

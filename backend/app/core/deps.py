@@ -49,11 +49,13 @@ BRANCH_SCOPED_PERMISSIONS = frozenset(
         "registers.update",
         "registers.delete",
         "batches.view",
+        "batches.view_costs",
         "batches.create",
         "batches.update",
         "batches.write_off",
         "incoming.view",
         "incoming.create",
+        "incoming.finalize",
         "incoming.return",
         "pos.shift_open",
         "pos.shift_close",
@@ -562,7 +564,7 @@ async def current_user(
 
     user_id = _required_uuid_claim(claims, "sub")
     token_tenant_id = _optional_uuid_claim(claims, "tenant_id")
-    session_id = _optional_uuid_claim(claims, "sid")
+    session_id = _required_uuid_claim(claims, "sid")
     mfa_verified_at = _optional_timestamp_claim(claims, "mfa_at")
 
     is_dev = bool(claims.get("is_developer", False))
@@ -611,8 +613,6 @@ async def current_user(
 
     platform_capabilities: frozenset[str] = frozenset()
     if (is_dev or is_admin) and support_access_session_id is None:
-        if session_id is None:
-            raise AuthenticationError("Support session is inactive")
         platform_capabilities = await auth_repo.get_active_platform_capabilities(
             user_id,
             session_id,
@@ -881,12 +881,7 @@ async def require_writable_tenant(
     user: Annotated[CurrentUser, Depends(current_user)],
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> CurrentUser:
-    """Block mutating endpoints when the tenant is read-only.
-
-    Used in POS endpoints — once billing transitions a tenant to
-    'readonly' (via process_grace_endings), the cashier UI must refuse
-    to open shifts, sell, refund, etc.
-    """
+    """Block business mutations when the tenant is read-only."""
     if user.tenant_id is None:
         return user
     from app.core.errors import BusinessRuleError
@@ -899,7 +894,7 @@ async def require_writable_tenant(
         "archived",
     ):
         raise BusinessRuleError(
-            "Tenant is read-only (subscription suspended)",
+            "Аптека работает в режиме только чтения. Изменения недоступны.",
             details={"status": tenant.status},
         )
     return user

@@ -41,7 +41,15 @@ class AuditLog(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "action IN ('INSERT','UPDATE','DELETE','VIEW','EXPORT','IMPERSONATE')",
+            "action IN ("
+            "'INSERT','UPDATE','DELETE','VIEW','EXPORT','IMPERSONATE',"
+            "'MEMBERSHIP_CREATED','MEMBERSHIP_UPDATED','MEMBERSHIP_ACTIVATED',"
+            "'MEMBERSHIP_SUSPENDED','MEMBERSHIP_OFFBOARDED',"
+            "'OWNERSHIP_GRANTED','OWNERSHIP_REVOKED',"
+            "'ROLE_PERMISSIONS_CHANGED','ROLE_VERSION_PUBLISHED',"
+            "'ROLE_ARCHIVED_WITH_REPLACEMENT',"
+            "'AUTHORIZATION_DENIED'"
+            ")",
             name="ck_audit_action",
         ),
     )

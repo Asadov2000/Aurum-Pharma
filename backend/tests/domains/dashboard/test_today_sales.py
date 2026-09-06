@@ -13,7 +13,6 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
@@ -28,6 +27,7 @@ from app.domains.roles.models import (
     TenantMembership,
     UserAssignment,
 )
+from tests.auth_helpers import create_tenant_access_token
 from tests.role_version_helpers import create_published_test_role
 
 
@@ -260,12 +260,8 @@ async def test_dashboard_summary_requires_reports_view(
     )
     await db_session.flush()
 
-    seller_token = create_access_token(
-        seller.id, tenant_id=tenant.id, is_developer=False, is_administrator=False
-    )
-    admin_token = create_access_token(
-        admin.id, tenant_id=tenant.id, is_developer=False, is_administrator=False
-    )
+    seller_token = await create_tenant_access_token(db_session, seller, tenant_id=tenant.id)
+    admin_token = await create_tenant_access_token(db_session, admin, tenant_id=tenant.id)
     url = "/api/v1/dashboard/summary"
 
     await db_session.execute(text("SELECT set_config('app.support_session', 'false', true)"))

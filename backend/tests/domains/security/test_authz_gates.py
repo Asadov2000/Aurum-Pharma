@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.deps import _seed_request_db_context, get_db
-from app.core.security import create_access_token
+from app.core.time import utc_now
+from app.domains.audit.models import AuditLog
 from app.domains.auth.models import AppUser
 from app.domains.catalog.image_processing import CatalogImageVariants
 from app.domains.catalog.repository import CatalogRepository
@@ -35,6 +36,7 @@ from app.domains.roles.models import (
 from app.domains.suppliers.repository import SuppliersRepository
 from app.domains.suppliers.service import SuppliersService
 from app.main import app
+from tests.auth_helpers import create_tenant_access_token
 from tests.role_version_helpers import create_published_test_role, provision_test_owner
 
 SENSITIVE_READ_PATHS = [
@@ -279,13 +281,8 @@ async def _seed_tenant_subjects(
     return tenant, regular, admin
 
 
-def _token(user: AppUser) -> str:
-    return create_access_token(
-        user.id,
-        tenant_id=user.home_tenant_id,
-        is_developer=False,
-        is_administrator=False,
-    )
+async def _token(db_session: AsyncSession, user: AppUser) -> str:
+    return await create_tenant_access_token(db_session, user)
 
 
 async def _assign_permissions(
@@ -514,14 +511,74 @@ async def test_sensitive_reads_require_domain_permission(
             user_id=admin.id,
             permission_codes={permission_code},
         )
-        regular_token = _token(regular)
-        admin_token = _token(admin)
+        regular_token = await _token(db_session, regular)
+        admin_token = await _token(db_session, admin)
 
         regular_resp = await client.get(path, headers={"Authorization": f"Bearer {regular_token}"})
         assert regular_resp.status_code == 403, path
 
         admin_resp = await client.get(path, headers={"Authorization": f"Bearer {admin_token}"})
         assert admin_resp.status_code == 200, path
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_report_export_requires_explicit_permission_and_is_audited(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    await _override_db(db_session)
+    try:
+        tenant, viewer, exporter = await _seed_tenant_subjects(db_session)
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=viewer.id,
+            permission_codes={"reports.view"},
+        )
+        await _assign_permissions(
+            db_session,
+            tenant_id=tenant.id,
+            user_id=exporter.id,
+            permission_codes={"reports.view", "reports.export"},
+        )
+        today = date.today().isoformat()
+        path = f"/api/v1/reports/sales-summary.xlsx?from={today}&to={today}"
+
+        viewer_response = await client.get(
+            path,
+            headers={"Authorization": f"Bearer {await _token(db_session, viewer)}"},
+        )
+        assert viewer_response.status_code == 403
+
+        exporter_response = await client.get(
+            path,
+            headers={"Authorization": f"Bearer {await _token(db_session, exporter)}"},
+        )
+        assert exporter_response.status_code == 200
+        assert exporter_response.content[:2] == b"PK"
+
+        audit_rows = list(
+            (
+                await db_session.execute(
+                    select(AuditLog).where(
+                        AuditLog.tenant_id == tenant.id,
+                        AuditLog.user_id == exporter.id,
+                        AuditLog.action == "EXPORT",
+                        AuditLog.table_name == "sales_summary",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(audit_rows) == 1
+        assert audit_rows[0].metadata_json == {
+            "date_from": today,
+            "date_to": today,
+            "branch_id": None,
+            "format": "xlsx",
+        }
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -589,7 +646,7 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
             },
         )
 
-        headers = {"Authorization": f"Bearer {_token(branch_user)}"}
+        headers = {"Authorization": f"Bearer {await _token(db_session, branch_user)}"}
 
         branches_resp = await client.get("/api/v1/branches", headers=headers)
         assert branches_resp.status_code == 200
@@ -725,7 +782,7 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
             },
         )
 
-        headers = {"Authorization": f"Bearer {_token(branch_user)}"}
+        headers = {"Authorization": f"Bearer {await _token(db_session, branch_user)}"}
         branches_resp = await client.get("/api/v1/branches", headers=headers)
         assert branches_resp.status_code == 200
         assert [item["id"] for item in branches_resp.json()] == [str(branch_a.id)]
@@ -740,6 +797,11 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
         own_resp = await client.post("/api/v1/incoming", headers=headers, json=own_payload)
         assert own_resp.status_code == 201
         own_doc_id = own_resp.json()["id"]
+        finalize_without_permission = await client.post(
+            f"/api/v1/incoming/{own_doc_id}/accept",
+            headers=headers,
+        )
+        assert finalize_without_permission.status_code == 403
         await _assert_incoming_update_contract(
             client,
             db_session=db_session,
@@ -822,8 +884,8 @@ async def test_tenant_reads_require_domain_permission(
                     "users.view",
                 },
             )
-        regular_token = _token(regular)
-        admin_token = _token(admin)
+        regular_token = await _token(db_session, regular)
+        admin_token = await _token(db_session, admin)
 
         regular_resp = await client.get(path, headers={"Authorization": f"Bearer {regular_token}"})
         assert regular_resp.status_code == 403, path
@@ -894,9 +956,9 @@ async def test_catalog_images_require_exact_permissions_and_tenant_scope(
             lambda _object_path: None,
         )
 
-        viewer_headers = {"Authorization": f"Bearer {_token(viewer)}"}
-        editor_headers = {"Authorization": f"Bearer {_token(editor)}"}
-        other_headers = {"Authorization": f"Bearer {_token(other_viewer)}"}
+        viewer_headers = {"Authorization": f"Bearer {await _token(db_session, viewer)}"}
+        editor_headers = {"Authorization": f"Bearer {await _token(db_session, editor)}"}
+        other_headers = {"Authorization": f"Bearer {await _token(db_session, other_viewer)}"}
         forbidden_upload = await client.put(
             f"/api/v1/catalog/{item.id}/image",
             headers=viewer_headers,
@@ -1030,30 +1092,30 @@ async def test_cashier_cannot_view_another_cashiers_sale(
 
         cashier_resp = await client.get(
             f"/api/v1/sales/{sale.id}",
-            headers={"Authorization": f"Bearer {_token(cashier)}"},
+            headers={"Authorization": f"Bearer {await _token(db_session, cashier)}"},
         )
         assert cashier_resp.status_code == 200
 
         peer_resp = await client.get(
             f"/api/v1/sales/{sale.id}",
-            headers={"Authorization": f"Bearer {_token(peer)}"},
+            headers={"Authorization": f"Bearer {await _token(db_session, peer)}"},
         )
         assert peer_resp.status_code == 403
         peer_list = await client.get(
             f"/api/v1/sales?cashier_id={cashier.id}",
-            headers={"Authorization": f"Bearer {_token(peer)}"},
+            headers={"Authorization": f"Bearer {await _token(db_session, peer)}"},
         )
         assert peer_list.status_code == 200
         assert peer_list.json()["total"] == 0
 
         manager_resp = await client.get(
             f"/api/v1/sales/{sale.id}",
-            headers={"Authorization": f"Bearer {_token(manager)}"},
+            headers={"Authorization": f"Bearer {await _token(db_session, manager)}"},
         )
         assert manager_resp.status_code == 200
         manager_list = await client.get(
             f"/api/v1/sales?cashier_id={cashier.id}",
-            headers={"Authorization": f"Bearer {_token(manager)}"},
+            headers={"Authorization": f"Bearer {await _token(db_session, manager)}"},
         )
         assert manager_list.status_code == 200
         assert manager_list.json()["total"] == 1
@@ -1178,7 +1240,7 @@ async def test_sales_list_keeps_each_capability_paired_with_its_branch_scope(
             )
             sales.append(await pos.complete(sale_id=sale.id))
 
-        headers = {"Authorization": f"Bearer {_token(viewer)}"}
+        headers = {"Authorization": f"Bearer {await _token(db_session, viewer)}"}
         combined = await client.get("/api/v1/sales", headers=headers)
         assert combined.status_code == 200
         assert {item["id"] for item in combined.json()["items"]} == {
@@ -1281,7 +1343,7 @@ async def test_tenant_sales_view_does_not_expand_pos_sell_branch_scope(
 
         response = await client.post(
             f"/api/v1/sales/{draft.id}/items",
-            headers={"Authorization": f"Bearer {_token(manager)}"},
+            headers={"Authorization": f"Bearer {await _token(db_session, manager)}"},
             json={"operation_id": str(uuid4()), "catalog_id": str(item.id), "qty": "1"},
         )
         assert response.status_code == 403
@@ -1373,7 +1435,7 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
             qty=Decimal("1"),
         )
         item_id = created_items[0].id
-        peer_headers = {"Authorization": f"Bearer {_token(peer)}"}
+        peer_headers = {"Authorization": f"Bearer {await _token(db_session, peer)}"}
 
         add_item_resp = await client.post(
             f"/api/v1/sales/{sale.id}/items",
@@ -1429,7 +1491,7 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
             "items": [{"catalog_id": str(item.id), "qty": "1"}],
             "payments": [{"payment_method": "cash", "amount": "10.00"}],
         }
-        manager_headers = {"Authorization": f"Bearer {_token(manager)}"}
+        manager_headers = {"Authorization": f"Bearer {await _token(db_session, manager)}"}
         await _assert_current_shift_visibility(
             client,
             register_id=register.id,
@@ -1540,7 +1602,7 @@ async def test_readonly_tenant_blocks_pos_mutations(
 
         await foundation.update_tenant(tenant.id, fields={"status": "readonly"})
 
-        headers = {"Authorization": f"Bearer {_token(cashier)}"}
+        headers = {"Authorization": f"Bearer {await _token(db_session, cashier)}"}
         readonly_requests: list[tuple[str, str, dict[str, object] | None]] = [
             (
                 "POST",
@@ -1694,7 +1756,12 @@ async def test_electronic_refund_confirmation_requires_separate_permission(
         )
         sale = await pos.complete(sale_id=sale.id)
 
-        cashier_headers = {"Authorization": f"Bearer {_token(cashier)}"}
+        cashier_token = await create_tenant_access_token(
+            db_session,
+            cashier,
+            mfa_verified_at=utc_now(),
+        )
+        cashier_headers = {"Authorization": f"Bearer {cashier_token}"}
         create_response = await client.post(
             f"/api/v1/sales/{sale.id}/refund-attempts",
             headers=cashier_headers,
@@ -1734,9 +1801,14 @@ async def test_electronic_refund_confirmation_requires_separate_permission(
         )
         assert denied_void.status_code == 403
 
+        approver_token = await create_tenant_access_token(
+            db_session,
+            approver,
+            mfa_verified_at=utc_now(),
+        )
         approved = await client.post(
             f"/api/v1/pos/refund-attempts/{attempt_id}/confirm",
-            headers={"Authorization": f"Bearer {_token(approver)}"},
+            headers={"Authorization": f"Bearer {approver_token}"},
             json=confirmation,
         )
         assert approved.status_code == 200

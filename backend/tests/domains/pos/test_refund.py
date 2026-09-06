@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from dataclasses import replace
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from httpx import AsyncClient
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import CurrentUser, current_user, get_db
 from app.core.errors import (
     AurumError,
     BusinessRuleError,
@@ -23,12 +28,14 @@ from app.domains.audit.models import AuditLog
 from app.domains.auth.models import AppUser
 from app.domains.customer_returns.models import CustomerReturnQuarantineItem
 from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.service import FoundationService
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import RefundCreate
 from app.domains.pos.service import POSService
 from app.domains.sync.models import SyncOutboxEvent
 from app.domains.sync.repository import SyncOutboxRepository
+from app.main import app
 
 
 def test_refund_schema_accepts_only_controlled_reason_and_normalizes_comment() -> None:
@@ -100,6 +107,8 @@ async def _confirmed_refund_attempt(  # type: ignore[no-untyped-def]
     items: list[tuple[UUID, Decimal]],
     *,
     suffix: str,
+    reason: str | None = "other",
+    comment: str | None = None,
 ):
     attempt = await service.create_refund_attempt(
         tenant_id=scaffold["tenant"].id,
@@ -107,6 +116,8 @@ async def _confirmed_refund_attempt(  # type: ignore[no-untyped-def]
         items=items,
         actor_id=scaffold["cashier"].id,
         operation_id=uuid4(),
+        reason=reason,
+        comment=comment,
     )
     await service.begin_refund_attempt_reconciliation(
         tenant_id=scaffold["tenant"].id,
@@ -127,6 +138,95 @@ async def _confirmed_refund_attempt(  # type: ignore[no-untyped-def]
             for payment in attempt.payments
         ],
         allowed_branch_ids=None,
+    )
+
+
+async def _complete_historical_electronic_sale(  # type: ignore[no-untyped-def]
+    service: POSService,
+    scaffold,
+    *,
+    register_id: UUID | None = None,
+    payments: list[tuple[str, Decimal]] | None = None,
+):
+    sale = await service.create_sale(
+        tenant_id=scaffold["tenant"].id,
+        register_id=register_id or scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+    )
+    items, _ = await service.add_item(
+        sale_id=sale.id,
+        catalog_id=scaffold["item"].id,
+        qty=Decimal("1"),
+    )
+    for payment_method, amount in payments or [("card", Decimal("10.00"))]:
+        await service.repo.insert_payment(
+            tenant_id=scaffold["tenant"].id,
+            sale_id=sale.id,
+            payment_method=payment_method,
+            amount=amount,
+        )
+    return await service.complete(sale_id=sale.id), items[0]
+
+
+async def _create_refund_attempt(  # type: ignore[no-untyped-def]
+    service: POSService,
+    scaffold,
+    parent,
+    item,
+    *,
+    reason: str | None = "other",
+    comment: str | None = None,
+):
+    return await service.create_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(item.id, Decimal("1"))],
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        reason=reason,
+        comment=comment,
+    )
+
+
+async def _close_refund_attempts(  # type: ignore[no-untyped-def]
+    service: POSService,
+    scaffold,
+    voided_sale,
+    consumed_sale,
+) -> None:
+    voided = await _create_refund_attempt(service, scaffold, *voided_sale)
+    await service.void_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=voided.id,
+        actor_id=scaffold["cashier"].id,
+        reason="customer_cancelled",
+        operator_note=None,
+        can_manage_tenant=False,
+        allowed_branch_ids=None,
+        allowed_manage_branch_ids=set(),
+    )
+    consumed = await _create_refund_attempt(service, scaffold, *consumed_sale)
+    await service.begin_refund_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=consumed.id,
+        actor_id=scaffold["cashier"].id,
+        allowed_branch_ids=None,
+    )
+    consumed = await service.confirm_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=consumed.id,
+        actor_id=scaffold["cashier"].id,
+        confirmations=[("card", "CARD-TERM", "CARD-REFUND-CONSUMED")],
+        allowed_branch_ids=None,
+    )
+    await service.refund(
+        parent_sale_id=consumed_sale[0].id,
+        items=[(consumed_sale[1].id, Decimal("1"))],
+        reason="other",
+        comment=None,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        refund_attempt_id=consumed.id,
     )
 
 
@@ -273,15 +373,15 @@ async def test_refund_retry_and_result_recovery_are_idempotent_and_scoped(
     assert refund_event.payload["parent_sale_id"] == str(parent.id)
     assert refund_event.payload["parent_fully_refunded"] is False
 
-    retried_with_reentered_metadata = await service.refund(
-        parent_sale_id=parent.id,
-        items=[(item.id, Decimal("1"))],
-        reason="other",
-        comment="re-entered after reconnect",
-        cashier_user_id=s["cashier"].id,
-        operation_id=operation_id,
-    )
-    assert retried_with_reentered_metadata.id == returned.id
+    with pytest.raises(ConflictError, match="another refund"):
+        await service.refund(
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            reason="other",
+            comment="re-entered after reconnect",
+            cashier_user_id=s["cashier"].id,
+            operation_id=operation_id,
+        )
     replayed_event = await outbox.get_by_operation_id(
         tenant_id=s["tenant"].id,
         operation_id=operation_id,
@@ -848,6 +948,15 @@ async def test_non_cash_refund_requires_external_terminal_confirmation(
         [(item.id, Decimal("1"))],
         suffix="card",
     )
+    with pytest.raises(ConflictError, match="confirmed refund attempt"):
+        await service.refund(
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            reason="pricing_error",
+            comment=None,
+            cashier_user_id=s["cashier"].id,
+            refund_attempt_id=attempt.id,
+        )
     returned = await service.refund(
         parent_sale_id=parent.id,
         items=[(item.id, Decimal("1"))],
@@ -909,6 +1018,8 @@ async def test_refund_attempt_create_is_idempotent_and_payload_bound(
         items=[(item.id, Decimal("1"))],
         actor_id=s["cashier"].id,
         operation_id=operation_id,
+        reason="quality_issue",
+        comment="Упаковка повреждена",
     )
     retried = await service.create_refund_attempt(
         tenant_id=s["tenant"].id,
@@ -916,10 +1027,25 @@ async def test_refund_attempt_create_is_idempotent_and_payload_bound(
         items=[(item.id, Decimal("1.000"))],
         actor_id=s["cashier"].id,
         operation_id=operation_id,
+        reason="quality_issue",
+        comment="Упаковка повреждена",
     )
 
     assert retried.id == first.id
     assert retried.status == "pending"
+    assert retried.intent_locked is True
+    assert retried.reason == "quality_issue"
+    assert retried.comment == "Упаковка повреждена"
+    with pytest.raises(DBAPIError, match="Refund attempt identity is immutable"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE pos_refund_attempt "
+                    "SET reason_code = 'pricing_error', intent_version = 1 "
+                    "WHERE id = :attempt_id"
+                ),
+                {"attempt_id": first.id},
+            )
     with pytest.raises(ConflictError, match="another refund attempt"):
         await service.create_refund_attempt(
             tenant_id=s["tenant"].id,
@@ -927,6 +1053,18 @@ async def test_refund_attempt_create_is_idempotent_and_payload_bound(
             items=[(item.id, Decimal("2"))],
             actor_id=s["cashier"].id,
             operation_id=operation_id,
+            reason="quality_issue",
+            comment="Упаковка повреждена",
+        )
+    with pytest.raises(ConflictError, match="another refund attempt"):
+        await service.create_refund_attempt(
+            tenant_id=s["tenant"].id,
+            parent_sale_id=parent.id,
+            items=[(item.id, Decimal("1"))],
+            actor_id=s["cashier"].id,
+            operation_id=operation_id,
+            reason="pricing_error",
+            comment="Упаковка повреждена",
         )
 
 
@@ -1144,6 +1282,164 @@ async def test_terminal_refund_document_cannot_be_reused_for_another_sale(
             allowed_branch_ids=None,
             allowed_manage_branch_ids=None,
         )
+
+
+async def test_payment_terminal_document_cannot_be_reused_for_refund(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, scaffold, parent, parent_item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20"))],
+    )
+    draft = await service.create_sale(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=draft.id,
+        catalog_id=scaffold["item"].id,
+        qty=Decimal("1"),
+        actor_id=scaffold["cashier"].id,
+    )
+    payment_attempt = await service.create_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        sale_id=draft.id,
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        payment_method="card",
+        amount=Decimal("10.00"),
+        currency="TJS",
+    )
+    await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=payment_attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
+    await service.confirm_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=payment_attempt.id,
+        actor_id=scaffold["cashier"].id,
+        terminal_id="TERM-CROSS-TYPE",
+        external_reference="DOC-CROSS-TYPE-PAYMENT",
+    )
+
+    refund_attempt = await service.create_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(parent_item.id, Decimal("1"))],
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+    )
+    await service.begin_refund_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=refund_attempt.id,
+        actor_id=scaffold["cashier"].id,
+        allowed_branch_ids=None,
+    )
+    tenant_id = scaffold["tenant"].id
+    cashier_id = scaffold["cashier"].id
+    refund_attempt_id = refund_attempt.id
+
+    with pytest.raises(ConflictError, match="already used"):
+        async with db_session.begin_nested():
+            await service.confirm_refund_attempt(
+                tenant_id=tenant_id,
+                attempt_id=refund_attempt_id,
+                actor_id=cashier_id,
+                confirmations=[("card", "TERM-CROSS-TYPE", "DOC-CROSS-TYPE-PAYMENT")],
+                allowed_branch_ids=None,
+            )
+
+    db_session.expire_all()
+    restored = await service.get_refund_attempt(
+        tenant_id=tenant_id,
+        attempt_id=refund_attempt_id,
+        allowed_branch_ids=None,
+    )
+    assert restored.status == "requires_reconciliation"
+    assert all(payment.document_number is None for payment in restored.payments)
+
+
+async def test_refund_terminal_document_cannot_be_reused_for_payment(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    service, scaffold, parent, parent_item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20"))],
+    )
+    refund_attempt = await service.create_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        parent_sale_id=parent.id,
+        items=[(parent_item.id, Decimal("1"))],
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+    )
+    await service.begin_refund_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=refund_attempt.id,
+        actor_id=scaffold["cashier"].id,
+        allowed_branch_ids=None,
+    )
+    await service.confirm_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=refund_attempt.id,
+        actor_id=scaffold["cashier"].id,
+        confirmations=[("card", "TERM-CROSS-TYPE", "DOC-CROSS-TYPE-REFUND")],
+        allowed_branch_ids=None,
+    )
+
+    draft = await service.create_sale(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+    )
+    await service.add_item(
+        sale_id=draft.id,
+        catalog_id=scaffold["item"].id,
+        qty=Decimal("1"),
+        actor_id=scaffold["cashier"].id,
+    )
+    payment_attempt = await service.create_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        sale_id=draft.id,
+        actor_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        payment_method="card",
+        amount=Decimal("10.00"),
+        currency="TJS",
+    )
+    await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=payment_attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
+    tenant_id = scaffold["tenant"].id
+    cashier_id = scaffold["cashier"].id
+    payment_attempt_id = payment_attempt.id
+
+    with pytest.raises(ConflictError, match="already used"):
+        async with db_session.begin_nested():
+            await service.confirm_payment_attempt(
+                tenant_id=tenant_id,
+                attempt_id=payment_attempt_id,
+                actor_id=cashier_id,
+                terminal_id="TERM-CROSS-TYPE",
+                external_reference="DOC-CROSS-TYPE-REFUND",
+            )
+
+    db_session.expire_all()
+    restored = await service.get_payment_attempt(
+        tenant_id=tenant_id,
+        attempt_id=payment_attempt_id,
+        actor_id=cashier_id,
+    )
+    assert restored.status == "requires_reconciliation"
+    assert restored.external_reference is None
 
 
 async def test_shift_close_waits_until_refund_attempt_is_resolved(
@@ -1422,3 +1718,335 @@ async def test_refund_comment_is_redacted_from_audit_and_payment_metadata(
     assert matching.metadata_json is not None
     assert matching.metadata_json["refund_reason"] == "quality_issue"
     assert "refund_comment" not in matching.metadata_json
+
+
+async def test_refund_reconciliation_queue_lists_all_active_states_and_summary(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold(batch_qty=20, sale_price=10)
+    service = POSService(POSRepository(db_session))
+    await service.open_shift(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        opened_by_user_id=scaffold["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+
+    sales = []
+    for payments in (
+        [
+            ("card", Decimal("3.00")),
+            ("qr", Decimal("4.00")),
+            ("bank_transfer", Decimal("3.00")),
+        ],
+        [("card", Decimal("10.00"))],
+        [("qr", Decimal("10.00"))],
+        [("card", Decimal("10.00"))],
+        [("card", Decimal("10.00"))],
+    ):
+        sales.append(
+            await _complete_historical_electronic_sale(
+                service,
+                scaffold,
+                payments=payments,
+            )
+        )
+
+    pending = await _create_refund_attempt(service, scaffold, *sales[0])
+    requires_reconciliation = await _create_refund_attempt(service, scaffold, *sales[1])
+    await service.begin_refund_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=requires_reconciliation.id,
+        actor_id=scaffold["cashier"].id,
+        allowed_branch_ids=None,
+    )
+    confirmed = await _create_refund_attempt(service, scaffold, *sales[2])
+    await service.begin_refund_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=confirmed.id,
+        actor_id=scaffold["cashier"].id,
+        allowed_branch_ids=None,
+    )
+    confirmed = await service.confirm_refund_attempt(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=confirmed.id,
+        actor_id=scaffold["cashier"].id,
+        confirmations=[("qr", "QR-TERM", "QR-REFUND-QUEUE")],
+        allowed_branch_ids=None,
+    )
+    await _close_refund_attempts(service, scaffold, sales[3], sales[4])
+
+    actor = CurrentUser(
+        user_id=scaffold["cashier"].id,
+        tenant_id=scaffold["tenant"].id,
+        is_developer=False,
+        is_administrator=False,
+        permissions={"pos.refund_external_confirm"},
+        permission_scopes={
+            "pos.refund_external_confirm": frozenset({scaffold["branch"].id}),
+        },
+    )
+
+    async def _override_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    async def _override_user() -> CurrentUser:
+        return actor
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[current_user] = _override_user
+    try:
+        response = await client.get("/api/v1/pos/refund-reconciliation")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "private, no-store"
+        body = response.json()
+        assert body["total"] == 3
+        assert body["page"] == 1
+        assert body["page_size"] == 25
+        assert {item["status"] for item in body["items"]} == {
+            "pending",
+            "requires_reconciliation",
+            "confirmed",
+        }
+        assert all("operation_id" not in item for item in body["items"])
+        assert {item["id"] for item in body["items"]} == {
+            str(pending.id),
+            str(requires_reconciliation.id),
+            str(confirmed.id),
+        }
+        pending_item = next(item for item in body["items"] if item["status"] == "pending")
+        assert pending_item["parent_receipt_number"] == sales[0][0].receipt_number
+        assert pending_item["branch_name"] == scaffold["branch"].name
+        assert pending_item["register_name"] == scaffold["register"].name
+        assert pending_item["requested_by_name"] == scaffold["cashier"].full_name
+        assert pending_item["item_count"] == 1
+        assert set(pending_item["payment_methods"]) == {"card", "qr", "bank_transfer"}
+        assert body["summary"] == {
+            "pending_count": 1,
+            "pending_external_amount": "10.00",
+            "requires_reconciliation_count": 1,
+            "requires_reconciliation_external_amount": "10.00",
+            "confirmed_count": 1,
+            "confirmed_external_amount": "10.00",
+        }
+        assert body["branches"] == [
+            {"id": str(scaffold["branch"].id), "name": scaffold["branch"].name}
+        ]
+
+        filtered = await client.get(
+            "/api/v1/pos/refund-reconciliation",
+            params={"status": "confirmed", "page_size": 100},
+        )
+        assert filtered.status_code == 200
+        assert filtered.json()["total"] == 1
+        assert filtered.json()["items"][0]["id"] == str(confirmed.id)
+        assert filtered.json()["summary"] == body["summary"]
+
+        assert (
+            await client.get(
+                "/api/v1/pos/refund-reconciliation",
+                params={"page_size": 101},
+            )
+        ).status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(current_user, None)
+
+
+async def test_refund_reconciliation_queue_enforces_tenant_branch_and_permission(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold(batch_qty=10, sale_price=10)
+    service = POSService(POSRepository(db_session))
+    await service.open_shift(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        opened_by_user_id=scaffold["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    parent, item = await _complete_historical_electronic_sale(service, scaffold)
+    visible_attempt = await _create_refund_attempt(service, scaffold, parent, item)
+
+    foundation = FoundationService(FoundationRepository(db_session))
+    other_branch = await foundation.create_branch(
+        tenant_id=scaffold["tenant"].id,
+        fields={"name": "Other branch"},
+    )
+    other_register = await foundation.create_register(
+        tenant_id=scaffold["tenant"].id,
+        fields={"branch_id": other_branch.id, "name": "Касса 2"},
+    )
+    inventory = InventoryRepository(db_session)
+    other_batch = await inventory.create_batch(
+        tenant_id=scaffold["tenant"].id,
+        branch_id=other_branch.id,
+        catalog_id=scaffold["item"].id,
+        expires_at=scaffold["batch"].expires_at,
+        purchase_price=Decimal("3.00"),
+        sale_price=Decimal("10.00"),
+        qty_initial=Decimal("10.000"),
+        qty_remaining=Decimal("0"),
+    )
+    await inventory.insert_movement(
+        tenant_id=scaffold["tenant"].id,
+        batch_id=other_batch.id,
+        movement_type="incoming",
+        qty_delta=Decimal("10.000"),
+        source_table=None,
+        source_id=None,
+    )
+    await db_session.refresh(other_batch)
+    await service.open_shift(
+        tenant_id=scaffold["tenant"].id,
+        register_id=other_register.id,
+        opened_by_user_id=scaffold["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    hidden_parent, hidden_item = await _complete_historical_electronic_sale(
+        service,
+        scaffold,
+        register_id=other_register.id,
+    )
+    await _create_refund_attempt(service, scaffold, hidden_parent, hidden_item)
+
+    other_tenant = await pos_scaffold(batch_qty=4, sale_price=10)
+    other_service = POSService(POSRepository(db_session))
+    await other_service.open_shift(
+        tenant_id=other_tenant["tenant"].id,
+        register_id=other_tenant["register"].id,
+        opened_by_user_id=other_tenant["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    other_parent, other_item = await _complete_historical_electronic_sale(
+        other_service,
+        other_tenant,
+    )
+    await _create_refund_attempt(other_service, other_tenant, other_parent, other_item)
+
+    actor = CurrentUser(
+        user_id=scaffold["cashier"].id,
+        tenant_id=scaffold["tenant"].id,
+        is_developer=False,
+        is_administrator=False,
+        permissions={"pos.refund_external_confirm"},
+        permission_scopes={
+            "pos.refund_external_confirm": frozenset({scaffold["branch"].id}),
+        },
+    )
+
+    async def _override_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    async def _override_user() -> CurrentUser:
+        return actor
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[current_user] = _override_user
+    try:
+        response = await client.get("/api/v1/pos/refund-reconciliation")
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+        assert response.json()["items"][0]["id"] == str(visible_attempt.id)
+        assert response.json()["branches"] == [
+            {"id": str(scaffold["branch"].id), "name": scaffold["branch"].name}
+        ]
+        forbidden_branch = await client.get(
+            "/api/v1/pos/refund-reconciliation",
+            params={"branch_id": str(other_branch.id)},
+        )
+        assert forbidden_branch.status_code == 403
+        assert (
+            await client.get(f"/api/v1/sales/{hidden_parent.id}/refund-attempts/active")
+        ).status_code == 403
+        cross_tenant = await client.get(f"/api/v1/sales/{other_parent.id}/refund-attempts/active")
+        assert cross_tenant.status_code == 200
+        assert cross_tenant.json() is None
+
+        denied_actor = replace(
+            actor,
+            permissions={"pos.refund"},
+            permission_scopes={
+                "pos.refund": frozenset({scaffold["branch"].id}),
+            },
+        )
+
+        async def _override_denied_user() -> CurrentUser:
+            return denied_actor
+
+        app.dependency_overrides[current_user] = _override_denied_user
+        assert (await client.get("/api/v1/pos/refund-reconciliation")).status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(current_user, None)
+
+
+async def test_active_refund_attempt_endpoint_recovers_without_client_state(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    service, scaffold, parent, item = await _open_shift_and_sell(
+        db_session,
+        pos_scaffold,
+        qty=2,
+        payments=[("card", Decimal("20.00"))],
+    )
+    attempt = await _create_refund_attempt(service, scaffold, parent, item)
+    actor = CurrentUser(
+        user_id=scaffold["cashier"].id,
+        tenant_id=scaffold["tenant"].id,
+        is_developer=False,
+        is_administrator=False,
+        permissions={"pos.refund"},
+        permission_scopes={"pos.refund": frozenset({scaffold["branch"].id})},
+    )
+
+    async def _override_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    async def _override_user() -> CurrentUser:
+        return actor
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[current_user] = _override_user
+    try:
+        recovered = await client.get(f"/api/v1/sales/{parent.id}/refund-attempts/active")
+        assert recovered.status_code == 200
+        assert recovered.headers["cache-control"] == "private, no-store"
+        assert recovered.json()["id"] == str(attempt.id)
+        assert recovered.json()["status"] == "pending"
+
+        await service.void_refund_attempt(
+            tenant_id=scaffold["tenant"].id,
+            attempt_id=attempt.id,
+            actor_id=scaffold["cashier"].id,
+            reason="customer_cancelled",
+            operator_note=None,
+            can_manage_tenant=False,
+            allowed_branch_ids=None,
+            allowed_manage_branch_ids=set(),
+        )
+        closed = await client.get(f"/api/v1/sales/{parent.id}/refund-attempts/active")
+        assert closed.status_code == 200
+        assert closed.json() is None
+
+        unauthorized = replace(
+            actor,
+            permissions={"pos.sell"},
+            permission_scopes={"pos.sell": frozenset({scaffold["branch"].id})},
+        )
+
+        async def _override_unauthorized_user() -> CurrentUser:
+            return unauthorized
+
+        app.dependency_overrides[current_user] = _override_unauthorized_user
+        assert (
+            await client.get(f"/api/v1/sales/{parent.id}/refund-attempts/active")
+        ).status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(current_user, None)

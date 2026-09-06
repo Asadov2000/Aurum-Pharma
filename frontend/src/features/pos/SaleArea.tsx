@@ -16,7 +16,7 @@ import { findByBarcode } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
-import { useOnlineStatus } from "@/lib/useOnlineStatus";
+import { useConnectivity } from "@/lib/connectivityContext";
 import { cn } from "@/lib/utils";
 
 import { BarcodeListener } from "./BarcodeListener";
@@ -25,7 +25,7 @@ import { PaymentPanel } from "./PaymentPanel";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
-import { getCheckoutResult } from "./api";
+import { getActivePaymentAttempt, getCheckoutResult } from "./api";
 import { beep } from "./beep";
 import {
   clearPendingCheckoutOperation,
@@ -65,6 +65,7 @@ import {
   clearPaymentAttemptOperation,
   createPaymentAttemptOperation,
   loadPaymentAttemptOperation,
+  saveRecoveredPaymentAttemptOperation,
 } from "./paymentAttemptOperation";
 import {
   clearPendingPaymentOperation,
@@ -85,6 +86,7 @@ import {
   type SaleDetails,
 } from "./types";
 import { type PosMode } from "./usePosMode";
+import { usePosRegisterLock } from "./usePosRegisterLock";
 
 const ReceiptPrintModal = lazy(async () => {
   const module = await import("./ReceiptPrintModal");
@@ -98,12 +100,13 @@ const QuickProducts = lazy(async () => {
   return { default: module.QuickProducts };
 });
 
-// Lazy so the on-screen keypad chunk only loads when a cashier taps a field.
-const NumPad = lazy(() => import("./NumPad"));
-const ExternalPaymentEvidenceDialog = lazy(async () => {
+const loadNumPad = () => import("./NumPad");
+const loadExternalPaymentEvidenceDialog = async () => {
   const module = await import("./ExternalPaymentEvidenceDialog");
   return { default: module.ExternalPaymentEvidenceDialog };
-});
+};
+const NumPad = lazy(loadNumPad);
+const ExternalPaymentEvidenceDialog = lazy(loadExternalPaymentEvidenceDialog);
 
 type NumPadState =
   | { kind: "qty"; itemId: string; initial: string }
@@ -198,6 +201,7 @@ export function SaleArea({
   canCloseShift = true,
   canSell = true,
   canReconcileExternalPayment = false,
+  canExportReports = false,
   workstationControls,
   onRegisterSwitchStateChange,
 }: {
@@ -215,36 +219,50 @@ export function SaleArea({
   canCloseShift?: boolean;
   canSell?: boolean;
   canReconcileExternalPayment?: boolean;
+  canExportReports?: boolean;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
-  const isOnline = useOnlineStatus();
+  useEffect(() => {
+    // Payment controls are separate chunks, but should be ready before the
+    // cashier needs them during a brief network interruption.
+    void loadNumPad();
+    void loadExternalPaymentEvidenceDialog();
+  }, []);
+  const isOnline = useConnectivity().canUseServer;
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
 
   return (
     <div className="min-w-0">
       {hasShift && canSell ? (
-        // Key by register so switching registers restores that one's draft.
-        <ActiveWorkspace
+        <RegisterWorkspaceGate
           key={registerId}
           registerId={registerId}
-          branchId={shiftQuery.data?.branch_id ?? null}
-          mode={mode}
-          soundOn={soundOn}
-          draftTtlMin={draftTtlMin}
-          paymentMethods={paymentMethods}
-          mixedPaymentEnabled={mixedPaymentEnabled}
-          paymentSettingsLoading={paymentSettingsLoading}
-          paymentSettingsUnavailable={paymentSettingsUnavailable}
-          cardTerminalId={cardTerminalId}
-          qrTerminalId={qrTerminalId}
-          canCloseShift={canCloseShift}
-          canReconcileExternalPayment={canReconcileExternalPayment}
-          online={isOnline}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={onRegisterSwitchStateChange}
-        />
+        >
+          {/* Key by register so switching registers restores that one's draft. */}
+          <ActiveWorkspace
+            registerId={registerId}
+            branchId={shiftQuery.data?.branch_id ?? null}
+            mode={mode}
+            soundOn={soundOn}
+            draftTtlMin={draftTtlMin}
+            paymentMethods={paymentMethods}
+            mixedPaymentEnabled={mixedPaymentEnabled}
+            paymentSettingsLoading={paymentSettingsLoading}
+            paymentSettingsUnavailable={paymentSettingsUnavailable}
+            cardTerminalId={cardTerminalId}
+            qrTerminalId={qrTerminalId}
+            canCloseShift={canCloseShift}
+            canReconcileExternalPayment={canReconcileExternalPayment}
+            canExportReports={canExportReports}
+            online={isOnline}
+            workstationControls={workstationControls}
+            onRegisterSwitchStateChange={onRegisterSwitchStateChange}
+          />
+        </RegisterWorkspaceGate>
       ) : (
         <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
           {workstationControls ? (
@@ -257,10 +275,55 @@ export function SaleArea({
             mode={mode}
             canOpen={canOpenShift}
             canClose={canCloseShift}
+            canExportReport={canExportReports}
             online={isOnline}
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function RegisterWorkspaceGate({
+  registerId,
+  workstationControls,
+  onRegisterSwitchStateChange,
+  children,
+}: {
+  registerId: string;
+  workstationControls?: ReactNode;
+  onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
+  children: ReactNode;
+}): JSX.Element {
+  const registerLock = usePosRegisterLock(registerId);
+
+  useEffect(() => {
+    if (registerLock.isOwner) return;
+    onRegisterSwitchStateChange?.({ blocked: false, hasDraft: false });
+  }, [onRegisterSwitchStateChange, registerLock.isOwner]);
+
+  if (registerLock.isOwner) return <>{children}</>;
+
+  return (
+    <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
+      {workstationControls ? (
+        <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
+          {workstationControls}
+        </div>
+      ) : null}
+      <div
+        role="status"
+        className="rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning-foreground"
+      >
+        <p className="font-semibold">
+          {registerLock.status === "checking"
+            ? "Подключение к кассе"
+            : registerLock.status === "unsupported"
+              ? "Требуется обновление браузера"
+              : "Касса занята"}
+        </p>
+        <p className="mt-1">{registerLock.message}</p>
+      </div>
     </div>
   );
 }
@@ -284,6 +347,7 @@ function ActiveWorkspace({
   qrTerminalId,
   canCloseShift,
   canReconcileExternalPayment,
+  canExportReports,
   online,
   workstationControls,
   onRegisterSwitchStateChange,
@@ -301,6 +365,7 @@ function ActiveWorkspace({
   qrTerminalId?: string | null;
   canCloseShift: boolean;
   canReconcileExternalPayment: boolean;
+  canExportReports: boolean;
   online: boolean;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
@@ -364,6 +429,10 @@ function ActiveWorkspace({
   const externalPaymentConfirmationRef = useRef<ExternalPaymentConfirmation | null>(null);
   const externalPaymentMutationRef = useRef(false);
   const externalPaymentReviewRef = useRef(externalPaymentReviewRequired);
+  const paymentAttemptRecoverySaleRef = useRef<string | null>(null);
+  const prepareExternalPaymentRef = useRef<
+    (method: "card" | "qr", amount: string) => Promise<void>
+  >(async () => undefined);
   const saleIdRef = useRef<string | null>(saleId);
   const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
   saleIdRef.current = saleId;
@@ -813,8 +882,13 @@ function ActiveWorkspace({
 
   const onScan = async (code: string) => {
     setTopError(null);
+    if (!branchId) {
+      doFlash("danger");
+      setTopError("Выберите кассу с привязанным филиалом перед сканированием");
+      return;
+    }
     try {
-      const item = await findByBarcode(code);
+      const item = await findByBarcode(code, branchId);
       const added = await onAdd(item.id, item.brand_name, 1, true);
       if (!added) {
         doFlash("danger");
@@ -1162,6 +1236,40 @@ function ActiveWorkspace({
       setPayingMethod(null);
     }
   };
+
+  prepareExternalPaymentRef.current = prepareExternalPayment;
+
+  useEffect(() => {
+    if (!saleId || sale?.status !== "draft") return;
+    if (paymentAttemptRecoverySaleRef.current === saleId) return;
+    paymentAttemptRecoverySaleRef.current = saleId;
+    void (async () => {
+      let storedAttempt = loadPaymentAttemptOperation(saleId);
+      if (!storedAttempt) {
+        try {
+          const serverAttempt = await getActivePaymentAttempt(saleId);
+          if (!serverAttempt) return;
+          storedAttempt = saveRecoveredPaymentAttemptOperation(serverAttempt);
+          if (!storedAttempt) {
+            setTopError(
+              "Найдена незавершённая электронная оплата, но её не удалось безопасно сохранить. Не повторяйте оплату; освободите место и перезапустите приложение.",
+            );
+            return;
+          }
+        } catch (error) {
+          paymentAttemptRecoverySaleRef.current = null;
+          setTopError(
+            describeApiError(
+              error,
+              "Не удалось проверить незавершённую электронную оплату. Не повторяйте оплату до восстановления связи.",
+            ),
+          );
+          return;
+        }
+      }
+      await prepareExternalPaymentRef.current(storedAttempt.paymentMethod, storedAttempt.amount);
+    })();
+  }, [sale?.status, saleId]);
 
   const closeExternalPaymentConfirmation = () => {
     externalPaymentConfirmationRef.current = null;
@@ -1771,6 +1879,7 @@ function ActiveWorkspace({
             registerId={registerId}
             mode={mode}
             canClose={canCloseShift}
+            canExportReport={canExportReports}
             closeBlocked={shiftCloseBlocked}
             online={online}
           />

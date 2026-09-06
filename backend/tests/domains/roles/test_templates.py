@@ -6,18 +6,19 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.deps import _seed_request_db_context, get_db
-from app.core.security import create_access_token, decode_access_token
+from app.core.security import decode_access_token
 from app.domains.roles.models import Permission
 from app.domains.roles.repository import RolesRepository
 from app.domains.roles.service import RolesService
 from app.domains.support_access.repository import SupportAccessRepository
 from app.domains.support_access.service import SupportAccessService
 from app.main import app
-from tests.auth_helpers import create_support_access_token
+from tests.auth_helpers import create_support_access_token, create_tenant_access_token
 
 PROTECTED_GOVERNANCE_CODES = {
     "roles.assign",
@@ -30,6 +31,32 @@ PROTECTED_GOVERNANCE_CODES = {
 }
 
 
+async def test_permission_risk_metadata_is_fail_closed(db_session: AsyncSession) -> None:
+    critical_without_step_up = list(
+        (
+            await db_session.execute(
+                select(Permission.code).where(
+                    Permission.risk_level == "critical",
+                    Permission.requires_step_up.is_(False),
+                )
+            )
+        ).scalars()
+    )
+    dangerous_without_confirmation = list(
+        (
+            await db_session.execute(
+                select(Permission.code).where(
+                    Permission.is_dangerous.is_(True),
+                    Permission.requires_confirmation.is_(False),
+                )
+            )
+        ).scalars()
+    )
+
+    assert critical_without_step_up == []
+    assert dangerous_without_confirmation == []
+
+
 async def test_permission_scope_metadata_uses_explicit_capability_mapping(
     db_session: AsyncSession,
 ) -> None:
@@ -40,6 +67,7 @@ async def test_permission_scope_metadata_uses_explicit_capability_mapping(
         "pos.sell": "BRANCH_SET",
         "roles.assign": "TENANT_ALL",
         "incoming.create": "BRANCH_SET",
+        "incoming.finalize": "BRANCH_SET",
         "reports.view": "BRANCH_SET",
         "billing.overview.view": "TENANT_ALL",
         "billing.invoice.view": "TENANT_ALL",
@@ -234,12 +262,7 @@ async def test_non_owner_cannot_read_delegation_catalog(
             )
         )
         await db_session.flush()
-        token = create_access_token(
-            user.id,
-            tenant_id=tenant.id,
-            is_developer=False,
-            is_administrator=False,
-        )
+        token = await create_tenant_access_token(db_session, user, tenant_id=tenant.id)
 
         response = await client.get(
             "/api/v1/permissions",
@@ -270,12 +293,7 @@ async def test_role_catalog_does_not_disclose_protected_owner_role(
             level=4,
             name="Visible cashier",
         )
-        token = create_access_token(
-            owner.id,
-            tenant_id=tenant.id,
-            is_developer=False,
-            is_administrator=False,
-        )
+        token = await create_tenant_access_token(db_session, owner, tenant_id=tenant.id)
 
         response = await client.get(
             "/api/v1/roles",

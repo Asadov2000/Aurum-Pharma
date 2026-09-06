@@ -123,7 +123,7 @@ export function UsersPage(): JSX.Element {
   const canRevokeSessions = canSuspend;
   const canOffboard = (isTenantOwner || isSupportScoped) && permissions.includes("users.delete");
   const canAssign = (isTenantOwner || isSupportScoped) && permissions.includes("roles.assign");
-  const canInvite = (isTenantOwner || isSupportScoped) && permissions.includes("users.invite");
+  const canInvite = isTenantOwner && permissions.includes("users.invite");
   const canViewRoles =
     (isTenantOwner || isSupportScoped) &&
     permissions.some((permission) =>
@@ -262,7 +262,7 @@ export function UsersPage(): JSX.Element {
         target_membership_id: ownershipTransfer.user.membership_id,
       });
       setActionNotice(
-        `Запрос отправлен сотруднику «${ownershipTransfer.user.full_name}». До подтверждения вы остаётесь владельцем.`,
+        `Запрос отправлен сотруднику «${ownershipTransfer.user.full_name}». Получатель подтверждает его в «Настройки → Безопасность». Там же вы сможете отменить запрос. До подтверждения вы остаётесь владельцем.`,
       );
       setOwnershipTransfer(null);
       restoreActionFocus();
@@ -608,8 +608,9 @@ export function UsersPage(): JSX.Element {
             </TableEmpty>
           ) : (
             <TableEmpty title="Сотрудников пока нет">
-              Добавьте сотрудника, выберите ему роль и при необходимости ограничьте доступ одной
-              торговой точкой.
+              {canCreateEmployee
+                ? "Добавьте сотрудника, выберите ему роль и торговую точку."
+                : "Добавить первого сотрудника может владелец аптеки с правом управления ролями."}
             </TableEmpty>
           )
         ) : (
@@ -678,9 +679,11 @@ export function UsersPage(): JSX.Element {
                 tenantId={tenantId}
                 roles={roles.data ?? []}
                 branches={branches.data ?? []}
-                onCreated={(fullName) => {
+                onCreated={(fullName, email) => {
                   setInviteOpen(false);
-                  setActionNotice(`Сотрудник «${fullName}» создан. Приглашение действует 7 дней.`);
+                  setActionNotice(
+                    `Доступ для «${fullName}» создан. Сотрудник должен открыть страницу входа, указать ${email} и запросить код в течение 7 дней.`,
+                  );
                   setPage(1);
                 }}
                 onCancel={() => setInviteOpen(false)}

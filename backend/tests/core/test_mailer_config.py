@@ -12,13 +12,17 @@ from app.core.security import derive_email_outbox_encryption_key
 
 _ROOT = "e" * 40
 _PREVIOUS_ROOT = "p" * 40
+_POSTGRES_TLS = "?sslmode=verify-full&sslrootcert=/run/secrets/postgres_ca.crt"
+_REDIS_TLS = "?ssl_cert_reqs=required&ssl_check_hostname=true"
 
 
 def _build(**overrides: object) -> MailerSettings:
     base: dict[str, object] = {
         "ENVIRONMENT": "production",
-        "DATABASE_URL_MAILER": ("postgresql+asyncpg://aurum_mailer:Str0ng-Mailer-Pw@db/aurum"),
-        "REDIS_URL": "redis://:Str0ng-Redis-Pw@redis:6379/0",
+        "DATABASE_URL_MAILER": (
+            "postgresql+asyncpg://aurum_mailer:Str0ng-Mailer-Pw@db/aurum" + _POSTGRES_TLS
+        ),
+        "REDIS_URL": "rediss://:Str0ng-Redis-Pw@redis:6379/0" + _REDIS_TLS,
         "EMAIL_OUTBOX_ENCRYPTION_KEY": _ROOT,
         "EMAIL_HOST": "smtp.example.com",
         "EMAIL_USER": "mailer@example.com",
@@ -40,6 +44,16 @@ def test_production_accepts_only_dedicated_secure_configuration() -> None:
     assert "Str0ng-Redis-Pw" not in representation
     assert "smtp-provider-token" not in representation
     assert _ROOT not in representation
+
+
+def test_production_rejects_database_without_verified_tls() -> None:
+    with pytest.raises(ValidationError, match="sslmode=verify-full and sslrootcert"):
+        _build(DATABASE_URL_MAILER=("postgresql+asyncpg://aurum_mailer:Str0ng-Mailer-Pw@db/aurum"))
+
+
+def test_production_rejects_redis_without_certificate_verification() -> None:
+    with pytest.raises(ValidationError, match="ssl_cert_reqs=required"):
+        _build(REDIS_URL="rediss://:Str0ng-Redis-Pw@redis:6379/0")
 
 
 @pytest.mark.parametrize(

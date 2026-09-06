@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { Button, FormError, Input, Label, Select, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
+import { useConnectivity } from "@/lib/connectivityContext";
 
 import { formatInventoryMoney, formatInventoryQuantity } from "./formatters";
 import { writeOffReasonLabel, writeOffReasonOptions } from "./labels";
@@ -55,7 +56,7 @@ export function WriteOffForm({
 }: {
   batchId: string;
   maxQty: string;
-  purchasePrice: string;
+  purchasePrice: string | null;
   currency: string;
   productName: string;
   batchNumber: string | null;
@@ -67,26 +68,14 @@ export function WriteOffForm({
   const operationId = useMemo(createOperationId, []);
   const [topError, setTopError] = useState<string | null>(null);
   const [result, setResult] = useState<WriteOff | null>(null);
-  const [online, setOnline] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
+  const online = useConnectivity().canUseServer;
 
   const form = useForm<FormValues>({
     defaultValues: { qty: "", reason: "", comment: "" },
   });
   const qty = form.watch("qty");
   const normalizedQty = qty.replace(",", ".");
-  const amount = Number(normalizedQty) * Number(purchasePrice);
-
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, []);
+  const amount = purchasePrice === null ? null : Number(normalizedQty) * Number(purchasePrice);
 
   useEffect(() => {
     onDirtyChange?.(form.formState.isDirty && result === null);
@@ -152,7 +141,12 @@ export function WriteOffForm({
           <ResultField label="Партия" value={batchNumber ?? "Без номера"} />
           <ResultField label="Количество" value={formatInventoryQuantity(result.qty)} />
           <ResultField label="Причина" value={writeOffReasonLabel[result.reason]} />
-          <ResultField label="Сумма" value={formatInventoryMoney(result.amount, result.currency)} />
+          {result.amount !== null && (
+            <ResultField
+              label="Сумма"
+              value={formatInventoryMoney(result.amount, result.currency)}
+            />
+          )}
           <ResultField label="Код операции" value={result.id.slice(0, 8)} mono />
         </dl>
         <div className="flex justify-end">
@@ -229,7 +223,7 @@ export function WriteOffForm({
         <FormError>{form.formState.errors.comment?.message}</FormError>
       </div>
 
-      {Number.isFinite(amount) && amount > 0 && (
+      {amount !== null && Number.isFinite(amount) && amount > 0 && (
         <div className="flex items-center justify-between gap-4 rounded-lg bg-warning-subtle px-4 py-3 text-sm">
           <span className="text-warning-foreground">Сумма списания по закупочной цене</span>
           <strong className="whitespace-nowrap font-mono tabular-nums text-warning-foreground">

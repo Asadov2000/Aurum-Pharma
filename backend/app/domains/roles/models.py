@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    String,
     Text,
     UniqueConstraint,
     text,
@@ -90,6 +91,14 @@ class Permission(Base):
         CheckConstraint(
             "risk_level IN ('normal','sensitive','critical')",
             name="ck_permission_risk_level",
+        ),
+        CheckConstraint(
+            "risk_level <> 'critical' OR requires_step_up",
+            name="ck_permission_critical_requires_step_up",
+        ),
+        CheckConstraint(
+            "NOT is_dangerous OR requires_confirmation",
+            name="ck_permission_dangerous_requires_confirmation",
         ),
     )
 
@@ -262,6 +271,7 @@ class TenantInvitation(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
     operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

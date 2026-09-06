@@ -1,7 +1,7 @@
 import { apiBaseUrl } from "@/lib/api";
 
 const DEFAULT_HEALTH_PATH = "/healthz";
-const DEFAULT_HEALTH_TIMEOUT_MS = 3_000;
+const DEFAULT_HEALTH_TIMEOUT_MS = 8_000;
 
 interface HealthPayload {
   readonly status?: string;
@@ -14,10 +14,7 @@ interface CheckServerHealthOptions {
   readonly timeoutMs?: number;
 }
 
-export function resolveServerHealthUrl(
-  apiUrl = apiBaseUrl,
-  origin = getWindowOrigin(),
-): string {
+export function resolveServerHealthUrl(apiUrl = apiBaseUrl, origin = getWindowOrigin()): string {
   const resolved = new URL(apiUrl, origin);
   const isRelative = isRelativeUrl(apiUrl);
 
@@ -32,9 +29,7 @@ export function resolveServerHealthUrl(
   return resolved.toString();
 }
 
-export async function checkServerHealth(
-  options: CheckServerHealthOptions = {},
-): Promise<boolean> {
+export async function checkServerHealth(options: CheckServerHealthOptions = {}): Promise<boolean> {
   const fetcher = options.fetcher ?? getFetch();
   if (!fetcher) {
     return false;
@@ -47,7 +42,11 @@ export async function checkServerHealth(
   );
   const abortFromCaller = () => controller.abort();
 
-  options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (options.signal?.aborted) {
+    controller.abort();
+  } else {
+    options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
 
   try {
     const response = await fetcher(options.healthUrl ?? resolveServerHealthUrl(), {

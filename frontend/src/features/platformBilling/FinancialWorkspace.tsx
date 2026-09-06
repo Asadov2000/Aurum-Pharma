@@ -39,7 +39,7 @@ import {
   type PlatformPaymentHistoryItem,
   type PlatformPaymentSubmissionListItem,
 } from "./types";
-import { useOnlineStatus } from "./useOnlineStatus";
+import { useConnectivity } from "@/lib/connectivityContext";
 
 const PAGE_SIZE = 20;
 const SEARCH_DELAY_MS = 350;
@@ -59,7 +59,7 @@ export function FinancialWorkspace({
   refreshSignal: number;
   onFetchingChange?: (fetching: boolean) => void;
 }): JSX.Element {
-  const online = useOnlineStatus();
+  const online = useConnectivity().canUseServer;
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [tenantPage, setTenantPage] = useState(1);

@@ -7,7 +7,15 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationInfo, field_validator
+from pydantic import (
+    UUID4,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    ValidationInfo,
+    field_validator,
+)
 
 SupplierReturnReason = Literal[
     "damaged",
@@ -35,6 +43,7 @@ def _normalize_supplier_text(value: str | None, info: ValidationInfo) -> str | N
 class SupplierCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    operation_id: UUID4
     name: str = Field(min_length=1, max_length=200)
     legal_name: str | None = Field(default=None, max_length=300)
     inn_or_tin: str | None = Field(default=None, max_length=40)
@@ -188,9 +197,9 @@ class SupplierReturnRead(BaseModel):
     id: UUID
     supplier_id: UUID
     batch_id: UUID
-    source_document_id: UUID | None
+    source_document_id: UUID
     qty: Decimal
-    amount: Decimal
+    amount: Decimal | None
     currency: str
     reason: SupplierReturnReason
     comment: str | None
@@ -228,7 +237,7 @@ class SupplierReturnSearchRequest(BaseModel):
 
 class SupplierReturnSummary(BaseModel):
     total_qty: Decimal
-    total_amount: Decimal
+    total_amount: Decimal | None
 
 
 class SupplierReturnList(BaseModel):

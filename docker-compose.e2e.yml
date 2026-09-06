@@ -24,6 +24,7 @@ services:
       AURUM_SUPPORT_PASSWORD: aurum_support_pw
       AURUM_MAILER_PASSWORD: aurum_mailer_pw
       AURUM_BILLING_WORKER_PASSWORD: aurum_billing_worker_pw
+      AURUM_WORKER_PASSWORD: aurum_worker_pw
       AURUM_MIGRATOR_PASSWORD: aurum_migrator_pw
       AURUM_BACKUP_PASSWORD: aurum_backup_pw
       AURUM_PITR_PASSWORD: aurum_pitr_pw
@@ -87,6 +88,7 @@ services:
       AURUM_SUPPORT_PASSWORD: aurum_support_pw
       AURUM_MAILER_PASSWORD: aurum_mailer_pw
       AURUM_BILLING_WORKER_PASSWORD: aurum_billing_worker_pw
+      AURUM_WORKER_PASSWORD: aurum_worker_pw
       AURUM_MIGRATOR_PASSWORD: aurum_migrator_pw
       AURUM_BACKUP_PASSWORD: aurum_backup_pw
       AURUM_PITR_PASSWORD: aurum_pitr_pw
@@ -133,7 +135,31 @@ services:
 
   celery-worker:
     image: aurum-pharma-e2e-backend:local
-    environment: *backend-environment
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_WORKER: postgresql+asyncpg://aurum_worker:aurum_worker_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
+      REDIS_URL: redis://redis:6379/0
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=warning -Q default
+    restart: "no"
+
+  catalog-worker:
+    image: aurum-pharma-e2e-backend:local
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: aurum
+      MINIO_SECURE: "false"
+      PYTHONPATH: /app
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,7 +167,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    command: celery -A app.tasks.celery_app worker --loglevel=warning -Q default
+    command: celery -A app.tasks.catalog_app worker --loglevel=warning -Q catalog-worker --concurrency=1
     restart: "no"
 
   billing-worker:

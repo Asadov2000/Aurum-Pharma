@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
-from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.foundation.models import Tenant
 from app.domains.roles.models import (
@@ -24,6 +23,7 @@ from app.domains.roles.models import (
     TenantMembership,
     UserAssignment,
 )
+from tests.auth_helpers import create_session_access_token
 from tests.role_version_helpers import create_published_test_role
 
 
@@ -196,18 +196,18 @@ async def test_tenant_financial_account_owner_success_and_seller_denied(
 ) -> None:
     subjects = await _seed_committed_subjects(db_engine)
     try:
-        owner_token = create_access_token(
-            subjects.owner_user_id,
-            tenant_id=subjects.tenant_id,
-            is_developer=False,
-            is_administrator=False,
-        )
-        seller_token = create_access_token(
-            subjects.seller_user_id,
-            tenant_id=subjects.tenant_id,
-            is_developer=False,
-            is_administrator=False,
-        )
+        session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+        async with session_factory.begin() as auth_db:
+            owner_token = await create_session_access_token(
+                auth_db,
+                user_id=subjects.owner_user_id,
+                tenant_id=subjects.tenant_id,
+            )
+            seller_token = await create_session_access_token(
+                auth_db,
+                user_id=subjects.seller_user_id,
+                tenant_id=subjects.tenant_id,
+            )
         owner_response = await client.get(
             "/api/v1/billing/financial-account",
             headers={"Authorization": f"Bearer {owner_token}"},

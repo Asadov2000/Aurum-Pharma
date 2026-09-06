@@ -102,6 +102,30 @@ describe("AuditPage", () => {
     expect(screen.getByText("Изменения на странице")).toBeInTheDocument();
   });
 
+  it("shows rejected authorization changes as events requiring attention", async () => {
+    searchAudit.mockResolvedValueOnce({
+      items: [
+        {
+          ...ENTRY,
+          action: "AUTHORIZATION_DENIED",
+          table_name: "authorization_policy",
+          metadata: { reason: "self_assignment_denied" },
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+    });
+
+    renderPage();
+
+    const row = await screen.findByRole("row", {
+      name: /Открыть событие: Опасное действие отклонено, Политика доступа/i,
+    });
+    expect(within(row).getByText("Опасное действие отклонено")).toBeInTheDocument();
+    expect(screen.getByText("Требуют внимания")).toBeInTheDocument();
+  });
+
   it("opens the entry modal with a colored diff on row click", async () => {
     searchAudit.mockResolvedValueOnce({
       items: [ENTRY],

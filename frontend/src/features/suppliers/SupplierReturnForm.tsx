@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button, FormError, Input, Label, Select, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
+import { useConnectivity } from "@/lib/connectivityContext";
 import { cn } from "@/lib/utils";
 
 import {
@@ -60,10 +61,12 @@ export function SupplierReturnForm({
   supplier,
   onClose,
   onDirtyChange,
+  allowedBranchIds = null,
 }: {
   supplier: Supplier;
   onClose: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  allowedBranchIds?: readonly string[] | null;
 }): JSX.Element {
   const operationId = useMemo(createOperationId, []);
   const createReturn = useCreateSupplierReturn();
@@ -73,9 +76,9 @@ export function SupplierReturnForm({
   const [selected, setSelected] = useState<SupplierReturnCandidate | null>(null);
   const [createdReturn, setCreatedReturn] = useState<SupplierReturnCreated | null>(null);
   const [topError, setTopError] = useState<string | null>(null);
-  const [online, setOnline] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
+  const online = useConnectivity().canUseServer;
+  const [highlight, setHighlight] = useState(0);
+  const candidateListId = useId();
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -87,6 +90,12 @@ export function SupplierReturnForm({
     },
   });
   const branches = useBranchesQuery(false);
+  const availableBranches = useMemo(() => {
+    const items = branches.data ?? [];
+    if (allowedBranchIds === null) return items;
+    const allowed = new Set(allowedBranchIds);
+    return items.filter((branch) => allowed.has(branch.id));
+  }, [allowedBranchIds, branches.data]);
   const candidates = useSupplierReturnCandidatesQuery(
     {
       supplier_id: supplier.id,
@@ -99,31 +108,26 @@ export function SupplierReturnForm({
   );
   const qty = form.watch("qty").replace(",", ".");
   const amount = selected ? Number(qty) * Number(selected.purchase_price) : 0;
+  const candidateItems = candidates.data?.items ?? [];
+  const candidateResultsCurrent = searchInput.trim() === search;
+  const selectableCandidateItems = candidateResultsCurrent ? candidateItems : [];
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 250);
     return () => clearTimeout(timeout);
   }, [searchInput]);
 
+  useEffect(() => setHighlight(0), [branchId, search]);
+
   useEffect(() => {
-    if (!branchId && branches.data?.length === 1) setBranchId(branches.data[0]!.id);
-  }, [branchId, branches.data]);
+    if (!branchId && availableBranches.length === 1) setBranchId(availableBranches[0]!.id);
+  }, [availableBranches, branchId]);
 
   useEffect(() => {
     onDirtyChange(
       !createdReturn && (form.formState.isDirty || selected !== null || searchInput.trim() !== ""),
     );
   }, [createdReturn, form.formState.isDirty, onDirtyChange, searchInput, selected]);
-
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, []);
 
   const chooseCandidate = (candidate: SupplierReturnCandidate) => {
     setSelected(candidate);
@@ -247,12 +251,15 @@ export function SupplierReturnForm({
           }}
         >
           <option value="">Выберите точку</option>
-          {branches.data?.map((branch) => (
+          {availableBranches.map((branch) => (
             <option key={branch.id} value={branch.id}>
               {branch.name}
             </option>
           ))}
         </Select>
+        {!branches.isLoading && !branches.error && availableBranches.length === 0 ? (
+          <FormError>Нет доступных точек для возврата поставщику.</FormError>
+        ) : null}
         {branches.error ? (
           <div
             className="mt-2 flex flex-wrap items-center gap-2 text-sm text-danger-foreground"
@@ -284,15 +291,46 @@ export function SupplierReturnForm({
           onChange={(event) => setSearchInput(event.target.value)}
           placeholder="Начните вводить или выберите из списка"
           autoComplete="off"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={Boolean(branchId)}
+          aria-controls={candidateListId}
+          aria-busy={candidates.isFetching || undefined}
+          aria-activedescendant={
+            selectableCandidateItems[highlight]
+              ? `${candidateListId}-${selectableCandidateItems[highlight]?.batch_id}`
+              : undefined
+          }
+          onKeyDown={(event) => {
+            if (candidates.isFetching || selectableCandidateItems.length === 0) {
+              return;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setHighlight((current) => Math.min(current + 1, selectableCandidateItems.length - 1));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setHighlight((current) => Math.max(current - 1, 0));
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              const candidate = selectableCandidateItems[highlight];
+              if (candidate) chooseCandidate(candidate);
+            }
+          }}
         />
       </div>
 
-      <div className="max-h-64 overflow-y-auto rounded-lg border border-border" role="listbox">
+      <div
+        id={candidateListId}
+        className="max-h-64 overflow-y-auto rounded-lg border border-border"
+        role="listbox"
+        aria-label="Доступные партии для возврата"
+      >
         {!branchId ? (
           <p className="px-4 py-5 text-sm text-foreground-muted">
             Сначала выберите аптечную точку.
           </p>
-        ) : candidates.isLoading ? (
+        ) : !candidateResultsCurrent || candidates.isLoading ? (
           <p className="px-4 py-5 text-sm text-foreground-muted" role="status">
             Загрузка доступных партий…
           </p>
@@ -309,16 +347,18 @@ export function SupplierReturnForm({
               Повторить
             </Button>
           </div>
-        ) : candidates.data?.items.length ? (
-          candidates.data.items.map((candidate) => {
+        ) : selectableCandidateItems.length ? (
+          selectableCandidateItems.map((candidate, index) => {
             const subtitle = supplierProductSubtitle(candidate);
             const active = selected?.batch_id === candidate.batch_id;
             return (
               <button
                 key={candidate.batch_id}
+                id={`${candidateListId}-${candidate.batch_id}`}
                 type="button"
                 role="option"
                 aria-selected={active}
+                onPointerEnter={() => setHighlight(index)}
                 onClick={() => chooseCandidate(candidate)}
                 className={cn(
                   "flex min-h-16 w-full items-start justify-between gap-4 border-b border-border px-4 py-3 text-left last:border-b-0",

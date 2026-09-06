@@ -241,9 +241,18 @@ export function RolesPage(): JSX.Element {
     return (
       <div className="space-y-4">
         <PageHeader title="Роли" description="Рабочие роли сотрудников и доступные им функции." />
-        <p className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
-          {describeApiError(roles.error, "Не удалось загрузить список")}
-        </p>
+        <div className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-3 text-sm text-danger-foreground">
+          <p>{describeApiError(roles.error, "Не удалось загрузить список")}</p>
+          <Button
+            className="mt-3"
+            variant="secondary"
+            size="sm"
+            isLoading={roles.isFetching}
+            onClick={() => void roles.refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
       </div>
     );
   }

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
 from io import BytesIO
 from uuid import UUID
 
@@ -18,6 +19,9 @@ from app.domains.catalog.models import TenantCatalog
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.router import _read_import_file
 from app.domains.catalog.service import CatalogService
+from app.domains.foundation.repository import FoundationRepository
+from app.domains.foundation.service import FoundationService
+from app.domains.inventory.repository import InventoryRepository
 
 SAMPLE_CSV = (
     b"brand_name,inn,manufacturer,dosage,pack_size,dispensing_type,base_price,barcode\n"
@@ -152,6 +156,81 @@ async def test_import_process_creates_items(
     assert await _count_items(db_session, tenant.id) == 3
 
 
+async def test_confirm_import_is_idempotent_for_same_strategy(
+    db_session: AsyncSession,
+    make_tenant,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    service = CatalogService(CatalogRepository(db_session))
+    job = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="idempotent.csv",
+        source_path="aurum/test/idempotent.csv",
+    )
+
+    first = await service.confirm_import(job_id=job.id, duplicate_strategy="skip")
+    repeated = await service.confirm_import(job_id=job.id, duplicate_strategy="skip")
+
+    assert first.status == repeated.status == "importing"
+
+
+async def test_confirm_import_blocks_second_active_job_for_tenant(
+    db_session: AsyncSession,
+    make_tenant,
+    make_user,
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    service = CatalogService(CatalogRepository(db_session))
+    first = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="first.csv",
+        source_path="aurum/test/first.csv",
+    )
+    second = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="second.csv",
+        source_path="aurum/test/second.csv",
+    )
+
+    await service.confirm_import(job_id=first.id, duplicate_strategy="skip")
+    with pytest.raises(BusinessRuleError) as exc_info:
+        await service.confirm_import(job_id=second.id, duplicate_strategy="skip")
+
+    assert exc_info.value.details == {"reason": "catalog_import_in_progress"}
+
+
+async def test_process_import_is_idempotent_after_success(
+    db_session: AsyncSession, make_tenant, make_user
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    service = CatalogService(CatalogRepository(db_session))
+    job = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="retry.csv",
+        source_path="aurum/test/retry.csv",
+    )
+    await service.repo.update_job(
+        job,
+        status="importing",
+        duplicate_strategy="skip",
+        started_at=utc_now(),
+    )
+
+    first = await service.process_import(job_id=job.id, raw=SAMPLE_CSV)
+    repeated = await service.process_import(job_id=job.id, raw=SAMPLE_CSV)
+
+    assert first.status == repeated.status == "success"
+    assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 3
+
+
 async def test_import_rollback_soft_deletes(
     db_session: AsyncSession, make_tenant, make_user
 ) -> None:
@@ -176,6 +255,52 @@ async def test_import_rollback_soft_deletes(
     # The job's rows are soft-deleted, so none of this tenant's items remain.
     assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 0
     assert await _count_items(db_session, tenant.id) == 0
+
+
+async def test_import_rollback_rejects_item_with_positive_stock(
+    db_session: AsyncSession, make_tenant, make_user
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    service = CatalogService(CatalogRepository(db_session))
+    job = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="stocked.csv",
+        source_path="aurum/test/stocked.csv",
+    )
+    await service.repo.update_job(
+        job,
+        status="importing",
+        duplicate_strategy="skip",
+        started_at=utc_now(),
+    )
+    await service.process_import(job_id=job.id, raw=SAMPLE_CSV)
+    imported = (
+        await db_session.execute(
+            select(TenantCatalog)
+            .where(TenantCatalog.import_job_id == job.id)
+            .order_by(TenantCatalog.id)
+            .limit(1)
+        )
+    ).scalar_one()
+    branch = await FoundationService(FoundationRepository(db_session)).create_branch(
+        tenant_id=tenant.id,
+        fields={"name": "Stocked import branch"},
+    )
+    await InventoryRepository(db_session).create_batch(
+        tenant_id=tenant.id,
+        branch_id=branch.id,
+        catalog_id=imported.id,
+        expires_at=date.today() + timedelta(days=90),
+        purchase_price=Decimal("5.00"),
+        sale_price=Decimal("10.00"),
+        qty_initial=Decimal("2.000"),
+        qty_remaining=Decimal("2.000"),
+    )
+
+    with pytest.raises(BusinessRuleError):
+        await service.rollback_import(job.id)
 
 
 async def test_import_rollback_blocked_after_24h(

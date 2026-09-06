@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.deps import _seed_request_db_context, get_db
-from app.core.security import create_access_token
 from app.domains.auth.models import AppUser
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
@@ -23,7 +22,7 @@ from app.domains.roles.models import (
 )
 from app.domains.roles.repository import RolesRepository
 from app.main import app
-from tests.auth_helpers import create_support_access_token
+from tests.auth_helpers import create_support_access_token, create_tenant_access_token
 from tests.platform_access_helpers import create_test_platform_user
 
 
@@ -218,9 +217,7 @@ async def test_non_support_actor_forbidden(db_session: AsyncSession, client: Asy
             )
         )
         await db_session.flush()
-        token = create_access_token(
-            seller.id, tenant_id=tenant.id, is_developer=False, is_administrator=False
-        )
+        token = await create_tenant_access_token(db_session, seller, tenant_id=tenant.id)
 
         resp = await client.post(
             f"/api/v1/admin/tenants/{tenant.id}/owner",

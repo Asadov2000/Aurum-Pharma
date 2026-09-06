@@ -13,8 +13,12 @@ import {
   type ImportJob,
 } from "./types";
 
-export async function listCatalog(params: CatalogSearchParams): Promise<CatalogList> {
+export async function listCatalog(
+  params: CatalogSearchParams,
+  signal?: AbortSignal,
+): Promise<CatalogList> {
   const { data } = await api.get<CatalogList>("/catalog", {
+    signal,
     params: {
       q: params.q || undefined,
       manufacturer: params.manufacturer || undefined,
@@ -32,8 +36,11 @@ export async function listCatalog(params: CatalogSearchParams): Promise<CatalogL
   return data;
 }
 
-export async function getCatalogItem(id: string): Promise<CatalogItemWithBarcodes> {
-  const { data } = await api.get<CatalogItemWithBarcodes>(`/catalog/${id}`);
+export async function getCatalogItem(
+  id: string,
+  signal?: AbortSignal,
+): Promise<CatalogItemWithBarcodes> {
+  const { data } = await api.get<CatalogItemWithBarcodes>(`/catalog/${id}`, { signal });
   return data;
 }
 
@@ -59,8 +66,10 @@ export async function restoreCatalogItem(id: string): Promise<CatalogItem> {
   return data;
 }
 
-export async function findByBarcode(code: string): Promise<CatalogItem> {
-  const { data } = await api.get<CatalogItem>(`/catalog/by-barcode/${encodeURIComponent(code)}`);
+export async function findByBarcode(code: string, branchId: string): Promise<CatalogItem> {
+  const { data } = await api.get<CatalogItem>(`/catalog/by-barcode/${encodeURIComponent(code)}`, {
+    params: { branch_id: branchId },
+  });
   return data;
 }
 
@@ -101,8 +110,8 @@ export async function confirmImport(
   return data;
 }
 
-export async function getImportJob(jobId: string): Promise<ImportJob> {
-  const { data } = await api.get<ImportJob>(`/catalog/import/${jobId}`);
+export async function getImportJob(jobId: string, signal?: AbortSignal): Promise<ImportJob> {
+  const { data } = await api.get<ImportJob>(`/catalog/import/${jobId}`, { signal });
   return data;
 }
 

@@ -70,6 +70,17 @@ class PaymentReconciliationRow:
     item_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class RefundReconciliationRow:
+    attempt: POSRefundAttempt
+    parent_receipt_number: str
+    branch_id: UUID
+    branch_name: str
+    register_id: UUID
+    register_name: str
+    requested_by_name: str | None
+
+
 _FULL_REFUND_SQL = """
   s.sale_type = 'sale'
   AND EXISTS (
@@ -833,6 +844,19 @@ class POSRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_active_payment_attempt_for_sale(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+    ) -> POSPaymentAttempt | None:
+        stmt = select(POSPaymentAttempt).where(
+            POSPaymentAttempt.tenant_id == tenant_id,
+            POSPaymentAttempt.sale_id == sale_id,
+            POSPaymentAttempt.status.in_(("pending", "requires_reconciliation", "confirmed")),
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def insert_payment_attempt(self, **fields: Any) -> POSPaymentAttempt:
         attempt = POSPaymentAttempt(**fields)
         self.session.add(attempt)
@@ -855,6 +879,114 @@ class POSRepository:
 
     async def get_refund_attempt(self, attempt_id: UUID) -> POSRefundAttempt | None:
         return await self.session.get(POSRefundAttempt, attempt_id)
+
+    async def list_refund_reconciliation(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_ids: set[UUID] | None,
+        branch_id: UUID | None,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[
+        list[RefundReconciliationRow],
+        int,
+        dict[str, tuple[int, Decimal]],
+        list[tuple[UUID, str]],
+    ]:
+        active_statuses = ("pending", "requires_reconciliation", "confirmed")
+        base_clauses = [
+            POSRefundAttempt.tenant_id == tenant_id,
+            POSRefundAttempt.status.in_(active_statuses),
+        ]
+        if branch_ids is not None:
+            base_clauses.append(Sale.branch_id.in_(branch_ids))
+        if branch_id is not None:
+            base_clauses.append(Sale.branch_id == branch_id)
+
+        filtered_clauses = list(base_clauses)
+        if status is not None:
+            filtered_clauses.append(POSRefundAttempt.status == status)
+
+        count_stmt = (
+            select(func.count(POSRefundAttempt.id))
+            .join(Sale, Sale.id == POSRefundAttempt.parent_sale_id)
+            .where(*filtered_clauses)
+        )
+        total = int((await self.session.execute(count_stmt)).scalar_one())
+
+        rows_stmt = (
+            select(
+                POSRefundAttempt,
+                Sale.receipt_number.label("parent_receipt_number"),
+                Sale.branch_id,
+                Branch.name.label("branch_name"),
+                Sale.register_id,
+                Register.name.label("register_name"),
+                AppUser.full_name.label("requested_by_name"),
+            )
+            .join(Sale, Sale.id == POSRefundAttempt.parent_sale_id)
+            .join(Branch, Branch.id == Sale.branch_id)
+            .join(Register, Register.id == Sale.register_id)
+            .outerjoin(AppUser, AppUser.id == POSRefundAttempt.requested_by_user_id)
+            .where(*filtered_clauses)
+            .order_by(POSRefundAttempt.created_at.asc(), POSRefundAttempt.id.asc())
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        )
+        rows = (await self.session.execute(rows_stmt)).all()
+        items = [
+            RefundReconciliationRow(
+                attempt=row[0],
+                parent_receipt_number=row.parent_receipt_number,
+                branch_id=row.branch_id,
+                branch_name=row.branch_name,
+                register_id=row.register_id,
+                register_name=row.register_name,
+                requested_by_name=row.requested_by_name,
+            )
+            for row in rows
+        ]
+
+        summary_stmt = (
+            select(
+                POSRefundAttempt.status,
+                func.count(POSRefundAttempt.id),
+                func.coalesce(func.sum(POSRefundAttempt.external_amount), 0),
+            )
+            .join(Sale, Sale.id == POSRefundAttempt.parent_sale_id)
+            .where(*base_clauses)
+            .group_by(POSRefundAttempt.status)
+        )
+        summary = {
+            row[0]: (int(row[1]), Decimal(row[2]))
+            for row in (await self.session.execute(summary_stmt)).all()
+        }
+
+        branches_stmt = (
+            select(Branch.id, Branch.name)
+            .where(
+                Branch.tenant_id == tenant_id,
+                *([Branch.id.in_(branch_ids)] if branch_ids is not None else []),
+            )
+            .order_by(Branch.name, Branch.id)
+        )
+        branches = [(row.id, row.name) for row in (await self.session.execute(branches_stmt)).all()]
+        return items, total, summary, branches
+
+    async def get_active_refund_attempt_for_sale(
+        self,
+        *,
+        tenant_id: UUID,
+        parent_sale_id: UUID,
+    ) -> POSRefundAttempt | None:
+        stmt = select(POSRefundAttempt).where(
+            POSRefundAttempt.tenant_id == tenant_id,
+            POSRefundAttempt.parent_sale_id == parent_sale_id,
+            POSRefundAttempt.status.in_(("pending", "requires_reconciliation", "confirmed")),
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def lock_refund_attempt(self, attempt_id: UUID) -> POSRefundAttempt | None:
         stmt = (

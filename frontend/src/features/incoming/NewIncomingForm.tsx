@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
@@ -28,11 +28,13 @@ export function NewIncomingForm({
   onCancel = onClose,
   onDirtyChange,
   document,
+  allowedBranchIds = null,
 }: {
   onClose: () => void;
   onCancel?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   document?: IncomingDocument;
+  allowedBranchIds?: readonly string[] | null;
 }): JSX.Element {
   const branches = useBranchesQuery(false);
   const create = useCreateIncoming();
@@ -41,6 +43,12 @@ export function NewIncomingForm({
   const [topError, setTopError] = useState<string | null>(null);
   const [operationId] = useState(createOperationId);
   const isEditing = document !== undefined;
+  const availableBranches = useMemo(() => {
+    const items = branches.data ?? [];
+    if (allowedBranchIds === null) return items;
+    const allowed = new Set(allowedBranchIds);
+    return items.filter((branch) => allowed.has(branch.id));
+  }, [allowedBranchIds, branches.data]);
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -137,19 +145,23 @@ export function NewIncomingForm({
             {...form.register("branch_id")}
           >
             <option value="">{branches.isLoading ? "Загрузка точек…" : "— выберите —"}</option>
-            {branches.data?.map((b) => (
+            {availableBranches.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name}
               </option>
             ))}
           </Select>
           <FormError>{form.formState.errors.branch_id?.message}</FormError>
+          {!branches.isLoading && !branches.error && availableBranches.length === 0 ? (
+            <FormError>Нет доступных точек для приёмки.</FormError>
+          ) : null}
         </div>
         <div>
           <Label htmlFor="supplier_id">Поставщик</Label>
           <SupplierPicker
             id="supplier_id"
             value={form.watch("supplier_id")}
+            initialLabel={document?.supplier_name ?? undefined}
             onChange={(supplierId) => {
               form.setValue("supplier_id", supplierId, {
                 shouldDirty: true,
@@ -184,14 +196,18 @@ export function NewIncomingForm({
           <Textarea id="notes" {...form.register("notes")} />
         </div>
       </div>
-      {topError && <p className="text-sm text-danger">{topError}</p>}
+      {topError && (
+        <p className="text-sm text-danger" role="alert">
+          {topError}
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
         <Button
           type="submit"
-          disabled={Boolean(branches.error)}
+          disabled={Boolean(branches.error) || availableBranches.length === 0}
           isLoading={form.formState.isSubmitting}
         >
           {isEditing ? "Сохранить" : "Создать черновик"}

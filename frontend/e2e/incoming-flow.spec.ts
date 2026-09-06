@@ -178,7 +178,18 @@ test.describe("Incoming flow (owner)", () => {
 
     // ---- UI: supplier card → source-bound return → stock decreases again ----
     await page.goto("/suppliers");
+    const filteredSupplierResponse = page.waitForResponse((response) => {
+      const request = response.request();
+      if (!response.ok() || request.method() !== "POST") return false;
+      if (!response.url().endsWith("/api/v1/suppliers/search")) return false;
+      try {
+        return request.postDataJSON()?.q === supplier.name;
+      } catch {
+        return false;
+      }
+    });
     await page.getByLabel("Поиск").fill(supplier.name);
+    await filteredSupplierResponse;
     const supplierCard = page.getByRole("article").filter({ hasText: supplier.name });
     await expect(supplierCard).toBeVisible({ timeout: 15_000 });
     await supplierCard.getByRole("button", { name: "Открыть карточку" }).click();

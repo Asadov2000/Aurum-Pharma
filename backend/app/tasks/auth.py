@@ -3,26 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 
 import structlog
+from sqlalchemy import text
 
-from app.core.db import WorkerSessionLocal
-from app.core.time import utc_now
-from app.domains.auth.repository import AuthRepository
+from app.core.system_worker_db import SystemWorkerSessionLocal
 from app.tasks.celery_app import celery_app
 
 logger = structlog.get_logger("tasks.auth")
 
 
 async def _expire_email_codes_async() -> int:
-    async with WorkerSessionLocal() as db:
+    async with SystemWorkerSessionLocal() as db:
         async with db.begin():
-            repo = AuthRepository(db)
-            removed = await repo.delete_expired_email_codes(
-                older_than=utc_now() - timedelta(hours=24)
+            result = await db.execute(
+                text("SELECT public.worker_purge_expired_email_codes(:limit)"),
+                {"limit": 1000},
             )
-            return removed
+            return int(result.scalar_one())
 
 
 @celery_app.task(name="auth.expire_email_codes")  # type: ignore[misc]
@@ -33,11 +31,13 @@ def expire_email_codes() -> int:
 
 
 async def _expire_sessions_async() -> int:
-    async with WorkerSessionLocal() as db:
+    async with SystemWorkerSessionLocal() as db:
         async with db.begin():
-            repo = AuthRepository(db)
-            removed = await repo.delete_expired_sessions(older_than=utc_now() - timedelta(days=30))
-            return removed
+            result = await db.execute(
+                text("SELECT public.worker_purge_expired_sessions(:limit)"),
+                {"limit": 1000},
+            )
+            return int(result.scalar_one())
 
 
 @celery_app.task(name="auth.expire_sessions")  # type: ignore[misc]

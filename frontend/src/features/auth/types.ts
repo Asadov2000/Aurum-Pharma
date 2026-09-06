@@ -40,6 +40,8 @@ export interface MeResponse {
   is_tenant_owner: boolean;
   branch_assignments: Record<string, string>;
   permissions: string[];
+  /** null = tenant-wide; an array = exact branches. */
+  permission_scopes?: Record<string, string[] | null>;
   platform_capabilities: string[];
   support_access: {
     id: string;

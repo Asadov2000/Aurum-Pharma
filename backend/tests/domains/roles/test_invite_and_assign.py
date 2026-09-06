@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import (
     BusinessRuleError,
+    ConflictError,
     NotFoundError,
     PermissionDeniedError,
 )
@@ -379,7 +380,20 @@ async def test_owner_invite_creates_employee_only_in_current_tenant_and_is_idemp
         owner_permissions=owner_permissions,
     )
 
+    stored_creation: EmployeeInvitationCreation | None = None
+
     async def create_employee_invitation(**fields: object) -> EmployeeInvitationCreation:
+        nonlocal stored_creation
+        assert len(str(fields["request_fingerprint"])) == 64
+        if stored_creation is not None:
+            return EmployeeInvitationCreation(
+                user_id=stored_creation.user_id,
+                membership_id=stored_creation.membership_id,
+                invitation_id=stored_creation.invitation_id,
+                invited_at=stored_creation.invited_at,
+                invitation_expires_at=stored_creation.invitation_expires_at,
+                created=False,
+            )
         account, membership = await service.create_tenant_account(
             tenant_id=tenant.id,
             email=str(fields["email"]),
@@ -389,7 +403,7 @@ async def test_owner_invite_creates_employee_only_in_current_tenant_and_is_idemp
         )
         invitation = await service.repo.latest_invitation_for_membership(membership.id)
         assert invitation is not None
-        return EmployeeInvitationCreation(
+        stored_creation = EmployeeInvitationCreation(
             user_id=account.id,
             membership_id=membership.id,
             invitation_id=invitation.id,
@@ -397,6 +411,7 @@ async def test_owner_invite_creates_employee_only_in_current_tenant_and_is_idemp
             invitation_expires_at=invitation.expires_at,
             created=True,
         )
+        return stored_creation
 
     monkeypatch.setattr(service.repo, "create_employee_invitation", create_employee_invitation)
 
@@ -456,6 +471,90 @@ async def test_owner_invite_creates_employee_only_in_current_tenant_and_is_idemp
     assert membership.phone == "+992900001122"
     assert len(invitations) == 1
     assert invitations[0].status == "pending"
+
+    assignment.is_active = False
+    await db_session.flush()
+    with pytest.raises(ConflictError) as changed_access_error:
+        await service.invite_user(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            email="new-employee@aurum.tj",
+            full_name="Новый сотрудник",
+            phone="+992900001122",
+            operation_id=operation_id,
+            role_id=role.id,
+            branch_id=None,
+            password_required=False,
+        )
+    assert changed_access_error.value.details == {"reason": "invitation_access_changed"}
+    assert assignment.is_active is False
+
+
+async def test_owner_invite_rejects_existing_employee_with_a_new_operation(
+    db_session: AsyncSession,
+    make_tenant,
+    make_owner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = await make_tenant()
+    owner, _owner_role, owner_permissions, service = await _owner_context(
+        db_session,
+        tenant_id=tenant.id,
+        make_owner=make_owner,
+    )
+    role = await _custom_cashier_role(
+        service,
+        owner=owner,
+        tenant_id=tenant.id,
+        owner_permissions=owner_permissions,
+    )
+    account, _membership = await service.create_tenant_account(
+        tenant_id=tenant.id,
+        email="existing-employee@aurum.tj",
+        full_name="Существующий сотрудник",
+        actor_id=owner.id,
+    )
+
+    invitation_attempted = False
+
+    async def reject_existing_email(**_fields: object) -> EmployeeInvitationCreation:
+        nonlocal invitation_attempted
+        invitation_attempted = True
+        raise ConflictError(
+            "Не удалось создать новый аккаунт с этим email",
+            details={"reason": "email_unavailable"},
+        )
+
+    monkeypatch.setattr(service.repo, "create_employee_invitation", reject_existing_email)
+
+    with pytest.raises(ConflictError) as error:
+        await service.invite_user(
+            actor_id=owner.id,
+            actor_permissions=owner_permissions,
+            actor_permission_scopes=_tenantwide_scopes(owner_permissions),
+            actor_is_developer=False,
+            actor_is_administrator=False,
+            tenant_id=tenant.id,
+            email="existing-employee@aurum.tj",
+            full_name="Существующий сотрудник",
+            phone=None,
+            operation_id=uuid4(),
+            role_id=role.id,
+            branch_id=None,
+            password_required=False,
+        )
+
+    assert invitation_attempted is True
+    assert error.value.details == {"reason": "email_unavailable"}
+    assignments = await service.repo.list_assignments_for_user(
+        account.id,
+        tenant_id=tenant.id,
+    )
+    assert [item.id for item in assignments if item.is_active] == []
 
 
 async def test_non_owner_cannot_create_employee_even_with_invite_permission(

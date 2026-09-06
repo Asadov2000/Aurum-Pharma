@@ -106,7 +106,7 @@ try {
     Invoke-E2ECompose up --detach --build postgres redis minio
     Invoke-E2ECompose run --rm db-role-bootstrap
     Invoke-E2ECompose run --rm --build migrate
-    Invoke-E2ECompose up --detach --build backend celery-worker billing-worker platform-mailer frontend
+    Invoke-E2ECompose up --detach --build backend celery-worker catalog-worker billing-worker platform-mailer frontend
 
     Wait-HttpOk "E2E backend" "http://localhost:18000/healthz"
     Wait-HttpOk "E2E frontend" "http://localhost:15173"
@@ -181,7 +181,7 @@ finally {
     if ($null -ne $failure) {
         Write-Host "E2E failed; collecting service logs before cleanup..."
         try {
-            & docker @composeArgs logs --no-color --tail 200 backend billing-worker frontend
+            & docker @composeArgs logs --no-color --tail 200 backend celery-worker catalog-worker billing-worker frontend
         }
         catch {
             Write-Warning "Unable to collect E2E service logs: $($_.Exception.Message)"

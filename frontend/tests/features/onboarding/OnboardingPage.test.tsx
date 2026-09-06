@@ -1,8 +1,9 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type OnboardingOverview } from "@/features/onboarding/types";
+import { ConnectivityProvider } from "@/lib/connectivity";
 
 const getOnboardingOverview = vi.fn();
 const startTrial = vi.fn();
@@ -108,20 +109,25 @@ function renderPage(): ReturnType<typeof render> {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <OnboardingPage />
+      <ConnectivityProvider checkHealth={async () => true}>
+        <OnboardingPage />
+      </ConnectivityProvider>
     </QueryClientProvider>,
   );
 }
 
 describe("OnboardingPage", () => {
   beforeEach(() => {
+    onlineManager.setOnline(true);
     getOnboardingOverview.mockReset();
     startTrial.mockReset();
     vi.spyOn(window.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000099");
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
+    onlineManager.setOnline(true);
   });
 
   it("loads one canonical overview and shows the next available action", async () => {
@@ -134,11 +140,19 @@ describe("OnboardingPage", () => {
       expect(link).toHaveAttribute("href", "/branches");
     }
     expect(screen.getByText("42 из 100")).toBeInTheDocument();
+    expect(screen.getByText(/Осталось выполнить обязательных шагов: 4/)).toBeInTheDocument();
+    expect(screen.getByText(/Плановая дата завершения настройки/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Начать пробный период/i })).toBeDisabled();
   });
 
   it("confirms the irreversible trial activation with one operation id", async () => {
-    getOnboardingOverview.mockResolvedValue(readyOverview);
+    getOnboardingOverview.mockResolvedValueOnce(readyOverview).mockResolvedValue({
+      ...readyOverview,
+      tenant_status: "trial",
+      can_start_trial: false,
+      trial_started_at: "2026-08-21T00:00:00Z",
+      trial_ends_at: "2026-09-04T00:00:00Z",
+    });
     startTrial.mockResolvedValueOnce({
       tenant_id: readyOverview.tenant_id,
       status: "trial",
@@ -155,6 +169,7 @@ describe("OnboardingPage", () => {
     await waitFor(() => {
       expect(startTrial).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000099");
     });
+    expect(await screen.findByText("Пробный период активен")).toBeInTheDocument();
   });
 
   it("routes an existing register with missing payments to pharmacy settings", async () => {
@@ -238,23 +253,56 @@ describe("OnboardingPage", () => {
 
   it("shows a failed activation inside the confirmation dialog", async () => {
     getOnboardingOverview.mockResolvedValue(readyOverview);
-    startTrial.mockRejectedValueOnce(new Error("network"));
+    startTrial.mockRejectedValue(new Error("network"));
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: /Начать пробный период/i }));
     fireEvent.click(screen.getByRole("button", { name: "Начать период" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось начать пробный период");
+    expect(screen.getByRole("button", { name: "Проверить статус" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить безопасно" }));
+    await waitFor(() => expect(startTrial).toHaveBeenCalledTimes(2));
+    expect(startTrial).toHaveBeenNthCalledWith(1, "00000000-0000-4000-8000-000000000099");
+    expect(startTrial).toHaveBeenNthCalledWith(2, "00000000-0000-4000-8000-000000000099");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("keeps cached readiness visible and disables activation while offline", async () => {
-    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    let online = true;
+    vi.spyOn(window.navigator, "onLine", "get").mockImplementation(() => online);
     getOnboardingOverview.mockResolvedValueOnce(readyOverview);
     renderPage();
 
+    expect(await screen.findByText("Аптека готова к запуску")).toBeInTheDocument();
+    online = false;
+    act(() => window.dispatchEvent(new Event("offline")));
     expect(await screen.findByText("Нет сети.")).toBeInTheDocument();
+    expect(screen.getByText(/загруженные ранее в этой сессии/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Начать пробный период/i })).toBeDisabled();
+  });
+
+  it("does not leave a cold offline start on an endless loading skeleton", async () => {
+    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    getOnboardingOverview.mockReturnValue(new Promise(() => undefined));
+    renderPage();
+
+    expect(screen.getByRole("heading", { name: "Нет соединения с сервером" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ожидаем подключения" })).toBeDisabled();
+    expect(screen.queryByLabelText("Проверяем готовность аптеки")).toBeNull();
+  });
+
+  it("fails closed when the readiness snapshot is incomplete", async () => {
+    getOnboardingOverview.mockResolvedValueOnce({
+      ...readyOverview,
+      steps: readyOverview.steps.filter((step) => step.code !== "regulatory"),
+    });
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "Проверка готовности получена не полностью" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Начать пробный период/i })).toBeNull();
   });
 
   it("shows a controlled retry state when readiness cannot be loaded", async () => {

@@ -55,6 +55,21 @@ describe("ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it("can visibly lock cancellation while an operation is pending", () => {
+    render(
+      <ConfirmDialog
+        open
+        title="Выполняется операция"
+        message="Дождитесь ответа сервера."
+        cancelDisabled
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Отмена" })).toBeDisabled();
+  });
+
   it("moves focus into the dialog and traps Tab navigation", () => {
     render(
       <ConfirmDialog

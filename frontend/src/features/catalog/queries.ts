@@ -32,7 +32,7 @@ export const catalogKeys = {
 export function useCatalogQuery(params: CatalogSearchParams, enabled = true) {
   return useQuery({
     queryKey: catalogKeys.list(params),
-    queryFn: () => listCatalog(params),
+    queryFn: ({ signal }) => listCatalog(params, signal),
     placeholderData: keepPreviousData,
     enabled,
   });
@@ -41,7 +41,7 @@ export function useCatalogQuery(params: CatalogSearchParams, enabled = true) {
 export function useCatalogItemQuery(id: string | null) {
   return useQuery({
     queryKey: catalogKeys.item(id ?? ""),
-    queryFn: () => getCatalogItem(id as string),
+    queryFn: ({ signal }) => getCatalogItem(id as string, signal),
     enabled: id !== null,
   });
 }
@@ -122,7 +122,7 @@ export function useDeleteBarcode() {
 export function useImportJobQuery(jobId: string | null) {
   return useQuery({
     queryKey: catalogKeys.import(jobId ?? ""),
-    queryFn: () => getImportJob(jobId as string),
+    queryFn: ({ signal }) => getImportJob(jobId as string, signal),
     enabled: jobId !== null,
     refetchInterval: (query) => (query.state.data?.status === "importing" ? 2000 : false),
   });

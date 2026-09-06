@@ -20,9 +20,11 @@ approval="$root/approval"
 verified="$root/verified"
 authorization="$root/authorization"
 trusted="$root/trusted"
+internal_tls="$root/internal-tls"
 mkdir -p \
     "$secrets" "$repository" "$scratch" "$wal_archive" "$metrics" \
-    "$candidate" "$approval" "$verified" "$authorization" "$trusted"
+    "$candidate" "$approval" "$verified" "$authorization" "$trusted" \
+    "$internal_tls"
 
 cleanup() {
     status=$?
@@ -100,6 +102,7 @@ support_password="$(random_hex 32)"
 migrator_password="$(random_hex 32)"
 mailer_password="$(random_hex 32)"
 billing_password="$(random_hex 32)"
+worker_password="$(random_hex 32)"
 backup_password="$(random_hex 32)"
 pitr_password="$(random_hex 32)"
 redis_password="$(random_hex 32)"
@@ -110,17 +113,29 @@ write_secret AURUM_SUPPORT_PASSWORD "$support_password"
 write_secret AURUM_MIGRATOR_PASSWORD "$migrator_password"
 write_secret AURUM_MAILER_PASSWORD "$mailer_password"
 write_secret AURUM_BILLING_WORKER_PASSWORD "$billing_password"
+write_secret AURUM_WORKER_PASSWORD "$worker_password"
 write_secret AURUM_BACKUP_PASSWORD "$backup_password"
 write_secret AURUM_PITR_PASSWORD "$pitr_password"
-write_secret DATABASE_URL_APP "postgresql+asyncpg://aurum_app:$app_password@postgres:5432/aurum"
-write_secret DATABASE_URL_SUPPORT "postgresql+asyncpg://aurum_support:$support_password@postgres:5432/aurum"
-write_secret DATABASE_URL_MIGRATION "postgresql+asyncpg://aurum_migrator:$migrator_password@postgres:5432/aurum"
-write_secret DATABASE_URL_MAILER "postgresql+asyncpg://aurum_mailer:$mailer_password@postgres:5432/aurum"
-write_secret DATABASE_URL_BILLING_WORKER "postgresql+asyncpg://aurum_billing_worker:$billing_password@postgres:5432/aurum"
-write_secret DATABASE_URL_BACKUP "postgresql://aurum_backup:$backup_password@postgres:5432/aurum"
-write_secret DATABASE_URL_PITR "postgresql://aurum_pitr:$pitr_password@postgres:5432/aurum"
+postgres_tls_query="sslmode=verify-full&sslrootcert=/run/tls/ca.crt"
+write_secret DATABASE_URL_APP \
+    "postgresql+asyncpg://aurum_app:$app_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_SUPPORT \
+    "postgresql+asyncpg://aurum_support:$support_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_MIGRATION \
+    "postgresql+asyncpg://aurum_migrator:$migrator_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_MAILER \
+    "postgresql+asyncpg://aurum_mailer:$mailer_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_BILLING_WORKER \
+    "postgresql+asyncpg://aurum_billing_worker:$billing_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_WORKER \
+    "postgresql+asyncpg://aurum_worker:$worker_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_BACKUP \
+    "postgresql://aurum_backup:$backup_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_PITR \
+    "postgresql://aurum_pitr:$pitr_password@postgres:5432/aurum?$postgres_tls_query"
 write_secret REDIS_PASSWORD "$redis_password"
-write_secret REDIS_URL "redis://:$redis_password@redis:6379/0"
+write_secret REDIS_URL \
+    "rediss://:$redis_password@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt"
 write_secret JWT_SECRET "$(random_hex 48)"
 write_secret MFA_ENCRYPTION_KEY "$(random_hex 48)"
 write_secret MFA_ENCRYPTION_PREVIOUS_KEYS '{}'
@@ -151,7 +166,13 @@ chmod 644 \
     "$secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem" \
     "$secrets/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem"
 
+pwsh -NoProfile \
+    -File ./scripts/New-ProductionInternalTls.ps1 \
+    -OutputDirectory "$(host_bind_path "$internal_tls")" >/dev/null
+rm -f -- "$internal_tls/ca.key"
+
 export AURUM_SECRET_FILES_DIR="$(host_bind_path "$secrets")"
+export AURUM_INTERNAL_TLS_DIR="$(host_bind_path "$internal_tls")"
 export AURUM_BACKUP_REPOSITORY="$(host_bind_path "$repository")"
 export AURUM_BACKUP_SCRATCH="$(host_bind_path "$scratch")"
 export AURUM_WAL_ARCHIVE="$(host_bind_path "$wal_archive")"
@@ -215,6 +236,48 @@ for recovery_script in \
     sh -n "$recovery_script"
 done
 
+fake_bin="$root/fake-bin"
+wrapper_log="$root/restore-wrapper.log"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/docker" <<'SH'
+#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "${AURUM_TEST_DOCKER_LOG:?}"
+case " $* " in
+    *" exec -T postgres psql "*)
+        printf '%s\n' '0/16B6C50' '000000010000000000000001'
+        ;;
+esac
+SH
+cat > "$fake_bin/flock" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod 700 "$fake_bin/docker" "$fake_bin/flock"
+PATH="$fake_bin:$PATH" \
+    AURUM_TEST_DOCKER_LOG="$wrapper_log" \
+    AURUM_PRODUCTION_ENV_FILE=.env.production.example \
+    AURUM_PRODUCTION_COMPOSE_PROJECT="$project" \
+    AURUM_BACKUP_LOCK_FILE="$root/restore-wrapper.lock" \
+    AURUM_RECOVERY_LOCK_WAIT_SECONDS=0 \
+    AURUM_RECOVERY_METRICS_DIR="$metrics" \
+    sh ./scripts/run-production-restore-drill.sh >/dev/null
+
+grep -q -- "--project-name $project .* exec -T postgres psql" "$wrapper_log"
+grep -q -- "--project-name $project .* run --rm wal-snapshot" "$wrapper_log"
+drill_project="$(sed -n \
+    's/.*--project-name \(aurum-restore-[^ ]*\).* run --rm restore-drill.*/\1/p' \
+    "$wrapper_log" | head -n 1)"
+test -n "$drill_project"
+grep -q -- "--project-name $drill_project .* run --rm pitr-restore-drill" \
+    "$wrapper_log"
+grep -q -- "--project-name $drill_project .* down --volumes --remove-orphans" \
+    "$wrapper_log"
+if grep -q -- "--project-name $project .* run --rm restore-drill" "$wrapper_log"; then
+    echo "Restore drill reused the production Compose project" >&2
+    exit 1
+fi
+
 . ./scripts/recovery-metrics.sh
 aurum_run_recovery_step metrics_probe sh -c 'exit 0'
 metrics_file="$metrics/aurum-recovery-metrics_probe.prom"
@@ -275,14 +338,14 @@ compose run --rm minio-init
 compose run --rm --entrypoint /bin/sh minio-init -ec '
     root_user="$(cat /run/secrets/MINIO_ROOT_USER)"
     root_password="$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
-    mc --config-dir /tmp/.mc alias set local http://minio:9000 "$root_user" "$root_password" >/dev/null
+    mc --config-dir /tmp/.mc alias set local https://minio:9000 "$root_user" "$root_password" >/dev/null
     printf verified | mc --config-dir /tmp/.mc pipe local/aurum/recovery/probe.txt >/dev/null
 '
 
 compose --profile backup run --rm backup
 compose --profile backup run --rm pitr-basebackup
 
-expected_wal="$(docker exec -i "${project}-postgres-1" psql \
+checkpoint="$(docker exec -i "${project}-postgres-1" psql \
     -U postgres \
     -d aurum \
     --tuples-only \
@@ -293,7 +356,9 @@ INSERT INTO public.pitr_probe (id, value) VALUES (3, 'must_not_survive');
 SELECT pg_walfile_name(pg_switch_wal());
 SQL
 )"
-expected_wal="$(printf '%s\n' "$expected_wal" | tail -n 1 | tr -d '[:space:]')"
+export AURUM_PITR_TARGET_LSN="$(printf '%s\n' "$checkpoint" | sed -n '2p' | tr -d '[:space:]')"
+expected_wal="$(printf '%s\n' "$checkpoint" | tail -n 1 | tr -d '[:space:]')"
+test -n "$AURUM_PITR_TARGET_LSN"
 test -n "$expected_wal"
 
 attempt=1

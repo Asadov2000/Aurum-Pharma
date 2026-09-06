@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
+from app.domains.catalog import import_parser
 from app.domains.catalog.import_parser import (
     XLS_UNSUPPORTED_MESSAGE,
     parse_import,
@@ -114,6 +115,26 @@ def test_parse_xlsx_skips_blank_rows() -> None:
     rows, errors = parse_xlsx(raw)
     assert len(rows) == 1
     assert errors == []
+
+
+def test_parse_xlsx_rejects_archive_over_uncompressed_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = _xlsx(["brand_name"], [["Aspirin"]])
+    monkeypatch.setattr(import_parser, "MAX_XLSX_UNCOMPRESSED_BYTES", 1)
+
+    with pytest.raises(ValueError, match="safety limit"):
+        parse_xlsx(raw)
+
+
+def test_parse_xlsx_rejects_too_many_archive_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = _xlsx(["brand_name"], [["Aspirin"]])
+    monkeypatch.setattr(import_parser, "MAX_XLSX_ARCHIVE_MEMBERS", 1)
+
+    with pytest.raises(ValueError, match="too many internal files"):
+        parse_xlsx(raw)
 
 
 def test_parse_import_xls_rejected_with_russian_message() -> None:

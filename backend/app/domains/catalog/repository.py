@@ -359,6 +359,42 @@ class CatalogRepository:
         )
         return result.rowcount or 0  # type: ignore[attr-defined]
 
+    async def import_job_has_operational_dependencies(
+        self,
+        *,
+        tenant_id: UUID,
+        import_job_id: UUID,
+    ) -> bool:
+        """Return whether imported products already participate in stock operations."""
+
+        from app.domains.incoming.models import IncomingItem
+
+        imported_ids = (
+            select(TenantCatalog.id)
+            .where(
+                TenantCatalog.tenant_id == tenant_id,
+                TenantCatalog.import_job_id == import_job_id,
+            )
+            .scalar_subquery()
+        )
+        stmt = select(
+            or_(
+                exists(
+                    select(Batch.id).where(
+                        Batch.tenant_id == tenant_id,
+                        Batch.catalog_id.in_(imported_ids),
+                    )
+                ),
+                exists(
+                    select(IncomingItem.id).where(
+                        IncomingItem.tenant_id == tenant_id,
+                        IncomingItem.catalog_id.in_(imported_ids),
+                    )
+                ),
+            )
+        )
+        return bool((await self.session.execute(stmt)).scalar_one())
+
     # -------------------------------------------------------------------------
     # barcode
     # -------------------------------------------------------------------------
@@ -375,14 +411,28 @@ class CatalogRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def find_item_by_barcode(self, code: str) -> TenantCatalog | None:
+    async def find_item_by_barcode(
+        self,
+        code: str,
+        *,
+        tenant_id: UUID,
+    ) -> TenantCatalog | None:
         stmt = (
             select(TenantCatalog)
-            .join(Barcode, Barcode.catalog_id == TenantCatalog.id)
+            .join(
+                Barcode,
+                and_(
+                    Barcode.tenant_id == TenantCatalog.tenant_id,
+                    Barcode.catalog_id == TenantCatalog.id,
+                ),
+            )
             .where(
                 and_(
+                    TenantCatalog.tenant_id == tenant_id,
+                    Barcode.tenant_id == tenant_id,
                     Barcode.code == code,
                     TenantCatalog.deleted_at.is_(None),
+                    TenantCatalog.is_active.is_(True),
                 )
             )
             .limit(1)
@@ -409,6 +459,25 @@ class CatalogRepository:
 
     async def get_job(self, job_id: UUID) -> CatalogImportJob | None:
         return await self.session.get(CatalogImportJob, job_id)
+
+    async def get_job_for_update(self, job_id: UUID) -> CatalogImportJob | None:
+        stmt = select(CatalogImportJob).where(CatalogImportJob.id == job_id).with_for_update()
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def lock_import_slot(self, tenant_id: UUID) -> None:
+        """Serialize import confirmation per tenant before checking the active job."""
+
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:tenant_id, 0))"),
+            {"tenant_id": str(tenant_id)},
+        )
+
+    async def get_active_import(self, tenant_id: UUID) -> CatalogImportJob | None:
+        stmt = select(CatalogImportJob).where(
+            CatalogImportJob.tenant_id == tenant_id,
+            CatalogImportJob.status == "importing",
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def update_job(self, job: CatalogImportJob, **fields: Any) -> CatalogImportJob:
         for key, value in fields.items():

@@ -17,6 +17,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    SmallInteger,
     Text,
     UniqueConstraint,
     text,
@@ -651,6 +652,11 @@ class POSRefundAttempt(Base):
     operation_hash: Mapped[str] = mapped_column(Text, nullable=False)
     items_json: Mapped[list[dict[str, str]]] = mapped_column(JSONB, nullable=False)
     external_allocations_json: Mapped[list[dict[str, str]]] = mapped_column(JSONB, nullable=False)
+    intent_version: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("2")
+    )
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    comment: Mapped[str | None] = mapped_column(Text)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     external_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
@@ -683,6 +689,25 @@ class POSRefundAttempt(Base):
         CheckConstraint(
             "operation_hash ~ '^[0-9a-f]{64}$'",
             name="ck_pos_refund_attempt_operation_hash",
+        ),
+        CheckConstraint(
+            "intent_version IN (1, 2)",
+            name="ck_pos_refund_attempt_intent_version",
+        ),
+        CheckConstraint(
+            "reason_code IS NULL OR reason_code IN "
+            "('dispensing_error','duplicate_sale','pricing_error','quality_issue',"
+            "'damaged_package','customer_cancelled','other')",
+            name="ck_pos_refund_attempt_reason_code",
+        ),
+        CheckConstraint(
+            "comment IS NULL OR char_length(comment) <= 500",
+            name="ck_pos_refund_attempt_comment",
+        ),
+        CheckConstraint(
+            "(intent_version = 1 AND reason_code IS NULL AND comment IS NULL) "
+            "OR intent_version = 2",
+            name="ck_pos_refund_attempt_intent_payload",
         ),
         CheckConstraint("total_amount > 0", name="ck_pos_refund_attempt_total"),
         CheckConstraint("external_amount > 0", name="ck_pos_refund_attempt_external_total"),

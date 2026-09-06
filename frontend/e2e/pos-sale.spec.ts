@@ -79,32 +79,46 @@ test.describe("POS sale (owner)", () => {
     await expect(paymentPanel).toBeVisible();
     await expect(paymentPanel.getByRole("button", { name: "Завершить продажу" })).toBeVisible();
 
-    const [quickBox, receiptBox, paymentBox] = await Promise.all([
-      quickProducts.boundingBox(),
-      currentReceipt.boundingBox(),
-      paymentPanel.boundingBox(),
-    ]);
-    expect(quickBox).not.toBeNull();
-    expect(receiptBox).not.toBeNull();
-    expect(paymentBox).not.toBeNull();
-    expect(quickBox!.x + quickBox!.width).toBeLessThanOrEqual(receiptBox!.x);
-    expect(receiptBox!.x + receiptBox!.width).toBeLessThanOrEqual(paymentBox!.x);
-    expect(Math.abs(quickBox!.y - receiptBox!.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(receiptBox!.y - paymentBox!.y)).toBeLessThanOrEqual(1);
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
-      ),
-    ).toBe(true);
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1,
-      ),
-    ).toBe(true);
-    expect(
-      Math.max(quickBox!.y + quickBox!.height, receiptBox!.y + receiptBox!.height),
-    ).toBeLessThanOrEqual(768);
-    expect(paymentBox!.y + paymentBox!.height).toBeLessThanOrEqual(768);
+    await expect
+      .poll(
+        async () => {
+          const [quickBox, receiptBox, paymentBox] = await Promise.all([
+            quickProducts.boundingBox(),
+            currentReceipt.boundingBox(),
+            paymentPanel.boundingBox(),
+          ]);
+          if (!quickBox || !receiptBox || !paymentBox) {
+            return null;
+          }
+
+          const documentFitsViewport = await page.evaluate(() => ({
+            horizontally:
+              document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+            vertically:
+              document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1,
+          }));
+
+          return {
+            columnsDoNotOverlap:
+              quickBox.x + quickBox.width <= receiptBox.x &&
+              receiptBox.x + receiptBox.width <= paymentBox.x,
+            columnsShareTop:
+              Math.abs(quickBox.y - receiptBox.y) <= 1 &&
+              Math.abs(receiptBox.y - paymentBox.y) <= 1,
+            documentFitsViewport,
+            panelsFitViewport:
+              Math.max(quickBox.y + quickBox.height, receiptBox.y + receiptBox.height) <= 768 &&
+              paymentBox.y + paymentBox.height <= 768,
+          };
+        },
+        { message: "POS workspace should settle inside the 1366x768 viewport" },
+      )
+      .toEqual({
+        columnsDoNotOverlap: true,
+        columnsShareTop: true,
+        documentFitsViewport: { horizontally: true, vertically: true },
+        panelsFitViewport: true,
+      });
 
     const productSearch = page.getByRole("combobox", { name: "Товар" });
     await productSearch.fill(item.brand_name);
@@ -113,6 +127,7 @@ test.describe("POS sale (owner)", () => {
 
     await page.reload();
     await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await expect(page.locator('[data-barcode-sink="true"]')).toBeAttached();
     const restoredQuickProducts = page.getByRole("region", { name: "Быстрый выбор" });
     await expect(restoredQuickProducts.getByText(item.brand_name)).toBeVisible();
     await restoredQuickProducts
@@ -164,8 +179,16 @@ test.describe("POS sale (owner)", () => {
       await route.continue();
     });
     await page.locator('[data-barcode-sink="true"]').focus();
-    await page.keyboard.type(barcode, { delay: 5 });
-    await page.keyboard.press("Enter");
+    await page.evaluate((code) => {
+      for (const key of code) {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+        );
+      }
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+      );
+    }, barcode);
 
     await physicalBarcodeLookup;
     await expect(
@@ -189,6 +212,40 @@ test.describe("POS sale (owner)", () => {
 
     await page.unroute("**/api/v1/sales/*/items");
     await page.unroute("**/api/v1/pos/commands/*");
+  });
+
+  test("allows only one browser tab to control a register", async ({ page }) => {
+    test.setTimeout(90_000);
+
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+    const branch = await seedBranch(api, uniqueName("LOCK-Branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("LOCK-Cash"));
+    await apiAnon.dispose();
+    await api.dispose();
+
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos");
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
+    await page.getByRole("button", { name: "Открыть смену" }).click();
+    await expect(page.getByRole("region", { name: "Текущий чек" })).toBeVisible();
+
+    const secondPage = await page.context().newPage();
+    await secondPage.goto("/pos");
+    await secondPage.getByLabel(/^Касса$/).selectOption({ label: register.name });
+
+    await expect(secondPage.getByText("Касса занята", { exact: true })).toBeVisible();
+    await expect(secondPage.getByRole("region", { name: "Текущий чек" })).toHaveCount(0);
+
+    await page.close();
+
+    await expect(secondPage.getByRole("region", { name: "Текущий чек" })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(secondPage.getByText("Касса занята", { exact: true })).toHaveCount(0);
+    await secondPage.close();
   });
 
   test("binds card sale and refund to confirmed terminal attempts", async ({ page }) => {
@@ -347,7 +404,7 @@ test.describe("POS sale (owner)", () => {
       });
       await saleDialog.getByRole("button", { name: "Оформить возврат" }).click();
 
-      const refundDialog = page.getByRole("dialog", {
+      let refundDialog = page.getByRole("dialog", {
         name: `Возврат по чеку № ${completedSale.receipt_number}`,
       });
       await refundDialog.getByRole("checkbox").first().check();
@@ -377,6 +434,44 @@ test.describe("POS sale (owner)", () => {
       expect(((await reconciledRefundAttemptResponse.json()) as { status: string }).status).toBe(
         "requires_reconciliation",
       );
+
+      await page.evaluate(
+        (saleId) => window.localStorage.removeItem(`sales:pendingRefund:${saleId}`),
+        completedSale.sale_id,
+      );
+      await page.reload();
+      const recoveredSalesResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET" &&
+          url.pathname.endsWith("/api/v1/sales") &&
+          url.searchParams.get("receipt_number") === completedSale.receipt_number
+        );
+      });
+      await page.getByLabel("№ чека").fill(completedSale.receipt_number);
+      const recoveredSales = (await (await recoveredSalesResponse).json()) as {
+        items: { id: string }[];
+      };
+      const recoveredSaleIndex = recoveredSales.items.findIndex(
+        (sale) => sale.id === completedSale.sale_id,
+      );
+      expect(recoveredSaleIndex).toBeGreaterThanOrEqual(0);
+      await page
+        .getByRole("button", { name: `Открыть чек № ${completedSale.receipt_number}` })
+        .nth(recoveredSaleIndex)
+        .click();
+      await page
+        .getByRole("dialog", { name: `Чек № ${completedSale.receipt_number}` })
+        .getByRole("button", { name: "Оформить возврат" })
+        .click();
+      refundDialog = page.getByRole("dialog", {
+        name: `Возврат по чеку № ${completedSale.receipt_number}`,
+      });
+      await expect(
+        refundDialog.getByText(
+          "Найдена заявка, требующая сверки. Не повторяйте возврат во внешнем терминале; проверьте его документ.",
+        ),
+      ).toBeVisible();
 
       const refundDocument = `E2E-REFUND-${Date.now()}`;
       await refundDialog.getByLabel("Терминал").fill("E2E-TERM-01");

@@ -59,6 +59,10 @@ SENSITIVE_FIELDS: set[str] = {
 }
 SENSITIVE_SUFFIXES: tuple[str, ...] = ("_email", "_phone")
 REDACTED_VALUE = "***"
+TABLE_SENSITIVE_FIELDS: dict[str, frozenset[str]] = {
+    "incoming_document": frozenset({"total_amount"}),
+    "supplier_return": frozenset({"amount"}),
+}
 
 
 def _is_sensitive_field(key: str) -> bool:
@@ -66,24 +70,39 @@ def _is_sensitive_field(key: str) -> bool:
     return key_lower in SENSITIVE_FIELDS or key_lower.endswith(SENSITIVE_SUFFIXES)
 
 
-def _redact_sensitive_payload(value: Any) -> Any:
+def _redact_sensitive_payload(
+    value: Any,
+    *,
+    extra_fields: frozenset[str] = frozenset(),
+) -> Any:
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for key, item in value.items():
-            if isinstance(key, str) and _is_sensitive_field(key) and item is not None:
+            if (
+                isinstance(key, str)
+                and (_is_sensitive_field(key) or key.lower() in extra_fields)
+                and item is not None
+            ):
                 out[key] = REDACTED_VALUE
             else:
-                out[key] = _redact_sensitive_payload(item)
+                out[key] = _redact_sensitive_payload(item, extra_fields=extra_fields)
         return out
     if isinstance(value, list):
-        return [_redact_sensitive_payload(item) for item in value]
+        return [_redact_sensitive_payload(item, extra_fields=extra_fields) for item in value]
     return value
 
 
-def _redact_dict(blob: dict[str, Any] | None) -> dict[str, Any] | None:
+def _redact_dict(
+    blob: dict[str, Any] | None,
+    *,
+    extra_fields: frozenset[str] = frozenset(),
+) -> dict[str, Any] | None:
     if blob is None:
         return None
-    return cast(dict[str, Any], _redact_sensitive_payload(blob))
+    return cast(
+        dict[str, Any],
+        _redact_sensitive_payload(blob, extra_fields=extra_fields),
+    )
 
 
 def _safe_timezone(value: str | None) -> str:
@@ -227,6 +246,22 @@ class AuditService:
             metadata_json=_redact_dict(metadata),
         )
 
+    async def log_authorization_denied(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        metadata: dict[str, Any],
+    ) -> AuditLog:
+        return await self.repo.insert_entry(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action="AUTHORIZATION_DENIED",
+            table_name="authorization_policy",
+            record_id=None,
+            metadata_json=_redact_dict(metadata),
+        )
+
     # ---- PII filter for read-side serialization ----
 
     @staticmethod
@@ -235,6 +270,7 @@ class AuditService:
         Trigger-generated rows should already be redacted at rest; this keeps
         API responses safe for older rows and explicit metadata."""
 
+        extra_fields = TABLE_SENSITIVE_FIELDS.get(entry.table_name, frozenset())
         return {
             "id": entry.id,
             "tenant_id": entry.tenant_id,
@@ -242,9 +278,12 @@ class AuditService:
             "action": entry.action,
             "table_name": entry.table_name,
             "record_id": entry.record_id,
-            "old_values": _redact_dict(entry.old_values),
-            "new_values": _redact_dict(entry.new_values),
-            "changed_fields": _redact_dict(entry.changed_fields),
+            "old_values": _redact_dict(entry.old_values, extra_fields=extra_fields),
+            "new_values": _redact_dict(entry.new_values, extra_fields=extra_fields),
+            "changed_fields": _redact_dict(
+                entry.changed_fields,
+                extra_fields=extra_fields,
+            ),
             "ip_address": (str(entry.ip_address) if entry.ip_address is not None else None),
             "user_agent": entry.user_agent,
             "metadata": _redact_dict(entry.metadata_json),

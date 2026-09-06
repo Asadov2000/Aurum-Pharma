@@ -30,7 +30,7 @@ class BatchRead(BaseModel):
     batch_number: str | None
     manufactured_at: date | None
     expires_at: date
-    purchase_price: Decimal
+    purchase_price: Decimal | None
     sale_price: Decimal
     currency: str
     qty_initial: Decimal
@@ -54,7 +54,7 @@ class BatchWithExpiry(BatchRead):
 
 class BatchSummary(BaseModel):
     total_qty: Decimal
-    purchase_value: Decimal
+    purchase_value: Decimal | None
     sale_value: Decimal
     attention_count: int
     expired_count: int
@@ -102,6 +102,6 @@ class WriteOffRead(BaseModel):
     qty: Decimal
     reason: WriteOffReason
     comment: str | None
-    amount: Decimal
+    amount: Decimal | None
     currency: str
     created_at: datetime

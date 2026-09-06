@@ -148,7 +148,7 @@ test.describe("POS sale (branch-scoped cashier)", () => {
     await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Пользователи" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Роли" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Тариф и оплата" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Тариф", exact: true })).toHaveCount(0);
 
     const registerField = page.getByLabel(/^Касса$/);
     await expect(registerField).toBeDisabled();

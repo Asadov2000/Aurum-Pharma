@@ -1,0 +1,274 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-09-04",
+  "release_scope": "restricted-web-pilot-one-pharmacy",
+  "decision": "blocked",
+  "release": {
+    "commit": null,
+    "ci_evidence": null,
+    "approved_at": null,
+    "valid_until": null,
+    "images": [],
+    "approvals": []
+  },
+  "gates": [
+    {
+      "id": "APP-001",
+      "category": "pos",
+      "title": "Касса, оплаты, смены и возвраты защищены тестами",
+      "owner": "POS owner",
+      "required": true,
+      "verification": "repository",
+      "status": "verified",
+      "evidence": [
+        { "type": "repository", "ref": "backend/tests/domains/pos" },
+        { "type": "repository", "ref": "frontend/e2e/pos-sale.spec.ts" },
+        { "type": "repository", "ref": "frontend/e2e/payment-reconciliation.spec.ts" }
+      ]
+    },
+    {
+      "id": "APP-002",
+      "category": "inventory",
+      "title": "Каталог, партии, FEFO и сроки годности защищены тестами",
+      "owner": "Inventory owner",
+      "required": true,
+      "verification": "repository",
+      "status": "verified",
+      "evidence": [
+        { "type": "repository", "ref": "backend/tests/domains/catalog" },
+        { "type": "repository", "ref": "backend/tests/domains/pos/test_sales.py" },
+        { "type": "repository", "ref": "frontend/e2e/catalog-flow.spec.ts" }
+      ]
+    },
+    {
+      "id": "APP-003",
+      "category": "supply",
+      "title": "Приходы и поставщики защищены от повторного проведения и нарушения происхождения",
+      "owner": "Supply owner",
+      "required": true,
+      "verification": "repository",
+      "status": "verified",
+      "evidence": [
+        { "type": "repository", "ref": "backend/tests/domains/incoming" },
+        { "type": "repository", "ref": "backend/tests/domains/suppliers" },
+        { "type": "repository", "ref": "frontend/e2e/incoming-flow.spec.ts" }
+      ]
+    },
+    {
+      "id": "APP-004",
+      "category": "authorization",
+      "title": "Роли, сотрудники и tenant-изоляция защищены сервисными, RLS и E2E-проверками",
+      "owner": "Authorization owner",
+      "required": true,
+      "verification": "repository",
+      "status": "verified",
+      "evidence": [
+        { "type": "repository", "ref": "backend/tests/domains/roles" },
+        { "type": "repository", "ref": "backend/tests/isolation" },
+        { "type": "repository", "ref": "frontend/e2e/owner-employee-account.spec.ts" }
+      ]
+    },
+    {
+      "id": "APP-005",
+      "category": "onboarding",
+      "title": "Владелец проходит путь от создания аптеки до готового рабочего места",
+      "owner": "Onboarding owner",
+      "required": true,
+      "verification": "repository",
+      "status": "verified",
+      "evidence": [
+        { "type": "repository", "ref": "frontend/e2e/owner-onboarding.spec.ts" },
+        { "type": "repository", "ref": "frontend/e2e/tenant-setup.spec.ts" }
+      ]
+    },
+    {
+      "id": "APP-006",
+      "category": "assurance",
+      "title": "Отчёты, аудит и локальное восстановление имеют автоматические проверки",
+      "owner": "Assurance owner",
+      "required": true,
+      "verification": "repository",
+      "status": "verified",
+      "evidence": [
+        { "type": "repository", "ref": "backend/tests/domains/audit" },
+        { "type": "repository", "ref": "backend/tests/domains/pos/test_report_overviews.py" },
+        { "type": "repository", "ref": "scripts/test-recovery-tooling.sh" }
+      ]
+    },
+    {
+      "id": "APP-007",
+      "category": "resilience",
+      "title": "Краткая потеря сети или API блокирует новые команды и безопасно восстанавливает чтение",
+      "owner": "Frontend owner",
+      "required": true,
+      "verification": "repository",
+      "status": "verified",
+      "evidence": [
+        { "type": "repository", "ref": "frontend/tests/lib/connectivity.test.tsx" },
+        { "type": "repository", "ref": "frontend/e2e/runtime-surface.spec.ts" }
+      ]
+    },
+    {
+      "id": "APP-008",
+      "category": "security",
+      "title": "Threat model будущего публичного web-пилота привязан к коду и release blockers",
+      "owner": "Security owner",
+      "required": true,
+      "verification": "repository",
+      "status": "verified",
+      "evidence": [
+        { "type": "repository", "ref": "docs/security/A-Pharma-threat-model.md" }
+      ]
+    },
+    {
+      "id": "LEGAL-001",
+      "category": "legal",
+      "title": "Зарегистрированы поставщик Aurum, налоговый режим и банковские реквизиты",
+      "owner": "Руководитель + бухгалтер",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "LEGAL-002",
+      "category": "legal",
+      "title": "Юрист РТ утвердил договор, SLA, EULA, тарифы и выход клиента",
+      "owner": "Коммерческий юрист РТ",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "PRIVACY-001",
+      "category": "privacy",
+      "title": "Утверждены DPA, политика, согласия, retention и процесс запросов субъектов",
+      "owner": "Privacy owner + юрист РТ",
+      "required": true,
+      "verification": "hybrid",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "PRIVACY-002",
+      "category": "privacy",
+      "title": "Все production-копии персональных данных размещены в допустимой юрисдикции",
+      "owner": "Infrastructure owner + privacy owner",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "PHARMA-001",
+      "category": "pharmacy",
+      "title": "Проверены разрешительные документы аптеки и специалистов",
+      "owner": "Ответственный фармацевт",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "PHARMA-002",
+      "category": "pharmacy",
+      "title": "Утверждены официальный master-каталог и правила рецептурного и специального отпуска",
+      "owner": "Pharma compliance owner",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "FISCAL-001",
+      "category": "fiscal",
+      "title": "Выбран сертифицированный провайдер ККМ и приняты сценарии чеков, offline и возвратов",
+      "owner": "POS owner + налоговый юрист",
+      "required": true,
+      "verification": "hybrid",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "PAYMENT-001",
+      "category": "payments",
+      "title": "Банк или лицензированный провайдер принял карту, QR, смешанную оплату и возвраты",
+      "owner": "Payment owner + финансовый юрист",
+      "required": true,
+      "verification": "hybrid",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "SECURITY-001",
+      "category": "security",
+      "title": "Независимый pentest не содержит открытых critical/high находок",
+      "owner": "Security owner",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "SECURITY-002",
+      "category": "security",
+      "title": "Внутренний TLS, production secrets и защищённый deployment проверены на staging",
+      "owner": "Infrastructure owner",
+      "required": true,
+      "verification": "hybrid",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "RECOVERY-001",
+      "category": "recovery",
+      "title": "Внешний WORM/recovery-host и RPO/RTO проверены на production-подобном объёме",
+      "owner": "Recovery owner",
+      "required": true,
+      "verification": "hybrid",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "IP-001",
+      "category": "intellectual-property",
+      "title": "Подтверждены права на код, дизайн и ассеты; SBOM и лицензии приняты",
+      "owner": "Technical lead + IP-юрист",
+      "required": true,
+      "verification": "hybrid",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "REGULATOR-001",
+      "category": "regulatory",
+      "title": "Получены и проверены письменные ответы применимых регуляторов",
+      "owner": "Руководитель + юрист РТ",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "PILOT-001",
+      "category": "pilot",
+      "title": "Аптека обучена, проведена репетиция рабочего дня и аварийных процедур",
+      "owner": "Pilot owner + владелец аптеки",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "PILOT-002",
+      "category": "pilot",
+      "title": "Пять владельцев допуска подписали версионированный протокол запуска",
+      "owner": "Руководитель Aurum Pharma",
+      "required": true,
+      "verification": "external",
+      "status": "pending",
+      "evidence": []
+    }
+  ]
+}

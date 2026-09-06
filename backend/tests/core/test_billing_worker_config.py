@@ -12,14 +12,17 @@ from pydantic import ValidationError
 
 from app.core.billing_worker_config import BillingWorkerSettings
 
+_POSTGRES_TLS = "?sslmode=verify-full&sslrootcert=/run/secrets/postgres_ca.crt"
+_REDIS_TLS = "?ssl_cert_reqs=required&ssl_check_hostname=true"
+
 
 def _production_settings(**overrides: object) -> BillingWorkerSettings:
     values: dict[str, object] = {
         "ENVIRONMENT": "production",
         "DATABASE_URL_BILLING_WORKER": (
-            "postgresql+asyncpg://aurum_billing_worker:Str0ng-Billing-Pw@db/aurum"
+            "postgresql+asyncpg://aurum_billing_worker:Str0ng-Billing-Pw@db/aurum" + _POSTGRES_TLS
         ),
-        "REDIS_URL": "rediss://:Str0ng-Redis-Pw@redis/0",
+        "REDIS_URL": "rediss://:Str0ng-Redis-Pw@redis/0" + _REDIS_TLS,
     }
     values.update(overrides)
     return BillingWorkerSettings(**values)
@@ -46,8 +49,22 @@ def test_production_rejects_non_dedicated_database_credentials(database_url: str
 
 
 def test_production_requires_authenticated_redis() -> None:
-    with pytest.raises(ValidationError, match="REDIS_URL must contain a host and password"):
+    with pytest.raises(ValidationError, match="REDIS_URL"):
         _production_settings(REDIS_URL="redis://redis:6379/0")
+
+
+def test_production_rejects_database_without_verified_tls() -> None:
+    with pytest.raises(ValidationError, match="sslmode=verify-full and sslrootcert"):
+        _production_settings(
+            DATABASE_URL_BILLING_WORKER=(
+                "postgresql+asyncpg://aurum_billing_worker:Str0ng-Billing-Pw@db/aurum"
+            )
+        )
+
+
+def test_production_rejects_redis_without_certificate_verification() -> None:
+    with pytest.raises(ValidationError, match="ssl_cert_reqs=required"):
+        _production_settings(REDIS_URL="rediss://:Str0ng-Redis-Pw@redis/0")
 
 
 def test_batch_size_is_bounded() -> None:
@@ -62,7 +79,7 @@ def test_validation_errors_do_not_expose_worker_secrets() -> None:
     with pytest.raises(ValidationError) as error:
         _production_settings(
             DATABASE_URL_BILLING_WORKER=(
-                f"postgresql+asyncpg://aurum_support:{database_secret}@db/aurum"
+                f"postgresql+asyncpg://aurum_support:{database_secret}@db/aurum{_POSTGRES_TLS}"
             ),
             REDIS_URL=f"redis://:{redis_secret}@redis/0",
         )

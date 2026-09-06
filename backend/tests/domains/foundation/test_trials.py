@@ -6,24 +6,20 @@ from datetime import date, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.time import utc_now
 from app.tasks.foundation import _auto_start_trials_async
 
 
 async def test_auto_start_trials_promotes_only_ready_expired_setup(
-    db_connection: AsyncConnection,
+    db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
 ) -> None:
-    session_factory = async_sessionmaker(
-        bind=db_connection,
-        expire_on_commit=False,
-        class_=AsyncSession,
-        join_transaction_mode="create_savepoint",
-    )
     nick = uuid4().hex[:8]
-    async with session_factory() as session, session.begin():
-        inserted = await session.execute(
+    async with db_engine.begin() as connection:
+        await connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
+        inserted = await connection.execute(
             text("""
                 INSERT INTO public.tenant (name, contact_email, status)
                 VALUES
@@ -39,14 +35,14 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
             },
         )
         ready_id, blocked_id, young_id = (UUID(str(row[0])) for row in inserted.fetchall())
-        await session.execute(
+        await connection.execute(
             text("""
                 INSERT INTO public.tenant_settings (tenant_id)
                 VALUES (:ready), (:blocked), (:young)
                 """),
             {"ready": ready_id, "blocked": blocked_id, "young": young_id},
         )
-        await session.execute(
+        await connection.execute(
             text("""
                 INSERT INTO public.onboarding_checklist (tenant_id, setup_ends_at)
                 VALUES
@@ -63,7 +59,7 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
             },
         )
         branch_id = (
-            await session.execute(
+            await connection.execute(
                 text("""
                     INSERT INTO public.branch (
                       tenant_id, name, address, license_number,
@@ -81,7 +77,7 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
                 },
             )
         ).scalar_one()
-        await session.execute(
+        await connection.execute(
             text("""
                 INSERT INTO public.register (tenant_id, branch_id, name)
                 VALUES (:tenant_id, :branch_id, 'Register 1')
@@ -89,7 +85,7 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
             {"tenant_id": ready_id, "branch_id": branch_id},
         )
         user_id = (
-            await session.execute(
+            await connection.execute(
                 text("""
                     INSERT INTO public.app_user (
                       email, full_name, status, home_tenant_id, activated_at
@@ -103,7 +99,7 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
             )
         ).scalar_one()
         membership_id = (
-            await session.execute(
+            await connection.execute(
                 text("""
                     INSERT INTO public.tenant_membership (
                       tenant_id, user_id, full_name, status, activated_at
@@ -116,7 +112,7 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
                 {"tenant_id": ready_id, "user_id": user_id},
             )
         ).scalar_one()
-        await session.execute(
+        await connection.execute(
             text("""
                 INSERT INTO public.tenant_ownership (
                   tenant_id, membership_id, is_active
@@ -124,7 +120,7 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
                 """),
             {"tenant_id": ready_id, "membership_id": membership_id},
         )
-        await session.execute(
+        await connection.execute(
             text("""
                 INSERT INTO public.tenant_catalog (
                   tenant_id, brand_name, dispensing_type, storage_type, is_active
@@ -140,24 +136,69 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
             {"tenant_id": ready_id},
         )
 
-    result = await _auto_start_trials_async(
-        session_factory=session_factory,
-        candidate_tenant_ids=frozenset({ready_id, blocked_id, young_id}),
-    )
-    assert result == {"started": 1, "skipped": 1}
+    tenant_ids = [ready_id, blocked_id, young_id]
+    try:
+        result = await _auto_start_trials_async(
+            candidate_tenant_ids=frozenset(tenant_ids),
+        )
+        assert result == {"started": 1, "skipped": 1}
 
-    async with session_factory() as session:
-        rows = (
-            await session.execute(
+        async with maintenance_engine.connect() as connection:
+            rows = (
+                await connection.execute(
+                    text(
+                        "SELECT id, status, trial_started_at FROM public.tenant "
+                        "WHERE id = ANY(:ids) ORDER BY name"
+                    ),
+                    {"ids": tenant_ids},
+                )
+            ).fetchall()
+        by_id = {UUID(str(row[0])): (row[1], row[2]) for row in rows}
+        assert by_id[ready_id][0] == "trial"
+        assert by_id[ready_id][1] is not None
+        assert by_id[blocked_id][0] == "setup"
+        assert by_id[young_id][0] == "setup"
+    finally:
+        async with maintenance_engine.begin() as connection:
+            await connection.execute(
                 text(
-                    "SELECT id, status, trial_started_at FROM public.tenant "
-                    "WHERE id = ANY(:ids) ORDER BY name"
-                ),
-                {"ids": [ready_id, blocked_id, young_id]},
+                    "ALTER TABLE public.trial_activation "
+                    "DISABLE TRIGGER trg_trial_activation_immutable"
+                )
             )
-        ).fetchall()
-    by_id = {UUID(str(row[0])): (row[1], row[2]) for row in rows}
-    assert by_id[ready_id][0] == "trial"
-    assert by_id[ready_id][1] is not None
-    assert by_id[blocked_id][0] == "setup"
-    assert by_id[young_id][0] == "setup"
+            await connection.execute(
+                text("DELETE FROM public.trial_activation WHERE tenant_id = ANY(:ids)"),
+                {"ids": tenant_ids},
+            )
+            await connection.execute(
+                text(
+                    "ALTER TABLE public.trial_activation "
+                    "ENABLE TRIGGER trg_trial_activation_immutable"
+                )
+            )
+            await connection.execute(
+                text("DELETE FROM public.tenant_subscription WHERE tenant_id = ANY(:ids)"),
+                {"ids": tenant_ids},
+            )
+        async with db_engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM public.sync_stream WHERE tenant_id = ANY(:ids)"),
+                {"ids": tenant_ids},
+            )
+            await connection.execute(
+                text("DELETE FROM public.sync_writer_epoch WHERE tenant_id = ANY(:ids)"),
+                {"ids": tenant_ids},
+            )
+            await connection.execute(
+                text("DELETE FROM public.sync_node WHERE tenant_id = ANY(:ids)"),
+                {"ids": tenant_ids},
+            )
+            await connection.execute(
+                text("DELETE FROM public.tenant WHERE id = ANY(:ids)"),
+                {"ids": tenant_ids},
+            )
+        async with maintenance_engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM public.audit_log WHERE tenant_id = ANY(:ids)"),
+                {"ids": tenant_ids},
+            )

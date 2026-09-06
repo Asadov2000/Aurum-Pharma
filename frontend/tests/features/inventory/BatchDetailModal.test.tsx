@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -68,11 +68,12 @@ function renderDetails() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <BatchDetailModal batchId={DETAILS.id} onClose={vi.fn()} />
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 describe("BatchDetailModal", () => {
@@ -102,6 +103,35 @@ describe("BatchDetailModal", () => {
     expect(screen.getByText("Приход")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Списать" })).toBeInTheDocument();
     expect(mocks.getBatch).toHaveBeenCalledTimes(1);
-    expect(mocks.getBatch).toHaveBeenCalledWith(DETAILS.id);
+    expect(mocks.getBatch).toHaveBeenCalledWith(DETAILS.id, expect.any(AbortSignal));
+  });
+
+  it("keeps retail inventory workflows without exposing hidden purchase costs", async () => {
+    mocks.getBatch.mockResolvedValueOnce({ ...DETAILS, purchase_price: null });
+    renderDetails();
+
+    expect(await screen.findByRole("heading", { name: "Парацетамол" })).toBeInTheDocument();
+    expect(screen.queryByText("Закупочная стоимость")).not.toBeInTheDocument();
+    expect(screen.queryByText("Цена закупки")).not.toBeInTheDocument();
+    expect(screen.queryByText(/маржа/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Розничный потенциал")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Списать" }));
+    expect(screen.getByLabelText("Количество")).toBeInTheDocument();
+    expect(screen.getByLabelText("Причина")).toBeInTheDocument();
+    expect(screen.queryByText(/Сумма списания по закупочной цене/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps cached details visible when a background refresh fails", async () => {
+    const { queryClient } = renderDetails();
+    expect(await screen.findByRole("heading", { name: "Парацетамол" })).toBeInTheDocument();
+    mocks.getBatch.mockRejectedValueOnce(new Error("network"));
+
+    await queryClient.refetchQueries({ queryKey: ["inventory", "batch", DETAILS.id] });
+
+    expect(screen.getByRole("heading", { name: "Парацетамол" })).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Не удалось обновить данные партии",
+    );
   });
 });

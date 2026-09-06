@@ -64,6 +64,7 @@ $appPassword = New-RandomHex -Bytes 32
 $supportPassword = New-RandomHex -Bytes 32
 $mailerPassword = New-RandomHex -Bytes 32
 $billingWorkerPassword = New-RandomHex -Bytes 32
+$workerPassword = New-RandomHex -Bytes 32
 $migratorPassword = New-RandomHex -Bytes 32
 $backupPassword = New-RandomHex -Bytes 32
 $pitrPassword = New-RandomHex -Bytes 32
@@ -91,33 +92,39 @@ Write-Secret -Name "AURUM_APP_PASSWORD" -Value $appPassword
 Write-Secret -Name "AURUM_SUPPORT_PASSWORD" -Value $supportPassword
 Write-Secret -Name "AURUM_MAILER_PASSWORD" -Value $mailerPassword
 Write-Secret -Name "AURUM_BILLING_WORKER_PASSWORD" -Value $billingWorkerPassword
+Write-Secret -Name "AURUM_WORKER_PASSWORD" -Value $workerPassword
 Write-Secret -Name "AURUM_MIGRATOR_PASSWORD" -Value $migratorPassword
 Write-Secret -Name "AURUM_BACKUP_PASSWORD" -Value $backupPassword
 Write-Secret -Name "AURUM_PITR_PASSWORD" -Value $pitrPassword
 Write-Secret -Name "DATABASE_URL_APP" -Value (
-    "postgresql+asyncpg://aurum_app:{0}@postgres:5432/aurum" -f $appPassword
+    "postgresql+asyncpg://aurum_app:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $appPassword
 )
 Write-Secret -Name "DATABASE_URL_SUPPORT" -Value (
-    "postgresql+asyncpg://aurum_support:{0}@postgres:5432/aurum" -f $supportPassword
+    "postgresql+asyncpg://aurum_support:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $supportPassword
 )
 Write-Secret -Name "DATABASE_URL_MAILER" -Value (
-    "postgresql+asyncpg://aurum_mailer:{0}@postgres:5432/aurum" -f $mailerPassword
+    "postgresql+asyncpg://aurum_mailer:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $mailerPassword
 )
 Write-Secret -Name "DATABASE_URL_BILLING_WORKER" -Value (
-    "postgresql+asyncpg://aurum_billing_worker:{0}@postgres:5432/aurum" -f `
+    "postgresql+asyncpg://aurum_billing_worker:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f `
         $billingWorkerPassword
 )
+Write-Secret -Name "DATABASE_URL_WORKER" -Value (
+    "postgresql+asyncpg://aurum_worker:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $workerPassword
+)
 Write-Secret -Name "DATABASE_URL_MIGRATION" -Value (
-    "postgresql+asyncpg://aurum_migrator:{0}@postgres:5432/aurum" -f $migratorPassword
+    "postgresql+asyncpg://aurum_migrator:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $migratorPassword
 )
 Write-Secret -Name "DATABASE_URL_BACKUP" -Value (
-    "postgresql://aurum_backup:{0}@postgres:5432/aurum" -f $backupPassword
+    "postgresql://aurum_backup:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $backupPassword
 )
 Write-Secret -Name "DATABASE_URL_PITR" -Value (
-    "postgresql://aurum_pitr:{0}@postgres:5432/aurum" -f $pitrPassword
+    "postgresql://aurum_pitr:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $pitrPassword
 )
 Write-Secret -Name "REDIS_PASSWORD" -Value $redisPassword
-Write-Secret -Name "REDIS_URL" -Value ("redis://:{0}@redis:6379/0" -f $redisPassword)
+Write-Secret -Name "REDIS_URL" -Value (
+    "rediss://:{0}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -f $redisPassword
+)
 Write-Secret -Name "JWT_SECRET" -Value (New-RandomHex -Bytes 48)
 Write-Secret -Name "MFA_ENCRYPTION_KEY" -Value (New-RandomHex -Bytes 48)
 Write-Secret -Name "MFA_ENCRYPTION_PREVIOUS_KEYS" -Value "{}"
@@ -156,4 +163,4 @@ if ([Environment]::OSVersion.Platform -eq "Win32NT") {
     }
 }
 
-Write-Host "Created 29 production secret files in a protected external directory."
+Write-Host "Created 33 production secret files in a protected external directory."

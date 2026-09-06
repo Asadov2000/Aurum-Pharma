@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { AxiosError, type AxiosResponse } from "axios";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listUsers = vi.fn();
@@ -166,6 +167,25 @@ const usersResponse = (items: unknown[]) => ({
   page_size: 50,
 });
 
+function employeeInviteConflict(): AxiosError {
+  const response = {
+    status: 409,
+    data: {
+      error: {
+        code: "conflict",
+        message: "Не удалось создать новый аккаунт с этим email",
+        details: { reason: "email_unavailable" },
+      },
+    },
+    statusText: "Conflict",
+    headers: {},
+    config: {},
+  } as AxiosResponse;
+  const error = new AxiosError("Request failed", "ERR_BAD_RESPONSE");
+  error.response = response;
+  return error;
+}
+
 describe("UsersPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -219,7 +239,9 @@ describe("UsersPage", () => {
     renderPage();
 
     expect(await screen.findByText("Сотрудников пока нет")).toBeInTheDocument();
-    expect(screen.getByText(/Добавьте сотрудника, выберите ему роль/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Добавить первого сотрудника может владелец аптеки/i),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Добавить сотрудника/i })).not.toBeInTheDocument();
   });
 
@@ -270,10 +292,15 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
-    fireEvent.change(screen.getByLabelText("Торговая точка"), {
+    fireEvent.change(screen.getByLabelText("Доступ к торговым точкам"), {
       target: { value: "branch-1" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и пригласить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить данные" }));
+
+    expect(await screen.findByText("Проверьте данные")).toBeInTheDocument();
+    expect(screen.getByText("saida@aurum.tj")).toBeInTheDocument();
+    expect(screen.getByText("Аптека №1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Создать доступ" }));
 
     await waitFor(() => expect(inviteEmployee).toHaveBeenCalledTimes(1));
     expect(inviteEmployee).toHaveBeenCalledWith({
@@ -286,8 +313,118 @@ describe("UsersPage", () => {
       password_required: false,
     });
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Сотрудник «Саида Каримова» создан",
+      "Доступ для «Саида Каримова» создан",
     );
+  });
+
+  it("keeps the employee form open and explains an existing email conflict", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.invite", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([]));
+    inviteEmployee.mockRejectedValueOnce(employeeInviteConflict());
+    renderPage();
+
+    const addEmployeeButton = await screen.findByRole("button", {
+      name: /Добавить сотрудника/i,
+    });
+    await waitFor(() => expect(addEmployeeButton).toBeEnabled());
+    fireEvent.click(addEmployeeButton);
+    fireEvent.change(screen.getByLabelText("ФИО сотрудника"), {
+      target: { value: "Саида Каримова" },
+    });
+    fireEvent.change(screen.getByLabelText("Email для входа"), {
+      target: { value: "existing@aurum.tj" },
+    });
+    fireEvent.change(screen.getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
+    fireEvent.change(screen.getByLabelText("Доступ к торговым точкам"), {
+      target: { value: "__all_branches__" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить данные" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Создать доступ" }));
+
+    expect(
+      await screen.findByText("Не удалось создать новый аккаунт с этим email"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Email для входа")).toHaveValue("existing@aurum.tj");
+    expect(screen.getByRole("button", { name: "Проверить данные" })).toBeInTheDocument();
+  });
+
+  it("retries an uncertain employee creation with the same operation and locked data", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.invite", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([]));
+    inviteEmployee.mockRejectedValueOnce(new AxiosError("Network Error", "ERR_NETWORK"));
+    renderPage();
+
+    const addEmployeeButton = await screen.findByRole("button", { name: /Добавить сотрудника/i });
+    await waitFor(() => expect(addEmployeeButton).toBeEnabled());
+    fireEvent.click(addEmployeeButton);
+    fireEvent.change(screen.getByLabelText("ФИО сотрудника"), {
+      target: { value: "Саида Каримова" },
+    });
+    fireEvent.change(screen.getByLabelText("Email для входа"), {
+      target: { value: "saida@aurum.tj" },
+    });
+    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: MANAGED_ROLE.id } });
+    fireEvent.change(screen.getByLabelText("Доступ к торговым точкам"), {
+      target: { value: "__all_branches__" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить данные" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Создать доступ" }));
+
+    expect(await screen.findByText(/Не удалось получить результат/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Изменить данные" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить создание" }));
+
+    await waitFor(() => expect(inviteEmployee).toHaveBeenCalledTimes(2));
+    expect(inviteEmployee.mock.calls[1]?.[0]).toEqual(inviteEmployee.mock.calls[0]?.[0]);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Доступ для «Саида Каримова» создан",
+    );
+  });
+
+  it("requires an explicit branch scope before reviewing employee access", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.invite", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([]));
+    renderPage();
+
+    const addEmployeeButton = await screen.findByRole("button", { name: /Добавить сотрудника/i });
+    await waitFor(() => expect(addEmployeeButton).toBeEnabled());
+    fireEvent.click(addEmployeeButton);
+    fireEvent.change(screen.getByLabelText("ФИО сотрудника"), {
+      target: { value: "Фаррух Саидов" },
+    });
+    fireEvent.change(screen.getByLabelText("Email для входа"), {
+      target: { value: "farrukh@aurum.tj" },
+    });
+    fireEvent.change(screen.getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить данные" }));
+
+    expect(await screen.findByText("Выберите, к каким точкам дать доступ")).toBeInTheDocument();
+    expect(inviteEmployee).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Доступ к торговым точкам"), {
+      target: { value: "__all_branches__" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить данные" }));
+    expect(await screen.findByText(/доступ ко всем текущим и будущим точкам/i)).toBeInTheDocument();
   });
 
   it("does not show employee creation to a non-owner with delegated permissions", async () => {
@@ -296,6 +433,30 @@ describe("UsersPage", () => {
       home_tenant_id: "tenant-1",
       is_tenant_owner: false,
       permissions: ["users.view", "users.invite", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([]));
+    renderPage();
+
+    expect(await screen.findByText("Сотрудников пока нет")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Добавить сотрудника/i })).not.toBeInTheDocument();
+  });
+
+  it("does not show employee creation during scoped support access", async () => {
+    mockUser = {
+      id: "support-admin",
+      active_tenant_id: "tenant-1",
+      home_tenant_id: null,
+      is_tenant_owner: false,
+      permissions: ["users.view", "users.invite", "roles.assign"],
+      support_access: {
+        id: "support-session-1",
+        tenant_id: "tenant-1",
+        tenant_name: "Аптека Сино",
+        reason: "Проверка учетных записей",
+        capabilities: ["users.view", "users.invite", "roles.assign"],
+        is_read_only: false,
+        expires_at: "2030-01-01T00:00:00Z",
+      },
     };
     listUsers.mockResolvedValue(usersResponse([]));
     renderPage();

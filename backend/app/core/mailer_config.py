@@ -15,6 +15,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+from app.core.config import _database_security_problems, _redis_security_problems
+
 
 class MailerSettings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -85,17 +87,10 @@ class MailerSettings(BaseSettings):
             or "aurum_mailer_pw" in self.DATABASE_URL_MAILER
         ):
             problems.append("DATABASE_URL_MAILER must use dedicated aurum_mailer credentials")
-        try:
-            redis = urlsplit(self.REDIS_URL)
-            redis_is_secure = (
-                redis.scheme in {"redis", "rediss"}
-                and bool(redis.hostname)
-                and bool(redis.password)
-            )
-        except ValueError:
-            redis_is_secure = False
-        if not redis_is_secure:
-            problems.append("REDIS_URL must contain a host and dedicated password")
+        problems.extend(
+            _database_security_problems("DATABASE_URL_MAILER", self.DATABASE_URL_MAILER)
+        )
+        problems.extend(_redis_security_problems(self.REDIS_URL))
         if self.EMAIL_OUTBOX_ENCRYPTION_KEY is None:
             problems.append("EMAIL_OUTBOX_ENCRYPTION_KEY is required")
         if (

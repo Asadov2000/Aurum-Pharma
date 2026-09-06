@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { Button, FormError, Input, Label, Switch, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
+import { createOperationId } from "@/lib/operationId";
 
 import { useCreateSupplier, useUpdateSupplier } from "./queries";
 import { type Supplier } from "./types";
@@ -37,6 +38,7 @@ export function SupplierForm({ supplier, onClose, onCancel, onDirtyChange }: Pro
   const create = useCreateSupplier();
   const update = useUpdateSupplier();
   const [topError, setTopError] = useState<string | null>(null);
+  const [operationId] = useState(createOperationId);
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -107,6 +109,7 @@ export function SupplierForm({ supplier, onClose, onCancel, onDirtyChange }: Pro
         });
       } else {
         await create.mutateAsync({
+          operation_id: operationId,
           name: d.name,
           legal_name: trim(d.legal_name),
           inn_or_tin: trim(d.inn_or_tin),

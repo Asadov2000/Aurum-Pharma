@@ -11,6 +11,7 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   variant?: "default" | "danger";
   isLoading?: boolean;
+  cancelDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -25,6 +26,7 @@ export function ConfirmDialog({
   cancelLabel = "Отмена",
   variant = "default",
   isLoading = false,
+  cancelDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps): JSX.Element | null {
@@ -34,7 +36,7 @@ export function ConfirmDialog({
       <div className="space-y-4">
         <div className="text-sm text-foreground-secondary">{message}</div>
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onCancel}>
+          <Button type="button" variant="secondary" onClick={onCancel} disabled={cancelDisabled}>
             {cancelLabel}
           </Button>
           <Button

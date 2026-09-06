@@ -295,6 +295,7 @@ class InventoryRepository:
         tenant_id: UUID,
         include_expired: bool,
         today: date,
+        lock: bool = False,
     ) -> list[Batch]:
         """All non-blocked, non-empty batches for catalog+branch, sorted by
         expires_at ASC. If include_expired=False, filters expired ones out."""
@@ -309,10 +310,12 @@ class InventoryRepository:
                     Batch.is_blocked.is_(False),
                 )
             )
-            .order_by(Batch.expires_at.asc(), Batch.created_at.asc())
+            .order_by(Batch.expires_at.asc(), Batch.created_at.asc(), Batch.id.asc())
         )
         if not include_expired:
             stmt = stmt.where(Batch.expires_at > today)
+        if lock:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

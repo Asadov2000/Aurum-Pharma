@@ -5,13 +5,15 @@ services:
     profiles: ["backup"]
     image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     entrypoint: ["/bin/sh", "-ec"]
+    environment:
+      SSL_CERT_FILE: /run/tls/ca.crt
     command:
       - |
         root_user="$$(cat /run/secrets/MINIO_ROOT_USER)"
         root_password="$$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
         backup_user="$$(cat /run/secrets/MINIO_BACKUP_ACCESS_KEY)"
         backup_password="$$(cat /run/secrets/MINIO_BACKUP_SECRET_KEY)"
-        mc --config-dir /tmp/.mc alias set local http://minio:9000 "$$root_user" "$$root_password"
+        mc --config-dir /tmp/.mc alias set local https://minio:9000 "$$root_user" "$$root_password"
         mc --config-dir /tmp/.mc admin user add local "$$backup_user" "$$backup_password"
         mc --config-dir /tmp/.mc admin policy create local aurum-backup /config/aurum-backup-policy.json
         mc --config-dir /tmp/.mc admin policy attach local aurum-backup --user "$$backup_user"
@@ -26,6 +28,10 @@ services:
         target: MINIO_BACKUP_SECRET_KEY
     volumes:
       - ./infra/minio/aurum-backup-policy.json:/config/aurum-backup-policy.json:ro
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
     networks:
       - data
     depends_on:
@@ -51,6 +57,7 @@ services:
       dockerfile: Dockerfile
     environment:
       AURUM_BACKUP_MIN_FREE_BYTES: "${AURUM_BACKUP_MIN_FREE_BYTES:-5368709120}"
+      SSL_CERT_FILE: /run/tls/ca.crt
     secrets:
       - source: database_url_backup
         target: DATABASE_URL_BACKUP
@@ -67,6 +74,10 @@ services:
       - type: bind
         source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
         target: /scratch
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
     networks:
       - data
     depends_on:
@@ -95,6 +106,7 @@ services:
       dockerfile: Dockerfile
     environment:
       AURUM_BACKUP_MIN_FREE_BYTES: "${AURUM_BACKUP_MIN_FREE_BYTES:-5368709120}"
+      SSL_CERT_FILE: /run/tls/ca.crt
     secrets:
       - source: database_url_pitr
         target: DATABASE_URL_PITR
@@ -107,6 +119,10 @@ services:
       - type: bind
         source: "${AURUM_BACKUP_SCRATCH:?AURUM_BACKUP_SCRATCH is required}"
         target: /scratch
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
     networks:
       - data
     depends_on:
@@ -484,6 +500,7 @@ services:
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
+      AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -499,6 +516,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_worker_password
+        target: AURUM_WORKER_PASSWORD
       - source: aurum_backup_password
         target: AURUM_BACKUP_PASSWORD
       - source: aurum_pitr_password
@@ -516,6 +535,10 @@ services:
           psql -U postgres -d aurum_restore -tAc
           "SELECT 1 WHERE EXISTS (
           SELECT FROM pg_roles WHERE rolname = 'aurum_backup'
+          ) AND EXISTS (
+          SELECT FROM pg_roles WHERE rolname = 'aurum_worker'
+          AND rolcanlogin AND NOT rolinherit AND NOT rolbypassrls
+          AND rolconnlimit = 2
           ) AND has_function_privilege(
           'aurum_app', to_regprocedure('public.similarity_op(text,text)'), 'EXECUTE'
           )" | grep -qx 1
@@ -619,6 +642,7 @@ services:
       dockerfile: Dockerfile
     environment:
       AURUM_PITR_TARGET_NAME: "${AURUM_PITR_TARGET_NAME:-}"
+      AURUM_PITR_TARGET_LSN: "${AURUM_PITR_TARGET_LSN:-}"
     secrets:
       - source: restic_password
         target: RESTIC_PASSWORD

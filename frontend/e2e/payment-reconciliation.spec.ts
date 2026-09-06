@@ -6,6 +6,7 @@ import {
   apiLogin,
   catalogSearchKey,
   clearLoginRateLimit,
+  completePosSale,
   expect,
   loginInBrowser,
   OWNER,
@@ -63,13 +64,11 @@ test.describe("Payment reconciliation queue", () => {
       await expect(page.getByRole("dialog", { name: "Сверка оплаты картой" })).toBeVisible();
 
       await page.goto("/payment-reconciliation");
-      await expect(page.getByRole("heading", { name: "Сверка оплат" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Сверка", exact: true })).toBeVisible();
       await expect(page.getByText(register.name).first()).toBeVisible();
       await page.getByRole("button", { name: "Принять решение" }).first().click();
       const decision = page.getByRole("dialog", { name: "Решение по оплате" });
-      await decision
-        .getByRole("textbox", { name: "Терминал", exact: true })
-        .fill("E2E-TERM-REC");
+      await decision.getByRole("textbox", { name: "Терминал", exact: true }).fill("E2E-TERM-REC");
       await decision
         .getByRole("textbox", { name: "Номер операции/документа", exact: true })
         .fill(`E2E-REC-${Date.now()}`);
@@ -79,6 +78,23 @@ test.describe("Payment reconciliation queue", () => {
       await expect(page.getByText("Оплата подтверждена").first()).toBeVisible();
       await expect(page.getByText("Ждут завершения чека")).toBeVisible();
       await expect(page.getByRole("button", { name: "Принять решение" })).toHaveCount(0);
+
+      await page.evaluate(() => {
+        for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+          const key = window.localStorage.key(index);
+          if (key?.startsWith("pos:pendingPaymentAttempt:")) {
+            window.localStorage.removeItem(key);
+          }
+        }
+      });
+
+      await page.goto("/pos");
+      await expect(page.getByLabel(/^Касса$/)).toHaveValue(register.id);
+      await expect(page.getByText("Оплачено 31.00", { exact: false })).toBeVisible({
+        timeout: 15_000,
+      });
+      await completePosSale(page);
+      await expect(page.getByText(/оформлен/)).toBeVisible();
     } finally {
       await api.dispose();
       await anonymousApi.dispose();

@@ -53,12 +53,13 @@ export function BatchDetailModal({
 
   if (batchQuery.isLoading) {
     return (
-      <div className="p-4 sm:p-5">
+      <div role="status" aria-label="Загрузка партии" className="p-4 sm:p-5">
+        <span className="sr-only">Загружаем данные партии</span>
         <SkeletonRows rows={5} />
       </div>
     );
   }
-  if (batchQuery.error || !batchQuery.data) {
+  if (!batchQuery.data) {
     return (
       <div role="alert" className="p-4 text-sm text-danger sm:p-5">
         <p>{describeApiError(batchQuery.error, "Не удалось загрузить партию")}</p>
@@ -77,9 +78,12 @@ export function BatchDetailModal({
 
   const batch = batchQuery.data;
   const subtitle = productSubtitle(batch);
-  const purchaseValue = Number(batch.purchase_price) * Number(batch.qty_remaining);
+  const hasPurchaseCost = batch.purchase_price !== null;
+  const purchaseValue = hasPurchaseCost
+    ? Number(batch.purchase_price) * Number(batch.qty_remaining)
+    : null;
   const saleValue = Number(batch.sale_price) * Number(batch.qty_remaining);
-  const marginValue = saleValue - purchaseValue;
+  const marginValue = purchaseValue === null ? null : saleValue - purchaseValue;
   const canWriteOffCurrentBatch =
     canWriteOff && !batch.is_blocked && Number(batch.qty_remaining) > 0;
   const closeWriteOff = () => {
@@ -97,6 +101,23 @@ export function BatchDetailModal({
 
   return (
     <div className="min-w-0">
+      {batchQuery.error && (
+        <div
+          role="status"
+          className="border-b border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning-foreground sm:px-5"
+        >
+          <span>{describeApiError(batchQuery.error, "Не удалось обновить данные партии")}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-2"
+            isLoading={batchQuery.isFetching}
+            onClick={() => void batchQuery.refetch()}
+          >
+            Повторить
+          </Button>
+        </div>
+      )}
       <header className="border-b border-border px-4 py-4 sm:px-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -131,7 +152,7 @@ export function BatchDetailModal({
         aria-label="Остаток и стоимость партии"
         className={cn(
           "grid grid-cols-2 border-b border-border bg-background/60",
-          !isPreview && "md:grid-cols-4",
+          !isPreview && (hasPurchaseCost ? "md:grid-cols-4" : "md:grid-cols-3"),
         )}
       >
         <Metric
@@ -145,15 +166,21 @@ export function BatchDetailModal({
           detail={expiryHint(batch.days_to_expiry)}
           tone={batch.days_to_expiry <= 0 ? "danger" : "default"}
         />
-        <Metric
-          label="Закупочная стоимость"
-          value={formatInventoryMoney(purchaseValue, batch.currency)}
-          detail={`${formatInventoryMoney(batch.purchase_price, batch.currency)} за единицу`}
-        />
+        {purchaseValue !== null && batch.purchase_price !== null && (
+          <Metric
+            label="Закупочная стоимость"
+            value={formatInventoryMoney(purchaseValue, batch.currency)}
+            detail={`${formatInventoryMoney(batch.purchase_price, batch.currency)} за единицу`}
+          />
+        )}
         <Metric
           label="Розничный потенциал"
           value={formatInventoryMoney(saleValue, batch.currency)}
-          detail={`маржа ${formatInventoryMoney(marginValue, batch.currency)}`}
+          detail={
+            marginValue === null
+              ? `${formatInventoryMoney(batch.sale_price, batch.currency)} за единицу`
+              : `маржа ${formatInventoryMoney(marginValue, batch.currency)}`
+          }
         />
       </section>
 
@@ -190,11 +217,13 @@ export function BatchDetailModal({
               label="Создана"
               value={formatInventoryDateTime(batch.created_at, batch.report_timezone)}
             />
-            <Field
-              label="Цена закупки"
-              value={formatInventoryMoney(batch.purchase_price, batch.currency)}
-              mono
-            />
+            {batch.purchase_price !== null && (
+              <Field
+                label="Цена закупки"
+                value={formatInventoryMoney(batch.purchase_price, batch.currency)}
+                mono
+              />
+            )}
             <Field
               label="Цена продажи"
               value={formatInventoryMoney(batch.sale_price, batch.currency)}

@@ -93,11 +93,12 @@ function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <BatchesPage />
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 describe("BatchesPage", () => {
@@ -208,6 +209,7 @@ describe("BatchesPage", () => {
     await waitFor(() => {
       expect(listBatches).toHaveBeenCalledWith(
         expect.objectContaining({ batch_number: "LOT-2026", page_size: 25 }),
+        expect.any(AbortSignal),
       );
     });
   });
@@ -227,5 +229,39 @@ describe("BatchesPage", () => {
 
     expect(await screen.findByText("На складе пока нет партий")).toBeInTheDocument();
     expect(listBatches).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps cached rows visible when a background refresh fails", async () => {
+    listBatches.mockResolvedValueOnce({
+      items: [BATCH],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    const { queryClient } = renderPage();
+    expect(await screen.findByText("Парацетамол")).toBeInTheDocument();
+    listBatches.mockRejectedValue(new Error("network"));
+
+    await queryClient.refetchQueries({ queryKey: ["inventory", "batches"] });
+
+    expect(screen.getByText("Парацетамол")).toBeInTheDocument();
+    expect(await screen.findByText("Не удалось обновить список партий")).toBeInTheDocument();
+  });
+
+  it("shows retail value without exposing a hidden purchase value", async () => {
+    setDesktop(false);
+    listBatches.mockResolvedValueOnce({
+      items: [{ ...BATCH, purchase_price: null }],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      summary: { ...SUMMARY, purchase_value: null },
+    });
+    renderPage();
+
+    expect(await screen.findByText("Розничная стоимость")).toBeInTheDocument();
+    expect(screen.getByText("по действующим ценам продажи")).toBeInTheDocument();
+    expect(screen.queryByText("Стоимость остатка")).not.toBeInTheDocument();
   });
 });

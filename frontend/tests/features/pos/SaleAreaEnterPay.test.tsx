@@ -12,6 +12,7 @@ const findByBarcode = vi.fn();
 const addSaleItem = vi.fn();
 const getPosFavorites = vi.fn();
 const createPaymentAttempt = vi.fn();
+const getActivePaymentAttempt = vi.fn();
 const beginPaymentAttemptReconciliation = vi.fn();
 const confirmPaymentAttempt = vi.fn();
 const voidPaymentAttempt = vi.fn();
@@ -40,6 +41,7 @@ vi.mock("@/features/pos/api", () => ({
   addPosFavorite: vi.fn(),
   removePosFavorite: vi.fn(),
   createPaymentAttempt: (...args: unknown[]) => createPaymentAttempt(...args),
+  getActivePaymentAttempt: (...args: unknown[]) => getActivePaymentAttempt(...args),
   beginPaymentAttemptReconciliation: (...args: unknown[]) =>
     beginPaymentAttemptReconciliation(...args),
   confirmPaymentAttempt: (...args: unknown[]) => confirmPaymentAttempt(...args),
@@ -60,6 +62,10 @@ vi.mock("@/lib/desktopBridge", () => ({
   requestDesktopCashDrawerOpen: (...args: unknown[]) => requestDesktopCashDrawerOpen(...args),
 }));
 
+vi.mock("@/features/pos/usePosRegisterLock", () => ({
+  usePosRegisterLock: () => ({ status: "owned", isOwner: true, message: null }),
+}));
+
 import { SaleArea } from "@/features/pos/SaleArea";
 import {
   createPendingCheckoutOperation,
@@ -67,6 +73,10 @@ import {
 } from "@/features/pos/checkoutOperation";
 import { draftKey } from "@/features/pos/draftStorage";
 import { createPendingPaymentOperation } from "@/features/pos/paymentOperation";
+import {
+  createPaymentAttemptOperation,
+  loadPaymentAttemptOperation,
+} from "@/features/pos/paymentAttemptOperation";
 
 const REG = "reg-1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -291,12 +301,14 @@ describe("SaleArea atomic checkout", () => {
     addSaleItem.mockReset();
     getPosFavorites.mockReset();
     createPaymentAttempt.mockReset();
+    getActivePaymentAttempt.mockReset();
     beginPaymentAttemptReconciliation.mockReset();
     confirmPaymentAttempt.mockReset();
     voidPaymentAttempt.mockReset();
     requestDesktopCashDrawerOpen.mockReset();
     getCurrentShift.mockResolvedValue(SHIFT);
     getPosFavorites.mockResolvedValue([]);
+    getActivePaymentAttempt.mockResolvedValue(null);
     let attemptSequence = 0;
     const attemptOperations = new Map<string, string>();
     createPaymentAttempt.mockImplementation(
@@ -565,6 +577,118 @@ describe("SaleArea atomic checkout", () => {
         payment_attempt_id: "30000000-0000-4000-8000-000000000002",
       },
     ]);
+  });
+
+  it("restores a payment confirmed from the reconciliation queue without repeating it", async () => {
+    seedDraftSale(SALE.id);
+    const operation = createPaymentAttemptOperation(SALE.id, "card", "50.00");
+    if (!operation) throw new Error("payment attempt marker was not persisted");
+    getSale.mockResolvedValue(SALE);
+    createPaymentAttempt.mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000099",
+      tenant_id: SALE.tenant_id,
+      sale_id: SALE.id,
+      cashier_user_id: SALE.cashier_user_id,
+      operation_id: operation.operationId,
+      payment_method: "card",
+      amount: "50.00",
+      currency: "TJS",
+      status: "confirmed",
+      terminal_id: "TERM-QUEUE",
+      external_reference: "DOC-QUEUE-1",
+      resolved_by_user_id: SALE.cashier_user_id,
+      reconciliation_started_at: SALE.created_at,
+      evidence_required: true,
+      void_reason: null,
+      void_note: null,
+      created_at: SALE.created_at,
+      confirmed_at: SALE.created_at,
+      consumed_at: null,
+      voided_at: null,
+    });
+
+    renderArea();
+
+    await waitFor(
+      () =>
+        expect(createPaymentAttempt).toHaveBeenCalledWith({
+          operation_id: operation.operationId,
+          sale_id: SALE.id,
+          payment_method: "card",
+          amount: "50.00",
+        }),
+      { timeout: 5_000 },
+    );
+    await waitFor(
+      () => {
+        expect(loadPaymentAttemptOperation(SALE.id)).toBeNull();
+        expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+          stagedPayments: [
+            {
+              payment_method: "card",
+              amount: "50.00",
+              payment_attempt_id: "30000000-0000-4000-8000-000000000099",
+            },
+          ],
+        });
+      },
+      { timeout: 5_000 },
+    );
+    expect(confirmPaymentAttempt).not.toHaveBeenCalled();
+  });
+
+  it("recovers a server-confirmed payment after the local attempt marker is lost", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    const recoveredAttempt = {
+      id: "30000000-0000-4000-8000-000000000098",
+      tenant_id: SALE.tenant_id,
+      sale_id: SALE.id,
+      cashier_user_id: SALE.cashier_user_id,
+      operation_id: "60000000-0000-4000-8000-000000000001",
+      payment_method: "card" as const,
+      amount: "50.00",
+      currency: "TJS",
+      status: "confirmed" as const,
+      terminal_id: "TERM-QUEUE",
+      external_reference: "DOC-QUEUE-LOST",
+      resolved_by_user_id: SALE.cashier_user_id,
+      reconciliation_started_at: SALE.created_at,
+      evidence_required: true,
+      void_reason: null,
+      void_note: null,
+      created_at: SALE.created_at,
+      confirmed_at: SALE.created_at,
+      consumed_at: null,
+      voided_at: null,
+    };
+    getActivePaymentAttempt.mockResolvedValue(recoveredAttempt);
+    createPaymentAttempt.mockResolvedValue(recoveredAttempt);
+
+    renderArea();
+
+    await waitFor(() => expect(getActivePaymentAttempt).toHaveBeenCalledWith(SALE.id));
+    await waitFor(() =>
+      expect(createPaymentAttempt).toHaveBeenCalledWith({
+        operation_id: recoveredAttempt.operation_id,
+        sale_id: SALE.id,
+        payment_method: "card",
+        amount: "50.00",
+      }),
+    );
+    await waitFor(() => {
+      expect(loadPaymentAttemptOperation(SALE.id)).toBeNull();
+      expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+        stagedPayments: [
+          {
+            payment_method: "card",
+            amount: "50.00",
+            payment_attempt_id: recoveredAttempt.id,
+          },
+        ],
+      });
+    });
+    expect(confirmPaymentAttempt).not.toHaveBeenCalled();
   });
 
   it("does not stage an external payment until the cashier confirms terminal success", async () => {

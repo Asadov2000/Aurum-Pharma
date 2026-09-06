@@ -12,7 +12,10 @@ import {
   type IncomingSearchParams,
 } from "./types";
 
-export async function listIncoming(params: IncomingSearchParams): Promise<IncomingDocumentList> {
+export async function listIncoming(
+  params: IncomingSearchParams,
+  signal?: AbortSignal,
+): Promise<IncomingDocumentList> {
   const { data } = await api.get<IncomingDocumentList>("/incoming", {
     params: {
       branch_id: params.branch_id || undefined,
@@ -24,6 +27,7 @@ export async function listIncoming(params: IncomingSearchParams): Promise<Incomi
       page: params.page,
       page_size: params.page_size,
     },
+    signal,
   });
   return data;
 }
@@ -35,8 +39,11 @@ export async function createIncoming(
   return data;
 }
 
-export async function getIncoming(id: string): Promise<IncomingDocumentWithItems> {
-  const { data } = await api.get<IncomingDocumentWithItems>(`/incoming/${id}`);
+export async function getIncoming(
+  id: string,
+  signal?: AbortSignal,
+): Promise<IncomingDocumentWithItems> {
+  const { data } = await api.get<IncomingDocumentWithItems>(`/incoming/${id}`, { signal });
   return data;
 }
 

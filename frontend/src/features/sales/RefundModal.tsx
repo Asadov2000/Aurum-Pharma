@@ -27,15 +27,17 @@ import {
   beginRefundAttemptReconciliation,
   confirmRefundAttempt,
   createRefundAttempt,
+  getActiveRefundAttempt,
   getRefundAttempt,
   getRefundResult,
   voidRefundAttempt,
 } from "./api";
-import { useRefundSale } from "./queries";
+import { useActiveRefundAttemptQuery, useRefundSale } from "./queries";
 import {
   clearPendingRefundOperation,
   createPendingRefundOperation,
   loadPendingRefundOperation,
+  saveRecoveredPendingRefundOperation,
   savePendingRefundAttemptId,
   type PendingRefundOperation,
 } from "./refundOperation";
@@ -79,6 +81,29 @@ function sameRefundItems(
   );
 }
 
+function refundAttemptMatchesSale(attempt: RefundAttempt, sale: SaleDetails): boolean {
+  if (
+    attempt.parent_sale_id !== sale.id ||
+    attempt.tenant_id !== sale.tenant_id ||
+    attempt.register_id !== sale.register_id ||
+    attempt.items.length === 0 ||
+    new Set(attempt.items.map((item) => item.sale_item_id)).size !== attempt.items.length
+  ) {
+    return false;
+  }
+  const availableById = new Map(
+    sale.items.map((item) => [
+      item.id,
+      Math.max(0, Number(item.qty) - Number(item.refunded_qty ?? "0")),
+    ]),
+  );
+  return attempt.items.every((item) => {
+    const qty = Number(item.qty);
+    const available = availableById.get(item.sale_item_id);
+    return available !== undefined && Number.isFinite(qty) && qty > 0 && qty - available <= 0.0005;
+  });
+}
+
 async function lookupRefundResult(operationId: string): Promise<RefundLookupResult> {
   try {
     return { status: "found", sale: await getRefundResult(operationId) };
@@ -118,9 +143,9 @@ export function RefundModal({
   const reasonMode = settings.data?.refund_reason_mode;
   const [topError, setTopError] = useState<string | null>(null);
   const [topMessageTone, setTopMessageTone] = useState<"danger" | "warning" | "info">("danger");
+  const [initialPendingOperation] = useState(() => loadPendingRefundOperation(sale.id));
   const [reason, setReason] = useState<RefundReasonCode | "">("");
   const [comment, setComment] = useState("");
-  const [initialPendingOperation] = useState(() => loadPendingRefundOperation(sale.id));
   const [refundAttempt, setRefundAttempt] = useState<RefundAttempt | null>(null);
   const [terminalReferences, setTerminalReferences] = useState<TerminalReferences>({});
   const [reconciling, setReconciling] = useState(false);
@@ -132,11 +157,17 @@ export function RefundModal({
   );
   const pendingOperationRef = useRef<PendingRefundOperation | null>(initialPendingOperation);
   const recoveryStartedRef = useRef(false);
+  const serverRecoveryHandledRef = useRef(false);
   const submittingRef = useRef(false);
   const requiresExternalRefund = useMemo(
     () => sale.payments.some((payment) => payment.payment_method !== "cash"),
     [sale.payments],
   );
+  const shouldDiscoverServerAttempt = initialPendingOperation === null && requiresExternalRefund;
+  const activeRefundAttempt = useActiveRefundAttemptQuery(sale.id, shouldDiscoverServerAttempt);
+  const activeAttemptLookupInProgress =
+    shouldDiscoverServerAttempt && activeRefundAttempt.isFetching;
+  const financialActionsBlocked = financialOperationPending || activeAttemptLookupInProgress;
   const [lines, setLines] = useState<Record<string, LineState>>(() =>
     Object.fromEntries(
       sale.items.map((item) => {
@@ -188,6 +219,10 @@ export function RefundModal({
   const applyRefundAttempt = useCallback((attempt: RefundAttempt) => {
     setRefundAttempt(attempt);
     setTerminalReferences(referencesFromAttempt(attempt));
+    if (attempt.intent_locked) {
+      setReason(attempt.reason ?? "");
+      setComment(attempt.comment ?? "");
+    }
   }, []);
 
   const restoreRefundAttempt = useCallback(
@@ -195,13 +230,31 @@ export function RefundModal({
       if (!operation.refundAttemptOperationId) return true;
       setAttemptBusy(true);
       try {
-        let attempt = operation.refundAttemptId
-          ? await getRefundAttempt(operation.refundAttemptId)
-          : await createRefundAttempt(
-              operation.parentSaleId,
-              operation.refundAttemptOperationId,
-              operation.items,
+        let attempt: RefundAttempt;
+        if (operation.refundAttemptId) {
+          attempt = await getRefundAttempt(operation.refundAttemptId);
+        } else {
+          const discovered = await getActiveRefundAttempt(operation.parentSaleId);
+          if (!discovered) {
+            clearPendingRefundOperation(operation.parentSaleId, operation.operationId);
+            pendingOperationRef.current = null;
+            setFinancialOperationPending(false);
+            setRecoveryBlocked(false);
+            setTopMessageTone("info");
+            setTopError(
+              "Сервер не получил прежнюю заявку. Проверьте выбранные позиции и введите причину возврата заново.",
             );
+            return true;
+          }
+          if (discovered.operation_id !== operation.refundAttemptOperationId) {
+            setRecoveryBlocked(true);
+            setTopError(
+              "Найдена другая активная заявка возврата. Не повторяйте денежную операцию и обратитесь к администратору.",
+            );
+            return false;
+          }
+          attempt = discovered;
+        }
         if (!sameRefundItems(attempt.items, operation.items)) {
           setRecoveryBlocked(true);
           setTopError(
@@ -302,6 +355,105 @@ export function RefundModal({
     void reconcileRefund(operation);
   }, [reconcileRefund]);
 
+  useEffect(() => {
+    if (
+      !shouldDiscoverServerAttempt ||
+      activeAttemptLookupInProgress ||
+      serverRecoveryHandledRef.current
+    ) {
+      return;
+    }
+    serverRecoveryHandledRef.current = true;
+    if (activeRefundAttempt.isError) {
+      setFinancialOperationPending(true);
+      setRecoveryBlocked(true);
+      setTopMessageTone("danger");
+      setTopError(
+        "Не удалось проверить незавершённый электронный возврат. Не повторяйте возврат денег; повторите поиск после восстановления связи.",
+      );
+      return;
+    }
+
+    const attempt = activeRefundAttempt.data;
+    if (!attempt) {
+      setFinancialOperationPending(false);
+      setRecoveryBlocked(false);
+      setTopError(null);
+      return;
+    }
+    if (
+      !refundAttemptMatchesSale(attempt, sale) ||
+      !["pending", "requires_reconciliation", "confirmed"].includes(attempt.status)
+    ) {
+      setFinancialOperationPending(true);
+      setRecoveryBlocked(true);
+      setTopMessageTone("danger");
+      setTopError(
+        "Серверная заявка возврата не совпадает с исходным чеком. Не повторяйте денежную операцию и обратитесь к администратору.",
+      );
+      return;
+    }
+
+    const operation = saveRecoveredPendingRefundOperation(sale.id, attempt);
+    if (
+      !operation ||
+      operation.refundAttemptId !== attempt.id ||
+      operation.refundAttemptOperationId !== attempt.operation_id ||
+      !sameRefundItems(operation.items, attempt.items)
+    ) {
+      setFinancialOperationPending(true);
+      setRecoveryBlocked(true);
+      setTopMessageTone("danger");
+      setTopError(
+        "Не удалось безопасно сохранить найденную заявку. Не повторяйте возврат денег; освободите место или перезапустите приложение.",
+      );
+      return;
+    }
+
+    pendingOperationRef.current = operation;
+    setFinancialOperationPending(true);
+    setLines(
+      Object.fromEntries(
+        sale.items.map((item) => {
+          const attemptItem = attempt.items.find((candidate) => candidate.sale_item_id === item.id);
+          const available = Math.max(0, Number(item.qty) - Number(item.refunded_qty ?? "0"));
+          return [
+            item.id,
+            {
+              selected: attemptItem !== undefined,
+              qty:
+                attemptItem?.qty ??
+                (available > 0.0005 ? available.toFixed(3).replace(/\.?0+$/, "") : "0"),
+            },
+          ];
+        }),
+      ),
+    );
+    applyRefundAttempt(attempt);
+    setRecoveryBlocked(false);
+    if (attempt.status === "pending") {
+      setTopMessageTone("info");
+      setTopError(
+        "Найдена незавершённая заявка. Деньги ещё не возвращались: можно продолжить или отменить заявку.",
+      );
+    } else if (attempt.status === "requires_reconciliation") {
+      setTopMessageTone("warning");
+      setTopError(
+        "Найдена заявка, требующая сверки. Не повторяйте возврат во внешнем терминале; проверьте его документ.",
+      );
+    } else {
+      setTopMessageTone("info");
+      setTopError("Возврат денег подтверждён. Осталось создать чек возврата.");
+    }
+  }, [
+    activeAttemptLookupInProgress,
+    activeRefundAttempt.data,
+    activeRefundAttempt.isError,
+    applyRefundAttempt,
+    sale,
+    shouldDiscoverServerAttempt,
+  ]);
+
   const setLine = (id: string, patch: Partial<LineState>) =>
     setLines((previous) => ({ ...previous, [id]: { ...previous[id]!, ...patch } }));
 
@@ -384,7 +536,14 @@ export function RefundModal({
   };
 
   const onSubmit = async () => {
-    if (submittingRef.current || reconciling || recoveryBlocked || attemptBusy) return;
+    if (
+      submittingRef.current ||
+      reconciling ||
+      recoveryBlocked ||
+      attemptBusy ||
+      activeAttemptLookupInProgress
+    )
+      return;
     setTopMessageTone("danger");
     const chosen = validateForm();
     if (!chosen) return;
@@ -416,6 +575,8 @@ export function RefundModal({
           sale.id,
           operation.refundAttemptOperationId,
           operation.items,
+          reason || null,
+          comment.trim() || null,
         );
         const updated = persistAttempt(operation, created);
         if (!updated) return;
@@ -463,8 +624,8 @@ export function RefundModal({
         payload: {
           operation_id: operation.operationId,
           items: operation.items,
-          reason: reason || null,
-          comment: comment.trim() || null,
+          reason: activeAttempt?.intent_locked ? activeAttempt.reason : reason || null,
+          comment: activeAttempt?.intent_locked ? activeAttempt.comment : comment.trim() || null,
           refund_attempt_id: activeAttempt?.id ?? null,
         },
       });
@@ -554,7 +715,7 @@ export function RefundModal({
                         type="checkbox"
                         aria-label={`Вернуть ${item.name ?? `товар из строки ${item.position}`}`}
                         checked={line.selected}
-                        disabled={available <= 0.0005 || financialOperationPending}
+                        disabled={available <= 0.0005 || financialActionsBlocked}
                         onChange={(event) => setLine(item.id, { selected: event.target.checked })}
                         className="size-5 accent-primary"
                       />
@@ -574,7 +735,7 @@ export function RefundModal({
                       inputMode="decimal"
                       aria-label={`Количество для возврата: ${item.name ?? `товар из строки ${item.position}`}`}
                       value={line.qty}
-                      disabled={!line.selected || financialOperationPending}
+                      disabled={!line.selected || financialActionsBlocked}
                       onChange={(event) => {
                         const value = event.target.value.replace(",", ".");
                         if (/^\d{0,11}(?:\.\d{0,3})?$/.test(value)) {
@@ -621,6 +782,7 @@ export function RefundModal({
               <Select
                 id="refund_reason"
                 value={reason}
+                disabled={refundAttempt?.intent_locked === true}
                 onChange={(event) => setReason(event.target.value as RefundReasonCode | "")}
               >
                 <option value="">Не выбрана</option>
@@ -640,6 +802,7 @@ export function RefundModal({
                 rows={1}
                 value={comment}
                 maxLength={500}
+                disabled={refundAttempt?.intent_locked === true}
                 onChange={(event) => setComment(event.target.value)}
                 placeholder="Только служебное пояснение, без ФИО, телефона и данных покупателя"
               />
@@ -753,6 +916,15 @@ export function RefundModal({
           </p>
         ) : null}
 
+        {activeAttemptLookupInProgress ? (
+          <p
+            role="status"
+            className="rounded-lg border border-info/30 bg-info-subtle px-4 py-3 text-sm text-info-foreground"
+          >
+            Проверяем, нет ли незавершённого электронного возврата…
+          </p>
+        ) : null}
+
         <div
           role="note"
           className="rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning-foreground"
@@ -775,7 +947,7 @@ export function RefundModal({
               Отменить заявку
             </Button>
           ) : null}
-          {recoveryBlocked ? (
+          {recoveryBlocked && pendingOperationRef.current ? (
             <Button
               variant="secondary"
               onClick={() => {
@@ -787,15 +959,30 @@ export function RefundModal({
               Проверить результат
             </Button>
           ) : null}
+          {recoveryBlocked && !pendingOperationRef.current && activeRefundAttempt.isError ? (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                serverRecoveryHandledRef.current = false;
+                void activeRefundAttempt.refetch();
+              }}
+              isLoading={activeRefundAttempt.isFetching}
+            >
+              Повторить поиск
+            </Button>
+          ) : null}
           <Button
             onClick={() => void onSubmit()}
-            isLoading={refund.isPending || reconciling || attemptBusy}
+            isLoading={
+              refund.isPending || reconciling || attemptBusy || activeAttemptLookupInProgress
+            }
             disabled={
               !reasonMode ||
               settings.isLoading ||
               recoveryBlocked ||
               reconciling ||
               attemptBusy ||
+              activeAttemptLookupInProgress ||
               refund.isPending ||
               selectedSummary.count === 0 ||
               ((refundAttempt?.status === "pending" ||

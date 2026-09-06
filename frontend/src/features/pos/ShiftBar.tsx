@@ -24,6 +24,7 @@ export function ShiftBar({
   mode = "keyboard",
   canOpen = true,
   canClose = true,
+  canExportReport = false,
   closeBlocked = false,
   online = true,
 }: {
@@ -31,6 +32,7 @@ export function ShiftBar({
   mode?: PosMode;
   canOpen?: boolean;
   canClose?: boolean;
+  canExportReport?: boolean;
   closeBlocked?: boolean;
   online?: boolean;
 }): JSX.Element {
@@ -115,11 +117,13 @@ export function ShiftBar({
     setClosingCash("");
     setClosingCashError(null);
     setNotes("");
-    try {
-      const blob = await getZReportXlsx(shiftId);
-      downloadBlob(blob, `z-report-${shiftId}.xlsx`);
-    } catch {
-      // The report remains available from «Отчёты».
+    if (canExportReport) {
+      try {
+        const blob = await getZReportXlsx(shiftId);
+        downloadBlob(blob, `z-report-${shiftId}.xlsx`);
+      } catch {
+        // The report remains available from «Отчёты».
+      }
     }
   };
 

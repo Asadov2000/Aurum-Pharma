@@ -5,12 +5,13 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from typing import Literal
-from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+from app.core.config import _database_security_problems, _redis_security_problems
 
 
 class BillingWorkerSettings(BaseSettings):
@@ -53,18 +54,13 @@ class BillingWorkerSettings(BaseSettings):
             problems.append(
                 "DATABASE_URL_BILLING_WORKER must use dedicated " "aurum_billing_worker credentials"
             )
-
-        try:
-            redis = urlsplit(self.REDIS_URL)
-            redis_is_secure = (
-                redis.scheme in {"redis", "rediss"}
-                and bool(redis.hostname)
-                and bool(redis.password)
+        problems.extend(
+            _database_security_problems(
+                "DATABASE_URL_BILLING_WORKER",
+                self.DATABASE_URL_BILLING_WORKER,
             )
-        except ValueError:
-            redis_is_secure = False
-        if not redis_is_secure:
-            problems.append("REDIS_URL must contain a host and password")
+        )
+        problems.extend(_redis_security_problems(self.REDIS_URL))
 
         if problems:
             raise ValueError(

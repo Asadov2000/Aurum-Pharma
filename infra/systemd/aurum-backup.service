@@ -2,6 +2,8 @@
 Description=Aurum Pharma encrypted backup
 Requires=docker.service
 After=docker.service network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -11,6 +13,8 @@ Environment=AURUM_RECOVERY_METRICS_DIR=/var/lib/aurum/recovery-metrics
 ExecStartPre=/usr/bin/install -d -m 0755 -o root -g root /var/lib/aurum/recovery-metrics
 ExecStart=/bin/sh ./scripts/run-production-recovery-cycle.sh full
 TimeoutStartSec=4h
+Restart=on-failure
+RestartSec=5m
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

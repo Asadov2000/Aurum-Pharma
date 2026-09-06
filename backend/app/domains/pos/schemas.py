@@ -674,6 +674,15 @@ class POSRefundAttemptCreate(BaseModel):
 
     operation_id: UUID4
     items: list[RefundItem] = Field(min_length=1, max_length=200)
+    reason: RefundReasonCode | None = None
+    comment: str | None = Field(default=None, max_length=500)
+
+    @field_validator("comment", mode="before")
+    @classmethod
+    def _strip_comment(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return value.strip() or None
 
 
 class POSRefundConfirmation(BaseModel):
@@ -763,6 +772,9 @@ class POSRefundAttemptRead(BaseModel):
     confirmed_by_user_id: UUID | None
     operation_id: UUID
     items: list[RefundItem]
+    intent_locked: bool
+    reason: RefundReasonCode | None
+    comment: str | None
     payments: list[POSRefundAttemptPaymentRead]
     total_amount: Decimal
     external_amount: Decimal
@@ -774,6 +786,48 @@ class POSRefundAttemptRead(BaseModel):
     confirmed_at: datetime | None
     consumed_at: datetime | None
     voided_at: datetime | None
+
+
+class POSRefundReconciliationSummary(BaseModel):
+    pending_count: int
+    pending_external_amount: Decimal
+    requires_reconciliation_count: int
+    requires_reconciliation_external_amount: Decimal
+    confirmed_count: int
+    confirmed_external_amount: Decimal
+
+
+class POSRefundReconciliationBranch(BaseModel):
+    id: UUID
+    name: str
+
+
+class POSRefundReconciliationItem(BaseModel):
+    id: UUID
+    parent_sale_id: UUID
+    parent_receipt_number: str
+    branch_id: UUID
+    branch_name: str
+    register_id: UUID
+    register_name: str
+    requested_by_name: str | None
+    total_amount: Decimal
+    external_amount: Decimal
+    currency: Literal["TJS"]
+    status: Literal["pending", "requires_reconciliation", "confirmed"]
+    item_count: int
+    payment_methods: list[Literal["card", "qr", "bank_transfer"]]
+    created_at: datetime
+    confirmed_at: datetime | None
+
+
+class POSRefundReconciliationList(BaseModel):
+    items: list[POSRefundReconciliationItem]
+    total: int
+    page: int
+    page_size: int
+    summary: POSRefundReconciliationSummary
+    branches: list[POSRefundReconciliationBranch]
 
 
 class RefundCreate(BaseModel):

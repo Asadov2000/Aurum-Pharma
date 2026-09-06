@@ -1,0 +1,64 @@
+"""Minimal configuration for cross-tenant maintenance tasks."""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field, model_validator
+from pydantic_settings import SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
+
+from app.core.celery_broker_config import CeleryBrokerSettings
+from app.core.config import _database_security_problems, _redis_security_problems
+
+
+class SystemWorkerSettings(CeleryBrokerSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
+
+    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    DATABASE_URL_WORKER: str = Field(
+        default="postgresql+asyncpg://aurum_worker:aurum_worker_pw@postgres:5432/aurum",
+        repr=False,
+    )
+
+    @model_validator(mode="after")
+    def _guard_system_worker(self) -> SystemWorkerSettings:
+        if self.ENVIRONMENT == "development":
+            return self
+        try:
+            database = make_url(self.DATABASE_URL_WORKER)
+        except ArgumentError:
+            database = None
+        problems: list[str] = []
+        if (
+            database is None
+            or database.username != "aurum_worker"
+            or not database.password
+            or not database.host
+            or "aurum_worker_pw" in self.DATABASE_URL_WORKER
+        ):
+            problems.append("DATABASE_URL_WORKER must use non-placeholder aurum_worker credentials")
+        problems.extend(
+            _database_security_problems("DATABASE_URL_WORKER", self.DATABASE_URL_WORKER)
+        )
+        problems.extend(_redis_security_problems(self.REDIS_URL))
+        if problems:
+            raise ValueError(
+                "Refusing to start insecure system worker:\n- " + "\n- ".join(problems)
+            )
+        return self
+
+
+@lru_cache
+def get_system_worker_settings() -> SystemWorkerSettings:
+    secrets_dir = os.environ.get("AURUM_SECRETS_DIR")
+    return SystemWorkerSettings(_secrets_dir=secrets_dir or None)

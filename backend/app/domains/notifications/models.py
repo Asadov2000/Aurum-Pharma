@@ -39,6 +39,7 @@ class Notification(Base):
     body: Mapped[str | None] = mapped_column(Text)
     data: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     severity: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'info'"))
+    dedupe_key: Mapped[str | None] = mapped_column(Text)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
@@ -84,12 +85,36 @@ class NotificationDelivery(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
     error_message: Mapped[str | None] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    last_error_code: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 
     __table_args__ = (
-        CheckConstraint("channel IN ('email','telegram','sms')", name="ck_nd_channel"),
-        CheckConstraint("status IN ('pending','sent','failed','bounced')", name="ck_nd_status"),
+        CheckConstraint(
+            "channel IN ('email','telegram','sms')",
+            name="notification_delivery_channel_check",
+        ),
+        CheckConstraint(
+            "status IN ('pending','processing','sent','failed','bounced')",
+            name="notification_delivery_status_check",
+        ),
+        CheckConstraint(
+            "(status = 'processing' AND claimed_at IS NOT NULL "
+            "AND claim_token IS NOT NULL) OR "
+            "(status <> 'processing' AND claimed_at IS NULL "
+            "AND claim_token IS NULL)",
+            name="notification_delivery_claim_state_check",
+        ),
+        CheckConstraint(
+            "last_error_code IS NULL OR (length(last_error_code) <= 64 "
+            "AND last_error_code ~ '^[a-z0-9_]+$')",
+            name="notification_delivery_last_error_code_check",
+        ),
     )

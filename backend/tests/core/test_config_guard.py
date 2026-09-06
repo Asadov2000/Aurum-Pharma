@@ -12,8 +12,12 @@ from app.core.config import Settings
 _STRONG_SECRET = "x" * 40
 _DEV_DB_APP = "postgresql+asyncpg://app:aurum_app_pw@postgres/aurum"
 _DEV_DB_SUPPORT = "postgresql+asyncpg://support:aurum_support_pw@postgres/aurum"
-_PROD_DB_APP = "postgresql+asyncpg://app:Str0ng-App-Pw@db/aurum"
-_PROD_DB_SUPPORT = "postgresql+asyncpg://support:Str0ng-Sup-Pw@db/aurum"
+_POSTGRES_TLS = "?sslmode=verify-full&sslrootcert=/run/secrets/postgres_ca.crt"
+_PROD_DB_APP = "postgresql+asyncpg://app:Str0ng-App-Pw@db/aurum" + _POSTGRES_TLS
+_PROD_DB_SUPPORT = "postgresql+asyncpg://support:Str0ng-Sup-Pw@db/aurum" + _POSTGRES_TLS
+_PROD_REDIS = (
+    "rediss://:Str0ng-Redis-Pw@redis:6379/0" "?ssl_cert_reqs=required&ssl_check_hostname=true"
+)
 _METRICS_TOKEN = "m" * 40
 _MFA_ENCRYPTION_KEY = "k" * 40
 _PREVIOUS_MFA_ENCRYPTION_KEY = "p" * 40
@@ -29,10 +33,11 @@ def _build(**overrides: object) -> Settings:
         "JWT_SECRET": _STRONG_SECRET,
         "MINIO_ACCESS_KEY": "application-user-key",
         "MINIO_SECRET_KEY": "m" * 40,
+        "MINIO_SECURE": True,
         "METRICS_TOKEN": _METRICS_TOKEN,
         "MFA_ENCRYPTION_KEY": _MFA_ENCRYPTION_KEY,
         "EMAIL_OUTBOX_ENCRYPTION_KEY": _EMAIL_OUTBOX_ENCRYPTION_KEY,
-        "REDIS_URL": "redis://:Str0ng-Redis-Pw@redis:6379/0",
+        "REDIS_URL": _PROD_REDIS,
         "CORS_ORIGINS": [_PRODUCTION_ORIGIN],
         "TRUSTED_HOSTS": ["pharmacy.example.com"],
         "TRUSTED_PROXY_IPS": ["172.30.0.10"],
@@ -74,6 +79,42 @@ def test_production_accepts_strong_secrets() -> None:
     assert s.ENVIRONMENT == "production"
     assert s.refresh_cookie_secure is True
     assert s.auth_login_guard_enabled is True
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "postgresql+asyncpg://app:Str0ng-App-Pw@db/aurum",
+        "postgresql+asyncpg://app:Str0ng-App-Pw@db/aurum?sslmode=require",
+        "postgresql+asyncpg://app:Str0ng-App-Pw@db/aurum?sslmode=verify-full",
+        (
+            "postgresql+asyncpg://app:Str0ng-App-Pw@db/aurum"
+            "?sslmode=verify-ca&sslrootcert=/run/secrets/postgres_ca.crt"
+        ),
+    ],
+)
+def test_production_rejects_database_without_verified_tls(database_url: str) -> None:
+    with pytest.raises(ValidationError, match="sslmode=verify-full and sslrootcert"):
+        _build(ENVIRONMENT="production", DATABASE_URL_APP=database_url)
+
+
+@pytest.mark.parametrize(
+    "redis_url",
+    [
+        "redis://:Str0ng-Redis-Pw@redis:6379/0",
+        "rediss://:Str0ng-Redis-Pw@redis:6379/0",
+        "rediss://:Str0ng-Redis-Pw@redis:6379/0?ssl_cert_reqs=none",
+        "rediss://:Str0ng-Redis-Pw@redis:6379/0?ssl_cert_reqs=required",
+    ],
+)
+def test_production_rejects_redis_without_verified_tls(redis_url: str) -> None:
+    with pytest.raises(ValidationError, match="ssl_cert_reqs=required"):
+        _build(ENVIRONMENT="production", REDIS_URL=redis_url)
+
+
+def test_production_rejects_minio_without_https() -> None:
+    with pytest.raises(ValidationError, match="MINIO_SECURE"):
+        _build(ENVIRONMENT="production", MINIO_SECURE=False)
 
 
 @pytest.mark.parametrize("environment", ["staging", "production"])
@@ -300,7 +341,7 @@ def test_settings_read_secrets_from_files(
             '{"1":"' + _PREVIOUS_EMAIL_OUTBOX_ENCRYPTION_KEY + '"}'
         ),
         "METRICS_TOKEN": _METRICS_TOKEN,
-        "REDIS_URL": "redis://:Str0ng-Redis-Pw@redis:6379/0",
+        "REDIS_URL": _PROD_REDIS,
         "MINIO_ACCESS_KEY": "application-user-key",
         "MINIO_SECRET_KEY": "m" * 40,
     }
@@ -316,6 +357,7 @@ def test_settings_read_secrets_from_files(
         TRUSTED_HOSTS=["pharmacy.example.com"],
         TRUSTED_PROXY_IPS=["172.30.0.10"],
         REFRESH_COOKIE_SECURE=True,
+        MINIO_SECURE=True,
         MFA_ENCRYPTION_KEY_VERSION=2,
         EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION=2,
     )

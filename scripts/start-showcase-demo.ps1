@@ -19,6 +19,7 @@ $secretHexLengths = [ordered]@{
     AURUM_DEMO_SUPPORT_PASSWORD = 64
     AURUM_DEMO_MAILER_PASSWORD = 64
     AURUM_DEMO_BILLING_WORKER_PASSWORD = 64
+    AURUM_DEMO_WORKER_PASSWORD = 64
     AURUM_DEMO_MIGRATOR_PASSWORD = 64
     AURUM_DEMO_BACKUP_PASSWORD = 64
     AURUM_DEMO_PITR_PASSWORD = 64
@@ -39,6 +40,7 @@ $showcaseContainers = @(
     "aurum-demo-minio",
     "aurum-demo-backend",
     "aurum-demo-celery-worker",
+    "aurum-demo-catalog-worker",
     "aurum-demo-billing-worker",
     "aurum-demo-platform-mailer",
     "aurum-demo-celery-beat",
@@ -58,6 +60,7 @@ $conflictingDevContainers = @(
     "aurum-frontend",
     "aurum-backend",
     "aurum-celery-worker",
+    "aurum-catalog-worker",
     "aurum-billing-worker",
     "aurum-celery-beat",
     "aurum-postgres",
@@ -133,7 +136,9 @@ function Protect-LocalSecretFile {
 function Assert-ValidShowcaseEnvironmentFile {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path
+        [string]$Path,
+
+        [string[]]$AllowedMissingKeys = @()
     )
 
     $item = Get-Item -LiteralPath $Path -Force
@@ -168,13 +173,13 @@ function Assert-ValidShowcaseEnvironmentFile {
     }
 
     foreach ($name in $secretHexLengths.Keys) {
-        if (-not $values.ContainsKey($name)) {
+        if (-not $values.ContainsKey($name) -and $AllowedMissingKeys -cnotcontains $name) {
             throw "$environmentFileName is missing required key: $name"
         }
     }
 
     $uniqueValues = @($values.Values | Sort-Object -Unique)
-    if ($uniqueValues.Count -ne $secretHexLengths.Count) {
+    if ($uniqueValues.Count -ne $values.Count) {
         throw "$environmentFileName must use a distinct value for every secret"
     }
 }
@@ -269,12 +274,16 @@ function Add-MissingShowcaseSecrets {
             "AURUM_DEMO_MIGRATOR_PASSWORD",
             "AURUM_DEMO_MAILER_PASSWORD",
             "AURUM_DEMO_BILLING_WORKER_PASSWORD",
+            "AURUM_DEMO_WORKER_PASSWORD",
             "AURUM_DEMO_BACKUP_PASSWORD",
             "AURUM_DEMO_PITR_PASSWORD"
         ) | Where-Object { $key = $_; -not ($existing | Where-Object { $_ -match "^$key=" }) }
     )
-    if ($missing.Count -eq 0) { return }
-    if ($DryRun) { throw "$environmentFileName needs a one-time secret upgrade" }
+    if ($missing.Count -eq 0) { return $true }
+    if ($DryRun) {
+        Write-Host "$environmentFileName needs a one-time secret upgrade; the normal launcher will add it without replacing existing secrets."
+        return $false
+    }
 
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     foreach ($key in $missing) {
@@ -286,6 +295,7 @@ function Add-MissingShowcaseSecrets {
         )
     }
     Protect-LocalSecretFile -Path $Path
+    return $true
 }
 
 function Ensure-ShowcaseEnvironment {
@@ -293,8 +303,20 @@ function Ensure-ShowcaseEnvironment {
     Assert-NoProcessSecretOverrides
 
     if (Test-Path -LiteralPath $environmentFile) {
-        Add-MissingShowcaseSecrets -Path $environmentFile
-        Assert-ValidShowcaseEnvironmentFile -Path $environmentFile
+        $environmentIsCurrent = Add-MissingShowcaseSecrets -Path $environmentFile
+        $allowedMissingKeys = if ($DryRun -and -not $environmentIsCurrent) {
+            @(
+                "AURUM_DEMO_MIGRATOR_PASSWORD",
+                "AURUM_DEMO_MAILER_PASSWORD",
+                "AURUM_DEMO_BILLING_WORKER_PASSWORD",
+                "AURUM_DEMO_WORKER_PASSWORD",
+                "AURUM_DEMO_BACKUP_PASSWORD",
+                "AURUM_DEMO_PITR_PASSWORD"
+            )
+        } else { @() }
+        Assert-ValidShowcaseEnvironmentFile `
+            -Path $environmentFile `
+            -AllowedMissingKeys $allowedMissingKeys
         if (-not $DryRun) {
             Protect-LocalSecretFile -Path $environmentFile
         }
@@ -517,6 +539,7 @@ Invoke-DemoCompose `
         "up",
         "--detach",
         "celery-worker",
+        "catalog-worker",
         "billing-worker",
         "platform-mailer",
         "celery-beat",

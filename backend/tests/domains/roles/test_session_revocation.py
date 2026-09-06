@@ -16,6 +16,7 @@ from app.core.security import create_access_token, decode_access_token, hash_tok
 from app.core.time import utc_now
 from app.domains.audit.models import AuditLog
 from app.domains.auth.models import AppUser, Session
+from app.domains.roles.models import TenantMembership
 from app.domains.support_access.repository import SupportAccessRepository
 from app.domains.support_access.service import SupportAccessService
 from app.main import app
@@ -34,12 +35,14 @@ async def _session(db: AsyncSession, user: AppUser) -> Session:
     return auth_session
 
 
-def _headers(user: AppUser) -> dict[str, str]:
+async def _headers(db: AsyncSession, user: AppUser) -> dict[str, str]:
+    auth_session = await _session(db, user)
     token = create_access_token(
         user.id,
         tenant_id=user.home_tenant_id,
         is_developer=False,
         is_administrator=False,
+        session_id=auth_session.id,
     )
     return {"Authorization": f"Bearer {token}"}
 
@@ -76,26 +79,26 @@ async def test_owner_revokes_employee_sessions_through_the_api(
     try:
         denied = await client.post(
             f"/api/v1/users/{employee.id}/sessions/revoke",
-            headers=_headers(unprivileged),
+            headers=await _headers(db_session, unprivileged),
         )
         assert denied.status_code == 403
 
         response = await client.post(
             f"/api/v1/users/{employee.id}/sessions/revoke",
-            headers=_headers(owner),
+            headers=await _headers(db_session, owner),
         )
         assert response.status_code == 200
         assert response.json() == {"status": "ok", "revoked_count": 2}
 
         protected = await client.post(
             f"/api/v1/users/{protected_owner.id}/sessions/revoke",
-            headers=_headers(owner),
+            headers=await _headers(db_session, owner),
         )
         assert protected.status_code == 403
 
         cross_tenant = await client.post(
             f"/api/v1/users/{outsider.id}/sessions/revoke",
-            headers=_headers(owner),
+            headers=await _headers(db_session, owner),
         )
         assert cross_tenant.status_code == 404
     finally:
@@ -145,6 +148,8 @@ async def test_scoped_administrator_revokes_employee_sessions_with_explicit_capa
         is_administrator=True,
     )
     employee = await make_user(home_tenant_id=tenant.id)
+    tenant_id = tenant.id
+    employee_id = employee.id
     employee_session = await _session(db_session, employee)
     employee_session_id = employee_session.id
     await db_session.flush()
@@ -156,7 +161,7 @@ async def test_scoped_administrator_revokes_employee_sessions_with_explicit_capa
         actor_session_id=actor_session_id,
         actor_is_developer=False,
         actor_is_administrator=True,
-        tenant_id=tenant.id,
+        tenant_id=tenant_id,
         reason="End an employee session after a verified security request",
         duration_minutes=10,
         requested_capabilities=["users.block"],
@@ -164,7 +169,7 @@ async def test_scoped_administrator_revokes_employee_sessions_with_explicit_capa
 
     async def _override(request: Request) -> AsyncIterator[AsyncSession]:
         request.state.support_access_resolved = True
-        request.state.tenant_id = tenant.id
+        request.state.tenant_id = tenant_id
         request.state.is_support_session = True
         request.state.support_access_capabilities = support_session.capabilities
         request.state.support_access_reason = support_session.reason
@@ -177,7 +182,14 @@ async def test_scoped_administrator_revokes_employee_sessions_with_explicit_capa
     app.dependency_overrides[get_db] = _override
     try:
         response = await client.post(
-            f"/api/v1/users/{employee.id}/sessions/revoke",
+            f"/api/v1/users/{employee_id}/sessions/revoke",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Aurum-Support-Session": str(support_session.id),
+            },
+        )
+        blocked = await client.post(
+            f"/api/v1/users/{employee_id}/block",
             headers={
                 "Authorization": f"Bearer {token}",
                 "X-Aurum-Support-Session": str(support_session.id),
@@ -188,7 +200,18 @@ async def test_scoped_administrator_revokes_employee_sessions_with_explicit_capa
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "revoked_count": 1}
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json() == {"status": "suspended"}
     db_session.expire_all()
     revoked_session = await db_session.get(Session, employee_session_id)
     assert revoked_session is not None
     assert revoked_session.revoked_reason == "tenant_admin_revoked"
+    membership = (
+        await db_session.execute(
+            select(TenantMembership).where(
+                TenantMembership.tenant_id == tenant_id,
+                TenantMembership.user_id == employee_id,
+            )
+        )
+    ).scalar_one()
+    assert membership.status == "suspended"

@@ -1,21 +1,16 @@
-import { useEffect, useState } from "react";
-
+import { useConnectivity } from "@/lib/connectivityContext";
 import { cn } from "@/lib/utils";
 
 export function ConnectivityIndicator(): JSX.Element {
-  const [isOnline, setIsOnline] = useState(readOnlineStatus);
-
-  useEffect(() => {
-    const update = () => setIsOnline(readOnlineStatus());
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, []);
-
-  const label = isOnline ? "Онлайн" : "Нет сети";
+  const { status } = useConnectivity();
+  const label =
+    status === "online"
+      ? "Онлайн"
+      : status === "offline"
+        ? "Нет сети"
+        : status === "server-unavailable"
+          ? "Сервер недоступен"
+          : "Проверка связи";
 
   return (
     <span
@@ -26,13 +21,16 @@ export function ConnectivityIndicator(): JSX.Element {
     >
       <span
         aria-hidden="true"
-        className={cn("h-2 w-2 rounded-full", isOnline ? "bg-success" : "bg-danger")}
+        className={cn(
+          "h-2 w-2 rounded-full",
+          status === "online"
+            ? "bg-success"
+            : status === "checking"
+              ? "bg-warning"
+              : "bg-danger",
+        )}
       />
       <span className="sr-only xl:not-sr-only">{label}</span>
     </span>
   );
-}
-
-function readOnlineStatus(): boolean {
-  return typeof navigator === "undefined" ? true : navigator.onLine;
 }

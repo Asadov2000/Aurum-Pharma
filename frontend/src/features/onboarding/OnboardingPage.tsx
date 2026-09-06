@@ -5,6 +5,7 @@ import { canAccessPath, getRouteAccessContext } from "@/components/layout/routeA
 import { Badge, Button, ConfirmDialog, PageHeader, Skeleton } from "@/components/ui";
 import { useMeQuery } from "@/features/auth/queries";
 import { activeTenantId } from "@/features/auth/tenantContext";
+import { useConnectivity } from "@/lib/connectivityContext";
 import { describeApiError } from "@/lib/errorMessages";
 import { createOperationId } from "@/lib/operationId";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,7 @@ import { cn } from "@/lib/utils";
 import {
   readinessStepAction,
   readinessSteps,
+  readinessTasks,
   readinessTaskByCode,
   type ReadinessAction,
 } from "./labels";
@@ -20,24 +22,6 @@ import { type OnboardingOverview, type ReadinessStep, type ReadinessStepCode } f
 
 const primaryLinkClass =
   "inline-flex h-[var(--control-height-lg)] items-center justify-center gap-2 rounded-md border border-transparent bg-primary px-[var(--control-padding-lg)] text-base font-semibold text-primary-foreground shadow-sm transition-colors duration-fast hover:bg-primary/90 focus-visible:outline-none";
-
-function useOnlineStatus(): boolean {
-  const [online, setOnline] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
-
-  useEffect(() => {
-    const update = (): void => setOnline(navigator.onLine);
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, []);
-
-  return online;
-}
 
 function formatDate(value: string | null): string {
   if (!value) return "не указано";
@@ -123,7 +107,14 @@ function StepValue({ step }: { step: ReadinessStep }): JSX.Element | null {
 
 function OnboardingSkeleton(): JSX.Element {
   return (
-    <div className="space-y-4" aria-label="Загрузка готовности">
+    <div
+      className="space-y-4"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label="Проверяем готовность аптеки"
+    >
+      <span className="sr-only">Проверяем готовность аптеки</span>
       <Skeleton className="h-20 w-full" />
       <Skeleton className="h-44 w-full" />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
@@ -141,11 +132,44 @@ export function OnboardingPage(): JSX.Element {
   const { data: user } = useMeQuery();
   const tenantId = activeTenantId(user) ?? undefined;
   const access = useMemo(() => getRouteAccessContext(user), [user]);
-  const online = useOnlineStatus();
+  const online = useConnectivity().canUseServer;
   const overviewQuery = useOnboardingOverviewQuery(tenantId);
   const startTrial = useStartTrial(tenantId);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [operationId, setOperationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      confirmOpen &&
+      startTrial.isError &&
+      overviewQuery.data &&
+      overviewQuery.data.tenant_status !== "setup"
+    ) {
+      setConfirmOpen(false);
+      setOperationId(null);
+      startTrial.reset();
+    }
+  }, [confirmOpen, overviewQuery.data, startTrial]);
+
+  if (!online && overviewQuery.data === undefined) {
+    return (
+      <div className="mx-auto max-w-[720px] rounded-lg border border-warning/30 bg-warning/10 p-6">
+        <div className="flex items-start gap-3">
+          <StatusMark>!</StatusMark>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-foreground">Нет соединения с сервером</h1>
+            <p className="mt-1 text-sm leading-5 text-foreground-secondary">
+              Данные о готовности ещё не загружены. После восстановления сети проверка продолжится
+              автоматически.
+            </p>
+            <Button className="mt-4" variant="secondary" disabled>
+              Ожидаем подключения
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (overviewQuery.isPending) return <OnboardingSkeleton />;
 
@@ -179,6 +203,43 @@ export function OnboardingPage(): JSX.Element {
   }
 
   const overview = overviewQuery.data;
+  const snapshotComplete =
+    overview.required_total === readinessSteps.length &&
+    readinessSteps.every((definition) =>
+      overview.steps.some((step) => step.code === definition.code),
+    ) &&
+    overview.recommended_total === readinessTasks.length &&
+    readinessTasks.every((definition) =>
+      overview.recommended_tasks.some((task) => task.code === definition.code),
+    );
+
+  if (!snapshotComplete) {
+    return (
+      <div className="mx-auto max-w-[720px] rounded-lg border border-warning/30 bg-warning/10 p-6">
+        <div className="flex items-start gap-3">
+          <StatusMark>!</StatusMark>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-foreground">
+              Проверка готовности получена не полностью
+            </h1>
+            <p className="mt-1 text-sm leading-5 text-foreground-secondary">
+              Запуск временно недоступен, чтобы не пропустить обязательную настройку. Обновите
+              данные.
+            </p>
+            <Button
+              className="mt-4"
+              variant="secondary"
+              onClick={() => void overviewQuery.refetch()}
+              disabled={!online || overviewQuery.isFetching}
+              isLoading={overviewQuery.isFetching}
+            >
+              Проверить снова
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   const copy = statusCopy(overview);
   const stepsByCode = new Map(overview.steps.map((step) => [step.code, step]));
   const firstAction =
@@ -255,7 +316,8 @@ export function OnboardingPage(): JSX.Element {
           role="status"
         >
           <span className="font-semibold text-warning-foreground">Нет сети.</span>
-          Показаны последние сохранённые данные. Изменения станут доступны после подключения.
+          Показаны данные, загруженные ранее в этой сессии. Изменения станут доступны после
+          подключения.
         </div>
       )}
 
@@ -319,17 +381,31 @@ export function OnboardingPage(): JSX.Element {
               период для этой аптеки нельзя.
             </p>
             {startTrial.isError && (
-              <p
-                className="rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-sm text-danger"
+              <div
+                className="space-y-3 rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-sm text-danger"
                 role="alert"
               >
-                {describeApiError(startTrial.error, "Не удалось начать пробный период")}
-              </p>
+                <p>{describeApiError(startTrial.error, "Не удалось начать пробный период")}</p>
+                <p className="text-foreground-secondary">
+                  Сервер мог получить запрос. Сначала проверьте статус. Безопасный повтор использует
+                  тот же номер операции и не создаст второй пробный период.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void overviewQuery.refetch()}
+                  disabled={!online || overviewQuery.isFetching}
+                  isLoading={overviewQuery.isFetching}
+                >
+                  Проверить статус
+                </Button>
+              </div>
             )}
           </div>
         }
-        confirmLabel="Начать период"
+        confirmLabel={startTrial.isError ? "Повторить безопасно" : "Начать период"}
         isLoading={startTrial.isPending}
+        cancelDisabled={startTrial.isPending}
         onConfirm={confirmTrial}
         onCancel={() => {
           if (startTrial.isPending) return;
@@ -418,7 +494,7 @@ function LaunchSummary({
           </div>
           <span className="text-xs text-foreground-muted lg:text-right">
             {setupPhase
-              ? `Настройку нужно завершить до ${formatDate(overview.setup_ends_at)}`
+              ? `Плановая дата завершения настройки: ${formatDate(overview.setup_ends_at)}`
               : `${progress}% обязательных настроек выполнено`}
           </span>
         </div>
@@ -527,6 +603,13 @@ function TrialPanel({
       : overview.tenant_status === "active"
         ? "Работа доступна"
         : "Требуется действие";
+  const blockedReason = !online
+    ? "Нет соединения с сервером."
+    : !overview.is_ready
+      ? `Осталось выполнить обязательных шагов: ${overview.blocker_codes.length}.`
+      : !isOwner
+        ? "Запустить период может только владелец аптеки."
+        : null;
 
   return (
     <section className="rounded-lg border border-border bg-surface px-5 py-4">
@@ -551,9 +634,9 @@ function TrialPanel({
           Начать пробный период
         </Button>
       )}
-      {isSetup && overview.is_ready && !isOwner && (
+      {isSetup && blockedReason && (
         <p className="mt-2 text-xs text-foreground-muted" role="status">
-          Запустить период может только владелец аптеки.
+          {blockedReason}
         </p>
       )}
       {isSetup && (

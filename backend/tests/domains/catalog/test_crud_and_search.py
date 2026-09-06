@@ -126,8 +126,43 @@ async def test_barcode_lookup(db_session: AsyncSession, make_tenant) -> None:
         tenant_id=tenant.id, catalog_id=item.id, code="4607013192829", code_type="ean13"
     )
 
-    found = await service.find_item_by_barcode("4607013192829")
+    found = await service.find_item_by_barcode("4607013192829", tenant_id=tenant.id)
     assert found.id == item.id
+
+
+async def test_barcode_lookup_is_explicitly_tenant_scoped(
+    db_session: AsyncSession, make_tenant
+) -> None:
+    service = CatalogService(CatalogRepository(db_session))
+    tenant = await make_tenant()
+    other_tenant = await make_tenant()
+    own = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Tenant barcode item"},
+    )
+    other = await service.create_item(
+        tenant_id=other_tenant.id,
+        fields={"brand_name": "Other tenant barcode item"},
+    )
+    code = "4607013192888"
+    await service.add_barcode(
+        tenant_id=tenant.id,
+        catalog_id=own.id,
+        code=code,
+        code_type="ean13",
+    )
+    await service.add_barcode(
+        tenant_id=other_tenant.id,
+        catalog_id=other.id,
+        code=code,
+        code_type="ean13",
+    )
+
+    found = await service.find_item_by_barcode(code, tenant_id=tenant.id)
+    found_other = await service.find_item_by_barcode(code, tenant_id=other_tenant.id)
+
+    assert found.id == own.id
+    assert found_other.id == other.id
 
 
 async def test_catalog_search_accepts_an_exact_barcode(

@@ -996,6 +996,11 @@ async def test_payment_attempt_api_requires_permission_and_sale_ownership(
         assert confirmed.status_code == 200
         assert confirmed.json()["terminal_id"] == "TERM-API"
         assert confirmed.json()["external_reference"] == "TERM-API-1"
+        active = await client.get(f"/api/v1/sales/{sale.id}/payment-attempts/active")
+        assert active.status_code == 200
+        assert active.headers["cache-control"] == "private, no-store"
+        assert active.json()["id"] == attempt_id
+        assert active.json()["status"] == "confirmed"
 
         other = AppUser(
             email=f"other-{uuid4().hex[:8]}@aurum.tj",
@@ -1008,6 +1013,8 @@ async def test_payment_attempt_api_requires_permission_and_sale_ownership(
         actor.user_id = other.id
         hidden = await client.get(f"/api/v1/pos/payment-attempts/{attempt_id}")
         assert hidden.status_code == 403
+        hidden_active = await client.get(f"/api/v1/sales/{sale.id}/payment-attempts/active")
+        assert hidden_active.status_code == 403
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(current_user, None)

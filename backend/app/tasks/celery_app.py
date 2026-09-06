@@ -5,9 +5,9 @@ from __future__ import annotations
 from celery import Celery
 from celery.schedules import crontab
 
-from app.core.config import get_settings
+from app.core.celery_broker_config import get_celery_broker_settings
 
-settings = get_settings()
+settings = get_celery_broker_settings()
 
 celery_app = Celery(
     "aurum",
@@ -17,7 +17,6 @@ celery_app = Celery(
         "app.tasks.auth",
         "app.tasks.foundation",
         "app.tasks.roles",
-        "app.tasks.catalog",
         "app.tasks.notifications",
     ],
 )
@@ -38,6 +37,7 @@ celery_app.conf.update(
         "platform_accounts.process_invitation_emails": {"queue": "platform-mailer"},
         "billing.process_trial_endings": {"queue": "billing-worker"},
         "billing.process_grace_endings": {"queue": "billing-worker"},
+        "catalog.import_catalog_job": {"queue": "catalog-worker"},
     },
 )
 
@@ -61,10 +61,6 @@ celery_app.conf.beat_schedule = {
     "billing-process-grace-endings": {
         "task": "billing.process_grace_endings",
         "schedule": crontab(minute=0, hour=7),
-    },
-    "notifications-process-pending-deliveries": {
-        "task": "notifications.process_pending_deliveries",
-        "schedule": crontab(minute="*"),
     },
     "platform-accounts-process-invitation-emails": {
         "task": "platform_accounts.process_invitation_emails",

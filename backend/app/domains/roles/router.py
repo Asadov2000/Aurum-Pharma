@@ -18,6 +18,7 @@ from app.core.deps import (
     require_recent_account_mfa,
     require_recent_mfa_if_support,
     require_recent_owner_mfa,
+    require_writable_tenant,
 )
 from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.roles.models import Role, UserAssignment
@@ -103,6 +104,7 @@ async def list_ownership_transfers(
 async def create_ownership_transfer(
     payload: OwnershipTransferCreate,
     user: Annotated[CurrentUser, Depends(require_recent_owner_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> OwnershipTransferActionResponse:
     transfer = await service.create_ownership_transfer(
@@ -136,6 +138,7 @@ async def cancel_ownership_transfer(
 async def accept_ownership_transfer(
     request_id: UUID,
     user: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> OwnershipTransferActionResponse:
     transfer = await service.accept_ownership_transfer(
@@ -291,6 +294,7 @@ async def create_role(
     payload: RoleCreate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.create"))],
     _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleWithPermissions:
     role, codes = await service.create_role(
@@ -312,6 +316,7 @@ async def update_role(
     payload: RoleUpdate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.update"))],
     _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleWithPermissions:
     tenant_id = _current_tenant_or_400(user)
@@ -377,6 +382,7 @@ async def archive_role(
     payload: RoleArchiveRequest,
     user: Annotated[CurrentUser, Depends(require_role_archive_access)],
     _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> RoleArchiveResponse:
     result = await service.archive_role_with_replacement(
@@ -434,7 +440,12 @@ async def list_users(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> UserListResponse:
     tenant_id = _current_tenant_or_400(user)
-    pairs, total = await service.list_users(tenant_id, page=page, page_size=page_size)
+    pairs, total = await service.search_users(
+        tenant_id,
+        visible_branch_ids=user.branch_scope_for("users.view"),
+        page=page,
+        page_size=page_size,
+    )
     return await _serialize_user_list(
         service,
         pairs,
@@ -480,7 +491,8 @@ async def search_users(
 async def invite_user(
     payload: InviteUserRequest,
     user: Annotated[CurrentUser, Depends(require_permission("users.invite"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> AssignmentRead:
     _, assignment, _ = await service.invite_user(
@@ -507,6 +519,7 @@ async def update_user(
     payload: UserUpdate,
     user: Annotated[CurrentUser, Depends(require_permission("users.update"))],
     _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, object]:
     fields = payload.model_dump(exclude_none=True, exclude={"status"})
@@ -547,6 +560,7 @@ async def reissue_user_invitation(
     payload: InvitationReissueRequest,
     user: Annotated[CurrentUser, Depends(require_permission("users.invite"))],
     _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> InvitationRead:
     invitation = await service.reissue_invitation(
@@ -610,7 +624,8 @@ async def create_assignment(
     user_id: UUID,
     payload: AssignmentCreate,
     user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> AssignmentRead:
     assignment = await service.assign_role(
@@ -636,7 +651,8 @@ async def replace_assignments(
     user_id: UUID,
     payload: AssignmentBatchReplace,
     user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> list[AssignmentRead]:
     assignments = await service.replace_role_assignments(
@@ -680,7 +696,8 @@ async def revoke_assignment(
     user_id: UUID,
     assignment_id: UUID,
     user: Annotated[CurrentUser, Depends(require_permission("roles.assign"))],
-    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_mfa_if_support)],
+    _recent_mfa: Annotated[CurrentUser, Depends(require_recent_account_mfa)],
+    _writable: Annotated[CurrentUser, Depends(require_writable_tenant)],
     service: Annotated[RolesService, Depends(_service)],
 ) -> dict[str, str]:
     await service.revoke_assignment(

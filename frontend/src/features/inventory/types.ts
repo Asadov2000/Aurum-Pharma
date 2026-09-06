@@ -15,7 +15,7 @@ export interface Batch {
   batch_number: string | null;
   manufactured_at: string | null;
   expires_at: string;
-  purchase_price: string; // Decimal as string
+  purchase_price: string | null; // Decimal as string; hidden when the user cannot view costs
   sale_price: string;
   currency: string;
   qty_initial: string;
@@ -39,7 +39,7 @@ export interface BatchWithExpiry extends Batch {
 
 export interface BatchSummary {
   total_qty: string;
-  purchase_value: string;
+  purchase_value: string | null;
   sale_value: string;
   attention_count: number;
   expired_count: number;
@@ -83,7 +83,7 @@ export interface WriteOff {
   qty: string;
   reason: WriteOffReason;
   comment: string | null;
-  amount: string;
+  amount: string | null;
   currency: string;
   created_at: string;
 }

@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -201,6 +203,63 @@ async def test_pos_refund_attempt_rls_enforces_tenant_isolation(
                 )
                 assert [str(value) for value in visible_attempts] == [attempt_ids[index]]
                 assert [str(value) for value in visible_references] == [reference_ids[index]]
+
+                if index == 0:
+                    intent = (
+                        await conn.execute(
+                            text(
+                                "SELECT intent_version, reason_code, comment "
+                                "FROM pos_refund_attempt WHERE id = :attempt_id"
+                            ),
+                            {"attempt_id": attempt_ids[index]},
+                        )
+                    ).one()
+                    assert tuple(intent) == (2, None, None)
+
+                    immutable_updates = (
+                        "UPDATE pos_refund_attempt SET intent_version = 1 WHERE id = :attempt_id",
+                        "UPDATE pos_refund_attempt SET reason_code = 'other' "
+                        "WHERE id = :attempt_id",
+                        "UPDATE pos_refund_attempt SET comment = 'tampered' "
+                        "WHERE id = :attempt_id",
+                    )
+                    for statement in immutable_updates:
+                        with pytest.raises(
+                            DBAPIError,
+                            match="Refund attempt identity is immutable",
+                        ):
+                            async with conn.begin_nested():
+                                await conn.execute(
+                                    text(statement),
+                                    {"attempt_id": attempt_ids[index]},
+                                )
+
+                    with pytest.raises(DBAPIError) as invalid_v1:
+                        async with conn.begin_nested():
+                            await conn.execute(
+                                text(
+                                    "INSERT INTO pos_refund_attempt "
+                                    "(tenant_id, parent_sale_id, register_id, "
+                                    "requested_by_user_id, operation_id, operation_hash, "
+                                    "items_json, external_allocations_json, intent_version, "
+                                    "reason_code, total_amount, external_amount) VALUES "
+                                    "(:tenant_id, :sale_id, :register_id, :user_id, "
+                                    "gen_random_uuid(), repeat('c', 64), "
+                                    "jsonb_build_array(jsonb_build_object("
+                                    "'sale_item_id', CAST(:item_id AS text), 'qty', '1')), "
+                                    "jsonb_build_array(jsonb_build_object("
+                                    "'payment_method', 'card', 'amount', '10.00')), "
+                                    "1, 'other', 10, 10)"
+                                ),
+                                {
+                                    "tenant_id": tenant_ids[index],
+                                    "sale_id": sale_ids[index],
+                                    "register_id": register_ids[index],
+                                    "user_id": user_ids[index],
+                                    "item_id": "00000000-0000-0000-0000-000000000003",
+                                },
+                            )
+                    assert "ck_pos_refund_attempt_intent_payload" in str(invalid_v1.value)
     finally:
         if tenant_ids:
             async with support_engine_refund_attempts.begin() as conn:

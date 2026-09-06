@@ -52,7 +52,14 @@ class RoleCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
-    permissions: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list, max_length=500)
+
+    @field_validator("permissions")
+    @classmethod
+    def _unique_permissions(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("Permissions must be unique")
+        return value
 
 
 class RoleUpdate(BaseModel):
@@ -63,7 +70,14 @@ class RoleUpdate(BaseModel):
     expected_version: int = Field(ge=1)
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
-    permissions: list[str] | None = None
+    permissions: list[str] | None = Field(default=None, max_length=500)
+
+    @field_validator("permissions")
+    @classmethod
+    def _unique_permissions(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("Permissions must be unique")
+        return value
 
 
 class RoleVersionRead(BaseModel):
@@ -219,6 +233,8 @@ class InviteUserRequest(BaseModel):
 
 
 class AssignmentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     role_id: UUID
     branch_id: UUID | None = None
     password_required: bool = False
@@ -246,7 +262,7 @@ class UserUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     full_name: str | None = Field(default=None, min_length=1, max_length=200)
-    phone: str | None = None
+    phone: str | None = Field(default=None, max_length=50)
     status: Literal["active"] | None = None
 
 
@@ -255,7 +271,7 @@ class TenantAccountCreate(BaseModel):
 
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=200)
-    phone: str | None = None
+    phone: str | None = Field(default=None, max_length=50)
 
 
 class TenantMembershipRead(BaseModel):
