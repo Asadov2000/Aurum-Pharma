@@ -5,7 +5,6 @@ import {
   apiContext,
   apiLogin,
   catalogSearchKey,
-  clearLoginRateLimit,
   completePosSale,
   expect,
   loginInBrowser,
@@ -19,8 +18,6 @@ import {
 } from "./helpers";
 
 test.describe("Payment reconciliation queue", () => {
-  test.beforeEach(() => clearLoginRateLimit(OWNER.email));
-
   test("lets an owner resolve an uncertain card payment without repeating it", async ({ page }) => {
     test.setTimeout(120_000);
     const anonymousApi = await request.newContext();

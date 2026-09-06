@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { promises as fs, readdirSync } from "node:fs";
 import path from "node:path";
 

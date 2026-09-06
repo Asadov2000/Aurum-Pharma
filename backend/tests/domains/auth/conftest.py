@@ -22,18 +22,14 @@ from app.core.security import hash_password
 from app.domains.auth.models import AppUser
 from app.main import app
 from app.tasks.celery_app import celery_app
+from tests.fixture_helpers import eager_tasks
 from tests.platform_access_helpers import create_test_platform_user
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def celery_eager() -> AsyncIterator[None]:
-    prev = celery_app.conf.task_always_eager
-    celery_app.conf.task_always_eager = True
-    celery_app.conf.task_eager_propagates = True
-    try:
+    with eager_tasks(celery_app.conf):
         yield
-    finally:
-        celery_app.conf.task_always_eager = prev
 
 
 @pytest_asyncio.fixture

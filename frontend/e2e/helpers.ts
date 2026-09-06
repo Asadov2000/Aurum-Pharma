@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 
 import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
 
-export const API = process.env.E2E_API_URL ?? "http://localhost:8000/api/v1";
+export const API = process.env.E2E_API_URL ?? "http://localhost:18000/api/v1";
 
 function sqlLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
