@@ -72,7 +72,7 @@ export function BranchesPage(): JSX.Element {
     return () => clearTimeout(timer);
   }, [qInput]);
 
-  const { data, isLoading, isFetching, error, refetch } = useBranchSearchQuery({
+  const { data, isPending, isFetching, fetchStatus, error, refetch } = useBranchSearchQuery({
     q,
     branch_type: branchType || undefined,
     is_active: status === "all" ? undefined : status === "active",
@@ -138,7 +138,7 @@ export function BranchesPage(): JSX.Element {
         active="branches"
         showBranches
         showRegisters={canViewRegisters}
-        meta={isFetching && !isLoading ? "Обновление…" : undefined}
+        meta={isFetching && !isPending ? "Обновление…" : undefined}
         actions={
           canCreate ? (
             <Button onClick={() => setCreating(true)}>Добавить торговую точку</Button>
@@ -149,7 +149,7 @@ export function BranchesPage(): JSX.Element {
       {!hasInitialLoadError && (
         <LocationsSummary
           label="Сводка торговых точек"
-          loading={isLoading}
+          loading={isPending}
           metrics={[
             { label: "Всего по фильтрам", value: data?.total ?? 0 },
             { label: "Показано на странице", value: rows.length },
@@ -268,8 +268,15 @@ export function BranchesPage(): JSX.Element {
           </Button>
         </div>
       )}
-      {isLoading ? (
-        <SkeletonRows rows={6} />
+      {isPending ? (
+        <>
+          {fetchStatus === "paused" && (
+            <p role="status" className="text-sm text-foreground-muted">
+              Нет связи с сервером. Список загрузится автоматически после восстановления соединения.
+            </p>
+          )}
+          <SkeletonRows rows={6} />
+        </>
       ) : hasInitialLoadError ? null : rows.length === 0 ? (
         hasFilters ? (
           <TableEmpty title="Ничего не найдено">Измените запрос или выбранные фильтры.</TableEmpty>

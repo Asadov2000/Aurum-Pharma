@@ -72,7 +72,7 @@ export function RegistersPage(): JSX.Element {
   // registers.view is itself a branch-discovery capability on the backend.
   // Loading names here avoids exposing internal branch IDs to restricted roles.
   const branches = useBranchesQuery(true);
-  const { data, isLoading, isFetching, error, refetch } = useRegisterSearchQuery({
+  const { data, isPending, isFetching, fetchStatus, error, refetch } = useRegisterSearchQuery({
     q,
     branch_id: branchFilter || undefined,
     printer_type: printerType || undefined,
@@ -122,7 +122,7 @@ export function RegistersPage(): JSX.Element {
         active="registers"
         showBranches={canViewBranches}
         showRegisters
-        meta={isFetching && !isLoading ? "Обновление…" : undefined}
+        meta={isFetching && !isPending ? "Обновление…" : undefined}
         actions={
           canCreate ? (
             <Button onClick={() => setCreating(true)}>Добавить рабочую кассу</Button>
@@ -133,7 +133,7 @@ export function RegistersPage(): JSX.Element {
       {!hasInitialLoadError && (
         <LocationsSummary
           label="Сводка касс"
-          loading={isLoading}
+          loading={isPending}
           metrics={[
             { label: "Всего по фильтрам", value: data?.total ?? 0 },
             { label: "Показано на странице", value: rows.length },
@@ -303,8 +303,15 @@ export function RegistersPage(): JSX.Element {
           </Button>
         </div>
       )}
-      {isLoading ? (
-        <SkeletonRows rows={6} />
+      {isPending ? (
+        <>
+          {fetchStatus === "paused" && (
+            <p role="status" className="text-sm text-foreground-muted">
+              Нет связи с сервером. Список загрузится автоматически после восстановления соединения.
+            </p>
+          )}
+          <SkeletonRows rows={6} />
+        </>
       ) : hasInitialLoadError ? null : rows.length === 0 ? (
         hasFilters ? (
           <TableEmpty title="Ничего не найдено">Измените запрос или выбранные фильтры.</TableEmpty>

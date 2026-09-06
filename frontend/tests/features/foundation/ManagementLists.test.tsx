@@ -1,9 +1,10 @@
 import { type AnchorHTMLAttributes, type ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listBranches = vi.fn();
+const listTenants = vi.fn();
 const searchBranches = vi.fn();
 const searchRegisters = vi.fn();
 const getBranchLifecycleImpact = vi.fn();
@@ -25,7 +26,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 vi.mock("@/features/foundation/api", () => ({
-  listTenants: vi.fn(),
+  listTenants: (...args: unknown[]) => listTenants(...args),
   createTenant: vi.fn(),
   updateTenant: vi.fn(),
   createTenantOwner: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@/features/auth/hooks", () => ({
 
 import { BranchesPage } from "@/features/foundation/BranchesPage";
 import { RegistersPage } from "@/features/foundation/RegistersPage";
+import { TenantsPage } from "@/features/foundation/TenantsPage";
 
 const BRANCH = {
   id: "branch-0001",
@@ -105,6 +107,7 @@ describe("management list filters", () => {
       ],
     };
     listBranches.mockReset();
+    listTenants.mockReset();
     searchBranches.mockReset();
     searchRegisters.mockReset();
     getBranchLifecycleImpact.mockReset();
@@ -141,7 +144,11 @@ describe("management list filters", () => {
     updateRegister.mockResolvedValue(REGISTER);
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    cleanup();
+    onlineManager.setOnline(true);
+    vi.clearAllMocks();
+  });
 
   it("searches and filters branches through the paginated contract", async () => {
     renderPage(<BranchesPage />);
@@ -314,6 +321,65 @@ describe("management list filters", () => {
     );
     expect(screen.queryByText("Торговых точек пока нет")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Сводка торговых точек" })).not.toBeInTheDocument();
+  });
+
+  it("waits for connectivity instead of showing zero branches and resumes automatically", async () => {
+    onlineManager.setOnline(false);
+    renderPage(<BranchesPage />);
+
+    expect(searchBranches).not.toHaveBeenCalled();
+    expect(screen.queryByText("Торговых точек пока нет")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Сводка торговых точек" })).queryByText("0"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Список загрузится автоматически");
+
+    act(() => onlineManager.setOnline(true));
+
+    expect(await screen.findByText(BRANCH.name)).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows an empty branch list only after a successful empty response", async () => {
+    searchBranches.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 25 });
+    renderPage(<BranchesPage />);
+
+    expect(await screen.findByText("Торговых точек пока нет")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("waits for connectivity before deciding that the tenant list is empty", async () => {
+    mockUser = { platform_capabilities: ["platform.tenants.view"] };
+    listTenants.mockResolvedValueOnce([]);
+    onlineManager.setOnline(false);
+    renderPage(<TenantsPage />);
+
+    expect(listTenants).not.toHaveBeenCalled();
+    expect(screen.queryByText("Пока нет ни одной аптеки")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Список загрузится автоматически");
+
+    act(() => onlineManager.setOnline(true));
+
+    expect(await screen.findByText("Пока нет ни одной аптеки")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("waits for connectivity instead of showing zero registers and resumes automatically", async () => {
+    onlineManager.setOnline(false);
+    renderPage(<RegistersPage />);
+
+    expect(searchRegisters).not.toHaveBeenCalled();
+    expect(screen.queryByText("Рабочих касс пока нет")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Сводка касс" })).queryByText("0"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Список загрузится автоматически");
+
+    act(() => onlineManager.setOnline(true));
+
+    expect(await screen.findByText(REGISTER.name)).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("blocks register creation until branch options can be loaded", async () => {
