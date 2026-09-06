@@ -64,6 +64,7 @@ vi.mock("@/features/settings/queries", () => ({
 }));
 
 import { AppLayout } from "@/components/layout/AppLayout";
+import { Modal } from "@/components/ui/Modal";
 
 describe("AppLayout shell", () => {
   beforeEach(() => {
@@ -112,6 +113,30 @@ describe("AppLayout shell", () => {
     expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(badge);
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
     expect(within(main).getByText("Page content")).toBeInTheDocument();
+  });
+
+  it("keeps the page locked when the mobile drawer closes before another modal", async () => {
+    const originalOverflow = document.body.style.overflow;
+    const content = (modalOpen: boolean) => (
+      <AppLayout>
+        <Modal open={modalOpen} onClose={() => undefined} title="Другое окно">
+          Modal content
+        </Modal>
+      </AppLayout>
+    );
+    const view = render(content(false));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть меню", exact: true }));
+    await within(screen.getByRole("dialog", { name: "Меню приложения" })).findByRole("navigation", {
+      name: "Основная навигация",
+    });
+    view.rerender(content(true));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть меню", exact: true }));
+    expect(screen.queryByRole("dialog", { name: "Меню приложения" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Другое окно" })).toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    view.rerender(content(false));
+    expect(document.body.style.overflow).toBe(originalOverflow);
   });
 
   it("renders the offline banner in the shell instead of page content", () => {
