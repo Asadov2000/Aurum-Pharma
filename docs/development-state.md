@@ -71,9 +71,10 @@
 ## Быстрый цикл без ослабления CI
 
 - Backend, frontend, dependency audit, Chromium E2E, production containers и
-  verification tooling уже выполняются параллельно. Последний замер
-  `origin/main` завершил успешные application-gates за 17-284 секунды; дальнейшее
-  дробление тестов без отдельной worker-изоляции сейчас не оправдано.
+  verification tooling выполняются параллельно. Backend разделён на две
+  группы на отдельных runner со своими PostgreSQL, Redis и MinIO. Финальный
+  gate сверяет полный охват по manifest и JUnit обеих групп. Локальные
+  pytest и браузерные сценарии остаются последовательными.
 - `scripts/task-scope.ps1` классифицирует изменения fail-closed, а
   `scripts/verify-change.ps1` запускает целевые проверки в коротком локальном
   цикле. Неизвестные пути и критические области повышаются до полного риска.
