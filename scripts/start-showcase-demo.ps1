@@ -8,6 +8,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "demo-cors-origins.ps1")
+
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $composeFile = Join-Path $workspace "docker-compose.demo.yml"
 $seedModule = Join-Path $workspace "backend\app\seed_showcase.py"
@@ -377,7 +379,9 @@ function Invoke-DemoCompose {
         [string[]]$Arguments
     )
 
-    Invoke-DockerCommand -Title $Title -Arguments ($composeArgs + $Arguments)
+    Invoke-WithDemoCorsOrigins -OriginsJson $demoCorsOriginsJson -Action {
+        Invoke-DockerCommand -Title $Title -Arguments ($composeArgs + $Arguments)
+    }
 }
 
 function Stop-ConflictingDevContainers {
@@ -481,6 +485,12 @@ if (-not $SkipSeed -and -not $DryRun -and -not (Test-Path -LiteralPath $seedModu
 }
 
 Set-Location $workspace
+$demoCorsOriginsJson = if ($DryRun) {
+    Get-DemoCorsOriginsJson -ReadServeStatus { "" }
+}
+else {
+    Get-DemoCorsOriginsJson
+}
 
 Invoke-DockerCommand `
     -Title "Check Docker" `

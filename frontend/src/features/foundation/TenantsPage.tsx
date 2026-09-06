@@ -67,7 +67,7 @@ export function TenantsPage(): JSX.Element {
   const [supportRequestPending, setSupportRequestPending] = useState(false);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
-  const { data, isLoading, error } = useTenantsQuery(canViewTenants);
+  const { data, isPending, fetchStatus, error } = useTenantsQuery(canViewTenants);
 
   // Search + pagination are client-side: the API has no search param and the
   // tenant count is small (we already fetch up to 500).
@@ -124,8 +124,15 @@ export function TenantsPage(): JSX.Element {
         >
           {describeApiError(error, "Не удалось загрузить список")}
         </div>
-      ) : isLoading ? (
-        <SkeletonRows rows={6} />
+      ) : isPending ? (
+        <>
+          {fetchStatus === "paused" && (
+            <p role="status" className="text-sm text-foreground-muted">
+              Нет связи с сервером. Список загрузится автоматически после восстановления соединения.
+            </p>
+          )}
+          <SkeletonRows rows={6} />
+        </>
       ) : !data || data.length === 0 ? (
         <TableEmpty>Пока нет ни одной аптеки</TableEmpty>
       ) : filtered.length === 0 ? (

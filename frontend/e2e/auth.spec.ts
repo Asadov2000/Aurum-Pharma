@@ -77,6 +77,68 @@ test.describe("Auth", () => {
     await expect(page.getByRole("link", { name: "Управление", exact: true })).toHaveCount(0);
   });
 
+  test("independent desktop and mobile owner sessions keep the same branches after reload", async ({
+    page,
+    browser,
+    baseURL,
+  }) => {
+    const mobileContext = await browser.newContext({
+      baseURL,
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    try {
+      await loginInBrowser(page, OWNER);
+      await page.goto("/branches");
+      const desktopRows = page.getByRole("table").locator("tbody tr");
+      await expect(desktopRows.first()).toBeVisible();
+      const expectedRows = await desktopRows.allTextContents();
+      expect(expectedRows.length).toBeGreaterThan(0);
+      expect(
+        (await mobileContext.cookies()).some((cookie) => cookie.name === "aurum_refresh_token"),
+      ).toBe(false);
+
+      const mobilePage = await mobileContext.newPage();
+      await loginInBrowser(mobilePage, OWNER);
+      await mobilePage.goto("/branches");
+      const mobileRows = mobilePage.getByRole("table").locator("tbody tr");
+      await expect(mobileRows).toHaveText(expectedRows);
+      const desktopRefresh = (await page.context().cookies()).find(
+        (cookie) => cookie.name === "aurum_refresh_token",
+      );
+      const mobileRefresh = (await mobileContext.cookies()).find(
+        (cookie) => cookie.name === "aurum_refresh_token",
+      );
+      // Assert cookie isolation without printing either credential on failure.
+      expect(
+        Boolean(desktopRefresh && mobileRefresh && desktopRefresh.value !== mobileRefresh.value),
+      ).toBe(true);
+
+      const mobileRefreshResponse = mobilePage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/auth/refresh" &&
+          response.request().method() === "POST",
+      );
+      await mobilePage.reload();
+      expect((await mobileRefreshResponse).status()).toBe(200);
+      await expect(mobilePage).toHaveURL(/\/branches$/);
+      await expect(mobileRows).toHaveText(expectedRows);
+
+      const desktopRefreshResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/auth/refresh" &&
+          response.request().method() === "POST",
+      );
+      await page.reload();
+      expect((await desktopRefreshResponse).status()).toBe(200);
+      await expect(page).toHaveURL(/\/branches$/);
+      await expect(desktopRows).toHaveText(expectedRows);
+    } finally {
+      await mobileContext.close();
+    }
+  });
+
   test("owner reviews and revokes other active sessions", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await apiLogin(page.request, OWNER);

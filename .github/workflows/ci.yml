@@ -44,6 +44,7 @@ jobs:
           ./scripts/test-verification-tools.ps1
           ./scripts/test-pilot-readiness.ps1
           ./scripts/test-production-host-preflight.ps1
+          ./scripts/test-demo-cors-origins.ps1
 
       - name: Test backend shard report validation
         run: python scripts/test-backend-shards.py
@@ -55,6 +56,7 @@ jobs:
           ./scripts/test-verification-tools.ps1
           ./scripts/test-pilot-readiness.ps1
           ./scripts/test-manage-edge-cash-identity.ps1
+          ./scripts/test-demo-cors-origins.ps1
 
       - name: Test Edge identity Windows wrapper
         if: runner.os == 'Windows'
