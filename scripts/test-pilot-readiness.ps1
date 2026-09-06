@@ -133,3 +133,4 @@ finally {
 }
 
 Write-Host "Pilot readiness tooling tests passed ($script:assertions assertions)."
+exit 0

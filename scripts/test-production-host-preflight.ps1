@@ -185,7 +185,10 @@ New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
 try {
     $validRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "valid")).FullName
     $valid = Write-TestEnvironment -Root $validRoot
-    Assert-Equal -Actual (Invoke-Validator -Path $valid.EnvFile) -Expected 0 -Because "a complete production configuration passes"
+    Assert-Equal `
+        -Actual (Invoke-Validator -Path $valid.EnvFile -ReportUnexpectedFailure) `
+        -Expected 0 `
+        -Because "a complete production configuration passes"
     Remove-Item -LiteralPath (Join-Path $valid.Paths."internal-tls" "ca.key")
     Assert-Equal -Actual (Invoke-Validator -Path $valid.EnvFile) -Expected 0 -Because "the internal CA private key stays off the production host"
     if ([Environment]::OSVersion.Platform -ne "Win32NT") {
@@ -298,3 +301,4 @@ finally {
 }
 
 Write-Host "Production host preflight tests passed ($script:assertions assertions)."
+exit 0

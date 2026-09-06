@@ -20,9 +20,11 @@ approval="$root/approval"
 verified="$root/verified"
 authorization="$root/authorization"
 trusted="$root/trusted"
+internal_tls="$root/internal-tls"
 mkdir -p \
     "$secrets" "$repository" "$scratch" "$wal_archive" "$metrics" \
-    "$candidate" "$approval" "$verified" "$authorization" "$trusted"
+    "$candidate" "$approval" "$verified" "$authorization" "$trusted" \
+    "$internal_tls"
 
 cleanup() {
     status=$?
@@ -114,16 +116,26 @@ write_secret AURUM_BILLING_WORKER_PASSWORD "$billing_password"
 write_secret AURUM_WORKER_PASSWORD "$worker_password"
 write_secret AURUM_BACKUP_PASSWORD "$backup_password"
 write_secret AURUM_PITR_PASSWORD "$pitr_password"
-write_secret DATABASE_URL_APP "postgresql+asyncpg://aurum_app:$app_password@postgres:5432/aurum"
-write_secret DATABASE_URL_SUPPORT "postgresql+asyncpg://aurum_support:$support_password@postgres:5432/aurum"
-write_secret DATABASE_URL_MIGRATION "postgresql+asyncpg://aurum_migrator:$migrator_password@postgres:5432/aurum"
-write_secret DATABASE_URL_MAILER "postgresql+asyncpg://aurum_mailer:$mailer_password@postgres:5432/aurum"
-write_secret DATABASE_URL_BILLING_WORKER "postgresql+asyncpg://aurum_billing_worker:$billing_password@postgres:5432/aurum"
-write_secret DATABASE_URL_WORKER "postgresql+asyncpg://aurum_worker:$worker_password@postgres:5432/aurum"
-write_secret DATABASE_URL_BACKUP "postgresql://aurum_backup:$backup_password@postgres:5432/aurum"
-write_secret DATABASE_URL_PITR "postgresql://aurum_pitr:$pitr_password@postgres:5432/aurum"
+postgres_tls_query="sslmode=verify-full&sslrootcert=/run/tls/ca.crt"
+write_secret DATABASE_URL_APP \
+    "postgresql+asyncpg://aurum_app:$app_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_SUPPORT \
+    "postgresql+asyncpg://aurum_support:$support_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_MIGRATION \
+    "postgresql+asyncpg://aurum_migrator:$migrator_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_MAILER \
+    "postgresql+asyncpg://aurum_mailer:$mailer_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_BILLING_WORKER \
+    "postgresql+asyncpg://aurum_billing_worker:$billing_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_WORKER \
+    "postgresql+asyncpg://aurum_worker:$worker_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_BACKUP \
+    "postgresql://aurum_backup:$backup_password@postgres:5432/aurum?$postgres_tls_query"
+write_secret DATABASE_URL_PITR \
+    "postgresql://aurum_pitr:$pitr_password@postgres:5432/aurum?$postgres_tls_query"
 write_secret REDIS_PASSWORD "$redis_password"
-write_secret REDIS_URL "redis://:$redis_password@redis:6379/0"
+write_secret REDIS_URL \
+    "rediss://:$redis_password@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt"
 write_secret JWT_SECRET "$(random_hex 48)"
 write_secret MFA_ENCRYPTION_KEY "$(random_hex 48)"
 write_secret MFA_ENCRYPTION_PREVIOUS_KEYS '{}'
@@ -154,7 +166,13 @@ chmod 644 \
     "$secrets/AURUM_RECOVERY_SIGNING_PRIVATE_KEY.pem" \
     "$secrets/AURUM_RECOVERY_SIGNING_PUBLIC_KEY.pem"
 
+pwsh -NoProfile \
+    -File ./scripts/New-ProductionInternalTls.ps1 \
+    -OutputDirectory "$(host_bind_path "$internal_tls")" >/dev/null
+rm -f -- "$internal_tls/ca.key"
+
 export AURUM_SECRET_FILES_DIR="$(host_bind_path "$secrets")"
+export AURUM_INTERNAL_TLS_DIR="$(host_bind_path "$internal_tls")"
 export AURUM_BACKUP_REPOSITORY="$(host_bind_path "$repository")"
 export AURUM_BACKUP_SCRATCH="$(host_bind_path "$scratch")"
 export AURUM_WAL_ARCHIVE="$(host_bind_path "$wal_archive")"
@@ -320,7 +338,7 @@ compose run --rm minio-init
 compose run --rm --entrypoint /bin/sh minio-init -ec '
     root_user="$(cat /run/secrets/MINIO_ROOT_USER)"
     root_password="$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
-    mc --config-dir /tmp/.mc alias set local http://minio:9000 "$root_user" "$root_password" >/dev/null
+    mc --config-dir /tmp/.mc alias set local https://minio:9000 "$root_user" "$root_password" >/dev/null
     printf verified | mc --config-dir /tmp/.mc pipe local/aurum/recovery/probe.txt >/dev/null
 '
 
