@@ -52,6 +52,10 @@ class PermissionDeniedError(AurumError):
     message = "Permission denied"
 
 
+class AuthorizationPolicyDeniedError(PermissionDeniedError):
+    """A policy denial that must be recorded in the immutable audit ledger."""
+
+
 class AuthenticationError(AurumError):
     code = "authentication_required"
     http_status = 401

@@ -11,9 +11,16 @@ export const actionLabel: Record<string, string> = {
   EXPORT: "Экспорт",
   IMPERSONATE: "Служебный доступ",
   MEMBERSHIP_CREATED: "Сотрудник добавлен",
+  MEMBERSHIP_UPDATED: "Данные сотрудника изменены",
   MEMBERSHIP_ACTIVATED: "Доступ сотрудника активирован",
+  MEMBERSHIP_SUSPENDED: "Доступ сотрудника приостановлен",
+  MEMBERSHIP_OFFBOARDED: "Сотрудник отключён",
   OWNERSHIP_GRANTED: "Владелец назначен",
+  OWNERSHIP_REVOKED: "Полномочия владельца отозваны",
   ROLE_PERMISSIONS_CHANGED: "Права роли изменены",
+  ROLE_VERSION_PUBLISHED: "Новая версия роли опубликована",
+  ROLE_ARCHIVED_WITH_REPLACEMENT: "Роль отправлена в архив",
+  AUTHORIZATION_DENIED: "Опасное действие отклонено",
   login: "Вход",
   logout: "Выход",
   login_failed: "Ошибка входа",
@@ -30,7 +37,12 @@ export const actionTone = (
   const normalizedAction = action.toLowerCase();
   if (normalizedAction === "insert") return "success";
   if (normalizedAction === "update") return "info";
-  if (normalizedAction === "delete" || normalizedAction === "impersonate") return "danger";
+  if (
+    normalizedAction === "delete" ||
+    normalizedAction === "impersonate" ||
+    normalizedAction === "authorization_denied"
+  )
+    return "danger";
   if (normalizedAction.includes("failed") || normalizedAction.includes("revoke")) return "danger";
   if (normalizedAction.includes("ownership") || normalizedAction.includes("permissions")) {
     return "warning";
@@ -52,6 +64,7 @@ export const tableLabel: Record<string, string> = {
   user_assignment: "Назначение роли",
   tenant_membership: "Сотрудник аптеки",
   tenant_ownership: "Владелец аптеки",
+  authorization_policy: "Политика доступа",
   tenant_catalog: "Каталог",
   barcode: "Штрихкод",
   batch: "Партия",

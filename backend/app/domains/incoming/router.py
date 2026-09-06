@@ -9,7 +9,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_db, require_branch_permission
+from app.core.deps import (
+    CurrentUser,
+    get_db,
+    require_branch_permission,
+    require_recent_account_mfa,
+)
 from app.core.errors import BusinessRuleError
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.schemas import (
@@ -322,7 +327,11 @@ async def delete_item(
 # ---- accept / reject ----
 
 
-@router.post("/{document_id}/accept", response_model=IncomingDocumentRead)
+@router.post(
+    "/{document_id}/accept",
+    response_model=IncomingDocumentRead,
+    dependencies=[Depends(require_recent_account_mfa)],
+)
 async def accept_incoming(
     document_id: UUID,
     user: Annotated[
@@ -339,7 +348,11 @@ async def accept_incoming(
     return IncomingDocumentRead.model_validate(doc)
 
 
-@router.post("/{document_id}/reject", response_model=IncomingDocumentRead)
+@router.post(
+    "/{document_id}/reject",
+    response_model=IncomingDocumentRead,
+    dependencies=[Depends(require_recent_account_mfa)],
+)
 async def reject_incoming(
     document_id: UUID,
     user: Annotated[

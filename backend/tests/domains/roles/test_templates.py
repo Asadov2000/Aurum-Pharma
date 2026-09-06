@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
@@ -28,6 +29,32 @@ PROTECTED_GOVERNANCE_CODES = {
     "users.invite",
     "users.update",
 }
+
+
+async def test_permission_risk_metadata_is_fail_closed(db_session: AsyncSession) -> None:
+    critical_without_step_up = list(
+        (
+            await db_session.execute(
+                select(Permission.code).where(
+                    Permission.risk_level == "critical",
+                    Permission.requires_step_up.is_(False),
+                )
+            )
+        ).scalars()
+    )
+    dangerous_without_confirmation = list(
+        (
+            await db_session.execute(
+                select(Permission.code).where(
+                    Permission.is_dangerous.is_(True),
+                    Permission.requires_confirmation.is_(False),
+                )
+            )
+        ).scalars()
+    )
+
+    assert critical_without_step_up == []
+    assert dangerous_without_confirmation == []
 
 
 async def test_permission_scope_metadata_uses_explicit_capability_mapping(

@@ -14,10 +14,10 @@ from redis.asyncio import Redis
 from sqlalchemy.exc import DBAPIError
 
 from app.core.errors import (
+    AuthorizationPolicyDeniedError,
     BusinessRuleError,
     ConflictError,
     NotFoundError,
-    PermissionDeniedError,
     ValidationError,
 )
 from app.core.time import utc_now
@@ -94,7 +94,10 @@ def _is_assignment_concurrency_error(exc: DBAPIError) -> bool:
 def _ownership_transfer_error(exc: DBAPIError) -> Exception:
     sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
     if sqlstate == "42501":
-        return PermissionDeniedError("Передача владения недоступна для этого аккаунта")
+        return AuthorizationPolicyDeniedError(
+            "Передача владения недоступна для этого аккаунта",
+            details={"reason": "ownership_transfer_policy_denied"},
+        )
     if sqlstate in {"22023", "23514", "P0001"}:
         return BusinessRuleError("Запрос передачи владения недействителен или истёк")
     if sqlstate in {"23505", "40001", "40P01"}:
@@ -116,8 +119,9 @@ def _employee_invitation_error(exc: DBAPIError) -> Exception:
             details={"reason": "email_unavailable"},
         )
     if sqlstate == "42501":
-        return PermissionDeniedError(
-            "Создавать сотрудников может только активный владелец этой аптеки"
+        return AuthorizationPolicyDeniedError(
+            "Создавать сотрудников может только активный владелец этой аптеки",
+            details={"reason": "employee_invitation_policy_denied"},
         )
     if sqlstate in {"22004", "22023"}:
         return ValidationError("Проверьте данные сотрудника и повторите попытку")
@@ -128,7 +132,10 @@ def _employee_invitation_error(exc: DBAPIError) -> Exception:
 def _role_publication_error(exc: DBAPIError) -> Exception:
     sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
     if sqlstate == "42501":
-        return PermissionDeniedError("Публикация этой роли недоступна")
+        return AuthorizationPolicyDeniedError(
+            "Публикация этой роли недоступна",
+            details={"reason": "role_publication_policy_denied"},
+        )
     if sqlstate in {"23505", "40001", "40P01"}:
         return ConflictError("Роль изменилась; обновите страницу и повторите")
     if sqlstate in {"22023", "23514", "P0001"}:
@@ -264,7 +271,10 @@ class RolesService:
             tenant_id=tenant_id,
             user_id=actor_id,
         ):
-            raise PermissionDeniedError("Active tenant ownership is required")
+            raise AuthorizationPolicyDeniedError(
+                "Active tenant ownership is required",
+                details={"reason": "active_tenant_ownership_required"},
+            )
         return [
             permission
             for permission in permissions
@@ -301,9 +311,12 @@ class RolesService:
         allowed = {permission.code for permission in catalog}
         unavailable = sorted(set(codes) - allowed)
         if unavailable:
-            raise PermissionDeniedError(
+            raise AuthorizationPolicyDeniedError(
                 "Permissions are outside the delegation envelope",
-                details={"permissions": unavailable},
+                details={
+                    "reason": "delegation_envelope_exceeded",
+                    "permissions": unavailable,
+                },
             )
 
         return sorted(codes)
@@ -633,13 +646,19 @@ class RolesService:
                 },
             )
         if role.is_system or role.is_protected:
-            raise PermissionDeniedError("Protected roles cannot be modified")
+            raise AuthorizationPolicyDeniedError(
+                "Protected roles cannot be modified",
+                details={"reason": "protected_role_mutation_denied"},
+            )
         if await self.repo.user_has_active_role(
             tenant_id=tenant_id,
             user_id=actor_id,
             role_id=role.id,
         ):
-            raise PermissionDeniedError("You cannot change your own active role")
+            raise AuthorizationPolicyDeniedError(
+                "You cannot change your own active role",
+                details={"reason": "self_role_mutation_denied"},
+            )
 
         current_codes = await self.repo.get_role_permissions(role.id)
         catalog = await self._delegation_catalog(
@@ -651,8 +670,9 @@ class RolesService:
         )
         allowed = {permission.code for permission in catalog}
         if set(current_codes) - allowed:
-            raise PermissionDeniedError(
-                "Role contains capabilities outside the delegation envelope"
+            raise AuthorizationPolicyDeniedError(
+                "Role contains capabilities outside the delegation envelope",
+                details={"reason": "managed_role_outside_delegation_envelope"},
             )
         requested_codes = current_codes if permission_codes is None else permission_codes
         codes = await self._validated_role_permissions(
@@ -767,7 +787,10 @@ class RolesService:
     @staticmethod
     def _assert_role_name_available(name: str) -> None:
         if name.strip().casefold() in RESERVED_ROLE_NAMES:
-            raise PermissionDeniedError("Protected role names are reserved")
+            raise AuthorizationPolicyDeniedError(
+                "Protected role names are reserved",
+                details={"reason": "protected_role_name_denied"},
+            )
 
     # -------------------------------------------------------------------------
     # Tenant directory and account lifecycle
@@ -917,7 +940,10 @@ class RolesService:
         if result.result == "not_found":
             raise NotFoundError("Membership not found")
         if result.result == "protected":
-            raise PermissionDeniedError("Protected account sessions cannot be ended here")
+            raise AuthorizationPolicyDeniedError(
+                "Protected account sessions cannot be ended here",
+                details={"reason": "protected_account_session_denied"},
+            )
         if result.result != "revoked":
             raise RuntimeError("Unexpected administrative session revocation result")
         logger.info(
@@ -974,7 +1000,10 @@ class RolesService:
             if await self.repo.count_active_owners(tenant_id) <= 1:
                 raise BusinessRuleError("The last active owner cannot be changed")
             if not actor_is_developer:
-                raise PermissionDeniedError("Owner lifecycle requires a protected support workflow")
+                raise AuthorizationPolicyDeniedError(
+                    "Owner lifecycle requires a protected support workflow",
+                    details={"reason": "owner_lifecycle_policy_denied"},
+                )
 
         now = utc_now()
         if not await self.repo.set_membership_status(
@@ -1033,7 +1062,10 @@ class RolesService:
             actor_is_developer=actor_is_developer,
             actor_is_administrator=actor_is_administrator,
         ):
-            raise PermissionDeniedError("Assignment is outside your authorized branch scope")
+            raise AuthorizationPolicyDeniedError(
+                "Assignment is outside your authorized branch scope",
+                details={"reason": "assignment_scope_exceeded"},
+            )
 
     def _assert_role_delegation_at_scope(
         self,
@@ -1058,9 +1090,12 @@ class RolesService:
             )
         )
         if unavailable:
-            raise PermissionDeniedError(
+            raise AuthorizationPolicyDeniedError(
                 "Role capabilities are outside your target assignment scope",
-                details={"permissions": unavailable},
+                details={
+                    "reason": "assignment_delegation_envelope_exceeded",
+                    "permissions": unavailable,
+                },
             )
 
     async def _assert_assignment_target_is_not_owner(
@@ -1074,8 +1109,9 @@ class RolesService:
             membership_id=membership_id,
         )
         if ownership is not None:
-            raise PermissionDeniedError(
-                "Owner assignments require the protected ownership workflow"
+            raise AuthorizationPolicyDeniedError(
+                "Owner assignments require the protected ownership workflow",
+                details={"reason": "owner_assignment_policy_denied"},
             )
 
     async def invite_user(
@@ -1107,8 +1143,9 @@ class RolesService:
                 user_id=actor_id,
             )
         ):
-            raise PermissionDeniedError(
-                "Создавать сотрудников может только активный владелец этой аптеки"
+            raise AuthorizationPolicyDeniedError(
+                "Создавать сотрудников может только активный владелец этой аптеки",
+                details={"reason": "employee_invitation_policy_denied"},
             )
 
         try:
@@ -1261,7 +1298,10 @@ class RolesService:
         if not await self.repo.lock_tenant_authorization(tenant_id):
             raise NotFoundError("Tenant not found")
         if actor_id == target_user_id:
-            raise PermissionDeniedError("You cannot assign privileges to yourself")
+            raise AuthorizationPolicyDeniedError(
+                "You cannot assign privileges to yourself",
+                details={"reason": "self_assignment_denied"},
+            )
         if not branch_ids or len(set(branch_ids)) != len(branch_ids):
             raise ValidationError("Assignment scopes must be present and unique")
         if None in branch_ids and len(branch_ids) > 1:
@@ -1271,7 +1311,10 @@ class RolesService:
         if role is None or not role.is_active or role.tenant_id != tenant_id or role.is_system:
             raise NotFoundError("Role not found")
         if role.is_protected:
-            raise PermissionDeniedError("Protected roles cannot be assigned")
+            raise AuthorizationPolicyDeniedError(
+                "Protected roles cannot be assigned",
+                details={"reason": "protected_role_assignment_denied"},
+            )
 
         role_codes = await self.repo.get_role_permissions(role.id)
         await self._validated_role_permissions(
@@ -1425,7 +1468,10 @@ class RolesService:
         for assignment in assignments_to_revoke:
             existing_role = await self.repo.get_role(assignment.role_id)
             if existing_role is None or existing_role.is_protected:
-                raise PermissionDeniedError("Protected role assignments cannot be replaced")
+                raise AuthorizationPolicyDeniedError(
+                    "Protected role assignments cannot be replaced",
+                    details={"reason": "protected_role_assignment_replace_denied"},
+                )
             existing_role_codes = await self.repo.get_role_permissions(existing_role.id)
             await self._validated_role_permissions(
                 actor_id=actor_id,
@@ -1541,7 +1587,10 @@ class RolesService:
         assignment_id: UUID,
     ) -> None:
         if actor_id == target_user_id:
-            raise PermissionDeniedError("You cannot revoke your own privileges")
+            raise AuthorizationPolicyDeniedError(
+                "You cannot revoke your own privileges",
+                details={"reason": "self_assignment_revoke_denied"},
+            )
         if not await self.repo.lock_tenant_authorization(tenant_id):
             raise NotFoundError("Tenant not found")
         await self.repo.lock_user_assignments(tenant_id, target_user_id)
@@ -1560,7 +1609,10 @@ class RolesService:
         if role is None:
             raise NotFoundError("Role not found")
         if role.is_protected:
-            raise PermissionDeniedError("Protected role assignments cannot be revoked")
+            raise AuthorizationPolicyDeniedError(
+                "Protected role assignments cannot be revoked",
+                details={"reason": "protected_role_assignment_revoke_denied"},
+            )
         await self._validated_role_permissions(
             actor_id=actor_id,
             tenant_id=tenant_id,

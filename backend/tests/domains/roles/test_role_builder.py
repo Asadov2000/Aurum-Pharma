@@ -133,7 +133,10 @@ async def test_owner_cannot_grant_global_protected_or_unknown_permission(
             description=None,
             permission_codes=["audit.view.global"],
         )
-    assert global_error.value.details == {"permissions": ["audit.view.global"]}
+    assert global_error.value.details == {
+        "reason": "delegation_envelope_exceeded",
+        "permissions": ["audit.view.global"],
+    }
 
     with pytest.raises(PermissionDeniedError) as governance_error:
         await service.create_role(
@@ -146,7 +149,10 @@ async def test_owner_cannot_grant_global_protected_or_unknown_permission(
             description=None,
             permission_codes=["roles.assign"],
         )
-    assert governance_error.value.details == {"permissions": ["roles.assign"]}
+    assert governance_error.value.details == {
+        "reason": "delegation_envelope_exceeded",
+        "permissions": ["roles.assign"],
+    }
 
     with pytest.raises(ValidationError) as unknown_error:
         await service.create_role(
@@ -198,7 +204,10 @@ async def test_tenant_role_never_receives_platform_scope_from_malformed_catalog(
             description=None,
             permission_codes=["pos.sell"],
         )
-    assert error.value.details == {"permissions": ["pos.sell"]}
+    assert error.value.details == {
+        "reason": "delegation_envelope_exceeded",
+        "permissions": ["pos.sell"],
+    }
 
 
 async def test_protected_owner_role_cannot_be_edited(

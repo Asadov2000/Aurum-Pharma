@@ -246,6 +246,22 @@ class AuditService:
             metadata_json=_redact_dict(metadata),
         )
 
+    async def log_authorization_denied(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        metadata: dict[str, Any],
+    ) -> AuditLog:
+        return await self.repo.insert_entry(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action="AUTHORIZATION_DENIED",
+            table_name="authorization_policy",
+            record_id=None,
+            metadata_json=_redact_dict(metadata),
+        )
+
     # ---- PII filter for read-side serialization ----
 
     @staticmethod

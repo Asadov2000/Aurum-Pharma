@@ -31,7 +31,7 @@ import { type AuditEntry, type AuditScope } from "./types";
 const PAGE_SIZE = 50;
 
 const WRITE_ACTIONS = new Set(["INSERT", "UPDATE", "DELETE"]);
-const ATTENTION_ACTIONS = new Set(["DELETE", "IMPERSONATE", "ROLE_REVOKE"]);
+const ATTENTION_ACTIONS = new Set(["DELETE", "IMPERSONATE", "ROLE_REVOKE", "AUTHORIZATION_DENIED"]);
 
 const actionOptions = [
   "INSERT",
@@ -41,9 +41,16 @@ const actionOptions = [
   "EXPORT",
   "IMPERSONATE",
   "MEMBERSHIP_CREATED",
+  "MEMBERSHIP_UPDATED",
   "MEMBERSHIP_ACTIVATED",
+  "MEMBERSHIP_SUSPENDED",
+  "MEMBERSHIP_OFFBOARDED",
   "OWNERSHIP_GRANTED",
+  "OWNERSHIP_REVOKED",
   "ROLE_PERMISSIONS_CHANGED",
+  "ROLE_VERSION_PUBLISHED",
+  "ROLE_ARCHIVED_WITH_REPLACEMENT",
+  "AUTHORIZATION_DENIED",
 ] as const;
 
 const scopeLabel: Record<AuditScope, string> = {

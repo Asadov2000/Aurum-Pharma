@@ -21,6 +21,7 @@ from app.core.deps import (
     require_any_branch_permission,
     require_branch_permission,
     require_permission,
+    require_recent_account_mfa,
     require_writable_tenant,
 )
 from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
@@ -638,7 +639,10 @@ async def begin_pos_refund_attempt_reconciliation(
 @router.post(
     "/pos/refund-attempts/{attempt_id}/confirm",
     response_model=POSRefundAttemptRead,
-    dependencies=[Depends(require_writable_tenant)],
+    dependencies=[
+        Depends(require_writable_tenant),
+        Depends(require_recent_account_mfa),
+    ],
 )
 async def confirm_pos_refund_attempt(
     attempt_id: UUID,

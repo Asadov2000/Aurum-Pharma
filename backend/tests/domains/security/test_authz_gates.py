@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.deps import _seed_request_db_context, get_db
+from app.core.time import utc_now
 from app.domains.audit.models import AuditLog
 from app.domains.auth.models import AppUser
 from app.domains.catalog.image_processing import CatalogImageVariants
@@ -1755,7 +1756,12 @@ async def test_electronic_refund_confirmation_requires_separate_permission(
         )
         sale = await pos.complete(sale_id=sale.id)
 
-        cashier_headers = {"Authorization": f"Bearer {await _token(db_session, cashier)}"}
+        cashier_token = await create_tenant_access_token(
+            db_session,
+            cashier,
+            mfa_verified_at=utc_now(),
+        )
+        cashier_headers = {"Authorization": f"Bearer {cashier_token}"}
         create_response = await client.post(
             f"/api/v1/sales/{sale.id}/refund-attempts",
             headers=cashier_headers,
@@ -1795,9 +1801,14 @@ async def test_electronic_refund_confirmation_requires_separate_permission(
         )
         assert denied_void.status_code == 403
 
+        approver_token = await create_tenant_access_token(
+            db_session,
+            approver,
+            mfa_verified_at=utc_now(),
+        )
         approved = await client.post(
             f"/api/v1/pos/refund-attempts/{attempt_id}/confirm",
-            headers={"Authorization": f"Bearer {await _token(db_session, approver)}"},
+            headers={"Authorization": f"Bearer {approver_token}"},
             json=confirmation,
         )
         assert approved.status_code == 200

@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audit.models import AuditLog
@@ -358,3 +358,47 @@ async def test_explicit_log_view_writes_row(db_session: AsyncSession) -> None:
     assert found.action == "VIEW"
     assert found.metadata_json is not None
     assert found.metadata_json["purchase_price"] == "***"
+
+
+async def test_explicit_authorization_denial_is_append_only_and_redacted(
+    db_session: AsyncSession,
+) -> None:
+    foundation = FoundationService(FoundationRepository(db_session))
+    tenant = await foundation.create_tenant(
+        payload={
+            "name": "Authorization audit tenant",
+            "contact_email": f"authorization-audit-{uuid4().hex[:6]}@aurum.test",
+        }
+    )
+    user_id = uuid4()
+    await db_session.execute(
+        text("""
+            INSERT INTO public.app_user (id, email, full_name, home_tenant_id)
+            VALUES (:id, :email, 'Audit actor', :tenant_id)
+            """),
+        {
+            "id": user_id,
+            "email": f"authorization-actor-{uuid4().hex[:6]}@aurum.test",
+            "tenant_id": tenant.id,
+        },
+    )
+    service = AuditService(AuditRepository(db_session))
+
+    entry = await service.log_authorization_denied(
+        tenant_id=tenant.id,
+        user_id=user_id,
+        metadata={
+            "result": "denied",
+            "reason": "self_assignment_denied",
+            "method": "POST",
+            "path": "/api/v1/users/{user_id}/assignments",
+            "email": "must-not-appear@aurum.test",
+        },
+    )
+
+    assert entry.action == "AUTHORIZATION_DENIED"
+    assert entry.table_name == "authorization_policy"
+    assert entry.record_id is None
+    assert entry.metadata_json is not None
+    assert entry.metadata_json["reason"] == "self_assignment_denied"
+    assert entry.metadata_json["email"] == "***"

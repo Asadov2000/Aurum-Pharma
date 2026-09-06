@@ -92,6 +92,14 @@ class Permission(Base):
             "risk_level IN ('normal','sensitive','critical')",
             name="ck_permission_risk_level",
         ),
+        CheckConstraint(
+            "risk_level <> 'critical' OR requires_step_up",
+            name="ck_permission_critical_requires_step_up",
+        ),
+        CheckConstraint(
+            "NOT is_dangerous OR requires_confirmation",
+            name="ck_permission_dangerous_requires_confirmation",
+        ),
     )
 
 
