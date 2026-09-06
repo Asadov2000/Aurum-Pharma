@@ -13,8 +13,9 @@
    реализованы, но до production нужно создать внешний bucket в допустимом
    регионе, подключить freshness/free-space alerts и измерить RPO/RTO на объёме
    пилота.
-2. **P0:** внутренние соединения с PostgreSQL, Redis и MinIO еще не переведены
-   на production TLS.
+2. **P0:** внутренний TLS для PostgreSQL, Redis и MinIO реализован fail-closed и
+   проверен изолированным Docker smoke test; до production остаются staging
+   deployment, репетиция ротации сертификатов и внешние expiry-оповещения.
 3. **P0:** production-секреты еще не выданы через внешний secret storage, а
    staging deployment и restore на объёме пилота не отрепетированы.
 4. **P1:** release images пока не публикуются по digest и не подписываются

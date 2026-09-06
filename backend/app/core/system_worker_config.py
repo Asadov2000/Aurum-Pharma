@@ -12,6 +12,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 from app.core.celery_broker_config import CeleryBrokerSettings
+from app.core.config import _database_security_problems, _redis_security_problems
 
 
 class SystemWorkerSettings(CeleryBrokerSettings):
@@ -37,6 +38,7 @@ class SystemWorkerSettings(CeleryBrokerSettings):
             database = make_url(self.DATABASE_URL_WORKER)
         except ArgumentError:
             database = None
+        problems: list[str] = []
         if (
             database is None
             or database.username != "aurum_worker"
@@ -44,8 +46,14 @@ class SystemWorkerSettings(CeleryBrokerSettings):
             or not database.host
             or "aurum_worker_pw" in self.DATABASE_URL_WORKER
         ):
+            problems.append("DATABASE_URL_WORKER must use non-placeholder aurum_worker credentials")
+        problems.extend(
+            _database_security_problems("DATABASE_URL_WORKER", self.DATABASE_URL_WORKER)
+        )
+        problems.extend(_redis_security_problems(self.REDIS_URL))
+        if problems:
             raise ValueError(
-                "DATABASE_URL_WORKER must use non-placeholder aurum_worker credentials"
+                "Refusing to start insecure system worker:\n- " + "\n- ".join(problems)
             )
         return self
 

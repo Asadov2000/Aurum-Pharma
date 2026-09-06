@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $validator = Join-Path $PSScriptRoot "Test-ProductionHostPreflight.ps1"
 $generator = Join-Path $PSScriptRoot "New-ProductionSecrets.ps1"
+$tlsGenerator = Join-Path $PSScriptRoot "New-ProductionInternalTls.ps1"
 $compose = Join-Path (Split-Path $PSScriptRoot -Parent) "docker-compose.production.yml"
 $powershellExecutable = (Get-Process -Id $PID).Path
 $script:assertions = 0
@@ -57,7 +58,8 @@ function Invoke-Validator {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [switch]$CheckUnixPermissions,
-        [switch]$CheckBackupMount
+        [switch]$CheckBackupMount,
+        [switch]$ReportUnexpectedFailure
     )
 
     $arguments = @("-NoProfile")
@@ -75,8 +77,12 @@ function Invoke-Validator {
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        & $powershellExecutable @arguments *> $null
-        return $LASTEXITCODE
+        $output = @(& $powershellExecutable @arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        if ($ReportUnexpectedFailure -and $exitCode -ne 0) {
+            $output | ForEach-Object { Write-Warning "$_" }
+        }
+        return $exitCode
     }
     finally {
         $ErrorActionPreference = $previousPreference
@@ -92,6 +98,7 @@ function Write-TestEnvironment {
     $paths = @{}
     foreach ($name in @(
         "secrets", "backup-repository", "backup-scratch", "wal-archive",
+        "internal-tls",
         "recovery-metrics", "offsite-secrets", "offsite-restore-secrets",
         "recovery-trust-secrets", "offsite-candidates", "offsite-approvals",
         "verified-checkpoints", "signing-authorizations", "trusted-checkpoints"
@@ -101,6 +108,13 @@ function Write-TestEnvironment {
     foreach ($name in $secretNames) {
         [IO.File]::WriteAllText((Join-Path $paths.secrets $name), "test-value")
     }
+    & $powershellExecutable `
+        -NoProfile `
+        -File $tlsGenerator `
+        -OutputDirectory $paths."internal-tls" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to generate test internal TLS material."
+    }
     $workerPassword = "worker-test-password"
     [IO.File]::WriteAllText(
         (Join-Path $paths.secrets "AURUM_WORKER_PASSWORD"),
@@ -108,7 +122,26 @@ function Write-TestEnvironment {
     )
     [IO.File]::WriteAllText(
         (Join-Path $paths.secrets "DATABASE_URL_WORKER"),
-        "postgresql+asyncpg://aurum_worker:$workerPassword@postgres:5432/aurum"
+        "postgresql+asyncpg://aurum_worker:$workerPassword@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt"
+    )
+    foreach ($name in @(
+        "DATABASE_URL_APP", "DATABASE_URL_SUPPORT", "DATABASE_URL_MAILER",
+        "DATABASE_URL_BILLING_WORKER", "DATABASE_URL_MIGRATION"
+    )) {
+        [IO.File]::WriteAllText(
+            (Join-Path $paths.secrets $name),
+            "postgresql+asyncpg://test:test-password@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt"
+        )
+    }
+    foreach ($name in @("DATABASE_URL_BACKUP", "DATABASE_URL_PITR")) {
+        [IO.File]::WriteAllText(
+            (Join-Path $paths.secrets $name),
+            "postgresql://test:test-password@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt"
+        )
+    }
+    [IO.File]::WriteAllText(
+        (Join-Path $paths.secrets "REDIS_URL"),
+        "rediss://:test-password@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt"
     )
 
     $settings = [ordered]@{
@@ -116,6 +149,7 @@ function Write-TestEnvironment {
         AURUM_PUBLIC_ORIGIN = "https://staging.aurum.tj"
         AURUM_ACME_EMAIL = "ops@aurum.tj"
         AURUM_SECRET_FILES_DIR = $paths.secrets
+        AURUM_INTERNAL_TLS_DIR = $paths."internal-tls"
         AURUM_BACKUP_FILESYSTEM_ROOT = $Root
         AURUM_BACKUP_REPOSITORY = $paths."backup-repository"
         AURUM_BACKUP_SCRATCH = $paths."backup-scratch"
@@ -152,6 +186,8 @@ try {
     $validRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "valid")).FullName
     $valid = Write-TestEnvironment -Root $validRoot
     Assert-Equal -Actual (Invoke-Validator -Path $valid.EnvFile) -Expected 0 -Because "a complete production configuration passes"
+    Remove-Item -LiteralPath (Join-Path $valid.Paths."internal-tls" "ca.key")
+    Assert-Equal -Actual (Invoke-Validator -Path $valid.EnvFile) -Expected 0 -Because "the internal CA private key stays off the production host"
     if ([Environment]::OSVersion.Platform -ne "Win32NT") {
         Assert-Equal -Actual (Invoke-Validator -Path $valid.EnvFile -CheckBackupMount) -Expected 2 -Because "a plain directory cannot impersonate the backup filesystem"
         Assert-Equal -Actual (Invoke-Validator -Path $valid.EnvFile -CheckUnixPermissions) -Expected 2 -Because "unsafe Unix secret permissions are rejected"
@@ -159,7 +195,19 @@ try {
         Get-ChildItem -LiteralPath $valid.Paths.secrets -File | ForEach-Object {
             & chmod 600 -- $_.FullName
         }
-        Assert-Equal -Actual (Invoke-Validator -Path $valid.EnvFile -CheckUnixPermissions) -Expected 0 -Because "private Unix secret permissions pass"
+        & chmod 700 -- $valid.Paths."internal-tls"
+        foreach ($name in @("postgres.key", "redis.key", "minio.key")) {
+            & chmod 600 -- (Join-Path $valid.Paths."internal-tls" $name)
+        }
+        Assert-Equal `
+            -Actual (
+                Invoke-Validator `
+                    -Path $valid.EnvFile `
+                    -CheckUnixPermissions `
+                    -ReportUnexpectedFailure
+            ) `
+            -Expected 0 `
+            -Because "private Unix secret permissions pass"
     }
 
     $placeholderRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "placeholder")).FullName
@@ -184,6 +232,35 @@ try {
     $missing = Write-TestEnvironment -Root $missingRoot
     Remove-Item -LiteralPath (Join-Path $missing.Paths.secrets "JWT_SECRET")
     Assert-Equal -Actual (Invoke-Validator -Path $missing.EnvFile) -Expected 2 -Because "missing secrets are rejected"
+
+    $missingTlsRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "missing-tls")).FullName
+    $missingTls = Write-TestEnvironment -Root $missingTlsRoot
+    Remove-Item -LiteralPath (Join-Path $missingTls.Paths."internal-tls" "redis.key")
+    Assert-Equal -Actual (Invoke-Validator -Path $missingTls.EnvFile) -Expected 2 -Because "missing internal TLS material is rejected"
+
+    $wrongTlsKeyRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "wrong-tls-key")).FullName
+    $wrongTlsKey = Write-TestEnvironment -Root $wrongTlsKeyRoot
+    Copy-Item `
+        -LiteralPath (Join-Path $wrongTlsKey.Paths."internal-tls" "minio.key") `
+        -Destination (Join-Path $wrongTlsKey.Paths."internal-tls" "redis.key") `
+        -Force
+    Assert-Equal -Actual (Invoke-Validator -Path $wrongTlsKey.EnvFile) -Expected 2 -Because "a certificate and private key mismatch is rejected"
+
+    $plainDatabaseRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "plain-database")).FullName
+    $plainDatabase = Write-TestEnvironment -Root $plainDatabaseRoot
+    [IO.File]::WriteAllText(
+        (Join-Path $plainDatabase.Paths.secrets "DATABASE_URL_APP"),
+        "postgresql+asyncpg://test:test-password@postgres:5432/aurum"
+    )
+    Assert-Equal -Actual (Invoke-Validator -Path $plainDatabase.EnvFile) -Expected 2 -Because "plaintext PostgreSQL transport is rejected"
+
+    $plainRedisRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "plain-redis")).FullName
+    $plainRedis = Write-TestEnvironment -Root $plainRedisRoot
+    [IO.File]::WriteAllText(
+        (Join-Path $plainRedis.Paths.secrets "REDIS_URL"),
+        "redis://:test-password@redis:6379/0"
+    )
+    Assert-Equal -Actual (Invoke-Validator -Path $plainRedis.EnvFile) -Expected 2 -Because "plaintext Redis transport is rejected"
 
     $multilineRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "multiline")).FullName
     $multiline = Write-TestEnvironment -Root $multilineRoot

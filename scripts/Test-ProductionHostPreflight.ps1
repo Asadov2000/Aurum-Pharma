@@ -24,6 +24,7 @@ $requiredSettings = @(
     "AURUM_PUBLIC_ORIGIN",
     "AURUM_ACME_EMAIL",
     "AURUM_SECRET_FILES_DIR",
+    "AURUM_INTERNAL_TLS_DIR",
     "AURUM_BACKUP_FILESYSTEM_ROOT",
     "AURUM_BACKUP_REPOSITORY",
     "AURUM_BACKUP_SCRATCH",
@@ -81,6 +82,7 @@ $requiredSecrets = @(
 
 $externalDirectorySettings = @(
     "AURUM_SECRET_FILES_DIR",
+    "AURUM_INTERNAL_TLS_DIR",
     "AURUM_BACKUP_FILESYSTEM_ROOT",
     "AURUM_BACKUP_REPOSITORY",
     "AURUM_BACKUP_SCRATCH",
@@ -165,7 +167,7 @@ function Get-UnixMode {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $mode = (& stat -c '%a' -- $Path 2>$null | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or "$mode" -notmatch '^[0-7]{3,4}$') {
+    if ("$mode" -notmatch '^[0-7]{3,4}$') {
         throw "Cannot inspect Unix permissions for a production path."
     }
     return [Convert]::ToInt32("$mode", 8)
@@ -210,7 +212,7 @@ function Assert-WorkerDatabaseUrl {
         $uri.Host -cne "postgres" -or
         $uri.Port -ne 5432 -or
         $uri.AbsolutePath -cne "/aurum" -or
-        $uri.Query.Length -gt 0 -or
+        $uri.Query -cne "?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -or
         $uri.Fragment.Length -gt 0
     ) {
         throw "DATABASE_URL_WORKER must target aurum_worker on postgres:5432/aurum."
@@ -224,6 +226,136 @@ function Assert-WorkerDatabaseUrl {
     $password = [Uri]::UnescapeDataString($uri.UserInfo.Substring($separator + 1))
     if ($username -cne "aurum_worker" -or $password -cne $ExpectedPassword) {
         throw "DATABASE_URL_WORKER credentials must match AURUM_WORKER_PASSWORD."
+    }
+}
+
+function Assert-InternalTransportUrls {
+    param([Parameter(Mandatory = $true)][hashtable]$SecretValues)
+
+    foreach ($name in @(
+        "DATABASE_URL_APP", "DATABASE_URL_SUPPORT", "DATABASE_URL_MAILER",
+        "DATABASE_URL_BILLING_WORKER", "DATABASE_URL_WORKER",
+        "DATABASE_URL_MIGRATION", "DATABASE_URL_BACKUP", "DATABASE_URL_PITR"
+    )) {
+        $uri = $null
+        $value = $SecretValues[$name]
+        if (-not [Uri]::TryCreate($value, [UriKind]::Absolute, [ref]$uri)) {
+            throw "$name must be an absolute PostgreSQL URL."
+        }
+        $expectedScheme = if ($name -in @("DATABASE_URL_BACKUP", "DATABASE_URL_PITR")) {
+            "postgresql"
+        } else {
+            "postgresql+asyncpg"
+        }
+        if (
+            $uri.Scheme -cne $expectedScheme -or
+            $uri.Host -cne "postgres" -or
+            $uri.Port -ne 5432 -or
+            $uri.AbsolutePath -cne "/aurum" -or
+            $uri.Query -cne "?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -or
+            $uri.Fragment.Length -gt 0
+        ) {
+            throw "$name must use verify-full TLS to postgres:5432/aurum."
+        }
+    }
+
+    $redisUri = $null
+    if (-not [Uri]::TryCreate($SecretValues.REDIS_URL, [UriKind]::Absolute, [ref]$redisUri)) {
+        throw "REDIS_URL must be an absolute Redis URL."
+    }
+    if (
+        $redisUri.Scheme -cne "rediss" -or
+        $redisUri.Host -cne "redis" -or
+        $redisUri.Port -ne 6379 -or
+        $redisUri.AbsolutePath -cne "/0" -or
+        $redisUri.Query -cne "?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -or
+        $redisUri.Fragment.Length -gt 0
+    ) {
+        throw "REDIS_URL must require verified TLS to redis:6379/0."
+    }
+}
+
+function Assert-InternalTlsMaterial {
+    param([Parameter(Mandatory = $true)][string]$Directory)
+
+    $directoryItem = Get-Item -LiteralPath $Directory -Force
+    if ($directoryItem.PSObject.Properties["LinkType"] -and $directoryItem.LinkType) {
+        throw "AURUM_INTERNAL_TLS_DIR cannot be a symbolic link."
+    }
+
+    $requiredFiles = @(
+        "ca.crt", "postgres.crt", "postgres.key",
+        "redis.crt", "redis.key", "minio.crt", "minio.key"
+    )
+    foreach ($name in $requiredFiles) {
+        $path = Join-Path $Directory $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Required internal TLS file is missing: $name."
+        }
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSObject.Properties["LinkType"] -and $item.LinkType) {
+            throw "Internal TLS file cannot be a symbolic link: $name."
+        }
+    }
+
+    $caPath = Join-Path $Directory "ca.crt"
+    $ca = [Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPem(
+        [IO.File]::ReadAllText($caPath)
+    )
+    try {
+        $caConstraint = @(
+            $ca.Extensions |
+                Where-Object {
+                    $_ -is [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]
+                }
+        ) | Select-Object -First 1
+        if (-not $caConstraint -or -not $caConstraint.CertificateAuthority) {
+            throw "ca.crt must be a certificate authority certificate."
+        }
+        if ($ca.NotAfter.ToUniversalTime() -le [DateTime]::UtcNow.AddDays(90)) {
+            throw "Internal CA certificate expires in 90 days or less."
+        }
+
+        foreach ($service in @("postgres", "redis", "minio")) {
+            $certificatePath = Join-Path $Directory "$service.crt"
+            $keyPath = Join-Path $Directory "$service.key"
+            $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPemFile(
+                $certificatePath,
+                $keyPath
+            )
+            try {
+                if (-not $certificate.HasPrivateKey) {
+                    throw "$service certificate does not match its private key."
+                }
+                if (
+                    $certificate.GetNameInfo(
+                        [Security.Cryptography.X509Certificates.X509NameType]::DnsName,
+                        $false
+                    ) -cne $service
+                ) {
+                    throw "$service certificate must identify the service DNS name."
+                }
+                if ($certificate.NotAfter.ToUniversalTime() -le [DateTime]::UtcNow.AddDays(30)) {
+                    throw "$service certificate expires in 30 days or less."
+                }
+
+                $chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
+                try {
+                    $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+                    $chain.ChainPolicy.TrustMode = [Security.Cryptography.X509Certificates.X509ChainTrustMode]::CustomRootTrust
+                    [void]$chain.ChainPolicy.CustomTrustStore.Add($ca)
+                    if (-not $chain.Build($certificate)) {
+                        throw "$service certificate is not trusted by ca.crt."
+                    }
+                } finally {
+                    $chain.Dispose()
+                }
+            } finally {
+                $certificate.Dispose()
+            }
+        }
+    } finally {
+        $ca.Dispose()
     }
 }
 
@@ -299,7 +431,7 @@ try {
             throw "Production backup mount checks require Linux and PowerShell 7."
         }
         $mountTarget = (& findmnt -n -o TARGET --mountpoint $backupRoot 2>$null | Select-Object -First 1)
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace("$mountTarget")) {
+        if ([string]::IsNullOrWhiteSpace("$mountTarget")) {
             throw "AURUM_BACKUP_FILESYSTEM_ROOT must be a mounted filesystem."
         }
         $resolvedMountTarget = [IO.Path]::GetFullPath("$mountTarget")
@@ -341,6 +473,9 @@ try {
     Assert-WorkerDatabaseUrl `
         -Value $secretValues.DATABASE_URL_WORKER `
         -ExpectedPassword $secretValues.AURUM_WORKER_PASSWORD
+    Assert-InternalTransportUrls -SecretValues $secretValues
+    $tlsDirectory = $resolvedDirectories.AURUM_INTERNAL_TLS_DIR
+    Assert-InternalTlsMaterial -Directory $tlsDirectory
 
     if (-not $SkipUnixPermissionCheck) {
         if ($isWindowsPlatform) {
@@ -349,6 +484,12 @@ try {
         Assert-PrivateUnixMode -Path $secretDirectory -Label "Production secret directory"
         foreach ($name in $requiredSecrets) {
             Assert-PrivateUnixMode -Path (Join-Path $secretDirectory $name) -Label "Production secret $name"
+        }
+        Assert-PrivateUnixMode -Path $tlsDirectory -Label "Internal TLS directory"
+        foreach ($name in @("postgres.key", "redis.key", "minio.key")) {
+            Assert-PrivateUnixMode `
+                -Path (Join-Path $tlsDirectory $name) `
+                -Label "Internal TLS private key $name"
         }
     }
 

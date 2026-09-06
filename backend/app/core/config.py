@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import ipaddress
-import logging
 import os
 from functools import lru_cache
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
-
-logger = logging.getLogger("aurum.config")
 
 # Example/dev values that must never reach production.
 _DEFAULT_DB_PASSWORDS = ("aurum_app_pw", "aurum_support_pw", ":postgres@")
@@ -32,6 +29,15 @@ def _database_security_problems(name: str, url: str) -> list[str]:
 
     if not parsed.username or not parsed.password or not parsed.host:
         problems.append(f"{name} must contain a host and dedicated credentials")
+    sslmode = parsed.query.get("sslmode")
+    sslrootcert = parsed.query.get("sslrootcert")
+    if (
+        parsed.drivername.split("+", maxsplit=1)[0] != "postgresql"
+        or sslmode != "verify-full"
+        or not isinstance(sslrootcert, str)
+        or not sslrootcert.strip()
+    ):
+        problems.append(f"{name} must use PostgreSQL TLS with sslmode=verify-full and sslrootcert")
     return problems
 
 
@@ -100,18 +106,37 @@ def _proxy_security_problems(proxy_ips: list[str]) -> list[str]:
 def _redis_security_problems(url: str) -> list[str]:
     try:
         parsed = urlsplit(url)
+        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+        cert_reqs = query.get("ssl_cert_reqs", [])
+        hostname_checks = query.get("ssl_check_hostname", [])
         valid = (
-            parsed.scheme in {"redis", "rediss"} and bool(parsed.hostname) and bool(parsed.password)
+            parsed.scheme == "rediss"
+            and bool(parsed.hostname)
+            and bool(parsed.password)
+            and cert_reqs == ["required"]
+            and len(hostname_checks) == 1
+            and hostname_checks[0].lower() in {"1", "true", "yes"}
         )
     except ValueError:
         valid = False
-    return [] if valid else ["REDIS_URL must contain a host and dedicated password"]
+    return (
+        []
+        if valid
+        else [
+            "REDIS_URL must use rediss with a dedicated password, "
+            "ssl_cert_reqs=required and ssl_check_hostname=true"
+        ]
+    )
 
 
 def _minio_security_problems(access_key: str, secret_key: str) -> list[str]:
     if "minioadmin" in (access_key, secret_key) or len(access_key) < 16 or len(secret_key) < 32:
         return ["MINIO_ACCESS_KEY/MINIO_SECRET_KEY must be strong, independent credentials"]
     return []
+
+
+def _minio_transport_security_problems(secure: bool) -> list[str]:
+    return [] if secure else ["MINIO_SECURE must be true outside development"]
 
 
 class Settings(BaseSettings):
@@ -294,6 +319,7 @@ class Settings(BaseSettings):
         if len(self.JWT_SECRET) < 32 or "change-me" in self.JWT_SECRET.lower():
             problems.append("JWT_SECRET must be a strong secret (>=32 chars, not the placeholder)")
         problems.extend(_minio_security_problems(self.MINIO_ACCESS_KEY, self.MINIO_SECRET_KEY))
+        problems.extend(_minio_transport_security_problems(self.MINIO_SECURE))
         for name, url in (
             ("DATABASE_URL_APP", self.DATABASE_URL_APP),
             ("DATABASE_URL_SUPPORT", self.DATABASE_URL_SUPPORT),
@@ -327,13 +353,6 @@ class Settings(BaseSettings):
         if problems:
             raise ValueError(
                 "Refusing to start in production with insecure config:\n- " + "\n- ".join(problems)
-            )
-
-        # Non-fatal for the first single-host perimeter: object-storage TLS is
-        # still a release blocker and remains tracked in the security plan.
-        if not self.MINIO_SECURE:
-            logger.warning(
-                "MINIO_SECURE=false outside development - object storage traffic is unencrypted"
             )
         return self
 

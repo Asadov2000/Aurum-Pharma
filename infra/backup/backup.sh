@@ -44,7 +44,7 @@ alembic_revision="$(psql --dbname "$database_url" --tuples-only --no-align \
     --command 'SELECT version_num FROM public.alembic_version')"
 
 mc --config-dir /workspace/mc alias set \
-    source http://minio:9000 "$minio_user" "$minio_password" >/dev/null
+    source https://minio:9000 "$minio_user" "$minio_password" >/dev/null
 mc --config-dir /workspace/mc mirror source/aurum "$payload/minio" >/dev/null
 
 dump_sha256="$(sha256sum "$payload/database.dump" | awk '{print $1}')"

@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from typing import Literal
-from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.config import _redis_security_problems
 
 
 class CeleryBrokerSettings(BaseSettings):
@@ -27,17 +28,11 @@ class CeleryBrokerSettings(BaseSettings):
     def _guard_broker(self) -> CeleryBrokerSettings:
         if self.ENVIRONMENT == "development":
             return self
-        try:
-            redis = urlsplit(self.REDIS_URL)
-            valid = (
-                redis.scheme in {"redis", "rediss"}
-                and bool(redis.hostname)
-                and bool(redis.password)
+        problems = _redis_security_problems(self.REDIS_URL)
+        if problems:
+            raise ValueError(
+                "Refusing to start insecure Celery broker:\n- " + "\n- ".join(problems)
             )
-        except ValueError:
-            valid = False
-        if not valid:
-            raise ValueError("REDIS_URL must contain a host and dedicated password")
         return self
 
 

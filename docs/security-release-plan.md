@@ -65,9 +65,10 @@
 - [ ] Независимый `MFA_ENCRYPTION_KEY` выдан в secret manager каждой
       staging/production-среды до первого support-enrollment; ротация отрепетирована
       на staging с проверенным backup и rollback.
-- [ ] Production/staging fail-closed: HTTPS для CORS origins, secure cookies,
-      trusted Host/proxy и отсутствие default credentials уже enforced;
-      encrypted Redis/MinIO/DB transport ещё не реализован.
+- [x] Production/staging fail-closed: HTTPS для CORS origins, secure cookies,
+      trusted Host/proxy, отсутствие default credentials и проверенный TLS для
+      Redis/MinIO/PostgreSQL enforced конфигурацией, preflight и Docker smoke
+      test. Staging-репетиция ротации остаётся внешним эксплуатационным gate.
 - [x] Зашифрованный logical backup PostgreSQL + MinIO, отдельные read-only
       credentials, retention и изолированный restore drill реализованы и локально
       проверены на полной схеме и повторным тестом владельцев, ACL и RLS.
@@ -160,8 +161,9 @@
 ## Порядок следующей разработки
 
 1. Развернуть внешний WORM/recovery-host и измерить RPO/RTO на staging.
-2. DB-инварианты POS и полный refund/void sync-контур.
-3. Внутренний TLS для PostgreSQL, Redis и MinIO.
+2. Выдать staging/production secrets, отрепетировать TLS-ротацию и настроить
+   expiry-оповещения.
+3. DB-инварианты POS и полный refund/void sync-контур.
 4. mTLS/device identity, зашифрованная локальная БД и trusted time для Edge.
 5. Подписанный Windows-дистрибутив и безопасное обновление.
 

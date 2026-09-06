@@ -14,7 +14,8 @@ x-backend-environment: &backend-environment
   REFRESH_COOKIE_SAMESITE: lax
   MINIO_ENDPOINT: minio:9000
   MINIO_BUCKET: aurum
-  MINIO_SECURE: "false"
+  MINIO_SECURE: "true"
+  SSL_CERT_FILE: /run/tls/ca.crt
   MFA_ENCRYPTION_KEY_VERSION: "${AURUM_MFA_KEY_VERSION:-1}"
   EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION: "${AURUM_EMAIL_OUTBOX_KEY_VERSION:-1}"
   LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
@@ -56,6 +57,11 @@ x-backend-service: &backend-service
     dockerfile: Dockerfile.production
   environment: *backend-environment
   secrets: *backend-secrets
+  volumes:
+    - type: bind
+      source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+      target: /run/tls/ca.crt
+      read_only: true
   networks:
     - data
   read_only: true
@@ -115,11 +121,35 @@ services:
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
       - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
       - ./infra/postgres/archive-wal.sh:/opt/aurum/postgres/archive-wal.sh:ro
+      - ./infra/postgres/start-tls.sh:/opt/aurum/postgres/start-tls.sh:ro
       - ./infra/postgres/pg_hba.production.conf:/etc/postgresql/pg_hba.production.conf:ro
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/postgres.crt"
+        target: /run/tls/postgres.crt
+        read_only: true
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/postgres.key"
+        target: /run/tls/postgres.key
+        read_only: true
+    entrypoint: ["/bin/sh", "/opt/aurum/postgres/start-tls.sh"]
     command:
       - postgres
       - -c
       - hba_file=/etc/postgresql/pg_hba.production.conf
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/var/lib/postgresql/tls/server.crt
+      - -c
+      - ssl_key_file=/var/lib/postgresql/tls/server.key
+      - -c
+      - ssl_ca_file=/var/lib/postgresql/tls/ca.crt
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
       - -c
       - wal_level=replica
       - -c
@@ -170,10 +200,21 @@ services:
         umask 077
         password="$$(cat /run/secrets/REDIS_PASSWORD)"
         test -n "$$password"
+        mkdir -p /tmp/tls
+        cp /run/tls/ca.crt /run/tls/redis.crt /run/tls/redis.key /tmp/tls/
+        chown -R redis:redis /tmp/tls
+        chmod 600 /tmp/tls/redis.key
         printf 'user default on >%s ~* +@all -ACL -CONFIG -DEBUG -FLUSHALL -FLUSHDB -MODULE -SHUTDOWN -SLAVEOF -REPLICAOF\n' "$$password" > /tmp/users.acl
         chown redis:redis /tmp/users.acl
         chown -R redis:redis /data
         exec gosu redis redis-server \
+          --port 0 \
+          --tls-port 6379 \
+          --tls-cert-file /tmp/tls/redis.crt \
+          --tls-key-file /tmp/tls/redis.key \
+          --tls-ca-cert-file /tmp/tls/ca.crt \
+          --tls-auth-clients no \
+          --tls-protocols "TLSv1.2 TLSv1.3" \
           --appendonly yes \
           --aclfile /tmp/users.acl \
           --protected-mode yes \
@@ -184,6 +225,18 @@ services:
         target: REDIS_PASSWORD
     volumes:
       - redis-data:/data
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/redis.crt"
+        target: /run/tls/redis.crt
+        read_only: true
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/redis.key"
+        target: /run/tls/redis.key
+        read_only: true
     networks:
       - data
     tmpfs:
@@ -192,7 +245,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "REDISCLI_AUTH=$$(cat /run/secrets/REDIS_PASSWORD) redis-cli ping | grep -q PONG",
+          "REDISCLI_AUTH=$$(cat /run/secrets/REDIS_PASSWORD) redis-cli --tls --cacert /run/tls/ca.crt -h redis ping | grep -q PONG",
         ]
       interval: 10s
       timeout: 3s
@@ -208,7 +261,16 @@ services:
 
   minio:
     image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    command: server /data
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        mkdir -p /tmp/certs/CAs
+        cp /run/tls/minio.crt /tmp/certs/public.crt
+        cp /run/tls/minio.key /tmp/certs/private.key
+        cp /run/tls/ca.crt /tmp/certs/CAs/aurum-internal-ca.crt
+        chmod 600 /tmp/certs/private.key
+        exec minio server --certs-dir /tmp/certs /data
     environment:
       MINIO_BROWSER: "off"
       MINIO_ROOT_USER_FILE: /run/secrets/MINIO_ROOT_USER
@@ -220,10 +282,32 @@ services:
         target: MINIO_ROOT_PASSWORD
     volumes:
       - minio-data:/data
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/minio.crt"
+        target: /run/tls/minio.crt
+        read_only: true
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/minio.key"
+        target: /run/tls/minio.key
+        read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=0700
     networks:
       - data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test:
+        [
+          "CMD",
+          "curl",
+          "--cacert",
+          "/run/tls/ca.crt",
+          "-f",
+          "https://minio:9000/minio/health/live",
+        ]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -239,13 +323,15 @@ services:
   minio-init:
     image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     entrypoint: ["/bin/sh", "-ec"]
+    environment:
+      SSL_CERT_FILE: /run/tls/ca.crt
     command:
       - |
         root_user="$$(cat /run/secrets/MINIO_ROOT_USER)"
         root_password="$$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
         app_user="$$(cat /run/secrets/MINIO_ACCESS_KEY)"
         app_password="$$(cat /run/secrets/MINIO_SECRET_KEY)"
-        until mc --config-dir /tmp/.mc alias set local http://minio:9000 "$$root_user" "$$root_password" >/dev/null 2>&1; do
+        until mc --config-dir /tmp/.mc alias set local https://minio:9000 "$$root_user" "$$root_password" >/dev/null 2>&1; do
           sleep 2
         done
         mc --config-dir /tmp/.mc mb --ignore-existing local/aurum
@@ -264,6 +350,10 @@ services:
         target: MINIO_SECRET_KEY
     volumes:
       - ./infra/minio/aurum-app-policy.json:/config/aurum-app-policy.json:ro
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
     networks:
       - data
     depends_on:
@@ -291,6 +381,8 @@ services:
       POSTGRES_DB: aurum
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /run/tls/ca.crt
       AURUM_APP_PASSWORD_FILE: /run/secrets/AURUM_APP_PASSWORD
       AURUM_SUPPORT_PASSWORD_FILE: /run/secrets/AURUM_SUPPORT_PASSWORD
       AURUM_MIGRATOR_PASSWORD_FILE: /run/secrets/AURUM_MIGRATOR_PASSWORD
@@ -320,6 +412,10 @@ services:
         target: AURUM_PITR_PASSWORD
     volumes:
       - ./infra/postgres:/opt/aurum/postgres:ro
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
     networks:
       - data
     depends_on:
@@ -348,6 +444,7 @@ services:
     profiles: ["maintenance"]
     environment:
       AURUM_SECRETS_DIR: /run/secrets
+      SSL_CERT_FILE: /run/tls/ca.crt
       PYTHONPATH: /app
     secrets:
       - source: database_url_support
@@ -356,6 +453,11 @@ services:
         target: DATABASE_URL_MIGRATION
     networks:
       - data
+    volumes:
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
     depends_on:
       db-role-bootstrap:
         condition: service_completed_successfully
@@ -416,6 +518,7 @@ services:
     environment:
       ENVIRONMENT: production
       AURUM_SECRETS_DIR: /run/secrets
+      SSL_CERT_FILE: /run/tls/ca.crt
       LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
       PYTHONPATH: /app
     secrets:
@@ -463,7 +566,8 @@ services:
       AURUM_SECRETS_DIR: /run/secrets
       MINIO_ENDPOINT: minio:9000
       MINIO_BUCKET: aurum
-      MINIO_SECURE: "false"
+      MINIO_SECURE: "true"
+      SSL_CERT_FILE: /run/tls/ca.crt
       LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
       PYTHONPATH: /app
     secrets:
@@ -508,6 +612,7 @@ services:
     environment:
       ENVIRONMENT: production
       AURUM_SECRETS_DIR: /run/secrets
+      SSL_CERT_FILE: /run/tls/ca.crt
       BILLING_TRANSITION_BATCH_SIZE: "${AURUM_BILLING_TRANSITION_BATCH_SIZE:-100}"
       PYTHONPATH: /app
     secrets:
@@ -517,6 +622,11 @@ services:
         target: REDIS_URL
     networks:
       - data
+    volumes:
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
     command:
       [
         "celery",
@@ -557,6 +667,7 @@ services:
     environment:
       ENVIRONMENT: production
       AURUM_SECRETS_DIR: /run/secrets
+      SSL_CERT_FILE: /run/tls/ca.crt
       EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION: "${AURUM_EMAIL_OUTBOX_KEY_VERSION:-1}"
       EMAIL_HOST: "${AURUM_EMAIL_HOST:?AURUM_EMAIL_HOST is required}"
       EMAIL_PORT: "${AURUM_EMAIL_PORT:-587}"
@@ -582,6 +693,11 @@ services:
     networks:
       - data
       - mailer-egress
+    volumes:
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
     command:
       [
         "celery",
@@ -619,6 +735,7 @@ services:
     environment:
       ENVIRONMENT: production
       AURUM_SECRETS_DIR: /run/secrets
+      SSL_CERT_FILE: /run/tls/ca.crt
       LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
       PYTHONPATH: /app
     secrets:

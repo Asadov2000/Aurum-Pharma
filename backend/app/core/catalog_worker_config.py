@@ -12,6 +12,11 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 from app.core.celery_broker_config import CeleryBrokerSettings
+from app.core.config import (
+    _database_security_problems,
+    _minio_transport_security_problems,
+    _redis_security_problems,
+)
 
 
 class CatalogWorkerSettings(CeleryBrokerSettings):
@@ -51,6 +56,8 @@ class CatalogWorkerSettings(CeleryBrokerSettings):
             or "aurum_app_pw" in self.DATABASE_URL_APP
         ):
             problems.append("DATABASE_URL_APP must use non-placeholder aurum_app credentials")
+        problems.extend(_database_security_problems("DATABASE_URL_APP", self.DATABASE_URL_APP))
+        problems.extend(_redis_security_problems(self.REDIS_URL))
         if (
             not self.MINIO_ENDPOINT
             or "://" in self.MINIO_ENDPOINT
@@ -61,6 +68,7 @@ class CatalogWorkerSettings(CeleryBrokerSettings):
             or not self.MINIO_BUCKET
         ):
             problems.append("dedicated MinIO endpoint, bucket and credentials are required")
+        problems.extend(_minio_transport_security_problems(self.MINIO_SECURE))
         if problems:
             raise ValueError(
                 "Refusing to start insecure catalog worker:\n- " + "\n- ".join(problems)

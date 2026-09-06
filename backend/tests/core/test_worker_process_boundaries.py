@@ -15,7 +15,10 @@ from app.core.catalog_worker_storage import validate_catalog_import_path
 from app.core.celery_broker_config import CeleryBrokerSettings
 from app.core.system_worker_config import SystemWorkerSettings
 
-_REDIS_URL = "rediss://:Str0ng-Redis-Pw@redis:6379/0"
+_POSTGRES_TLS = "?sslmode=verify-full&sslrootcert=/run/secrets/postgres_ca.crt"
+_REDIS_URL = (
+    "rediss://:Str0ng-Redis-Pw@redis:6379/0" "?ssl_cert_reqs=required&ssl_check_hostname=true"
+)
 
 
 def test_beat_configuration_requires_only_authenticated_redis() -> None:
@@ -33,10 +36,20 @@ def test_beat_configuration_rejects_unauthenticated_redis() -> None:
         )
 
 
+def test_beat_configuration_rejects_unverified_tls() -> None:
+    with pytest.raises(ValidationError, match="ssl_cert_reqs=required"):
+        CeleryBrokerSettings(
+            ENVIRONMENT="production",
+            REDIS_URL="rediss://:Str0ng-Redis-Pw@redis:6379/0",
+        )
+
+
 def test_system_worker_accepts_only_worker_identity() -> None:
     settings = SystemWorkerSettings(
         ENVIRONMENT="production",
-        DATABASE_URL_WORKER=("postgresql+asyncpg://aurum_worker:Str0ng-Worker-Pw@db:5432/aurum"),
+        DATABASE_URL_WORKER=(
+            "postgresql+asyncpg://aurum_worker:Str0ng-Worker-Pw@db:5432/aurum" + _POSTGRES_TLS
+        ),
         REDIS_URL=_REDIS_URL,
     )
 
@@ -63,12 +76,15 @@ def test_system_worker_rejects_wrong_database_identity(database_url: str) -> Non
 def _catalog_settings(**overrides: object) -> CatalogWorkerSettings:
     values: dict[str, object] = {
         "ENVIRONMENT": "production",
-        "DATABASE_URL_APP": ("postgresql+asyncpg://aurum_app:Str0ng-App-Pw@db:5432/aurum"),
+        "DATABASE_URL_APP": (
+            "postgresql+asyncpg://aurum_app:Str0ng-App-Pw@db:5432/aurum" + _POSTGRES_TLS
+        ),
         "REDIS_URL": _REDIS_URL,
         "MINIO_ENDPOINT": "minio:9000",
         "MINIO_ACCESS_KEY": "catalog-access-key",
         "MINIO_SECRET_KEY": "catalog-secret-key-with-at-least-32-characters",
         "MINIO_BUCKET": "aurum",
+        "MINIO_SECURE": True,
     }
     values.update(overrides)
     return CatalogWorkerSettings(**values)

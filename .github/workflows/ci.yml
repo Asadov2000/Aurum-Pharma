@@ -1470,6 +1470,8 @@ jobs:
           }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
 
           postgres_command = " ".join(model["services"]["postgres"]["command"])
+          assert "ssl=on" in postgres_command
+          assert "ssl_min_protocol_version=TLSv1.2" in postgres_command
           assert "archive_mode=on" in postgres_command
           assert "archive_timeout=60s" in postgres_command
           assert "archive-wal.sh" in postgres_command
@@ -1477,6 +1479,32 @@ jobs:
               volume["target"] for volume in model["services"]["postgres"]["volumes"]
           }
           assert "/wal-archive" in postgres_targets
+          assert "/run/tls/postgres.key" in postgres_targets
+
+          with open("infra/postgres/pg_hba.production.conf", encoding="utf-8") as source:
+              pg_hba = source.read()
+          assert "hostssl all" in pg_hba
+          assert "\nhost    all" not in pg_hba
+
+          redis_command = " ".join(model["services"]["redis"]["command"])
+          assert "--port 0" in redis_command
+          assert "--tls-port 6379" in redis_command
+          assert "--tls-auth-clients no" in redis_command
+
+          minio_command = " ".join(model["services"]["minio"]["command"])
+          assert "--certs-dir /tmp/certs" in minio_command
+          assert model["services"]["backend"]["environment"]["MINIO_SECURE"] == "true"
+
+          tls_clients = (
+              "backend", "celery-worker", "catalog-worker", "billing-worker",
+              "platform-mailer", "celery-beat", "migrate", "db-role-bootstrap",
+          )
+          for name in tls_clients:
+              targets = {
+                  volume["target"]
+                  for volume in model["services"][name].get("volumes", [])
+              }
+              assert "/run/tls/ca.crt" in targets, f"{name} does not trust internal CA"
 
           assert recovery_model["networks"]["recovery"]["internal"] is True
           assert not any(
@@ -1499,6 +1527,14 @@ jobs:
               for secret in recovery_model["services"]["pitr-basebackup"]["secrets"]
           }
           assert pitr_secrets == {"database_url_pitr", "restic_password"}
+          for name in ("minio-backup-init", "backup", "pitr-basebackup"):
+              targets = {
+                  volume["target"]
+                  for volume in recovery_model["services"][name].get("volumes", [])
+              }
+              assert "/run/tls/ca.crt" in targets, (
+                  f"{name} does not trust the production internal CA"
+              )
           wal_mount = next(
               volume
               for volume in recovery_model["services"]["wal-snapshot"]["volumes"]
@@ -1549,6 +1585,10 @@ jobs:
               "mailer-egress",
           }
           PY
+
+      - name: Smoke test production internal TLS
+        shell: pwsh
+        run: ./scripts/test-production-internal-tls.ps1
 
       - name: Check production Dockerfiles
         run: |
