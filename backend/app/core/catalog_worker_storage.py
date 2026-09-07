@@ -15,9 +15,11 @@ def get_catalog_minio() -> Minio:
     settings = get_catalog_worker_settings()
     return Minio(
         settings.MINIO_ENDPOINT,
-        access_key=settings.MINIO_ACCESS_KEY,
-        secret_key=settings.MINIO_SECRET_KEY,
+        access_key=settings.CATALOG_MINIO_ACCESS_KEY,
+        secret_key=settings.CATALOG_MINIO_SECRET_KEY,
         secure=settings.MINIO_SECURE,
+        # Avoid a GetBucketLocation request: the identity can only read import objects.
+        region="us-east-1",
     )
 
 

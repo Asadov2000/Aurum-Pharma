@@ -3,16 +3,37 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest_asyncio
 from fastapi import Request
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import NullPool
 
 import app.middleware.error_handler as error_handler_module
+from app.core.config import get_settings
 from app.core.errors import AuthorizationPolicyDeniedError, PermissionDeniedError
+
+
+@pytest_asyncio.fixture
+async def audit_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Keep durable app-role audit writes independent of other tests' event loops."""
+    engine = create_async_engine(get_settings().DATABASE_URL_APP, poolclass=NullPool)
+    if engine.url.username != "aurum_app" or not (engine.url.database or "").endswith("_test"):
+        raise RuntimeError("Audit integration requires aurum_app on a disposable '_test' database")
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
 
 
 def _request() -> Request:
@@ -74,6 +95,7 @@ async def test_ordinary_permission_denial_does_not_create_policy_audit(
 
 async def test_authorization_denial_is_committed_in_a_separate_transaction(
     maintenance_engine: AsyncEngine,
+    audit_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     tenant_id = uuid4()
     user_id = uuid4()
@@ -117,7 +139,9 @@ async def test_authorization_denial_is_committed_in_a_separate_transaction(
                 },
             )
 
-        await error_handler_module.record_authorization_denial(request, error)
+        await error_handler_module.record_authorization_denial(
+            request, error, session_factory=audit_session_factory
+        )
 
         async with maintenance_engine.connect() as connection:
             result = (

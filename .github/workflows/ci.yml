@@ -80,12 +80,14 @@ jobs:
       DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test
       DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@localhost:5432/aurum_test
       DATABASE_URL_WORKER: postgresql+asyncpg://aurum_worker:aurum_worker_pw@localhost:5432/aurum_test
+      DATABASE_URL_CATALOG_WORKER: postgresql+asyncpg://aurum_catalog_worker:aurum_catalog_worker_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@localhost:5432/aurum_test
       TEST_DATABASE_URL_WORKER: postgresql+asyncpg://aurum_worker:aurum_worker_pw@localhost:5432/aurum_test
+      TEST_DATABASE_URL_CATALOG_WORKER: postgresql+asyncpg://aurum_catalog_worker:aurum_catalog_worker_pw@localhost:5432/aurum_test
       REDIS_URL: redis://localhost:6379/0
       TEST_REDIS_URL: redis://localhost:6379/0
       JWT_SECRET: ci-only-secret-do-not-use-outside-tests-123456
@@ -224,6 +226,7 @@ jobs:
             printf %s aurum_mailer_pw > /tmp/aurum-mailer-password
             printf %s aurum_billing_worker_pw > /tmp/aurum-billing-worker-password
             printf %s aurum_worker_pw > /tmp/aurum-worker-password
+            printf %s aurum_catalog_worker_pw > /tmp/aurum-catalog-worker-password
             printf %s aurum_backup_pw > /tmp/aurum-backup-password
             printf %s aurum_pitr_pw > /tmp/aurum-pitr-password
           '
@@ -239,6 +242,7 @@ jobs:
             -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
             -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
             -e AURUM_WORKER_PASSWORD_FILE=/tmp/aurum-worker-password \
+            -e AURUM_CATALOG_WORKER_PASSWORD_FILE=/tmp/aurum-catalog-worker-password \
             -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
             -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
             "$POSTGRES_SERVICE_ID" sh -c '
@@ -250,6 +254,7 @@ jobs:
                 AURUM_MAILER_PASSWORD \
                 AURUM_BILLING_WORKER_PASSWORD \
                 AURUM_WORKER_PASSWORD \
+                AURUM_CATALOG_WORKER_PASSWORD \
                 AURUM_BACKUP_PASSWORD \
                 AURUM_PITR_PASSWORD
               exec sh /tmp/bootstrap-roles.sh
@@ -284,6 +289,7 @@ jobs:
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
               -e AURUM_WORKER_PASSWORD_FILE=/tmp/aurum-worker-password \
+              -e AURUM_CATALOG_WORKER_PASSWORD_FILE=/tmp/aurum-catalog-worker-password \
               -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
               -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
               "$POSTGRES_SERVICE_ID" sh -c '
@@ -295,6 +301,7 @@ jobs:
                   AURUM_MAILER_PASSWORD \
                   AURUM_BILLING_WORKER_PASSWORD \
                   AURUM_WORKER_PASSWORD \
+                  AURUM_CATALOG_WORKER_PASSWORD \
                   AURUM_BACKUP_PASSWORD \
                   AURUM_PITR_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
@@ -659,6 +666,17 @@ jobs:
           poetry run python -m app.migrate upgrade head
           run_role_bootstrap
 
+          # A repeated bootstrap must remove accidental table AND column grants.
+          # The following pytest exact-ACL checks run through the restricted login.
+          docker exec -i "$POSTGRES_SERVICE_ID" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          GRANT SELECT ON public.app_user TO aurum_catalog_worker;
+          GRANT UPDATE (image_version) ON public.tenant_catalog TO aurum_catalog_worker;
+          GRANT aurum_app TO aurum_catalog_worker;
+          ALTER ROLE aurum_catalog_worker CONNECTION LIMIT 5;
+          SQL
+          run_role_bootstrap
+
       - name: Verify revision bootstrap fails closed
         env:
           POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
@@ -679,6 +697,7 @@ jobs:
               -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
               -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
               -e AURUM_WORKER_PASSWORD_FILE=/tmp/aurum-worker-password \
+              -e AURUM_CATALOG_WORKER_PASSWORD_FILE=/tmp/aurum-catalog-worker-password \
               -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
               -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
               "$POSTGRES_SERVICE_ID" sh -c '
@@ -690,6 +709,7 @@ jobs:
                   AURUM_MAILER_PASSWORD \
                   AURUM_BILLING_WORKER_PASSWORD \
                   AURUM_WORKER_PASSWORD \
+                  AURUM_CATALOG_WORKER_PASSWORD \
                   AURUM_BACKUP_PASSWORD \
                   AURUM_PITR_PASSWORD
                 exec sh /tmp/bootstrap-roles.sh
@@ -909,6 +929,7 @@ jobs:
             -e AURUM_MAILER_PASSWORD_FILE=/tmp/aurum-mailer-password \
             -e AURUM_BILLING_WORKER_PASSWORD_FILE=/tmp/aurum-billing-worker-password \
             -e AURUM_WORKER_PASSWORD_FILE=/tmp/aurum-worker-password \
+            -e AURUM_CATALOG_WORKER_PASSWORD_FILE=/tmp/aurum-catalog-worker-password \
             -e AURUM_BACKUP_PASSWORD_FILE=/tmp/aurum-backup-password \
             -e AURUM_PITR_PASSWORD_FILE=/tmp/aurum-pitr-password \
             -e EDGE_IDENTITY_SCRIPT=/tmp/manage-edge-cash-identity.sh \
@@ -1337,6 +1358,7 @@ jobs:
               "AURUM_MAILER_PASSWORD",
               "AURUM_BILLING_WORKER_PASSWORD",
               "AURUM_WORKER_PASSWORD",
+              "AURUM_CATALOG_WORKER_PASSWORD",
               "AURUM_BACKUP_PASSWORD",
               "AURUM_PITR_PASSWORD",
               "AURUM_OFFSITE_ACCESS_KEY",
@@ -1347,6 +1369,7 @@ jobs:
               "TEST_DATABASE_URL_MAILER",
               "TEST_DATABASE_URL_BILLING_WORKER",
               "TEST_DATABASE_URL_WORKER",
+              "TEST_DATABASE_URL_CATALOG_WORKER",
               "MINIO_ROOT_USER",
               "MINIO_ROOT_PASSWORD",
               "DATABASE_URL_BACKUP",
@@ -1410,10 +1433,10 @@ jobs:
               },
               "celery-worker": {"database_url_worker", "redis_url"},
               "catalog-worker": {
-                  "database_url_app",
+                  "database_url_catalog_worker",
                   "redis_url",
-                  "minio_access_key",
-                  "minio_secret_key",
+                  "catalog_minio_access_key",
+                  "catalog_minio_secret_key",
               },
               "celery-beat": {"redis_url"},
           }
@@ -1427,9 +1450,12 @@ jobs:
               )
 
           credential_environment = {
+              "CATALOG_MINIO_ACCESS_KEY",
+              "CATALOG_MINIO_SECRET_KEY",
               "DATABASE_URL_APP",
               "DATABASE_URL_SUPPORT",
               "DATABASE_URL_WORKER",
+              "DATABASE_URL_CATALOG_WORKER",
               "REDIS_URL",
               "JWT_SECRET",
               "MFA_ENCRYPTION_KEY",
@@ -1440,10 +1466,10 @@ jobs:
           expected_development_credentials = {
               "celery-worker": {"DATABASE_URL_WORKER", "REDIS_URL"},
               "catalog-worker": {
-                  "DATABASE_URL_APP",
+                  "DATABASE_URL_CATALOG_WORKER",
                   "REDIS_URL",
-                  "MINIO_ACCESS_KEY",
-                  "MINIO_SECRET_KEY",
+                  "CATALOG_MINIO_ACCESS_KEY",
+                  "CATALOG_MINIO_SECRET_KEY",
               },
               "celery-beat": {"REDIS_URL"},
           }
@@ -1460,6 +1486,21 @@ jobs:
           assert "app.tasks.catalog_app" in catalog_command
           assert "-Q catalog-worker" in catalog_command
           assert set(model["services"]["catalog-worker"]["networks"]) == {"data"}
+          for compose_model in (model, development_model):
+              worker = compose_model["services"]["catalog-worker"]
+              assert worker["depends_on"]["catalog-minio-init"]["condition"] == (
+                  "service_completed_successfully"
+              )
+          catalog_secret_targets = {
+              entry["source"]: entry["target"]
+              for entry in model["services"]["catalog-worker"]["secrets"]
+          }
+          assert catalog_secret_targets == {
+              "database_url_catalog_worker": "DATABASE_URL_CATALOG_WORKER",
+              "redis_url": "REDIS_URL",
+              "catalog_minio_access_key": "CATALOG_MINIO_ACCESS_KEY",
+              "catalog_minio_secret_key": "CATALOG_MINIO_SECRET_KEY",
+          }
           assert set(model["services"]["celery-beat"]["networks"]) == {"data"}
 
           migrate_secrets = {
@@ -1483,9 +1524,22 @@ jobs:
               "aurum_mailer_password",
               "aurum_billing_worker_password",
               "aurum_worker_password",
+              "aurum_catalog_worker_password",
               "aurum_backup_password",
               "aurum_pitr_password",
           }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
+
+          restore_postgres = recovery_model["services"]["restore-postgres"]
+          assert restore_postgres["environment"]["AURUM_CATALOG_WORKER_PASSWORD_FILE"] == (
+              "/run/secrets/AURUM_CATALOG_WORKER_PASSWORD"
+          )
+          assert {
+              "source": "aurum_catalog_worker_password",
+              "target": "AURUM_CATALOG_WORKER_PASSWORD",
+          }.items() <= next(
+              entry for entry in restore_postgres["secrets"]
+              if entry["source"] == "aurum_catalog_worker_password"
+          ).items()
 
           postgres_command = " ".join(model["services"]["postgres"]["command"])
           assert "ssl=on" in postgres_command
@@ -1628,6 +1682,10 @@ jobs:
           tags: aurum-backend:ci
           cache-from: type=gha,scope=aurum-production-backend
           cache-to: type=gha,mode=max,scope=aurum-production-backend,ignore-error=true
+
+      - name: Verify catalog storage permissions against isolated MinIO
+        shell: pwsh
+        run: ./scripts/test-catalog-storage-permissions.ps1 -BackendImage aurum-backend:ci
 
       - name: Build production gateway
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0

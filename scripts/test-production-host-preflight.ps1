@@ -124,6 +124,21 @@ function Write-TestEnvironment {
         (Join-Path $paths.secrets "DATABASE_URL_WORKER"),
         "postgresql+asyncpg://aurum_worker:$workerPassword@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt"
     )
+    $catalogWorkerPassword = "catalog-worker-test-password"
+    [IO.File]::WriteAllText(
+        (Join-Path $paths.secrets "AURUM_CATALOG_WORKER_PASSWORD"),
+        $catalogWorkerPassword
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $paths.secrets "DATABASE_URL_CATALOG_WORKER"),
+        "postgresql+asyncpg://aurum_catalog_worker:$catalogWorkerPassword@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt"
+    )
+    foreach ($name in @(
+        "MINIO_ROOT_USER", "MINIO_ACCESS_KEY", "MINIO_BACKUP_ACCESS_KEY",
+        "CATALOG_MINIO_ACCESS_KEY", "CATALOG_MINIO_SECRET_KEY"
+    )) {
+        [IO.File]::WriteAllText((Join-Path $paths.secrets $name), "synthetic-$name")
+    }
     foreach ($name in @(
         "DATABASE_URL_APP", "DATABASE_URL_SUPPORT", "DATABASE_URL_MAILER",
         "DATABASE_URL_BILLING_WORKER", "DATABASE_URL_MIGRATION"
@@ -277,6 +292,31 @@ try {
         "postgresql+asyncpg://aurum_support:wrong@postgres:5432/aurum"
     )
     Assert-Equal -Actual (Invoke-Validator -Path $workerUrl.EnvFile) -Expected 2 -Because "the system worker cannot reuse support credentials"
+
+    $catalogRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "catalog-identity")).FullName
+    $catalog = Write-TestEnvironment -Root $catalogRoot
+    $catalogUrlPath = Join-Path $catalog.Paths.secrets "DATABASE_URL_CATALOG_WORKER"
+    $catalogUrlOriginal = [IO.File]::ReadAllText($catalogUrlPath)
+    foreach ($wrongRole in @("aurum_app", "aurum_support")) {
+        [IO.File]::WriteAllText($catalogUrlPath, $catalogUrlOriginal.Replace("aurum_catalog_worker:", "${wrongRole}:"))
+        Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 2 -Because "the catalog worker rejects another database role"
+    }
+    [IO.File]::WriteAllText($catalogUrlPath, $catalogUrlOriginal.Replace("catalog-worker-test-password", "wrong-password"))
+    Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 2 -Because "the catalog worker password must match its bootstrap secret"
+    [IO.File]::WriteAllText($catalogUrlPath, $catalogUrlOriginal)
+    $catalogKeyPath = Join-Path $catalog.Paths.secrets "CATALOG_MINIO_ACCESS_KEY"
+    $catalogKeyOriginal = [IO.File]::ReadAllText($catalogKeyPath)
+    foreach ($name in @("MINIO_ROOT_USER", "MINIO_ACCESS_KEY", "MINIO_BACKUP_ACCESS_KEY")) {
+        [IO.File]::WriteAllText($catalogKeyPath, [IO.File]::ReadAllText((Join-Path $catalog.Paths.secrets $name)))
+        Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 2 -Because "catalog storage rejects privileged identity reuse"
+    }
+    [IO.File]::WriteAllText($catalogKeyPath, $catalogKeyOriginal)
+    $catalogSecretPath = Join-Path $catalog.Paths.secrets "CATALOG_MINIO_SECRET_KEY"
+    $catalogSecretOriginal = [IO.File]::ReadAllText($catalogSecretPath)
+    [IO.File]::WriteAllText($catalogSecretPath, [IO.File]::ReadAllText((Join-Path $catalog.Paths.secrets "MINIO_SECRET_KEY")))
+    Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 2 -Because "catalog storage rejects shared secrets"
+    [IO.File]::WriteAllText($catalogSecretPath, $catalogSecretOriginal)
+    Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 0 -Because "restored dedicated catalog credentials are valid"
 
     $sharedRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "shared")).FullName
     $shared = Write-TestEnvironment -Root $sharedRoot

@@ -3,6 +3,7 @@
 \getenv mailer_password AURUM_MAILER_PASSWORD
 \getenv billing_worker_password AURUM_BILLING_WORKER_PASSWORD
 \getenv worker_password AURUM_WORKER_PASSWORD
+\getenv catalog_worker_password AURUM_CATALOG_WORKER_PASSWORD
 \getenv migrator_password AURUM_MIGRATOR_PASSWORD
 \getenv backup_password AURUM_BACKUP_PASSWORD
 \getenv pitr_password AURUM_PITR_PASSWORD
@@ -127,7 +128,7 @@ BEGIN
         WHERE owners.rolname IN (
             'aurum_mailer',
             'aurum_billing_worker',
-            'aurum_worker',
+            'aurum_worker', 'aurum_catalog_worker',
             'aurum_backup',
             'aurum_pitr',
             'aurum_edge_cash_executor',
@@ -143,7 +144,7 @@ BEGIN
         WHERE owners.rolname IN (
             'aurum_mailer',
             'aurum_billing_worker',
-            'aurum_worker',
+            'aurum_worker', 'aurum_catalog_worker',
             'aurum_backup',
             'aurum_pitr',
             'aurum_edge_cash_executor',
@@ -162,7 +163,7 @@ BEGIN
             owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
-              'aurum_worker',
+              'aurum_worker', 'aurum_catalog_worker',
               'aurum_backup',
               'aurum_pitr',
               'aurum_edge_cash_executor',
@@ -186,7 +187,7 @@ BEGIN
             owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
-              'aurum_worker',
+              'aurum_worker', 'aurum_catalog_worker',
               'aurum_backup',
               'aurum_pitr',
               'aurum_edge_cash_executor',
@@ -211,7 +212,7 @@ BEGIN
             owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
-              'aurum_worker',
+              'aurum_worker', 'aurum_catalog_worker',
               'aurum_backup',
               'aurum_pitr',
               'aurum_edge_cash_executor',
@@ -235,7 +236,7 @@ BEGIN
             owners.rolname IN (
               'aurum_mailer',
               'aurum_billing_worker',
-              'aurum_worker',
+              'aurum_worker', 'aurum_catalog_worker',
               'aurum_edge_cash_executor',
               'aurum_edge_cash_owner'
             ) OR owners.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
@@ -268,7 +269,7 @@ BEGIN
     WHERE grantees.rolname IN (
         'aurum_mailer',
         'aurum_billing_worker',
-        'aurum_worker',
+        'aurum_worker', 'aurum_catalog_worker',
         'aurum_edge_cash_executor',
         'aurum_edge_cash_owner'
     ) OR grantees.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
@@ -309,6 +310,12 @@ WHERE NOT EXISTS (
 SELECT 'CREATE ROLE aurum_worker'
 WHERE NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_worker'
+)
+\gexec
+
+SELECT 'CREATE ROLE aurum_catalog_worker'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aurum_catalog_worker'
 )
 \gexec
 
@@ -372,6 +379,13 @@ ALTER ROLE aurum_worker WITH
 ALTER ROLE aurum_worker SET statement_timeout = '30s';
 ALTER ROLE aurum_worker SET lock_timeout = '5s';
 ALTER ROLE aurum_worker SET idle_in_transaction_session_timeout = '30s';
+ALTER ROLE aurum_catalog_worker WITH
+    LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    CONNECTION LIMIT 2
+    PASSWORD :'catalog_worker_password';
+ALTER ROLE aurum_catalog_worker SET statement_timeout = '30s';
+ALTER ROLE aurum_catalog_worker SET lock_timeout = '5s';
+ALTER ROLE aurum_catalog_worker SET idle_in_transaction_session_timeout = '180s';
 ALTER ROLE aurum_backup WITH
     LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS
     CONNECTION LIMIT 1
@@ -416,22 +430,22 @@ GRANT pg_read_all_data TO aurum_backup
 -- inherit PostgreSQL's implicit PUBLIC EXECUTE privilege.
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
     REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support,
-        aurum_billing_worker, aurum_worker;
+        aurum_billing_worker, aurum_worker, aurum_catalog_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
     REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support,
-        aurum_billing_worker, aurum_worker;
+        aurum_billing_worker, aurum_worker, aurum_catalog_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner
     REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support,
-        aurum_billing_worker, aurum_worker;
+        aurum_billing_worker, aurum_worker, aurum_catalog_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
     REVOKE ALL ON TABLES FROM PUBLIC, aurum_app, aurum_support,
-        aurum_billing_worker, aurum_worker;
+        aurum_billing_worker, aurum_worker, aurum_catalog_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM PUBLIC, aurum_app, aurum_support,
-        aurum_billing_worker, aurum_worker;
+        aurum_billing_worker, aurum_worker, aurum_catalog_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
     REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support,
-        aurum_billing_worker, aurum_worker;
+        aurum_billing_worker, aurum_worker, aurum_catalog_worker;
 CREATE TEMP TABLE allowed_edge_node_role (
     role_name TEXT PRIMARY KEY,
     role_oid OID NOT NULL UNIQUE
@@ -521,7 +535,7 @@ WHERE (
 ) OR (
     granted.rolname = 'aurum_support'
     AND member.rolname IN (
-        'aurum_app', 'aurum_mailer', 'aurum_billing_worker', 'aurum_worker',
+        'aurum_app', 'aurum_mailer', 'aurum_billing_worker', 'aurum_worker', 'aurum_catalog_worker',
         'aurum_edge_cash_executor'
     )
 ) OR (
@@ -530,7 +544,8 @@ WHERE (
     granted.rolname = 'aurum_billing_worker'
     OR member.rolname = 'aurum_billing_worker'
 ) OR (
-    granted.rolname = 'aurum_worker' OR member.rolname = 'aurum_worker'
+    granted.rolname IN ('aurum_worker', 'aurum_catalog_worker')
+    OR member.rolname IN ('aurum_worker', 'aurum_catalog_worker')
 ) OR (
     (granted.rolname = 'aurum_backup' OR member.rolname = 'aurum_backup')
     AND NOT (
@@ -582,13 +597,13 @@ WHERE (
 
 REVOKE ALL PRIVILEGES ON DATABASE :"database_name"
     FROM PUBLIC, aurum_app, aurum_support, aurum_mailer, aurum_billing_worker,
-         aurum_worker,
+         aurum_worker, aurum_catalog_worker,
          aurum_backup,
          aurum_pitr,
          aurum_migrator,
          aurum_edge_cash_executor, aurum_edge_cash_owner;
 GRANT CONNECT ON DATABASE :"database_name"
-    TO aurum_app, aurum_mailer, aurum_billing_worker, aurum_worker,
+    TO aurum_app, aurum_mailer, aurum_billing_worker, aurum_worker, aurum_catalog_worker,
        aurum_backup, aurum_migrator;
 
 SELECT pg_catalog.format(
@@ -612,27 +627,52 @@ BEGIN
     LOOP
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON SCHEMA %I '
-            'FROM aurum_mailer, aurum_billing_worker, aurum_worker, '
+            'FROM aurum_mailer, aurum_billing_worker, aurum_worker, aurum_catalog_worker, '
             'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
         );
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I '
-            'FROM aurum_mailer, aurum_billing_worker, aurum_worker, '
+            'FROM aurum_mailer, aurum_billing_worker, aurum_worker, aurum_catalog_worker, '
             'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
         );
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I '
-            'FROM aurum_mailer, aurum_billing_worker, aurum_worker, '
+            'FROM aurum_mailer, aurum_billing_worker, aurum_worker, aurum_catalog_worker, '
             'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
         );
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA %I '
-            'FROM aurum_mailer, aurum_billing_worker, aurum_worker, '
+            'FROM aurum_mailer, aurum_billing_worker, aurum_worker, aurum_catalog_worker, '
             'aurum_edge_cash_executor, aurum_edge_cash_owner',
             application_schema
+        );
+    END LOOP;
+END
+$$;
+
+-- Table-level REVOKE does not remove column ACLs. Normalize every explicit
+-- column grant before restoring the catalog worker's revision allowlist.
+DO $$
+DECLARE
+    target RECORD;
+BEGIN
+    FOR target IN
+        SELECT schema.nspname, relation.relname, column_info.attname
+        FROM pg_catalog.pg_attribute AS column_info
+        JOIN pg_catalog.pg_class AS relation ON relation.oid = column_info.attrelid
+        JOIN pg_catalog.pg_namespace AS schema ON schema.oid = relation.relnamespace
+        CROSS JOIN LATERAL pg_catalog.aclexplode(column_info.attacl) AS acl
+        JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
+        WHERE grantee.rolname = 'aurum_catalog_worker'
+          AND column_info.attnum > 0 AND NOT column_info.attisdropped
+          AND schema.nspname <> 'information_schema' AND schema.nspname !~ '^pg_'
+    LOOP
+        EXECUTE pg_catalog.format(
+            'REVOKE ALL PRIVILEGES (%I) ON TABLE %I.%I FROM aurum_catalog_worker',
+            target.attname, target.nspname, target.relname
         );
     END LOOP;
 END
@@ -641,18 +681,19 @@ $$;
 DO $$
 DECLARE
     parameter_name TEXT;
+    runtime_role TEXT;
 BEGIN
-    FOR parameter_name IN
-        SELECT DISTINCT parameters.parname
+    FOR parameter_name, runtime_role IN
+        SELECT DISTINCT parameters.parname, grantees.rolname
         FROM pg_catalog.pg_parameter_acl AS parameters
         CROSS JOIN LATERAL pg_catalog.aclexplode(parameters.paracl) AS acl
         JOIN pg_catalog.pg_roles AS grantees
           ON grantees.oid = acl.grantee
-        WHERE grantees.rolname = 'aurum_worker'
+        WHERE grantees.rolname IN ('aurum_worker', 'aurum_catalog_worker')
     LOOP
         EXECUTE pg_catalog.format(
-            'REVOKE ALL PRIVILEGES ON PARAMETER %I FROM aurum_worker',
-            parameter_name
+            'REVOKE ALL PRIVILEGES ON PARAMETER %I FROM %I',
+            parameter_name, runtime_role
         );
     END LOOP;
 END
@@ -809,7 +850,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 141 THEN
+        IF revision_number < 1 OR revision_number > 142 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -857,7 +898,7 @@ BEGIN
         EXECUTE pg_catalog.format(
             'REVOKE ALL PRIVILEGES ON FUNCTION %s '
             'FROM PUBLIC, aurum_app, aurum_support, aurum_mailer, '
-            'aurum_billing_worker, aurum_worker, '
+            'aurum_billing_worker, aurum_worker, aurum_catalog_worker, '
             'aurum_edge_cash_executor, aurum_edge_cash_owner',
             extension_function
         );
@@ -1321,6 +1362,58 @@ BEGIN
 
     IF unsafe_object IS NOT NULL THEN
         RAISE EXCEPTION 'Edge cash role owns application type %', unsafe_object;
+    END IF;
+END
+$$;
+
+-- Imports require no auth, sales, stock or audit table access. The only
+-- writable columns are parsed catalog fields and worker execution results.
+DO $$
+DECLARE
+    current_revision TEXT;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_authid
+        WHERE rolname = 'aurum_catalog_worker' AND rolcanlogin
+          AND NOT rolinherit AND NOT rolsuper AND NOT rolcreatedb
+          AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+          AND rolconnlimit = 2 AND rolpassword IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION 'aurum_catalog_worker violates the deny-by-default contract';
+    END IF;
+    IF pg_catalog.to_regclass('public.alembic_version') IS NOT NULL THEN
+        SELECT version_num INTO current_revision FROM public.alembic_version;
+        IF current_revision ~ '^[0-9]{4}$' AND current_revision::INTEGER >= 142 THEN
+            IF EXISTS (
+                SELECT 1 FROM pg_catalog.pg_class AS relation
+                JOIN pg_catalog.pg_namespace AS schema ON schema.oid = relation.relnamespace
+                WHERE schema.nspname = 'public'
+                  AND relation.relname IN ('catalog_import_job', 'tenant_catalog', 'barcode')
+                  AND NOT relation.relrowsecurity
+            ) THEN
+                RAISE EXCEPTION 'Catalog worker requires tenant row-level security';
+            END IF;
+            GRANT USAGE ON SCHEMA public TO aurum_catalog_worker;
+            GRANT SELECT ON TABLE public.catalog_import_job, public.tenant_catalog,
+                public.barcode TO aurum_catalog_worker;
+            GRANT UPDATE (
+                status, execution_started_at, total_rows, valid_rows, error_rows,
+                preview_data, errors, finished_at, expires_at_for_rollback
+            ) ON TABLE public.catalog_import_job TO aurum_catalog_worker;
+            GRANT INSERT (
+                tenant_id, import_job_id, created_by,
+                brand_name, inn, manufacturer, form, dosage, pack_size, atx_code,
+                dispensing_type, storage_type, category, base_price
+            ) ON TABLE public.tenant_catalog TO aurum_catalog_worker;
+            GRANT UPDATE (
+                brand_name, inn, manufacturer, form, dosage, pack_size, atx_code,
+                dispensing_type, storage_type, category, base_price
+            ) ON TABLE public.tenant_catalog TO aurum_catalog_worker;
+            GRANT INSERT (tenant_id, catalog_id, code, code_type)
+                ON TABLE public.barcode TO aurum_catalog_worker;
+            GRANT EXECUTE ON FUNCTION public.current_tenant_id(), public.current_app_user_id()
+                TO aurum_catalog_worker;
+        END IF;
     END IF;
 END
 $$;

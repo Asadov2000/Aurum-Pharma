@@ -54,6 +54,10 @@ _LOCAL_TEST_DATABASE_URL_BILLING_WORKER = (
 _LOCAL_TEST_DATABASE_URL_WORKER = (
     "postgresql+asyncpg://aurum_worker:aurum_worker_pw@" "postgres-test:5432/aurum_test"
 )
+_LOCAL_TEST_DATABASE_URL_CATALOG_WORKER = (
+    "postgresql+asyncpg://aurum_catalog_worker:aurum_catalog_worker_pw@"
+    "postgres-test:5432/aurum_test"
+)
 
 
 def _require_disposable_test_database(url: str, variable_name: str) -> None:
@@ -77,6 +81,9 @@ _test_database_url_billing_worker = os.getenv(
 _test_database_url_worker = os.getenv(
     "TEST_DATABASE_URL_WORKER",
     _LOCAL_TEST_DATABASE_URL_WORKER,
+)
+_test_database_url_catalog_worker = os.getenv(
+    "TEST_DATABASE_URL_CATALOG_WORKER", _LOCAL_TEST_DATABASE_URL_CATALOG_WORKER
 )
 _require_disposable_test_database(_test_database_url_app, "TEST_DATABASE_URL_APP")
 _require_disposable_test_database(_test_database_url_support, "TEST_DATABASE_URL_SUPPORT")
@@ -102,6 +109,10 @@ os.environ["DATABASE_URL_MIGRATION"] = _test_database_url_migration
 os.environ["DATABASE_URL_MAILER"] = _test_database_url_mailer
 os.environ["DATABASE_URL_BILLING_WORKER"] = _test_database_url_billing_worker
 os.environ["DATABASE_URL_WORKER"] = _test_database_url_worker
+_require_disposable_test_database(
+    _test_database_url_catalog_worker, "TEST_DATABASE_URL_CATALOG_WORKER"
+)
+os.environ["DATABASE_URL_CATALOG_WORKER"] = _test_database_url_catalog_worker
 # Never inherit the application's Redis endpoint: cleanup belongs exclusively
 # to dedicated test infrastructure (CI can supply TEST_REDIS_URL explicitly).
 os.environ["REDIS_URL"] = resolve_test_redis_url(os.environ)

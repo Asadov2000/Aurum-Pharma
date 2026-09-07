@@ -27,7 +27,7 @@ import sys
 import time
 from sqlalchemy.engine import make_url
 from app.core.catalog_worker_config import get_catalog_worker_settings
-database = make_url(get_catalog_worker_settings().DATABASE_URL_APP).database or ''
+database = make_url(get_catalog_worker_settings().DATABASE_URL_CATALOG_WORKER).database or ''
 if not database.endswith('_test'):
     raise RuntimeError('Hard-timeout worker requires a disposable test database')
 from app.tasks import catalog as worker
@@ -103,7 +103,7 @@ async def test_real_celery_hard_timeout_releases_claim_and_import_slot(
     committed_catalog_import: ImportFixture,
 ) -> None:
     factory, tenant_id, job_id = committed_catalog_import
-    database = make_url(get_catalog_worker_settings().DATABASE_URL_APP).database or ""
+    database = make_url(get_catalog_worker_settings().DATABASE_URL_CATALOG_WORKER).database or ""
     if not database.endswith("_test"):
         raise RuntimeError("Hard-timeout integration requires a disposable '_test' database")
     async with factory.begin() as db:

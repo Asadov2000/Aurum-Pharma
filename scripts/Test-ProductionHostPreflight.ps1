@@ -51,6 +51,7 @@ $requiredSecrets = @(
     "AURUM_MAILER_PASSWORD",
     "AURUM_BILLING_WORKER_PASSWORD",
     "AURUM_WORKER_PASSWORD",
+    "AURUM_CATALOG_WORKER_PASSWORD",
     "AURUM_MIGRATOR_PASSWORD",
     "AURUM_BACKUP_PASSWORD",
     "AURUM_PITR_PASSWORD",
@@ -59,6 +60,7 @@ $requiredSecrets = @(
     "DATABASE_URL_MAILER",
     "DATABASE_URL_BILLING_WORKER",
     "DATABASE_URL_WORKER",
+    "DATABASE_URL_CATALOG_WORKER",
     "DATABASE_URL_MIGRATION",
     "DATABASE_URL_BACKUP",
     "DATABASE_URL_PITR",
@@ -74,6 +76,8 @@ $requiredSecrets = @(
     "MINIO_ROOT_PASSWORD",
     "MINIO_ACCESS_KEY",
     "MINIO_SECRET_KEY",
+    "CATALOG_MINIO_ACCESS_KEY",
+    "CATALOG_MINIO_SECRET_KEY",
     "MINIO_BACKUP_ACCESS_KEY",
     "MINIO_BACKUP_SECRET_KEY",
     "RESTIC_PASSWORD",
@@ -200,12 +204,15 @@ function Test-DescendantPath {
 function Assert-WorkerDatabaseUrl {
     param(
         [Parameter(Mandatory = $true)][string]$Value,
-        [Parameter(Mandatory = $true)][string]$ExpectedPassword
+        [Parameter(Mandatory = $true)][string]$ExpectedPassword,
+        [string]$Name = "DATABASE_URL_WORKER",
+        [string]$ExpectedRole = "aurum_worker",
+        [string]$PasswordName = "AURUM_WORKER_PASSWORD"
     )
 
     $uri = $null
     if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri)) {
-        throw "DATABASE_URL_WORKER must be an absolute PostgreSQL URL."
+        throw "$Name must be an absolute PostgreSQL URL."
     }
     if (
         $uri.Scheme -cne "postgresql+asyncpg" -or
@@ -215,17 +222,17 @@ function Assert-WorkerDatabaseUrl {
         $uri.Query -cne "?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -or
         $uri.Fragment.Length -gt 0
     ) {
-        throw "DATABASE_URL_WORKER must target aurum_worker on postgres:5432/aurum."
+        throw "$Name must target $ExpectedRole on postgres:5432/aurum."
     }
 
     $separator = $uri.UserInfo.IndexOf(":", [StringComparison]::Ordinal)
     if ($separator -lt 1) {
-        throw "DATABASE_URL_WORKER must contain dedicated credentials."
+        throw "$Name must contain dedicated credentials."
     }
     $username = [Uri]::UnescapeDataString($uri.UserInfo.Substring(0, $separator))
     $password = [Uri]::UnescapeDataString($uri.UserInfo.Substring($separator + 1))
-    if ($username -cne "aurum_worker" -or $password -cne $ExpectedPassword) {
-        throw "DATABASE_URL_WORKER credentials must match AURUM_WORKER_PASSWORD."
+    if ($username -cne $ExpectedRole -or $password -cne $ExpectedPassword) {
+        throw "$Name credentials must match $PasswordName."
     }
 }
 
@@ -234,7 +241,7 @@ function Assert-InternalTransportUrls {
 
     foreach ($name in @(
         "DATABASE_URL_APP", "DATABASE_URL_SUPPORT", "DATABASE_URL_MAILER",
-        "DATABASE_URL_BILLING_WORKER", "DATABASE_URL_WORKER",
+        "DATABASE_URL_BILLING_WORKER", "DATABASE_URL_WORKER", "DATABASE_URL_CATALOG_WORKER",
         "DATABASE_URL_MIGRATION", "DATABASE_URL_BACKUP", "DATABASE_URL_PITR"
     )) {
         $uri = $null
@@ -473,6 +480,22 @@ try {
     Assert-WorkerDatabaseUrl `
         -Value $secretValues.DATABASE_URL_WORKER `
         -ExpectedPassword $secretValues.AURUM_WORKER_PASSWORD
+    Assert-WorkerDatabaseUrl `
+        -Value $secretValues.DATABASE_URL_CATALOG_WORKER `
+        -ExpectedPassword $secretValues.AURUM_CATALOG_WORKER_PASSWORD `
+        -Name "DATABASE_URL_CATALOG_WORKER" `
+        -ExpectedRole "aurum_catalog_worker" `
+        -PasswordName "AURUM_CATALOG_WORKER_PASSWORD"
+    foreach ($name in @("MINIO_ROOT_USER", "MINIO_ACCESS_KEY", "MINIO_BACKUP_ACCESS_KEY")) {
+        if ($secretValues.CATALOG_MINIO_ACCESS_KEY -ceq $secretValues[$name]) {
+            throw "CATALOG_MINIO_ACCESS_KEY must identify an independent storage account."
+        }
+    }
+    foreach ($name in @("MINIO_ROOT_PASSWORD", "MINIO_SECRET_KEY", "MINIO_BACKUP_SECRET_KEY")) {
+        if ($secretValues.CATALOG_MINIO_SECRET_KEY -ceq $secretValues[$name]) {
+            throw "CATALOG_MINIO_SECRET_KEY must not reuse another storage secret."
+        }
+    }
     Assert-InternalTransportUrls -SecretValues $secretValues
     $tlsDirectory = $resolvedDirectories.AURUM_INTERNAL_TLS_DIR
     Assert-InternalTlsMaterial -Directory $tlsDirectory

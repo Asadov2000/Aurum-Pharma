@@ -59,7 +59,7 @@ def test_system_worker_accepts_only_worker_identity() -> None:
 @pytest.mark.parametrize(
     "database_url",
     (
-        "postgresql+asyncpg://aurum_app:secret@db:5432/aurum",
+        "postgresql+asyncpg://aurum_catalog_worker:secret@db:5432/aurum",
         "postgresql+asyncpg://aurum_worker@db:5432/aurum",
         "postgresql+asyncpg://aurum_worker:aurum_worker_pw@db:5432/aurum",
     ),
@@ -76,13 +76,13 @@ def test_system_worker_rejects_wrong_database_identity(database_url: str) -> Non
 def _catalog_settings(**overrides: object) -> CatalogWorkerSettings:
     values: dict[str, object] = {
         "ENVIRONMENT": "production",
-        "DATABASE_URL_APP": (
-            "postgresql+asyncpg://aurum_app:Str0ng-App-Pw@db:5432/aurum" + _POSTGRES_TLS
+        "DATABASE_URL_CATALOG_WORKER": (
+            "postgresql+asyncpg://aurum_catalog_worker:Str0ng-App-Pw@db:5432/aurum" + _POSTGRES_TLS
         ),
         "REDIS_URL": _REDIS_URL,
         "MINIO_ENDPOINT": "minio:9000",
-        "MINIO_ACCESS_KEY": "catalog-access-key",
-        "MINIO_SECRET_KEY": "catalog-secret-key-with-at-least-32-characters",
+        "CATALOG_MINIO_ACCESS_KEY": "catalog-access-key",
+        "CATALOG_MINIO_SECRET_KEY": "catalog-secret-key-with-at-least-32-characters",
         "MINIO_BUCKET": "aurum",
         "MINIO_SECURE": True,
     }
@@ -98,16 +98,50 @@ def test_catalog_worker_accepts_only_tenant_scoped_dependencies() -> None:
     assert "catalog-secret-key" not in representation
 
 
+def test_catalog_worker_rejects_app_identity_even_in_development() -> None:
+    with pytest.raises(ValidationError, match="aurum_catalog_worker"):
+        _catalog_settings(
+            ENVIRONMENT="development",
+            DATABASE_URL_CATALOG_WORKER="postgresql+asyncpg://aurum_app:secret@db:5432/aurum",
+        )
+
+
+def test_catalog_worker_does_not_fall_back_to_application_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in (
+        "DATABASE_URL_CATALOG_WORKER",
+        "CATALOG_MINIO_ACCESS_KEY",
+        "CATALOG_MINIO_SECRET_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DATABASE_URL_APP", "postgresql+asyncpg://aurum_app:secret@db/aurum")
+    monkeypatch.setenv("MINIO_ACCESS_KEY", "unrelated-app-key")
+    monkeypatch.setenv("MINIO_SECRET_KEY", "unrelated-app-secret")
+    with pytest.raises(ValidationError, match="non-placeholder"):
+        CatalogWorkerSettings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            REDIS_URL=_REDIS_URL,
+            MINIO_SECURE=True,
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     (
         (
-            "DATABASE_URL_APP",
+            "DATABASE_URL_CATALOG_WORKER",
             "postgresql+asyncpg://aurum_support:secret@db:5432/aurum",
-            "DATABASE_URL_APP",
+            "DATABASE_URL_CATALOG_WORKER",
         ),
-        ("MINIO_ACCESS_KEY", "minioadmin", "MinIO"),
-        ("MINIO_SECRET_KEY", "short", "MinIO"),
+        (
+            "DATABASE_URL_CATALOG_WORKER",
+            "postgresql+asyncpg://aurum_app:secret@db:5432/aurum",
+            "DATABASE_URL_CATALOG_WORKER",
+        ),
+        ("CATALOG_MINIO_ACCESS_KEY", "minioadmin", "MinIO"),
+        ("CATALOG_MINIO_SECRET_KEY", "short", "MinIO"),
     ),
 )
 def test_catalog_worker_rejects_privileged_or_default_credentials(
@@ -187,10 +221,12 @@ def test_catalog_tasks_are_routed_only_to_dedicated_queue() -> None:
         (
             "app.tasks.catalog",
             {
-                "DATABASE_URL_APP": ("postgresql+asyncpg://aurum_app:worker-pw@db:5432/aurum"),
+                "DATABASE_URL_CATALOG_WORKER": (
+                    "postgresql+asyncpg://aurum_catalog_worker:worker-pw@db:5432/aurum"
+                ),
                 "MINIO_ENDPOINT": "minio:9000",
-                "MINIO_ACCESS_KEY": "minioadmin",
-                "MINIO_SECRET_KEY": "minioadmin",
+                "CATALOG_MINIO_ACCESS_KEY": "minioadmin",
+                "CATALOG_MINIO_SECRET_KEY": "minioadmin",
                 "MINIO_BUCKET": "aurum",
             },
         ),
@@ -203,12 +239,15 @@ def test_worker_modules_import_without_unrelated_application_secrets(
     env = os.environ.copy()
     for name in (
         "DATABASE_URL_APP",
+        "DATABASE_URL_CATALOG_WORKER",
         "DATABASE_URL_SUPPORT",
         "DATABASE_URL_WORKER",
         "JWT_SECRET",
         "MFA_ENCRYPTION_KEY",
         "EMAIL_OUTBOX_ENCRYPTION_KEY",
         "METRICS_TOKEN",
+        "CATALOG_MINIO_ACCESS_KEY",
+        "CATALOG_MINIO_SECRET_KEY",
         "MINIO_ACCESS_KEY",
         "MINIO_SECRET_KEY",
     ):

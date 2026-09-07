@@ -65,6 +65,7 @@ $supportPassword = New-RandomHex -Bytes 32
 $mailerPassword = New-RandomHex -Bytes 32
 $billingWorkerPassword = New-RandomHex -Bytes 32
 $workerPassword = New-RandomHex -Bytes 32
+$catalogWorkerPassword = New-RandomHex -Bytes 32
 $migratorPassword = New-RandomHex -Bytes 32
 $backupPassword = New-RandomHex -Bytes 32
 $pitrPassword = New-RandomHex -Bytes 32
@@ -73,6 +74,8 @@ $minioRootUser = New-RandomHex -Bytes 10
 $minioRootPassword = New-RandomHex -Bytes 32
 $minioAccessKey = New-RandomHex -Bytes 10
 $minioSecretKey = New-RandomHex -Bytes 32
+$catalogMinioAccessKey = New-RandomHex -Bytes 10
+$catalogMinioSecretKey = New-RandomHex -Bytes 32
 $minioBackupAccessKey = New-RandomHex -Bytes 10
 $minioBackupSecretKey = New-RandomHex -Bytes 32
 
@@ -93,6 +96,7 @@ Write-Secret -Name "AURUM_SUPPORT_PASSWORD" -Value $supportPassword
 Write-Secret -Name "AURUM_MAILER_PASSWORD" -Value $mailerPassword
 Write-Secret -Name "AURUM_BILLING_WORKER_PASSWORD" -Value $billingWorkerPassword
 Write-Secret -Name "AURUM_WORKER_PASSWORD" -Value $workerPassword
+Write-Secret -Name "AURUM_CATALOG_WORKER_PASSWORD" -Value $catalogWorkerPassword
 Write-Secret -Name "AURUM_MIGRATOR_PASSWORD" -Value $migratorPassword
 Write-Secret -Name "AURUM_BACKUP_PASSWORD" -Value $backupPassword
 Write-Secret -Name "AURUM_PITR_PASSWORD" -Value $pitrPassword
@@ -111,6 +115,9 @@ Write-Secret -Name "DATABASE_URL_BILLING_WORKER" -Value (
 )
 Write-Secret -Name "DATABASE_URL_WORKER" -Value (
     "postgresql+asyncpg://aurum_worker:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $workerPassword
+)
+Write-Secret -Name "DATABASE_URL_CATALOG_WORKER" -Value (
+    "postgresql+asyncpg://aurum_catalog_worker:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $catalogWorkerPassword
 )
 Write-Secret -Name "DATABASE_URL_MIGRATION" -Value (
     "postgresql+asyncpg://aurum_migrator:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $migratorPassword
@@ -135,6 +142,8 @@ Write-Secret -Name "MINIO_ROOT_USER" -Value $minioRootUser
 Write-Secret -Name "MINIO_ROOT_PASSWORD" -Value $minioRootPassword
 Write-Secret -Name "MINIO_ACCESS_KEY" -Value $minioAccessKey
 Write-Secret -Name "MINIO_SECRET_KEY" -Value $minioSecretKey
+Write-Secret -Name "CATALOG_MINIO_ACCESS_KEY" -Value $catalogMinioAccessKey
+Write-Secret -Name "CATALOG_MINIO_SECRET_KEY" -Value $catalogMinioSecretKey
 Write-Secret -Name "MINIO_BACKUP_ACCESS_KEY" -Value $minioBackupAccessKey
 Write-Secret -Name "MINIO_BACKUP_SECRET_KEY" -Value $minioBackupSecretKey
 Write-Secret -Name "RESTIC_PASSWORD" -Value (New-RandomHex -Bytes 48)

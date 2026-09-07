@@ -501,6 +501,7 @@ services:
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
       AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
+      AURUM_CATALOG_WORKER_PASSWORD_FILE: /run/secrets/AURUM_CATALOG_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -518,6 +519,8 @@ services:
         target: AURUM_BILLING_WORKER_PASSWORD
       - source: aurum_worker_password
         target: AURUM_WORKER_PASSWORD
+      - source: aurum_catalog_worker_password
+        target: AURUM_CATALOG_WORKER_PASSWORD
       - source: aurum_backup_password
         target: AURUM_BACKUP_PASSWORD
       - source: aurum_pitr_password

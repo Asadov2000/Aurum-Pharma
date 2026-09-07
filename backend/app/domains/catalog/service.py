@@ -543,7 +543,7 @@ class CatalogService:
                 await self.repo.update_item(duplicate, **merged)
                 outcome = "updated"
             elif strategy == "create_copy":
-                item = await self.repo.create_item(
+                item = await self.repo.create_import_item(
                     tenant_id=job.tenant_id,
                     import_job_id=job.id,
                     created_by=job.user_id,
@@ -552,7 +552,7 @@ class CatalogService:
                 target_id = item.id
                 outcome = "created"
         else:
-            item = await self.repo.create_item(
+            item = await self.repo.create_import_item(
                 tenant_id=job.tenant_id,
                 import_job_id=job.id,
                 created_by=job.user_id,

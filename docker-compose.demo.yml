@@ -52,6 +52,7 @@ services:
       AURUM_MAILER_PASSWORD: "${AURUM_DEMO_MAILER_PASSWORD:?AURUM_DEMO_MAILER_PASSWORD is required}"
       AURUM_BILLING_WORKER_PASSWORD: "${AURUM_DEMO_BILLING_WORKER_PASSWORD:?AURUM_DEMO_BILLING_WORKER_PASSWORD is required}"
       AURUM_WORKER_PASSWORD: "${AURUM_DEMO_WORKER_PASSWORD:?AURUM_DEMO_WORKER_PASSWORD is required}"
+      AURUM_CATALOG_WORKER_PASSWORD: "${AURUM_DEMO_CATALOG_WORKER_PASSWORD:?AURUM_DEMO_CATALOG_WORKER_PASSWORD is required}"
       AURUM_MIGRATOR_PASSWORD: "${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}"
       AURUM_BACKUP_PASSWORD: "${AURUM_DEMO_BACKUP_PASSWORD:?AURUM_DEMO_BACKUP_PASSWORD is required}"
       AURUM_PITR_PASSWORD: "${AURUM_DEMO_PITR_PASSWORD:?AURUM_DEMO_PITR_PASSWORD is required}"
@@ -124,6 +125,7 @@ services:
       AURUM_MAILER_PASSWORD: "${AURUM_DEMO_MAILER_PASSWORD:?AURUM_DEMO_MAILER_PASSWORD is required}"
       AURUM_BILLING_WORKER_PASSWORD: "${AURUM_DEMO_BILLING_WORKER_PASSWORD:?AURUM_DEMO_BILLING_WORKER_PASSWORD is required}"
       AURUM_WORKER_PASSWORD: "${AURUM_DEMO_WORKER_PASSWORD:?AURUM_DEMO_WORKER_PASSWORD is required}"
+      AURUM_CATALOG_WORKER_PASSWORD: "${AURUM_DEMO_CATALOG_WORKER_PASSWORD:?AURUM_DEMO_CATALOG_WORKER_PASSWORD is required}"
       AURUM_MIGRATOR_PASSWORD: "${AURUM_DEMO_MIGRATOR_PASSWORD:?AURUM_DEMO_MIGRATOR_PASSWORD is required}"
       AURUM_BACKUP_PASSWORD: "${AURUM_DEMO_BACKUP_PASSWORD:?AURUM_DEMO_BACKUP_PASSWORD is required}"
       AURUM_PITR_PASSWORD: "${AURUM_DEMO_PITR_PASSWORD:?AURUM_DEMO_PITR_PASSWORD is required}"
@@ -196,6 +198,33 @@ services:
     init: true
     restart: unless-stopped
 
+  catalog-minio-init:
+    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    container_name: aurum-demo-catalog-minio-init
+    entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_SECURE: "false"
+      MINIO_BUCKET: aurum-demo
+      MINIO_ROOT_USER: "${AURUM_DEMO_MINIO_ACCESS_KEY:?AURUM_DEMO_MINIO_ACCESS_KEY is required}"
+      MINIO_ROOT_PASSWORD: "${AURUM_DEMO_MINIO_SECRET_KEY:?AURUM_DEMO_MINIO_SECRET_KEY is required}"
+      MINIO_ACCESS_KEY: "${AURUM_DEMO_MINIO_ACCESS_KEY:?AURUM_DEMO_MINIO_ACCESS_KEY is required}"
+      CATALOG_MINIO_ACCESS_KEY: "${AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY:?AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY is required}"
+      CATALOG_MINIO_SECRET_KEY: "${AURUM_DEMO_CATALOG_MINIO_SECRET_KEY:?AURUM_DEMO_CATALOG_MINIO_SECRET_KEY is required}"
+    volumes:
+      - ./infra/minio/provision-catalog-reader.sh:/config/provision-catalog-reader.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"
+
   catalog-worker:
     image: aurum-pharma-demo-backend:local
     build:
@@ -204,15 +233,17 @@ services:
     container_name: aurum-demo-catalog-worker
     environment:
       ENVIRONMENT: development
-      DATABASE_URL_APP: "postgresql+asyncpg://aurum_app:${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}@postgres:5432/aurum_demo"
+      DATABASE_URL_CATALOG_WORKER: "postgresql+asyncpg://aurum_catalog_worker:${AURUM_DEMO_CATALOG_WORKER_PASSWORD:?AURUM_DEMO_CATALOG_WORKER_PASSWORD is required}@postgres:5432/aurum_demo"
       REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: "${AURUM_DEMO_MINIO_ACCESS_KEY:?AURUM_DEMO_MINIO_ACCESS_KEY is required}"
-      MINIO_SECRET_KEY: "${AURUM_DEMO_MINIO_SECRET_KEY:?AURUM_DEMO_MINIO_SECRET_KEY is required}"
+      CATALOG_MINIO_ACCESS_KEY: "${AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY:?AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY is required}"
+      CATALOG_MINIO_SECRET_KEY: "${AURUM_DEMO_CATALOG_MINIO_SECRET_KEY:?AURUM_DEMO_CATALOG_MINIO_SECRET_KEY is required}"
       MINIO_BUCKET: aurum-demo
       MINIO_SECURE: "false"
       PYTHONPATH: /app
     depends_on:
+      catalog-minio-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

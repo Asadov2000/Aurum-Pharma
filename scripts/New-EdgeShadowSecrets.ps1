@@ -60,6 +60,7 @@ $passwords = @{
     AURUM_MAILER_PASSWORD = New-RandomHex -Bytes 32
     AURUM_BILLING_WORKER_PASSWORD = New-RandomHex -Bytes 32
     AURUM_WORKER_PASSWORD = New-RandomHex -Bytes 32
+    AURUM_CATALOG_WORKER_PASSWORD = New-RandomHex -Bytes 32
     AURUM_BACKUP_PASSWORD = New-RandomHex -Bytes 32
     AURUM_PITR_PASSWORD = New-RandomHex -Bytes 32
 }

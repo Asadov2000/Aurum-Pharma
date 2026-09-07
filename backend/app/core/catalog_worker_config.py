@@ -29,42 +29,51 @@ class CatalogWorkerSettings(CeleryBrokerSettings):
     )
 
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
-    DATABASE_URL_APP: str = Field(
-        default="postgresql+asyncpg://aurum_app:aurum_app_pw@postgres:5432/aurum",
+    DATABASE_URL_CATALOG_WORKER: str = Field(
+        default="postgresql+asyncpg://aurum_catalog_worker:aurum_catalog_worker_pw@postgres:5432/aurum",
         repr=False,
     )
     MINIO_ENDPOINT: str = "minio:9000"
-    MINIO_ACCESS_KEY: str = Field(default="minioadmin", repr=False)
-    MINIO_SECRET_KEY: str = Field(default="minioadmin", repr=False)
+    CATALOG_MINIO_ACCESS_KEY: str = Field(default="aurum_catalog_reader", repr=False)
+    CATALOG_MINIO_SECRET_KEY: str = Field(default="aurum_catalog_reader_pw", repr=False)
     MINIO_BUCKET: str = "aurum"
     MINIO_SECURE: bool = False
 
     @model_validator(mode="after")
     def _guard_catalog_worker(self) -> CatalogWorkerSettings:
-        if self.ENVIRONMENT == "development":
-            return self
         problems: list[str] = []
         try:
-            database = make_url(self.DATABASE_URL_APP)
+            database = make_url(self.DATABASE_URL_CATALOG_WORKER)
         except ArgumentError:
             database = None
         if (
             database is None
-            or database.username != "aurum_app"
+            or database.username != "aurum_catalog_worker"
             or not database.password
             or not database.host
-            or "aurum_app_pw" in self.DATABASE_URL_APP
         ):
-            problems.append("DATABASE_URL_APP must use non-placeholder aurum_app credentials")
-        problems.extend(_database_security_problems("DATABASE_URL_APP", self.DATABASE_URL_APP))
+            problems.append("DATABASE_URL_CATALOG_WORKER must use aurum_catalog_worker credentials")
+        if self.ENVIRONMENT == "development":
+            if problems:
+                raise ValueError(
+                    "Refusing to start insecure catalog worker: " + "; ".join(problems)
+                )
+            return self
+        if "aurum_catalog_worker_pw" in self.DATABASE_URL_CATALOG_WORKER:
+            problems.append("DATABASE_URL_CATALOG_WORKER must use non-placeholder credentials")
+        problems.extend(
+            _database_security_problems(
+                "DATABASE_URL_CATALOG_WORKER", self.DATABASE_URL_CATALOG_WORKER
+            )
+        )
         problems.extend(_redis_security_problems(self.REDIS_URL))
         if (
             not self.MINIO_ENDPOINT
             or "://" in self.MINIO_ENDPOINT
-            or self.MINIO_ACCESS_KEY.lower() == "minioadmin"
-            or len(self.MINIO_ACCESS_KEY) < 16
-            or self.MINIO_SECRET_KEY.lower() == "minioadmin"
-            or len(self.MINIO_SECRET_KEY) < 32
+            or self.CATALOG_MINIO_ACCESS_KEY.lower() in {"minioadmin", "aurum_catalog_reader"}
+            or len(self.CATALOG_MINIO_ACCESS_KEY) < 16
+            or self.CATALOG_MINIO_SECRET_KEY.lower() in {"minioadmin", "aurum_catalog_reader_pw"}
+            or len(self.CATALOG_MINIO_SECRET_KEY) < 32
             or not self.MINIO_BUCKET
         ):
             problems.append("dedicated MinIO endpoint, bucket and credentials are required")
