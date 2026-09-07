@@ -17,13 +17,13 @@ _REDIS_TLS_URL = (
 def _catalog_settings(**overrides: object) -> CatalogWorkerSettings:
     values: dict[str, object] = {
         "ENVIRONMENT": "production",
-        "DATABASE_URL_APP": (
-            "postgresql+asyncpg://aurum_app:Str0ng-App-Pw@db:5432/aurum" + _POSTGRES_TLS
+        "DATABASE_URL_CATALOG_WORKER": (
+            "postgresql+asyncpg://aurum_catalog_worker:Str0ng-App-Pw@db:5432/aurum" + _POSTGRES_TLS
         ),
         "REDIS_URL": _REDIS_TLS_URL,
         "MINIO_ENDPOINT": "minio:9000",
-        "MINIO_ACCESS_KEY": "catalog-access-key",
-        "MINIO_SECRET_KEY": "catalog-secret-key-with-at-least-32-characters",
+        "CATALOG_MINIO_ACCESS_KEY": "catalog-access-key",
+        "CATALOG_MINIO_SECRET_KEY": "catalog-secret-key-with-at-least-32-characters",
         "MINIO_BUCKET": "aurum",
         "MINIO_SECURE": True,
     }
@@ -51,13 +51,16 @@ def test_production_workers_accept_verified_internal_transports() -> None:
 @pytest.mark.parametrize(
     "database_url",
     [
-        "postgresql+asyncpg://aurum_app:Str0ng-App-Pw@db:5432/aurum",
-        ("postgresql+asyncpg://aurum_app:Str0ng-App-Pw@db:5432/aurum" "?sslmode=verify-full"),
+        "postgresql+asyncpg://aurum_catalog_worker:Str0ng-App-Pw@db:5432/aurum",
+        (
+            "postgresql+asyncpg://aurum_catalog_worker:Str0ng-App-Pw@db:5432/aurum"
+            "?sslmode=verify-full"
+        ),
     ],
 )
 def test_catalog_worker_rejects_database_without_verified_tls(database_url: str) -> None:
     with pytest.raises(ValidationError, match="sslmode=verify-full and sslrootcert"):
-        _catalog_settings(DATABASE_URL_APP=database_url)
+        _catalog_settings(DATABASE_URL_CATALOG_WORKER=database_url)
 
 
 def test_catalog_worker_rejects_redis_without_verified_tls() -> None:

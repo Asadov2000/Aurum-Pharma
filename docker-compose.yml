@@ -78,6 +78,7 @@ services:
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_WORKER_PASSWORD: ${AURUM_WORKER_PASSWORD:-aurum_worker_pw}
+      AURUM_CATALOG_WORKER_PASSWORD: ${AURUM_CATALOG_WORKER_PASSWORD:-aurum_catalog_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
       AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
       AURUM_PITR_PASSWORD: ${AURUM_PITR_PASSWORD:-aurum_pitr_pw}
@@ -111,6 +112,7 @@ services:
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_WORKER_PASSWORD: ${AURUM_WORKER_PASSWORD:-aurum_worker_pw}
+      AURUM_CATALOG_WORKER_PASSWORD: ${AURUM_CATALOG_WORKER_PASSWORD:-aurum_catalog_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
       AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
       AURUM_PITR_PASSWORD: ${AURUM_PITR_PASSWORD:-aurum_pitr_pw}
@@ -224,6 +226,7 @@ services:
       AURUM_MAILER_PASSWORD: ${AURUM_MAILER_PASSWORD:-aurum_mailer_pw}
       AURUM_BILLING_WORKER_PASSWORD: ${AURUM_BILLING_WORKER_PASSWORD:-aurum_billing_worker_pw}
       AURUM_WORKER_PASSWORD: ${AURUM_WORKER_PASSWORD:-aurum_worker_pw}
+      AURUM_CATALOG_WORKER_PASSWORD: ${AURUM_CATALOG_WORKER_PASSWORD:-aurum_catalog_worker_pw}
       AURUM_MIGRATOR_PASSWORD: ${AURUM_MIGRATOR_PASSWORD:-aurum_migrator_pw}
       AURUM_BACKUP_PASSWORD: ${AURUM_BACKUP_PASSWORD:-aurum_backup_pw}
       AURUM_PITR_PASSWORD: ${AURUM_PITR_PASSWORD:-aurum_pitr_pw}
@@ -283,6 +286,32 @@ services:
     command: celery -A app.tasks.celery_app worker --loglevel=info -Q default
     restart: unless-stopped
 
+  catalog-minio-init:
+    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_SECURE: ${MINIO_SECURE:-false}
+      MINIO_BUCKET: ${MINIO_BUCKET:-aurum}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      CATALOG_MINIO_ACCESS_KEY: ${CATALOG_MINIO_ACCESS_KEY:-aurum_catalog_reader}
+      CATALOG_MINIO_SECRET_KEY: ${CATALOG_MINIO_SECRET_KEY:-aurum_catalog_reader_pw}
+    volumes:
+      - ./infra/minio/provision-catalog-reader.sh:/config/provision-catalog-reader.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"
+
   catalog-worker:
     build:
       context: ./backend
@@ -290,16 +319,18 @@ services:
     container_name: aurum-catalog-worker
     environment:
       ENVIRONMENT: development
-      DATABASE_URL_APP: ${DATABASE_URL_APP:-postgresql+asyncpg://aurum_app:aurum_app_pw@postgres:5432/aurum}
+      DATABASE_URL_CATALOG_WORKER: ${DATABASE_URL_CATALOG_WORKER:-postgresql+asyncpg://aurum_catalog_worker:aurum_catalog_worker_pw@postgres:5432/aurum}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      CATALOG_MINIO_ACCESS_KEY: ${CATALOG_MINIO_ACCESS_KEY:-aurum_catalog_reader}
+      CATALOG_MINIO_SECRET_KEY: ${CATALOG_MINIO_SECRET_KEY:-aurum_catalog_reader_pw}
       MINIO_BUCKET: ${MINIO_BUCKET:-aurum}
       MINIO_SECURE: ${MINIO_SECURE:-false}
       PYTHONPATH: /app
     volumes: *backend-dev-volumes
     depends_on:
+      catalog-minio-init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       postgres:

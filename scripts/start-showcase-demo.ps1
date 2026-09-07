@@ -22,6 +22,7 @@ $secretHexLengths = [ordered]@{
     AURUM_DEMO_MAILER_PASSWORD = 64
     AURUM_DEMO_BILLING_WORKER_PASSWORD = 64
     AURUM_DEMO_WORKER_PASSWORD = 64
+    AURUM_DEMO_CATALOG_WORKER_PASSWORD = 64
     AURUM_DEMO_MIGRATOR_PASSWORD = 64
     AURUM_DEMO_BACKUP_PASSWORD = 64
     AURUM_DEMO_PITR_PASSWORD = 64
@@ -30,6 +31,8 @@ $secretHexLengths = [ordered]@{
     AURUM_DEMO_MFA_ENCRYPTION_KEY = 96
     AURUM_DEMO_MINIO_ACCESS_KEY = 32
     AURUM_DEMO_MINIO_SECRET_KEY = 64
+    AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY = 32
+    AURUM_DEMO_CATALOG_MINIO_SECRET_KEY = 64
 }
 $credentialBoundVolumes = @(
     "aurum-demo-postgres-data",
@@ -43,6 +46,7 @@ $showcaseContainers = @(
     "aurum-demo-backend",
     "aurum-demo-celery-worker",
     "aurum-demo-catalog-worker",
+    "aurum-demo-catalog-minio-init",
     "aurum-demo-billing-worker",
     "aurum-demo-platform-mailer",
     "aurum-demo-celery-beat",
@@ -277,6 +281,9 @@ function Add-MissingShowcaseSecrets {
             "AURUM_DEMO_MAILER_PASSWORD",
             "AURUM_DEMO_BILLING_WORKER_PASSWORD",
             "AURUM_DEMO_WORKER_PASSWORD",
+            "AURUM_DEMO_CATALOG_WORKER_PASSWORD",
+            "AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY",
+            "AURUM_DEMO_CATALOG_MINIO_SECRET_KEY",
             "AURUM_DEMO_BACKUP_PASSWORD",
             "AURUM_DEMO_PITR_PASSWORD"
         ) | Where-Object { $key = $_; -not ($existing | Where-Object { $_ -match "^$key=" }) }
@@ -289,7 +296,7 @@ function Add-MissingShowcaseSecrets {
 
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     foreach ($key in $missing) {
-        $value = New-CryptographicHex -ByteCount 32
+        $value = New-CryptographicHex -ByteCount ([int]($secretHexLengths[$key] / 2))
         [System.IO.File]::AppendAllText(
             $Path,
             [Environment]::NewLine + "$key=$value" + [Environment]::NewLine,
@@ -312,6 +319,9 @@ function Ensure-ShowcaseEnvironment {
                 "AURUM_DEMO_MAILER_PASSWORD",
                 "AURUM_DEMO_BILLING_WORKER_PASSWORD",
                 "AURUM_DEMO_WORKER_PASSWORD",
+                "AURUM_DEMO_CATALOG_WORKER_PASSWORD",
+                "AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY",
+                "AURUM_DEMO_CATALOG_MINIO_SECRET_KEY",
                 "AURUM_DEMO_BACKUP_PASSWORD",
                 "AURUM_DEMO_PITR_PASSWORD"
             )

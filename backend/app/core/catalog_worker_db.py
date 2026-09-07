@@ -7,7 +7,7 @@ from app.core.catalog_worker_config import get_catalog_worker_settings
 
 settings = get_catalog_worker_settings()
 catalog_worker_engine = create_async_engine(
-    settings.DATABASE_URL_APP,
+    settings.DATABASE_URL_CATALOG_WORKER,
     echo=False,
     hide_parameters=True,
     poolclass=NullPool,

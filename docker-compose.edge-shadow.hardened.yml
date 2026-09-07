@@ -43,6 +43,7 @@ services:
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
       AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
+      AURUM_CATALOG_WORKER_PASSWORD_FILE: /run/secrets/AURUM_CATALOG_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -58,6 +59,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_catalog_worker_password
+        target: AURUM_CATALOG_WORKER_PASSWORD
       - source: aurum_worker_password
         target: AURUM_WORKER_PASSWORD
       - source: aurum_backup_password
@@ -98,6 +101,7 @@ services:
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
       AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
+      AURUM_CATALOG_WORKER_PASSWORD_FILE: /run/secrets/AURUM_CATALOG_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -113,6 +117,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_catalog_worker_password
+        target: AURUM_CATALOG_WORKER_PASSWORD
       - source: aurum_worker_password
         target: AURUM_WORKER_PASSWORD
       - source: aurum_backup_password
@@ -213,6 +219,8 @@ secrets:
     file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_MAILER_PASSWORD"
   aurum_billing_worker_password:
     file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_BILLING_WORKER_PASSWORD"
+  aurum_catalog_worker_password:
+    file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_CATALOG_WORKER_PASSWORD"
   aurum_worker_password:
     file: "${AURUM_EDGE_SECRET_FILES_DIR:?AURUM_EDGE_SECRET_FILES_DIR is required}/AURUM_WORKER_PASSWORD"
   aurum_backup_password:

@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, delete, exists, func, not_, or_, select, text, update
+from sqlalchemy import and_, case, delete, exists, func, insert, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
@@ -81,6 +81,11 @@ class CatalogRepository:
         await self.session.flush()
         await self.session.refresh(item)
         return item
+
+    async def create_import_item(self, **fields: object) -> TenantCatalog:
+        """Insert only import fields, without ORM NULLs for unrelated metadata."""
+        statement = insert(TenantCatalog).values(**fields).returning(TenantCatalog)
+        return (await self.session.execute(statement)).scalar_one()
 
     async def get_item(
         self, item_id: UUID, *, include_deleted: bool = False

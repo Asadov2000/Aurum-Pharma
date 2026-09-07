@@ -92,6 +92,7 @@ services:
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
       AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
+      AURUM_CATALOG_WORKER_PASSWORD_FILE: /run/secrets/AURUM_CATALOG_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -107,6 +108,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_catalog_worker_password
+        target: AURUM_CATALOG_WORKER_PASSWORD
       - source: aurum_worker_password
         target: AURUM_WORKER_PASSWORD
       - source: aurum_backup_password
@@ -389,6 +392,7 @@ services:
       AURUM_MAILER_PASSWORD_FILE: /run/secrets/AURUM_MAILER_PASSWORD
       AURUM_BILLING_WORKER_PASSWORD_FILE: /run/secrets/AURUM_BILLING_WORKER_PASSWORD
       AURUM_WORKER_PASSWORD_FILE: /run/secrets/AURUM_WORKER_PASSWORD
+      AURUM_CATALOG_WORKER_PASSWORD_FILE: /run/secrets/AURUM_CATALOG_WORKER_PASSWORD
       AURUM_BACKUP_PASSWORD_FILE: /run/secrets/AURUM_BACKUP_PASSWORD
       AURUM_PITR_PASSWORD_FILE: /run/secrets/AURUM_PITR_PASSWORD
     secrets:
@@ -404,6 +408,8 @@ services:
         target: AURUM_MAILER_PASSWORD
       - source: aurum_billing_worker_password
         target: AURUM_BILLING_WORKER_PASSWORD
+      - source: aurum_catalog_worker_password
+        target: AURUM_CATALOG_WORKER_PASSWORD
       - source: aurum_worker_password
         target: AURUM_WORKER_PASSWORD
       - source: aurum_backup_password
@@ -559,6 +565,52 @@ services:
       retries: 3
       start_period: 30s
 
+  catalog-minio-init:
+    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_SECURE: "true"
+      MINIO_BUCKET: aurum
+      SSL_CERT_FILE: /run/tls/ca.crt
+    secrets:
+      - source: minio_root_user
+        target: MINIO_ROOT_USER
+      - source: minio_root_password
+        target: MINIO_ROOT_PASSWORD
+      - source: minio_access_key
+        target: MINIO_ACCESS_KEY
+      - source: catalog_minio_access_key
+        target: CATALOG_MINIO_ACCESS_KEY
+      - source: catalog_minio_secret_key
+        target: CATALOG_MINIO_SECRET_KEY
+      - source: minio_backup_access_key
+        target: MINIO_BACKUP_ACCESS_KEY
+    volumes:
+      - ./infra/minio/provision-catalog-reader.sh:/config/provision-catalog-reader.sh:ro
+      - type: bind
+        source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
+        target: /run/tls/ca.crt
+        read_only: true
+    networks:
+      - data
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: "${AURUM_MAINTENANCE_MEMORY_LIMIT:-256m}"
+    cpus: "${AURUM_MAINTENANCE_CPU_LIMIT:-0.5}"
+    init: true
+    logging: *service-logging
+    restart: "no"
+
   catalog-worker:
     <<: *backend-service
     environment:
@@ -571,14 +623,14 @@ services:
       LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
       PYTHONPATH: /app
     secrets:
-      - source: database_url_app
-        target: DATABASE_URL_APP
+      - source: database_url_catalog_worker
+        target: DATABASE_URL_CATALOG_WORKER
       - source: redis_url
         target: REDIS_URL
-      - source: minio_access_key
-        target: MINIO_ACCESS_KEY
-      - source: minio_secret_key
-        target: MINIO_SECRET_KEY
+      - source: catalog_minio_access_key
+        target: CATALOG_MINIO_ACCESS_KEY
+      - source: catalog_minio_secret_key
+        target: CATALOG_MINIO_SECRET_KEY
     networks:
       - data
     mem_limit: "${AURUM_CATALOG_WORKER_MEMORY_LIMIT:-768m}"
@@ -597,6 +649,8 @@ services:
         "catalog-worker",
       ]
     depends_on:
+      catalog-minio-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -869,6 +923,8 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_MAILER_PASSWORD"
   aurum_billing_worker_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_BILLING_WORKER_PASSWORD"
+  aurum_catalog_worker_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_CATALOG_WORKER_PASSWORD"
   aurum_worker_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/AURUM_WORKER_PASSWORD"
   aurum_backup_password:
@@ -885,6 +941,8 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_MAILER"
   database_url_billing_worker:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_BILLING_WORKER"
+  database_url_catalog_worker:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_CATALOG_WORKER"
   database_url_worker:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/DATABASE_URL_WORKER"
   database_url_backup:
@@ -911,8 +969,12 @@ secrets:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MINIO_ROOT_USER"
   minio_root_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MINIO_ROOT_PASSWORD"
+  catalog_minio_access_key:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/CATALOG_MINIO_ACCESS_KEY"
   minio_access_key:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MINIO_ACCESS_KEY"
+  catalog_minio_secret_key:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/CATALOG_MINIO_SECRET_KEY"
   minio_secret_key:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/MINIO_SECRET_KEY"
   minio_backup_access_key:
