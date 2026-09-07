@@ -140,6 +140,13 @@ write_secret DATABASE_URL_PITR \
 write_secret REDIS_PASSWORD "$redis_password"
 write_secret REDIS_URL \
     "rediss://:$redis_password@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt"
+for broker_role in api beat system catalog billing mailer; do
+    broker_upper="$(printf '%s' "$broker_role" | tr '[:lower:]' '[:upper:]')"
+    broker_password="$(random_hex 32)"
+    write_secret "REDIS_CELERY_${broker_upper}_PASSWORD" "$broker_password"
+    write_secret "CELERY_${broker_upper}_BROKER_URL" \
+        "rediss://aurum_$broker_role:$broker_password@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt"
+done
 write_secret JWT_SECRET "$(random_hex 48)"
 write_secret MFA_ENCRYPTION_KEY "$(random_hex 48)"
 write_secret MFA_ENCRYPTION_PREVIOUS_KEYS '{}'

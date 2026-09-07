@@ -2,7 +2,8 @@ x-backend-environment: &backend-environment
   ENVIRONMENT: development
   DATABASE_URL_APP: postgresql+asyncpg://aurum_app:aurum_app_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
   DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:aurum_support_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
-  REDIS_URL: redis://redis:6379/0
+  REDIS_URL: redis://:aurum_redis_pw@redis:6379/0
+  CELERY_BROKER_URL: redis://aurum_api:aurum_api_broker_pw@redis:6379/0
   JWT_SECRET: e2e-only-secret-do-not-use-outside-tests-123456
   AUTH_LOCAL_TESTING_MODE: "true"
   CORS_ORIGINS: '["http://localhost:15173"]'
@@ -15,6 +16,8 @@ x-backend-environment: &backend-environment
 
 services:
   postgres:
+    networks:
+      - db
     image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
     environment:
       POSTGRES_DB: ${AURUM_E2E_DATABASE:-aurum}
@@ -43,16 +46,35 @@ services:
     restart: "no"
 
   redis:
+    networks:
+      - broker
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    volumes:
+      - ./infra/redis/start-with-worker-acl.sh:/config/start-with-worker-acl.sh:ro
+    environment:
+      REDIS_TLS: "false"
+      AURUM_REDIS_MAXMEMORY: "0"
+      REDIS_PASSWORD: aurum_redis_pw
+      REDIS_APPENDONLY: "no"
+      REDIS_CELERY_API_PASSWORD: aurum_api_broker_pw
+      REDIS_CELERY_BEAT_PASSWORD: aurum_beat_broker_pw
+      REDIS_CELERY_SYSTEM_PASSWORD: aurum_system_broker_pw
+      REDIS_CELERY_CATALOG_PASSWORD: aurum_catalog_broker_pw
+      REDIS_CELERY_BILLING_PASSWORD: aurum_billing_broker_pw
+      REDIS_CELERY_MAILER_PASSWORD: aurum_mailer_broker_pw
+    entrypoint: ["/bin/sh", "/config/start-with-worker-acl.sh"]
     image: redis:7-alpine@sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf
-    command: redis-server --appendonly no
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: "no"
 
   mailpit:
+    networks:
+      - mailer-egress
     image: axllent/mailpit:v1.31.0@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24
     environment:
       MP_MAX_MESSAGES: 200
@@ -64,6 +86,8 @@ services:
     restart: "no"
 
   minio:
+    networks:
+      - storage
     image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data
     environment:
@@ -79,6 +103,8 @@ services:
     restart: "no"
 
   db-role-bootstrap:
+    networks:
+      - db
     image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
     environment:
       POSTGRES_HOST: postgres
@@ -103,6 +129,8 @@ services:
     restart: "no"
 
   migrate:
+    networks:
+      - db
     image: aurum-pharma-e2e-backend:local
     build:
       context: ./backend
@@ -118,6 +146,11 @@ services:
     restart: "no"
 
   backend:
+    networks:
+      - web
+      - db
+      - broker
+      - storage
     image: aurum-pharma-e2e-backend:local
     build:
       context: ./backend
@@ -136,21 +169,32 @@ services:
     restart: "no"
 
   celery-worker:
+    networks:
+      - db
+      - broker
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "system", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: aurum-pharma-e2e-backend:local
     environment:
       ENVIRONMENT: development
       DATABASE_URL_WORKER: postgresql+asyncpg://aurum_worker:aurum_worker_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
-      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://aurum_system:aurum_system_broker_pw@redis:6379/0
       PYTHONPATH: /app
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A app.tasks.celery_app worker --loglevel=warning -Q default
+    command: celery -A app.tasks.celery_app worker --loglevel=warning -Q default --without-gossip --without-mingle --without-heartbeat --pidfile=/tmp/celery-worker.pid
     restart: "no"
 
   catalog-minio-init:
+    networks:
+      - storage
     image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
     environment:
@@ -177,11 +221,21 @@ services:
     restart: "no"
 
   catalog-worker:
+    networks:
+      - db
+      - broker
+      - storage
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "catalog", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: aurum-pharma-e2e-backend:local
     environment:
       ENVIRONMENT: development
       DATABASE_URL_CATALOG_WORKER: postgresql+asyncpg://aurum_catalog_worker:aurum_catalog_worker_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
-      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://aurum_catalog:aurum_catalog_broker_pw@redis:6379/0
       MINIO_ENDPOINT: minio:9000
       CATALOG_MINIO_ACCESS_KEY: aurum_catalog_reader
       CATALOG_MINIO_SECRET_KEY: aurum_catalog_reader_pw
@@ -197,15 +251,24 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    command: celery -A app.tasks.catalog_app worker --loglevel=warning -Q catalog-worker --concurrency=1
+    command: celery -A app.tasks.catalog_app worker --loglevel=warning -Q catalog-worker --concurrency=1 --without-gossip --without-mingle --without-heartbeat --pidfile=/tmp/celery-worker.pid
     restart: "no"
 
   billing-worker:
+    networks:
+      - db
+      - broker
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "billing", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: aurum-pharma-e2e-backend:local
     environment:
       ENVIRONMENT: development
       DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
-      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://aurum_billing:aurum_billing_broker_pw@redis:6379/0
       BILLING_TRANSITION_BATCH_SIZE: "100"
       PYTHONPATH: /app
     depends_on:
@@ -213,15 +276,25 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A app.tasks.billing_app worker --loglevel=warning -Q billing-worker --concurrency=1
+    command: celery -A app.tasks.billing_app worker --loglevel=warning -Q billing-worker --concurrency=1 --without-gossip --without-mingle --without-heartbeat --pidfile=/tmp/celery-worker.pid
     restart: "no"
 
   platform-mailer:
+    networks:
+      - db
+      - broker
+      - mailer-egress
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "mailer", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: aurum-pharma-e2e-backend:local
     environment:
       ENVIRONMENT: development
       DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@postgres:5432/${AURUM_E2E_DATABASE:-aurum}
-      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://aurum_mailer:aurum_mailer_broker_pw@redis:6379/0
       EMAIL_HOST: mailpit
       EMAIL_PORT: "1025"
       EMAIL_USER: ""
@@ -237,10 +310,26 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_healthy
-    command: celery -A app.tasks.mailer_app worker --loglevel=warning -Q platform-mailer --concurrency=1
+    command: celery -A app.tasks.mailer_app worker --loglevel=warning -Q platform-mailer --concurrency=1 --without-gossip --without-mingle --without-heartbeat --pidfile=/tmp/celery-worker.pid
+    restart: "no"
+
+  celery-beat:
+    image: aurum-pharma-e2e-backend:local
+    environment:
+      ENVIRONMENT: development
+      CELERY_BROKER_URL: redis://aurum_beat:aurum_beat_broker_pw@redis:6379/0
+      PYTHONPATH: /app
+    networks:
+      - broker
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.beat_app beat --loglevel=warning --schedule=/tmp/celerybeat-schedule
     restart: "no"
 
   frontend:
+    networks:
+      - web
     image: aurum-pharma-e2e-frontend:local
     build:
       context: ./frontend
@@ -255,3 +344,13 @@ services:
 volumes:
   postgres-data:
   minio-data:
+
+networks:
+  web:
+  db:
+    internal: true
+  broker:
+    internal: true
+  storage:
+    internal: true
+  mailer-egress:

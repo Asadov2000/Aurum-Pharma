@@ -7,14 +7,15 @@ from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-from app.core.config import _database_security_problems, _redis_security_problems
+from app.core.celery_broker_config import BillingBrokerSettings
+from app.core.config import _database_security_problems
 
 
-class BillingWorkerSettings(BaseSettings):
+class BillingWorkerSettings(BillingBrokerSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -31,7 +32,6 @@ class BillingWorkerSettings(BaseSettings):
         ),
         repr=False,
     )
-    REDIS_URL: str = Field(default="redis://redis:6379/0", repr=False)
     BILLING_TRANSITION_BATCH_SIZE: int = Field(default=100, ge=1, le=100)
 
     @model_validator(mode="after")
@@ -60,7 +60,6 @@ class BillingWorkerSettings(BaseSettings):
                 self.DATABASE_URL_BILLING_WORKER,
             )
         )
-        problems.extend(_redis_security_problems(self.REDIS_URL))
 
         if problems:
             raise ValueError(

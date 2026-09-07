@@ -12,35 +12,36 @@ from pydantic import ValidationError
 
 from app.core.catalog_worker_config import CatalogWorkerSettings
 from app.core.catalog_worker_storage import validate_catalog_import_path
-from app.core.celery_broker_config import CeleryBrokerSettings
+from app.core.celery_broker_config import BeatBrokerSettings
 from app.core.system_worker_config import SystemWorkerSettings
 
 _POSTGRES_TLS = "?sslmode=verify-full&sslrootcert=/run/secrets/postgres_ca.crt"
-_REDIS_URL = (
-    "rediss://:Str0ng-Redis-Pw@redis:6379/0" "?ssl_cert_reqs=required&ssl_check_hostname=true"
+_CELERY_BROKER_URL = (
+    "rediss://aurum_beat:Str0ng-Redis-Pw@redis:6379/0"
+    "?ssl_cert_reqs=required&ssl_check_hostname=true"
 )
 
 
 def test_beat_configuration_requires_only_authenticated_redis() -> None:
-    settings = CeleryBrokerSettings(ENVIRONMENT="production", REDIS_URL=_REDIS_URL)
+    settings = BeatBrokerSettings(ENVIRONMENT="production", CELERY_BROKER_URL=_CELERY_BROKER_URL)
 
     assert settings.ENVIRONMENT == "production"
     assert "Str0ng-Redis-Pw" not in repr(settings)
 
 
 def test_beat_configuration_rejects_unauthenticated_redis() -> None:
-    with pytest.raises(ValidationError, match="REDIS_URL"):
-        CeleryBrokerSettings(
+    with pytest.raises(ValidationError, match="CELERY_BROKER_URL"):
+        BeatBrokerSettings(
             ENVIRONMENT="production",
-            REDIS_URL="redis://redis:6379/0",
+            CELERY_BROKER_URL="redis://redis:6379/0",
         )
 
 
 def test_beat_configuration_rejects_unverified_tls() -> None:
     with pytest.raises(ValidationError, match="ssl_cert_reqs=required"):
-        CeleryBrokerSettings(
+        BeatBrokerSettings(
             ENVIRONMENT="production",
-            REDIS_URL="rediss://:Str0ng-Redis-Pw@redis:6379/0",
+            CELERY_BROKER_URL="rediss://aurum_beat:Str0ng-Redis-Pw@redis:6379/0",
         )
 
 
@@ -50,7 +51,7 @@ def test_system_worker_accepts_only_worker_identity() -> None:
         DATABASE_URL_WORKER=(
             "postgresql+asyncpg://aurum_worker:Str0ng-Worker-Pw@db:5432/aurum" + _POSTGRES_TLS
         ),
-        REDIS_URL=_REDIS_URL,
+        CELERY_BROKER_URL=_CELERY_BROKER_URL.replace("aurum_beat", "aurum_system"),
     )
 
     assert "Str0ng-Worker-Pw" not in repr(settings)
@@ -69,7 +70,7 @@ def test_system_worker_rejects_wrong_database_identity(database_url: str) -> Non
         SystemWorkerSettings(
             ENVIRONMENT="production",
             DATABASE_URL_WORKER=database_url,
-            REDIS_URL=_REDIS_URL,
+            CELERY_BROKER_URL=_CELERY_BROKER_URL.replace("aurum_beat", "aurum_system"),
         )
 
 
@@ -79,7 +80,7 @@ def _catalog_settings(**overrides: object) -> CatalogWorkerSettings:
         "DATABASE_URL_CATALOG_WORKER": (
             "postgresql+asyncpg://aurum_catalog_worker:Str0ng-App-Pw@db:5432/aurum" + _POSTGRES_TLS
         ),
-        "REDIS_URL": _REDIS_URL,
+        "CELERY_BROKER_URL": _CELERY_BROKER_URL.replace("aurum_beat", "aurum_catalog"),
         "MINIO_ENDPOINT": "minio:9000",
         "CATALOG_MINIO_ACCESS_KEY": "catalog-access-key",
         "CATALOG_MINIO_SECRET_KEY": "catalog-secret-key-with-at-least-32-characters",
@@ -122,7 +123,7 @@ def test_catalog_worker_does_not_fall_back_to_application_secrets(
         CatalogWorkerSettings(
             _env_file=None,
             ENVIRONMENT="production",
-            REDIS_URL=_REDIS_URL,
+            CELERY_BROKER_URL=_CELERY_BROKER_URL.replace("aurum_beat", "aurum_catalog"),
             MINIO_SECURE=True,
         )
 
@@ -186,6 +187,7 @@ def test_catalog_storage_rejects_cross_tenant_or_non_import_path(
 
 def test_catalog_tasks_are_routed_only_to_dedicated_queue() -> None:
     from app.tasks.catalog_app import catalog_app
+    from app.tasks.catalog_producer import producer_app
     from app.tasks.celery_app import celery_app
 
     expected_route = {
@@ -199,7 +201,7 @@ def test_catalog_tasks_are_routed_only_to_dedicated_queue() -> None:
     assert "app.tasks.catalog" in catalog_app.conf.include
     assert "app.tasks.catalog" not in celery_app.conf.include
     for task_name, route in expected_route.items():
-        assert celery_app.conf.task_routes[task_name] == route
+        assert producer_app.conf.task_routes[task_name] == route
 
 
 @pytest.mark.parametrize(
@@ -255,7 +257,11 @@ def test_worker_modules_import_without_unrelated_application_secrets(
     env.update(
         {
             "ENVIRONMENT": "development",
-            "REDIS_URL": "redis://redis:6379/0",
+            "CELERY_BROKER_URL": (
+                "redis://aurum_catalog:aurum_catalog_broker_pw@redis:6379/0"
+                if module == "app.tasks.catalog"
+                else "redis://aurum_system:aurum_system_broker_pw@redis:6379/0"
+            ),
             **extra_environment,
         }
     )

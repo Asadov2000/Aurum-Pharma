@@ -22,7 +22,7 @@ def _build(**overrides: object) -> MailerSettings:
         "DATABASE_URL_MAILER": (
             "postgresql+asyncpg://aurum_mailer:Str0ng-Mailer-Pw@db/aurum" + _POSTGRES_TLS
         ),
-        "REDIS_URL": "rediss://:Str0ng-Redis-Pw@redis:6379/0" + _REDIS_TLS,
+        "CELERY_BROKER_URL": "rediss://aurum_mailer:Str0ng-Redis-Pw@redis:6379/0" + _REDIS_TLS,
         "EMAIL_OUTBOX_ENCRYPTION_KEY": _ROOT,
         "EMAIL_HOST": "smtp.example.com",
         "EMAIL_USER": "mailer@example.com",
@@ -53,7 +53,7 @@ def test_production_rejects_database_without_verified_tls() -> None:
 
 def test_production_rejects_redis_without_certificate_verification() -> None:
     with pytest.raises(ValidationError, match="ssl_cert_reqs=required"):
-        _build(REDIS_URL="rediss://:Str0ng-Redis-Pw@redis:6379/0")
+        _build(CELERY_BROKER_URL="rediss://aurum_mailer:Str0ng-Redis-Pw@redis:6379/0")
 
 
 @pytest.mark.parametrize(
@@ -64,8 +64,8 @@ def test_production_rejects_redis_without_certificate_verification() -> None:
             "postgresql+asyncpg://aurum_support:x@db/aurum",
             "DATABASE_URL_MAILER",
         ),
-        ("REDIS_URL", "redis://redis:6379/0", "REDIS_URL"),
-        ("REDIS_URL", "redis://:[invalid", "REDIS_URL"),
+        ("CELERY_BROKER_URL", "redis://redis:6379/0", "CELERY_BROKER_URL"),
+        ("CELERY_BROKER_URL", "redis://:[invalid", "CELERY_BROKER_URL"),
         ("EMAIL_PASSWORD", "", "SMTP"),
         ("EMAIL_USE_TLS", False, "SMTP"),
         ("PUBLIC_APP_URL", "http://pharmacy.example.com", "PUBLIC_APP_URL"),

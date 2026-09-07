@@ -22,7 +22,7 @@ def _production_settings(**overrides: object) -> BillingWorkerSettings:
         "DATABASE_URL_BILLING_WORKER": (
             "postgresql+asyncpg://aurum_billing_worker:Str0ng-Billing-Pw@db/aurum" + _POSTGRES_TLS
         ),
-        "REDIS_URL": "rediss://:Str0ng-Redis-Pw@redis/0" + _REDIS_TLS,
+        "CELERY_BROKER_URL": "rediss://aurum_billing:Str0ng-Redis-Pw@redis/0" + _REDIS_TLS,
     }
     values.update(overrides)
     return BillingWorkerSettings(**values)
@@ -49,8 +49,10 @@ def test_production_rejects_non_dedicated_database_credentials(database_url: str
 
 
 def test_production_requires_authenticated_redis() -> None:
-    with pytest.raises(ValidationError, match="REDIS_URL"):
-        _production_settings(REDIS_URL="redis://redis:6379/0")
+    with pytest.raises(ValidationError, match="CELERY_BROKER_URL"):
+        _production_settings(
+            CELERY_BROKER_URL="redis://aurum_billing:aurum_billing_broker_pw@redis:6379/0"
+        )
 
 
 def test_production_rejects_database_without_verified_tls() -> None:
@@ -64,7 +66,7 @@ def test_production_rejects_database_without_verified_tls() -> None:
 
 def test_production_rejects_redis_without_certificate_verification() -> None:
     with pytest.raises(ValidationError, match="ssl_cert_reqs=required"):
-        _production_settings(REDIS_URL="rediss://:Str0ng-Redis-Pw@redis/0")
+        _production_settings(CELERY_BROKER_URL="rediss://aurum_billing:Str0ng-Redis-Pw@redis/0")
 
 
 def test_batch_size_is_bounded() -> None:
@@ -81,7 +83,7 @@ def test_validation_errors_do_not_expose_worker_secrets() -> None:
             DATABASE_URL_BILLING_WORKER=(
                 f"postgresql+asyncpg://aurum_support:{database_secret}@db/aurum{_POSTGRES_TLS}"
             ),
-            REDIS_URL=f"redis://:{redis_secret}@redis/0",
+            CELERY_BROKER_URL=f"redis://:{redis_secret}@redis/0",
         )
 
     message = str(error.value)
@@ -97,6 +99,7 @@ def test_billing_tasks_are_routed_only_to_dedicated_queue(
         "billing-routing-test-secret-at-least-32-characters",
     )
 
+    from app.tasks.beat_app import beat_app
     from app.tasks.billing_app import billing_app
     from app.tasks.celery_app import celery_app
 
@@ -112,7 +115,7 @@ def test_billing_tasks_are_routed_only_to_dedicated_queue(
     assert "app.tasks.billing" in billing_app.conf.include
     assert "app.tasks.billing" not in celery_app.conf.include
     for task_name, route in expected_routes.items():
-        assert celery_app.conf.task_routes[task_name] == route
+        assert beat_app.conf.task_routes[task_name] == route
 
 
 def test_billing_worker_import_needs_only_worker_configuration() -> None:
@@ -125,7 +128,7 @@ def test_billing_worker_import_needs_only_worker_configuration() -> None:
             "DATABASE_URL_BILLING_WORKER": (
                 "postgresql+asyncpg://aurum_billing_worker:worker-pw@db/aurum"
             ),
-            "REDIS_URL": "redis://redis:6379/0",
+            "CELERY_BROKER_URL": "redis://aurum_billing:aurum_billing_broker_pw@redis:6379/0",
         }
     )
 

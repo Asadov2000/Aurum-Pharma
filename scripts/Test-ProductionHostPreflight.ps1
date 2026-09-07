@@ -66,6 +66,18 @@ $requiredSecrets = @(
     "DATABASE_URL_PITR",
     "REDIS_PASSWORD",
     "REDIS_URL",
+    "REDIS_CELERY_API_PASSWORD",
+    "REDIS_CELERY_BEAT_PASSWORD",
+    "REDIS_CELERY_SYSTEM_PASSWORD",
+    "REDIS_CELERY_CATALOG_PASSWORD",
+    "REDIS_CELERY_BILLING_PASSWORD",
+    "REDIS_CELERY_MAILER_PASSWORD",
+    "CELERY_API_BROKER_URL",
+    "CELERY_BEAT_BROKER_URL",
+    "CELERY_SYSTEM_BROKER_URL",
+    "CELERY_CATALOG_BROKER_URL",
+    "CELERY_BILLING_BROKER_URL",
+    "CELERY_MAILER_BROKER_URL",
     "JWT_SECRET",
     "MFA_ENCRYPTION_KEY",
     "MFA_ENCRYPTION_PREVIOUS_KEYS",
@@ -279,6 +291,40 @@ function Assert-InternalTransportUrls {
         $redisUri.Fragment.Length -gt 0
     ) {
         throw "REDIS_URL must require verified TLS to redis:6379/0."
+    }
+}
+
+function Assert-BrokerTransportUrls {
+    param([Parameter(Mandatory = $true)][hashtable]$SecretValues)
+
+    $seenPasswords = @($SecretValues.REDIS_PASSWORD)
+    foreach ($role in @("api", "beat", "system", "catalog", "billing", "mailer")) {
+        $upper = $role.ToUpperInvariant()
+        $name = "CELERY_${upper}_BROKER_URL"
+        $expectedPassword = $SecretValues["REDIS_CELERY_${upper}_PASSWORD"]
+        $uri = $null
+        if (-not [Uri]::TryCreate($SecretValues[$name], [UriKind]::Absolute, [ref]$uri)) {
+            throw "$name must be an absolute Redis URL."
+        }
+        if (
+            $uri.Scheme -cne "rediss" -or $uri.Host -cne "redis" -or
+            $uri.Port -ne 6379 -or $uri.AbsolutePath -cne "/0" -or
+            $uri.Query -cne "?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -or
+            $uri.Fragment.Length -gt 0
+        ) {
+            throw "$name must require verified TLS to redis:6379/0."
+        }
+        $separator = $uri.UserInfo.IndexOf(":", [StringComparison]::Ordinal)
+        if ($separator -lt 1) { throw "$name must contain a dedicated broker identity." }
+        $username = [Uri]::UnescapeDataString($uri.UserInfo.Substring(0, $separator))
+        $password = [Uri]::UnescapeDataString($uri.UserInfo.Substring($separator + 1))
+        if ($username -cne "aurum_$role" -or $password -cne $expectedPassword) {
+            throw "$name must match its dedicated Redis ACL credential."
+        }
+        if ($seenPasswords -ccontains $expectedPassword) {
+            throw "Celery broker passwords must be independent from cache and other roles."
+        }
+        $seenPasswords += $expectedPassword
     }
 }
 
@@ -497,6 +543,7 @@ try {
         }
     }
     Assert-InternalTransportUrls -SecretValues $secretValues
+    Assert-BrokerTransportUrls -SecretValues $secretValues
     $tlsDirectory = $resolvedDirectories.AURUM_INTERNAL_TLS_DIR
     Assert-InternalTlsMaterial -Directory $tlsDirectory
 

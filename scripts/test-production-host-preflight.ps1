@@ -139,6 +139,15 @@ function Write-TestEnvironment {
     )) {
         [IO.File]::WriteAllText((Join-Path $paths.secrets $name), "synthetic-$name")
     }
+    foreach ($role in @("api", "beat", "system", "catalog", "billing", "mailer")) {
+        $upper = $role.ToUpperInvariant()
+        $brokerPassword = "synthetic-$role-broker-password"
+        [IO.File]::WriteAllText((Join-Path $paths.secrets "REDIS_CELERY_${upper}_PASSWORD"), $brokerPassword)
+        [IO.File]::WriteAllText(
+            (Join-Path $paths.secrets "CELERY_${upper}_BROKER_URL"),
+            "rediss://aurum_${role}:${brokerPassword}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt"
+        )
+    }
     foreach ($name in @(
         "DATABASE_URL_APP", "DATABASE_URL_SUPPORT", "DATABASE_URL_MAILER",
         "DATABASE_URL_BILLING_WORKER", "DATABASE_URL_MIGRATION"
@@ -317,6 +326,27 @@ try {
     Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 2 -Because "catalog storage rejects shared secrets"
     [IO.File]::WriteAllText($catalogSecretPath, $catalogSecretOriginal)
     Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 0 -Because "restored dedicated catalog credentials are valid"
+    $brokerUrlPath = Join-Path $catalog.Paths.secrets "CELERY_CATALOG_BROKER_URL"
+    $brokerUrlOriginal = [IO.File]::ReadAllText($brokerUrlPath)
+    foreach ($invalidUrl in @(
+        $brokerUrlOriginal.Replace("rediss://", "redis://"),
+        $brokerUrlOriginal.Replace("aurum_catalog:", "aurum_system:"),
+        $brokerUrlOriginal.Replace("synthetic-catalog-broker-password", "wrong-broker-password")
+    )) {
+        [IO.File]::WriteAllText($brokerUrlPath, $invalidUrl)
+        Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 2 -Because "broker URL rejects plaintext, foreign role, or credential mismatch"
+    }
+    [IO.File]::WriteAllText($brokerUrlPath, $brokerUrlOriginal)
+    $brokerPasswordPath = Join-Path $catalog.Paths.secrets "REDIS_CELERY_CATALOG_PASSWORD"
+    foreach ($sharedPasswordName in @("REDIS_PASSWORD", "REDIS_CELERY_SYSTEM_PASSWORD")) {
+        $sharedPassword = [IO.File]::ReadAllText((Join-Path $catalog.Paths.secrets $sharedPasswordName))
+        [IO.File]::WriteAllText($brokerPasswordPath, $sharedPassword)
+        [IO.File]::WriteAllText($brokerUrlPath, $brokerUrlOriginal.Replace("synthetic-catalog-broker-password", $sharedPassword))
+        Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 2 -Because "broker cannot share a cache or another worker password"
+    }
+    [IO.File]::WriteAllText($brokerPasswordPath, "synthetic-catalog-broker-password")
+    [IO.File]::WriteAllText($brokerUrlPath, $brokerUrlOriginal)
+    Assert-Equal -Actual (Invoke-Validator -Path $catalog.EnvFile) -Expected 0 -Because "restored broker credentials pass"
 
     $sharedRoot = (New-Item -ItemType Directory -Path (Join-Path $temporaryDirectory "shared")).FullName
     $shared = Write-TestEnvironment -Root $sharedRoot
