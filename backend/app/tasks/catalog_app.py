@@ -1,30 +1,15 @@
-"""Celery application restricted to tenant-scoped catalog imports."""
+"""Celery application restricted to the catalog-worker queue."""
 
 from celery import Celery
 
 from app.core.celery_broker_config import get_celery_broker_settings
+from app.tasks.broker_contract import CATALOG_ROUTES, configure_task_app
 
-settings = get_celery_broker_settings()
 catalog_app = Celery(
     "aurum-catalog-worker",
-    broker=settings.REDIS_URL,
+    broker=get_celery_broker_settings("catalog").CELERY_BROKER_URL,
     include=["app.tasks.catalog"],
 )
-catalog_app.conf.update(
-    task_default_queue="catalog-worker",
-    task_routes={
-        "catalog.import_catalog_job": {"queue": "catalog-worker"},
-        "catalog.preview_catalog_job": {"queue": "catalog-worker"},
-    },
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-    task_track_started=True,
-    task_acks_late=True,
-    task_ignore_result=True,
-    task_reject_on_worker_lost=True,
-    worker_prefetch_multiplier=1,
-    broker_connection_retry_on_startup=True,
-)
+configure_task_app(catalog_app, queues=("catalog-worker",), worker_queue="catalog-worker")
+catalog_app.conf.task_routes = CATALOG_ROUTES
+catalog_app.conf.task_reject_on_worker_lost = True

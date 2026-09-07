@@ -11,6 +11,7 @@ x-backend-environment: &backend-environment
   DATABASE_URL_APP: "postgresql+asyncpg://aurum_app:${AURUM_DEMO_APP_PASSWORD:?AURUM_DEMO_APP_PASSWORD is required}@postgres:5432/aurum_demo"
   DATABASE_URL_SUPPORT: "postgresql+asyncpg://aurum_support:${AURUM_DEMO_SUPPORT_PASSWORD:?AURUM_DEMO_SUPPORT_PASSWORD is required}@postgres:5432/aurum_demo"
   REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+  CELERY_BROKER_URL: "redis://aurum_api:${AURUM_DEMO_REDIS_CELERY_API_PASSWORD:?AURUM_DEMO_REDIS_CELERY_API_PASSWORD is required}@redis:6379/0"
   JWT_SECRET: "${AURUM_DEMO_JWT_SECRET:?AURUM_DEMO_JWT_SECRET is required}"
   MFA_ENCRYPTION_KEY: "${AURUM_DEMO_MFA_ENCRYPTION_KEY:?AURUM_DEMO_MFA_ENCRYPTION_KEY is required}"
   CORS_ORIGINS: '${AURUM_DEMO_CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173","http://localhost:18080","http://127.0.0.1:18080"]}'
@@ -41,6 +42,8 @@ x-backend-service: &backend-service
 
 services:
   postgres:
+    networks:
+      - db
     image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
     container_name: aurum-demo-postgres
     environment:
@@ -71,15 +74,25 @@ services:
     restart: unless-stopped
 
   redis:
+    networks:
+      - broker
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    entrypoint: ["/bin/sh", "/config/start-with-worker-acl.sh"]
     image: redis:7-alpine@sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf
     container_name: aurum-demo-redis
-    command:
-      - /bin/sh
-      - -ec
-      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
     environment:
+      REDIS_TLS: "false"
+      AURUM_REDIS_MAXMEMORY: "0"
       REDIS_PASSWORD: "${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}"
+      REDIS_CELERY_API_PASSWORD: "${AURUM_DEMO_REDIS_CELERY_API_PASSWORD:?AURUM_DEMO_REDIS_CELERY_API_PASSWORD is required}"
+      REDIS_CELERY_BEAT_PASSWORD: "${AURUM_DEMO_REDIS_CELERY_BEAT_PASSWORD:?AURUM_DEMO_REDIS_CELERY_BEAT_PASSWORD is required}"
+      REDIS_CELERY_SYSTEM_PASSWORD: "${AURUM_DEMO_REDIS_CELERY_SYSTEM_PASSWORD:?AURUM_DEMO_REDIS_CELERY_SYSTEM_PASSWORD is required}"
+      REDIS_CELERY_CATALOG_PASSWORD: "${AURUM_DEMO_REDIS_CELERY_CATALOG_PASSWORD:?AURUM_DEMO_REDIS_CELERY_CATALOG_PASSWORD is required}"
+      REDIS_CELERY_BILLING_PASSWORD: "${AURUM_DEMO_REDIS_CELERY_BILLING_PASSWORD:?AURUM_DEMO_REDIS_CELERY_BILLING_PASSWORD is required}"
+      REDIS_CELERY_MAILER_PASSWORD: "${AURUM_DEMO_REDIS_CELERY_MAILER_PASSWORD:?AURUM_DEMO_REDIS_CELERY_MAILER_PASSWORD is required}"
     volumes:
+      - ./infra/redis/start-with-worker-acl.sh:/config/start-with-worker-acl.sh:ro
       - redis-data:/data
     ports:
       - "127.0.0.1:6379:6379"
@@ -95,6 +108,8 @@ services:
     restart: unless-stopped
 
   minio:
+    networks:
+      - storage
     image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: aurum-demo-minio
     command: server /data --console-address ":9001"
@@ -114,6 +129,8 @@ services:
     restart: unless-stopped
 
   db-role-bootstrap:
+    networks:
+      - db
     image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
     environment:
       POSTGRES_HOST: postgres
@@ -138,6 +155,8 @@ services:
     restart: "no"
 
   migrate:
+    networks:
+      - db
     image: aurum-pharma-demo-backend:local
     build:
       context: ./backend
@@ -153,6 +172,11 @@ services:
     restart: "no"
 
   backend:
+    networks:
+      - web
+      - db
+      - broker
+      - storage
     <<: *backend-service
     container_name: aurum-demo-backend
     ports:
@@ -170,6 +194,15 @@ services:
       start_period: 20s
 
   celery-worker:
+    networks:
+      - db
+      - broker
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "system", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: aurum-pharma-demo-backend:local
     build:
       context: ./backend
@@ -178,7 +211,7 @@ services:
     environment:
       ENVIRONMENT: development
       DATABASE_URL_WORKER: "postgresql+asyncpg://aurum_worker:${AURUM_DEMO_WORKER_PASSWORD:?AURUM_DEMO_WORKER_PASSWORD is required}@postgres:5432/aurum_demo"
-      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      CELERY_BROKER_URL: "redis://aurum_system:${AURUM_DEMO_REDIS_CELERY_SYSTEM_PASSWORD:?AURUM_DEMO_REDIS_CELERY_SYSTEM_PASSWORD is required}@redis:6379/0"
       PYTHONPATH: /app
     depends_on:
       postgres:
@@ -190,6 +223,10 @@ services:
       - -A
       - app.tasks.celery_app
       - worker
+      - --without-gossip
+      - --without-mingle
+      - --without-heartbeat
+      - --pidfile=/tmp/celery-worker.pid
       - --loglevel=warning
       - --concurrency=1
       - --prefetch-multiplier=1
@@ -199,6 +236,8 @@ services:
     restart: unless-stopped
 
   catalog-minio-init:
+    networks:
+      - storage
     image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: aurum-demo-catalog-minio-init
     entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
@@ -226,6 +265,16 @@ services:
     restart: "no"
 
   catalog-worker:
+    networks:
+      - db
+      - broker
+      - storage
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "catalog", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: aurum-pharma-demo-backend:local
     build:
       context: ./backend
@@ -234,7 +283,7 @@ services:
     environment:
       ENVIRONMENT: development
       DATABASE_URL_CATALOG_WORKER: "postgresql+asyncpg://aurum_catalog_worker:${AURUM_DEMO_CATALOG_WORKER_PASSWORD:?AURUM_DEMO_CATALOG_WORKER_PASSWORD is required}@postgres:5432/aurum_demo"
-      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      CELERY_BROKER_URL: "redis://aurum_catalog:${AURUM_DEMO_REDIS_CELERY_CATALOG_PASSWORD:?AURUM_DEMO_REDIS_CELERY_CATALOG_PASSWORD is required}@redis:6379/0"
       MINIO_ENDPOINT: minio:9000
       CATALOG_MINIO_ACCESS_KEY: "${AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY:?AURUM_DEMO_CATALOG_MINIO_ACCESS_KEY is required}"
       CATALOG_MINIO_SECRET_KEY: "${AURUM_DEMO_CATALOG_MINIO_SECRET_KEY:?AURUM_DEMO_CATALOG_MINIO_SECRET_KEY is required}"
@@ -255,6 +304,10 @@ services:
       - -A
       - app.tasks.catalog_app
       - worker
+      - --without-gossip
+      - --without-mingle
+      - --without-heartbeat
+      - --pidfile=/tmp/celery-worker.pid
       - --loglevel=warning
       - --concurrency=1
       - --prefetch-multiplier=1
@@ -264,6 +317,15 @@ services:
     restart: unless-stopped
 
   billing-worker:
+    networks:
+      - db
+      - broker
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "billing", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: aurum-pharma-demo-backend:local
     build:
       context: ./backend
@@ -272,7 +334,7 @@ services:
     environment:
       ENVIRONMENT: development
       DATABASE_URL_BILLING_WORKER: "postgresql+asyncpg://aurum_billing_worker:${AURUM_DEMO_BILLING_WORKER_PASSWORD:?AURUM_DEMO_BILLING_WORKER_PASSWORD is required}@postgres:5432/aurum_demo"
-      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      CELERY_BROKER_URL: "redis://aurum_billing:${AURUM_DEMO_REDIS_CELERY_BILLING_PASSWORD:?AURUM_DEMO_REDIS_CELERY_BILLING_PASSWORD is required}@redis:6379/0"
       BILLING_TRANSITION_BATCH_SIZE: "100"
       PYTHONPATH: /app
     depends_on:
@@ -285,6 +347,10 @@ services:
       - -A
       - app.tasks.billing_app
       - worker
+      - --without-gossip
+      - --without-mingle
+      - --without-heartbeat
+      - --pidfile=/tmp/celery-worker.pid
       - --loglevel=warning
       - --concurrency=1
       - --prefetch-multiplier=1
@@ -294,6 +360,16 @@ services:
     restart: unless-stopped
 
   platform-mailer:
+    networks:
+      - db
+      - broker
+      - mailer-egress
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "mailer", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: aurum-pharma-demo-backend:local
     build:
       context: ./backend
@@ -302,7 +378,7 @@ services:
     environment:
       ENVIRONMENT: development
       DATABASE_URL_MAILER: "postgresql+asyncpg://aurum_mailer:${AURUM_DEMO_MAILER_PASSWORD:?AURUM_DEMO_MAILER_PASSWORD is required}@postgres:5432/aurum_demo"
-      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      CELERY_BROKER_URL: "redis://aurum_mailer:${AURUM_DEMO_REDIS_CELERY_MAILER_PASSWORD:?AURUM_DEMO_REDIS_CELERY_MAILER_PASSWORD is required}@redis:6379/0"
       PYTHONPATH: /app
     depends_on:
       postgres:
@@ -314,6 +390,10 @@ services:
       - -A
       - app.tasks.mailer_app
       - worker
+      - --without-gossip
+      - --without-mingle
+      - --without-heartbeat
+      - --pidfile=/tmp/celery-worker.pid
       - --loglevel=warning
       - --concurrency=1
       - --prefetch-multiplier=1
@@ -323,6 +403,8 @@ services:
     restart: unless-stopped
 
   celery-beat:
+    networks:
+      - broker
     image: aurum-pharma-demo-backend:local
     build:
       context: ./backend
@@ -330,7 +412,7 @@ services:
     container_name: aurum-demo-celery-beat
     environment:
       ENVIRONMENT: development
-      REDIS_URL: "redis://:${AURUM_DEMO_REDIS_PASSWORD:?AURUM_DEMO_REDIS_PASSWORD is required}@redis:6379/0"
+      CELERY_BROKER_URL: "redis://aurum_beat:${AURUM_DEMO_REDIS_CELERY_BEAT_PASSWORD:?AURUM_DEMO_REDIS_CELERY_BEAT_PASSWORD is required}@redis:6379/0"
       PYTHONPATH: /app
     depends_on:
       redis:
@@ -338,13 +420,15 @@ services:
     command:
       - celery
       - -A
-      - app.tasks.celery_app
+      - app.tasks.beat_app
       - beat
       - --loglevel=warning
     init: true
     restart: unless-stopped
 
   frontend:
+    networks:
+      - web
     image: aurum-pharma-demo-frontend:local
     build:
       context: ./frontend
@@ -364,6 +448,8 @@ services:
     restart: unless-stopped
 
   share-gateway:
+    networks:
+      - web
     image: aurum-pharma-demo-share-gateway:local
     build:
       context: ./infra/share
@@ -400,5 +486,12 @@ volumes:
     name: aurum-demo-frontend-vite-cache
 
 networks:
-  default:
+  web:
     name: aurum-demo-network
+  db:
+    internal: true
+  broker:
+    internal: true
+  storage:
+    internal: true
+  mailer-egress:

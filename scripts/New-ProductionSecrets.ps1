@@ -70,6 +70,12 @@ $migratorPassword = New-RandomHex -Bytes 32
 $backupPassword = New-RandomHex -Bytes 32
 $pitrPassword = New-RandomHex -Bytes 32
 $redisPassword = New-RandomHex -Bytes 32
+$redisApiPassword = New-RandomHex -Bytes 32
+$redisBeatPassword = New-RandomHex -Bytes 32
+$redisSystemPassword = New-RandomHex -Bytes 32
+$redisCatalogPassword = New-RandomHex -Bytes 32
+$redisBillingPassword = New-RandomHex -Bytes 32
+$redisMailerPassword = New-RandomHex -Bytes 32
 $minioRootUser = New-RandomHex -Bytes 10
 $minioRootPassword = New-RandomHex -Bytes 32
 $minioAccessKey = New-RandomHex -Bytes 10
@@ -129,6 +135,30 @@ Write-Secret -Name "DATABASE_URL_PITR" -Value (
     "postgresql://aurum_pitr:{0}@postgres:5432/aurum?sslmode=verify-full&sslrootcert=/run/tls/ca.crt" -f $pitrPassword
 )
 Write-Secret -Name "REDIS_PASSWORD" -Value $redisPassword
+Write-Secret -Name "REDIS_CELERY_API_PASSWORD" -Value $redisApiPassword
+Write-Secret -Name "REDIS_CELERY_BEAT_PASSWORD" -Value $redisBeatPassword
+Write-Secret -Name "REDIS_CELERY_SYSTEM_PASSWORD" -Value $redisSystemPassword
+Write-Secret -Name "REDIS_CELERY_CATALOG_PASSWORD" -Value $redisCatalogPassword
+Write-Secret -Name "REDIS_CELERY_BILLING_PASSWORD" -Value $redisBillingPassword
+Write-Secret -Name "REDIS_CELERY_MAILER_PASSWORD" -Value $redisMailerPassword
+Write-Secret -Name "CELERY_API_BROKER_URL" -Value (
+    "rediss://aurum_api:{0}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -f $redisApiPassword
+)
+Write-Secret -Name "CELERY_BEAT_BROKER_URL" -Value (
+    "rediss://aurum_beat:{0}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -f $redisBeatPassword
+)
+Write-Secret -Name "CELERY_SYSTEM_BROKER_URL" -Value (
+    "rediss://aurum_system:{0}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -f $redisSystemPassword
+)
+Write-Secret -Name "CELERY_CATALOG_BROKER_URL" -Value (
+    "rediss://aurum_catalog:{0}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -f $redisCatalogPassword
+)
+Write-Secret -Name "CELERY_BILLING_BROKER_URL" -Value (
+    "rediss://aurum_billing:{0}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -f $redisBillingPassword
+)
+Write-Secret -Name "CELERY_MAILER_BROKER_URL" -Value (
+    "rediss://aurum_mailer:{0}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -f $redisMailerPassword
+)
 Write-Secret -Name "REDIS_URL" -Value (
     "rediss://:{0}@redis:6379/0?ssl_cert_reqs=required&ssl_check_hostname=true&ssl_ca_certs=/run/tls/ca.crt" -f $redisPassword
 )

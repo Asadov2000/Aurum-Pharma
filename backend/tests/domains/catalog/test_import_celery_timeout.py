@@ -11,6 +11,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from kombu import Queue
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -25,7 +26,10 @@ type ImportFixture = tuple[async_sessionmaker[AsyncSession], UUID, UUID]
 _WORKER_PROGRAM = """
 import sys
 import time
+from kombu import Queue
 from sqlalchemy.engine import make_url
+from tests.fixture_helpers import resolve_test_redis_url
+import os
 from app.core.catalog_worker_config import get_catalog_worker_settings
 database = make_url(get_catalog_worker_settings().DATABASE_URL_CATALOG_WORKER).database or ''
 if not database.endswith('_test'):
@@ -37,7 +41,12 @@ def delayed_storage(*args, **kwargs):
 worker.get_catalog_object = delayed_storage
 worker.preview_catalog_job.time_limit = 1
 worker.preview_catalog_job.soft_time_limit = None
-worker.catalog_app.conf.update(worker_enable_remote_control=False, worker_send_task_events=False)
+worker.catalog_app.conf.update(
+    broker_url=resolve_test_redis_url(os.environ),
+    task_queues=(Queue(sys.argv[1]),),
+    worker_enable_remote_control=False,
+    worker_send_task_events=False,
+)
 worker.catalog_app.worker_main([
     'worker', '--pool=prefork', '--concurrency=1', '--queues=' + sys.argv[1],
     '--hostname=' + sys.argv[1] + '@%h', '--without-gossip', '--without-mingle',
@@ -110,6 +119,8 @@ async def test_real_celery_hard_timeout_releases_claim_and_import_slot(
         job = await CatalogService(CatalogRepository(db)).request_preview(job_id=job_id)
         execution_id = str(job.execution_id)
     queue = f"catalog-hard-timeout-{uuid4().hex}"
+    # Dynamic queues are restricted to this disposable integration test.
+    catalog_app.amqp.queues.add(Queue(queue))
     process = subprocess.Popen(
         [sys.executable, "-c", _WORKER_PROGRAM, queue],
         env=os.environ.copy(),
@@ -134,6 +145,7 @@ async def test_real_celery_hard_timeout_releases_claim_and_import_slot(
     finally:
         output = await asyncio.to_thread(_stop_worker, process)
         await asyncio.to_thread(_delete_queue, queue)
+        catalog_app.amqp.queues.pop(queue, None)
     # Keep captured output private: the assertion needs only this fixed marker.
     hard_timeout_logged = "Hard time limit (1s) exceeded" in output
     assert hard_timeout_logged, "Celery must report the enforced hard timeout"

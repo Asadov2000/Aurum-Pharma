@@ -24,6 +24,15 @@ $postgresEntrypoint = (
 $postgresHba = (
     Resolve-Path (Join-Path $PSScriptRoot "../infra/postgres/pg_hba.production.conf")
 ).Path
+$redisEntrypoint = (
+    Resolve-Path (Join-Path $PSScriptRoot "../infra/redis/start-with-worker-acl.sh")
+).Path
+$redisPasswords = @{}
+foreach ($role in @("default", "api", "beat", "system", "catalog", "billing", "mailer")) {
+    $redisPasswords[$role] = [Convert]::ToHexString(
+        [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+    ).ToLowerInvariant()
+}
 
 function Invoke-Docker {
     param(
@@ -108,26 +117,25 @@ try {
     ) -DiscardOutput)
     $createdContainers.Add($postgresContainer)
 
-    $redisCommand = @'
-set -eu
-umask 077
-mkdir -p /tmp/tls
-cp /run/tls/ca.crt /run/tls/redis.crt /run/tls/redis.key /tmp/tls/
-chown -R redis:redis /tmp/tls
-chmod 600 /tmp/tls/redis.key
-printf 'user default on >%s ~* +@all\n' 'tls-test-redis-password' > /tmp/users.acl
-chown redis:redis /tmp/users.acl
-exec gosu redis redis-server --port 0 --tls-port 6379 --tls-cert-file /tmp/tls/redis.crt --tls-key-file /tmp/tls/redis.key --tls-ca-cert-file /tmp/tls/ca.crt --tls-auth-clients no --tls-protocols 'TLSv1.2 TLSv1.3' --aclfile /tmp/users.acl --protected-mode yes
-'@
-    $redisCommand = $redisCommand.Replace("`r`n", "`n")
-    [void](Invoke-Docker -Arguments @(
+    $redisArguments = @(
         "run", "--detach", "--name", $redisContainer,
         "--network", $network, "--network-alias", "redis",
         "--volume", "${tlsVolume}:/run/tls:ro",
+        "--mount", "type=bind,source=$redisEntrypoint,target=/config/start-with-worker-acl.sh,readonly",
+        "--tmpfs", "/tmp:size=8m,mode=1777",
+        "--env", "REDIS_TLS=true",
+        "--env", "REDIS_APPENDONLY=no",
+        "--env", "REDIS_PASSWORD=$($redisPasswords.default)"
+    )
+    foreach ($role in @("api", "beat", "system", "catalog", "billing", "mailer")) {
+        $redisArguments += @("--env", "REDIS_CELERY_$($role.ToUpperInvariant())_PASSWORD=$($redisPasswords[$role])")
+    }
+    $redisArguments += @(
         "--entrypoint", "/bin/sh",
         $redisImage,
-        "-ec", $redisCommand
-    ) -DiscardOutput)
+        "/config/start-with-worker-acl.sh"
+    )
+    [void](Invoke-Docker -Arguments $redisArguments -DiscardOutput)
     $createdContainers.Add($redisContainer)
 
     $minioCommand = @'
@@ -174,10 +182,20 @@ exec minio server --certs-dir /tmp/certs /data
 
     Wait-DockerCheck -Label "Redis TLS" -Check {
         Test-DockerCommand -Arguments @(
-            "exec", "--env", "REDISCLI_AUTH=tls-test-redis-password",
+            "exec", "--env", "REDISCLI_AUTH=$($redisPasswords.default)",
             $redisContainer,
             "redis-cli", "--tls", "--cacert", "/run/tls/ca.crt", "-h", "redis", "ping"
         )
+    }
+
+    foreach ($role in @("default", "api", "beat", "system", "catalog", "billing", "mailer")) {
+        $username = if ($role -eq "default") { "default" } else { "aurum_$role" }
+        $redisPing = & docker exec --env "REDISCLI_AUTH=$($redisPasswords[$role])" `
+            $redisContainer redis-cli --tls --cacert /run/tls/ca.crt --sni redis `
+            -h redis --user $username --raw ping 2>&1
+        if ($LASTEXITCODE -ne 0 -or ($redisPing -join "`n").Trim() -cne "PONG") {
+            throw "Redis TLS PING failed for the $role identity."
+        }
     }
 
     Wait-DockerCheck -Label "MinIO TLS" -Check {
@@ -212,7 +230,7 @@ exec minio server --certs-dir /tmp/certs /data
         throw "MinIO accepted a plaintext connection."
     }
 
-    Write-Host "Production internal TLS smoke test passed."
+    Write-Host "Production internal TLS smoke test passed (Redis startup ACL: 7 authenticated TLS identities)."
 } catch {
     foreach ($container in $createdContainers) {
         & docker logs --tail 50 $container 2>&1 | Write-Warning

@@ -11,19 +11,21 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-from app.core.config import _database_security_problems, _redis_security_problems
+from app.core.celery_broker_config import MailerBrokerSettings
+from app.core.config import _database_security_problems
 
 
-class MailerSettings(BaseSettings):
+class MailerSettings(MailerBrokerSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
@@ -31,7 +33,6 @@ class MailerSettings(BaseSettings):
         default="postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@postgres:5432/aurum",
         repr=False,
     )
-    REDIS_URL: str = Field(default="redis://redis:6379/0", repr=False)
     EMAIL_OUTBOX_ENCRYPTION_KEY: SecretStr | None = None
     EMAIL_OUTBOX_ENCRYPTION_KEY_VERSION: int = Field(default=1, ge=1, le=32767)
     EMAIL_OUTBOX_ENCRYPTION_PREVIOUS_KEYS: dict[int, SecretStr] = Field(default_factory=dict)
@@ -90,7 +91,6 @@ class MailerSettings(BaseSettings):
         problems.extend(
             _database_security_problems("DATABASE_URL_MAILER", self.DATABASE_URL_MAILER)
         )
-        problems.extend(_redis_security_problems(self.REDIS_URL))
         if self.EMAIL_OUTBOX_ENCRYPTION_KEY is None:
             problems.append("EMAIL_OUTBOX_ENCRYPTION_KEY is required")
         if (

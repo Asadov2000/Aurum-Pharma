@@ -9,6 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "demo-cors-origins.ps1")
+. (Join-Path $PSScriptRoot "demo-broker-rollout.ps1")
 
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $composeFile = Join-Path $workspace "docker-compose.demo.yml"
@@ -27,6 +28,12 @@ $secretHexLengths = [ordered]@{
     AURUM_DEMO_BACKUP_PASSWORD = 64
     AURUM_DEMO_PITR_PASSWORD = 64
     AURUM_DEMO_REDIS_PASSWORD = 64
+    AURUM_DEMO_REDIS_CELERY_API_PASSWORD = 64
+    AURUM_DEMO_REDIS_CELERY_BEAT_PASSWORD = 64
+    AURUM_DEMO_REDIS_CELERY_SYSTEM_PASSWORD = 64
+    AURUM_DEMO_REDIS_CELERY_CATALOG_PASSWORD = 64
+    AURUM_DEMO_REDIS_CELERY_BILLING_PASSWORD = 64
+    AURUM_DEMO_REDIS_CELERY_MAILER_PASSWORD = 64
     AURUM_DEMO_JWT_SECRET = 96
     AURUM_DEMO_MFA_ENCRYPTION_KEY = 96
     AURUM_DEMO_MINIO_ACCESS_KEY = 32
@@ -278,6 +285,12 @@ function Add-MissingShowcaseSecrets {
     $missing = @(
         @(
             "AURUM_DEMO_MIGRATOR_PASSWORD",
+            "AURUM_DEMO_REDIS_CELERY_API_PASSWORD",
+            "AURUM_DEMO_REDIS_CELERY_BEAT_PASSWORD",
+            "AURUM_DEMO_REDIS_CELERY_SYSTEM_PASSWORD",
+            "AURUM_DEMO_REDIS_CELERY_CATALOG_PASSWORD",
+            "AURUM_DEMO_REDIS_CELERY_BILLING_PASSWORD",
+            "AURUM_DEMO_REDIS_CELERY_MAILER_PASSWORD",
             "AURUM_DEMO_MAILER_PASSWORD",
             "AURUM_DEMO_BILLING_WORKER_PASSWORD",
             "AURUM_DEMO_WORKER_PASSWORD",
@@ -316,6 +329,12 @@ function Ensure-ShowcaseEnvironment {
         $allowedMissingKeys = if ($DryRun -and -not $environmentIsCurrent) {
             @(
                 "AURUM_DEMO_MIGRATOR_PASSWORD",
+                "AURUM_DEMO_REDIS_CELERY_API_PASSWORD",
+                "AURUM_DEMO_REDIS_CELERY_BEAT_PASSWORD",
+                "AURUM_DEMO_REDIS_CELERY_SYSTEM_PASSWORD",
+                "AURUM_DEMO_REDIS_CELERY_CATALOG_PASSWORD",
+                "AURUM_DEMO_REDIS_CELERY_BILLING_PASSWORD",
+                "AURUM_DEMO_REDIS_CELERY_MAILER_PASSWORD",
                 "AURUM_DEMO_MAILER_PASSWORD",
                 "AURUM_DEMO_BILLING_WORKER_PASSWORD",
                 "AURUM_DEMO_WORKER_PASSWORD",
@@ -359,6 +378,7 @@ function Invoke-DockerCommand {
     )
 
     Write-Host ""
+    $script:demoUpgradeStage = $Title
     Write-Host "==> $Title"
     Write-Host "docker $($Arguments -join ' ')"
     if ($DryRun) {
@@ -429,6 +449,7 @@ function Wait-HttpOk {
 
     Write-Host ""
     Write-Host "==> Wait for $Name"
+    $script:demoUpgradeStage = "Wait for $Name"
     if ($DryRun) {
         Write-Host "GET $Url"
         return
@@ -517,66 +538,75 @@ if (-not $SkipBuild) {
         -Arguments @("build", "backend", "frontend", "share-gateway")
 }
 
-Invoke-DemoCompose `
-    -Title "Start isolated showcase infrastructure" `
-    -Arguments @("up", "--detach", "postgres", "redis", "minio")
+Stop-DemoBrokerClientsForUpgrade -DryRun:$DryRun
 
-Invoke-DemoCompose `
-    -Title "Bootstrap showcase database roles" `
-    -Arguments @("run", "--rm", "db-role-bootstrap")
-
-Invoke-DemoCompose `
-    -Title "Apply showcase database migrations" `
-    -Arguments @("run", "--rm", "migrate")
-
-Invoke-DemoCompose `
-    -Title "Start showcase backend" `
-    -Arguments @("up", "--detach", "backend")
-
-Wait-HttpOk `
-    -Name "Showcase backend" `
-    -Url "http://localhost:8000/healthz" `
-    -ExpectedStatus "ok"
-
-if (-not $SkipSeed) {
+try {
     Invoke-DemoCompose `
-        -Title "Seed realistic showcase data" `
+        -Title "Start isolated showcase infrastructure" `
+        -Arguments @("up", "--detach", "postgres", "redis", "minio")
+
+    Invoke-DemoCompose `
+        -Title "Bootstrap showcase database roles" `
+        -Arguments @("run", "--rm", "db-role-bootstrap")
+
+    Invoke-DemoCompose `
+        -Title "Apply showcase database migrations" `
+        -Arguments @("run", "--rm", "migrate")
+
+    Invoke-DemoCompose `
+        -Title "Start showcase backend" `
+        -Arguments @("up", "--detach", "backend")
+
+    Wait-HttpOk `
+        -Name "Showcase backend" `
+        -Url "http://localhost:8000/healthz" `
+        -ExpectedStatus "ok"
+
+    if (-not $SkipSeed) {
+        Invoke-DemoCompose `
+            -Title "Seed realistic showcase data" `
+            -Arguments @(
+                "exec",
+                "-T",
+                "backend",
+                "python",
+                "-m",
+                "app.seed_showcase",
+                "--profile",
+                "realistic"
+            )
+    }
+
+    Invoke-DemoCompose `
+        -Title "Start showcase workers and frontend" `
         -Arguments @(
-            "exec",
-            "-T",
-            "backend",
-            "python",
-            "-m",
-            "app.seed_showcase",
-            "--profile",
-            "realistic"
+            "up",
+            "--detach",
+            "celery-worker",
+            "catalog-worker",
+            "billing-worker",
+            "platform-mailer",
+            "celery-beat",
+            "frontend",
+            "share-gateway"
         )
+
+    Invoke-DemoCompose `
+        -Title "Refresh shared gateway routes" `
+        -Arguments @("restart", "--timeout", "10", "share-gateway")
+
+    Wait-HttpOk -Name "Showcase frontend" -Url "http://localhost:5173"
+    Wait-HttpOk -Name "Shared gateway" -Url "http://localhost:18080"
+    Assert-SharedFrontendCurrent
+
+    Invoke-DemoCompose -Title "Show showcase service status" -Arguments @("ps")
 }
-
-Invoke-DemoCompose `
-    -Title "Start showcase workers and frontend" `
-    -Arguments @(
-        "up",
-        "--detach",
-        "celery-worker",
-        "catalog-worker",
-        "billing-worker",
-        "platform-mailer",
-        "celery-beat",
-        "frontend",
-        "share-gateway"
-    )
-
-Invoke-DemoCompose `
-    -Title "Refresh shared gateway routes" `
-    -Arguments @("restart", "--timeout", "10", "share-gateway")
-
-Wait-HttpOk -Name "Showcase frontend" -Url "http://localhost:5173"
-Wait-HttpOk -Name "Shared gateway" -Url "http://localhost:18080"
-Assert-SharedFrontendCurrent
-
-Invoke-DemoCompose -Title "Show showcase service status" -Arguments @("ps")
-
+catch {
+    Write-Host "Demo update stopped during: $script:demoUpgradeStage"
+    Write-Host "Data and queues were preserved. Infrastructure may already have changed; old clients were not restarted blindly."
+    Write-Host "Resolve the reported failure, then rerun start-current-main-demo.ps1 -Rebuild -SkipSeed -NoBrowser. Do not clear volumes or queues."
+    throw
+}
 Write-Host ""
 if ($DryRun) {
     Write-Host "Dry run complete. No file, container, volume, or database was changed."

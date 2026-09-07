@@ -1,30 +1,15 @@
-"""Celery application that can consume only the isolated billing queue."""
+"""Celery application restricted to the billing-worker queue."""
 
 from celery import Celery
 
-from app.core.billing_worker_config import get_billing_worker_settings
+from app.core.celery_broker_config import get_celery_broker_settings
+from app.tasks.broker_contract import BILLING_ROUTES, configure_task_app
 
-settings = get_billing_worker_settings()
 billing_app = Celery(
     "aurum-billing-worker",
-    broker=settings.REDIS_URL,
+    broker=get_celery_broker_settings("billing").CELERY_BROKER_URL,
     include=["app.tasks.billing"],
 )
-billing_app.conf.update(
-    task_default_queue="billing-worker",
-    task_routes={
-        "billing.process_trial_endings": {"queue": "billing-worker"},
-        "billing.process_grace_endings": {"queue": "billing-worker"},
-    },
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-    task_track_started=True,
-    task_acks_late=True,
-    task_ignore_result=True,
-    task_reject_on_worker_lost=True,
-    worker_prefetch_multiplier=1,
-    broker_connection_retry_on_startup=True,
-)
+configure_task_app(billing_app, queues=("billing-worker",), worker_queue="billing-worker")
+billing_app.conf.task_routes = BILLING_ROUTES
+billing_app.conf.task_reject_on_worker_lost = True

@@ -1,29 +1,14 @@
-"""Celery application that can consume only the isolated mailer queue."""
+"""Celery application restricted to the platform-mailer queue."""
 
 from celery import Celery
 
-from app.core.mailer_config import get_mailer_settings
+from app.core.celery_broker_config import get_celery_broker_settings
+from app.tasks.broker_contract import MAILER_ROUTES, configure_task_app
 
-settings = get_mailer_settings()
 mailer_app = Celery(
-    "aurum-mailer",
-    broker=settings.REDIS_URL,
-    backend=settings.REDIS_URL,
+    "aurum-mailer-worker",
+    broker=get_celery_broker_settings("mailer").CELERY_BROKER_URL,
     include=["app.tasks.auth_mailer", "app.tasks.platform_accounts"],
 )
-mailer_app.conf.update(
-    task_default_queue="platform-mailer",
-    task_routes={
-        "auth.process_login_emails": {"queue": "platform-mailer"},
-        "platform_accounts.process_invitation_emails": {"queue": "platform-mailer"},
-    },
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-    task_track_started=True,
-    task_acks_late=True,
-    worker_prefetch_multiplier=1,
-    broker_connection_retry_on_startup=True,
-)
+configure_task_app(mailer_app, queues=("platform-mailer",), worker_queue="platform-mailer")
+mailer_app.conf.task_routes = MAILER_ROUTES

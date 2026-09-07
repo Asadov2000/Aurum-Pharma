@@ -11,11 +11,11 @@ from pydantic_settings import SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-from app.core.celery_broker_config import CeleryBrokerSettings
-from app.core.config import _database_security_problems, _redis_security_problems
+from app.core.celery_broker_config import SystemBrokerSettings
+from app.core.config import _database_security_problems
 
 
-class SystemWorkerSettings(CeleryBrokerSettings):
+class SystemWorkerSettings(SystemBrokerSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -50,7 +50,6 @@ class SystemWorkerSettings(CeleryBrokerSettings):
         problems.extend(
             _database_security_problems("DATABASE_URL_WORKER", self.DATABASE_URL_WORKER)
         )
-        problems.extend(_redis_security_problems(self.REDIS_URL))
         if problems:
             raise ValueError(
                 "Refusing to start insecure system worker:\n- " + "\n- ".join(problems)

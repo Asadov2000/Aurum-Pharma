@@ -33,7 +33,7 @@ services:
         target: /run/tls/ca.crt
         read_only: true
     networks:
-      - data
+      - storage
     depends_on:
       minio-init:
         condition: service_completed_successfully
@@ -79,7 +79,8 @@ services:
         target: /run/tls/ca.crt
         read_only: true
     networks:
-      - data
+      - db
+      - storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -124,7 +125,7 @@ services:
         target: /run/tls/ca.crt
         read_only: true
     networks:
-      - data
+      - db
     depends_on:
       postgres:
         condition: service_healthy

@@ -16,10 +16,11 @@ which overrides `get_db` to share the same in-flight SAVEPOINT.
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis, from_url
@@ -116,9 +117,37 @@ os.environ["DATABASE_URL_CATALOG_WORKER"] = _test_database_url_catalog_worker
 # Never inherit the application's Redis endpoint: cleanup belongs exclusively
 # to dedicated test infrastructure (CI can supply TEST_REDIS_URL explicitly).
 os.environ["REDIS_URL"] = resolve_test_redis_url(os.environ)
+# Celery's environment override takes precedence even over explicit app.conf.
+# Imported apps must never inherit a live deployment's broker endpoint.
+os.environ.pop("CELERY_BROKER_URL", None)
 # Unit and integration tests exercise the production-grade lockout policy even
 # though the rest of the test stack uses ENVIRONMENT=development.
 os.environ["AUTH_LOCAL_TESTING_MODE"] = "false"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def disposable_task_brokers() -> Iterator[None]:
+    """Use the dedicated test broker without changing runtime role validation.
+
+    Domain tests share a process containing all six apps. Runtime ACLs and actual
+    role credentials are exercised separately by test-worker-broker-boundaries.
+    """
+    from app.tasks.beat_app import beat_app
+    from app.tasks.billing_app import billing_app
+    from app.tasks.catalog_app import catalog_app
+    from app.tasks.catalog_producer import producer_app
+    from app.tasks.celery_app import celery_app
+    from app.tasks.mailer_app import mailer_app
+
+    apps = (beat_app, billing_app, catalog_app, producer_app, celery_app, mailer_app)
+    previous = [app.conf.broker_url for app in apps]
+    for app in apps:
+        app.conf.broker_url = resolve_test_redis_url(os.environ)
+    try:
+        yield
+    finally:
+        for app, broker_url in zip(apps, previous, strict=True):
+            app.conf.broker_url = broker_url
 
 
 @pytest_asyncio.fixture

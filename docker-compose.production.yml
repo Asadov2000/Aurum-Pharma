@@ -28,6 +28,8 @@ x-backend-secrets: &backend-secrets
     target: DATABASE_URL_SUPPORT
   - source: redis_url
     target: REDIS_URL
+  - source: celery_api_broker_url
+    target: CELERY_BROKER_URL
   - source: jwt_secret
     target: JWT_SECRET
   - source: mfa_encryption_key
@@ -62,8 +64,6 @@ x-backend-service: &backend-service
       source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
       target: /run/tls/ca.crt
       read_only: true
-  networks:
-    - data
   read_only: true
   tmpfs:
     - /tmp:size=128m,mode=1777
@@ -162,7 +162,7 @@ services:
       - -c
       - archive_command=/bin/sh /opt/aurum/postgres/archive-wal.sh "%p" "%f"
     networks:
-      - data
+      - db
     healthcheck:
       test:
         - CMD-SHELL
@@ -195,38 +195,27 @@ services:
 
   redis:
     image: redis:7-alpine@sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf
-    entrypoint: ["/bin/sh", "-ec"]
+    entrypoint: ["/bin/sh", "/config/start-with-worker-acl.sh"]
     environment:
+      REDIS_TLS: "true"
       AURUM_REDIS_MAXMEMORY: "${AURUM_REDIS_MAXMEMORY:-384mb}"
-    command:
-      - |
-        umask 077
-        password="$$(cat /run/secrets/REDIS_PASSWORD)"
-        test -n "$$password"
-        mkdir -p /tmp/tls
-        cp /run/tls/ca.crt /run/tls/redis.crt /run/tls/redis.key /tmp/tls/
-        chown -R redis:redis /tmp/tls
-        chmod 600 /tmp/tls/redis.key
-        printf 'user default on >%s ~* +@all -ACL -CONFIG -DEBUG -FLUSHALL -FLUSHDB -MODULE -SHUTDOWN -SLAVEOF -REPLICAOF\n' "$$password" > /tmp/users.acl
-        chown redis:redis /tmp/users.acl
-        chown -R redis:redis /data
-        exec gosu redis redis-server \
-          --port 0 \
-          --tls-port 6379 \
-          --tls-cert-file /tmp/tls/redis.crt \
-          --tls-key-file /tmp/tls/redis.key \
-          --tls-ca-cert-file /tmp/tls/ca.crt \
-          --tls-auth-clients no \
-          --tls-protocols "TLSv1.2 TLSv1.3" \
-          --appendonly yes \
-          --aclfile /tmp/users.acl \
-          --protected-mode yes \
-          --maxmemory "$$AURUM_REDIS_MAXMEMORY" \
-          --maxmemory-policy noeviction
     secrets:
+      - source: redis_celery_api_password
+        target: REDIS_CELERY_API_PASSWORD
+      - source: redis_celery_beat_password
+        target: REDIS_CELERY_BEAT_PASSWORD
+      - source: redis_celery_system_password
+        target: REDIS_CELERY_SYSTEM_PASSWORD
+      - source: redis_celery_catalog_password
+        target: REDIS_CELERY_CATALOG_PASSWORD
+      - source: redis_celery_billing_password
+        target: REDIS_CELERY_BILLING_PASSWORD
+      - source: redis_celery_mailer_password
+        target: REDIS_CELERY_MAILER_PASSWORD
       - source: redis_password
         target: REDIS_PASSWORD
     volumes:
+      - ./infra/redis/start-with-worker-acl.sh:/config/start-with-worker-acl.sh:ro
       - redis-data:/data
       - type: bind
         source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
@@ -241,7 +230,7 @@ services:
         target: /run/tls/redis.key
         read_only: true
     networks:
-      - data
+      - broker
     tmpfs:
       - /tmp:size=8m,mode=1777
     healthcheck:
@@ -300,7 +289,7 @@ services:
     tmpfs:
       - /tmp:size=16m,mode=0700
     networks:
-      - data
+      - storage
     healthcheck:
       test:
         [
@@ -358,7 +347,7 @@ services:
         target: /run/tls/ca.crt
         read_only: true
     networks:
-      - data
+      - storage
     depends_on:
       minio:
         condition: service_healthy
@@ -423,7 +412,7 @@ services:
         target: /run/tls/ca.crt
         read_only: true
     networks:
-      - data
+      - db
     depends_on:
       postgres:
         condition: service_healthy
@@ -458,7 +447,7 @@ services:
       - source: database_url_migration
         target: DATABASE_URL_MIGRATION
     networks:
-      - data
+      - db
     volumes:
       - type: bind
         source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
@@ -498,9 +487,11 @@ services:
         "--no-server-header",
       ]
     networks:
-      app:
-      data:
-      monitoring:
+      - app
+      - db
+      - broker
+      - storage
+      - monitoring
     depends_on:
       postgres:
         condition: service_healthy
@@ -530,10 +521,11 @@ services:
     secrets:
       - source: database_url_worker
         target: DATABASE_URL_WORKER
-      - source: redis_url
-        target: REDIS_URL
+      - source: celery_system_broker_url
+        target: CELERY_BROKER_URL
     networks:
-      - data
+      - db
+      - broker
     mem_limit: "${AURUM_CELERY_MEMORY_LIMIT:-1g}"
     cpus: "${AURUM_CELERY_CPU_LIMIT:-1.5}"
     stop_grace_period: 60s
@@ -543,6 +535,10 @@ services:
         "-A",
         "app.tasks.celery_app",
         "worker",
+        "--without-gossip",
+        "--without-mingle",
+        "--without-heartbeat",
+        "--pidfile=/tmp/celery-worker.pid",
         "--loglevel=warning",
         "--concurrency=${AURUM_CELERY_CONCURRENCY:-2}",
         "--prefetch-multiplier=1",
@@ -555,16 +551,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          celery -A app.tasks.celery_app inspect ping
-          -d celery@$$HOSTNAME --timeout 5 | grep -q pong
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "system", "/tmp/celery-worker.pid"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-
   catalog-minio-init:
     image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
@@ -593,7 +584,7 @@ services:
         target: /run/tls/ca.crt
         read_only: true
     networks:
-      - data
+      - storage
     depends_on:
       minio-init:
         condition: service_completed_successfully
@@ -612,6 +603,12 @@ services:
     restart: "no"
 
   catalog-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "catalog", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     <<: *backend-service
     environment:
       ENVIRONMENT: production
@@ -625,14 +622,16 @@ services:
     secrets:
       - source: database_url_catalog_worker
         target: DATABASE_URL_CATALOG_WORKER
-      - source: redis_url
-        target: REDIS_URL
+      - source: celery_catalog_broker_url
+        target: CELERY_BROKER_URL
       - source: catalog_minio_access_key
         target: CATALOG_MINIO_ACCESS_KEY
       - source: catalog_minio_secret_key
         target: CATALOG_MINIO_SECRET_KEY
     networks:
-      - data
+      - db
+      - broker
+      - storage
     mem_limit: "${AURUM_CATALOG_WORKER_MEMORY_LIMIT:-768m}"
     cpus: "${AURUM_CATALOG_WORKER_CPU_LIMIT:-1.0}"
     stop_grace_period: 60s
@@ -642,6 +641,10 @@ services:
         "-A",
         "app.tasks.catalog_app",
         "worker",
+        "--without-gossip",
+        "--without-mingle",
+        "--without-heartbeat",
+        "--pidfile=/tmp/celery-worker.pid",
         "--loglevel=warning",
         "--concurrency=${AURUM_CATALOG_WORKER_CONCURRENCY:-1}",
         "--prefetch-multiplier=1",
@@ -659,6 +662,12 @@ services:
         condition: service_completed_successfully
 
   billing-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "billing", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: "aurum-pharma-backend:${AURUM_IMAGE_TAG:-local}"
     build:
       context: ./backend
@@ -672,10 +681,11 @@ services:
     secrets:
       - source: database_url_billing_worker
         target: DATABASE_URL_BILLING_WORKER
-      - source: redis_url
-        target: REDIS_URL
+      - source: celery_billing_broker_url
+        target: CELERY_BROKER_URL
     networks:
-      - data
+      - db
+      - broker
     volumes:
       - type: bind
         source: "${AURUM_INTERNAL_TLS_DIR:?AURUM_INTERNAL_TLS_DIR is required}/ca.crt"
@@ -687,6 +697,10 @@ services:
         "-A",
         "app.tasks.billing_app",
         "worker",
+        "--without-gossip",
+        "--without-mingle",
+        "--without-heartbeat",
+        "--pidfile=/tmp/celery-worker.pid",
         "--loglevel=warning",
         "--concurrency=${AURUM_BILLING_WORKER_CONCURRENCY:-1}",
         "--prefetch-multiplier=1",
@@ -714,6 +728,12 @@ services:
     restart: unless-stopped
 
   platform-mailer:
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.worker_health", "mailer", "/tmp/celery-worker.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     image: "aurum-pharma-backend:${AURUM_IMAGE_TAG:-local}"
     build:
       context: ./backend
@@ -736,8 +756,8 @@ services:
     secrets:
       - source: database_url_mailer
         target: DATABASE_URL_MAILER
-      - source: redis_url
-        target: REDIS_URL
+      - source: celery_mailer_broker_url
+        target: CELERY_BROKER_URL
       - source: email_outbox_encryption_key
         target: EMAIL_OUTBOX_ENCRYPTION_KEY
       - source: email_outbox_previous_keys
@@ -745,7 +765,8 @@ services:
       - source: email_password
         target: EMAIL_PASSWORD
     networks:
-      - data
+      - db
+      - broker
       - mailer-egress
     volumes:
       - type: bind
@@ -758,6 +779,10 @@ services:
         "-A",
         "app.tasks.mailer_app",
         "worker",
+        "--without-gossip",
+        "--without-mingle",
+        "--without-heartbeat",
+        "--pidfile=/tmp/celery-worker.pid",
         "--loglevel=warning",
         "--concurrency=${AURUM_MAILER_CONCURRENCY:-1}",
         "--prefetch-multiplier=1",
@@ -793,10 +818,10 @@ services:
       LOG_LEVEL: "${AURUM_LOG_LEVEL:-INFO}"
       PYTHONPATH: /app
     secrets:
-      - source: redis_url
-        target: REDIS_URL
+      - source: celery_beat_broker_url
+        target: CELERY_BROKER_URL
     networks:
-      - data
+      - broker
     mem_limit: "${AURUM_CELERY_BEAT_MEMORY_LIMIT:-384m}"
     cpus: "${AURUM_CELERY_BEAT_CPU_LIMIT:-0.5}"
     stop_grace_period: 30s
@@ -804,7 +829,7 @@ services:
       [
         "celery",
         "-A",
-        "app.tasks.celery_app",
+        "app.tasks.beat_app",
         "beat",
         "--loglevel=warning",
         "--schedule=/tmp/celerybeat-schedule",
@@ -911,6 +936,30 @@ services:
     restart: unless-stopped
 
 secrets:
+  redis_celery_api_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_CELERY_API_PASSWORD"
+  celery_api_broker_url:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/CELERY_API_BROKER_URL"
+  redis_celery_beat_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_CELERY_BEAT_PASSWORD"
+  celery_beat_broker_url:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/CELERY_BEAT_BROKER_URL"
+  redis_celery_system_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_CELERY_SYSTEM_PASSWORD"
+  celery_system_broker_url:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/CELERY_SYSTEM_BROKER_URL"
+  redis_celery_catalog_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_CELERY_CATALOG_PASSWORD"
+  celery_catalog_broker_url:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/CELERY_CATALOG_BROKER_URL"
+  redis_celery_billing_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_CELERY_BILLING_PASSWORD"
+  celery_billing_broker_url:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/CELERY_BILLING_BROKER_URL"
+  redis_celery_mailer_password:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/REDIS_CELERY_MAILER_PASSWORD"
+  celery_mailer_broker_url:
+    file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/CELERY_MAILER_BROKER_URL"
   postgres_password:
     file: "${AURUM_SECRET_FILES_DIR:?AURUM_SECRET_FILES_DIR is required}/POSTGRES_PASSWORD"
   aurum_app_password:
@@ -1001,7 +1050,11 @@ networks:
     ipam:
       config:
         - subnet: "${AURUM_APP_NETWORK_CIDR:-172.30.0.0/24}"
-  data:
+  db:
+    internal: true
+  broker:
+    internal: true
+  storage:
     internal: true
   monitoring:
     internal: true

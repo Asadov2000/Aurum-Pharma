@@ -506,17 +506,17 @@ async def import_confirm(
 
 def _enqueue_catalog_preview(job_id: UUID, tenant_id: UUID, execution_id: UUID) -> None:
     """Queue only after the request transaction has committed."""
-    from app.tasks.catalog import preview_catalog_job
+    from app.tasks.catalog_producer import enqueue_catalog_job
 
-    preview_catalog_job.delay(str(job_id), str(tenant_id), str(execution_id))
+    enqueue_catalog_job("preview", job_id, tenant_id, execution_id)
 
 
 def _enqueue_catalog_import(job_id: UUID, tenant_id: UUID, execution_id: UUID) -> None:
     """Queue only after the request transaction has committed."""
 
-    from app.tasks.catalog import import_catalog_job
+    from app.tasks.catalog_producer import enqueue_catalog_job
 
-    import_catalog_job.delay(str(job_id), str(tenant_id), str(execution_id))
+    enqueue_catalog_job("import", job_id, tenant_id, execution_id)
 
 
 @router.get("/import/{job_id}", response_model=ImportJobRead)

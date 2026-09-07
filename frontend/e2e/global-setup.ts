@@ -77,9 +77,21 @@ export default async function globalSetup(): Promise<void> {
   process.env.E2E_TENANT_ID = tenantId;
 
   // Start every run without stale effective-permission cache entries.
-  try {
-    dockerExec(E2E_REDIS_CONTAINER, ["redis-cli", "FLUSHDB"]);
-  } catch {
-    // The suite will report the unavailable Redis service on its first request.
-  }
+  // This container belongs to the guarded disposable E2E project. Clear only
+  // permission cache entries: flushing Redis would also delete pending tasks.
+  dockerExec(E2E_REDIS_CONTAINER, [
+    "/bin/sh",
+    "-ec",
+    [
+      'export REDISCLI_AUTH="$REDIS_PASSWORD"',
+      '[ "$(redis-cli --raw PING)" = PONG ]',
+      'keys="$(redis-cli --raw --scan --pattern "auth:perms:*")"',
+      'printf "%s\\n" "$keys" | while IFS= read -r key; do',
+      '  [ -n "$key" ] || continue',
+      '  case "$key" in auth:perms:*) ;; *) exit 1 ;; esac',
+      '  result="$(redis-cli --raw DEL "$key")"',
+      '  [ "$result" = 0 ] || [ "$result" = 1 ] || exit 1',
+      "done",
+    ].join("\n"),
+  ]);
 }

@@ -11,15 +11,14 @@ from pydantic_settings import SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-from app.core.celery_broker_config import CeleryBrokerSettings
+from app.core.celery_broker_config import CatalogBrokerSettings
 from app.core.config import (
     _database_security_problems,
     _minio_transport_security_problems,
-    _redis_security_problems,
 )
 
 
-class CatalogWorkerSettings(CeleryBrokerSettings):
+class CatalogWorkerSettings(CatalogBrokerSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -66,7 +65,6 @@ class CatalogWorkerSettings(CeleryBrokerSettings):
                 "DATABASE_URL_CATALOG_WORKER", self.DATABASE_URL_CATALOG_WORKER
             )
         )
-        problems.extend(_redis_security_problems(self.REDIS_URL))
         if (
             not self.MINIO_ENDPOINT
             or "://" in self.MINIO_ENDPOINT

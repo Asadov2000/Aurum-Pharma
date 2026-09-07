@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.time import utc_now
-from app.tasks.celery_app import celery_app
+from app.tasks.beat_app import beat_app
 
 
 async def test_legacy_financial_write_routes_are_not_registered(
@@ -35,7 +35,7 @@ async def test_legacy_financial_write_routes_are_not_registered(
 def test_legacy_invoice_generator_is_not_scheduled() -> None:
     scheduled_tasks = {
         str(entry["task"])
-        for entry in celery_app.conf.beat_schedule.values()
+        for entry in beat_app.conf.beat_schedule.values()
         if isinstance(entry, dict) and "task" in entry
     }
 

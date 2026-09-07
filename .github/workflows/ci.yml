@@ -45,6 +45,7 @@ jobs:
           ./scripts/test-pilot-readiness.ps1
           ./scripts/test-production-host-preflight.ps1
           ./scripts/test-demo-cors-origins.ps1
+          ./scripts/test-demo-broker-rollout.ps1
 
       - name: Test backend shard report validation
         run: python scripts/test-backend-shards.py
@@ -57,6 +58,7 @@ jobs:
           ./scripts/test-pilot-readiness.ps1
           ./scripts/test-manage-edge-cash-identity.ps1
           ./scripts/test-demo-cors-origins.ps1
+          ./scripts/test-demo-broker-rollout.ps1
 
       - name: Test Edge identity Windows wrapper
         if: runner.os == 'Windows'
@@ -1172,7 +1174,7 @@ jobs:
           docker compose up -d --build postgres redis minio
           docker compose run --rm db-role-bootstrap
           docker compose run --rm --build migrate
-          docker compose up -d --build backend celery-worker catalog-worker billing-worker frontend
+          docker compose up -d --build backend celery-worker catalog-worker billing-worker platform-mailer celery-beat frontend
           docker compose ps
           echo "E2E_POSTGRES_CONTAINER=$(docker compose ps --quiet postgres)" >> "$GITHUB_ENV"
           echo "E2E_REDIS_CONTAINER=$(docker compose ps --quiet redis)" >> "$GITHUB_ENV"
@@ -1214,7 +1216,7 @@ jobs:
         if: failure()
         run: >-
           docker compose logs --no-color --tail=250
-          postgres redis minio backend celery-worker catalog-worker billing-worker frontend
+          postgres redis minio backend celery-worker catalog-worker billing-worker platform-mailer celery-beat frontend
 
       - name: Upload Playwright artifacts on failure
         if: failure()
@@ -1326,7 +1328,7 @@ jobs:
           )
           assert published == ["gateway"], f"unexpected published services: {published}"
 
-          for name in ("app", "data", "monitoring"):
+          for name in ("app", "db", "broker", "storage", "monitoring"):
               assert model["networks"][name]["internal"] is True, (
                   f"{name} network must be internal"
               )
@@ -1423,6 +1425,7 @@ jobs:
                   "database_url_app",
                   "database_url_support",
                   "redis_url",
+                  "celery_api_broker_url",
                   "jwt_secret",
                   "mfa_encryption_key",
                   "mfa_previous_keys",
@@ -1431,14 +1434,14 @@ jobs:
                   "minio_access_key",
                   "minio_secret_key",
               },
-              "celery-worker": {"database_url_worker", "redis_url"},
+              "celery-worker": {"database_url_worker", "celery_system_broker_url"},
               "catalog-worker": {
                   "database_url_catalog_worker",
-                  "redis_url",
+                  "celery_catalog_broker_url",
                   "catalog_minio_access_key",
                   "catalog_minio_secret_key",
               },
-              "celery-beat": {"redis_url"},
+              "celery-beat": {"celery_beat_broker_url"},
           }
           for name, expected in expected_runtime_secrets.items():
               mounted = {
@@ -1457,6 +1460,7 @@ jobs:
               "DATABASE_URL_WORKER",
               "DATABASE_URL_CATALOG_WORKER",
               "REDIS_URL",
+              "CELERY_BROKER_URL",
               "JWT_SECRET",
               "MFA_ENCRYPTION_KEY",
               "MINIO_ACCESS_KEY",
@@ -1464,14 +1468,14 @@ jobs:
               "EMAIL_PASSWORD",
           }
           expected_development_credentials = {
-              "celery-worker": {"DATABASE_URL_WORKER", "REDIS_URL"},
+              "celery-worker": {"DATABASE_URL_WORKER", "CELERY_BROKER_URL"},
               "catalog-worker": {
                   "DATABASE_URL_CATALOG_WORKER",
-                  "REDIS_URL",
+                  "CELERY_BROKER_URL",
                   "CATALOG_MINIO_ACCESS_KEY",
                   "CATALOG_MINIO_SECRET_KEY",
               },
-              "celery-beat": {"REDIS_URL"},
+              "celery-beat": {"CELERY_BROKER_URL"},
           }
           for name, expected in expected_development_credentials.items():
               present = (
@@ -1485,7 +1489,7 @@ jobs:
           catalog_command = " ".join(model["services"]["catalog-worker"]["command"])
           assert "app.tasks.catalog_app" in catalog_command
           assert "-Q catalog-worker" in catalog_command
-          assert set(model["services"]["catalog-worker"]["networks"]) == {"data"}
+          assert set(model["services"]["catalog-worker"]["networks"]) == {"db", "broker", "storage"}
           for compose_model in (model, development_model):
               worker = compose_model["services"]["catalog-worker"]
               assert worker["depends_on"]["catalog-minio-init"]["condition"] == (
@@ -1497,11 +1501,39 @@ jobs:
           }
           assert catalog_secret_targets == {
               "database_url_catalog_worker": "DATABASE_URL_CATALOG_WORKER",
-              "redis_url": "REDIS_URL",
+              "celery_catalog_broker_url": "CELERY_BROKER_URL",
               "catalog_minio_access_key": "CATALOG_MINIO_ACCESS_KEY",
               "catalog_minio_secret_key": "CATALOG_MINIO_SECRET_KEY",
           }
-          assert set(model["services"]["celery-beat"]["networks"]) == {"data"}
+          assert set(model["services"]["celery-beat"]["networks"]) == {"broker"}
+
+          expected_resource_networks = {
+              "postgres": {"db"}, "redis": {"broker"}, "minio": {"storage"},
+              "minio-init": {"storage"}, "catalog-minio-init": {"storage"},
+              "db-role-bootstrap": {"db"}, "migrate": {"db"},
+              "celery-worker": {"db", "broker"},
+              "catalog-worker": {"db", "broker", "storage"},
+              "billing-worker": {"db", "broker"},
+              "platform-mailer": {"db", "broker", "mailer-egress"},
+              "celery-beat": {"broker"},
+              "backend": {"app", "db", "broker", "storage", "monitoring"},
+          }
+          for service_name, expected_networks in expected_resource_networks.items():
+              assert set(model["services"][service_name]["networks"]) == expected_networks, service_name
+          worker_roles = {
+              "celery-worker": "system", "catalog-worker": "catalog",
+              "billing-worker": "billing", "platform-mailer": "mailer",
+          }
+          for service_name, role in worker_roles.items():
+              service = model["services"][service_name]
+              command = service["command"]
+              for flag in ("--without-gossip", "--without-mingle", "--without-heartbeat",
+                           "--pidfile=/tmp/celery-worker.pid"):
+                  assert flag in command, (service_name, flag)
+              assert service["healthcheck"]["test"] == [
+                  "CMD", "python", "-m", "app.tasks.worker_health", role, "/tmp/celery-worker.pid"
+              ], service_name
+          assert "app.tasks.beat_app" in model["services"]["celery-beat"]["command"]
 
           migrate_secrets = {
               secret["source"]
@@ -1558,10 +1590,18 @@ jobs:
           assert "hostssl all" in pg_hba
           assert "\nhost    all" not in pg_hba
 
-          redis_command = " ".join(model["services"]["redis"]["command"])
-          assert "--port 0" in redis_command
-          assert "--tls-port 6379" in redis_command
-          assert "--tls-auth-clients no" in redis_command
+          redis_service = model["services"]["redis"]
+          assert redis_service["entrypoint"] == ["/bin/sh", "/config/start-with-worker-acl.sh"]
+          assert redis_service["environment"]["REDIS_TLS"] == "true"
+          assert {entry["target"] for entry in redis_service["secrets"]} == {
+              "REDIS_PASSWORD", *(
+                  f"REDIS_CELERY_{role}_PASSWORD"
+                  for role in ("API", "BEAT", "SYSTEM", "CATALOG", "BILLING", "MAILER")
+              )
+          }
+          acl_mount = next(volume for volume in redis_service["volumes"]
+                           if volume["target"] == "/config/start-with-worker-acl.sh")
+          assert acl_mount["read_only"] is True
 
           minio_command = " ".join(model["services"]["minio"]["command"])
           assert "--certs-dir /tmp/certs" in minio_command
@@ -1637,9 +1677,9 @@ jobs:
           }
           assert billing_worker_secrets == {
               "database_url_billing_worker",
-              "redis_url",
+              "celery_billing_broker_url",
           }, f"unexpected billing worker secrets: {sorted(billing_worker_secrets)}"
-          assert set(model["services"]["billing-worker"]["networks"]) == {"data"}
+          assert set(model["services"]["billing-worker"]["networks"]) == {"db", "broker"}
 
           mailer_secrets = {
               secret["source"]
@@ -1647,13 +1687,13 @@ jobs:
           }
           assert mailer_secrets == {
               "database_url_mailer",
-              "redis_url",
+              "celery_mailer_broker_url",
               "email_outbox_encryption_key",
               "email_outbox_previous_keys",
               "email_password",
           }, f"unexpected mailer secrets: {sorted(mailer_secrets)}"
           assert set(model["services"]["platform-mailer"]["networks"]) == {
-              "data",
+              "db", "broker",
               "mailer-egress",
           }
           PY
@@ -1686,6 +1726,10 @@ jobs:
       - name: Verify catalog storage permissions against isolated MinIO
         shell: pwsh
         run: ./scripts/test-catalog-storage-permissions.ps1 -BackendImage aurum-backend:ci
+
+      - name: Verify worker Redis permissions and network boundaries
+        shell: pwsh
+        run: ./scripts/test-worker-broker-boundaries.ps1 -BackendImage aurum-backend:ci
 
       - name: Build production gateway
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
