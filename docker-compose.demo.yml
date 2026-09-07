@@ -63,8 +63,6 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
       - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
-    ports:
-      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d aurum_demo"]
       interval: 5s
@@ -94,8 +92,6 @@ services:
     volumes:
       - ./infra/redis/start-with-worker-acl.sh:/config/start-with-worker-acl.sh:ro
       - redis-data:/data
-    ports:
-      - "127.0.0.1:6379:6379"
     healthcheck:
       test:
         [
@@ -118,9 +114,6 @@ services:
       MINIO_ROOT_PASSWORD: "${AURUM_DEMO_MINIO_SECRET_KEY:?AURUM_DEMO_MINIO_SECRET_KEY is required}"
     volumes:
       - minio-data:/data
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
