@@ -113,6 +113,7 @@ export interface CatalogSearchParams {
 // Mirrors the backend's CatalogImportJob.status values exactly.
 export type ImportStatus =
   | "pending"
+  | "previewing"
   | "validating"
   | "importing"
   | "success"

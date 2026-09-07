@@ -37,6 +37,7 @@ from app.core.errors import (
 )
 from app.core.storage import default_object_path, get_object, put_object, remove_object
 from app.domains.catalog.image_processing import process_catalog_image
+from app.domains.catalog.import_limits import MAX_IMPORT_FILE_BYTES
 from app.domains.catalog.import_parser import XLS_UNSUPPORTED_MESSAGE
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.schemas import (
@@ -457,7 +458,7 @@ async def import_upload(
         raise ValidationError(XLS_UNSUPPORTED_MESSAGE)
 
     max_mb = get_settings().MAX_IMPORT_FILE_MB
-    data = await _read_import_file(file, max_bytes=max_mb * 1024 * 1024)
+    data = await _read_import_file(file, max_bytes=min(max_mb * 1024 * 1024, MAX_IMPORT_FILE_BYTES))
 
     object_name = new_import_object_name(tenant_id)
     source_path = await run_in_threadpool(
@@ -478,14 +479,13 @@ async def import_upload(
 @router.post("/import/{job_id}/preview", response_model=ImportJobRead)
 async def import_preview(
     job_id: UUID,
+    background_tasks: BackgroundTasks,
     _user: Annotated[CurrentUser, Depends(require_permission("catalog.create"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> ImportJobRead:
-    job = await service.get_job(job_id)
-    if not job.source_path:
-        raise BusinessRuleError("Job has no uploaded file")
-    raw = await run_in_threadpool(get_object, job.source_path)
-    job = await service.preview_import(job_id=job_id, raw=raw)
+    job = await service.request_preview(job_id=job_id)
+    if job.status == "previewing" and job.execution_id is not None:
+        background_tasks.add_task(_enqueue_catalog_preview, job.id, job.tenant_id, job.execution_id)
     return ImportJobRead.model_validate(job)
 
 
@@ -499,16 +499,24 @@ async def import_confirm(
     service: Annotated[CatalogService, Depends(_service)],
 ) -> ImportJobRead:
     job = await service.confirm_import(job_id=job_id, duplicate_strategy=payload.duplicate_strategy)
-    background_tasks.add_task(_enqueue_catalog_import, job.id, job.tenant_id)
+    if job.status == "importing" and job.execution_id is not None:
+        background_tasks.add_task(_enqueue_catalog_import, job.id, job.tenant_id, job.execution_id)
     return ImportJobRead.model_validate(job)
 
 
-def _enqueue_catalog_import(job_id: UUID, tenant_id: UUID) -> None:
+def _enqueue_catalog_preview(job_id: UUID, tenant_id: UUID, execution_id: UUID) -> None:
+    """Queue only after the request transaction has committed."""
+    from app.tasks.catalog import preview_catalog_job
+
+    preview_catalog_job.delay(str(job_id), str(tenant_id), str(execution_id))
+
+
+def _enqueue_catalog_import(job_id: UUID, tenant_id: UUID, execution_id: UUID) -> None:
     """Queue only after the request transaction has committed."""
 
     from app.tasks.catalog import import_catalog_job
 
-    import_catalog_job.delay(str(job_id), str(tenant_id))
+    import_catalog_job.delay(str(job_id), str(tenant_id), str(execution_id))
 
 
 @router.get("/import/{job_id}", response_model=ImportJobRead)

@@ -182,13 +182,17 @@ class CatalogImportJob(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    execution_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    execution_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at_for_rollback: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','validating','importing','success','failed','rolled_back')",
+            "status IN ('pending','previewing','validating','importing',"
+            "'success','failed','rolled_back')",
             name="ck_cij_status",
         ),
         CheckConstraint(

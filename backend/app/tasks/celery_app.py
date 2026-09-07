@@ -38,6 +38,7 @@ celery_app.conf.update(
         "billing.process_trial_endings": {"queue": "billing-worker"},
         "billing.process_grace_endings": {"queue": "billing-worker"},
         "catalog.import_catalog_job": {"queue": "catalog-worker"},
+        "catalog.preview_catalog_job": {"queue": "catalog-worker"},
     },
 )
 

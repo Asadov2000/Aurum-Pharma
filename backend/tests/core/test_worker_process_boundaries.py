@@ -154,14 +154,18 @@ def test_catalog_tasks_are_routed_only_to_dedicated_queue() -> None:
     from app.tasks.catalog_app import catalog_app
     from app.tasks.celery_app import celery_app
 
-    expected_route = {"catalog.import_catalog_job": {"queue": "catalog-worker"}}
+    expected_route = {
+        "catalog.import_catalog_job": {"queue": "catalog-worker"},
+        "catalog.preview_catalog_job": {"queue": "catalog-worker"},
+    }
     assert catalog_app.conf.task_default_queue == "catalog-worker"
     assert catalog_app.conf.task_routes == expected_route
     assert catalog_app.conf.task_ignore_result is True
     assert catalog_app.conf.task_reject_on_worker_lost is True
     assert "app.tasks.catalog" in catalog_app.conf.include
     assert "app.tasks.catalog" not in celery_app.conf.include
-    assert celery_app.conf.task_routes["catalog.import_catalog_job"] == {"queue": "catalog-worker"}
+    for task_name, route in expected_route.items():
+        assert celery_app.conf.task_routes[task_name] == route
 
 
 @pytest.mark.parametrize(

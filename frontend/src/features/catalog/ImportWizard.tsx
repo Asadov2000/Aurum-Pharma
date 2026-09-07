@@ -1,4 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Badge, Button, ConfirmDialog, Label, Select } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
@@ -26,6 +28,7 @@ const strategyDescription: Record<DuplicateStrategy, string> = {
 
 const statusLabel: Record<ImportJob["status"], string> = {
   pending: "Файл загружен",
+  previewing: "Проверка файла",
   validating: "Превью готово",
   importing: "Импорт выполняется",
   success: "Импорт завершён",
@@ -39,7 +42,7 @@ const statusBadgeTone = (
   status: ImportJob["status"],
 ): "neutral" | "info" | "success" | "warning" | "danger" => {
   if (status === "pending" || status === "validating") return "info";
-  if (status === "importing") return "warning";
+  if (status === "previewing" || status === "importing") return "warning";
   if (status === "success") return "success";
   if (status === "failed") return "danger";
   return "neutral";
@@ -80,6 +83,9 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
   const [topError, setTopError] = useState<string | null>(null);
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const actionPending = useRef(false);
+  const refreshedCompletedJob = useRef<string | null>(null);
+  const queryClient = useQueryClient();
 
   const upload = useUploadImport();
   const preview = usePreviewImport();
@@ -87,6 +93,21 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
   const rollback = useRollbackImport();
   const jobQuery = useImportJobQuery(jobId);
   const job = jobQuery.data ?? null;
+  const previewReady =
+    job?.status === "validating" &&
+    job.total_rows !== null &&
+    job.valid_rows !== null &&
+    job.error_rows !== null &&
+    job.preview_data !== null;
+  const canConfirm = previewReady && (job?.valid_rows ?? 0) > 0;
+
+  useEffect(() => {
+    if (job?.status !== "success" || refreshedCompletedJob.current === job.id) return;
+    refreshedCompletedJob.current = job.id;
+    void queryClient.invalidateQueries({ queryKey: ["catalog", "list"] });
+    void queryClient.invalidateQueries({ queryKey: ["catalog", "summary"] });
+    void queryClient.invalidateQueries({ queryKey: ["catalog", "picker"] });
+  }, [job?.id, job?.status, queryClient]);
 
   const resetJob = () => {
     setJobId(null);
@@ -113,22 +134,35 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
   };
 
   const onPreview = async () => {
-    if (!jobId) return;
+    if (!jobId || job?.status !== "pending" || actionPending.current) return;
+    actionPending.current = true;
     setTopError(null);
     try {
       await preview.mutateAsync(jobId);
     } catch (err) {
-      setTopError(describeApiError(err, "Не удалось подготовить превью"));
+      // A lost POST response does not mean the server rejected the background job.
+      const refreshed = await jobQuery.refetch();
+      if (!refreshed.data || refreshed.data.status === "pending") {
+        setTopError(describeApiError(err, "Не удалось запустить проверку файла"));
+      }
+    } finally {
+      actionPending.current = false;
     }
   };
 
   const onConfirm = async () => {
-    if (!jobId) return;
+    if (!jobId || !canConfirm || actionPending.current) return;
+    actionPending.current = true;
     setTopError(null);
     try {
       await confirm.mutateAsync({ jobId, strategy });
     } catch (err) {
-      setTopError(describeApiError(err, "Не удалось запустить импорт"));
+      const refreshed = await jobQuery.refetch();
+      if (!refreshed.data || refreshed.data.status === "validating") {
+        setTopError(describeApiError(err, "Не удалось запустить импорт"));
+      }
+    } finally {
+      actionPending.current = false;
     }
   };
 
@@ -143,8 +177,14 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
     }
   };
 
-  if (jobId && jobQuery.isLoading) {
-    return <p className="py-8 text-center text-sm text-foreground-muted">Загрузка импорта…</p>;
+  if (jobId && jobQuery.isPending) {
+    return (
+      <p className="py-8 text-center text-sm text-foreground-muted" role="status">
+        {jobQuery.fetchStatus === "paused"
+          ? "Ожидаем соединение, чтобы открыть сохранённый импорт…"
+          : "Загрузка импорта…"}
+      </p>
+    );
   }
 
   if (jobId && jobQuery.error && !job) {
@@ -219,10 +259,28 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
         {job.preview_data && job.preview_data.length > 0 && <PreviewRows rows={job.preview_data} />}
         {job.errors && job.errors.length > 0 && <ImportErrors rows={job.errors} />}
 
-        {job.status === "importing" && (
+        {(job.status === "previewing" || job.status === "importing") && (
           <p className="text-sm text-foreground-muted" aria-live="polite">
-            Файл обрабатывается в фоне. Это окно можно закрыть: при следующем открытии импорт
-            продолжится с текущего шага.
+            {job.status === "previewing"
+              ? "Проверяем файл в фоне. Товары пока не добавляются. "
+              : "Файл обрабатывается в фоне. "}
+            Это окно можно закрыть: при следующем открытии импорт продолжится с текущего шага.
+          </p>
+        )}
+
+        {job.status === "failed" && (
+          <p className="text-sm text-danger" role="alert">
+            Обработка файла не завершена. Проверьте ошибки и загрузите файл заново.
+          </p>
+        )}
+        {previewReady && !canConfirm && (
+          <p className="text-sm text-danger" role="alert">
+            В файле нет корректных строк для импорта. Исправьте ошибки и загрузите новый файл.
+          </p>
+        )}
+        {jobQuery.error && (
+          <p className="text-sm text-danger" role="alert">
+            Не удалось обновить состояние импорта. Проверим снова после восстановления связи.
           </p>
         )}
 
@@ -239,6 +297,7 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
               <Select
                 id="strategy"
                 value={strategy}
+                disabled={preview.isPending || confirm.isPending}
                 onChange={(event) => setStrategy(event.target.value as DuplicateStrategy)}
                 className="w-full sm:w-48"
               >
@@ -260,7 +319,11 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
               </Button>
             )}
             {job.status === "validating" && (
-              <Button onClick={() => void onConfirm()} isLoading={confirm.isPending}>
+              <Button
+                onClick={() => void onConfirm()}
+                isLoading={confirm.isPending}
+                disabled={!canConfirm}
+              >
                 Импортировать товары
               </Button>
             )}
@@ -271,7 +334,8 @@ export function ImportWizard({ onClose, canRollback, storageKey }: Props): JSX.E
             )}
             {(job.status === "success" ||
               job.status === "failed" ||
-              job.status === "rolled_back") && (
+              job.status === "rolled_back" ||
+              (previewReady && !canConfirm)) && (
               <Button variant="secondary" onClick={resetJob}>
                 Новый импорт
               </Button>

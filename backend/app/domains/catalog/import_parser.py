@@ -18,7 +18,9 @@ import zipfile
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from celery.exceptions import SoftTimeLimitExceeded
 from openpyxl import load_workbook
+from openpyxl.workbook import Workbook
 from pydantic import ValidationError as PydanticValidationError
 
 from app.domains.catalog.schemas import BarcodeCreate, CatalogItemCreate
@@ -181,15 +183,21 @@ def _is_blank(cell: Any) -> bool:
     return cell is None or (isinstance(cell, str) and cell.strip() == "")
 
 
+def _open_import_workbook(raw: bytes) -> Workbook:
+    """Map malformed workbooks to a safe error without swallowing cancellation."""
+    try:
+        return load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:  # openpyxl raises many exception types on malformed input
+        raise ValueError("Could not read XLSX file") from exc
+
+
 def parse_xlsx(raw: bytes) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Parse the first worksheet of an XLSX file. First row is the header
     (case-insensitive match). Same (rows, errors) contract as parse_csv."""
     _validate_xlsx_archive(raw)
-    try:
-        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-    except Exception as exc:  # openpyxl raises many exception types on malformed input
-        raise ValueError("Could not read XLSX file") from exc
-
+    wb = _open_import_workbook(raw)
     try:
         ws = wb.worksheets[0]
         rows_iter = ws.iter_rows(values_only=True)

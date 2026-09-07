@@ -189,6 +189,7 @@ async def test_xlsx_preview_and_process_creates_items(
         source_filename="price.xlsx",
         source_path="aurum/test/price.xlsx",
     )
+    await service.request_preview(job_id=job.id)
     previewed = await service.preview_import(job_id=job.id, raw=raw)
     assert previewed.status == "validating"
     assert previewed.total_rows == 3

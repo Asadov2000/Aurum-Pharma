@@ -124,7 +124,10 @@ export function useImportJobQuery(jobId: string | null) {
     queryKey: catalogKeys.import(jobId ?? ""),
     queryFn: ({ signal }) => getImportJob(jobId as string, signal),
     enabled: jobId !== null,
-    refetchInterval: (query) => (query.state.data?.status === "importing" ? 2000 : false),
+    refetchInterval: (query) =>
+      query.state.data?.status === "previewing" || query.state.data?.status === "importing"
+        ? 2000
+        : false,
   });
 }
 
@@ -138,6 +141,7 @@ export function usePreviewImport() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (jobId: string) => previewImport(jobId),
+    onMutate: (jobId) => qc.cancelQueries({ queryKey: catalogKeys.import(jobId) }),
     onSuccess: (data) => {
       qc.setQueryData(catalogKeys.import(data.id), data);
     },
@@ -149,10 +153,9 @@ export function useConfirmImport() {
   return useMutation({
     mutationFn: (args: { jobId: string; strategy: DuplicateStrategy }) =>
       confirmImport(args.jobId, args.strategy),
+    onMutate: ({ jobId }) => qc.cancelQueries({ queryKey: catalogKeys.import(jobId) }),
     onSuccess: (data) => {
       qc.setQueryData(catalogKeys.import(data.id), data);
-      void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
-      void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
     },
   });
 }
@@ -165,6 +168,7 @@ export function useRollbackImport() {
       qc.setQueryData(catalogKeys.import(data.id), data);
       void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
       void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
+      void qc.invalidateQueries({ queryKey: ["catalog", "picker"] });
     },
   });
 }

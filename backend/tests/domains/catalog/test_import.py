@@ -75,6 +75,7 @@ async def test_import_preview_returns_stats(
         source_filename="import.csv",
         source_path="aurum/test/import.csv",
     )
+    await service.request_preview(job_id=job.id)
     updated = await service.preview_import(job_id=job.id, raw=SAMPLE_CSV)
 
     assert updated.status == "validating"
@@ -103,6 +104,7 @@ async def test_import_preview_collects_errors(
         source_filename="bad.csv",
         source_path="aurum/test/bad.csv",
     )
+    await service.request_preview(job_id=job.id)
     updated = await service.preview_import(job_id=job.id, raw=bad_csv)
     assert updated.error_rows == 3
     assert updated.valid_rows == 0
@@ -121,6 +123,7 @@ async def test_import_preview_maps_parser_failure_to_validation_error(
         source_path="aurum/test/broken.csv",
     )
 
+    await service.request_preview(job_id=job.id)
     with pytest.raises(ValidationError, match="brand_name"):
         await service.preview_import(job_id=job.id, raw=b"wrong_header\nvalue\n")
 
@@ -171,6 +174,8 @@ async def test_confirm_import_is_idempotent_for_same_strategy(
         source_path="aurum/test/idempotent.csv",
     )
 
+    await service.request_preview(job_id=job.id)
+    await service.preview_import(job_id=job.id, raw=SAMPLE_CSV)
     first = await service.confirm_import(job_id=job.id, duplicate_strategy="skip")
     repeated = await service.confirm_import(job_id=job.id, duplicate_strategy="skip")
 
@@ -198,6 +203,10 @@ async def test_confirm_import_blocks_second_active_job_for_tenant(
         source_path="aurum/test/second.csv",
     )
 
+    await service.request_preview(job_id=first.id)
+    await service.preview_import(job_id=first.id, raw=SAMPLE_CSV)
+    await service.request_preview(job_id=second.id)
+    await service.preview_import(job_id=second.id, raw=SAMPLE_CSV)
     await service.confirm_import(job_id=first.id, duplicate_strategy="skip")
     with pytest.raises(BusinessRuleError) as exc_info:
         await service.confirm_import(job_id=second.id, duplicate_strategy="skip")

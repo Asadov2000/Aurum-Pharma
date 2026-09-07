@@ -1,28 +1,40 @@
-"""Celery task that runs the catalog import inside a worker.
+"""Bounded, tenant-scoped execution of catalog preview and import.
 
-Reads the uploaded file out of MinIO and calls CatalogService.process_import.
-The worker uses the ordinary application role and seeds one explicit tenant
-scope before reading the job, so a forged job ID cannot bypass RLS.
+A session advisory lock spans the committed claim and the work transaction.
+The durable claim prevents a lost worker's message from parsing a poison file
+again. The work transaction either finishes within the deadline or rolls back.
 """
 
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
+from uuid import UUID
 
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.catalog_worker_db import CatalogWorkerSessionLocal
+from app.core.catalog_worker_db import catalog_worker_engine
 from app.core.catalog_worker_storage import get_catalog_object
 from app.core.time import utc_now
+from app.domains.catalog.import_limits import (
+    IMPORT_HARD_TIME_LIMIT_SECONDS,
+    IMPORT_SOFT_TIME_LIMIT_SECONDS,
+    catalog_execution_lock_key,
+)
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
 from app.tasks.catalog_app import catalog_app
 
 logger = structlog.get_logger("tasks.catalog")
-IMPORT_SOFT_TIME_LIMIT_SECONDS = 120
-IMPORT_HARD_TIME_LIMIT_SECONDS = 150
+Phase = Literal["previewing", "importing"]
+_EMPTY_RESULT = {"valid": 0, "errors": 0}
+_FAILURE_MESSAGE = "Обработка файла прервана. Загрузите файл заново и повторите попытку."
+
+
+class CatalogExecutionBusy(RuntimeError):
+    """A new phase arrived before the previous phase released its session lock."""
 
 
 async def _seed_tenant(db: AsyncSession, tenant_id: str) -> None:
@@ -32,70 +44,144 @@ async def _seed_tenant(db: AsyncSession, tenant_id: str) -> None:
     )
 
 
-async def _run_import(job_id: str, tenant_id: str) -> dict[str, int]:
-    from uuid import UUID
+async def _fail_execution(db: AsyncSession, job_id: UUID) -> None:
+    repo = CatalogRepository(db)
+    job = await repo.get_job_for_update(job_id)
+    if job is not None:
+        await repo.update_job(
+            job,
+            status="failed",
+            errors=[{"row": 0, "messages": [_FAILURE_MESSAGE]}],
+            finished_at=utc_now(),
+        )
 
-    async with CatalogWorkerSessionLocal() as db:
-        async with db.begin():
-            await _seed_tenant(db, tenant_id)
-            repo = CatalogRepository(db)
-            service = CatalogService(repo)
-            job = await repo.get_job(UUID(job_id))
-            if job is None or str(job.tenant_id) != tenant_id or not job.source_path:
-                logger.warning("import_job_missing", job_id=job_id)
-                return {"created": 0, "errors": 0}
-            raw = await asyncio.to_thread(
-                get_catalog_object,
-                job.source_path,
-                tenant_id=tenant_id,
+
+async def _execute_job(
+    job_id: str, tenant_id: str, execution_id: str, *, phase: Phase
+) -> dict[str, int]:
+    job_uuid = UUID(job_id)
+    execution_uuid = UUID(execution_id)
+    # Keep the same physical connection over both transactions. NullPool closes
+    # it on exit, releasing the session lock even if exception cleanup fails.
+    async with catalog_worker_engine.connect() as connection:
+        acquired = await connection.scalar(
+            text("SELECT pg_try_advisory_lock(hashtextextended(:key, 0))"),
+            {"key": catalog_execution_lock_key(job_uuid)},
+        )
+        await connection.commit()
+        if not acquired:
+            async with AsyncSession(bind=connection) as observer, observer.begin():
+                await _seed_tenant(observer, tenant_id)
+                waiting = await CatalogRepository(observer).get_job(job_uuid)
+                if (
+                    waiting is not None
+                    and waiting.status == phase
+                    and waiting.execution_id == execution_uuid
+                    and waiting.execution_started_at is None
+                    and waiting.deadline_at is not None
+                    and waiting.deadline_at > utc_now()
+                ):
+                    raise CatalogExecutionBusy("Catalog execution lock is busy")
+            return dict(_EMPTY_RESULT)
+        try:
+            async with AsyncSession(bind=connection, expire_on_commit=False) as db:
+                async with db.begin():
+                    await _seed_tenant(db, tenant_id)
+                    repo = CatalogRepository(db)
+                    job = await repo.get_job_for_update(job_uuid)
+                    if (
+                        job is None
+                        or str(job.tenant_id) != tenant_id
+                        or job.status != phase
+                        or job.execution_id != execution_uuid
+                    ):
+                        return dict(_EMPTY_RESULT)
+                    if (
+                        job.execution_started_at is not None
+                        or job.deadline_at is None
+                        or job.deadline_at <= utc_now()
+                        or not job.source_path
+                    ):
+                        await _fail_execution(db, job_uuid)
+                        return dict(_EMPTY_RESULT)
+                    source_path = job.source_path
+                    deadline = job.deadline_at
+                    await repo.update_job(job, execution_started_at=utc_now())
+
+                # Claim is durable before reading or parsing untrusted input.
+                try:
+                    async with db.begin():
+                        await _seed_tenant(db, tenant_id)
+                        raw = await asyncio.to_thread(
+                            get_catalog_object, source_path, tenant_id=tenant_id
+                        )
+                        service = CatalogService(CatalogRepository(db))
+                        if phase == "previewing":
+                            updated = await service.preview_import(job_id=job_uuid, raw=raw)
+                        else:
+                            updated = await service.process_import(job_id=job_uuid, raw=raw)
+                        if utc_now() >= deadline:
+                            raise TimeoutError("Catalog execution deadline exceeded")
+                        result = {
+                            "valid": updated.valid_rows or 0,
+                            "errors": updated.error_rows or 0,
+                        }
+                    return result
+                except Exception as exc:
+                    # Never log exception messages/tracebacks containing file
+                    # contents or database parameters.
+                    logger.error(
+                        "catalog_execution_failed", job_id=job_id, error_type=type(exc).__name__
+                    )
+                    async with db.begin():
+                        await _seed_tenant(db, tenant_id)
+                        await _fail_execution(db, job_uuid)
+                    raise
+        finally:
+            await connection.execute(
+                text("SELECT pg_advisory_unlock(hashtextextended(:key, 0))"),
+                {"key": catalog_execution_lock_key(job_uuid)},
             )
-            updated = await service.process_import(job_id=UUID(job_id), raw=raw)
-            return {
-                "valid": updated.valid_rows or 0,
-                "errors": updated.error_rows or 0,
-            }
+            await connection.commit()
 
 
-async def _mark_import_failed(job_id: str, tenant_id: str) -> None:
-    from uuid import UUID
-
-    async with CatalogWorkerSessionLocal() as db:
-        async with db.begin():
-            await _seed_tenant(db, tenant_id)
-            repo = CatalogRepository(db)
-            job = await repo.get_job_for_update(UUID(job_id))
-            if job is None or job.status != "importing":
-                return
-            await repo.update_job(
-                job,
-                status="failed",
-                errors=[{"row": 0, "messages": ["Импорт прерван. Повторите загрузку файла."]}],
-                finished_at=utc_now(),
-            )
+# Celery does not expose typed task decorators.
+@catalog_app.task(  # type: ignore[misc]
+    name="catalog.preview_catalog_job",
+    soft_time_limit=IMPORT_SOFT_TIME_LIMIT_SECONDS,
+    time_limit=IMPORT_HARD_TIME_LIMIT_SECONDS,
+    autoretry_for=(CatalogExecutionBusy,),
+    retry_kwargs={"max_retries": 5, "countdown": 1},
+)
+def preview_catalog_job(job_id: str, tenant_id: str, execution_id: str) -> dict[str, int]:
+    return _run_phase(job_id, tenant_id, execution_id, phase="previewing")
 
 
+# Celery does not expose typed task decorators.
 @catalog_app.task(  # type: ignore[misc]
     name="catalog.import_catalog_job",
     soft_time_limit=IMPORT_SOFT_TIME_LIMIT_SECONDS,
     time_limit=IMPORT_HARD_TIME_LIMIT_SECONDS,
+    autoretry_for=(CatalogExecutionBusy,),
+    retry_kwargs={"max_retries": 5, "countdown": 1},
 )
-def import_catalog_job(job_id: str, tenant_id: str) -> dict[str, int]:
+def import_catalog_job(
+    job_id: str, tenant_id: str, execution_id: str | None = None
+) -> dict[str, int]:
+    if execution_id is None:
+        # Pre-upgrade messages cannot claim a new execution. Their old job
+        # expires through the tenant-scoped recovery path for lost dispatch.
+        return dict(_EMPTY_RESULT)
+    return _run_phase(job_id, tenant_id, execution_id, phase="importing")
+
+
+def _run_phase(job_id: str, tenant_id: str, execution_id: str, *, phase: Phase) -> dict[str, int]:
     try:
-        result = asyncio.run(_run_import(job_id, tenant_id))
-    except Exception as exc:
-        logger.error(
-            "import_catalog_job_failed",
-            job_id=job_id,
-            error_type=type(exc).__name__,
-        )
-        try:
-            asyncio.run(_mark_import_failed(job_id, tenant_id))
-        except Exception as mark_exc:
-            logger.error(
-                "import_catalog_job_failure_state_failed",
-                job_id=job_id,
-                error_type=type(mark_exc).__name__,
-            )
+        return asyncio.run(_execute_job(job_id, tenant_id, execution_id, phase=phase))
+    except CatalogExecutionBusy:
         raise
-    logger.info("import_catalog_job_done", job_id=job_id, **result)
-    return result
+    except Exception as exc:
+        logger.error("catalog_task_failed", job_id=job_id, error_type=type(exc).__name__)
+        # Celery logs uncaught task exceptions itself. Only a fixed message may
+        # escape this boundary; parser/driver details can contain uploaded data.
+        raise RuntimeError("Catalog file processing failed") from None

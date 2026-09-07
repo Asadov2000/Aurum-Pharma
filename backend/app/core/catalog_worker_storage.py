@@ -7,6 +7,7 @@ from functools import lru_cache
 from minio import Minio
 
 from app.core.catalog_worker_config import get_catalog_worker_settings
+from app.domains.catalog.import_limits import MAX_IMPORT_FILE_BYTES
 
 
 @lru_cache
@@ -50,7 +51,10 @@ def get_catalog_object(object_path: str, *, tenant_id: str) -> bytes:
     )
     response = get_catalog_minio().get_object(bucket, key)
     try:
-        return response.read()
+        raw = response.read(MAX_IMPORT_FILE_BYTES + 1)
+        if len(raw) > MAX_IMPORT_FILE_BYTES:
+            raise ValueError("Catalog import exceeds the file size limit")
+        return raw
     finally:
         response.close()
         response.release_conn()
