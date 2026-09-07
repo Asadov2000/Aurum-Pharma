@@ -1529,6 +1529,18 @@ jobs:
               "aurum_pitr_password",
           }, f"unexpected bootstrap secrets: {sorted(bootstrap_secrets)}"
 
+          restore_postgres = recovery_model["services"]["restore-postgres"]
+          assert restore_postgres["environment"]["AURUM_CATALOG_WORKER_PASSWORD_FILE"] == (
+              "/run/secrets/AURUM_CATALOG_WORKER_PASSWORD"
+          )
+          assert {
+              "source": "aurum_catalog_worker_password",
+              "target": "AURUM_CATALOG_WORKER_PASSWORD",
+          }.items() <= next(
+              entry for entry in restore_postgres["secrets"]
+              if entry["source"] == "aurum_catalog_worker_password"
+          ).items()
+
           postgres_command = " ".join(model["services"]["postgres"]["command"])
           assert "ssl=on" in postgres_command
           assert "ssl_min_protocol_version=TLSv1.2" in postgres_command
