@@ -11,7 +11,6 @@ duplicate-handling branches.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -20,6 +19,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
+from celery.exceptions import SoftTimeLimitExceeded
 
 from app.core.errors import (
     AurumError,
@@ -30,6 +30,10 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.catalog.image_processing import CatalogImageVariants
+from app.domains.catalog.import_limits import (
+    CATALOG_ACTIVE_STATUSES,
+    CATALOG_EXECUTION_TIMEOUT_SECONDS,
+)
 from app.domains.catalog.import_parser import parse_import
 from app.domains.catalog.models import (
     Barcode,
@@ -294,15 +298,40 @@ class CatalogService:
             status="pending",
         )
 
-    async def preview_import(self, *, job_id: UUID, raw: bytes) -> CatalogImportJob:
-        job = await self._get_job_or_404(job_id)
-        if job.status not in ("pending", "validating"):
+    async def request_preview(self, *, job_id: UUID) -> CatalogImportJob:
+        job = await self.get_job(job_id)
+        if job.status in ("previewing", "validating", "failed"):
+            return job
+        if job.status != "pending":
             raise BusinessRuleError(
                 "Cannot preview an import that is already running or finished",
                 details={"status": job.status},
             )
+        if not job.source_path:
+            raise BusinessRuleError("Job has no uploaded file")
+        await self.repo.lock_import_slot(job.tenant_id)
+        locked_job = await self.repo.get_job_for_update(job_id)
+        if locked_job is None:
+            raise NotFoundError("Import job not found")
+        job = locked_job
+        if job.status in ("previewing", "validating", "failed"):
+            return job
+        if job.status != "pending":
+            raise BusinessRuleError("Import is no longer awaiting preview")
+        if not job.source_path:
+            raise BusinessRuleError("Job has no uploaded file")
+        await self._require_available_import_slot(job)
+        return await self._start_execution(job, status="previewing")
+
+    async def preview_import(self, *, job_id: UUID, raw: bytes) -> CatalogImportJob:
+        """Parse in the isolated catalog worker after its execution claim."""
+        job = await self.repo.get_job_for_update(job_id)
+        if job is None:
+            raise NotFoundError("Import job not found")
+        if job.status != "previewing":
+            raise BusinessRuleError("Import preview has not been requested")
         try:
-            rows, errors = await asyncio.to_thread(parse_import, raw, job.source_filename)
+            rows, errors = parse_import(raw, job.source_filename)
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         await self.repo.update_job(
@@ -313,11 +342,64 @@ class CatalogService:
             error_rows=len(errors),
             preview_data=[_to_jsonable(r) for r in rows[:PREVIEW_ROW_LIMIT]],
             errors=errors[:PREVIEW_ROW_LIMIT],
+            finished_at=self._now(),
         )
         return job
 
     async def get_job(self, job_id: UUID) -> CatalogImportJob:
-        return await self._get_job_or_404(job_id)
+        job = await self._get_job_or_404(job_id)
+        return await self._recover_expired_execution(job)
+
+    async def _recover_expired_execution(self, job: CatalogImportJob) -> CatalogImportJob:
+        if (
+            job.status not in CATALOG_ACTIVE_STATUSES
+            or job.deadline_at is None
+            or job.deadline_at > self._now()
+        ):
+            return job
+        if not await self.repo.try_lock_execution(job.id):
+            return job
+        locked_job = await self.repo.get_job_for_update(job.id)
+        if locked_job is None:
+            raise NotFoundError("Import job not found")
+        if (
+            locked_job.status in CATALOG_ACTIVE_STATUSES
+            and locked_job.deadline_at is not None
+            and locked_job.deadline_at <= self._now()
+        ):
+            await self.repo.update_job(
+                locked_job,
+                status="failed",
+                errors=[
+                    {"row": 0, "messages": ["Обработка файла прервана. Загрузите файл повторно."]}
+                ],
+                finished_at=self._now(),
+            )
+        return locked_job
+
+    async def _require_available_import_slot(self, job: CatalogImportJob) -> None:
+        active = await self.repo.get_active_import(job.tenant_id)
+        if active is not None:
+            active = await self._recover_expired_execution(active)
+        if active is not None and active.id != job.id and active.status in CATALOG_ACTIVE_STATUSES:
+            raise BusinessRuleError(
+                "Another catalog import is already running for this pharmacy",
+                details={"reason": "catalog_import_in_progress"},
+            )
+
+    async def _start_execution(
+        self, job: CatalogImportJob, *, status: Literal["previewing", "importing"]
+    ) -> CatalogImportJob:
+        now = self._now()
+        return await self.repo.update_job(
+            job,
+            status=status,
+            execution_id=uuid4(),
+            execution_started_at=None,
+            deadline_at=now + timedelta(seconds=CATALOG_EXECUTION_TIMEOUT_SECONDS),
+            started_at=now,
+            finished_at=None,
+        )
 
     async def confirm_import(
         self,
@@ -325,9 +407,9 @@ class CatalogService:
         job_id: UUID,
         duplicate_strategy: str,
     ) -> CatalogImportJob:
-        job = await self.repo.get_job_for_update(job_id)
-        if job is None:
-            raise NotFoundError("Import job not found")
+        job = await self.get_job(job_id)
+        if job.status == "failed":
+            return job
         if job.status == "importing":
             if job.duplicate_strategy != duplicate_strategy:
                 raise BusinessRuleError(
@@ -335,26 +417,27 @@ class CatalogService:
                     details={"status": job.status},
                 )
             return job
-        if job.status not in ("pending", "validating"):
+        if job.status != "validating":
             raise BusinessRuleError(
                 "Cannot confirm an import that is already running or finished",
                 details={"status": job.status},
             )
+        if not job.valid_rows:
+            raise BusinessRuleError("Import preview has no valid rows")
         await self.repo.lock_import_slot(job.tenant_id)
-        active = await self.repo.get_active_import(job.tenant_id)
-        if active is not None and active.id != job.id:
-            raise BusinessRuleError(
-                "Another catalog import is already running for this pharmacy",
-                details={"reason": "catalog_import_in_progress"},
-            )
-        await self.repo.update_job(
-            job,
-            status="importing",
-            duplicate_strategy=duplicate_strategy,
-            started_at=utc_now(),
-        )
-
-        return job
+        locked_job = await self.repo.get_job_for_update(job_id)
+        if locked_job is None:
+            raise NotFoundError("Import job not found")
+        job = locked_job
+        if job.status == "importing" and job.duplicate_strategy == duplicate_strategy:
+            return job
+        if job.status != "validating":
+            raise BusinessRuleError("Import is no longer awaiting confirmation")
+        if not job.valid_rows:
+            raise BusinessRuleError("Import preview has no valid rows")
+        await self._require_available_import_slot(job)
+        await self.repo.update_job(job, duplicate_strategy=duplicate_strategy)
+        return await self._start_execution(job, status="importing")
 
     async def process_import(
         self,
@@ -408,8 +491,12 @@ class CatalogService:
                 per_row_errors.append(
                     {"row": row.get("brand_name", "?"), "messages": [exc.message]}
                 )
-            except Exception:
-                logger.exception("catalog_import_row_failed", job_id=str(job.id))
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "catalog_import_row_failed", job_id=str(job.id), error_type=type(exc).__name__
+                )
                 per_row_errors.append(
                     {
                         "row": row.get("brand_name", "?"),

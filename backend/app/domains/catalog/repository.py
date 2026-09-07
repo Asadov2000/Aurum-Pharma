@@ -13,6 +13,7 @@ from sqlalchemy import and_, case, delete, exists, func, not_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
+from app.domains.catalog.import_limits import CATALOG_ACTIVE_STATUSES, catalog_execution_lock_key
 from app.domains.catalog.models import Barcode, CatalogImportJob, TenantCatalog
 from app.domains.inventory.models import Batch
 
@@ -461,8 +462,21 @@ class CatalogRepository:
         return await self.session.get(CatalogImportJob, job_id)
 
     async def get_job_for_update(self, job_id: UUID) -> CatalogImportJob | None:
-        stmt = select(CatalogImportJob).where(CatalogImportJob.id == job_id).with_for_update()
+        stmt = (
+            select(CatalogImportJob)
+            .where(CatalogImportJob.id == job_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def try_lock_execution(self, job_id: UUID) -> bool:
+        """Never wait for a live worker while recovering an abandoned execution."""
+        result = await self.session.execute(
+            text("SELECT pg_try_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": catalog_execution_lock_key(job_id)},
+        )
+        return bool(result.scalar_one())
 
     async def lock_import_slot(self, tenant_id: UUID) -> None:
         """Serialize import confirmation per tenant before checking the active job."""
@@ -475,7 +489,7 @@ class CatalogRepository:
     async def get_active_import(self, tenant_id: UUID) -> CatalogImportJob | None:
         stmt = select(CatalogImportJob).where(
             CatalogImportJob.tenant_id == tenant_id,
-            CatalogImportJob.status == "importing",
+            CatalogImportJob.status.in_(CATALOG_ACTIVE_STATUSES),
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 

@@ -12,7 +12,10 @@ catalog_app = Celery(
 )
 catalog_app.conf.update(
     task_default_queue="catalog-worker",
-    task_routes={"catalog.import_catalog_job": {"queue": "catalog-worker"}},
+    task_routes={
+        "catalog.import_catalog_job": {"queue": "catalog-worker"},
+        "catalog.preview_catalog_job": {"queue": "catalog-worker"},
+    },
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",

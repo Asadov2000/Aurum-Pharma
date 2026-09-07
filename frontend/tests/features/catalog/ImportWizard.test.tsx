@@ -1,20 +1,36 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const uploadImport = vi.fn();
 const getImportJob = vi.fn();
 const rollbackImport = vi.fn();
+const previewImport = vi.fn();
+const confirmImport = vi.fn();
+const listCatalog = vi.fn();
+const getCatalogSummary = vi.fn();
+const listCatalogForPicker = vi.fn();
 
 vi.mock("@/features/catalog/api", () => ({
   uploadImport: (...a: unknown[]) => uploadImport(...a),
-  previewImport: vi.fn(),
-  confirmImport: vi.fn(),
+  previewImport: (...a: unknown[]) => previewImport(...a),
+  confirmImport: (...a: unknown[]) => confirmImport(...a),
   getImportJob: (...a: unknown[]) => getImportJob(...a),
   rollbackImport: (...a: unknown[]) => rollbackImport(...a),
+  listCatalog: (...a: unknown[]) => listCatalog(...a),
+}));
+
+vi.mock("@/features/catalog/summaryApi", () => ({
+  getCatalogSummary: (...a: unknown[]) => getCatalogSummary(...a),
+}));
+vi.mock("@/features/catalog/pickerApi", () => ({
+  listCatalogForPicker: (...a: unknown[]) => listCatalogForPicker(...a),
 }));
 
 import { ImportWizard } from "@/features/catalog/ImportWizard";
+import { useCatalogPickerQuery } from "@/features/catalog/pickerQueries";
+import { catalogKeys, useCatalogQuery } from "@/features/catalog/queries";
+import { useCatalogSummaryQuery } from "@/features/catalog/summaryQueries";
 import { type ImportJob } from "@/features/catalog/types";
 
 const JOB: ImportJob = {
@@ -43,6 +59,20 @@ const SUCCESS_JOB: ImportJob = {
   error_rows: 0,
 };
 
+const READY_JOB: ImportJob = {
+  ...SUCCESS_JOB,
+  status: "validating",
+  preview_data: [{ brand_name: "Тестовый товар" }],
+};
+
+function deferredJob() {
+  let resolve!: (job: ImportJob) => void;
+  const promise = new Promise<ImportJob>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function renderWizard() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
@@ -54,12 +84,30 @@ function renderWizard() {
   return { ...view, input };
 }
 
+function CatalogCacheProbe() {
+  const catalog = useCatalogQuery({ page: 1 });
+  const summary = useCatalogSummaryQuery();
+  const picker = useCatalogPickerQuery({ q: "", page: 1, page_size: 20 }, true);
+  return (
+    <>
+      <p>Товаров в списке: {catalog.data?.total}</p>
+      <p>Товаров в сводке: {summary.data?.total}</p>
+      <p>Подбор товара: {picker.data?.items.map((item) => item.brand_name).join(", ")}</p>
+    </>
+  );
+}
+
 describe("ImportWizard", () => {
   beforeEach(() => {
     window.localStorage.clear();
     uploadImport.mockReset();
     getImportJob.mockReset();
     rollbackImport.mockReset();
+    previewImport.mockReset();
+    confirmImport.mockReset();
+    listCatalog.mockReset();
+    getCatalogSummary.mockReset();
+    listCatalogForPicker.mockReset();
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -125,5 +173,159 @@ describe("ImportWizard", () => {
     await waitFor(() => {
       expect(rollbackImport).toHaveBeenCalledWith("job-1");
     });
+  });
+
+  it("waits for background preview before confirming and prevents duplicate submissions", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue(JOB);
+    const previewRequest = deferredJob();
+    const confirmRequest = deferredJob();
+    previewImport.mockReturnValue(previewRequest.promise);
+    confirmImport.mockReturnValue(confirmRequest.promise);
+    renderWizard();
+
+    const previewButton = await screen.findByRole("button", { name: "Проверить файл" });
+    fireEvent.click(previewButton);
+    fireEvent.click(previewButton);
+    await waitFor(() => expect(previewButton).toBeDisabled());
+    expect(previewImport).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Импортировать товары" })).not.toBeInTheDocument();
+
+    getImportJob.mockResolvedValue(READY_JOB);
+    await act(async () => previewRequest.resolve({ ...JOB, status: "previewing" }));
+    expect(await screen.findByText("Проверка файла")).toBeInTheDocument();
+    expect(screen.getByText(/Товары пока не добавляются/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Закрыть" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Проверить файл" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Импортировать товары" })).not.toBeInTheDocument();
+
+    const confirmButton = await screen.findByRole(
+      "button",
+      { name: "Импортировать товары" },
+      { timeout: 3500 },
+    );
+    expect(screen.getByText("Тестовый товар")).toBeInTheDocument();
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+    await waitFor(() => expect(confirmButton).toBeDisabled());
+    expect(confirmImport).toHaveBeenCalledTimes(1);
+    expect(confirmImport).toHaveBeenCalledWith(JOB.id, "skip");
+    expect(screen.getByLabelText("Что делать с дубликатами")).toBeDisabled();
+    await act(async () => confirmRequest.resolve({ ...READY_JOB, status: "importing" }));
+    expect(await screen.findByText("Импорт выполняется")).toBeInTheDocument();
+  });
+
+  it("restores background preview after remount and polls through a transient request failure", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue({ ...JOB, status: "previewing" });
+    const view = renderWizard();
+    expect(await screen.findByText("Проверка файла")).toBeInTheDocument();
+    view.unmount();
+    renderWizard();
+    expect(await screen.findByText("Проверка файла")).toBeInTheDocument();
+    expect(window.localStorage.getItem("aurum:test:catalog-import")).toBe(JOB.id);
+    expect(uploadImport).not.toHaveBeenCalled();
+    expect(previewImport).not.toHaveBeenCalled();
+    getImportJob.mockRejectedValueOnce(new Error("Connection interrupted"));
+    getImportJob.mockResolvedValue(READY_JOB);
+
+    expect(
+      await screen.findByText(/Не удалось обновить состояние импорта/, {}, { timeout: 3500 }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Импортировать товары" }, { timeout: 3500 }),
+    ).toBeEnabled();
+    expect(screen.queryByText(/Не удалось обновить состояние импорта/)).not.toBeInTheDocument();
+  }, 10_000);
+
+  it("allows a new upload after a background failure without exposing confirmation", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue({
+      ...JOB,
+      status: "failed",
+      errors: [{ message: "Превышено время проверки файла" }],
+    });
+    renderWizard();
+    expect(await screen.findByText(/Обработка файла не завершена/)).toBeInTheDocument();
+    expect(screen.getByText(/Превышено время проверки файла/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Импортировать товары" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Новый импорт" }));
+    expect(screen.getByLabelText("Файл каталога")).toBeEnabled();
+    expect(window.localStorage.getItem("aurum:test:catalog-import")).toBeNull();
+  });
+
+  it.each(["preview", "confirm"] as const)(
+    "reconciles a lost %s response with the server before offering another action",
+    async (action) => {
+      window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+      const before = action === "preview" ? JOB : READY_JOB;
+      const after: ImportJob = {
+        ...before,
+        status: action === "preview" ? "previewing" : "importing",
+      };
+      getImportJob.mockResolvedValueOnce(before).mockResolvedValue(after);
+      const mutation = action === "preview" ? previewImport : confirmImport;
+      mutation.mockRejectedValueOnce(new Error("Response lost"));
+      renderWizard();
+      const actionName = action === "preview" ? "Проверить файл" : "Импортировать товары";
+      fireEvent.click(await screen.findByRole("button", { name: actionName }));
+      expect(
+        await screen.findByText(action === "preview" ? "Проверка файла" : "Импорт выполняется"),
+      ).toBeInTheDocument();
+      expect(mutation).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("button", { name: actionName })).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
+
+  it("refreshes the visible catalog, summary and picker after the worker completes", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValueOnce({ ...READY_JOB, status: "importing" });
+    getImportJob.mockResolvedValue(SUCCESS_JOB);
+    listCatalog.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 20 });
+    listCatalog.mockResolvedValue({ items: [], total: 3, page: 1, page_size: 20 });
+    getCatalogSummary.mockResolvedValueOnce({ total: 0 });
+    getCatalogSummary.mockResolvedValue({ total: 3 });
+    listCatalogForPicker.mockResolvedValueOnce({ items: [] });
+    listCatalogForPicker.mockResolvedValue({
+      items: [{ id: "imported-item", brand_name: "Импортированный товар" }],
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <CatalogCacheProbe />
+        <ImportWizard onClose={() => {}} canRollback storageKey="aurum:test:catalog-import" />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Товаров в списке: 0")).toBeInTheDocument();
+    expect(await screen.findByText("Импорт выполняется")).toBeInTheDocument();
+    expect(listCatalog).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Импорт завершён", {}, { timeout: 3500 })).toBeInTheDocument();
+    expect(await screen.findByText("Товаров в списке: 3")).toBeInTheDocument();
+    expect(await screen.findByText("Товаров в сводке: 3")).toBeInTheDocument();
+    expect(await screen.findByText("Подбор товара: Импортированный товар")).toBeInTheDocument();
+
+    await act(async () => {
+      qc.setQueryData(catalogKeys.import(JOB.id), {
+        ...SUCCESS_JOB,
+        finished_at: "2026-01-01T00:05:00Z",
+      });
+    });
+    expect(listCatalog).toHaveBeenCalledTimes(2);
+    expect(getCatalogSummary).toHaveBeenCalledTimes(2);
+    expect(listCatalogForPicker).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { ...JOB, status: "validating" as const },
+    { ...READY_JOB, valid_rows: 0, error_rows: 3 },
+  ])("does not confirm an incomplete or entirely invalid preview", async (job) => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue(job);
+    renderWizard();
+    const button = await screen.findByRole("button", { name: "Импортировать товары" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(confirmImport).not.toHaveBeenCalled();
   });
 });

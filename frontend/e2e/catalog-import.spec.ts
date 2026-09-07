@@ -21,7 +21,20 @@ test.describe("Catalog import (owner)", () => {
     // Upload the sample workbook (3 rows); the wizard advances to the job step.
     await page.locator('input[type="file"]').setInputFiles("e2e/fixtures/import-sample.xlsx");
 
+    const previewAccepted = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        /\/catalog\/import\/[^/]+\/preview$/.test(new URL(response.url()).pathname),
+    );
     await page.getByRole("button", { name: /Проверить файл/ }).click();
+    expect((await previewAccepted).ok()).toBeTruthy();
+
+    // The server owns background preview; reloading must restore the saved job.
+    await page.reload();
+    await page
+      .getByRole("button", { name: /Загрузить из Excel\/CSV/ })
+      .first()
+      .click();
     await expect(page.getByText("Корректных")).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: /Импортировать товары/ }).click();
