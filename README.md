@@ -30,11 +30,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1
 - Backend API: <http://localhost:8000> (`/healthz`, `/docs`)
 - Frontend: <http://localhost:5173>
 - Local email inbox: <http://localhost:8025>
-- MinIO console: <http://localhost:9001>
-- Prometheus: <http://localhost:9090>
-- Postgres (основной): `localhost:5432`, БД `aurum`
+- MinIO: внутренний сервис Docker; служебная консоль на хост не публикуется.
+- Prometheus: внутренний сервис сети monitoring.
+- Postgres (основной): внутренний `postgres:5432`, БД `aurum`; обслуживание через Docker `exec`.
 - Postgres (тестовый): `localhost:5433`, БД `aurum_test`
-- Redis: `localhost:6379`
+- Redis: внутренний `redis:6379`; обслуживание через Docker `exec`.
 
 ## Production-периметр
 

@@ -56,8 +56,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1
 - Frontend: `http://localhost:5173`
 - Backend docs: `http://localhost:8000/docs`
 - Healthcheck: `http://localhost:8000/healthz`
-- MinIO: `http://localhost:9001`
-- Prometheus: `http://localhost:9090`
+- MinIO, PostgreSQL и Redis — внутренние сервисы Docker; обслуживание через `exec`.
+- Prometheus — внутренний сервис сети monitoring.
 
 Локальный launcher для Windows:
 

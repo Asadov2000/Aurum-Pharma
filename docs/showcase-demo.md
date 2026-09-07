@@ -68,7 +68,8 @@ Launcher добавляет в разрешённые адреса только 
 
 - frontend: `http://localhost:5173`;
 - API: `http://localhost:8000/docs`;
-- MinIO: `http://localhost:9001`.
+- PostgreSQL, Redis и MinIO доступны только внутри Docker; служебные порты и
+  MinIO-консоль на хост не публикуются. Обслуживание выполняется через Docker `exec`.
 
 Тестовые входы:
 
