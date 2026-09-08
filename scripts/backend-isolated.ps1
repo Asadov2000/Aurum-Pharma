@@ -82,7 +82,7 @@ function Remove-BackendVerifyProject {
                 -ActualProject $labels.'com.docker.compose.project' -ResourceName $resource.Name
         }
     }
-    # Compose supplies these build labels. Check them before any cleanup, then
+    # Explicit build labels work across Compose/Bake versions. Check them before any cleanup, then
     # remove only this invocation's tag without --force; shared cache is retained.
     $imageName = "$ProjectName-tools"
     $imageIds = Invoke-BackendVerifyDocker -Arguments @('image', 'ls', '-q', '--filter', "reference=$imageName") -Capture
@@ -91,8 +91,8 @@ function Remove-BackendVerifyProject {
         $images = @($imageJson | ConvertFrom-Json)
         if ($images.Count -ne 1) { throw 'Ambiguous verification image inspection.' }
         Assert-BackendVerifyResourceOwnership -ProjectName $ProjectName `
-            -ActualProject $images[0].Config.Labels.'com.docker.compose.project' -ResourceName $imageName
-        if ($images[0].Config.Labels.'com.docker.compose.service' -cne 'tools') {
+            -ActualProject $images[0].Config.Labels.'tj.aurum.verify.project' -ResourceName $imageName
+        if ($images[0].Config.Labels.'tj.aurum.verify.service' -cne 'tools') {
             throw 'Refusing cleanup of an image not built for verification tools.'
         }
     }
@@ -128,7 +128,12 @@ function Invoke-BackendIsolated {
     try {
         Write-Host "Backend verification project: $($plan.project)"
         $mayHaveResources = $true
-        Invoke-BackendVerifyDocker -Arguments ($compose + @('build', 'tools'))
+        # Compose/Bake does not consistently label built images. Own labels must
+        # be explicit so a cached build cannot lose its cleanup ownership proof.
+        $backendDirectory = Join-Path (Split-Path $plan.compose_file -Parent) 'backend'
+        Invoke-BackendVerifyDocker -Arguments @('build', '--file', (Join-Path $backendDirectory 'Dockerfile'),
+            '--tag', $plan.image, '--label', "tj.aurum.verify.project=$($plan.project)",
+            '--label', 'tj.aurum.verify.service=tools', $backendDirectory)
         if ($plan.services.Count -gt 0) {
             Invoke-BackendVerifyDocker -Arguments ($compose + @('up', '-d', '--wait', '--wait-timeout', '180') + $plan.services)
             # init.sh provisions extensions and initial roles. The maintained

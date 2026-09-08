@@ -113,7 +113,14 @@ Assert-True -Condition ((@($externalPlan.commands[0]) -join '|') -ceq ($pytestCo
     Assert-True -Condition (@($script:fixtureCalls | Where-Object { $_ -contains 'down' }).Count -eq 0) -Because "foreign ownership prevents every destructive cleanup call"
 }
 
-foreach ($imageOwner in @($project, $otherProject)) {
+foreach ($imageCase in @(
+    @{ Allowed = $true; Labels = @{ 'tj.aurum.verify.project' = $project; 'tj.aurum.verify.service' = 'tools' } },
+    @{ Allowed = $false; Labels = @{ 'tj.aurum.verify.project' = $otherProject; 'tj.aurum.verify.service' = 'tools' } },
+    @{ Allowed = $false; Labels = @{ 'tj.aurum.verify.project' = $project; 'tj.aurum.verify.service' = 'backend' } },
+    @{ Allowed = $false; Labels = @{ 'tj.aurum.verify.service' = 'tools' } },
+    @{ Allowed = $false; Labels = @{ 'tj.aurum.verify.project' = $project } },
+    @{ Allowed = $false; Labels = @{ 'com.docker.compose.project' = $project; 'com.docker.compose.service' = 'tools' } }
+)) {
     & {
         $script:fixtureCalls = New-Object 'System.Collections.Generic.List[object]'
         function Invoke-BackendVerifyDocker {
@@ -122,23 +129,20 @@ foreach ($imageOwner in @($project, $otherProject)) {
             if ($Arguments[0] -eq 'image' -and $Arguments[1] -eq 'ls') { return 'fixture-image-id' }
             if ($Arguments[0] -eq 'image' -and $Arguments[1] -eq 'inspect') {
                 return ConvertTo-Json -Depth 4 -InputObject @(@{
-                    Config = @{ Labels = @{
-                        'com.docker.compose.project' = $imageOwner
-                        'com.docker.compose.service' = 'tools'
-                    } }
+                    Config = @{ Labels = $imageCase.Labels }
                 })
             }
             if ($Capture) { return '' }
         }
         $cleanup = { Remove-BackendVerifyProject -ProjectName $project -ComposeArguments @('compose', '--project-name', $project) }
-        if ($imageOwner -ceq $project) {
+        if ($imageCase.Allowed) {
             & $cleanup
             $removeCalls = @($script:fixtureCalls | Where-Object { $_ -contains 'rm' })
-            Assert-True -Condition ($removeCalls.Count -eq 1) -Because "cleanup removes one owned image tag"
+            Assert-True -Condition ($removeCalls.Count -eq 1) -Because "own image labels authorize cleanup without automatic Compose labels"
             Assert-True -Condition (($removeCalls[0] -join '|') -ceq "image|rm|${project}-tools") -Because "cleanup cannot force-delete shared image tags"
         }
         else {
-            Assert-Rejected -Action $cleanup -Because "an image with a foreign ownership label blocks cleanup"
+            Assert-Rejected -Action $cleanup -Because "missing or foreign own project/service labels block image cleanup"
             Assert-True -Condition (@($script:fixtureCalls | Where-Object { $_ -contains 'down' -or $_ -contains 'rm' }).Count -eq 0) -Because "image ownership is checked before deleting any resources"
         }
     }
@@ -173,13 +177,29 @@ foreach ($imageOwner in @($project, $otherProject)) {
     $downs = @($script:fixtureCalls | Where-Object { $_ -contains 'down' })
     Assert-True -Condition ($downs.Count -eq 1) -Because "a failed check still cleans up its own project once"
     $build = @($script:fixtureCalls[0])
-    $projectIndex = [Array]::IndexOf($build, '--project-name')
-    $ownedProject = $build[$projectIndex + 1]
+    Assert-True -Condition ($build[0] -ceq 'build') -Because "the tools image is built directly with Docker"
+    $compose = @($script:fixtureCalls | Where-Object { $_[0] -ceq 'compose' })[0]
+    $projectIndex = [Array]::IndexOf($compose, '--project-name')
+    Assert-True -Condition ($projectIndex -ge 0) -Because "Compose is bound to one explicit project"
+    $ownedProject = $compose[$projectIndex + 1]
     Assert-BackendVerifyProjectName -ProjectName $ownedProject
     Assert-True -Condition ($downs[0] -contains $ownedProject) -Because "cleanup uses exactly the project created by this invocation"
-    $envIndex = [Array]::IndexOf($build, '--env-file')
+    $backendRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'backend'
+    foreach ($expectedArgument in @(
+        @{ Flag = '--file'; Value = (Join-Path $backendRoot 'Dockerfile') },
+        @{ Flag = '--tag'; Value = "${ownedProject}-tools" }
+    )) {
+        $argumentIndex = [Array]::IndexOf($build, $expectedArgument.Flag)
+        Assert-True -Condition ($argumentIndex -ge 0 -and $build[$argumentIndex + 1] -ceq $expectedArgument.Value) -Because "the direct build selects this workspace Dockerfile and invocation image tag"
+    }
+    foreach ($label in @("tj.aurum.verify.project=$ownedProject", 'tj.aurum.verify.service=tools')) {
+        $labelIndex = [Array]::IndexOf($build, $label)
+        Assert-True -Condition ($labelIndex -gt 0 -and $build[$labelIndex - 1] -ceq '--label') -Because "the built image receives explicit ownership labels"
+    }
+    Assert-True -Condition ($build[-1] -ceq $backendRoot) -Because "the direct build uses only this workspace backend context"
+    $envIndex = [Array]::IndexOf($compose, '--env-file')
     $nullDevice = if ($env:OS -eq 'Windows_NT') { 'NUL' } else { '/dev/null' }
-    Assert-True -Condition ($envIndex -ge 0 -and $build[$envIndex + 1] -ceq $nullDevice) -Because "Compose receives an explicit empty env file"
+    Assert-True -Condition ($envIndex -ge 0 -and $compose[$envIndex + 1] -ceq $nullDevice) -Because "Compose receives an explicit empty env file"
 }
 
 Write-Host "Backend isolation self-test passed: $script:assertions assertions." -ForegroundColor Green

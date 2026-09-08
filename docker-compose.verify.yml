@@ -52,8 +52,8 @@ x-postgres-environment: &postgres-environment
 
 services:
   tools:
-    # Compose's project-tools image tag is unique to the invocation; build layers
-    # remain reusable without a mutable image shared by concurrent worktrees.
+    # The launcher prebuilds Compose's project-tools tag with explicit ownership
+    # labels; layers remain reusable across the unique invocation tags.
     build:
       context: ./backend
       dockerfile: Dockerfile
