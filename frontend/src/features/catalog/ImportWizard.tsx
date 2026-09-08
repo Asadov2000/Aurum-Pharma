@@ -399,16 +399,37 @@ function ImportErrors({ rows }: { rows: Array<Record<string, unknown>> }): JSX.E
     <div className="max-h-48 overflow-auto rounded-md border border-danger/30 bg-danger-subtle p-3">
       <p className="mb-2 text-xs font-medium text-danger">Ошибки ({rows.length})</p>
       <ol className="space-y-2 text-xs text-danger">
-        {rows.slice(0, 10).map((row, index) => (
-          <li key={index} className="break-words">
-            {Object.entries(row)
-              .map(([key, value]) => `${key}: ${displayValue(value)}`)
-              .join(" · ")}
-          </li>
-        ))}
+        {rows.slice(0, 10).map((row, index) => {
+          const messages = Array.isArray(row.messages) ? row.messages.filter(isErrorMessage) : [];
+          if (messages.length === 0 && isErrorMessage(row.message)) messages.push(row.message);
+          const source =
+            typeof row.row === "number" && Number.isInteger(row.row) && row.row > 0
+              ? `Строка ${row.row}`
+              : isErrorMessage(row.row)
+                ? `Товар: ${row.row}`
+                : "Ошибка файла";
+          return (
+            <li key={index} className="break-words">
+              <p className="font-medium">{source}</p>
+              {messages.length > 0 ? (
+                <ul className="list-disc space-y-1 pl-4">
+                  {messages.map((message, messageIndex) => (
+                    <li key={messageIndex}>{message}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Не удалось прочитать описание ошибки.</p>
+              )}
+            </li>
+          );
+        })}
       </ol>
     </div>
   );
+}
+
+function isErrorMessage(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function Stat({

@@ -238,6 +238,59 @@ describe("ImportWizard", () => {
     expect(screen.queryByText(/Не удалось обновить состояние импорта/)).not.toBeInTheDocument();
   }, 10_000);
 
+  it("shows every parser message with its source row", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue({
+      ...READY_JOB,
+      errors: [{ row: 2, messages: ["brand_name is required", "base_price 'abc' is not a number"] }],
+    });
+    renderWizard();
+
+    expect(await screen.findByText("Строка 2")).toBeInTheDocument();
+    expect(screen.getByText("brand_name is required")).toBeInTheDocument();
+    expect(screen.getByText("base_price 'abc' is not a number")).toBeInTheDocument();
+    expect(screen.queryByText(/Сложное значение/)).not.toBeInTheDocument();
+  });
+
+  it("distinguishes file failures from product errors and treats markup as text", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue({
+      ...JOB,
+      status: "failed",
+      errors: [
+        { row: 0, messages: ["Обработка файла прервана. Загрузите файл повторно."] },
+        { row: "Тестовый товар", messages: ["<img src=x onerror=alert(1)>"] },
+      ],
+    });
+    const { container } = renderWizard();
+
+    expect(await screen.findByText("Ошибка файла")).toBeInTheDocument();
+    expect(screen.getByText("Товар: Тестовый товар")).toBeInTheDocument();
+    expect(screen.getByText("Обработка файла прервана. Загрузите файл повторно.")).toBeInTheDocument();
+    expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.queryByText("Строка 0")).not.toBeInTheDocument();
+  });
+
+  it("handles malformed details without exposing unrelated fields", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue({
+      ...JOB,
+      status: "failed",
+      errors: [
+        { messages: [null, {}, "", "  ", "Проверьте файл"], internal: "internal-value" },
+        { messages: [], message: "Старое описание ошибки" },
+        { row: {}, messages: [{ debug: "nested-value" }] },
+      ],
+    });
+    renderWizard();
+
+    expect(await screen.findByText("Проверьте файл")).toBeInTheDocument();
+    expect(screen.getByText("Старое описание ошибки")).toBeInTheDocument();
+    expect(screen.getByText("Не удалось прочитать описание ошибки.")).toBeInTheDocument();
+    expect(screen.queryByText(/internal-value|nested-value|Сложное значение/)).not.toBeInTheDocument();
+  });
+
   it("allows a new upload after a background failure without exposing confirmation", async () => {
     window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
     getImportJob.mockResolvedValue({
