@@ -5,6 +5,9 @@ name: aurum-production
 x-backend-environment: &backend-environment
   ENVIRONMENT: production
   DEPLOYMENT_PROFILE: cloud
+  JWT_ISSUER: "${JWT_ISSUER:-aurum-pharma}"
+  JWT_AUDIENCE: "${JWT_AUDIENCE:-aurum-pharma-api}"
+  JWT_LEGACY_ACCESS_UNTIL: "${JWT_LEGACY_ACCESS_UNTIL:-0}"
   AURUM_SECRETS_DIR: /run/secrets
   AURUM_DOMAIN: "${AURUM_DOMAIN:?AURUM_DOMAIN is required}"
   CORS_ORIGINS: '["${AURUM_PUBLIC_ORIGIN:?AURUM_PUBLIC_ORIGIN is required}"]'

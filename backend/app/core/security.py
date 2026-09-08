@@ -14,10 +14,10 @@ import hmac
 import json
 import secrets
 import struct
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlencode
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import jwt
 from jwt.exceptions import InvalidTokenError
@@ -317,6 +317,9 @@ def hash_recovery_code(code: str) -> str:
 # JWT
 # -----------------------------------------------------------------------------
 
+ACCESS_TOKEN_TYPE = "aurum-access+jwt"
+_REGISTERED_ACCESS_CLAIMS = frozenset({"sub", "iat", "exp", "iss", "aud", "jti"})
+
 
 def encode_token(
     subject: str,
@@ -324,29 +327,110 @@ def encode_token(
     expires_in: timedelta,
     extra: dict[str, Any] | None = None,
 ) -> str:
-    """Generic JWT factory used by the access-token helper below."""
+    """Issue this API's access profile; callers cannot override registered claims."""
+    if extra and (_REGISTERED_ACCESS_CLAIMS | {"permissions"}).intersection(extra):
+        raise ValueError("Reserved access-token claims cannot be overridden")
     now = utc_now()
     payload: dict[str, Any] = {
         "sub": subject,
         "iat": int(now.timestamp()),
         "exp": int((now + expires_in).timestamp()),
+        "iss": settings.JWT_ISSUER,
+        "aud": settings.JWT_AUDIENCE,
+        "jti": str(uuid4()),
     }
     if extra:
         payload.update(extra)
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(
+        payload,
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+        headers={"typ": ACCESS_TOKEN_TYPE},
+    )
 
 
 def decode_token(token: str) -> dict[str, Any]:
-    """Returns the JWT claims, or raises AuthenticationError on invalid / expired."""
+    """Validate the access profile before middleware can use identity or support claims."""
     try:
-        payload: dict[str, Any] = jwt.decode(
+        # The unverified header only selects a validator. Both paths verify the
+        # signature, algorithm and identity; legacy acceptance has a fixed deadline.
+        legacy = (
+            utc_now().timestamp() < settings.JWT_LEGACY_ACCESS_UNTIL
+            and jwt.get_unverified_header(token).get("typ") == "JWT"
+        )
+        required = ["sub", "sid", "iat", "exp", "is_developer", "is_administrator"]
+        decoded = jwt.decode_complete(
             token,
             settings.JWT_SECRET,
             algorithms=[settings.JWT_ALGORITHM],
+            issuer=None if legacy else settings.JWT_ISSUER,
+            audience=None if legacy else settings.JWT_AUDIENCE,
+            options={
+                "require": required if legacy else [*required, "iss", "aud", "jti"],
+                "verify_aud": not legacy,
+                "strict_aud": True,
+            },
         )
-    except InvalidTokenError as exc:
+        # PyJWT returns heterogeneous JSON claims. Keep its Any-valued mapping
+        # at this boundary and validate every identity field before returning it.
+        payload: dict[str, Any] = decoded["payload"]
+        if decoded["header"].get("typ") != ("JWT" if legacy else ACCESS_TOKEN_TYPE):
+            raise InvalidTokenError("Wrong access token type")
+        if legacy and {"iss", "aud", "jti"}.intersection(payload):
+            raise InvalidTokenError("Mixed legacy access token profile")
+        _validate_access_identity(payload, legacy=legacy)
+    except (InvalidTokenError, TypeError, OverflowError) as exc:
         raise AuthenticationError("Invalid or expired token") from exc
     return payload
+
+
+def _validate_access_identity(payload: dict[str, Any], *, legacy: bool) -> None:
+    """Reject coercions before claims select a tenant or database connection."""
+    for field in ("sub", "sid") if legacy else ("sub", "sid", "jti"):
+        _validate_uuid_claim(payload.get(field))
+    if "tenant_id" not in payload:
+        raise InvalidTokenError("Missing tenant scope")
+    if payload["tenant_id"] is not None:
+        _validate_uuid_claim(payload["tenant_id"])
+    for field in ("is_developer", "is_administrator"):
+        if type(payload.get(field)) is not bool:
+            raise InvalidTokenError("Invalid identity flag")
+    for field in ("iat", "exp"):
+        if type(payload.get(field)) is not int or payload[field] < 0:
+            raise InvalidTokenError("Invalid access token time")
+    max_lifetime = (
+        min(settings.ACCESS_TOKEN_MINUTES * 60, 900)
+        if legacy
+        else settings.ACCESS_TOKEN_MINUTES * 60
+    )
+    if not 0 < payload["exp"] - payload["iat"] <= max_lifetime:
+        raise InvalidTokenError("Invalid access token lifetime")
+    for field in ("mfa_at", "password_at", "nbf"):
+        _validate_proof_time(payload.get(field))
+    if "permissions" in payload:
+        raise InvalidTokenError("Permissions must not be stored in access tokens")
+
+
+def _validate_proof_time(value: object) -> None:
+    if value is None:
+        return
+    if type(value) is not int or value < 0:
+        raise InvalidTokenError("Invalid proof time")
+    try:
+        datetime.fromtimestamp(value, tz=UTC)
+    except (OverflowError, OSError, ValueError) as exc:
+        raise InvalidTokenError("Invalid proof time") from exc
+
+
+def _validate_uuid_claim(value: object) -> None:
+    if not isinstance(value, str):
+        raise InvalidTokenError("Invalid identity identifier")
+    try:
+        parsed = UUID(value)
+    except ValueError as exc:
+        raise InvalidTokenError("Invalid identity identifier") from exc
+    if str(parsed) != value:
+        raise InvalidTokenError("Invalid identity identifier")
 
 
 def create_access_token(

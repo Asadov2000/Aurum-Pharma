@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
@@ -157,6 +158,9 @@ class Settings(BaseSettings):
 
     JWT_SECRET: str = Field(repr=False)
     JWT_ALGORITHM: str = "HS256"
+    JWT_ISSUER: str = Field(default="aurum-pharma", min_length=1, max_length=200)
+    JWT_AUDIENCE: str = Field(default="aurum-pharma-api", min_length=1, max_length=200)
+    JWT_LEGACY_ACCESS_UNTIL: int = Field(default=0, ge=0)
     MFA_ENCRYPTION_KEY: SecretStr | None = None
     MFA_ENCRYPTION_KEY_VERSION: int = Field(default=1, ge=1, le=32767)
     MFA_ENCRYPTION_PREVIOUS_KEYS: dict[int, SecretStr] = Field(default_factory=dict)
@@ -230,6 +234,14 @@ class Settings(BaseSettings):
     @property
     def auth_login_guard_enabled(self) -> bool:
         return self.ENVIRONMENT != "development" or not self.AUTH_LOCAL_TESTING_MODE
+
+    @model_validator(mode="after")
+    def _guard_access_token_contract(self) -> Settings:
+        if not self.JWT_ISSUER.strip() or not self.JWT_AUDIENCE.strip():
+            raise ValueError("JWT issuer and audience must not be blank")
+        if self.JWT_LEGACY_ACCESS_UNTIL > int(datetime.now(UTC).timestamp()) + 15 * 60:
+            raise ValueError("JWT_LEGACY_ACCESS_UNTIL must be at most 15 minutes ahead")
+        return self
 
     @model_validator(mode="after")
     def _guard_edge_nonce_window(self) -> Settings:
