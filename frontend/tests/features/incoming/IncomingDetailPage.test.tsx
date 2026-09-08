@@ -10,6 +10,9 @@ const listIncomingDraftRows = vi.fn();
 const deleteIncomingDraftRow = vi.fn();
 const saveIncomingDraftRow = vi.fn();
 const blockNavigation = vi.fn();
+const resetNavigation = vi.fn();
+const proceedNavigation = vi.fn();
+let navigationBlocked = false;
 
 let permissions = ["incoming.view", "incoming.create", "incoming.finalize"];
 let permissionScopes: Record<string, string[] | null> = {};
@@ -42,7 +45,11 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ id: "doc-1" }),
   useBlocker: (options: unknown) => {
     blockNavigation(options);
-    return { status: "idle" };
+    return {
+      status: navigationBlocked ? "blocked" : "idle",
+      reset: resetNavigation,
+      proceed: proceedNavigation,
+    };
   },
 }));
 
@@ -122,6 +129,9 @@ describe("IncomingDetailPage", () => {
     saveIncomingDraftRow.mockReset();
     saveIncomingDraftRow.mockResolvedValue({ revision: 1 });
     blockNavigation.mockClear();
+    resetNavigation.mockClear();
+    proceedNavigation.mockClear();
+    navigationBlocked = false;
     getIncoming.mockResolvedValue(DOC);
   });
 
@@ -267,5 +277,34 @@ describe("IncomingDetailPage", () => {
     expect(await screen.findByText(/Не удалось обновить документ/)).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Добавить позицию" })).toBeInTheDocument();
     expect(screen.getByLabelText("Количество единиц")).toHaveValue("12,");
+  });
+
+  it("places navigation confirmation above a portaled catalog form and handles Escape there", async () => {
+    permissions.push("catalog.create");
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить позицию" }));
+    fireEvent.click(screen.getByRole("button", { name: "Новый товар" }));
+    const catalog = await screen.findByRole("dialog", { name: "Добавить товар" });
+    expect(screen.queryByRole("dialog", { name: "Уйти со страницы?" })).not.toBeInTheDocument();
+
+    navigationBlocked = true;
+    fireEvent.change(within(catalog).getByLabelText("Торговое название"), {
+      target: { value: "Несохранённый препарат" },
+    });
+    const confirmation = await screen.findByRole("dialog", { name: "Уйти со страницы?" });
+    const dialogs = document.querySelectorAll("[data-aurum-modal]");
+    expect(dialogs[dialogs.length - 1]).toBe(confirmation);
+    expect(confirmation.contains(document.activeElement)).toBe(true);
+    expect(blockNavigation.mock.lastCall?.[0].shouldBlockFn()).toBe(true);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(resetNavigation).toHaveBeenCalledOnce();
+    expect(proceedNavigation).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("dialog", { name: "Закрыть карточку товара?" }),
+    ).not.toBeInTheDocument();
+    expect(within(catalog).getByLabelText("Торговое название")).toHaveValue(
+      "Несохранённый препарат",
+    );
   });
 });

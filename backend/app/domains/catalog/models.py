@@ -88,6 +88,8 @@ class TenantCatalog(Base):
     image_uploaded_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     import_job_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    operation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    create_request_fingerprint: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -120,6 +122,13 @@ class TenantCatalog(Base):
             name="ck_tc_image_metadata",
         ),
         UniqueConstraint("tenant_id", "id", name="uq_tenant_catalog_tenant_id_id"),
+        UniqueConstraint("tenant_id", "operation_id", name="uq_tenant_catalog_operation"),
+        CheckConstraint(
+            "(operation_id IS NULL AND create_request_fingerprint IS NULL) OR "
+            "(operation_id IS NOT NULL AND create_request_fingerprint IS NOT NULL "
+            "AND create_request_fingerprint ~ '^[0-9a-f]{64}$')",
+            name="ck_tc_create_request_metadata",
+        ),
     )
 
 

@@ -37,7 +37,7 @@ function packageNameFromModuleId(id: string): string | undefined {
 function splitRuntimeDependencies(id: string): string | undefined {
   const packageName = packageNameFromModuleId(id);
   if (!packageName) return undefined;
-  // Navigation blocking is used only by the lazy incoming editor. Keep that
+  // Navigation blocking is used only by lazy editors. Keep that
   // optional router module out of the runtime loaded by Dashboard and POS.
   if (
     packageName === "@tanstack/react-router" &&

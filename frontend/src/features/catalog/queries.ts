@@ -53,6 +53,7 @@ export function useCreateCatalogItem() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
       void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });
+      void qc.invalidateQueries({ queryKey: ["catalog", "picker"] });
     },
   });
 }

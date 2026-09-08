@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useBlocker, useParams } from "@tanstack/react-router";
 
 import {
@@ -553,15 +554,19 @@ export function IncomingDetailPage(): JSX.Element {
         onCancel={() => setDiscardFormOpen(false)}
       />
 
-      <ConfirmDialog
-        open={navigation.status === "blocked"}
-        title="Уйти со страницы?"
-        message="Несохранённые изменения могут быть потеряны. Подтверждённый сервером черновик останется доступен."
-        confirmLabel="Уйти без сохранения"
-        variant="danger"
-        onConfirm={() => navigation.proceed?.()}
-        onCancel={() => navigation.reset?.()}
-      />
+      {navigation.status === "blocked" &&
+        createPortal(
+          <ConfirmDialog
+            open
+            title="Уйти со страницы?"
+            message="Несохранённые изменения могут быть потеряны. Подтверждённый сервером черновик останется доступен."
+            confirmLabel="Уйти без сохранения"
+            variant="danger"
+            onConfirm={() => navigation.proceed?.()}
+            onCancel={() => navigation.reset?.()}
+          />,
+          document.body,
+        )}
 
       <ConfirmDialog
         open={deletingDraft !== null}

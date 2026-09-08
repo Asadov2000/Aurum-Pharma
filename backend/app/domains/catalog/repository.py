@@ -85,6 +85,29 @@ class CatalogRepository:
     # tenant_catalog
     # -------------------------------------------------------------------------
 
+    async def lock_creation_operation(self, *, tenant_id: UUID, operation_id: UUID) -> None:
+        await self.session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended("
+                "'catalog:create:' || CAST(:tenant_id AS TEXT) || ':' || "
+                "CAST(:operation_id AS TEXT), 0))"
+            ),
+            {"tenant_id": str(tenant_id), "operation_id": str(operation_id)},
+        )
+
+    async def get_creation_operation(
+        self, *, tenant_id: UUID, operation_id: UUID
+    ) -> TenantCatalog | None:
+        statement = (
+            select(TenantCatalog)
+            .where(
+                TenantCatalog.tenant_id == tenant_id,
+                TenantCatalog.operation_id == operation_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none()
+
     async def create_item(self, **fields: Any) -> TenantCatalog:
         item = TenantCatalog(**fields)
         self.session.add(item)
@@ -598,6 +621,17 @@ class CatalogRepository:
     # -------------------------------------------------------------------------
     # barcode
     # -------------------------------------------------------------------------
+
+    async def add_creation_barcode(
+        self, *, tenant_id: UUID, catalog_id: UUID, code: str, code_type: str
+    ) -> bool:
+        statement = (
+            pg_insert(Barcode)
+            .values(tenant_id=tenant_id, catalog_id=catalog_id, code=code, code_type=code_type)
+            .on_conflict_do_nothing(index_elements=[Barcode.tenant_id, Barcode.code])
+            .returning(Barcode.id)
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none() is not None
 
     async def add_barcode(self, **fields: Any) -> Barcode:
         bc = Barcode(**fields)

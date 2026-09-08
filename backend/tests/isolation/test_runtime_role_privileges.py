@@ -367,6 +367,7 @@ CUSTOM_FUNCTIONS = {
     "trg_capture_bootstrap_platform_access",
     "trg_guard_app_user_platform_flags",
     "trg_guard_batch_movement_immutability",
+    "trg_guard_catalog_creation_metadata",
     "trg_guard_billing_contract_override",
     "trg_guard_billing_payment_submission_update",
     "trg_guard_billing_price_version",
@@ -1087,6 +1088,33 @@ async def test_runtime_role_cannot_escape_row_level_controls(
             app_engine_privileges,
             f"SELECT * FROM public.{table} LIMIT 1",
         )
+
+
+async def test_catalog_creation_guard_is_private_to_schema_owner(
+    app_engine_privileges: AsyncEngine,
+    support_engine_privileges: AsyncEngine,
+) -> None:
+    async with support_engine_privileges.connect() as connection:
+        definition = (await connection.execute(text("""
+            SELECT owner.rolname, routine.prosecdef
+            FROM pg_catalog.pg_proc AS routine
+            JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+            WHERE routine.oid = 'public.trg_guard_catalog_creation_metadata()'::regprocedure
+        """))).one()
+        assert tuple(definition) == ("aurum_schema_owner", False)
+    for engine, role in (
+        (app_engine_privileges, "aurum_app"),
+        (support_engine_privileges, "aurum_support"),
+    ):
+        async with engine.connect() as connection:
+            # Check effective EXECUTE under each actual login. Calling a trigger
+            # as a scalar function mixes privilege checks with result-type rules.
+            effective = (await connection.execute(text("""
+                SELECT session_user, current_user, pg_catalog.has_function_privilege(
+                  'public.trg_guard_catalog_creation_metadata()', 'EXECUTE'
+                )
+            """))).one()
+            assert tuple(effective) == (role, role, False)
 
 
 async def _delete_auth_probe(

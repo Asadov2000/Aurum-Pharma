@@ -14,6 +14,23 @@ vi.mock("@/features/catalog/pickerQueries", () => ({
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 
 describe("CatalogPicker — keyboard selection", () => {
+  it("reports optional search text without selecting or creating a product", () => {
+    const onSearchChange = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <CatalogPicker
+        value=""
+        onChange={onChange}
+        onSearchChange={onSearchChange}
+        placeholder="Поиск"
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText("Поиск"), {
+      target: { value: "Новый товар 500" },
+    });
+    expect(onSearchChange).toHaveBeenCalledWith("Новый товар 500");
+    expect(onChange).not.toHaveBeenCalled();
+  });
   it("selects the first result on Enter (highlighted by default)", async () => {
     const onChange = vi.fn();
     render(<CatalogPicker value="" onChange={onChange} placeholder="Поиск" />);

@@ -1,16 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button, ConfirmDialog, FormError, Input, Label } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 import { createOperationId } from "@/lib/operationId";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { pharmacyCalendarDate } from "./calendar";
 import { useUpdateIncomingItem } from "./queries";
 import { type IncomingDraftRow, type IncomingItem } from "./types";
 import { draftFields, useIncomingDraft } from "./useIncomingDraft";
+
+const CatalogCreateDialog = lazy(() =>
+  import("@/features/catalog/CatalogCreateDialog").then((module) => ({
+    default: module.CatalogCreateDialog,
+  })),
+);
 
 const decimalString = (
   emptyMessage: string,
@@ -103,6 +111,13 @@ export function AddItemForm({
   const [topError, setTopError] = useState<string | null>(null);
   const [operationId] = useState(createOperationId);
   const isEditing = item !== undefined;
+  const { user } = useAuth();
+  const canCreateCatalog = hasPermission(user, "catalog.create");
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogCreateName, setCatalogCreateName] = useState("");
+  const [catalogCreateOpen, setCatalogCreateOpen] = useState(false);
+  const [catalogCreateDirty, setCatalogCreateDirty] = useState(false);
+  const [preparingCatalog, setPreparingCatalog] = useState(false);
   const draft = useIncomingDraft(documentId, draftRow, !isEditing);
   const [reloadOpen, setReloadOpen] = useState(false);
   const [reloadPending, setReloadPending] = useState(false);
@@ -131,8 +146,17 @@ export function AddItemForm({
   });
 
   useEffect(() => {
-    onDirtyChange?.(isEditing ? form.formState.isDirty : draft.unsaved);
-  }, [form.formState.isDirty, onDirtyChange, isEditing, draft.unsaved]);
+    onDirtyChange?.(
+      isEditing ? form.formState.isDirty : draft.unsaved || catalogCreateDirty || preparingCatalog,
+    );
+  }, [
+    form.formState.isDirty,
+    onDirtyChange,
+    isEditing,
+    draft.unsaved,
+    catalogCreateDirty,
+    preparingCatalog,
+  ]);
 
   const updateDraft = draft.update;
   useEffect(() => {
@@ -150,6 +174,32 @@ export function AddItemForm({
     );
     return () => subscription.unsubscribe();
   }, [form, isEditing, updateDraft]);
+
+  const openCatalogCreate = async () => {
+    if (
+      !canCreateCatalog ||
+      preparingCatalog ||
+      catalogCreateOpen ||
+      draft.commitPending ||
+      draft.commitUncertain
+    )
+      return;
+    setPreparingCatalog(true);
+    setTopError(null);
+    try {
+      await draft.save();
+      if (!mounted.current) return;
+      setCatalogCreateName(catalogSearch.trim());
+      setCatalogCreateOpen(true);
+    } catch {
+      if (mounted.current)
+        setTopError(
+          "Сначала сохраните строку прихода. Повторите сохранение, затем откройте карточку товара.",
+        );
+    } finally {
+      if (mounted.current) setPreparingCatalog(false);
+    }
+  };
 
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
@@ -247,7 +297,12 @@ export function AddItemForm({
         </div>
       )}
       <fieldset
-        disabled={reloadPending || (!isEditing && (draft.commitPending || draft.commitUncertain))}
+        disabled={
+          reloadPending ||
+          preparingCatalog ||
+          catalogCreateOpen ||
+          (!isEditing && (draft.commitPending || draft.commitUncertain))
+        }
         className="space-y-3"
       >
         <div>
@@ -261,6 +316,7 @@ export function AddItemForm({
                 id="incoming-catalog-item"
                 value={field.value}
                 initialLabel={item?.catalog_name ?? catalogLabel}
+                onSearchChange={setCatalogSearch}
                 onChange={(id, name) => {
                   setCatalogLabel(name);
                   field.onChange(id);
@@ -270,6 +326,18 @@ export function AddItemForm({
             )}
           />
           <FormError>{form.formState.errors.catalog_id?.message}</FormError>
+          {!isEditing && canCreateCatalog && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="mt-2 min-h-11"
+              isLoading={preparingCatalog}
+              onClick={() => void openCatalogCreate()}
+            >
+              Новый товар
+            </Button>
+          )}
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -346,7 +414,12 @@ export function AddItemForm({
           type="submit"
           size="sm"
           isLoading={form.formState.isSubmitting}
-          disabled={!isEditing && draft.phase === "conflict"}
+          disabled={
+            preparingCatalog ||
+            catalogCreateOpen ||
+            reloadPending ||
+            (!isEditing && draft.phase === "conflict")
+          }
         >
           {isEditing ? "Сохранить" : draft.commitUncertain ? "Повторить добавление" : "Добавить"}
         </Button>
@@ -386,6 +459,33 @@ export function AddItemForm({
             });
         }}
       />
+      {catalogCreateOpen && (
+        <Suspense fallback={<p role="status">Открывается карточка товара…</p>}>
+          <CatalogCreateDialog
+            open={catalogCreateOpen}
+            initialName={catalogCreateName}
+            guardNavigation={false}
+            onDirtyChange={setCatalogCreateDirty}
+            onClose={() => {
+              setCatalogCreateOpen(false);
+              setCatalogCreateDirty(false);
+            }}
+            onCreated={(created) => {
+              form.setValue("catalog_id", created.id, { shouldDirty: true });
+              form.clearErrors("catalog_id");
+              setCatalogLabel(created.brand_name);
+              setPickerVersion((version) => version + 1);
+              setTopError(null);
+              void draft.save().catch(() => {
+                if (mounted.current)
+                  setTopError(
+                    "Товар создан и выбран. Связь со строкой прихода ещё не сохранена — повторите сохранение черновика.",
+                  );
+              });
+            }}
+          />
+        </Suspense>
+      )}
     </form>
   );
 }

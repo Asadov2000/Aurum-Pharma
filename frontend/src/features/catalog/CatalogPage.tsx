@@ -26,6 +26,7 @@ import { CatalogImage } from "./CatalogImage";
 import { CatalogImageManager } from "./CatalogImageManager";
 import { CatalogItemDetails } from "./CatalogItemDetails";
 import { CatalogItemForm } from "./CatalogItemForm";
+import { CatalogCreateDialog } from "./CatalogCreateDialog";
 import { ImportWizard } from "./ImportWizard";
 import { dispensingLabel, dispensingOptions, storageLabel, storageOptions } from "./labels";
 import {
@@ -943,14 +944,7 @@ export function CatalogPage(): JSX.Element {
         </>
       )}
 
-      <Modal
-        open={creating}
-        onClose={() => setCreating(false)}
-        title="Добавить товар"
-        className="max-w-2xl"
-      >
-        <CatalogItemForm item={null} onClose={() => setCreating(false)} />
-      </Modal>
+      <CatalogCreateDialog open={creating} onClose={() => setCreating(false)} />
       <Modal
         open={viewing !== null}
         onClose={() => setViewing(null)}

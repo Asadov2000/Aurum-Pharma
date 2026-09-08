@@ -87,7 +87,9 @@ def _validate_schema_fields(parsed: dict[str, Any], row_errors: list[str]) -> No
         item = CatalogItemCreate.model_validate(
             {key: value for key, value in parsed.items() if key != "barcode"}
         )
-        parsed.update(item.model_dump())
+        # The manual creation schema also accepts operation metadata. File imports
+        # retain their explicit column contract, including when that schema grows.
+        parsed.update(item.model_dump(include=set(EXPECTED_COLUMNS) - {"barcode"}))
     except PydanticValidationError as exc:
         for error in exc.errors(include_url=False):
             field = ".".join(str(part) for part in error["loc"])
