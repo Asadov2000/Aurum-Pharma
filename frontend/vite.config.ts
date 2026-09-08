@@ -37,6 +37,14 @@ function packageNameFromModuleId(id: string): string | undefined {
 function splitRuntimeDependencies(id: string): string | undefined {
   const packageName = packageNameFromModuleId(id);
   if (!packageName) return undefined;
+  // Navigation blocking is used only by the lazy incoming editor. Keep that
+  // optional router module out of the runtime loaded by Dashboard and POS.
+  if (
+    packageName === "@tanstack/react-router" &&
+    id.replaceAll("\\", "/").endsWith("/dist/esm/useBlocker.js")
+  ) {
+    return "router-blocker";
+  }
   if (formPackages.has(packageName)) return "vendor-forms";
   if (coreRuntimePackages.has(packageName)) return "vendor-core";
   return undefined;

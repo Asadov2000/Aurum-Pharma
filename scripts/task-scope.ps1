@@ -151,7 +151,7 @@ function Get-E2ESpecsForPath {
         @('(^|/)(auth)(/|$)|stores/auth\.ts$', @("e2e/auth.spec.ts", "e2e/user-session-revocation.spec.ts", "e2e/runtime-surface.spec.ts")),
         @('(^|/)(roles)(/|$)', @("e2e/tenant-setup.spec.ts", "e2e/user-session-revocation.spec.ts")),
         @('(^|/)(billing|platformBilling)(/|$)|tasks/billing', @("e2e/platform-billing.spec.ts")),
-        @('(^|/)(incoming|inventory|suppliers)(/|$)', @("e2e/incoming-flow.spec.ts", "e2e/catalog-flow.spec.ts")),
+        @('(^|/)(incoming|inventory|suppliers)(/|$)', @("e2e/incoming-flow.spec.ts", "e2e/incoming-drafts.spec.ts", "e2e/catalog-flow.spec.ts")),
         @('(^|/)(catalog)(/|$)', @("e2e/catalog-flow.spec.ts", "e2e/catalog-import.spec.ts")),
         @('(^|/)(foundation|onboarding)(/|$)', @("e2e/owner-onboarding.spec.ts", "e2e/tenant-setup.spec.ts", "e2e/payment-settings.spec.ts")),
         @('(^|/)(sync|syncCenter)(/|$)', @("e2e/sync-center.spec.ts", "e2e/runtime-surface.spec.ts")),

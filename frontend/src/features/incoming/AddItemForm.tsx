@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Button, FormError, Input, Label } from "@/components/ui";
+import { Button, ConfirmDialog, FormError, Input, Label } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 import { createOperationId } from "@/lib/operationId";
 
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { pharmacyCalendarDate } from "./calendar";
-import { useAddIncomingItem, useUpdateIncomingItem } from "./queries";
-import { type IncomingItem } from "./types";
+import { useUpdateIncomingItem } from "./queries";
+import { type IncomingDraftRow, type IncomingItem } from "./types";
+import { draftFields, useIncomingDraft } from "./useIncomingDraft";
 
 const decimalString = (
   emptyMessage: string,
@@ -89,34 +90,66 @@ export function AddItemForm({
   onCancel = onClose,
   onDirtyChange,
   item,
+  draftRow,
 }: {
   documentId: string;
   onClose: () => void;
   onCancel?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   item?: IncomingItem;
+  draftRow?: IncomingDraftRow;
 }): JSX.Element {
-  const addItem = useAddIncomingItem();
   const updateItem = useUpdateIncomingItem();
   const [topError, setTopError] = useState<string | null>(null);
   const [operationId] = useState(createOperationId);
   const isEditing = item !== undefined;
+  const draft = useIncomingDraft(documentId, draftRow, !isEditing);
+  const [reloadOpen, setReloadOpen] = useState(false);
+  const [reloadPending, setReloadPending] = useState(false);
+  const [catalogLabel, setCatalogLabel] = useState(draftRow?.catalog_name ?? undefined);
+  const [pickerVersion, setPickerVersion] = useState(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const form = useForm<FormValues>({
-    defaultValues: {
-      catalog_id: item?.catalog_id ?? "",
-      batch_number: item?.batch_number ?? "",
-      manufactured_at: item?.manufactured_at ?? "",
-      expires_at: item?.expires_at ?? "",
-      qty: item?.qty ?? "",
-      purchase_price: item?.purchase_price ?? "",
-      sale_price: item?.sale_price ?? "",
-    },
+    defaultValues: item
+      ? {
+          catalog_id: item?.catalog_id ?? "",
+          batch_number: item?.batch_number ?? "",
+          manufactured_at: item?.manufactured_at ?? "",
+          expires_at: item?.expires_at ?? "",
+          qty: item?.qty ?? "",
+          purchase_price: item?.purchase_price ?? "",
+          sale_price: item?.sale_price ?? "",
+        }
+      : draftFields(draftRow),
   });
 
   useEffect(() => {
-    onDirtyChange?.(form.formState.isDirty);
-  }, [form.formState.isDirty, onDirtyChange]);
+    onDirtyChange?.(isEditing ? form.formState.isDirty : draft.unsaved);
+  }, [form.formState.isDirty, onDirtyChange, isEditing, draft.unsaved]);
+
+  const updateDraft = draft.update;
+  useEffect(() => {
+    if (isEditing) return;
+    const subscription = form.watch((values) =>
+      updateDraft({
+        catalog_id: values.catalog_id ?? "",
+        batch_number: values.batch_number ?? "",
+        manufactured_at: values.manufactured_at ?? "",
+        expires_at: values.expires_at ?? "",
+        qty: values.qty ?? "",
+        purchase_price: values.purchase_price ?? "",
+        sale_price: values.sale_price ?? "",
+      }),
+    );
+    return () => subscription.unsubscribe();
+  }, [form, isEditing, updateDraft]);
 
   const onSubmit = form.handleSubmit(async (values) => {
     const parsed = schema.safeParse(values);
@@ -162,8 +195,9 @@ export function AddItemForm({
           },
         });
       } else {
-        await addItem.mutateAsync({ documentId, payload });
+        await draft.commit();
       }
+      if (!mounted.current) return;
       onDirtyChange?.(false);
       onClose();
     } catch (err) {
@@ -178,77 +212,127 @@ export function AddItemForm({
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-3">
-      <div>
-        <Label htmlFor="incoming-catalog-item">Лекарство или товар</Label>
-        <Controller
-          control={form.control}
-          name="catalog_id"
-          render={({ field }) => (
-            <CatalogPicker
-              id="incoming-catalog-item"
-              value={field.value}
-              initialLabel={item?.catalog_name ?? undefined}
-              onChange={(id) => field.onChange(id)}
-              invalid={Boolean(form.formState.errors.catalog_id)}
-            />
+      {!isEditing && (
+        <div className="space-y-2 rounded-lg border border-border bg-surface-subtle p-3 text-sm">
+          <p role="status" aria-live="polite">
+            {draft.commitUncertain
+              ? "Ответ не получен. Повторите добавление, чтобы проверить результат."
+              : draft.phase === "saved"
+                ? "Сохранено в черновике"
+                : draft.phase === "saving"
+                  ? "Сохраняется…"
+                  : draft.phase === "error"
+                    ? "Не сохранено. Проверьте соединение и повторите."
+                    : draft.phase === "conflict"
+                      ? "Черновик изменён на другом устройстве или уже закрыт. Ваш ввод остаётся в форме."
+                      : draft.phase === "unsaved"
+                        ? "Изменения ещё не сохранены"
+                        : "Ввод будет автоматически сохранён в черновике"}
+          </p>
+          {draft.phase === "error" && !draft.commitUncertain && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => void draft.save().catch(() => undefined)}
+            >
+              Повторить сохранение
+            </Button>
           )}
-        />
-        <FormError>{form.formState.errors.catalog_id?.message}</FormError>
-      </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="batch_number">Номер партии</Label>
-          <Input id="batch_number" {...form.register("batch_number")} />
+          {draft.phase === "conflict" && (
+            <Button type="button" size="sm" variant="secondary" onClick={() => setReloadOpen(true)}>
+              Загрузить сохранённое
+            </Button>
+          )}
         </div>
+      )}
+      <fieldset
+        disabled={reloadPending || (!isEditing && (draft.commitPending || draft.commitUncertain))}
+        className="space-y-3"
+      >
         <div>
-          <Label htmlFor="qty">Количество единиц</Label>
-          <Input
-            id="qty"
-            type="text"
-            inputMode="decimal"
-            invalid={Boolean(form.formState.errors.qty)}
-            {...form.register("qty")}
+          <Label htmlFor="incoming-catalog-item">Лекарство или товар</Label>
+          <Controller
+            control={form.control}
+            name="catalog_id"
+            render={({ field }) => (
+              <CatalogPicker
+                key={pickerVersion}
+                id="incoming-catalog-item"
+                value={field.value}
+                initialLabel={item?.catalog_name ?? catalogLabel}
+                onChange={(id, name) => {
+                  setCatalogLabel(name);
+                  field.onChange(id);
+                }}
+                invalid={Boolean(form.formState.errors.catalog_id)}
+              />
+            )}
           />
-          <FormError>{form.formState.errors.qty?.message}</FormError>
+          <FormError>{form.formState.errors.catalog_id?.message}</FormError>
         </div>
-        <div>
-          <Label htmlFor="manufactured_at">Дата производства</Label>
-          <Input id="manufactured_at" type="date" {...form.register("manufactured_at")} />
-          <FormError>{form.formState.errors.manufactured_at?.message}</FormError>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="batch_number">Номер партии</Label>
+            <Input
+              id="batch_number"
+              maxLength={isEditing ? undefined : 120}
+              {...form.register("batch_number")}
+            />
+          </div>
+          <div>
+            <Label htmlFor="qty">Количество единиц</Label>
+            <Input
+              id="qty"
+              type="text"
+              inputMode="decimal"
+              maxLength={isEditing ? undefined : 64}
+              invalid={Boolean(form.formState.errors.qty)}
+              {...form.register("qty")}
+            />
+            <FormError>{form.formState.errors.qty?.message}</FormError>
+          </div>
+          <div>
+            <Label htmlFor="manufactured_at">Дата производства</Label>
+            <Input id="manufactured_at" type="date" {...form.register("manufactured_at")} />
+            <FormError>{form.formState.errors.manufactured_at?.message}</FormError>
+          </div>
+          <div>
+            <Label htmlFor="expires_at">Срок годности</Label>
+            <Input
+              id="expires_at"
+              type="date"
+              invalid={Boolean(form.formState.errors.expires_at)}
+              {...form.register("expires_at")}
+            />
+            <FormError>{form.formState.errors.expires_at?.message}</FormError>
+          </div>
+          <div>
+            <Label htmlFor="purchase_price">Закупочная цена за единицу</Label>
+            <Input
+              id="purchase_price"
+              type="text"
+              inputMode="decimal"
+              maxLength={isEditing ? undefined : 64}
+              invalid={Boolean(form.formState.errors.purchase_price)}
+              {...form.register("purchase_price")}
+            />
+            <FormError>{form.formState.errors.purchase_price?.message}</FormError>
+          </div>
+          <div>
+            <Label htmlFor="sale_price">Розничная цена за единицу</Label>
+            <Input
+              id="sale_price"
+              type="text"
+              inputMode="decimal"
+              maxLength={isEditing ? undefined : 64}
+              invalid={Boolean(form.formState.errors.sale_price)}
+              {...form.register("sale_price")}
+            />
+            <FormError>{form.formState.errors.sale_price?.message}</FormError>
+          </div>
         </div>
-        <div>
-          <Label htmlFor="expires_at">Срок годности</Label>
-          <Input
-            id="expires_at"
-            type="date"
-            invalid={Boolean(form.formState.errors.expires_at)}
-            {...form.register("expires_at")}
-          />
-          <FormError>{form.formState.errors.expires_at?.message}</FormError>
-        </div>
-        <div>
-          <Label htmlFor="purchase_price">Закупочная цена за единицу</Label>
-          <Input
-            id="purchase_price"
-            type="text"
-            inputMode="decimal"
-            invalid={Boolean(form.formState.errors.purchase_price)}
-            {...form.register("purchase_price")}
-          />
-          <FormError>{form.formState.errors.purchase_price?.message}</FormError>
-        </div>
-        <div>
-          <Label htmlFor="sale_price">Розничная цена за единицу</Label>
-          <Input
-            id="sale_price"
-            type="text"
-            inputMode="decimal"
-            invalid={Boolean(form.formState.errors.sale_price)}
-            {...form.register("sale_price")}
-          />
-          <FormError>{form.formState.errors.sale_price?.message}</FormError>
-        </div>
-      </div>
+      </fieldset>
       {topError && (
         <p className="text-sm text-danger" role="alert">
           {topError}
@@ -256,12 +340,52 @@ export function AddItemForm({
       )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          Отмена
+          {isEditing ? "Отмена" : "Закрыть"}
         </Button>
-        <Button type="submit" size="sm" isLoading={form.formState.isSubmitting}>
-          {isEditing ? "Сохранить" : "Добавить"}
+        <Button
+          type="submit"
+          size="sm"
+          isLoading={form.formState.isSubmitting}
+          disabled={!isEditing && draft.phase === "conflict"}
+        >
+          {isEditing ? "Сохранить" : draft.commitUncertain ? "Повторить добавление" : "Добавить"}
         </Button>
       </div>
+      <ConfirmDialog
+        open={reloadOpen}
+        title="Загрузить сохранённый черновик?"
+        message="Текущие изменения в этой форме будут заменены сохранённой серверной версией."
+        confirmLabel="Загрузить сохранённое"
+        isLoading={reloadPending}
+        cancelDisabled={reloadPending}
+        onCancel={() => {
+          if (!reloadPending) setReloadOpen(false);
+        }}
+        onConfirm={() => {
+          if (reloadPending) return;
+          setReloadPending(true);
+          void draft
+            .reload()
+            .then((current) => {
+              if (!mounted.current) return;
+              form.reset(draftFields(current));
+              setCatalogLabel(current.catalog_name ?? undefined);
+              setPickerVersion((version) => version + 1);
+              setReloadOpen(false);
+              setTopError(null);
+            })
+            .catch(() => {
+              if (!mounted.current) return;
+              setReloadOpen(false);
+              setTopError(
+                "Не удалось загрузить черновик. Возможно, позиция уже добавлена или удалена. Ваш ввод остаётся в форме.",
+              );
+            })
+            .finally(() => {
+              if (mounted.current) setReloadPending(false);
+            });
+        }}
+      />
     </form>
   );
 }

@@ -2,6 +2,8 @@ import { api } from "@/lib/api";
 
 import {
   type IncomingDocument,
+  type IncomingDraftRow,
+  type IncomingDraftSavePayload,
   type IncomingDocumentCreatePayload,
   type IncomingDocumentList,
   type IncomingDocumentUpdatePayload,
@@ -87,4 +89,48 @@ export async function acceptIncoming(id: string): Promise<IncomingDocument> {
 export async function rejectIncoming(id: string): Promise<IncomingDocument> {
   const { data } = await api.post<IncomingDocument>(`/incoming/${id}/reject`);
   return data;
+}
+
+export async function listIncomingDraftRows(
+  documentId: string,
+  signal?: AbortSignal,
+): Promise<IncomingDraftRow[]> {
+  const { data } = await api.get<IncomingDraftRow[]>(`/incoming/${documentId}/draft-rows`, {
+    signal,
+  });
+  return data;
+}
+
+export async function saveIncomingDraftRow(
+  documentId: string,
+  rowId: string,
+  payload: IncomingDraftSavePayload,
+): Promise<IncomingDraftRow> {
+  const { data } = await api.put<IncomingDraftRow>(
+    `/incoming/${documentId}/draft-rows/${rowId}`,
+    payload,
+  );
+  return data;
+}
+
+export async function commitIncomingDraftRow(
+  documentId: string,
+  rowId: string,
+  revision: number,
+): Promise<IncomingItem> {
+  const { data } = await api.post<IncomingItem>(
+    `/incoming/${documentId}/draft-rows/${rowId}/commit`,
+    { expected_revision: revision },
+  );
+  return data;
+}
+
+export async function deleteIncomingDraftRow(
+  documentId: string,
+  rowId: string,
+  revision: number,
+): Promise<void> {
+  await api.delete(`/incoming/${documentId}/draft-rows/${rowId}`, {
+    params: { expected_revision: revision },
+  });
 }
