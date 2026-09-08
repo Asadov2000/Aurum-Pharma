@@ -24,10 +24,13 @@ function Get-Scope {
 function Get-Plan {
     param(
         [Parameter(Mandatory = $true)][ValidateSet("Auto", "Quick", "Full")][string]$Mode,
-        [AllowEmptyCollection()][string[]]$Paths
+        [AllowEmptyCollection()][string[]]$Paths,
+        [ValidateSet("Docker", "Poetry")][string]$BackendRuntime
     )
 
-    $json = & $verifyScript -Mode $Mode -BaseRef "origin/main" -ChangedPath $Paths -PlanOnly -Format Json
+    $runtimeArguments = @{}
+    if ($BackendRuntime) { $runtimeArguments.BackendRuntime = $BackendRuntime }
+    $json = & $verifyScript -Mode $Mode -BaseRef "origin/main" -ChangedPath $Paths -PlanOnly -Format Json @runtimeArguments
     return (($json -join [Environment]::NewLine) | ConvertFrom-Json)
 }
 
@@ -132,6 +135,18 @@ Assert-Equal -Actual $tooling.risk -Expected "tooling" -Because "verification to
 Assert-Equal -Actual $tooling.verification.toolingSelfTest -Expected $true -Because "verification tooling tests itself"
 Assert-Equal -Actual $tooling.verification.backendTests -Expected "none" -Because "verification tooling skips app tests"
 
+foreach ($path in @("scripts/test-backend-isolated.ps1")) {
+    $backendTooling = Get-Scope -Paths @($path)
+    Assert-Equal -Actual $backendTooling.risk -Expected "tooling" -Because "$path selects lightweight contract checks"
+    Assert-Equal -Actual $backendTooling.verification.toolingSelfTest -Expected $true -Because "$path runs its guards"
+}
+foreach ($path in @("scripts/backend-isolated.ps1", "scripts/backend-isolated-guards.ps1")) {
+    $backendInfrastructure = Get-Scope -Paths @($path)
+    Assert-Equal -Actual $backendInfrastructure.risk -Expected "full" -Because "$path changes execution or cleanup of real infrastructure"
+}
+$verificationStack = Get-Scope -Paths @("docker-compose.verify.yml")
+Assert-Equal -Actual $verificationStack.risk -Expected "full" -Because "verification stack changes require actual application checks"
+
 $unknown = Get-Scope -Paths @("unknown/new-area/file.xyz")
 Assert-Equal -Actual $unknown.risk -Expected "full" -Because "unknown roots fail closed"
 Assert-Contains -Actual @($unknown.reasons) -Expected "unknown-path" -Because "unknown roots explain the escalation"
@@ -184,11 +199,41 @@ Assert-Equal -Actual $runtimeSurface.risk -Expected "integrated" -Because "PWA r
 Assert-Contains -Actual @($runtimeSurface.targets.e2e) -Expected "e2e/pwa.spec.ts" -Because "PWA flow is selected"
 Assert-Contains -Actual @($runtimeSurface.targets.e2e) -Expected "e2e/runtime-surface.spec.ts" -Because "runtime surface is selected"
 
-$autoCatalog = Get-Plan -Mode "Auto" -Paths @("backend/app/domains/catalog/service.py")
+$autoCatalog = & {
+    function docker { throw "PlanOnly must not invoke Docker." }
+    function poetry { throw "PlanOnly must not invoke Poetry." }
+    Get-Plan -Mode "Auto" -Paths @("backend/app/domains/catalog/service.py")
+}
 $autoCatalogE2E = @($autoCatalog.steps | Where-Object { $_.id -eq "e2e" })
 Assert-Count -Actual $autoCatalogE2E -Expected 1 -Because "Auto schedules one isolated E2E step"
 Assert-Contains -Actual @($autoCatalogE2E[0].arguments) -Expected "e2e/catalog-flow.spec.ts" -Because "Auto passes the catalog flow to Playwright"
 Assert-Contains -Actual @($autoCatalogE2E[0].arguments) -Expected "e2e/catalog-import.spec.ts" -Because "Auto passes the catalog import flow to Playwright"
+
+$poetryCatalog = Get-Plan -Mode "Auto" -Paths @("backend/app/domains/catalog/service.py") -BackendRuntime Poetry
+foreach ($check in @(
+    @{ Id = "backend-tests"; Check = "Tests"; Module = "pytest" },
+    @{ Id = "backend-ruff"; Check = "Ruff"; Module = "ruff" },
+    @{ Id = "backend-black"; Check = "Black"; Module = "black" },
+    @{ Id = "backend-mypy"; Check = "Mypy"; Module = "mypy" }
+)) {
+    $dockerStep = @($autoCatalog.steps | Where-Object { $_.id -eq $check.Id })
+    $poetryStep = @($poetryCatalog.steps | Where-Object { $_.id -eq $check.Id })
+    Assert-Count -Actual $dockerStep -Expected 1 -Because "$($check.Id) keeps its stable step ID"
+    Assert-Count -Actual $poetryStep -Expected 1 -Because "Poetry keeps $($check.Id)"
+    Assert-Equal -Actual $dockerStep[0].command -Expected $powershellExecutable -Because "default backend checks use the isolated launcher"
+    Assert-Contains -Actual $dockerStep[0].arguments -Expected (Join-Path $PSScriptRoot "backend-isolated.ps1") -Because "backend check runs the guarded entrypoint"
+    $checkIndex = [Array]::IndexOf([object[]]$dockerStep[0].arguments, "-Check")
+    Assert-Equal -Actual ($checkIndex -ge 0) -Expected $true -Because "the launcher check is explicit"
+    Assert-Equal -Actual $dockerStep[0].arguments[$checkIndex + 1] -Expected $check.Check -Because "the correct isolated check is selected"
+    Assert-Equal -Actual $poetryStep[0].command -Expected "poetry" -Because "explicit Poetry preserves the host runtime"
+    Assert-Equal -Actual $poetryStep[0].arguments[1] -Expected $check.Module -Because "Poetry preserves the original tool"
+}
+$dockerTests = @($autoCatalog.steps | Where-Object { $_.id -eq "backend-tests" })[0]
+$poetryTests = @($poetryCatalog.steps | Where-Object { $_.id -eq "backend-tests" })[0]
+foreach ($target in @($autoCatalog.scope.targets.backend) + @("-q", "--tb=short")) {
+    Assert-Contains -Actual $dockerTests.arguments -Expected $target -Because "Docker preserves the selected test target and output flags"
+    Assert-Contains -Actual $poetryTests.arguments -Expected $target -Because "Poetry preserves the selected test target and output flags"
+}
 
 $e2eCommand = Get-Command -Name $e2eScript
 $remainingArgumentAttributes = @(
@@ -227,6 +272,8 @@ $fullDocs = Get-Plan -Mode "Full" -Paths @("docs/adr/9999-example.md")
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "backend-tests" -Because "Full always runs backend tests"
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "frontend-tests" -Because "Full always runs frontend tests"
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "e2e" -Because "Full always runs E2E"
+$fullBackend = @($fullDocs.steps | Where-Object { $_.id -eq "backend-tests" })[0]
+Assert-Contains -Actual $fullBackend.arguments -Expected "tests" -Because "Full keeps the complete backend suite inside Docker"
 
 $launcherArguments = @("-NoProfile")
 if ($env:OS -eq "Windows_NT") {
@@ -285,7 +332,8 @@ if ($env:OS -eq "Windows_NT") {
         -Because "the desktop CMD launcher forwards safe dry-run arguments"
 }
 
-$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("aurum-whitespace-test-" + [Guid]::NewGuid().ToString("N"))
+$fixtureParent = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) ".codex"
+$fixtureRoot = Join-Path $fixtureParent ("aurum-whitespace-test-" + [Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
 try {
     $encoding = New-Object System.Text.UTF8Encoding($false)
@@ -318,14 +366,17 @@ try {
 }
 finally {
     $resolvedFixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
-    $resolvedTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-    if (-not $resolvedFixtureRoot.StartsWith($resolvedTempRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to remove a fixture directory outside the system temp directory."
+    $resolvedFixtureParent = [IO.Path]::GetFullPath($fixtureParent) + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedFixtureRoot.StartsWith($resolvedFixtureParent, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a fixture directory outside the workspace fixture directory."
     }
     if ([IO.Directory]::Exists($resolvedFixtureRoot)) {
-        [IO.Directory]::Delete($resolvedFixtureRoot, $true)
+        [IO.File]::Delete((Join-Path $resolvedFixtureRoot "good.txt"))
+        [IO.File]::Delete((Join-Path $resolvedFixtureRoot "bad.txt"))
+        [IO.Directory]::Delete($resolvedFixtureRoot, $false)
     }
 }
 
+& (Join-Path $PSScriptRoot "test-backend-isolated.ps1")
 Write-Host "Verification tooling self-test passed: $script:assertions assertions." -ForegroundColor Green
 exit 0

@@ -1212,6 +1212,14 @@ jobs:
         working-directory: frontend
         run: pnpm e2e
 
+      - name: Verify isolated backend runner with real JWT and cookie tests
+        shell: pwsh
+        timeout-minutes: 10
+        run: >-
+          ./scripts/backend-isolated.ps1 -Check Tests
+          tests/core/test_access_token_contract.py
+          tests/domains/auth/test_token_contract.py -q --tb=short
+
       - name: Show service logs on failure
         if: failure()
         run: >-

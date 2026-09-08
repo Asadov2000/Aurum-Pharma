@@ -3,6 +3,8 @@ param(
     [ValidateSet("Auto", "Quick", "Full")]
     [string]$Mode = "Auto",
     [string]$BaseRef = "origin/main",
+    [ValidateSet("Docker", "Poetry")]
+    [string]$BackendRuntime = "Docker",
     [string[]]$ChangedPath = @(),
     [switch]$PlanOnly,
     [ValidateSet("Text", "Json")]
@@ -50,6 +52,34 @@ function Add-Step {
     )
 
     $Steps.Add($Step)
+}
+
+function New-BackendStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Id,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Check,
+        [string[]]$Arguments = @()
+    )
+
+    $backendDirectory = Join-Path $repoRoot "backend"
+    if ($BackendRuntime -eq "Poetry") {
+        $toolArguments = switch ($Check) {
+            "Tests" { @("run", "pytest") + $Arguments }
+            "Ruff" { @("run", "ruff", "check", "app", "tests") }
+            "Black" { @("run", "black", "--check", "app", "tests") }
+            "Mypy" { @("run", "mypy", "app") }
+        }
+        return New-Step -Id $Id -Name $Name -WorkingDirectory $backendDirectory -Command "poetry" -Arguments $toolArguments
+    }
+
+    $runnerArguments = @("-NoProfile")
+    if ($env:OS -eq "Windows_NT") {
+        $runnerArguments += @("-ExecutionPolicy", "Bypass")
+    }
+    $runnerArguments += @("-File", (Join-Path $PSScriptRoot "backend-isolated.ps1"), "-Check", $Check)
+    $runnerArguments += $Arguments
+    return New-Step -Id $Id -Name $Name -WorkingDirectory $backendDirectory -Command $powershellExecutable -Arguments $runnerArguments
 }
 
 function Format-CommandArgument {
@@ -163,12 +193,12 @@ if ($backendTests -ne "none") {
     if ($backendTests -eq "targeted" -and @($scope.targets.backend).Count -gt 0) {
         $pytestTargets = @($scope.targets.backend | ForEach-Object { "$_" })
     }
-    Add-Step -Steps $steps -Step (New-Step -Id "backend-tests" -Name "Backend tests ($backendTests)" -WorkingDirectory (Join-Path $repoRoot "backend") -Command "poetry" -Arguments (@("run", "pytest") + $pytestTargets + @("-q", "--tb=short")))
+    Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-tests" -Name "Backend tests ($backendTests)" -Check "Tests" -Arguments ($pytestTargets + @("-q", "--tb=short")))
 }
 if ($backendQuality) {
-    Add-Step -Steps $steps -Step (New-Step -Id "backend-ruff" -Name "Backend Ruff" -WorkingDirectory (Join-Path $repoRoot "backend") -Command "poetry" -Arguments @("run", "ruff", "check", "app", "tests"))
-    Add-Step -Steps $steps -Step (New-Step -Id "backend-black" -Name "Backend Black" -WorkingDirectory (Join-Path $repoRoot "backend") -Command "poetry" -Arguments @("run", "black", "--check", "app", "tests"))
-    Add-Step -Steps $steps -Step (New-Step -Id "backend-mypy" -Name "Backend Mypy" -WorkingDirectory (Join-Path $repoRoot "backend") -Command "poetry" -Arguments @("run", "mypy", "app"))
+    Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-ruff" -Name "Backend Ruff" -Check "Ruff")
+    Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-black" -Name "Backend Black" -Check "Black")
+    Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-mypy" -Name "Backend Mypy" -Check "Mypy")
 }
 
 if ($frontendTests -ne "none") {
@@ -200,6 +230,7 @@ if ($e2eMode -ne "none") {
 $plan = [ordered]@{
     version = 1
     mode = $Mode.ToLowerInvariant()
+    backendRuntime = $BackendRuntime.ToLowerInvariant()
     baseRef = $BaseRef
     warning = if ($Mode -eq "Quick") { "Quick is for development feedback only; the GitHub CI gate remains mandatory." } else { $null }
     scope = $scope
@@ -234,24 +265,12 @@ if ($Mode -eq "Quick") {
     Write-Host "  Quick is not a merge/release gate; GitHub CI is still required." -ForegroundColor Yellow
 }
 
-$tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-$logDirectory = Join-Path $tempRoot ("aurum-verify-" + [Guid]::NewGuid().ToString("N"))
+$logRoot = Join-Path (Join-Path $repoRoot ".codex") "verification"
+$logDirectory = Join-Path $logRoot ([Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
-$completed = $false
-try {
-    for ($index = 0; $index -lt $steps.Count; $index++) {
-        Invoke-LoggedStep -Step $steps[$index] -LogDirectory $logDirectory -Number ($index + 1) -Total $steps.Count
-    }
-    $completed = $true
-}
-finally {
-    if ($completed) {
-        $resolvedLogDirectory = [IO.Path]::GetFullPath($logDirectory)
-        if (-not $resolvedLogDirectory.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing to remove a verification log directory outside the system temp directory."
-        }
-        [IO.Directory]::Delete($resolvedLogDirectory, $true)
-    }
+for ($index = 0; $index -lt $steps.Count; $index++) {
+    Invoke-LoggedStep -Step $steps[$index] -LogDirectory $logDirectory -Number ($index + 1) -Total $steps.Count
 }
 
 Write-Host ("Verification passed: {0} steps." -f $steps.Count) -ForegroundColor Green
+Write-Host "Detailed logs: $logDirectory"

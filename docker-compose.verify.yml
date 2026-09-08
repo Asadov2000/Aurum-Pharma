@@ -1,0 +1,117 @@
+# Disposable verification only. Credentials below are public synthetic test values.
+# No interpolation, dotenv, published ports, or shared resources are permitted.
+x-test-environment: &test-environment
+  ENVIRONMENT: development
+  DEPLOYMENT_PROFILE: cloud
+  AUTH_LOCAL_TESTING_MODE: "false"
+  JWT_SECRET: isolated-verification-only-not-a-deployment-secret-123456
+  JWT_ISSUER: aurum-pharma
+  JWT_AUDIENCE: aurum-pharma-api
+  JWT_LEGACY_ACCESS_UNTIL: "0"
+  CORS_ORIGINS: '["http://localhost:5173"]'
+  DATABASE_URL_APP: postgresql+asyncpg://aurum_app:verify_app_only@postgres:5432/aurum_verify_test
+  DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:verify_support_only@postgres:5432/aurum_verify_test
+  DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:verify_migrator_only@postgres:5432/aurum_verify_test
+  DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:verify_mailer_only@postgres:5432/aurum_verify_test
+  DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:verify_billing_worker_only@postgres:5432/aurum_verify_test
+  DATABASE_URL_WORKER: postgresql+asyncpg://aurum_worker:verify_worker_only@postgres:5432/aurum_verify_test
+  DATABASE_URL_CATALOG_WORKER: postgresql+asyncpg://aurum_catalog_worker:verify_catalog_worker_only@postgres:5432/aurum_verify_test
+  TEST_DATABASE_URL_APP: postgresql+asyncpg://aurum_app:verify_app_only@postgres:5432/aurum_verify_test
+  TEST_DATABASE_URL_SUPPORT: postgresql+asyncpg://aurum_support:verify_support_only@postgres:5432/aurum_verify_test
+  TEST_DATABASE_URL_MIGRATION: postgresql+asyncpg://aurum_migrator:verify_migrator_only@postgres:5432/aurum_verify_test
+  TEST_DATABASE_URL_MAILER: postgresql+asyncpg://aurum_mailer:verify_mailer_only@postgres:5432/aurum_verify_test
+  TEST_DATABASE_URL_BILLING_WORKER: postgresql+asyncpg://aurum_billing_worker:verify_billing_worker_only@postgres:5432/aurum_verify_test
+  TEST_DATABASE_URL_WORKER: postgresql+asyncpg://aurum_worker:verify_worker_only@postgres:5432/aurum_verify_test
+  TEST_DATABASE_URL_CATALOG_WORKER: postgresql+asyncpg://aurum_catalog_worker:verify_catalog_worker_only@postgres:5432/aurum_verify_test
+  REDIS_URL: redis://redis:6379/0
+  TEST_REDIS_URL: redis://redis:6379/0
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: verify_minio
+  MINIO_SECRET_KEY: verify_minio_only
+  MINIO_BUCKET: aurum
+  MINIO_SECURE: "false"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTEST_ADDOPTS: "-p no:cacheprovider"
+  RUFF_CACHE_DIR: /tmp/ruff-cache
+  MYPY_CACHE_DIR: /tmp/mypy-cache
+
+x-postgres-environment: &postgres-environment
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: verify_postgres_only
+  POSTGRES_DB: aurum_verify_test
+  POSTGRES_HOST: postgres
+  AURUM_APP_PASSWORD: verify_app_only
+  AURUM_SUPPORT_PASSWORD: verify_support_only
+  AURUM_MAILER_PASSWORD: verify_mailer_only
+  AURUM_BILLING_WORKER_PASSWORD: verify_billing_worker_only
+  AURUM_WORKER_PASSWORD: verify_worker_only
+  AURUM_CATALOG_WORKER_PASSWORD: verify_catalog_worker_only
+  AURUM_MIGRATOR_PASSWORD: verify_migrator_only
+  AURUM_BACKUP_PASSWORD: verify_backup_only
+  AURUM_PITR_PASSWORD: verify_pitr_only
+
+services:
+  tools:
+    # Compose's project-tools image tag is unique to the invocation; build layers
+    # remain reusable without a mutable image shared by concurrent worktrees.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    working_dir: /workspace/backend
+    entrypoint: ["python"]
+    command: ["-m", "pytest", "tests", "-q", "--tb=short"]
+    environment: *test-environment
+    # Selected mounts exclude local .env, secrets and host virtual environments.
+    volumes:
+      - ./backend/app:/workspace/backend/app:ro
+      - ./backend/tests:/workspace/backend/tests:ro
+      - ./backend/scripts:/workspace/backend/scripts:ro
+      - ./backend/alembic:/workspace/backend/alembic:ro
+      - ./backend/alembic.ini:/workspace/backend/alembic.ini:ro
+      - ./backend/pyproject.toml:/workspace/backend/pyproject.toml:ro
+      - ./backend/poetry.lock:/workspace/backend/poetry.lock:ro
+      - ./infra:/workspace/infra:ro
+    security_opt: ["no-new-privileges:true"]
+
+  postgres:
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
+    environment: *postgres-environment
+    volumes:
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./infra/postgres/role-contract.sql:/docker-entrypoint-initdb.d/role-contract.inc:ro
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "aurum_verify_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  bootstrap:
+    image: postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2
+    environment: *postgres-environment
+    entrypoint: ["/bin/sh", "/bootstrap/bootstrap-roles.sh"]
+    tmpfs: [/var/lib/postgresql/data]
+    volumes:
+      - ./infra/postgres:/bootstrap:ro
+
+  redis:
+    image: redis:7-alpine@sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs: [/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    environment:
+      MINIO_ROOT_USER: verify_minio
+      MINIO_ROOT_PASSWORD: verify_minio_only
+    command: ["server", "/data"]
+    tmpfs: [/data]
+
+networks:
+  default:
+    internal: true
