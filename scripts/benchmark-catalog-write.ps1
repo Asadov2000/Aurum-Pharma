@@ -163,7 +163,7 @@ try {
     Start-BenchmarkContainer $workerName @(
         "--env-file", $workerEnv, "--memory=768m", "--memory-swap=768m", "--cpus=1", "--pids-limit=128";
         $sourceMounts; "--workdir", "/app",
-        "--entrypoint", "celery", $BackendImage, "-A", "app.tasks.catalog_app", "worker",
+        "--entrypoint", "python", $BackendImage, "-m", "celery", "-A", "app.tasks.catalog_app", "worker",
         "--loglevel=warning", "-Q", "catalog-worker", "--concurrency=1", "--without-gossip",
         "--without-mingle", "--without-heartbeat", "--pidfile=/tmp/celery-worker.pid"
     )
