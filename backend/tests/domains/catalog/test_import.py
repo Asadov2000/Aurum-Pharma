@@ -15,7 +15,7 @@ from starlette.datastructures import UploadFile
 from app.core.errors import BusinessRuleError, ValidationError
 from app.core.time import utc_now
 from app.domains.catalog import import_parser
-from app.domains.catalog.models import TenantCatalog
+from app.domains.catalog.models import Barcode, TenantCatalog
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.router import _read_import_file
 from app.domains.catalog.service import CatalogService
@@ -373,6 +373,178 @@ async def test_import_duplicate_skip_strategy(
     assert await _count_items(db_session, tenant.id) == 3
     # Only the 2 non-duplicate rows are tagged with this import job.
     assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 2
+
+
+@pytest.mark.parametrize("strategy", ["skip", "update"])
+async def test_reimport_existing_barcode_preserves_identity_and_applies_strategy(
+    db_session: AsyncSession, make_tenant, make_user, strategy: str
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    service = CatalogService(CatalogRepository(db_session))
+    original_csv = (
+        b"brand_name,manufacturer,dosage,pack_size,inn,base_price,barcode\n"
+        b"Synthetic product,Maker,10mg,20,Original INN,12.50,5555555555555\n"
+    )
+    changed_csv = original_csv.replace(b"Original INN,12.50", b"Updated INN,19.75")
+
+    first_job = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="original.csv",
+        source_path=f"{tenant.id}/imports/original.csv",
+    )
+    await service.request_preview(job_id=first_job.id)
+    await service.preview_import(job_id=first_job.id, raw=original_csv)
+    await service.confirm_import(job_id=first_job.id, duplicate_strategy="skip")
+    first_result = await service.process_import(job_id=first_job.id, raw=original_csv)
+    assert first_result.status == "success"
+    assert first_result.valid_rows == 1
+    assert first_result.error_rows == 0
+    first_job_id = first_job.id
+    item_id = await db_session.scalar(
+        select(TenantCatalog.id).where(TenantCatalog.tenant_id == tenant.id)
+    )
+    barcode_query = select(Barcode.id, Barcode.catalog_id, Barcode.code).where(
+        Barcode.tenant_id == tenant.id
+    )
+    original_barcodes = (await db_session.execute(barcode_query)).all()
+    assert len(original_barcodes) == 1
+
+    repeated_job = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="repeated.csv",
+        source_path=f"{tenant.id}/imports/repeated.csv",
+    )
+    await service.request_preview(job_id=repeated_job.id)
+    await service.preview_import(job_id=repeated_job.id, raw=changed_csv)
+    await service.confirm_import(job_id=repeated_job.id, duplicate_strategy=strategy)
+    result = await service.process_import(job_id=repeated_job.id, raw=changed_csv)
+
+    assert result.status == "success"
+    assert result.total_rows == result.valid_rows == 1
+    assert result.error_rows == 0
+    assert not result.errors
+    assert await _count_items(db_session, tenant.id) == 1
+    assert await _count_items(db_session, tenant.id, import_job_id=repeated_job.id) == 0
+    assert (await db_session.execute(barcode_query)).all() == original_barcodes
+    persisted = (
+        await db_session.execute(
+            select(
+                TenantCatalog.id,
+                TenantCatalog.import_job_id,
+                TenantCatalog.inn,
+                TenantCatalog.base_price,
+            ).where(TenantCatalog.tenant_id == tenant.id)
+        )
+    ).one()
+    assert persisted.id == item_id
+    assert persisted.import_job_id == first_job_id
+    assert persisted.inn == ("Updated INN" if strategy == "update" else "Original INN")
+    assert persisted.base_price == Decimal("19.75" if strategy == "update" else "12.50")
+
+
+async def test_import_update_conflicting_barcode_rolls_back_product_changes(
+    db_session: AsyncSession, make_tenant, make_user
+) -> None:
+    tenant = await make_tenant()
+    user = await make_user(home_tenant_id=tenant.id)
+    service = CatalogService(CatalogRepository(db_session))
+    owner = await service.create_item(tenant_id=tenant.id, fields={"brand_name": "Code owner"})
+    target = await service.create_item(
+        tenant_id=tenant.id,
+        fields={"brand_name": "Update target", "inn": "Original", "base_price": Decimal("12.50")},
+    )
+    target_id = target.id
+    barcode = await service.add_barcode(
+        tenant_id=tenant.id, catalog_id=owner.id, code="6666666666666", code_type="ean13"
+    )
+    barcode_query = select(Barcode.id, Barcode.catalog_id, Barcode.code).where(
+        Barcode.tenant_id == tenant.id
+    )
+    original_barcodes = (await db_session.execute(barcode_query)).all()
+    assert original_barcodes == [(barcode.id, owner.id, "6666666666666")]
+    raw = (
+        b"brand_name,inn,base_price,barcode\n"
+        b"Update target,Changed,19.75,6666666666666\n"
+        b"Valid after conflict,New,8.50,\n"
+    )
+    job = await service.create_import_job(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        source_filename="conflict.csv",
+        source_path=f"{tenant.id}/imports/conflict.csv",
+    )
+    await service.request_preview(job_id=job.id)
+    await service.preview_import(job_id=job.id, raw=raw)
+    await service.confirm_import(job_id=job.id, duplicate_strategy="update")
+    result = await service.process_import(job_id=job.id, raw=raw)
+
+    assert result.status == "success"
+    assert result.total_rows == 2
+    assert result.valid_rows == result.error_rows == 1
+    assert result.errors == [
+        {"row": "Update target", "messages": ["Barcode already exists in this tenant"]}
+    ]
+    assert (await db_session.execute(barcode_query)).all() == original_barcodes
+    persisted = (
+        await db_session.execute(
+            select(TenantCatalog.inn, TenantCatalog.base_price).where(TenantCatalog.id == target_id)
+        )
+    ).one()
+    assert persisted == ("Original", Decimal("12.50"))
+    assert await _count_items(db_session, tenant.id) == 3
+    assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 1
+
+
+async def test_import_same_barcode_in_different_tenants_creates_separate_associations(
+    db_session: AsyncSession, make_tenant, make_user
+) -> None:
+    tenants = [await make_tenant(), await make_tenant()]
+    service = CatalogService(CatalogRepository(db_session))
+    raw = b"brand_name,barcode\nSame synthetic product,7777777777777\n"
+    associations: list[tuple[UUID, UUID, UUID]] = []
+    for tenant in tenants:
+        user = await make_user(home_tenant_id=tenant.id)
+        job = await service.create_import_job(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            source_filename="tenant.csv",
+            source_path=f"{tenant.id}/imports/tenant.csv",
+        )
+        await service.request_preview(job_id=job.id)
+        await service.preview_import(job_id=job.id, raw=raw)
+        await service.confirm_import(job_id=job.id, duplicate_strategy="skip")
+        result = await service.process_import(job_id=job.id, raw=raw)
+        assert result.status == "success"
+        assert result.valid_rows == 1
+        assert result.error_rows == 0
+        assert await _count_items(db_session, tenant.id, import_job_id=job.id) == 1
+        association = (
+            await db_session.execute(
+                select(Barcode.id, Barcode.catalog_id).where(
+                    Barcode.tenant_id == tenant.id, Barcode.code == "7777777777777"
+                )
+            )
+        ).one()
+        associations.append((tenant.id, association.id, association.catalog_id))
+
+    assert associations[0][1] != associations[1][1]
+    assert associations[0][2] != associations[1][2]
+    for tenant_id, barcode_id, catalog_id in associations:
+        persisted = (
+            await db_session.execute(
+                select(Barcode.id, Barcode.catalog_id).where(Barcode.tenant_id == tenant_id)
+            )
+        ).one()
+        assert persisted == (barcode_id, catalog_id)
+        assert (
+            await db_session.scalar(
+                select(TenantCatalog.tenant_id).where(TenantCatalog.id == catalog_id)
+            )
+            == tenant_id
+        )
 
 
 async def test_import_row_conflict_does_not_abort_following_rows(
