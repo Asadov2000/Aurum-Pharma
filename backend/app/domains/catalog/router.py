@@ -231,8 +231,10 @@ async def create_catalog_item(
 ) -> CatalogItemRead:
     item = await service.create_item(
         tenant_id=_current_tenant_or_400(user),
-        fields=payload.model_dump(exclude_none=True),
+        fields=payload.model_dump(exclude={"operation_id", "initial_barcode"}, exclude_none=True),
         created_by=user.user_id,
+        operation_id=payload.operation_id,
+        initial_barcode=payload.initial_barcode,
     )
     return CatalogItemRead.model_validate(item)
 

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DISPENSING_TYPES = {"prescription", "otc", "special"}
 STORAGE_TYPES = {"normal", "cold", "frozen"}
@@ -31,7 +31,26 @@ def _strip_optional(value: Any) -> Any:
     return value
 
 
+class BarcodeCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=200)
+    code_type: str = "ean13"
+
+    @field_validator("code", mode="before")
+    @classmethod
+    def _normalize_code(cls, value: Any) -> Any:
+        return _strip_required(value)
+
+    @field_validator("code_type")
+    @classmethod
+    def _check_type(cls, v: str) -> str:
+        if v not in BARCODE_TYPES:
+            raise ValueError(f"code_type must be one of {sorted(BARCODE_TYPES)}")
+        return v
+
+
 class CatalogItemCreate(BaseModel):
+    operation_id: UUID4 | None = None
+    initial_barcode: BarcodeCreate | None = None
     brand_name: str = Field(min_length=1, max_length=500)
     inn: str | None = Field(default=None, max_length=500)
     manufacturer: str | None = Field(default=None, max_length=500)
@@ -49,6 +68,12 @@ class CatalogItemCreate(BaseModel):
         decimal_places=2,
         allow_inf_nan=False,
     )
+
+    @model_validator(mode="after")
+    def _require_barcode_operation(self) -> Self:
+        if self.initial_barcode is not None and self.operation_id is None:
+            raise ValueError("initial_barcode requires operation_id")
+        return self
 
     @field_validator("brand_name", mode="before")
     @classmethod
@@ -199,23 +224,6 @@ class CatalogSummary(BaseModel):
     archived: int
     without_barcode: int
     without_image: int
-
-
-class BarcodeCreate(BaseModel):
-    code: str = Field(min_length=1, max_length=200)
-    code_type: str = "ean13"
-
-    @field_validator("code", mode="before")
-    @classmethod
-    def _normalize_code(cls, value: Any) -> Any:
-        return _strip_required(value)
-
-    @field_validator("code_type")
-    @classmethod
-    def _check_type(cls, v: str) -> str:
-        if v not in BARCODE_TYPES:
-            raise ValueError(f"code_type must be one of {sorted(BARCODE_TYPES)}")
-        return v
 
 
 # -----------------------------------------------------------------------------

@@ -10,6 +10,8 @@ const authState = vi.hoisted(() => ({
   permissions: ["catalog.view", "catalog.create", "catalog.update", "catalog.delete"],
 }));
 
+vi.mock("@tanstack/react-router", () => ({ useBlocker: () => ({ status: "idle" }) }));
+
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => ({
     user: {

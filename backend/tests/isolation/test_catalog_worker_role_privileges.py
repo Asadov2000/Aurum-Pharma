@@ -220,6 +220,12 @@ async def test_catalog_tenant_helper_never_needs_support_privileges(
         "UPDATE public.catalog_import_job SET deadline_at = NULL WHERE false",
         "UPDATE public.catalog_import_job SET tenant_id = gen_random_uuid() WHERE false",
         "UPDATE public.tenant_catalog SET image_version = NULL WHERE false",
+        "UPDATE public.tenant_catalog SET operation_id = NULL WHERE false",
+        "UPDATE public.tenant_catalog SET create_request_fingerprint = NULL WHERE false",
+        "INSERT INTO public.tenant_catalog (tenant_id, brand_name, operation_id) "
+        "VALUES (gen_random_uuid(), 'Forbidden', gen_random_uuid())",
+        "INSERT INTO public.tenant_catalog (tenant_id, brand_name, create_request_fingerprint) "
+        "VALUES (gen_random_uuid(), 'Forbidden', repeat('a', 64))",
         "INSERT INTO public.tenant_catalog (tenant_id, brand_name, image_version) "
         "VALUES (gen_random_uuid(), 'Forbidden', NULL)",
         "CREATE TABLE public.catalog_worker_forbidden (id INTEGER)",

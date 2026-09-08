@@ -60,6 +60,8 @@ export interface CatalogSummary {
 }
 
 export interface CatalogItemCreatePayload {
+  operation_id?: string;
+  initial_barcode?: { code: string; code_type: BarcodeType };
   brand_name: string;
   inn?: string | null;
   manufacturer?: string | null;

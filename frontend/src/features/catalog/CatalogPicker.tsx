@@ -10,6 +10,7 @@ interface Props {
   id?: string;
   value: string;
   onChange: (catalogId: string, brandName: string) => void;
+  onSearchChange?: (text: string) => void;
   /** Optional initial label shown when `value` is preset (e.g. from URL state). */
   initialLabel?: string;
   /** Render an inline ✕ that clears the selection. Useful for filters. */
@@ -36,6 +37,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     value,
     id,
     onChange,
+    onSearchChange,
     initialLabel,
     clearable = false,
     placeholder = "Начните вводить название…",
@@ -126,6 +128,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
             onChange("", "");
           }
           setText(e.target.value);
+          onSearchChange?.(e.target.value);
           setOpen(true);
         }}
         onKeyDown={(e) => {

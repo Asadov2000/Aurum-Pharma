@@ -11,9 +11,11 @@ duplicate-handling branches.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from hashlib import sha256
 from typing import Any, Literal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -51,6 +53,7 @@ from app.domains.catalog.models import (
     TenantCatalog,
 )
 from app.domains.catalog.repository import CatalogRepository
+from app.domains.catalog.schemas import BarcodeCreate, CatalogItemCreate
 from app.domains.foundation.repository import FoundationRepository
 
 logger = structlog.get_logger("catalog.service")
@@ -87,11 +90,63 @@ class CatalogService:
         tenant_id: UUID,
         fields: dict[str, Any],
         created_by: UUID | None = None,
+        operation_id: UUID | None = None,
+        initial_barcode: BarcodeCreate | None = None,
     ) -> TenantCatalog:
+        if initial_barcode is not None and operation_id is None:
+            raise ValidationError("Initial barcode requires a creation operation ID")
+        fingerprint: str | None = None
+        if operation_id is not None:
+            request = CatalogItemCreate.model_validate(
+                {**fields, "operation_id": operation_id, "initial_barcode": initial_barcode}
+            )
+            canonical = request.model_dump(mode="json", exclude={"operation_id"})
+            if request.base_price is not None:
+                canonical["base_price"] = format(request.base_price.quantize(Decimal("0.01")), "f")
+            fingerprint = sha256(
+                json.dumps(
+                    canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+            await self.repo.lock_creation_operation(tenant_id=tenant_id, operation_id=operation_id)
+            existing = await self.repo.get_creation_operation(
+                tenant_id=tenant_id, operation_id=operation_id
+            )
+            if existing is not None:
+                if existing.create_request_fingerprint != fingerprint:
+                    raise ConflictError(
+                        "Catalog operation ID was already used with different data",
+                        details={"reason": "operation_payload_mismatch"},
+                    )
+                if existing.deleted_at is not None or not existing.is_active:
+                    raise ConflictError(
+                        "Created catalog item is no longer active",
+                        details={"reason": "created_item_unavailable"},
+                    )
+                return existing
+            fields = request.model_dump(
+                exclude={"operation_id", "initial_barcode"}, exclude_none=True
+            )
         payload = {**fields, "tenant_id": tenant_id}
         if created_by is not None:
             payload["created_by"] = created_by
-        return await self.repo.create_item(**payload)
+        if operation_id is not None:
+            payload.update(operation_id=operation_id, create_request_fingerprint=fingerprint)
+        async with self.repo.row_savepoint():
+            item = await self.repo.create_item(**payload)
+            if initial_barcode is not None:
+                attached = await self.repo.add_creation_barcode(
+                    tenant_id=tenant_id,
+                    catalog_id=item.id,
+                    code=initial_barcode.code,
+                    code_type=initial_barcode.code_type,
+                )
+                if not attached:
+                    raise ConflictError(
+                        "Barcode is already assigned to a catalog item",
+                        details={"reason": "barcode_conflict"},
+                    )
+            return item
 
     async def get_item(self, item_id: UUID, *, include_deleted: bool = False) -> TenantCatalog:
         item = await self.repo.get_item(item_id, include_deleted=include_deleted)
