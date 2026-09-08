@@ -1,11 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getIncoming = vi.fn();
 const acceptIncoming = vi.fn();
 const rejectIncoming = vi.fn();
 const deleteIncomingItem = vi.fn();
+const listIncomingDraftRows = vi.fn();
+const deleteIncomingDraftRow = vi.fn();
+const saveIncomingDraftRow = vi.fn();
+const blockNavigation = vi.fn();
 
 let permissions = ["incoming.view", "incoming.create", "incoming.finalize"];
 let permissionScopes: Record<string, string[] | null> = {};
@@ -15,6 +19,10 @@ vi.mock("@/features/incoming/api", () => ({
   acceptIncoming: (...args: unknown[]) => acceptIncoming(...args),
   rejectIncoming: (...args: unknown[]) => rejectIncoming(...args),
   deleteIncomingItem: (...args: unknown[]) => deleteIncomingItem(...args),
+  listIncomingDraftRows: (...args: unknown[]) => listIncomingDraftRows(...args),
+  deleteIncomingDraftRow: (...args: unknown[]) => deleteIncomingDraftRow(...args),
+  saveIncomingDraftRow: (...args: unknown[]) => saveIncomingDraftRow(...args),
+  commitIncomingDraftRow: vi.fn(),
   addIncomingItem: vi.fn(),
   updateIncomingItem: vi.fn(),
   createIncoming: vi.fn(),
@@ -32,6 +40,16 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a href="/incoming">{children}</a>,
   useNavigate: () => vi.fn(),
   useParams: () => ({ id: "doc-1" }),
+  useBlocker: (options: unknown) => {
+    blockNavigation(options);
+    return { status: "idle" };
+  },
+}));
+
+vi.mock("@/features/catalog/CatalogPicker", () => ({
+  CatalogPicker: ({ id, initialLabel }: { id: string; initialLabel?: string }) => (
+    <input id={id} readOnly value={initialLabel ?? ""} />
+  ),
 }));
 
 import { IncomingDetailPage } from "@/features/incoming/IncomingDetailPage";
@@ -74,7 +92,7 @@ const DOC = {
   ],
 };
 
-function renderPage(): void {
+function renderPage(): QueryClient {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -83,6 +101,7 @@ function renderPage(): void {
       <IncomingDetailPage />
     </QueryClientProvider>,
   );
+  return queryClient;
 }
 
 describe("IncomingDetailPage", () => {
@@ -97,6 +116,12 @@ describe("IncomingDetailPage", () => {
     acceptIncoming.mockReset();
     rejectIncoming.mockReset();
     deleteIncomingItem.mockReset();
+    listIncomingDraftRows.mockReset();
+    listIncomingDraftRows.mockResolvedValue([]);
+    deleteIncomingDraftRow.mockReset();
+    saveIncomingDraftRow.mockReset();
+    saveIncomingDraftRow.mockResolvedValue({ revision: 1 });
+    blockNavigation.mockClear();
     getIncoming.mockResolvedValue(DOC);
   });
 
@@ -118,7 +143,10 @@ describe("IncomingDetailPage", () => {
     acceptIncoming.mockRejectedValue(new Error("conflict"));
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Принять на склад" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Принять на склад" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Принять на склад" }));
     const dialog = screen.getByRole("dialog", { name: "Принять товары на склад" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Принять на склад" }));
 
@@ -170,5 +198,74 @@ describe("IncomingDetailPage", () => {
     expect(await screen.findByRole("button", { name: "Добавить позицию" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Отклонить" })).not.toBeInTheDocument();
+  });
+
+  it("restores the raw pending row and blocks final acceptance", async () => {
+    listIncomingDraftRows.mockResolvedValue([
+      {
+        id: "draft-1",
+        document_id: DOC.id,
+        revision: 2,
+        catalog_name: "Парацетамол",
+        fields: {
+          catalog_id: "catalog-1",
+          batch_number: "",
+          manufactured_at: "",
+          expires_at: "",
+          qty: "12,",
+          purchase_price: "",
+          sale_price: "",
+        },
+      },
+    ]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    expect(screen.getByLabelText("Количество единиц")).toHaveValue("12,");
+    expect(screen.getByLabelText("Лекарство или товар")).toHaveValue("Парацетамол");
+    expect(screen.getByText("Сохранено в черновике")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Закрыть"));
+    expect(screen.getByRole("button", { name: "Принять на склад" })).toBeDisabled();
+    expect(acceptIncoming).not.toHaveBeenCalled();
+  });
+
+  it("never treats a failed pending-row lookup as an empty document ready for acceptance", async () => {
+    listIncomingDraftRows.mockRejectedValue(new Error("offline"));
+    renderPage();
+    expect(await screen.findByText(/Не удалось проверить черновые позиции/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Принять на склад" })).toBeDisabled();
+    expect(screen.queryByText("Незавершённых позиций нет")).not.toBeInTheDocument();
+    listIncomingDraftRows.mockResolvedValue([]);
+    fireEvent.click(screen.getByRole("button", { name: "Повторить проверку" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Принять на склад" })).toBeEnabled(),
+    );
+  });
+
+  it("guards close, reload and route navigation until the latest input is saved", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить позицию" }));
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "12," } });
+    await waitFor(() => expect(blockNavigation.mock.lastCall?.[0].enableBeforeUnload).toBe(true));
+    expect(blockNavigation.mock.lastCall?.[0].shouldBlockFn()).toBe(true);
+    fireEvent.click(screen.getByText("Закрыть"));
+    const confirmation = screen.getByRole("dialog", { name: "Закрыть без сохранения?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Отмена" }));
+    expect(screen.getByLabelText("Количество единиц")).toHaveValue("12,");
+    await screen.findByText("Сохранено в черновике");
+    await waitFor(() => expect(blockNavigation.mock.lastCall?.[0].enableBeforeUnload).toBe(false));
+    expect(blockNavigation.mock.lastCall?.[0].shouldBlockFn()).toBe(false);
+  });
+
+  it("preserves the open form when a background document refresh fails", async () => {
+    const client = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить позицию" }));
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "12," } });
+    getIncoming.mockRejectedValue(new Error("offline"));
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["incoming", "doc", DOC.id] });
+    });
+    expect(await screen.findByText(/Не удалось обновить документ/)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Добавить позицию" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Количество единиц")).toHaveValue("12,");
   });
 });

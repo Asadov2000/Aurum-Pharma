@@ -1,8 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { AxiosError } from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const addIncomingItem = vi.fn();
+const saveIncomingDraftRow = vi.fn();
+const commitIncomingDraftRow = vi.fn();
+const listIncomingDraftRows = vi.fn();
 const updateIncomingItem = vi.fn();
 const updateIncoming = vi.fn();
 const listBranches = vi.fn();
@@ -10,7 +13,9 @@ const searchSupplierOptions = vi.fn();
 const navigate = vi.fn();
 
 vi.mock("@/features/incoming/api", () => ({
-  addIncomingItem: (...args: unknown[]) => addIncomingItem(...args),
+  saveIncomingDraftRow: (...args: unknown[]) => saveIncomingDraftRow(...args),
+  commitIncomingDraftRow: (...args: unknown[]) => commitIncomingDraftRow(...args),
+  listIncomingDraftRows: (...args: unknown[]) => listIncomingDraftRows(...args),
   updateIncomingItem: (...args: unknown[]) => updateIncomingItem(...args),
   getIncoming: vi.fn(),
   acceptIncoming: vi.fn(),
@@ -118,9 +123,12 @@ function renderForm(
 
 describe("AddItemForm", () => {
   beforeEach(() => {
-    addIncomingItem.mockReset();
+    saveIncomingDraftRow.mockReset();
+    commitIncomingDraftRow.mockReset();
+    listIncomingDraftRows.mockReset();
     updateIncomingItem.mockReset();
-    addIncomingItem.mockResolvedValue({ id: "item-1" });
+    saveIncomingDraftRow.mockResolvedValue({ revision: 1 });
+    commitIncomingDraftRow.mockResolvedValue({ id: "item-1" });
     updateIncomingItem.mockResolvedValue({ id: "item-1" });
   });
 
@@ -135,10 +143,10 @@ describe("AddItemForm", () => {
 
     expect(await screen.findByText("Укажите цену закупки")).toBeInTheDocument();
     expect(screen.getByText("Укажите цену продажи")).toBeInTheDocument();
-    expect(addIncomingItem).not.toHaveBeenCalled();
+    expect(commitIncomingDraftRow).not.toHaveBeenCalled();
   });
 
-  it("normalizes decimal commas and submits a valid item", async () => {
+  it("saves raw decimal commas before committing the confirmed revision", async () => {
     const onClose = vi.fn();
     renderForm(onClose);
     fireEvent.click(screen.getByRole("button", { name: "Лекарство или товар" }));
@@ -155,15 +163,24 @@ describe("AddItemForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Добавить", exact: true }));
 
     await waitFor(() =>
-      expect(addIncomingItem).toHaveBeenCalledWith(
+      expect(saveIncomingDraftRow).toHaveBeenCalledWith(
         "doc-1",
+        expect.any(String),
         expect.objectContaining({
-          catalog_id: "catalog-1",
-          qty: "2.5",
-          purchase_price: "4.50",
-          sale_price: "5.25",
+          expected_revision: 0,
+          fields: expect.objectContaining({
+            catalog_id: "catalog-1",
+            qty: "2,5",
+            purchase_price: "4,50",
+            sale_price: "5,25",
+          }),
         }),
       ),
+    );
+    expect(commitIncomingDraftRow).toHaveBeenCalledWith(
+      "doc-1",
+      saveIncomingDraftRow.mock.calls[0]?.[1],
+      1,
     );
     expect(onClose).toHaveBeenCalled();
   });
@@ -189,7 +206,7 @@ describe("AddItemForm", () => {
     expect(
       await screen.findByText("Дата производства не может быть позже срока годности"),
     ).toBeInTheDocument();
-    expect(addIncomingItem).not.toHaveBeenCalled();
+    expect(commitIncomingDraftRow).not.toHaveBeenCalled();
   });
 
   it("rejects values that exceed database precision", async () => {
@@ -213,7 +230,7 @@ describe("AddItemForm", () => {
       await screen.findByText("Количество: до 11 цифр и 3 знаков после запятой, больше 0"),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Цена: до 12 цифр и 2 знаков после запятой")).toHaveLength(2);
-    expect(addIncomingItem).not.toHaveBeenCalled();
+    expect(commitIncomingDraftRow).not.toHaveBeenCalled();
   });
 
   it("updates an item and explicitly clears nullable fields", async () => {
@@ -252,6 +269,105 @@ describe("AddItemForm", () => {
       ),
     );
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("keeps newer RHF input when an earlier autosave finishes", async () => {
+    let resolveFirst!: (value: { revision: number }) => void;
+    saveIncomingDraftRow
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({ revision: 2 });
+    renderForm();
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "12," } });
+    await waitFor(() => expect(saveIncomingDraftRow).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "13," } });
+    await act(async () => {
+      resolveFirst({ revision: 1 });
+    });
+    await waitFor(() => expect(saveIncomingDraftRow).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText("Количество единиц")).toHaveValue("13,");
+    expect(screen.getByText("Сохранено в черновике")).toBeInTheDocument();
+  });
+
+  it("preserves conflicting input until the user confirms loading the saved version", async () => {
+    saveIncomingDraftRow.mockRejectedValue(
+      Object.assign(new AxiosError("conflict"), { response: { status: 409 } }),
+    );
+    listIncomingDraftRows.mockImplementation(() => [
+      {
+        id: saveIncomingDraftRow.mock.calls[0]?.[1],
+        revision: 4,
+        catalog_name: null,
+        fields: {
+          catalog_id: "",
+          batch_number: "",
+          manufactured_at: "",
+          expires_at: "",
+          qty: "20",
+          purchase_price: "",
+          sale_price: "",
+        },
+      },
+    ]);
+    renderForm();
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "12," } });
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить сохранённое" }));
+    expect(screen.getByLabelText("Количество единиц")).toHaveValue("12,");
+    const dialog = screen.getByRole("dialog", { name: "Загрузить сохранённый черновик?" });
+    expect(listIncomingDraftRows).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Загрузить сохранённое" }));
+    await waitFor(() => expect(screen.getByLabelText("Количество единиц")).toHaveValue("20"));
+  });
+
+  it("protects confirmed reload from cancellation, repeat requests and new edits while pending", async () => {
+    saveIncomingDraftRow.mockRejectedValue(
+      Object.assign(new AxiosError("conflict"), { response: { status: 409 } }),
+    );
+    let resolveRows!: (rows: unknown[]) => void;
+    listIncomingDraftRows.mockImplementation(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolveRows = resolve;
+        }),
+    );
+    renderForm();
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "12," } });
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить сохранённое" }));
+    const dialog = screen.getByRole("dialog", { name: "Загрузить сохранённый черновик?" });
+    const confirm = within(dialog).getByRole("button", { name: "Загрузить сохранённое" });
+    fireEvent.click(confirm);
+    expect(confirm).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Отмена" })).toBeDisabled();
+    expect(screen.getByLabelText("Количество единиц")).toBeDisabled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть" }));
+    fireEvent.click(confirm);
+    expect(dialog).toBeInTheDocument();
+    expect(listIncomingDraftRows).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveRows([
+        {
+          id: saveIncomingDraftRow.mock.calls[0]?.[1],
+          revision: 4,
+          catalog_name: null,
+          fields: {
+            catalog_id: "",
+            batch_number: "",
+            manufactured_at: "",
+            expires_at: "",
+            qty: "20",
+            purchase_price: "",
+            sale_price: "",
+          },
+        },
+      ]);
+    });
+    expect(screen.getByLabelText("Количество единиц")).toHaveValue("20");
+    expect(screen.getByLabelText("Количество единиц")).toBeEnabled();
   });
 });
 

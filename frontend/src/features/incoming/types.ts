@@ -44,6 +44,31 @@ export interface IncomingDocumentWithItems extends IncomingDocument {
   items: IncomingItem[];
 }
 
+export interface IncomingDraftFields {
+  catalog_id: string;
+  batch_number: string;
+  manufactured_at: string;
+  expires_at: string;
+  qty: string;
+  purchase_price: string;
+  sale_price: string;
+}
+
+export interface IncomingDraftRow {
+  id: string;
+  document_id: string;
+  revision: number;
+  fields: Omit<IncomingDraftFields, "purchase_price"> & { purchase_price: string | null };
+  catalog_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IncomingDraftSavePayload {
+  expected_revision: number;
+  fields: IncomingDraftFields;
+}
+
 export interface IncomingDocumentList {
   items: IncomingDocument[];
   total: number;

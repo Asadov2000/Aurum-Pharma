@@ -316,6 +316,11 @@ class IncomingService:
         if doc.status == "accepted":
             return doc
         self._assert_draft(doc)
+        if await self.repo.count_draft_rows(document_id):
+            raise BusinessRuleError(
+                "Resolve pending draft rows before accepting the document",
+                details={"reason": "pending_draft_rows"},
+            )
         items = await self.repo.list_items(document_id)
         if not items:
             raise BusinessRuleError("Cannot accept a document with no items")

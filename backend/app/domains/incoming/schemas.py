@@ -100,6 +100,71 @@ class IncomingItemRead(BaseModel):
     catalog_pack_size: str | None = None
 
 
+class IncomingDraftFields(BaseModel):
+    """Bounded strings preserve incomplete input without numeric/date coercion."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    catalog_id: str = Field(max_length=36)
+    batch_number: str = Field(max_length=120)
+    manufactured_at: str = Field(max_length=32)
+    expires_at: str = Field(max_length=32)
+    qty: str = Field(max_length=64)
+    purchase_price: str = Field(max_length=64)
+    sale_price: str = Field(max_length=64)
+
+    @field_validator("catalog_id")
+    @classmethod
+    def catalog_identifier(cls, value: str) -> str:
+        if value and str(UUID(value)) != value:
+            raise ValueError("catalog_id must be empty or a canonical UUID")
+        return value
+
+    def as_fields(self) -> dict[str, str]:
+        return {
+            "catalog_id": self.catalog_id,
+            "batch_number": self.batch_number,
+            "manufactured_at": self.manufactured_at,
+            "expires_at": self.expires_at,
+            "qty": self.qty,
+            "purchase_price": self.purchase_price,
+            "sale_price": self.sale_price,
+        }
+
+
+class IncomingDraftSave(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=0, le=2_147_483_645)
+    fields: IncomingDraftFields
+
+
+class IncomingDraftCommit(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1, le=2_147_483_645)
+
+
+class IncomingDraftReadFields(BaseModel):
+    catalog_id: str
+    batch_number: str
+    manufactured_at: str
+    expires_at: str
+    qty: str
+    purchase_price: str | None
+    sale_price: str
+
+
+class IncomingDraftRead(BaseModel):
+    id: UUID
+    document_id: UUID
+    revision: int
+    fields: IncomingDraftReadFields
+    catalog_name: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class IncomingDocumentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

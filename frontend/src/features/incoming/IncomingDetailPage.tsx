@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useBlocker, useParams } from "@tanstack/react-router";
 
 import {
   ActionMenu,
@@ -24,6 +24,7 @@ import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
 
 import { AddItemForm } from "./AddItemForm";
+import { deleteIncomingDraftRow } from "./api";
 import { pharmacyCalendarDate } from "./calendar";
 import { statusLabel, statusTone } from "./labels";
 import { NewIncomingForm } from "./NewIncomingForm";
@@ -31,9 +32,10 @@ import {
   useAcceptIncoming,
   useDeleteIncomingItem,
   useIncomingDocQuery,
+  useIncomingDraftRowsQuery,
   useRejectIncoming,
 } from "./queries";
-import { type IncomingItem } from "./types";
+import { type IncomingDraftRow, type IncomingItem } from "./types";
 
 export function IncomingDetailPage(): JSX.Element {
   const { user } = useAuth();
@@ -43,6 +45,10 @@ export function IncomingDetailPage(): JSX.Element {
   const reject = useRejectIncoming();
   const deleteItem = useDeleteIncomingItem();
   const [adding, setAdding] = useState(false);
+  const [activeDraft, setActiveDraft] = useState<IncomingDraftRow | undefined>();
+  const [deletingDraft, setDeletingDraft] = useState<IncomingDraftRow | null>(null);
+  const [draftDeletePending, setDraftDeletePending] = useState(false);
+  const [draftDeleteError, setDraftDeleteError] = useState<string | null>(null);
   const [editingDocument, setEditingDocument] = useState(false);
   const [editingItem, setEditingItem] = useState<IncomingItem | null>(null);
   const [formDirty, setFormDirty] = useState(false);
@@ -50,16 +56,23 @@ export function IncomingDetailPage(): JSX.Element {
   const [topError, setTopError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [docAction, setDocAction] = useState<"accept" | "reject" | null>(null);
+  const [checkingAccept, setCheckingAccept] = useState(false);
   const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
   const [deleteItemError, setDeleteItemError] = useState<string | null>(null);
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
   const doc = incoming.data;
+  const drafts = useIncomingDraftRowsQuery(id, doc?.status === "draft");
+  const navigation = useBlocker({
+    shouldBlockFn: () => formDirty,
+    enableBeforeUnload: formDirty,
+    withResolver: true,
+  });
 
   const summary = useMemo(() => summarizeItems(doc?.items ?? []), [doc?.items]);
 
   if (incoming.isLoading) return <IncomingDetailSkeleton />;
 
-  if (incoming.error || !doc) {
+  if (!doc) {
     return (
       <div className="space-y-5">
         <PageHeader
@@ -94,17 +107,33 @@ export function IncomingDetailPage(): JSX.Element {
   const branchName = doc.branch_name ?? `Точка ${doc.branch_id.slice(0, 8)}`;
   const supplierName = doc.supplier_name ?? `Поставщик ${doc.supplier_id.slice(0, 8)}`;
   const pendingDeleteItem = doc.items.find((item) => item.id === pendingDeleteItemId) ?? null;
+  const draftsBlockAccept =
+    drafts.isPending ||
+    drafts.isFetching ||
+    drafts.isError ||
+    !drafts.data ||
+    drafts.data.length > 0;
 
   const onAccept = async () => {
-    if (!canFinalize || accept.isPending) return;
+    if (!canFinalize || accept.isPending || checkingAccept || draftsBlockAccept) return;
+    setCheckingAccept(true);
     setTopError(null);
     setActionMessage(null);
     try {
+      const currentDrafts = await drafts.refetch();
+      if (currentDrafts.isError || !currentDrafts.data || currentDrafts.data.length > 0) {
+        setTopError(
+          "Сначала завершите или удалите незавершённые позиции. Проверка черновиков должна завершиться успешно.",
+        );
+        return;
+      }
       await accept.mutateAsync(doc.id);
       setDocAction(null);
       setActionMessage("Товары приняты на склад. Документ теперь доступен только для просмотра.");
     } catch (error) {
       setTopError(describeApiError(error, "Не удалось принять приход"));
+    } finally {
+      setCheckingAccept(false);
     }
   };
 
@@ -134,6 +163,7 @@ export function IncomingDetailPage(): JSX.Element {
 
   const closeItemForm = () => {
     setAdding(false);
+    setActiveDraft(undefined);
     setEditingItem(null);
     setFormDirty(false);
     setDiscardFormOpen(false);
@@ -173,6 +203,26 @@ export function IncomingDetailPage(): JSX.Element {
           ) : undefined
         }
       />
+
+      {incoming.isError && (
+        <div
+          role="alert"
+          className="space-y-2 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm"
+        >
+          <p>
+            Не удалось обновить документ. Показана последняя загруженная версия; ввод в открытой
+            форме сохранён.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            isLoading={incoming.isFetching}
+            onClick={() => void incoming.refetch()}
+          >
+            Повторить обновление
+          </Button>
+        </div>
+      )}
 
       <section
         aria-label="Сводка прихода"
@@ -241,6 +291,73 @@ export function IncomingDetailPage(): JSX.Element {
         >
           {actionMessage}
         </div>
+      )}
+
+      {isDraft && (
+        <section
+          aria-label="Незавершённые позиции"
+          className="space-y-3 rounded-lg border border-border bg-surface p-4"
+        >
+          <h2 className="font-semibold">Незавершённые позиции</h2>
+          <p className="text-sm text-foreground-muted">
+            Сохранённый ввод можно продолжить на другом устройстве. В суммы и остатки он ещё не
+            включён.
+          </p>
+          {drafts.isError ? (
+            <div role="alert" className="space-y-2 text-sm text-danger">
+              <p>Не удалось проверить черновые позиции. Принятие прихода временно недоступно.</p>
+              <Button variant="secondary" size="sm" onClick={() => void drafts.refetch()}>
+                Повторить проверку
+              </Button>
+            </div>
+          ) : drafts.isPending ? (
+            <p role="status">Загрузка черновых позиций…</p>
+          ) : drafts.data?.length === 0 ? (
+            <p className="text-sm text-foreground-muted">Незавершённых позиций нет</p>
+          ) : (
+            drafts.data?.map((row) => (
+              <article
+                key={row.id}
+                className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3"
+              >
+                <div className="min-w-0">
+                  <h3 className="break-words text-sm font-medium">
+                    {row.catalog_name || "Товар ещё не выбран"}
+                  </h3>
+                  <p className="break-words text-sm text-foreground-muted">
+                    Количество: {row.fields.qty || "не указано"}
+                  </p>
+                </div>
+                {canEdit && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="min-h-11"
+                      onClick={() => {
+                        setActiveDraft(row);
+                        setAdding(true);
+                      }}
+                    >
+                      Продолжить
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-11"
+                      onClick={() => {
+                        setDeletingDraft(row);
+                        setDraftDeleteError(null);
+                      }}
+                    >
+                      Удалить
+                    </Button>
+                  </div>
+                )}
+              </article>
+            ))
+          )}
+        </section>
       )}
 
       <section aria-labelledby="incoming-items-heading" className="space-y-3">
@@ -326,8 +443,14 @@ export function IncomingDetailPage(): JSX.Element {
               Отклонить
             </Button>
             <Button
-              disabled={doc.items.length === 0}
-              title={doc.items.length === 0 ? "Сначала добавьте хотя бы одну позицию" : undefined}
+              disabled={doc.items.length === 0 || draftsBlockAccept}
+              title={
+                draftsBlockAccept
+                  ? "Сначала проверьте и завершите незавершённые позиции"
+                  : doc.items.length === 0
+                    ? "Сначала добавьте хотя бы одну позицию"
+                    : undefined
+              }
               onClick={() => setDocAction("accept")}
             >
               Принять на склад
@@ -344,8 +467,10 @@ export function IncomingDetailPage(): JSX.Element {
           className="sm:max-w-2xl"
         >
           <AddItemForm
+            key={editingItem?.id ?? activeDraft?.id ?? "new"}
             documentId={doc.id}
             item={editingItem ?? undefined}
+            draftRow={activeDraft}
             onClose={closeItemForm}
             onCancel={requestCloseForm}
             onDirtyChange={setFormDirty}
@@ -388,7 +513,7 @@ export function IncomingDetailPage(): JSX.Element {
             </>
           }
           confirmLabel="Принять на склад"
-          isLoading={accept.isPending}
+          isLoading={accept.isPending || checkingAccept}
           onConfirm={() => void onAccept()}
           onCancel={() => {
             setDocAction(null);
@@ -421,11 +546,58 @@ export function IncomingDetailPage(): JSX.Element {
       <ConfirmDialog
         open={discardFormOpen}
         title="Закрыть без сохранения?"
-        message="Изменения в форме будут потеряны."
+        message="Несохранённые изменения в форме будут потеряны. Уже сохранённый серверный черновик останется доступен. Отправленная операция может завершиться на сервере."
         confirmLabel="Закрыть без сохранения"
         variant="danger"
         onConfirm={editingDocument ? closeDocumentForm : closeItemForm}
         onCancel={() => setDiscardFormOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={navigation.status === "blocked"}
+        title="Уйти со страницы?"
+        message="Несохранённые изменения могут быть потеряны. Подтверждённый сервером черновик останется доступен."
+        confirmLabel="Уйти без сохранения"
+        variant="danger"
+        onConfirm={() => navigation.proceed?.()}
+        onCancel={() => navigation.reset?.()}
+      />
+
+      <ConfirmDialog
+        open={deletingDraft !== null}
+        title="Удалить незавершённую позицию?"
+        message={
+          <>
+            <span>Сохранённый ввод этой позиции будет удалён.</span>
+            {draftDeleteError && (
+              <p role="alert" className="mt-2 text-danger">
+                {draftDeleteError}
+              </p>
+            )}
+          </>
+        }
+        confirmLabel="Удалить"
+        variant="danger"
+        isLoading={draftDeletePending}
+        onCancel={() => {
+          if (!draftDeletePending) setDeletingDraft(null);
+        }}
+        onConfirm={() => {
+          if (!deletingDraft || draftDeletePending) return;
+          setDraftDeletePending(true);
+          void deleteIncomingDraftRow(doc.id, deletingDraft.id, deletingDraft.revision)
+            .then(async () => {
+              setDeletingDraft(null);
+              await drafts.refetch();
+            })
+            .catch(() => {
+              setDraftDeleteError(
+                "Не удалось удалить черновик. Возможно, он изменён на другом устройстве. Обновите список и повторите.",
+              );
+              void drafts.refetch();
+            })
+            .finally(() => setDraftDeletePending(false));
+        }}
       />
 
       {canEdit && (

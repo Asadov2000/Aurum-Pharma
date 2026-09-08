@@ -9,6 +9,7 @@ from uuid import uuid4
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import utc_now
 from app.domains.audit.models import AuditLog
 from app.domains.audit.repository import AuditRepository
 from app.domains.audit.service import AuditService
@@ -315,6 +316,28 @@ async def test_scrub_hides_contextual_purchase_totals() -> None:
     assert incoming_payload["new_values"]["document_number"] == "IN-1"
     assert return_payload["new_values"]["amount"] == "***"
     assert return_payload["new_values"]["qty"] == "3.000"
+
+
+async def test_scrub_hides_entire_incomplete_incoming_payload() -> None:
+    entry = AuditLog(
+        id=uuid4(),
+        tenant_id=None,
+        user_id=None,
+        action="UPDATE",
+        table_name="incoming_draft_row",
+        record_id=uuid4(),
+        old_values={"fields": {"batch_number": "private freeform input"}, "revision": 1},
+        new_values={"fields": {"qty": "unfinished sensitive input"}, "revision": 2},
+        changed_fields={"fields": {"old": {"qty": "12,"}, "new": {"qty": "12,5"}}},
+    )
+    entry.created_at = utc_now()
+
+    scrubbed = AuditService.scrub(entry)
+
+    for snapshot in ("old_values", "new_values", "changed_fields"):
+        assert scrubbed[snapshot]["fields"] == "***"
+    assert scrubbed["old_values"]["revision"] == 1
+    assert scrubbed["new_values"]["revision"] == 2
 
 
 async def test_service_search_filters_by_tenant(db_session: AsyncSession) -> None:

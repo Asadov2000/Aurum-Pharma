@@ -7,6 +7,7 @@ import {
   deleteIncomingItem,
   getIncoming,
   listIncoming,
+  listIncomingDraftRows,
   rejectIncoming,
   updateIncoming,
   updateIncomingItem,
@@ -22,7 +23,18 @@ import {
 export const incomingKeys = {
   list: (params: IncomingSearchParams) => ["incoming", "list", params] as const,
   doc: (id: string) => ["incoming", "doc", id] as const,
+  drafts: (id: string) => ["incoming", "draft-rows", id] as const,
 };
+
+export function useIncomingDraftRowsQuery(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: incomingKeys.drafts(id),
+    queryFn: ({ signal }) => listIncomingDraftRows(id, signal),
+    enabled,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+}
 
 export function useIncomingListQuery(params: IncomingSearchParams, enabled = true) {
   return useQuery({

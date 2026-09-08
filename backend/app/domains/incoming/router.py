@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
+from pydantic import UUID4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -16,6 +20,8 @@ from app.core.deps import (
     require_recent_account_mfa,
 )
 from app.core.errors import BusinessRuleError
+from app.domains.incoming.draft_service import IncomingDraftService
+from app.domains.incoming.models import IncomingDraftRow
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.schemas import (
     IncomingDocumentCreate,
@@ -24,6 +30,10 @@ from app.domains.incoming.schemas import (
     IncomingDocumentSummary,
     IncomingDocumentUpdate,
     IncomingDocumentWithItems,
+    IncomingDraftCommit,
+    IncomingDraftRead,
+    IncomingDraftReadFields,
+    IncomingDraftSave,
     IncomingItemBase,
     IncomingItemRead,
     IncomingItemUpdate,
@@ -31,6 +41,42 @@ from app.domains.incoming.schemas import (
 from app.domains.incoming.service import IncomingService
 
 router = APIRouter(prefix="/api/v1/incoming", tags=["incoming"])
+
+
+class _DraftRoute(APIRoute):
+    """Incomplete fields may contain arbitrary private input: never echo it."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[object, object, Response]]:
+        original = super().get_route_handler()
+
+        async def safe_handler(request: Request) -> Response:
+            try:
+                return await original(request)
+            except RequestValidationError as exc:
+                known = {
+                    "catalog_id",
+                    "batch_number",
+                    "manufactured_at",
+                    "expires_at",
+                    "qty",
+                    "purchase_price",
+                    "sale_price",
+                    "expected_revision",
+                    "row_id",
+                    "document_id",
+                }
+                fields = sorted(
+                    {str(part) for error in exc.errors() for part in error["loc"] if part in known}
+                )
+                raise BusinessRuleError(
+                    "Invalid draft request",
+                    details={"reason": "draft_request_invalid", "fields": fields},
+                ) from None
+
+        return safe_handler
+
+
+draft_router = APIRouter(route_class=_DraftRoute)
 
 INCOMING_COST_PERMISSIONS = (
     "batches.view_costs",
@@ -325,6 +371,110 @@ async def delete_item(
 
 
 # ---- accept / reject ----
+
+
+def _draft_read(
+    row: IncomingDraftRow, *, catalog_name: str | None, show_cost: bool
+) -> IncomingDraftRead:
+    fields = IncomingDraftReadFields.model_validate(row.fields)
+    if not show_cost:
+        fields.purchase_price = None
+    return IncomingDraftRead(
+        id=row.id,
+        document_id=row.document_id,
+        revision=row.revision,
+        fields=fields,
+        catalog_name=catalog_name,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@draft_router.get("/{document_id}/draft-rows", response_model=list[IncomingDraftRead])
+async def list_draft_rows(
+    document_id: UUID,
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("incoming.view", policy="resource"))
+    ],
+    service: Annotated[IncomingService, Depends(_service)],
+) -> list[IncomingDraftRead]:
+    details, rows, names = await IncomingDraftService(service).list_rows(
+        document_id, allowed_branch_ids=user.branch_scope_for("incoming.view")
+    )
+    return [
+        _draft_read(
+            row,
+            catalog_name=names.get(row.fields["catalog_id"]),
+            show_cost=_can_view_incoming_cost(user, details.document.branch_id),
+        )
+        for row in rows
+    ]
+
+
+@draft_router.put("/{document_id}/draft-rows/{row_id}", response_model=IncomingDraftRead)
+async def save_draft_row(
+    document_id: UUID,
+    row_id: UUID4,
+    payload: IncomingDraftSave,
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("incoming.create", policy="resource"))
+    ],
+    service: Annotated[IncomingService, Depends(_service)],
+) -> IncomingDraftRead:
+    row = await IncomingDraftService(service).save(
+        document_id,
+        row_id,
+        expected_revision=payload.expected_revision,
+        fields=payload.fields,
+        actor_id=user.user_id,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
+    )
+    names = await IncomingDraftService(service).catalog_names(row.tenant_id, [row])
+    # incoming.create is itself an operational cost capability for this branch.
+    return _draft_read(row, catalog_name=names.get(row.fields["catalog_id"]), show_cost=True)
+
+
+@draft_router.post("/{document_id}/draft-rows/{row_id}/commit", response_model=IncomingItemRead)
+async def commit_draft_row(
+    document_id: UUID,
+    row_id: UUID4,
+    payload: IncomingDraftCommit,
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("incoming.create", policy="resource"))
+    ],
+    service: Annotated[IncomingService, Depends(_service)],
+) -> IncomingItemRead:
+    item = await IncomingDraftService(service).commit(
+        document_id,
+        row_id,
+        expected_revision=payload.expected_revision,
+        actor_id=user.user_id,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
+    )
+    return IncomingItemRead.model_validate(item)
+
+
+@draft_router.delete("/{document_id}/draft-rows/{row_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def discard_draft_row(
+    document_id: UUID,
+    row_id: UUID4,
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("incoming.create", policy="resource"))
+    ],
+    service: Annotated[IncomingService, Depends(_service)],
+    expected_revision: Annotated[int, Query(ge=1, le=2_147_483_645)],
+) -> Response:
+    await IncomingDraftService(service).discard(
+        document_id,
+        row_id,
+        expected_revision=expected_revision,
+        actor_id=user.user_id,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+router.include_router(draft_router)
 
 
 @router.post(

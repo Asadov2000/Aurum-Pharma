@@ -61,6 +61,7 @@ SENSITIVE_SUFFIXES: tuple[str, ...] = ("_email", "_phone")
 REDACTED_VALUE = "***"
 TABLE_SENSITIVE_FIELDS: dict[str, frozenset[str]] = {
     "incoming_document": frozenset({"total_amount"}),
+    "incoming_draft_row": frozenset({"fields"}),
     "supplier_return": frozenset({"amount"}),
 }
 

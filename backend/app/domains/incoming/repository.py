@@ -8,12 +8,12 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select, text
+from sqlalchemy import Text, and_, cast, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.catalog.models import TenantCatalog
 from app.domains.foundation.models import Branch, Tenant
-from app.domains.incoming.models import IncomingDocument, IncomingItem
+from app.domains.incoming.models import IncomingDocument, IncomingDraftRow, IncomingItem
 from app.domains.suppliers.models import Supplier
 
 
@@ -45,6 +45,68 @@ class IncomingListSummaryData:
 class IncomingRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_draft_row(self, tenant_id: UUID, row_id: UUID) -> IncomingDraftRow | None:
+        result = await self.session.execute(
+            select(IncomingDraftRow)
+            .where(IncomingDraftRow.tenant_id == tenant_id, IncomingDraftRow.id == row_id)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_draft_rows(self, document_id: UUID) -> list[IncomingDraftRow]:
+        result = await self.session.scalars(
+            select(IncomingDraftRow)
+            .where(
+                IncomingDraftRow.document_id == document_id, IncomingDraftRow.status == "pending"
+            )
+            .order_by(IncomingDraftRow.created_at, IncomingDraftRow.id)
+        )
+        return list(result)
+
+    async def count_draft_rows(self, document_id: UUID) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(IncomingDraftRow)
+                .where(
+                    IncomingDraftRow.document_id == document_id,
+                    IncomingDraftRow.status == "pending",
+                )
+            )
+            or 0
+        )
+
+    async def persist_draft_row(self, row: IncomingDraftRow) -> IncomingDraftRow:
+        self.session.add(row)
+        await self.session.flush()
+        await self.session.refresh(row)
+        return row
+
+    async def get_committed_draft_item(self, row: IncomingDraftRow) -> IncomingItem | None:
+        result = await self.session.execute(
+            select(IncomingItem)
+            .where(
+                IncomingItem.tenant_id == row.tenant_id,
+                IncomingItem.document_id == row.document_id,
+                IncomingItem.id == row.committed_item_id,
+                IncomingItem.operation_id == row.id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def draft_catalog_names(self, tenant_id: UUID, identifiers: set[str]) -> dict[str, str]:
+        if not identifiers:
+            return {}
+        rows = await self.session.execute(
+            select(TenantCatalog.id, TenantCatalog.brand_name).where(
+                TenantCatalog.tenant_id == tenant_id,
+                cast(TenantCatalog.id, Text).in_(identifiers),
+                TenantCatalog.deleted_at.is_(None),
+            )
+        )
+        return {str(identifier): name for identifier, name in rows}
 
     # ---- documents ----
 

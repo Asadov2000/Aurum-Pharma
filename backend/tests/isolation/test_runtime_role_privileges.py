@@ -49,6 +49,7 @@ CRUD_TABLES = {
 }
 
 NO_DELETE_TABLES = {
+    "incoming_draft_row",
     "pos_payment_attempt",
     "pos_refund_attempt",
     "user_preferences",
@@ -376,6 +377,8 @@ CUSTOM_FUNCTIONS = {
     "trg_billing_subscription_row_version",
     "trg_guard_edge_cash_append_only",
     "trg_guard_incoming_document_lifecycle",
+    "trg_guard_incoming_draft_row",
+    "trg_guard_incoming_pending_rows",
     "trg_guard_incoming_item_lifecycle",
     "trg_validate_incoming_acceptance_integrity",
     "trg_guard_pos_command_immutable",
