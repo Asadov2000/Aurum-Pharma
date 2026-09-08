@@ -204,6 +204,7 @@ $toolingPatterns = @(
     '^scripts/task-scope\.ps1$',
     '^scripts/verify-change\.ps1$',
     '^scripts/test-verification-tools\.ps1$',
+    '^scripts/test-backend-isolated\.ps1$',
     '^scripts/check-untracked-whitespace\.ps1$'
 )
 $infrastructurePatterns = @(
@@ -213,7 +214,7 @@ $infrastructurePatterns = @(
     '(^|/)Dockerfile(?:\.[^/]+)?$',
     '^frontend/Caddyfile$',
     '^\.env(?:\.[^/]+)?\.example$',
-    '^scripts/(?!task-scope|verify-change|test-verification-tools|check-untracked-whitespace).+\.ps1$'
+    '^scripts/(?!task-scope|verify-change|test-verification-tools|test-backend-isolated|check-untracked-whitespace).+\.ps1$'
 )
 $dependencyPatterns = @(
     '^backend/(?:pyproject\.toml|poetry\.lock)$',
