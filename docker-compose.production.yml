@@ -475,6 +475,8 @@ services:
     <<: *backend-service
     command:
       [
+        "python",
+        "-m",
         "uvicorn",
         "app.main:app",
         "--host",
@@ -531,6 +533,8 @@ services:
     stop_grace_period: 60s
     command:
       [
+        "python",
+        "-m",
         "celery",
         "-A",
         "app.tasks.celery_app",
@@ -637,6 +641,8 @@ services:
     stop_grace_period: 60s
     command:
       [
+        "python",
+        "-m",
         "celery",
         "-A",
         "app.tasks.catalog_app",
@@ -693,6 +699,8 @@ services:
         read_only: true
     command:
       [
+        "python",
+        "-m",
         "celery",
         "-A",
         "app.tasks.billing_app",
@@ -775,6 +783,8 @@ services:
         read_only: true
     command:
       [
+        "python",
+        "-m",
         "celery",
         "-A",
         "app.tasks.mailer_app",
@@ -827,6 +837,8 @@ services:
     stop_grace_period: 30s
     command:
       [
+        "python",
+        "-m",
         "celery",
         "-A",
         "app.tasks.beat_app",

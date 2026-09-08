@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date, datetime
@@ -10,9 +11,18 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, case, delete, exists, func, insert, not_, or_, select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
+from app.domains.catalog.import_batch import (
+    IMPORT_COLUMNS,
+    ImportBatchFallback,
+    ImportCandidate,
+    ImportKey,
+    ImportRow,
+    import_key,
+)
 from app.domains.catalog.import_limits import CATALOG_ACTIVE_STATUSES, catalog_execution_lock_key
 from app.domains.catalog.models import Barcode, CatalogImportJob, TenantCatalog
 from app.domains.inventory.models import Batch
@@ -86,6 +96,190 @@ class CatalogRepository:
         """Insert only import fields, without ORM NULLs for unrelated metadata."""
         statement = insert(TenantCatalog).values(**fields).returning(TenantCatalog)
         return (await self.session.execute(statement)).scalar_one()
+
+    async def lock_import_candidates(
+        self,
+        *,
+        tenant_id: UUID,
+        rows: list[ImportRow],
+    ) -> list[ImportCandidate]:
+        """Resolve duplicate names together and lock existing products in ID order."""
+        names = [row.brand_name for row in rows]
+        folded = (
+            await self.session.execute(
+                text(
+                    "SELECT name, lower(name) FROM unnest(CAST(:names AS text[])) AS source(name)"
+                ),
+                {"names": names},
+            )
+        ).all()
+        # PostgreSQL collation can disagree with Python Unicode lower(). In that
+        # case preserve find_duplicate's exact historical expression per row.
+        if any(str(name).lower() != normalized for name, normalized in folded):
+            raise ImportBatchFallback
+        statement = text(
+            "WITH requested AS (SELECT * FROM jsonb_to_recordset(CAST(:keys AS jsonb)) "
+            "AS source(name text, manufacturer text, dosage text, pack_size text)) "
+            "SELECT target.id, target.brand_name, lower(target.brand_name), "
+            "target.manufacturer, target.dosage, target.pack_size "
+            "FROM public.tenant_catalog target JOIN requested "
+            "ON lower(target.brand_name) = requested.name "
+            "AND target.manufacturer IS NOT DISTINCT FROM requested.manufacturer "
+            "AND target.dosage IS NOT DISTINCT FROM requested.dosage "
+            "AND target.pack_size IS NOT DISTINCT FROM requested.pack_size "
+            "WHERE target.tenant_id = :tenant_id AND target.deleted_at IS NULL "
+            "ORDER BY target.id LIMIT :limit FOR UPDATE OF target"
+        )
+        parameters = {
+            "tenant_id": tenant_id,
+            "keys": json.dumps([row.key._asdict() for row in rows]),
+            # More than one candidate per distinct input key necessarily means
+            # ambiguity. Bound materialization even for many existing copies.
+            "limit": len(rows) + 1,
+        }
+        candidates: list[ImportCandidate] = []
+        for item_id, name, normalized, manufacturer, dosage, pack_size in (
+            await self.session.execute(statement, parameters)
+        ).all():
+            if str(name).lower() != normalized:
+                raise ImportBatchFallback
+            candidates.append(
+                ImportCandidate(item_id, ImportKey(normalized, manufacturer, dosage, pack_size))
+            )
+        return candidates
+
+    async def create_import_batch(
+        self,
+        *,
+        tenant_id: UUID,
+        job_id: UUID,
+        user_id: UUID,
+        rows: list[ImportRow],
+    ) -> dict[ImportKey, UUID]:
+        """Let PostgreSQL generate IDs and map RETURNING by the unique input key."""
+        if not rows:
+            return {}
+        statement = (
+            insert(TenantCatalog)
+            .values(
+                [
+                    {
+                        **row.fields,
+                        "tenant_id": tenant_id,
+                        "import_job_id": job_id,
+                        "created_by": user_id,
+                    }
+                    for row in rows
+                ]
+            )
+            .returning(
+                TenantCatalog.id,
+                TenantCatalog.brand_name,
+                TenantCatalog.manufacturer,
+                TenantCatalog.dosage,
+                TenantCatalog.pack_size,
+            )
+        )
+        result: dict[ImportKey, UUID] = {}
+        for item_id, name, manufacturer, dosage, pack_size in (
+            await self.session.execute(statement)
+        ).all():
+            key = import_key(name, manufacturer, dosage, pack_size)
+            if key in result:
+                raise ImportBatchFallback
+            result[key] = item_id
+        if result.keys() != {row.key for row in rows}:
+            raise ImportBatchFallback
+        return result
+
+    async def update_import_batch(
+        self,
+        *,
+        tenant_id: UUID,
+        rows: list[tuple[UUID, ImportRow]],
+    ) -> None:
+        """Merge non-null fields in one UPDATE without writing unchanged rows."""
+        if not rows:
+            return
+        payload = [
+            {
+                "id": str(item_id),
+                **{
+                    column: str(value) if isinstance(value, Decimal) else value
+                    for column, value in row.fields.items()
+                },
+            }
+            for item_id, row in rows
+        ]
+        definitions = ", ".join(
+            f"{column} {'numeric(14,2)' if column == 'base_price' else 'text'}"
+            for column in IMPORT_COLUMNS
+        )
+        assignments = ", ".join(
+            f"{column} = COALESCE(source.{column}, target.{column})" for column in IMPORT_COLUMNS
+        )
+        differences = " OR ".join(
+            f"target.{column} IS DISTINCT FROM COALESCE(source.{column}, target.{column})"
+            for column in IMPORT_COLUMNS
+        )
+        await self.session.execute(
+            text(
+                "WITH source AS (SELECT * FROM jsonb_to_recordset(CAST(:rows AS jsonb)) "
+                f"AS records(id uuid, {definitions})) "
+                f"UPDATE public.tenant_catalog target SET {assignments} FROM source "
+                "WHERE target.tenant_id = :tenant_id AND target.id = source.id "
+                f"AND target.deleted_at IS NULL AND ({differences})"
+            ),
+            {"tenant_id": tenant_id, "rows": json.dumps(payload)},
+        )
+
+    async def attach_import_barcodes(
+        self,
+        *,
+        tenant_id: UUID,
+        associations: dict[str, UUID],
+    ) -> bool:
+        """Attach each unique code, then verify ownership after any conflict race."""
+        if not associations:
+            return True
+        inserted_rows = await self.session.execute(
+            pg_insert(Barcode)
+            .values(
+                [
+                    {
+                        "tenant_id": tenant_id,
+                        "catalog_id": item_id,
+                        "code": code,
+                        "code_type": "ean13",
+                    }
+                    for code, item_id in associations.items()
+                ]
+            )
+            .on_conflict_do_nothing(index_elements=[Barcode.tenant_id, Barcode.code])
+            .returning(Barcode.code, Barcode.catalog_id)
+        )
+        # Our uncommitted inserts cannot be reassigned by another transaction.
+        # RETURNING proves their association without rescanning a growing table.
+        actual = dict(inserted_rows.tuples().all())
+        conflicts = [code for code in associations if code not in actual]
+        if not conflicts:
+            return actual == associations
+        # Keep this a separate statement: a concurrent ON CONFLICT winner may
+        # only become visible in this next READ COMMITTED snapshot.
+        actual_rows = (
+            (
+                await self.session.execute(
+                    select(Barcode.code, Barcode.catalog_id).where(
+                        Barcode.tenant_id == tenant_id,
+                        Barcode.code.in_(conflicts),
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+        actual.update(actual_rows)
+        return actual == associations
 
     async def get_item(
         self, item_id: UUID, *, include_deleted: bool = False
@@ -411,6 +605,24 @@ class CatalogRepository:
         await self.session.flush()
         await self.session.refresh(bc)
         return bc
+
+    async def add_import_barcode(self, *, tenant_id: UUID, catalog_id: UUID, code: str) -> bool:
+        """Attach a code, accepting an existing association to this same product."""
+        statement = (
+            pg_insert(Barcode)
+            .values(tenant_id=tenant_id, catalog_id=catalog_id, code=code, code_type="ean13")
+            .on_conflict_do_nothing(index_elements=[Barcode.tenant_id, Barcode.code])
+            .returning(Barcode.catalog_id)
+        )
+        inserted_id = (await self.session.execute(statement)).scalar_one_or_none()
+        if inserted_id is not None:
+            return inserted_id == catalog_id
+        # A concurrent insert may win the unique constraint race. A new statement
+        # sees its committed association without transferring the code's owner.
+        existing_id = await self.session.scalar(
+            select(Barcode.catalog_id).where(Barcode.tenant_id == tenant_id, Barcode.code == code)
+        )
+        return existing_id == catalog_id
 
     async def list_barcodes_for_item(self, catalog_id: UUID) -> list[Barcode]:
         stmt = select(Barcode).where(Barcode.catalog_id == catalog_id).order_by(Barcode.code)

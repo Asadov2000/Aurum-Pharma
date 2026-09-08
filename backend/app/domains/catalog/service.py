@@ -11,7 +11,7 @@ duplicate-handling branches.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy.exc import DataError, IntegrityError
 
 from app.core.errors import (
     AurumError,
@@ -30,6 +31,15 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.catalog.image_processing import CatalogImageVariants
+from app.domains.catalog.import_batch import (
+    IMPORT_BATCH_MIN_ROWS,
+    IMPORT_BATCH_SIZE,
+    ImportBatchFallback,
+    ImportCounts,
+    ImportKey,
+    ImportRow,
+    import_row,
+)
 from app.domains.catalog.import_limits import (
     CATALOG_ACTIVE_STATUSES,
     CATALOG_EXECUTION_TIMEOUT_SECONDS,
@@ -470,53 +480,129 @@ class CatalogService:
             )
             return job
 
-        created = 0
-        updated = 0
-        skipped = 0
+        totals = {"created": 0, "updated": 0, "skipped": 0}
         per_row_errors: list[dict[str, Any]] = list(errors)
         strategy = job.duplicate_strategy
 
-        for row in rows:
-            try:
-                async with self.repo.row_savepoint():
-                    outcome = await self._apply_import_row(job, row, strategy=strategy)
+        for offset in range(0, len(rows), IMPORT_BATCH_SIZE):
+            chunk = rows[offset : offset + IMPORT_BATCH_SIZE]
+            counts = await self._try_import_batch(job, chunk, strategy=strategy)
+            if counts is not None:
+                totals["created"] += counts.created
+                totals["updated"] += counts.updated
+                totals["skipped"] += counts.skipped
+                continue
+            for row in chunk:
+                try:
+                    async with self.repo.row_savepoint():
+                        outcome = await self._apply_import_row(job, row, strategy=strategy)
 
-                if outcome == "created":
-                    created += 1
-                elif outcome == "updated":
-                    updated += 1
-                else:
-                    skipped += 1
-            except ConflictError as exc:
-                per_row_errors.append(
-                    {"row": row.get("brand_name", "?"), "messages": [exc.message]}
-                )
-            except SoftTimeLimitExceeded:
-                raise
-            except Exception as exc:
-                logger.error(
-                    "catalog_import_row_failed", job_id=str(job.id), error_type=type(exc).__name__
-                )
-                per_row_errors.append(
-                    {
-                        "row": row.get("brand_name", "?"),
-                        "messages": ["Не удалось обработать строку"],
-                    }
-                )
+                    totals[outcome] += 1
+                except ConflictError as exc:
+                    per_row_errors.append(
+                        {"row": row.get("brand_name", "?"), "messages": [exc.message]}
+                    )
+                except SoftTimeLimitExceeded:
+                    raise
+                except Exception as exc:
+                    logger.error(
+                        "catalog_import_row_failed",
+                        job_id=str(job.id),
+                        error_type=type(exc).__name__,
+                    )
+                    per_row_errors.append(
+                        {
+                            "row": row.get("brand_name", "?"),
+                            "messages": ["Не удалось обработать строку"],
+                        }
+                    )
 
         now = utc_now()
-        any_progress = bool(created or updated or skipped)
+        any_progress = any(totals.values())
         final_status = "failed" if not any_progress and per_row_errors else "success"
         return await self.repo.update_job(
             job,
             status=final_status,
             total_rows=len(rows) + len(errors),
-            valid_rows=created + updated + skipped,
+            valid_rows=sum(totals.values()),
             error_rows=len(per_row_errors),
             errors=per_row_errors[:PREVIEW_ROW_LIMIT] if per_row_errors else None,
             finished_at=now,
             expires_at_for_rollback=now + ROLLBACK_WINDOW,
         )
+
+    async def _try_import_batch(
+        self,
+        job: CatalogImportJob,
+        source_rows: Sequence[Mapping[str, object]],
+        *,
+        strategy: str,
+    ) -> ImportCounts | None:
+        """Apply an unambiguous chunk, or roll it back before scalar fallback.
+
+        Savepoints remain inside the original whole-file transaction. Signals
+        that enforce worker time limits must escape rather than restart a chunk.
+        """
+        if len(source_rows) < IMPORT_BATCH_MIN_ROWS:
+            return None
+        try:
+            rows = [import_row(source) for source in source_rows]
+            keys = {row.key for row in rows}
+            codes = [row.barcode for row in rows if row.barcode]
+            if len(keys) != len(rows) or len(codes) != len(set(codes)):
+                return None
+            async with self.repo.row_savepoint():
+                return await self._apply_import_batch(job, rows, strategy=strategy)
+        except SoftTimeLimitExceeded:
+            raise
+        except (ImportBatchFallback, IntegrityError, DataError):
+            return None
+
+    async def _apply_import_batch(
+        self,
+        job: CatalogImportJob,
+        rows: list[ImportRow],
+        *,
+        strategy: str,
+    ) -> ImportCounts:
+        candidates = await self.repo.lock_import_candidates(tenant_id=job.tenant_id, rows=rows)
+        requested_keys = {row.key for row in rows}
+        targets: dict[ImportKey, UUID] = {}
+        for candidate in candidates:
+            if candidate.key not in requested_keys:
+                continue
+            if candidate.key in targets:
+                # Historical find_duplicate chooses one unspecified row. Do not
+                # silently select a different target when existing copies exist.
+                raise ImportBatchFallback
+            targets[candidate.key] = candidate.id
+        creates: list[ImportRow] = []
+        updates: list[tuple[UUID, ImportRow]] = []
+        skipped = 0
+        for row in rows:
+            target_id = targets.get(row.key)
+            if target_id is None or strategy == "create_copy":
+                creates.append(row)
+            elif strategy == "update":
+                updates.append((target_id, row))
+            else:
+                skipped += 1
+        targets.update(
+            await self.repo.create_import_batch(
+                tenant_id=job.tenant_id,
+                job_id=job.id,
+                user_id=job.user_id,
+                rows=creates,
+            )
+        )
+        await self.repo.update_import_batch(tenant_id=job.tenant_id, rows=updates)
+        associations = {row.barcode: targets[row.key] for row in rows if row.barcode}
+        if not await self.repo.attach_import_barcodes(
+            tenant_id=job.tenant_id,
+            associations=associations,
+        ):
+            raise ImportBatchFallback
+        return ImportCounts(len(creates), len(updates), skipped)
 
     async def _apply_import_row(
         self,
@@ -562,12 +648,13 @@ class CatalogService:
             outcome = "created"
 
         if barcode_code and target_id is not None:
-            await self.add_barcode(
+            attached = await self.repo.add_import_barcode(
                 tenant_id=job.tenant_id,
                 catalog_id=target_id,
                 code=barcode_code,
-                code_type="ean13",
             )
+            if not attached:
+                raise ConflictError("Barcode already exists in this tenant")
         return outcome
 
     async def rollback_import(self, job_id: UUID) -> CatalogImportJob:

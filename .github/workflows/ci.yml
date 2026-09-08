@@ -1349,6 +1349,12 @@ jobs:
 
           backend_command = " ".join(model["services"]["backend"]["command"])
           assert "--reload" not in backend_command, "backend Compose command enables reload"
+          assert model["services"]["backend"]["command"][:3] == ["python", "-m", "uvicorn"]
+          for name in ("celery-worker", "catalog-worker", "billing-worker",
+                       "platform-mailer", "celery-beat"):
+              assert model["services"][name]["command"][:3] == ["python", "-m", "celery"], (
+                  f"{name} must use the relocated interpreter, not a stale console-script shebang"
+              )
 
           runtime_services = ("backend", "celery-worker", "catalog-worker", "celery-beat")
           forbidden_runtime_environment = {
@@ -1735,6 +1741,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-local-resource-isolation.ps1 -BackendImage aurum-backend:ci
 
+      - name: Verify committed catalog imports and repeated barcodes
+        shell: pwsh
+        run: ./scripts/benchmark-catalog-write.ps1 -BackendImage aurum-backend:ci -Rows 300
+
       - name: Build production gateway
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -1839,10 +1849,15 @@ jobs:
           test "$(docker image inspect --format '{{.Config.User}}' aurum-gateway:ci)" = "10001:10001"
 
           backend_cmd="$(docker image inspect --format '{{json .Config.Cmd}}' aurum-backend:ci)"
+          python -c 'import json, sys; assert json.loads(sys.argv[1])[:3] == ["python", "-m", "uvicorn"]' "$backend_cmd"
           if grep -q -- '--reload' <<<"$backend_cmd"; then
             echo "::error title=Unsafe production command::Backend image contains --reload"
             exit 1
           fi
+          for module in uvicorn celery; do
+            docker run --rm --network none --read-only --entrypoint python \
+              aurum-backend:ci -m "$module" --version
+          done
 
       - name: Validate production Caddy configuration
         run: >-
