@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,24 @@ def _build(**overrides: object) -> Settings:
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("field", ["JWT_ISSUER", "JWT_AUDIENCE"])
+@pytest.mark.parametrize("value", ["", "   "])
+def test_access_contract_rejects_blank_identifiers(field: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        _build(**{field: value})
+
+
+def test_legacy_access_window_is_explicit_and_bounded() -> None:
+    now = int(datetime.now(UTC).timestamp())
+    assert _build().JWT_LEGACY_ACCESS_UNTIL == 0
+    assert _build(JWT_LEGACY_ACCESS_UNTIL=now - 1).JWT_LEGACY_ACCESS_UNTIL == now - 1
+    assert _build(JWT_LEGACY_ACCESS_UNTIL=now + 60).JWT_LEGACY_ACCESS_UNTIL == now + 60
+    with pytest.raises(ValidationError, match="15 minutes"):
+        _build(JWT_LEGACY_ACCESS_UNTIL=now + 3600)
+    with pytest.raises(ValidationError):
+        _build(JWT_LEGACY_ACCESS_UNTIL=-1)
 
 
 def test_production_rejects_default_jwt_secret() -> None:

@@ -15,6 +15,9 @@ x-backend-runtime-environment: &backend-runtime-environment
   - CELERY_BROKER_URL=${CELERY_API_BROKER_URL:-redis://aurum_api:aurum_api_broker_pw@redis:6379/0}
   - JWT_SECRET
   - JWT_ALGORITHM
+  - JWT_ISSUER=${JWT_ISSUER:-aurum-pharma}
+  - JWT_AUDIENCE=${JWT_AUDIENCE:-aurum-pharma-api}
+  - JWT_LEGACY_ACCESS_UNTIL=${JWT_LEGACY_ACCESS_UNTIL:-0}
   - MFA_ENCRYPTION_KEY
   - MFA_ENCRYPTION_KEY_VERSION
   - MFA_ENCRYPTION_PREVIOUS_KEYS
