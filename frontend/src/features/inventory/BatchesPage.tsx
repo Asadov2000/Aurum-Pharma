@@ -27,6 +27,7 @@ import { hasPermission } from "@/features/auth/permissions";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
+import { shouldOpenRecord } from "@/lib/record";
 import { cn } from "@/lib/utils";
 
 import { BatchDetailModal } from "./BatchDetailModal";
@@ -583,7 +584,11 @@ function BatchTable({
         {items.map((batch) => (
           <TR
             key={batch.id}
+            onClick={(event) => {
+              if (!disabled && shouldOpenRecord(event)) onOpen(batch);
+            }}
             className={cn(
+              !disabled && "cursor-pointer",
               selectedId === batch.id &&
                 "bg-primary/[0.055] shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-primary/[0.07]",
             )}
@@ -667,7 +672,13 @@ function BatchCards({
         <article
           key={batch.id}
           aria-label={`${batch.catalog_name}, партия ${batch.batch_number ?? "без номера"}`}
-          className="rounded-lg border border-border bg-surface px-3 py-3"
+          className={cn(
+            "rounded-lg border border-border bg-surface px-3 py-3",
+            !disabled && "cursor-pointer transition-colors hover:bg-foreground/[0.025]",
+          )}
+          onClick={(event) => {
+            if (!disabled && shouldOpenRecord(event)) onOpen(batch);
+          }}
         >
           <div className="flex min-w-0 items-start justify-between gap-3">
             <div className="min-w-0">

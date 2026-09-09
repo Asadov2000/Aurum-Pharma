@@ -29,6 +29,7 @@ import { hasAnyPermission, hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { SupplierPicker } from "@/features/suppliers/SupplierPicker";
+import { shouldOpenRecord } from "@/lib/record";
 import { cn } from "@/lib/utils";
 
 import { statusLabel, statusOptions, statusTone } from "./labels";
@@ -558,7 +559,11 @@ function IncomingTable({
         {items.map((document) => (
           <TR
             key={document.id}
+            onClick={(event) => {
+              if (!disabled && shouldOpenRecord(event)) onOpen(document);
+            }}
             className={cn(
+              !disabled && "cursor-pointer",
               selectedId === document.id &&
                 "bg-primary/[0.055] shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-primary/[0.07]",
             )}
@@ -619,7 +624,15 @@ function IncomingCard({
   disabled?: boolean;
 }): JSX.Element {
   return (
-    <article className="min-w-0 rounded-lg border border-border bg-surface p-4">
+    <article
+      className={cn(
+        "min-w-0 rounded-lg border border-border bg-surface p-4",
+        !disabled && "cursor-pointer transition-colors hover:bg-foreground/[0.025]",
+      )}
+      onClick={(event) => {
+        if (!disabled && shouldOpenRecord(event)) onOpen(document);
+      }}
+    >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate font-semibold text-foreground">

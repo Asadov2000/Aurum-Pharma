@@ -26,6 +26,7 @@ import { permissionBranchScope } from "@/features/auth/branchPermissions";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
+import { shouldOpenRecord } from "@/lib/record";
 
 import {
   formatSupplierDateTime,
@@ -313,7 +314,7 @@ export function SuppliersPage(): JSX.Element {
               ))}
             </div>
           ) : isSplitLayout ? (
-            <div className="grid min-w-0 grid-cols-[minmax(0,1.75fr)_minmax(21rem,1fr)] items-start gap-4">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_21rem] items-start gap-4">
               <SupplierTable
                 items={rows}
                 selectedId={selectedSupplier?.id ?? null}
@@ -545,7 +546,15 @@ function SupplierTable({
   onOpen: (supplier: Supplier) => void;
 }): JSX.Element {
   return (
-    <Table className="min-w-full" aria-label="Поставщики">
+    <Table className="min-w-0 table-fixed" aria-label="Поставщики">
+      <colgroup>
+        <col />
+        <col className="w-[17%]" />
+        <col className="w-[17%]" />
+        <col className="w-[24%]" />
+        <col className="w-32" />
+        <col className="w-12" />
+      </colgroup>
       <THead>
         <TR>
           <TH>Поставщик</TH>
@@ -562,7 +571,11 @@ function SupplierTable({
         {items.map((supplier) => (
           <TR
             key={supplier.id}
+            onClick={(event) => {
+              if (!disabled && shouldOpenRecord(event)) onOpen(supplier);
+            }}
             className={cn(
+              !disabled && "cursor-pointer",
               selectedId === supplier.id &&
                 "bg-primary/[0.055] shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-primary/[0.07]",
             )}
@@ -570,32 +583,38 @@ function SupplierTable({
             <TD>
               <button
                 type="button"
-                className="max-w-72 text-left font-semibold text-foreground hover:text-primary"
+                className="max-w-full break-words text-left font-semibold text-foreground hover:text-primary"
                 disabled={disabled}
                 onClick={() => onOpen(supplier)}
               >
                 {supplier.name}
               </button>
               {supplier.legal_name && (
-                <p className="mt-0.5 max-w-72 truncate text-xs text-foreground-muted">
+                <p
+                  className="mt-0.5 truncate text-xs text-foreground-muted"
+                  title={supplier.legal_name}
+                >
                   {supplier.legal_name}
                 </p>
               )}
             </TD>
             <TD>
-              <p className="font-mono text-xs tabular-nums">
+              <p className="break-words font-mono text-xs tabular-nums">
                 {supplier.inn_or_tin || "ИНН не указан"}
               </p>
               {supplier.address && (
-                <p className="mt-1 max-w-56 truncate text-xs text-foreground-muted">
+                <p className="mt-1 truncate text-xs text-foreground-muted" title={supplier.address}>
                   {supplier.address}
                 </p>
               )}
             </TD>
-            <TD>{supplier.contact_person || "—"}</TD>
+            <TD className="break-words">{supplier.contact_person || "—"}</TD>
             <TD>
               {supplier.phone ? (
-                <a className="hover:text-primary hover:underline" href={`tel:${supplier.phone}`}>
+                <a
+                  className="break-words hover:text-primary hover:underline"
+                  href={`tel:${supplier.phone}`}
+                >
                   {supplier.phone}
                 </a>
               ) : (
@@ -603,7 +622,7 @@ function SupplierTable({
               )}
               {supplier.email && (
                 <a
-                  className="mt-0.5 block max-w-52 truncate text-xs text-foreground-muted hover:text-primary hover:underline"
+                  className="mt-0.5 block truncate text-xs text-foreground-muted hover:text-primary hover:underline"
                   href={`mailto:${supplier.email}`}
                   title={supplier.email}
                 >
@@ -616,7 +635,7 @@ function SupplierTable({
                 {supplierStatusLabel(supplier)}
               </Badge>
             </TD>
-            <TD className="text-right">
+            <TD className="px-1 text-right">
               <Button
                 variant="ghost"
                 size="sm"
@@ -846,7 +865,15 @@ function SupplierCard({
   onOpen: (supplier: Supplier) => void;
 }): JSX.Element {
   return (
-    <article className="rounded-lg border border-border bg-surface px-4 py-4">
+    <article
+      className={cn(
+        "rounded-lg border border-border bg-surface px-4 py-4",
+        !disabled && "cursor-pointer",
+      )}
+      onClick={(event) => {
+        if (!disabled && shouldOpenRecord(event)) onOpen(supplier);
+      }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="break-words text-base font-semibold text-foreground">{supplier.name}</h2>
