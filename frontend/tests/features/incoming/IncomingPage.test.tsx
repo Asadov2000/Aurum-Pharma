@@ -6,6 +6,7 @@ const listIncoming = vi.fn();
 const getIncoming = vi.fn();
 const listBranches = vi.fn();
 const searchSupplierOptions = vi.fn();
+const navigate = vi.fn();
 
 vi.mock("@/features/incoming/api", () => ({
   listIncoming: (...a: unknown[]) => listIncoming(...a),
@@ -71,7 +72,7 @@ vi.mock("@/features/auth/hooks", () => ({
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
   useParams: () => ({}),
   useSearch: () => ({}),
 }));
@@ -145,11 +146,11 @@ const SUMMARY = {
   currency: "TJS",
 };
 
-function stubViewport(split = false): void {
+function stubViewport(split = false, mobile = false): void {
   vi.stubGlobal(
     "matchMedia",
     vi.fn((query: string) => ({
-      matches: query.includes("768px") || (split && query.includes("1280px")),
+      matches: !mobile && (query.includes("768px") || (split && query.includes("1280px"))),
       media: query,
       onchange: null,
       addEventListener: vi.fn(),
@@ -285,7 +286,9 @@ describe("IncomingPage", () => {
     expect(
       await screen.findByRole("region", { name: "Карточка прихода: INV-001" }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Открыть приход: INV-002" }));
+    const row = screen.getByRole("button", { name: "Открыть приход: INV-002" }).closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row!).getByText(SUPPLIER.name));
     expect(
       await screen.findByRole("region", { name: "Карточка прихода: INV-002" }),
     ).toBeInTheDocument();
@@ -293,6 +296,75 @@ describe("IncomingPage", () => {
       expect(getIncoming).toHaveBeenLastCalledWith(second.id, expect.any(AbortSignal)),
     );
   });
+
+  it.each(["cell", "row", "button", "card", "card-button"])(
+    "opens a document exactly once from its %s",
+    async (area) => {
+      const mobile = area.startsWith("card");
+      stubViewport(false, mobile);
+      listIncoming.mockResolvedValue({
+        items: [DOC],
+        total: 1,
+        page: 1,
+        page_size: 25,
+        summary: SUMMARY,
+      });
+      listBranches.mockResolvedValue([BRANCH]);
+      renderPage();
+      await screen.findByText(DOC.document_number, { exact: false });
+      if (mobile) {
+        const card = screen.getByRole("article");
+        fireEvent.click(
+          area === "card-button"
+            ? within(card).getByRole("button", { name: "Открыть документ" })
+            : within(card).getByText(SUPPLIER.name),
+        );
+      } else {
+        const button = screen.getByRole("button", { name: "Открыть приход: INV-001" });
+        const row = button.closest("tr");
+        expect(row).not.toBeNull();
+        fireEvent.click(
+          area === "button"
+            ? button
+            : area === "row"
+              ? row!
+              : within(row!).getByText(SUPPLIER.name),
+        );
+      }
+      expect(navigate).toHaveBeenCalledExactlyOnceWith({
+        to: "/incoming/$id",
+        params: { id: DOC.id },
+      });
+    },
+  );
+
+  it.each([false, true])(
+    "blocks previous document areas while a new page loads (mobile=%s)",
+    async (mobile) => {
+      stubViewport(false, mobile);
+      listIncoming.mockResolvedValueOnce({
+        items: [DOC],
+        total: 26,
+        page: 1,
+        page_size: 25,
+        summary: SUMMARY,
+      });
+      listIncoming.mockImplementation(() => new Promise(() => undefined));
+      listBranches.mockResolvedValue([BRANCH]);
+      renderPage();
+      fireEvent.click(await screen.findByRole("button", { name: /Вперёд/ }));
+      await waitFor(() => expect(listIncoming).toHaveBeenCalledTimes(2));
+      const open = screen.getByRole("button", {
+        name: mobile ? "Открыть документ" : "Открыть приход: INV-001",
+      });
+      await waitFor(() => expect(open).toBeDisabled());
+      const record = mobile ? screen.getByRole("article") : open.closest("tr");
+      expect(record).not.toBeNull();
+      fireEvent.click(within(record!).getByText(SUPPLIER.name));
+      fireEvent.click(open);
+      expect(navigate).not.toHaveBeenCalled();
+    },
+  );
 
   it("warns before closing a new receiving document with unsaved data", async () => {
     listIncoming.mockResolvedValueOnce({

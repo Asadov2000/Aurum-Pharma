@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listBatches = vi.fn();
@@ -192,6 +192,87 @@ describe("BatchesPage", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.getByText("Заблокирована: Карантин качества")).toBeInTheDocument();
   });
+
+  it("selects another batch from a regular cell in the wide workspace", async () => {
+    const second = {
+      ...BATCH,
+      id: "00000000-0000-0000-0000-000000000002",
+      batch_number: "LOT-002",
+    };
+    listBatches.mockResolvedValue({
+      items: [BATCH, second],
+      total: 2,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    getBatch.mockImplementation(async (id: string) => ({
+      ...(id === second.id ? second : BATCH),
+      report_timezone: "Asia/Dushanbe",
+      recent_movements: [],
+    }));
+    renderPage();
+    const open = await screen.findByRole("button", { name: /Открыть партию LOT-002/ });
+    const row = open.closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row!).getByText(BATCH.branch_name));
+    expect(
+      await screen.findByRole("region", { name: "Карточка партии LOT-002" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getBatch).toHaveBeenLastCalledWith(second.id, expect.any(AbortSignal)),
+    );
+  });
+
+  it.each(["area", "button"])("opens one batch dialog from a mobile card %s", async (area) => {
+    setDesktop(false);
+    listBatches.mockResolvedValue({
+      items: [BATCH],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    renderPage();
+    const card = await screen.findByRole("article", { name: /Парацетамол, партия LOT-2026-001/ });
+    fireEvent.click(
+      area === "button"
+        ? within(card).getByRole("button", { name: /Открыть партию/ })
+        : within(card).getByText(BATCH.branch_name),
+    );
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await waitFor(() =>
+      expect(getBatch).toHaveBeenCalledExactlyOnceWith(BATCH.id, expect.any(AbortSignal)),
+    );
+  });
+
+  it.each([false, true])(
+    "blocks previous batch areas while a new page loads (mobile=%s)",
+    async (mobile) => {
+      setDesktop(!mobile);
+      listBatches.mockResolvedValueOnce({
+        items: [BATCH],
+        total: 26,
+        page: 1,
+        page_size: 25,
+        summary: SUMMARY,
+      });
+      listBatches.mockImplementation(() => new Promise(() => undefined));
+      renderPage();
+      fireEvent.click(await screen.findByRole("button", { name: /Вперёд/ }));
+      await waitFor(() => expect(listBatches).toHaveBeenCalledTimes(2));
+      const open = screen.getByRole("button", { name: /Открыть партию LOT-2026-001/ });
+      await waitFor(() => expect(open).toBeDisabled());
+      const record = mobile ? screen.getByRole("article") : open.closest("tr");
+      expect(record).not.toBeNull();
+      const previousReads = getBatch.mock.calls.length;
+      fireEvent.click(within(record!).getByText(BATCH.branch_name));
+      fireEvent.click(open);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(getBatch).toHaveBeenCalledTimes(previousReads);
+    },
+  );
 
   it("debounces the batch-number filter before requesting data", async () => {
     listBatches.mockResolvedValue({

@@ -53,6 +53,12 @@ function renderPage() {
   );
 }
 
+function clickContactLink(link: HTMLElement) {
+  // Cancel browser navigation only after the React row/card handler has run.
+  window.addEventListener("click", (event) => event.preventDefault(), { once: true });
+  fireEvent.click(link);
+}
+
 const SAMPLE = {
   id: "s-1",
   tenant_id: "t-1",
@@ -255,7 +261,8 @@ describe("SuppliersPage", () => {
     expect(
       await screen.findByRole("region", { name: `Карточка поставщика: ${SAMPLE.name}` }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: `Открыть карточку: ${second.name}` }));
+    const table = screen.getByRole("table", { name: "Поставщики" });
+    fireEvent.click(within(table).getByText(second.contact_person));
     expect(
       screen.getByRole("region", { name: `Карточка поставщика: ${second.name}` }),
     ).toBeInTheDocument();
@@ -263,5 +270,58 @@ describe("SuppliersPage", () => {
       expect.objectContaining({ supplier_id: second.id, page: 1, page_size: 3 }),
       expect.any(AbortSignal),
     );
+    const firstRow = within(table).getByRole("button", { name: SAMPLE.name }).closest("tr")!;
+    clickContactLink(within(firstRow).getByRole("link", { name: SAMPLE.phone }));
+    clickContactLink(within(firstRow).getByRole("link", { name: SAMPLE.email }));
+    expect(
+      screen.getByRole("region", { name: `Карточка поставщика: ${second.name}` }),
+    ).toBeInTheDocument();
+    expect(firstRow).not.toHaveAttribute("tabindex");
+    expect(firstRow).not.toHaveAttribute("role", "button");
+    const open = within(firstRow).getByRole("button", { name: `Открыть карточку: ${SAMPLE.name}` });
+    open.focus();
+    expect(open).toHaveFocus();
+    fireEvent.click(open);
+    expect(
+      screen.getByRole("region", { name: `Карточка поставщика: ${SAMPLE.name}` }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens a card from its free surface but leaves its contact links independent", async () => {
+    searchSuppliers.mockResolvedValueOnce({
+      items: [SAMPLE],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    renderPage();
+    const card = (await screen.findByText(SAMPLE.name)).closest("article")!;
+    clickContactLink(within(card).getByRole("link", { name: SAMPLE.phone }));
+    clickContactLink(within(card).getByRole("link", { name: SAMPLE.email }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByText(SAMPLE.contact_person));
+    expect(await screen.findByRole("dialog", { name: SAMPLE.name })).toBeInTheDocument();
+  });
+
+  it("does not open previous search results while a replacement request is pending", async () => {
+    searchSuppliers.mockResolvedValueOnce({
+      items: [SAMPLE],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    searchSuppliers.mockImplementation(() => new Promise(() => undefined));
+    renderPage();
+    const card = (await screen.findByText(SAMPLE.name)).closest("article")!;
+    fireEvent.change(screen.getByPlaceholderText("Название, контакт, телефон или ИНН"), {
+      target: { value: "другой поставщик" },
+    });
+    await waitFor(() =>
+      expect(within(card).getByRole("button", { name: "Открыть карточку" })).toBeDisabled(),
+    );
+    fireEvent.click(within(card).getByText(SAMPLE.contact_person));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

@@ -46,6 +46,10 @@ type Preset = "all" | "active" | "without_image" | "without_barcode" | "inactive
 
 const pageSizeOptions = [25, 50, 100] as const;
 const wideCatalogQuery = "(min-width: 1536px)";
+// Main columns, gaps, padding and the separate 44px action area must all fit.
+const listColumnsClass =
+  "grid min-w-0 flex-1 grid-cols-[64px_minmax(0,1fr)] items-center gap-3 px-3 [@container_(min-width:1002px)]:grid-cols-[64px_minmax(220px,1.4fr)_minmax(140px,0.8fr)_150px_180px_120px]";
+const listDetailClass = "hidden [@container_(min-width:1002px)]:block";
 
 function useWideCatalogLayout(): boolean {
   const [isWide, setIsWide] = useState(
@@ -779,15 +783,21 @@ export function CatalogPage(): JSX.Element {
               aria-busy={isShowingPreviousResults}
             >
               {viewMode === "list" ? (
-                <div className="overflow-hidden rounded-lg border border-border bg-surface">
-                  <div className="hidden grid-cols-[64px_minmax(220px,1.4fr)_minmax(140px,.8fr)_150px_180px_120px_44px] gap-3 border-b border-border bg-background px-3 py-2 text-xs font-semibold text-foreground-muted xl:grid">
-                    <span className="sr-only">Фото</span>
-                    <span>Товар</span>
-                    <span>Производитель</span>
-                    <span>Условия отпуска</span>
-                    <span>Статус</span>
-                    <span>Цена</span>
-                    <span className="sr-only">Действия</span>
+                <div className="rounded-lg border border-border bg-surface [container-type:inline-size]">
+                  <div className="hidden border-b border-border bg-background py-2 text-xs font-semibold text-foreground-muted [@container_(min-width:1002px)]:flex">
+                    <div className={listColumnsClass}>
+                      <span>
+                        <span className="sr-only">Фото</span>
+                      </span>
+                      <span>Товар</span>
+                      <span>Производитель</span>
+                      <span>Условия отпуска</span>
+                      <span>Статус</span>
+                      <span>Цена</span>
+                    </div>
+                    <span className="w-11 shrink-0">
+                      <span className="sr-only">Действия</span>
+                    </span>
                   </div>
                   <div className="divide-y divide-border">
                     {rows.map((item) => {
@@ -806,7 +816,7 @@ export function CatalogPage(): JSX.Element {
                           )}
                           <button
                             type="button"
-                            className="grid min-w-0 flex-1 grid-cols-[64px_minmax(0,1fr)] items-center gap-3 px-3 py-3 text-left disabled:cursor-wait xl:grid-cols-[64px_minmax(220px,1.4fr)_minmax(140px,.8fr)_150px_180px_120px]"
+                            className={cn(listColumnsClass, "py-3 text-left disabled:cursor-wait")}
                             aria-label={`Открыть карточку ${item.brand_name}`}
                             aria-pressed={isWideCatalogLayout ? selected : undefined}
                             disabled={isShowingPreviousResults}
@@ -823,23 +833,35 @@ export function CatalogPage(): JSX.Element {
                                   [item.form, item.dosage].filter(Boolean).join(" · ") ||
                                   "Сведения не указаны"}
                               </span>
-                              <span className="mt-1 flex flex-wrap gap-1 xl:hidden">
+                              <span className="mt-1 flex flex-wrap gap-1 [@container_(min-width:1002px)]:hidden">
                                 <Badge tone={status.tone}>{status.label}</Badge>
                                 <span className="text-xs font-semibold text-foreground">
                                   {formattedPrice(item)}
                                 </span>
                               </span>
                             </span>
-                            <span className="hidden truncate text-sm text-foreground-secondary xl:block">
+                            <span
+                              className={cn(
+                                listDetailClass,
+                                "truncate text-sm text-foreground-secondary",
+                              )}
+                            >
                               {item.manufacturer || "—"}
                             </span>
-                            <span className="hidden text-sm text-foreground-secondary xl:block">
+                            <span
+                              className={cn(listDetailClass, "text-sm text-foreground-secondary")}
+                            >
                               {dispensingLabel[item.dispensing_type]}
                             </span>
-                            <span className="hidden xl:block">
+                            <span className={listDetailClass}>
                               <Badge tone={status.tone}>{status.label}</Badge>
                             </span>
-                            <span className="hidden whitespace-nowrap text-sm font-semibold text-foreground xl:block">
+                            <span
+                              className={cn(
+                                listDetailClass,
+                                "min-w-0 break-words whitespace-normal text-sm font-semibold text-foreground",
+                              )}
+                            >
                               {formattedPrice(item)}
                             </span>
                           </button>
