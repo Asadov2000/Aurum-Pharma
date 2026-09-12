@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.errors import ServiceUnavailableError
 from app.domains.auth.models import AppUser
 from tests.domains.auth.test_identities import BASE, PASSWORD, PHONE, _verified
 
@@ -206,6 +207,80 @@ async def test_unknown_numbers_do_not_exhaust_paid_sms_budget(
     sent = await auth_client.post(f"{BASE}/login/phone/code", json={"phone": PHONE})
     assert sent.status_code == 202
     assert int(await redis.get("auth:identity:sms:daily")) == 1
+
+
+@pytest.mark.parametrize("purpose", ["login", "reset"])
+@pytest.mark.parametrize("failure", ["timeout", "provider_rejection", "daily_budget"])
+async def test_public_sms_delivery_failures_do_not_identify_accounts(
+    purpose: str,
+    failure: str,
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user: UserFactory,
+    redis: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(get_settings(), "SMS_PROVIDER", "payom")
+    monkeypatch.setattr(get_settings(), "SMS_DAILY_LIMIT", 1)
+    if failure == "daily_budget":
+        await redis.set("auth:identity:sms:daily", 1, ex=86400)
+    user = await make_user()
+    await _verified(db_session, user.id)
+    sent: list[str] = []
+
+    async def unavailable(phone: str, code: str) -> None:
+        sent.append(phone)
+        assert code == "123456"
+        raise ServiceUnavailableError(
+            "SMS provider is temporarily unavailable"
+            if failure == "timeout"
+            else "SMS provider did not accept the request"
+        )
+
+    monkeypatch.setattr("app.domains.auth.identity_service.send_sms_code", unavailable)
+    results = []
+    for phone in (PHONE, "+992900000002"):
+        path = "/login/phone/code" if purpose == "login" else "/password/reset/code"
+        payload = {"phone": phone} if purpose == "login" else {"channel": "phone", "contact": phone}
+        results.append(await auth_client.post(f"{BASE}{path}", json=payload))
+    assert [result.status_code for result in results] == [202, 202]
+    assert results[0].json() == results[1].json() == {"status": "ok", "dev_code": None}
+    assert sent == ([] if failure == "daily_budget" else [PHONE])
+    assert int(await redis.get("auth:identity:sms:daily")) == (
+        2 if failure == "daily_budget" else 1
+    )
+    # An uncertain provider outcome must not discard a potentially delivered code.
+    assert (
+        await db_session.scalar(
+            text(
+                "SELECT count(*) FROM auth_identity_code WHERE contact=:phone AND used_at IS NULL"
+            ),
+            {"phone": PHONE},
+        )
+        == 1
+    )
+
+
+async def test_authenticated_phone_binding_still_reports_delivery_failure(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user: UserFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user(password=PASSWORD)
+    current = await _create_session(db_session, user=user)
+    headers = _auth_headers(user, current)
+    await _actor(db_session, headers["Authorization"].removeprefix("Bearer "))
+
+    async def unavailable(phone: str, code: str) -> None:
+        raise ServiceUnavailableError("SMS provider is temporarily unavailable")
+
+    monkeypatch.setattr("app.domains.auth.identity_service.send_sms_code", unavailable)
+    result = await auth_client.post(
+        f"{BASE}/phone/code", headers=headers, json={"phone": PHONE, "password": PASSWORD}
+    )
+    assert result.status_code == 503
+    assert result.json()["error"]["code"] == "service_unavailable"
 
 
 async def test_invalidating_unused_email_code_does_not_verify_contact(

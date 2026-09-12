@@ -104,8 +104,15 @@ class IdentityService(AuthService):
         if result["status"] != "created":
             raise RateLimitError("Too many code requests. Try again later.")
         if channel == "phone" and result.get("deliver"):
-            await self._budget("sms:daily", config.SMS_DAILY_LIMIT, 86400)
-            await send_sms_code(contact, code)
+            try:
+                await self._budget("sms:daily", config.SMS_DAILY_LIMIT, 86400)
+                await send_sms_code(contact, code)
+            except (RateLimitError, ServiceUnavailableError):
+                # Public requests must not reveal whether the destination belongs
+                # to an account when delivery fails or the paid budget is spent.
+                # Keep the challenge: an uncertain send may already have arrived.
+                if purpose not in {"login", "reset"}:
+                    raise
         if config.ENVIRONMENT == "development" and (
             channel == "email" or config.SMS_PROVIDER == "development"
         ):
