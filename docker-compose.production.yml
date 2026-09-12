@@ -255,7 +255,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -316,7 +316,7 @@ services:
     restart: unless-stopped
 
   minio-init:
-    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     entrypoint: ["/bin/sh", "-ec"]
     environment:
       SSL_CERT_FILE: /run/tls/ca.crt
@@ -564,7 +564,7 @@ services:
       retries: 3
       start_period: 30s
   catalog-minio-init:
-    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
     environment:
       MINIO_ENDPOINT: minio:9000
@@ -858,6 +858,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.production
+      args:
+        VITE_PUBLIC_WEBSITE_URL: "${VITE_PUBLIC_WEBSITE_URL:-}"
     environment:
       AURUM_DOMAIN: "${AURUM_DOMAIN:?AURUM_DOMAIN is required}"
       AURUM_ACME_EMAIL: "${AURUM_ACME_EMAIL:?AURUM_ACME_EMAIL is required}"

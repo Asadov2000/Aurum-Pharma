@@ -78,6 +78,18 @@ describe("LoginPage", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("opens the configured public website separately without submitting the login form", () => {
+    vi.stubEnv("VITE_PUBLIC_WEBSITE_URL", "https://aurum.example.test/");
+    renderPage();
+    const link = screen.getByRole("link", { name: /О проекте Aurum Pharma/ });
+    expect(link).toHaveAttribute("href", "https://aurum.example.test/");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(link.closest("form")).toBeNull();
+    expect(requestLoginCode).not.toHaveBeenCalled();
   });
 
   it("rejects an empty email and does not call the API", async () => {

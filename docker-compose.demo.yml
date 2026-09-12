@@ -109,7 +109,7 @@ services:
   minio:
     networks:
       - storage
-    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: aurum-demo-minio
     command: server /data --console-address ":9001"
     environment:
@@ -234,7 +234,7 @@ services:
   catalog-minio-init:
     networks:
       - storage
-    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: aurum-demo-catalog-minio-init
     entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
     environment:
@@ -431,6 +431,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: http://localhost:8000/api/v1
+        VITE_PUBLIC_WEBSITE_URL: ${VITE_PUBLIC_WEBSITE_URL:-}
     container_name: aurum-demo-frontend
     volumes:
       - frontend-vite-cache:/app/node_modules/.vite

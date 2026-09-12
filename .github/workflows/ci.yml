@@ -169,7 +169,7 @@ jobs:
             --publish 9000:9000 \
             --env MINIO_ROOT_USER=minioadmin \
             --env MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+            quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
             server /data
 
           for attempt in $(seq 1 30); do
@@ -1014,6 +1014,24 @@ jobs:
         # TypeScript was checked above; avoid running tsc twice in the same job.
         run: pnpm build:assets
 
+      - name: Public website static and unit checks
+        working-directory: .
+        run: node website/scripts/test.mjs
+
+      - name: Public website production build
+        working-directory: .
+        env:
+          APP_URL: https://app.example.test/login
+        run: node website/scripts/build.mjs --production
+
+      - name: Upload public website preview (test login URL)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-website-preview-${{ github.run_attempt }}
+          path: website/dist
+          if-no-files-found: error
+          retention-days: 7
+
   dependency-audit:
     name: Dependency security audit
     runs-on: ubuntu-latest
@@ -1167,6 +1185,9 @@ jobs:
       - name: Install Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
+
+      - name: Public website browser checks
+        run: node website/scripts/check-browser.mjs
 
       - name: Start isolated application stack
         shell: bash

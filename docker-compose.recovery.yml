@@ -3,7 +3,7 @@
 services:
   minio-backup-init:
     profiles: ["backup"]
-    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     entrypoint: ["/bin/sh", "-ec"]
     environment:
       SSL_CERT_FILE: /run/tls/ca.crt
@@ -216,7 +216,7 @@ services:
 
   offsite-test-minio:
     profiles: ["offsite-test"]
-    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data
     environment:
       MINIO_BROWSER: "off"
@@ -246,7 +246,7 @@ services:
 
   offsite-test-init:
     profiles: ["offsite-test"]
-    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     user: "10001:10001"
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -559,7 +559,7 @@ services:
 
   restore-minio:
     profiles: ["restore-drill"]
-    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data
     environment:
       MINIO_BROWSER: "off"

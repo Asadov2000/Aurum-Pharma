@@ -6,8 +6,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$minioImage = "minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
-$mcImage = "minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727"
+$minioImage = "quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+$mcImage = "quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727"
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $provisionScript = (Resolve-Path (Join-Path $workspace "infra/minio/provision-catalog-reader.sh")).Path
 $probeScript = (Resolve-Path (Join-Path $workspace "backend/scripts/test_catalog_storage_permissions.py")).Path

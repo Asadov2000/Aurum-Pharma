@@ -294,6 +294,7 @@ $e2eSpecs = [System.Collections.Generic.List[string]]::new()
 $hasBackend = $false
 $hasFrontend = $false
 $hasFrontendApp = $false
+$hasWebsite = $false
 $hasE2E = $false
 $hasInfrastructure = $false
 $hasDependency = $false
@@ -345,6 +346,10 @@ foreach ($path in $paths) {
     }
     if ($path -match '^frontend/e2e/') {
         $hasE2E = $true
+    }
+    if ($path -match '^website/' -and -not (Test-AnyPattern -Path $path -Patterns $documentationPatterns)) {
+        $hasWebsite = $true
+        Add-UniqueValue -List $areas -Value "website"
     }
     if (Test-AnyPattern -Path $path -Patterns $documentationPatterns) {
         $hasDocumentation = $true
@@ -403,7 +408,8 @@ foreach ($path in $paths) {
         (Test-AnyPattern -Path $path -Patterns $infrastructurePatterns) -or
         (Test-AnyPattern -Path $path -Patterns $dependencyPatterns) -or
         (Test-AnyPattern -Path $path -Patterns $knownBackendPatterns) -or
-        (Test-AnyPattern -Path $path -Patterns $knownFrontendPatterns)
+        (Test-AnyPattern -Path $path -Patterns $knownFrontendPatterns) -or
+        $path -match '^website/'
     if (-not $knownPath) {
         $hasUnknown = $true
         Add-UniqueValue -List $areas -Value "unknown"
@@ -486,6 +492,7 @@ $runBackendQuality = $false
 $runFrontendQuality = $false
 $runToolingSelfTest = $hasTooling
 $requiresAllE2E = $risk -eq "full" -or $risk -eq "critical"
+$runWebsite = $hasWebsite -or $requiresAllE2E
 
 if ($risk -eq "full" -or $risk -eq "critical") {
     $backendMode = "full"
@@ -543,6 +550,7 @@ $result = [ordered]@{
     flags = [ordered]@{
         backend = $hasBackend
         frontend = $hasFrontend
+        website = $hasWebsite
         e2e = $hasE2E
         tooling = $hasTooling
         documentation = $hasDocumentation
@@ -561,6 +569,9 @@ $result = [ordered]@{
         frontendTests = $frontendMode
         frontendQuality = $runFrontendQuality
         frontendBuild = $requiresFrontendBuild
+        websiteTests = $runWebsite
+        websiteBuild = $runWebsite
+        websiteBrowser = $runWebsite
         e2e = $e2eMode
     }
 }
@@ -581,6 +592,7 @@ Write-Host "Verification"
 Write-Host "  Backend tests:  $backendMode"
 Write-Host "  Frontend tests: $frontendMode"
 Write-Host "  Frontend build: $requiresFrontendBuild"
+Write-Host "  Website checks: $runWebsite"
 Write-Host "  E2E:            $e2eMode"
 if ($paths.Count -gt 0) {
     Write-Host "Changed paths"

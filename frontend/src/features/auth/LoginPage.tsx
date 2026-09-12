@@ -11,6 +11,7 @@ import {
   getRouteAccessContext,
 } from "@/components/layout/routeAccess";
 import { describeApiError } from "@/lib/errorMessages";
+import { resolvePublicWebsiteUrl } from "@/lib/publicWebsite";
 import { useAuthStore } from "@/stores/auth";
 
 import {
@@ -77,6 +78,7 @@ function LoginError({ message }: { message: string | null }): JSX.Element | null
 }
 
 export function LoginPage(): JSX.Element {
+  const publicWebsiteUrl = resolvePublicWebsiteUrl(import.meta.env.VITE_PUBLIC_WEBSITE_URL);
   const [step, setStep] = useState<LoginStep>("email");
   const [email, setEmail] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
@@ -673,6 +675,37 @@ export function LoginPage(): JSX.Element {
               <Button variant="ghost" size="sm" disabled={authRequestBusy} onClick={resetToEmail}>
                 Изменить email
               </Button>
+            </div>
+          ) : null}
+
+          {publicWebsiteUrl ? (
+            <div className="mt-8 border-t border-border pt-5">
+              <a
+                href={publicWebsiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="О проекте Aurum Pharma (откроется в новой вкладке)"
+                className="group flex min-h-16 items-center justify-between gap-4 rounded-xl border border-border bg-surface px-4 py-3 text-primary transition-colors hover:border-primary/40 hover:bg-primary/5"
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold">О проекте Aurum Pharma</span>
+                  <span className="mt-1 block text-xs leading-5 text-foreground-secondary">
+                    Возможности и установка
+                  </span>
+                </span>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5 shrink-0 motion-safe:transition-transform motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:translate-x-0.5"
+                  aria-hidden="true"
+                >
+                  <path d="M7 17 17 7M7 7h10v10" />
+                </svg>
+              </a>
             </div>
           ) : null}
         </div>

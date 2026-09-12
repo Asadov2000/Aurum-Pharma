@@ -328,7 +328,7 @@ services:
   catalog-minio-init:
     networks:
       - storage
-    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
     environment:
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
@@ -507,6 +507,7 @@ services:
     container_name: aurum-frontend
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
+      VITE_PUBLIC_WEBSITE_URL: ${VITE_PUBLIC_WEBSITE_URL:-}
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public

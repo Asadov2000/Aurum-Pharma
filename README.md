@@ -1,76 +1,114 @@
 # Aurum Pharma
 
-SaaS-система автоматизации аптек для Республики Таджикистан. Мульти-тенантная, по подписке.
+Система автоматизации аптек Таджикистана: касса, склад, приёмка, управление
+аптеками и сопровождение командой Aurum. Русский язык пилота, валюта TJS.
 
-> Этап 1 (MVP). Активная разработка. Полные правила, стек и конвенции — в [CLAUDE.md](CLAUDE.md).
+Рабочее веб-приложение уже реализовано и проверяется в локальном demo.
+Облачное рабочее окружение и распространяемый Windows-установщик ещё не
+выпущены. Публичный сайт добавляется отдельным компонентом `website/`.
 
-## Быстрый старт
+Правила проекта: **[AGENTS.md](AGENTS.md)**. Это единый источник постоянных
+правил; точные версии стека находятся в manifest/lock-файлах и Dockerfiles.
 
-```bash
-cp .env.example .env
-docker compose up -d
-```
+## С чего начать разработчику
 
-Применить миграции БД:
+1. [Карта проекта](docs/project-structure.md) — ответственность папок и первый
+   рабочий цикл; существующие пути отделены от планируемых.
+2. [Текущее состояние](docs/development-state.md) и
+   [известные проблемы](docs/known-issues.md) — реализация, проверки и риски.
+3. [План развития](docs/implementation-roadmap.md) — сайт, Cloud, локальная
+   касса, Windows-клиент, установщик и условия запуска пилота.
+4. [Индекс контекста](docs/ai-context-index.md) — где найти относящийся к задаче
+   код, тесты и документы; [ADR](docs/adr/README.md) — принятые решения.
 
-```bash
-powershell -ExecutionPolicy Bypass -File .\scripts\migrate-local.ps1
-```
+## Запуск текущего main demo на Windows
 
-Проверить локальное demo-состояние на Windows:
+Нужны Git и работающий Docker Desktop. Команды выполняются из корня checkout.
+Сначала проверить план запуска, затем обновить demo из `main` без пересоздания
+или наполнения общей базы:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\demo-smoke.ps1
+.\scripts\start-current-main-demo.ps1 -DryRun -Rebuild -SkipSeed -NoBrowser
+.\scripts\start-current-main-demo.ps1 -Rebuild -SkipSeed -NoBrowser
 ```
 
-Подробно: [docs/local-demo.md](docs/local-demo.md).
+Launcher обновляет `origin/main` (при недоступности GitHub использует его
+локальную копию), а не незакоммиченные изменения рабочей ветки,
+подготавливает отдельный runtime внутри workspace и применяет миграции вверх.
+`SkipSeed` обязателен для существующей общей dev/demo-базы. Прерванный запуск
+диагностировать по его ошибке; удаление томов, downgrade или принудительный seed
+не являются способом починки.
 
-После того как стек поднят:
+- Приложение: <http://localhost:5173>.
+- Launcher проверяет доступность API, frontend и gateway после запуска.
+- Отдельный стандартный dev Compose и его smoke описаны в
+  [docs/local-demo.md](docs/local-demo.md). Это другой профиль: не запускать
+  его поверх current-main demo на тех же портах.
 
-- Backend API: <http://localhost:8000> (`/healthz`, `/docs`)
-- Frontend: <http://localhost:5173>
-- Local email inbox: <http://localhost:8025>
-- MinIO: внутренний сервис Docker; служебная консоль на хост не публикуется.
-- Prometheus: внутренний сервис сети monitoring.
-- Postgres (основной): внутренний `postgres:5432`, БД `aurum`; обслуживание через Docker `exec`.
-- Postgres (тестовый): `localhost:5433`, БД `aurum_test`
-- Redis: внутренний `redis:6379`; обслуживание через Docker `exec`.
+`SkipSeed` не наполняет новую среду демонстрационными данными. Первичное
+наполнение отдельной новой среды и работа с общей существующей базой — разные
+операции; перед наполнением проверить назначение окружения. Для проверки
+изменений своей ветки использовать изолированные окружения из
+[docs/testing.md](docs/testing.md), а не считать main demo этой веткой.
 
-## Production-периметр
+## Запуск публичного сайта
 
-Отдельный production Compose, non-root образы, Caddy/TLS и Docker secrets
-описаны в [production deployment runbook](docs/runbooks/production-deployment.md).
-Этот контур нельзя публиковать для пилота до закрытия оставшихся P0-блокеров из
-[security release plan](docs/security-release-plan.md).
+Нужен доступный Node.js; сайт использует встроенные модули и не требует установки
+новых пакетов. Из корня проекта:
 
-## Структура
-
-```
-aurum-pharma/
-├── backend/            FastAPI + SQLAlchemy 2.0 async + Alembic
-├── frontend/           React 18 + TS strict + Vite + TanStack
-├── infra/              Postgres init, Prometheus config
-├── scripts/            Локальные проверки и утилиты разработки
-├── docs/               Спецификация, схема БД, план разработки
-├── docker-compose.yml  Dev-окружение
-└── CLAUDE.md           Правила и инструкции для AI-ассистента
+```powershell
+node website/scripts/test.mjs
+node website/scripts/build.mjs
+node website/scripts/serve.mjs
 ```
 
-## Документы
+Предпросмотр: <http://127.0.0.1:4174>. По умолчанию вход ведёт к локальному
+приложению `http://localhost:5173/login`; оно запускается отдельно.
+Сайт не подключается к базе данных и не заменяет launcher приложения.
 
-- [CLAUDE.md](CLAUDE.md) — правила, стек, архитектурные ограничения
-- [docs/spec-v3.md](docs/spec-v3.md) — функциональная спецификация
-- [docs/billing-financial-spec.md](docs/billing-financial-spec.md) — целевой
-  контракт тарифов, счетов, платежей и интерфейсов биллинга
-- [docs/billing-ux-low-fi.md](docs/billing-ux-low-fi.md) — UX-структура и
-  интерактивный low-fi прототип клиентского и внутреннего биллинга
-- [docs/billing-console-high-fi.md](docs/billing-console-high-fi.md) — выбранная
-  high-fi концепция «Консоль», состояния и адаптивные макеты биллинга
-- [docs/db-schema-v2.md](docs/db-schema-v2.md) — схема БД
-- [docs/handoff.md](docs/handoff.md) — план разработки по доменам
-- [docs/local-demo.md](docs/local-demo.md) — безопасная проверка локального demo
-- [docs/known-issues.md](docs/known-issues.md) — известные проблемы
+Для production-сборки оператор задаёт `APP_URL` равным реальному HTTPS адресу
+входа и выполняет:
 
-## Чек-лист после каждого домена
+```powershell
+node website/scripts/build.mjs --production
+```
 
-См. раздел 6 в [CLAUDE.md](CLAUDE.md).
+Без корректного `APP_URL` production-сборка завершается ошибкой. Сборка создаёт
+`website/dist/`, но сама ничего не публикует на домене. Подробности границы:
+[ADR-0041](docs/adr/0041-public-website-boundary.md).
+
+## Компоненты
+
+| Путь | Назначение |
+|---|---|
+| `backend/` | FastAPI/PostgreSQL, бизнес-правила, авторизация, задачи и синхронизация |
+| `frontend/` | Общий рабочий интерфейс React/TypeScript/Vite |
+| `website/` | Независимый публичный сайт и способы установки |
+| `infra/` | Конфигурация окружений, безопасность сервисов, backup/restore |
+| `scripts/` | Запуск, диагностика и межкомпонентные проверки |
+| `docs/` | Архитектура, план, состояния, runbooks и внешний допуск |
+| `.github/workflows/` | Проверки PR и обязательный CI gate |
+
+`desktop/AurumPharma.Desktop/` — **планируемый**, ещё не готовый компонент.
+Схема клиента описана в [desktop blueprint](docs/desktop-host-implementation.md).
+Установка веб-приложения на главный экран не означает наличие автономной кассы.
+
+## Проверки и публикация
+
+```powershell
+.\scripts\verify-change.ps1 -Mode Auto -PlanOnly
+```
+
+Далее — проверки по выданному плану и [docs/testing.md](docs/testing.md).
+Изменения идут через `codex/*`, PR и успешный обязательный CI gate.
+Общую dev-БД нельзя удалять, очищать или пересоздавать.
+
+Будущий Cloud развёртывается по
+[production deployment runbook](docs/runbooks/production-deployment.md).
+Публикация сайта и реальный запуск аптек — разные этапы: для пилота обязательны
+[security release plan](docs/security-release-plan.md) и
+[пилотный допуск](docs/compliance/pilot-legal-gate.md).
+
+Продуктовый замысел: [spec-v3.md](docs/spec-v3.md), схема:
+[db-schema-v2.md](docs/db-schema-v2.md). Исторический
+[handoff.md](docs/handoff.md) не является доказательством текущей готовности.
