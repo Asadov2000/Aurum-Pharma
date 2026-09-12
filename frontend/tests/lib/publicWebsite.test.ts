@@ -24,6 +24,20 @@ describe("resolvePublicWebsiteUrl", () => {
   });
 
   it.each([
+    "https://127.0.0.2/",
+    "https://127.255.255.254/",
+    "https://2130706433/",
+    "https://public.localhost/",
+    "https://PUBLIC.LOCALHOST./",
+    "https://[::ffff:127.0.0.2]/",
+    "https://[0:0:0:0:0:ffff:7fff:fffe]/",
+    "https://0.0.0.0/",
+    "https://[::]/",
+  ])("does not expose local or unspecified addresses to a remote user: %s", (url) => {
+    expect(resolvePublicWebsiteUrl(url, "https://app.example.test")).toBeNull();
+  });
+
+  it.each([
     "javascript:alert(1)",
     "data:text/html,test",
     "//example.test",
