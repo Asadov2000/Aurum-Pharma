@@ -1,9 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Aurum Pharma">
-  <rect width="512" height="512" rx="96" fill="#0e7568" />
-  <circle cx="362" cy="150" r="74" fill="#d7a64a" />
-  <path
-    d="M238 112h70v112h112v70H308v112h-70V294H126v-70h112V112Z"
-    fill="#ffffff"
-  />
-  <path d="M124 390h264v34H124v-34Z" fill="#ffffff" opacity="0.88" />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Aurum Pharma"><title>Aurum Pharma</title><rect width="256" height="256" rx="54" fill="#00566B"/><g transform="translate(22 16) scale(.84)"><defs><mask id="a-white-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256"><path fill="white" d="M0 0H256V256H0Z"/><path d="M56 174 C78 155 130 146 157 124 C179 107 184 99 172 83 C158 65 168 46 189 43 C199 41 204 42 211 44" fill="none" stroke="black" stroke-width="25" stroke-linecap="round"/></mask><mask id="a-white-eye" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256"><path fill="white" d="M0 0H256V256H0Z"/><circle cx="216" cy="43" r="1.7" fill="black"/></mask></defs><g fill="none" stroke-linecap="butt" stroke-linejoin="round"><path d="M144 186 C166 183 179 199 176 213 Q173 222 163 227 C169 216 167 205 156 204 L144 204 Z" fill="#FFFFFF"/><path d="M150 195 C126 198 116 228 88 230 C56 232 34 193 56 174 C78 155 130 146 157 124 C179 107 184 99 172 83 C158 65 168 46 189 43 C199 41 204 42 211 44" stroke="#FFFFFF" stroke-width="17"/><path d="M100 40 H132 Q144 40 144 52 V108 H200 Q212 108 212 120 V152 Q212 164 200 164 H144 V220 Q144 232 132 232 H100 Q88 232 88 220 V164 H32 Q20 164 20 152 V120 Q20 108 32 108 H88 V52 Q88 40 100 40 Z" fill="#FFFFFF" mask="url(#a-white-cut)"/><path d="M56 174 C78 155 130 146 157 124 C179 107 184 99 172 83 C158 65 168 46 189 43 C199 41 204 42 211 44" stroke="#FFFFFF" stroke-width="17"/><path d="M197 35 C207 34 220 38 229 44 Q233 47 229 50 C219 55 208 55 198 52 Q192 50 191 45 Q190 39 197 35 Z" fill="#FFFFFF" mask="url(#a-white-eye)"/></g></g></svg>

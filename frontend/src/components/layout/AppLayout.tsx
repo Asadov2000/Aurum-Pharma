@@ -16,7 +16,6 @@ import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
 import { useUserPreferencesQuery } from "@/features/settings/queries";
-import { cn } from "@/lib/utils";
 import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
 
 import { BrandMark } from "./BrandMark";
@@ -333,15 +332,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       >
         <div className="flex min-h-[var(--app-header-height)] items-stretch">
           <div className="hidden w-[var(--app-sidebar-width)] shrink-0 items-center border-r border-shell-sidebar-border bg-shell-sidebar px-4 lg:flex">
-            <BrandMark tone="inverse" />
-            <span
-              className={cn(
-                "ml-3 truncate font-display text-lg font-semibold text-shell-sidebar-foreground",
-                !sidebarExpanded && "sr-only",
-              )}
-            >
-              Aurum Pharma
-            </span>
+            <BrandMark tone="inverse" showName={sidebarExpanded} />
           </div>
 
           <div className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 sm:px-4 xl:px-5">
@@ -356,9 +347,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
               >
                 <MenuIcon />
               </Button>
-              <span className="truncate font-display text-base font-semibold text-foreground sm:text-lg lg:hidden">
-                Aurum Pharma
-              </span>
+              <BrandMark showName className="w-[150px] lg:hidden" />
               {pageOwnsDesktopTitle ? (
                 <span className="hidden min-h-9 items-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground-secondary lg:inline-flex">
                   {workspaceLabel}

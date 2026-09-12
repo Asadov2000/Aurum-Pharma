@@ -390,7 +390,7 @@ export function LoginPage(): JSX.Element {
           }
         >
           <div className="inline-flex">
-            <BrandMark showName className="[&>span:last-child]:text-xl" />
+            <BrandMark showName />
           </div>
 
           <header className="mb-7 mt-10 sm:mt-12">

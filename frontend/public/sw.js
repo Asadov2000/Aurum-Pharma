@@ -1,4 +1,4 @@
-const CACHE_NAME = "aurum-pharma-static-v2";
+const CACHE_NAME = "aurum-pharma-static-v3-brand12-8";
 const MAX_STATIC_CACHE_ENTRIES = 80;
 const STATIC_ASSET_PATTERN = /\.(?:css|ico|js|png|svg|webmanifest|woff2?)$/i;
 

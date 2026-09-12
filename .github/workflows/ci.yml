@@ -990,6 +990,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Verify approved brand assets
+        run: node ../scripts/build-brand-assets.mjs --check
+
       - name: Lint
         run: pnpm lint
 

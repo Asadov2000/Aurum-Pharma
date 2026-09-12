@@ -125,17 +125,13 @@ h3 {
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  flex-shrink: 0;
   min-height: 48px;
-  font-size: 23px;
-  font-weight: 650;
-  letter-spacing: -0.055em;
   text-decoration: none;
-  white-space: nowrap;
 }
-.brand-secondary {
-  margin-left: 5px;
-  font-weight: 400;
+.brand img {
+  width: 220px;
+  height: auto;
 }
 .main-nav {
   display: flex;
@@ -296,9 +292,10 @@ h3 {
 .preview-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
-  font-size: 13px;
-  font-weight: 650;
+}
+.preview-brand img {
+  width: 136px;
+  height: auto;
 }
 .preview-example {
   font-size: 10px;
@@ -741,8 +738,8 @@ h3 {
   min-height: 120px;
   padding-block: 25px;
 }
-.footer-inner .brand {
-  font-size: 19px;
+.footer-inner .brand img {
+  width: 200px;
 }
 .footer-inner p {
   color: var(--muted);
@@ -995,8 +992,8 @@ h3 {
   .main-nav {
     gap: 20px;
   }
-  .brand {
-    font-size: 21px;
+  .brand img {
+    width: 210px;
   }
   .hero-grid {
     gap: 30px;
@@ -1181,13 +1178,8 @@ h3 {
   .section-pad {
     padding-block: 56px;
   }
-  .brand {
-    font-size: 20px;
-    gap: 8px;
-  }
   .brand img {
-    width: 33px;
-    height: 33px;
+    width: 180px;
   }
   .button-small {
     padding-inline: 13px;
@@ -1427,9 +1419,6 @@ h3 {
   }
   .header-inner {
     column-gap: 8px;
-  }
-  .brand {
-    font-size: 18px;
   }
   .header-login {
     padding-inline: 11px;
