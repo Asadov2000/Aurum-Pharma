@@ -3,321 +3,254 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#07564f" />
+    <title>Aurum Pharma — рабочее пространство вашей аптеки</title>
+    <meta name="theme-color" content="#00566b" />
     <meta
       name="description"
-      content="Aurum Pharma — рабочее пространство аптеки: касса, каталог, приходы, остатки и управление доступом сотрудников. Познакомьтесь с возможностями и откройте приложение."
+      content="Aurum Pharma — касса, каталог, поставки и команда аптеки в одном приложении. Для аптек Таджикистана. Возможности и способы установки."
     />
-    <title>Aurum Pharma — аптека под контролем</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/assets/site.css" />
+    <script src="/assets/product-preview.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Перейти к содержимому</a>
-    <header class="site-header">
-      <div class="container header-inner">
-        <a class="brand" href="/" aria-label="Aurum Pharma — главная">
-          <img
-            src="/assets/brand/logo-color.svg"
-            width="1061"
-            height="256"
-            alt=""
-          />
-        </a>
-        <nav class="main-nav" aria-label="Основная навигация">
-          <a href="#features">Возможности</a>
-          <a href="#start">Как начать</a>
-          <a href="/downloads/">Установка</a>
-        </nav>
-        <a
-          class="button button-small button-outline header-login"
-          href="{{APP_URL}}"
-          >Войти <span aria-hidden="true">↗</span></a
-        >
-      </div>
+    <header class="wrap">
+      <a href="/" aria-label="Aurum Pharma — главная"
+        ><img
+          class="logo"
+          src="/assets/brand/logo-color.svg"
+          width="1061"
+          height="256"
+          alt="Aurum Pharma"
+      /></a>
+      <nav aria-label="Навигация">
+        <a href="#features">Возможности</a><a href="#team">Для команды</a
+        ><a href="#install">Установка</a>
+      </nav>
+      <a class="login" href="{{APP_URL}}">Войти ↗</a>
     </header>
     <main id="main">
-      <section class="hero section-pad">
-        <div class="container hero-grid">
-          <div class="hero-copy">
-            <p class="eyebrow">
-              <span class="eyebrow-mark" aria-hidden="true"></span>Рабочее
-              пространство аптеки
-            </p>
-            <h1>Аптека под контролем.<br /><span>Каждый день.</span></h1>
-            <p class="hero-description">
-              Продажи, поставки и остатки — в одном месте. Сотрудникам удобно
-              работать, владельцу — видеть, что происходит в аптеке.
-            </p>
-            <div class="button-row">
-              <a class="button button-primary" href="{{APP_URL}}"
-                >Открыть приложение <span aria-hidden="true">↗</span></a
-              >
-              <a class="button button-text" href="#features"
-                >Изучить возможности <span aria-hidden="true">↓</span></a
-              >
-            </div>
-            <p class="hero-note">
-              Для одной аптеки и нескольких точек.<br />Русский интерфейс ·
-              Расчёты в TJS
-            </p>
+      <section class="hero wrap entry">
+        <div class="eyebrow"><i class="dot"></i>Для аптек Таджикистана</div>
+        <h1>Всё, чем живёт<br /><span>ваша аптека.</span></h1>
+        <p class="intro">
+          Касса, товары, поставки и команда — вместе.<br />Чтобы каждый видел
+          главное в своей работе.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="{{APP_URL}}"
+            >Открыть приложение <span>↗</span></a
+          ><a class="button" href="#preview"
+            >Посмотреть, как устроено <span>↓</span></a
+          >
+        </div>
+        <p class="note">
+          Одна аптека или сеть · Русский интерфейс · Расчёты в TJS
+        </p>
+        <div class="product-stage" id="preview">
+          <div
+            hidden
+            class="role-pills"
+            role="group"
+            aria-label="Пример задач сотрудника"
+          >
+            <button aria-pressed="true" data-role="owner">Владельцу</button
+            ><button aria-pressed="false" data-role="cashier">Кассиру</button
+            ><button aria-pressed="false" data-role="stock">
+              Сотруднику склада
+            </button>
           </div>
-          <figure class="product-figure">
-            <div
-              class="product-preview"
-              aria-label="Демонстрационный пример рабочего пространства аптеки"
-            >
-              <div class="preview-topbar">
-                <span class="preview-brand">
-                  <img
-                    src="/assets/brand/logo-color.svg"
-                    width="1061"
-                    height="256"
-                    alt="Aurum Pharma"
-                  />
-                </span>
-                <span class="preview-example">Пример</span>
-              </div>
-              <div class="preview-workspace">
-                <div class="preview-sidebar" aria-hidden="true">
-                  <span class="preview-menu-item">Обзор</span>
-                  <span class="preview-menu-item is-selected">Касса</span>
-                  <span class="preview-menu-item">Каталог</span>
-                  <span class="preview-menu-item">Приходы</span>
-                  <span class="preview-menu-item">Партии</span>
+          <div class="product">
+            <div class="app-top">
+              <img
+                src="/assets/brand/logo-color.svg"
+                width="1061"
+                height="256"
+                alt=""
+              /><span>Рабочая область · Пример</span>
+            </div>
+            <div class="app-body">
+              <aside class="app-nav" aria-hidden="true">
+                <span class="selected">Обзор</span><span>Касса</span
+                ><span>Каталог</span><span>Приходы</span><span>Сотрудники</span>
+              </aside>
+              <div class="app-main" aria-live="polite">
+                <div class="app-heading">
+                  <b id="preview-title">Что происходит в аптеке</b
+                  ><span class="sample">Демо</span>
                 </div>
-                <div class="preview-content">
-                  <div class="preview-title">
-                    <span>Текущий чек</span
-                    ><span class="preview-label">3 позиции</span>
+                <div class="stats">
+                  <div class="stat">
+                    <small id="metric-a">Продажи за день</small
+                    ><strong id="value-a">1 320 <em>TJS</em></strong>
                   </div>
-                  <div class="preview-search">
-                    <span aria-hidden="true">⌕</span> Название или штрихкод
+                  <div class="stat">
+                    <small id="metric-b">Чеков</small
+                    ><strong id="value-b">48</strong>
                   </div>
-                  <div class="preview-items">
-                    <div class="preview-item">
-                      <span
-                        class="product-symbol symbol-mint"
-                        aria-hidden="true"
-                        >+</span
-                      ><span>Бинт медицинский<small>1 шт.</small></span
-                      ><strong>8,00</strong>
+                  <div class="stat">
+                    <small id="metric-c">Аптечные точки</small
+                    ><strong id="value-c">3</strong>
+                  </div>
+                </div>
+                <div class="chart-row">
+                  <div>
+                    <div class="chart-title" id="chart-title">
+                      Продажи в течение дня
                     </div>
-                    <div class="preview-item">
-                      <span
-                        class="product-symbol symbol-sand"
-                        aria-hidden="true"
-                        >+</span
-                      ><span>Пластырь<small>2 шт. × 5,00</small></span
-                      ><strong>10,00</strong>
-                    </div>
-                    <div class="preview-item">
-                      <span
-                        class="product-symbol symbol-lilac"
-                        aria-hidden="true"
-                        >+</span
-                      ><span>Маска медицинская<small>1 шт.</small></span
-                      ><strong>2,00</strong>
-                    </div>
+                    <svg class="chart" viewBox="0 0 360 90" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="fade" x2="0" y2="1">
+                          <stop stop-color="#079d9a" stop-opacity=".2" />
+                          <stop
+                            offset="1"
+                            stop-color="#079d9a"
+                            stop-opacity="0"
+                          />
+                        </linearGradient>
+                      </defs>
+                      <path
+                        d="M0 75 H360 M0 40 H360 M0 5 H360"
+                        stroke="#e3edef"
+                        fill="none"
+                      />
+                      <path
+                        d="M0 69 Q25 63 40 67 T80 47 T120 55 T160 24 T200 39 T240 15 T280 24 T320 8 L360 12 V90 H0Z"
+                        fill="url(#fade)"
+                      />
+                      <path
+                        d="M0 69 Q25 63 40 67 T80 47 T120 55 T160 24 T200 39 T240 15 T280 24 T320 8 L360 12"
+                        stroke="#079d9a"
+                        stroke-width="2.5"
+                        fill="none"
+                      />
+                    </svg>
                   </div>
-                  <div class="preview-total">
-                    <span>К оплате</span
-                    ><strong>20,00 <small>TJS</small></strong>
-                  </div>
-                  <div class="preview-payment">
-                    Перейти к оплате <span aria-hidden="true">→</span>
+                  <div class="mini-list">
+                    <div>
+                      <span>Центральная аптека</span
+                      ><span class="badge">Смена открыта</span>
+                    </div>
+                    <div>
+                      <span>Аптека на Сомони</span
+                      ><span class="badge">Смена открыта</span>
+                    </div>
+                    <div>
+                      <span>Аптека на Рудаки</span><span>Смена закрыта</span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-            <figcaption>
-              <span class="caption-line" aria-hidden="true"></span>Пример
-              интерфейса. Все данные вымышлены.
-            </figcaption>
-          </figure>
+          </div>
         </div>
+        <p class="stage-foot" id="preview-note">
+          Видеть продажи, смены и остатки по своим точкам. Демонстрационные
+          данные.
+        </p>
       </section>
-
-      <div class="principles-strip">
-        <div class="container principles-inner">
-          <p><span aria-hidden="true">01</span> Общие данные для команды</p>
-          <p><span aria-hidden="true">02</span> Доступ по задачам сотрудника</p>
-          <p><span aria-hidden="true">03</span> Понятная история операций</p>
-        </div>
+      <div class="wrap facts">
+        <span>Товары и продажи связаны</span
+        ><span>Права под задачи сотрудника</span
+        ><span>История операций рядом</span>
       </div>
-
-      <section
-        class="section-pad"
-        id="features"
-        aria-labelledby="features-title"
-      >
-        <div class="container">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Возможности</p>
-              <h2 id="features-title">
-                От первого товара<br />до закрытия смены.
-              </h2>
-            </div>
-            <p class="section-intro">
-              Связанные инструменты для ежедневной работы. Каждый сотрудник
-              видит разделы и действия, которые ему разрешены.
+      <section class="section wrap" id="features">
+        <div class="section-kicker">Ежедневная работа</div>
+        <div class="section-heading">
+          <h2>От первой поставки<br />до закрытия смены.</h2>
+          <p>
+            Связанные инструменты вместо разрозненных записей. Всё нужное для
+            работы — в пределах вашего доступа.
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature">
+            <span class="number">01 / ПРОДАЖИ</span>
+            <h3>Внимание покупателю.</h3>
+            <p>
+              Находите товар по названию или штрихкоду, собирайте чек и
+              оформляйте связанные возвраты.
             </p>
-          </div>
-          <div class="features-grid">
-            <article class="feature-card feature-wide feature-tinted">
-              <div class="feature-icon" aria-hidden="true">↗</div>
-              <p class="card-kicker">Касса</p>
-              <h3>Внимание — покупателю.</h3>
-              <p>
-                Поиск товара по названию или штрихкоду, текущий чек, смены и
-                возвраты. Продажи и складские остатки связаны между собой.
-              </p>
-              <div class="feature-tags">
-                <span>Поиск и сканирование</span><span>Смены</span
-                ><span>Связанные возвраты</span>
-              </div>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon" aria-hidden="true">▦</div>
-              <p class="card-kicker">Каталог и партии</p>
-              <h3>Товар на своём месте.</h3>
-              <p>
-                Карточки товаров, штрихкоды, цены и остатки по точкам. Сроки
-                годности и состояние партий — рядом с нужной позицией.
-              </p>
-              <p class="feature-footnote">
-                Каталог можно загрузить из Excel/CSV.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon" aria-hidden="true">↓</div>
-              <p class="card-kicker">Приходы и поставщики</p>
-              <h3>Приёмка без спешки.</h3>
-              <p>
-                Собирайте документ постепенно: подтверждённые сервером строки
-                сохраняются в черновике. Новый товар можно создать прямо в
-                процессе приёмки.
-              </p>
-              <p class="feature-footnote">
-                Импорт накладных и распознавание фото/PDF — в планах.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon" aria-hidden="true">⊞</div>
-              <p class="card-kicker">Сотрудники и роли</p>
-              <h3>Доступ под вашу команду.</h3>
-              <p>
-                Настраивайте роли, объединяйте их у одного сотрудника и
-                выбирайте доступные точки. Кассир с дополнительными задачами
-                получает нужные инструменты.
-              </p>
-              <p class="feature-footnote">
-                Один аккаунт — несколько разрешённых задач.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon" aria-hidden="true">◷</div>
-              <p class="card-kicker">Управление аптекой</p>
-              <h3>Видеть общую картину.</h3>
-              <p>
-                Отчёты, смены, остатки и история действий помогают разбирать
-                результаты работы. Переключайтесь между точками в пределах
-                своего доступа.
-              </p>
-              <p class="feature-footnote">
-                Работайте с компьютера или телефона.
-              </p>
-            </article>
-          </div>
+            <a href="#preview" data-preview="cashier">Посмотреть кассу →</a>
+          </article>
+          <article class="feature">
+            <span class="number">02 / ТОВАРЫ</span>
+            <h3>Порядок на полках.</h3>
+            <p>
+              Каталог, цены, партии и сроки годности. Принимайте поставку и
+              создавайте новый товар прямо в приходе.
+            </p>
+            <a href="#preview" data-preview="stock">Посмотреть приёмку →</a>
+          </article>
+          <article class="feature">
+            <span class="number">03 / УПРАВЛЕНИЕ</span>
+            <h3>Целая аптека перед вами.</h3>
+            <p>
+              Продажи, смены и история операций помогают видеть работу каждой
+              точки и разбирать результаты.
+            </p>
+            <a href="#preview" data-preview="owner">Посмотреть обзор →</a>
+          </article>
         </div>
       </section>
-
-      <section
-        class="section-pad section-cream"
-        id="start"
-        aria-labelledby="start-title"
-      >
-        <div class="container">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Как начать</p>
-              <h2 id="start-title">
-                Сначала ваша аптека.<br />Затем привычный рабочий день.
-              </h2>
-            </div>
+      <section class="wrap team" id="team">
+        <div>
+          <p class="section-kicker">Команда</p>
+          <h2>Один сотрудник.<br />Столько задач,<br />сколько нужно.</h2>
+          <p>
+            Кассиру можно добавить приёмку товаров. Роли объединяются, а
+            владелец выбирает доступные действия и точки.
+          </p>
+        </div>
+        <div class="permission">
+          <div class="person">
+            <span class="avatar">М</span
+            ><span>Мадина<small>Пример настройки сотрудника</small></span>
           </div>
-          <ol class="steps-grid">
-            <li>
-              <span class="step-number" aria-hidden="true">01</span>
-              <h3>Откройте Aurum</h3>
-              <p>
-                Войдите в приложение. Владелец проходит настройку аптеки,
-                сотрудник использует предоставленный ему доступ.
-              </p>
-            </li>
-            <li>
-              <span class="step-number" aria-hidden="true">02</span>
-              <h3>Подготовьте рабочее место</h3>
-              <p>
-                Настройте точки и сотрудников, заполните каталог и оформите
-                начальные приходы.
-              </p>
-            </li>
-            <li>
-              <span class="step-number" aria-hidden="true">03</span>
-              <h3>Проверьте свой сценарий</h3>
-              <p>
-                Убедитесь, что права, товары и рабочие устройства настроены
-                правильно, прежде чем начинать ежедневную работу.
-              </p>
-            </li>
-          </ol>
+          <div class="tags">
+            <span>✓ Продажи</span><span>✓ Приёмка товаров</span
+            ><span>Центральная аптека</span>
+          </div>
+          <p>
+            Дополнительная роль открывает нужные задачи в том же приложении.
+          </p>
         </div>
       </section>
-
-      <section class="section-pad" aria-labelledby="install-title">
-        <div class="container">
-          <div class="install-banner">
-            <div>
-              <p class="eyebrow">На привычном устройстве</p>
-              <h2 id="install-title">Aurum всегда<br />под рукой.</h2>
-              <p>
-                Открывайте веб-версию по ссылке или добавьте её иконку на своё
-                устройство. Отдельный установщик для Windows готовится.
-              </p>
-              <a class="button button-light" href="/downloads/"
-                >Варианты установки <span aria-hidden="true">→</span></a
-              >
-            </div>
-            <div class="device-art" aria-hidden="true">
-              <div class="device-screen">
-                <img
-                  src="/assets/brand/mark-color.svg"
-                  width="72"
-                  height="72"
-                  alt=""
-                /><span>Aurum Pharma</span
-                ><small>Рабочее пространство аптеки</small>
-              </div>
-              <div class="device-base"></div>
-              <div class="device-phone">
-                <img
-                  src="/assets/brand/mark-color.svg"
-                  width="38"
-                  height="38"
-                  alt=""
-                /><span>Aurum</span>
-              </div>
+      <section class="section wrap install" id="install">
+        <span id="start" class="anchor"></span>
+        <div>
+          <p class="section-kicker">На вашем устройстве</p>
+          <h2>Начните с браузера.<br />Оставьте Aurum рядом.</h2>
+          <p>
+            Веб-версию можно открыть по ссылке или добавить на главный экран как
+            приложение.
+          </p>
+          <a class="button primary" href="{{APP_URL}}">Открыть Aurum ↗</a>
+        </div>
+        <div>
+          <div class="install-list">
+            <a class="install-row" href="{{APP_URL}}"
+              ><span
+                >Веб-версия<small>Вход на компьютере или телефоне</small></span
+              ><span class="available">Доступна ↗</span></a
+            ><a class="install-row" href="/downloads/"
+              ><span
+                >На главный экран<small>Установка веб-приложения</small></span
+              ><span class="available">Инструкция ↗</span></a
+            >
+            <div class="install-row">
+              <span
+                >Приложение для Windows<small>Отдельный установщик</small></span
+              ><span class="future">Готовится</span>
             </div>
           </div>
         </div>
       </section>
-
-      <section class="section-pad faq-section" aria-labelledby="faq-title">
-        <div class="container faq-grid">
+      <section class="section wrap faq-section" aria-labelledby="faq-title">
+        <div class="faq-grid">
           <div>
-            <p class="eyebrow">Полезно знать</p>
+            <p class="section-kicker">Полезно знать</p>
             <h2 id="faq-title">Несколько<br />важных ответов.</h2>
             <p class="section-intro">
               Что доступно сейчас и как устроена работа.
@@ -395,24 +328,14 @@
         </div>
       </section>
     </main>
-    <footer class="site-footer">
-      <div class="container footer-inner">
-        <a class="brand" href="/" aria-label="Aurum Pharma — главная">
-          <img
-            src="/assets/brand/logo-color.svg"
-            width="1061"
-            height="256"
-            alt=""
-          />
-        </a>
-        <p>Рабочее пространство вашей аптеки.</p>
-        <nav aria-label="Навигация в подвале">
-          <a href="/downloads/">Установка</a
-          ><a href="{{APP_URL}}"
-            >Войти в приложение <span aria-hidden="true">↗</span></a
-          >
-        </nav>
-      </div>
+    <footer class="bottom wrap">
+      <img
+        src="/assets/brand/logo-color.svg"
+        width="1061"
+        height="256"
+        alt="Aurum Pharma"
+      /><span>Рабочее пространство аптеки.</span
+      ><a href="/downloads/">Способы установки →</a>
     </footer>
   </body>
 </html>

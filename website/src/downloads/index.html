@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#07564f" />
+    <meta name="theme-color" content="#00566b" />
     <meta
       name="description"
       content="Как открыть Aurum Pharma в браузере и добавить приложение на компьютер или iPhone. Доступные варианты установки и статус Windows-клиента."
@@ -14,30 +14,24 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Перейти к содержимому</a>
-    <header class="site-header">
-      <div class="container header-inner">
-        <a class="brand" href="/" aria-label="Aurum Pharma — главная">
-          <img
-            src="/assets/brand/logo-color.svg"
-            width="1061"
-            height="256"
-            alt=""
-          />
-        </a>
-        <nav class="main-nav" aria-label="Основная навигация">
-          <a href="/#features">Возможности</a><a href="/#start">Как начать</a
-          ><a href="/downloads/" aria-current="page">Установка</a>
-        </nav>
-        <a
-          class="button button-small button-outline header-login"
-          href="{{APP_URL}}"
-          >Войти <span aria-hidden="true">↗</span></a
-        >
-      </div>
+    <header class="wrap">
+      <a href="/" aria-label="Aurum Pharma — главная"
+        ><img
+          class="logo"
+          src="/assets/brand/logo-color.svg"
+          width="1061"
+          height="256"
+          alt="Aurum Pharma"
+      /></a>
+      <nav aria-label="Навигация">
+        <a href="/#features">Возможности</a><a href="/#team">Для команды</a
+        ><a href="/downloads/" aria-current="page">Установка</a>
+      </nav>
+      <a class="login" href="{{APP_URL}}">Войти ↗</a>
     </header>
     <main id="main">
-      <section class="downloads-hero section-pad">
-        <div class="container">
+      <section class="downloads-hero section">
+        <div class="wrap">
           <a class="back-link" href="/">← На главную</a>
           <p class="eyebrow">Установка и доступ</p>
           <h1>Ваше рабочее место.<br /><span>На вашем устройстве.</span></h1>
@@ -49,7 +43,7 @@
       </section>
 
       <section class="downloads-options" aria-labelledby="options-title">
-        <div class="container">
+        <div class="wrap">
           <h2 class="sr-only" id="options-title">Доступные варианты</h2>
           <div class="download-grid">
             <article class="download-card download-available">
@@ -69,7 +63,7 @@
                 <li>Без отдельного установщика</li>
                 <li>Нужен доступ к серверу</li>
               </ul>
-              <a class="button button-primary" href="{{APP_URL}}"
+              <a class="button primary" href="{{APP_URL}}"
                 >Открыть приложение <span aria-hidden="true">↗</span></a
               >
             </article>
@@ -98,11 +92,11 @@
       </section>
 
       <section
-        class="section-pad"
+        class="section"
         id="add-to-device"
         aria-labelledby="device-title"
       >
-        <div class="container">
+        <div class="wrap">
           <div class="section-heading">
             <div>
               <p class="eyebrow">Иконка на устройстве</p>
@@ -171,8 +165,8 @@
         </div>
       </section>
 
-      <section class="section-pad section-cream" aria-labelledby="before-title">
-        <div class="container before-start">
+      <section class="section download-bottom" aria-labelledby="before-title">
+        <div class="wrap before-start">
           <div>
             <p class="eyebrow">Перед началом работы</p>
             <h2 id="before-title">
@@ -185,7 +179,7 @@
             </p>
           </div>
           <div class="before-start-action">
-            <a class="button button-primary" href="{{APP_URL}}"
+            <a class="button primary" href="{{APP_URL}}"
               >Войти в Aurum <span aria-hidden="true">↗</span></a
             ><a class="button button-text" href="/#features"
               >Посмотреть возможности <span aria-hidden="true">→</span></a
@@ -194,24 +188,13 @@
         </div>
       </section>
     </main>
-    <footer class="site-footer">
-      <div class="container footer-inner">
-        <a class="brand" href="/" aria-label="Aurum Pharma — главная">
-          <img
-            src="/assets/brand/logo-color.svg"
-            width="1061"
-            height="256"
-            alt=""
-          />
-        </a>
-        <p>Рабочее пространство вашей аптеки.</p>
-        <nav aria-label="Навигация в подвале">
-          <a href="/">Главная</a
-          ><a href="{{APP_URL}}"
-            >Войти в приложение <span aria-hidden="true">↗</span></a
-          >
-        </nav>
-      </div>
+    <footer class="bottom wrap">
+      <img
+        src="/assets/brand/logo-color.svg"
+        width="1061"
+        height="256"
+        alt="Aurum Pharma"
+      /><span>Рабочее пространство аптеки.</span><a href="/">На главную →</a>
     </footer>
   </body>
 </html>
