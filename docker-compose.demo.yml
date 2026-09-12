@@ -234,7 +234,7 @@ services:
   catalog-minio-init:
     networks:
       - storage
-    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: aurum-demo-catalog-minio-init
     entrypoint: ["/bin/sh", "/config/provision-catalog-reader.sh"]
     environment:
