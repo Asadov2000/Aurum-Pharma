@@ -11,6 +11,26 @@ import {
 } from "./helpers";
 
 test.describe("Auth", () => {
+  test("opens the public website in a new tab and preserves the login form", async ({
+    page,
+    context,
+  }) => {
+    await context.route("http://127.0.0.1:4174/**", (route) =>
+      route.fulfill({ contentType: "text/html", body: "<h1>Aurum Pharma public website</h1>" }),
+    );
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
+    await page.getByLabel("Email").fill("visitor@example.test");
+    const originalUrl = page.url();
+    const popupPromise = page.waitForEvent("popup");
+    await page.getByRole("link", { name: /О проекте Aurum Pharma/ }).click();
+    const popup = await popupPromise;
+    await expect(popup.getByRole("heading", { name: "Aurum Pharma public website" })).toBeVisible();
+    await expect(page.getByLabel("Email")).toHaveValue("visitor@example.test");
+    expect(page.url()).toBe(originalUrl);
+    expect(await popup.evaluate(() => window.opener === null)).toBe(true);
+    await popup.close();
+  });
+
   test("dev logs in via the UI and lands on a support page", async ({ page }) => {
     clearLoginRateLimit(DEV.email);
     await page.goto("/login", { waitUntil: "domcontentloaded" });

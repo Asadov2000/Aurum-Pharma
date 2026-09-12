@@ -858,6 +858,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.production
+      args:
+        VITE_PUBLIC_WEBSITE_URL: "${VITE_PUBLIC_WEBSITE_URL:-}"
     environment:
       AURUM_DOMAIN: "${AURUM_DOMAIN:?AURUM_DOMAIN is required}"
       AURUM_ACME_EMAIL: "${AURUM_ACME_EMAIL:?AURUM_ACME_EMAIL is required}"
