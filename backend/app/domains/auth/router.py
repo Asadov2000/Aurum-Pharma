@@ -18,8 +18,21 @@ from app.core.deps import (
     get_redis,
     get_support_auth_db,
 )
-from app.core.errors import AuthenticationError
+from app.core.errors import AuthenticationError, ConflictError
 from app.core.security import generate_device_id
+from app.domains.auth.identity_repository import IdentityRepository
+from app.domains.auth.identity_schemas import (
+    ContactCodeRequest,
+    IdentityResponse,
+    LoginMethodsResponse,
+    PasswordLoginRequest,
+    PasswordResetRequest,
+    PhoneBindingRequest,
+    PhoneRequest,
+    PhoneVerifyRequest,
+    SetupChannelRequest,
+)
+from app.domains.auth.identity_service import IdentityService
 from app.domains.auth.models import UserPreferences
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
@@ -51,7 +64,7 @@ from app.domains.auth.schemas import (
     UserPreferencesUpdate,
     WorkspacePreferences,
 )
-from app.domains.auth.service import AuthService, MfaLoginChallenge
+from app.domains.auth.service import AuthService, AuthTokens, MfaLoginChallenge
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -177,6 +190,218 @@ async def _support_auth_state_service(
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> AuthService:
     return AuthService(AuthRepository(db), redis=redis)
+
+
+async def _identity_service(
+    db: Annotated[AsyncSession, Depends(get_support_auth_db, scope="function")],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> IdentityService:
+    # Credential verification uses the same restricted auth boundary as MFA.
+    # This service never accepts SQL or executes tenant business operations.
+    return IdentityService(IdentityRepository(db), redis=redis)
+
+
+def _identity_login_response(
+    result: AuthTokens | MfaLoginChallenge, response: Response, device_id: str
+) -> TokenResponse | MfaChallengeResponse:
+    _set_device_cookie(response, device_id)
+    if isinstance(result, MfaLoginChallenge):
+        return MfaChallengeResponse(
+            status=result.status,
+            challenge_token=result.challenge_token,
+            expires_in=result.expires_in,
+        )
+    _set_refresh_cookie(response, result.refresh_token)
+    return TokenResponse(access_token=result.access_token, expires_in=result.expires_in)
+
+
+@router.get("/methods", response_model=LoginMethodsResponse)
+async def login_methods(response: Response) -> LoginMethodsResponse:
+    _set_auth_no_store(response)
+    return LoginMethodsResponse(phone_login_enabled=get_settings().SMS_PROVIDER != "disabled")
+
+
+@router.post("/login/password", response_model=TokenResponse | MfaChallengeResponse)
+async def login_password(
+    payload: PasswordLoginRequest,
+    request: Request,
+    response: Response,
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> TokenResponse | MfaChallengeResponse:
+    _set_auth_no_store(response)
+    device_id = _device_id_from_request(request)
+    result = await service.login_password(
+        email=str(payload.email),
+        password=payload.password,
+        ip=_client_ip(request),
+        agent=request.headers.get("user-agent"),
+        device_id=device_id,
+    )
+    return _identity_login_response(result, response, device_id)
+
+
+@router.post("/login/phone/code", response_model=LoginCodeResponse, status_code=202)
+async def request_phone_login(
+    payload: PhoneRequest,
+    request: Request,
+    response: Response,
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> LoginCodeResponse:
+    _set_auth_no_store(response)
+    code = await service.request_code(
+        channel="phone",
+        contact=payload.phone,
+        purpose="login",
+        ip=_client_ip(request),
+        agent=request.headers.get("user-agent"),
+    )
+    return LoginCodeResponse(dev_code=code)
+
+
+@router.post("/login/phone/verify", response_model=TokenResponse | MfaChallengeResponse)
+async def verify_phone_login(
+    payload: PhoneVerifyRequest,
+    request: Request,
+    response: Response,
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> TokenResponse | MfaChallengeResponse:
+    _set_auth_no_store(response)
+    device_id = _device_id_from_request(request)
+    result = await service.login_phone(
+        phone=payload.phone,
+        code=payload.code,
+        ip=_client_ip(request),
+        agent=request.headers.get("user-agent"),
+        device_id=device_id,
+    )
+    return _identity_login_response(result, response, device_id)
+
+
+@router.post("/password/reset/code", response_model=LoginCodeResponse, status_code=202)
+async def request_password_reset(
+    payload: ContactCodeRequest,
+    request: Request,
+    response: Response,
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> LoginCodeResponse:
+    _set_auth_no_store(response)
+    code = await service.request_code(
+        channel=payload.channel,
+        contact=payload.contact,
+        purpose="reset",
+        ip=_client_ip(request),
+        agent=request.headers.get("user-agent"),
+    )
+    return LoginCodeResponse(dev_code=code)
+
+
+@router.post("/password/reset", response_model=AccountSecurityActionResponse)
+async def reset_password(
+    payload: PasswordResetRequest,
+    request: Request,
+    response: Response,
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> AccountSecurityActionResponse:
+    _set_auth_no_store(response)
+    await service.change_password(
+        channel=payload.channel,
+        contact=payload.contact,
+        code=payload.code,
+        new_password=payload.new_password,
+        mfa_code=payload.mfa_code,
+        recovery_code=payload.recovery_code,
+        ip=_client_ip(request),
+    )
+    _clear_refresh_cookie(response)
+    return AccountSecurityActionResponse()
+
+
+@router.get("/identity", response_model=IdentityResponse)
+async def account_identity(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> IdentityResponse:
+    _set_auth_no_store(response)
+    return IdentityResponse.model_validate(
+        await service.identity_settings(user.user_id, _account_session_id(user))
+    )
+
+
+@router.post("/password/prompt/dismiss", response_model=AccountSecurityActionResponse)
+async def dismiss_password_prompt(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> AccountSecurityActionResponse:
+    _set_auth_no_store(response)
+    if not await service.repo.dismiss_password_prompt(user.user_id, _account_session_id(user)):
+        raise AuthenticationError("Authenticated session is inactive")
+    return AccountSecurityActionResponse()
+
+
+@router.post("/phone/reauth/code", response_model=LoginCodeResponse, status_code=202)
+async def request_phone_reauth(
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> LoginCodeResponse:
+    _set_auth_no_store(response)
+    identity = await service.identity_settings(user.user_id, _account_session_id(user))
+    if identity["has_password"]:
+        raise AuthenticationError("Confirm your password")
+    code = await service.request_code(
+        channel="email",
+        contact=str(identity["email"]),
+        purpose="reauth",
+        ip=_client_ip(request),
+        agent=request.headers.get("user-agent"),
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+    )
+    return LoginCodeResponse(dev_code=code)
+
+
+@router.post("/phone/code", response_model=LoginCodeResponse, status_code=202)
+async def request_phone_binding(
+    payload: PhoneBindingRequest,
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> LoginCodeResponse:
+    _set_auth_no_store(response)
+    code = await service.request_phone_binding(
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+        phone=payload.phone,
+        password=payload.password,
+        reauth_code=payload.reauth_code,
+        mfa_code=payload.mfa_code,
+        ip=_client_ip(request),
+        agent=request.headers.get("user-agent"),
+    )
+    return LoginCodeResponse(dev_code=code)
+
+
+@router.post("/phone/verify", response_model=AccountSecurityActionResponse)
+async def verify_phone_binding(
+    payload: PhoneVerifyRequest,
+    request: Request,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[IdentityService, Depends(_identity_service)],
+) -> AccountSecurityActionResponse:
+    _set_auth_no_store(response)
+    await service.bind_phone(
+        user_id=user.user_id,
+        session_id=_account_session_id(user),
+        phone=payload.phone,
+        code=payload.code,
+        ip=_client_ip(request),
+    )
+    return AccountSecurityActionResponse()
 
 
 async def _service(
@@ -355,16 +580,18 @@ async def request_account_password_setup_code(
     request: Request,
     response: Response,
     user: Annotated[CurrentUser, Depends(current_user)],
-    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+    service: Annotated[IdentityService, Depends(_identity_service)],
+    payload: Annotated[SetupChannelRequest | None, Body()] = None,
 ) -> LoginCodeResponse:
     _set_auth_no_store(response)
-    code = await service.request_password_setup_code(
+    code = await service.request_setup(
         user_id=user.user_id,
         session_id=_account_session_id(user),
-        ip_address=_client_ip(request),
-        user_agent=request.headers.get("user-agent"),
+        channel=payload.channel if payload else "email",
+        ip=_client_ip(request),
+        agent=request.headers.get("user-agent"),
     )
-    return LoginCodeResponse(dev_code=code if get_settings().ENVIRONMENT == "development" else None)
+    return LoginCodeResponse(dev_code=code)
 
 
 @router.post("/password/setup", response_model=AccountSecurityActionResponse)
@@ -373,16 +600,23 @@ async def setup_account_password(
     request: Request,
     response: Response,
     user: Annotated[CurrentUser, Depends(current_user)],
-    service: Annotated[AuthService, Depends(_support_auth_state_service)],
+    service: Annotated[IdentityService, Depends(_identity_service)],
 ) -> AccountSecurityActionResponse:
     _set_auth_no_store(response)
-    await service.setup_account_password(
-        user_id=user.user_id,
+    identity = await service.identity_settings(user.user_id, _account_session_id(user))
+    if identity["has_password"]:
+        raise ConflictError("Account password is already configured")
+    contact = identity["email"] if payload.channel == "email" else identity["phone"]
+    if not contact:
+        raise AuthenticationError("Verified contact unavailable")
+    await service.change_password(
+        channel=payload.channel,
+        contact=str(contact),
+        purpose="setup",
         session_id=_account_session_id(user),
         code=payload.code,
         new_password=payload.new_password,
-        ip_address=_client_ip(request),
-        user_agent=request.headers.get("user-agent"),
+        ip=_client_ip(request),
     )
     return AccountSecurityActionResponse()
 

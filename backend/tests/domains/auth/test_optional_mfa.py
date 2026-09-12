@@ -57,11 +57,15 @@ async def _login(
     *,
     password: str | None = _PASSWORD,
 ) -> str:
-    await _seed_code(db_session, user.email)
-    response = await client.post(
-        f"{_BASE}/login/verify",
-        json={"email": user.email, "code": "123456", "password": password},
-    )
+    if user.password_hash:
+        response = await client.post(
+            f"{_BASE}/login/password", json={"email": user.email, "password": password}
+        )
+    else:
+        await _seed_code(db_session, user.email)
+        response = await client.post(
+            f"{_BASE}/login/verify", json={"email": user.email, "code": "123456"}
+        )
     assert response.status_code == 200
     token = str(response.json()["access_token"])
     await _actor(db_session, token)
@@ -168,10 +172,9 @@ async def test_ordinary_user_can_enable_and_disable_mfa_with_session_revocation(
     assert enabled.status_code == 200
     assert enabled.json()["enabled"] is True
     assert enabled.json()["prompt_pending"] is False
-    await _seed_code(db_session, user.email)
     challenge = await auth_client.post(
-        f"{_BASE}/login/verify",
-        json={"email": user.email, "code": "123456", "password": _PASSWORD},
+        f"{_BASE}/login/password",
+        json={"email": user.email, "password": _PASSWORD},
     )
     assert challenge.status_code == 200
     assert challenge.json()["status"] == "mfa_required"

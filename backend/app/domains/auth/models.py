@@ -55,6 +55,10 @@ class AppUser(Base):
     )
     full_name: Mapped[str] = mapped_column(Text, nullable=False)
     phone: Mapped[str | None] = mapped_column(Text)
+    verified_phone: Mapped[str | None] = mapped_column(Text, unique=True)
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_prompt_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_hash: Mapped[str | None] = mapped_column(Text)
     mfa_prompt_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_configured: Mapped[bool] = mapped_column(
@@ -365,6 +369,9 @@ class EmailCode(Base):
     code_hash: Mapped[str] = mapped_column(Text, nullable=False)
     code_salt: Mapped[str] = mapped_column(Text, nullable=False)
     purpose: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'login'"))
+    identity_method: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'bootstrap'")
+    )
     tenant_invitation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     ip_address: Mapped[str | None] = mapped_column(INET)
     created_at: Mapped[datetime] = mapped_column(

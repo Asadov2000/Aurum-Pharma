@@ -44,10 +44,12 @@ export async function disableAccountMfa(payload: MfaDisableRequest): Promise<Tok
   return data;
 }
 
-export async function requestPasswordSetupCode(): Promise<LoginCodeResponse> {
+export async function requestPasswordSetupCode(
+  channel?: "email" | "phone",
+): Promise<LoginCodeResponse> {
   const { data } = await api.post<LoginCodeResponse>(
     "/auth/password/setup/code",
-    {},
+    channel ? { channel } : {},
     withoutRefresh(),
   );
   return data;
@@ -56,6 +58,7 @@ export async function requestPasswordSetupCode(): Promise<LoginCodeResponse> {
 export async function setupAccountPassword(payload: {
   code: string;
   new_password: string;
+  channel?: "email" | "phone";
 }): Promise<void> {
   await api.post("/auth/password/setup", payload, withoutRefresh());
 }

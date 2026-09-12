@@ -186,6 +186,14 @@ class AuthRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def confirm_bootstrap_email(self, code_id: UUID, candidate_hash: str) -> bool:
+        return bool(
+            await self.session.scalar(
+                text("SELECT public.confirm_bootstrap_email(:id,:hash)"),
+                {"id": code_id, "hash": candidate_hash},
+            )
+        )
+
     async def get_or_create_user_preferences(self, user_id: UUID) -> UserPreferences:
         await self.session.execute(
             insert(UserPreferences)

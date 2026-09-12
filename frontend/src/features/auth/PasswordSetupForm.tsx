@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { isAxiosError } from "axios";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -7,14 +7,14 @@ import { Button, FormError, Input, Label } from "@/components/ui";
 import { describeAccountSecurityError } from "./accountSecurityErrors";
 
 import { requestPasswordSetupCode, setupAccountPassword } from "./accountSecurityApi";
+import { LoginMethodSwitch } from "./LoginMethodSwitch";
+import { type ContactChannel } from "./identityApi";
+import { newPasswordSchema } from "./identityForms";
 
 const schema = z
   .object({
-    code: z.string().regex(/^\d{6}$/, "Введите 6 цифр из письма"),
-    new_password: z
-      .string()
-      .min(12, "Используйте не менее 12 символов")
-      .max(128, "Не более 128 символов"),
+    code: z.string().regex(/^\d{6}$/, "Введите 6 цифр из сообщения"),
+    new_password: newPasswordSchema,
     confirmation: z.string(),
   })
   .refine((value) => value.new_password === value.confirmation, {
@@ -22,7 +22,15 @@ const schema = z
     message: "Пароли не совпадают",
   });
 
-export function PasswordSetupForm({ onComplete }: { onComplete: () => void }): JSX.Element {
+export function PasswordSetupForm({
+  onComplete,
+  phoneAvailable = false,
+}: {
+  onComplete: () => void;
+  phoneAvailable?: boolean;
+}): JSX.Element {
+  const idPrefix = useId();
+  const [channel, setChannel] = useState<ContactChannel>(phoneAvailable ? "phone" : "email");
   const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +50,7 @@ export function PasswordSetupForm({ onComplete }: { onComplete: () => void }): J
     setError(null);
     setSending(true);
     try {
-      const response = await requestPasswordSetupCode();
+      const response = await requestPasswordSetupCode(channel === "phone" ? "phone" : undefined);
       if (response.dev_code) form.setValue("code", response.dev_code);
       setSent(true);
       setRetrySeconds(60);
@@ -83,6 +91,7 @@ export function PasswordSetupForm({ onComplete }: { onComplete: () => void }): J
       await setupAccountPassword({
         code: parsed.data.code,
         new_password: parsed.data.new_password,
+        ...(channel === "phone" ? { channel } : {}),
       });
       form.reset();
       onComplete();
@@ -96,6 +105,14 @@ export function PasswordSetupForm({ onComplete }: { onComplete: () => void }): J
         Сначала создайте пароль аккаунта. Он нужен для изменения защиты и подтверждения важных
         действий.
       </p>
+      {phoneAvailable && !sent && (
+        <LoginMethodSwitch
+          label="Подтверждение создания пароля"
+          value={channel}
+          disabled={sending}
+          onChange={setChannel}
+        />
+      )}
       {!sent ? (
         <Button
           type="button"
@@ -110,12 +127,16 @@ export function PasswordSetupForm({ onComplete }: { onComplete: () => void }): J
       ) : (
         <form onSubmit={submit} noValidate className="space-y-4">
           <p className="text-sm text-foreground-secondary">
-            Код отправлен на почту вашего аккаунта.
+            {channel === "phone"
+              ? "Код отправлен на подтверждённый телефон вашего аккаунта."
+              : "Код отправлен на почту вашего аккаунта."}
           </p>
           <div>
-            <Label htmlFor="password-setup-code">Код из письма</Label>
+            <Label htmlFor={`${idPrefix}-password-setup-code`}>
+              {channel === "phone" ? "Код из SMS" : "Код из письма"}
+            </Label>
             <Input
-              id="password-setup-code"
+              id={`${idPrefix}-password-setup-code`}
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={6}
@@ -124,9 +145,9 @@ export function PasswordSetupForm({ onComplete }: { onComplete: () => void }): J
             <FormError>{form.formState.errors.code?.message}</FormError>
           </div>
           <div>
-            <Label htmlFor="password-setup-new">Новый пароль</Label>
+            <Label htmlFor={`${idPrefix}-password-setup-new`}>Новый пароль</Label>
             <Input
-              id="password-setup-new"
+              id={`${idPrefix}-password-setup-new`}
               type="password"
               autoComplete="new-password"
               maxLength={128}
@@ -135,9 +156,9 @@ export function PasswordSetupForm({ onComplete }: { onComplete: () => void }): J
             <FormError>{form.formState.errors.new_password?.message}</FormError>
           </div>
           <div>
-            <Label htmlFor="password-setup-confirm">Повторите пароль</Label>
+            <Label htmlFor={`${idPrefix}-password-setup-confirm`}>Повторите пароль</Label>
             <Input
-              id="password-setup-confirm"
+              id={`${idPrefix}-password-setup-confirm`}
               type="password"
               autoComplete="new-password"
               maxLength={128}

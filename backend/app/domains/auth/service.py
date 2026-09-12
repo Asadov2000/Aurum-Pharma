@@ -214,6 +214,19 @@ class AuthService:
     # 1. Request an email code
     # -------------------------------------------------------------------------
 
+    async def _claim_bootstrap_budget(self, key: str, limit: int, seconds: int) -> None:
+        if self.redis is None:
+            return
+        try:
+            pipeline = self.redis.pipeline(transaction=True)
+            pipeline.incr(f"auth:identity:bootstrap:{key}")
+            pipeline.expire(f"auth:identity:bootstrap:{key}", seconds)
+            results = cast(list[object], await pipeline.execute())
+        except RedisError as exc:
+            raise ServiceUnavailableError("Authentication attempt guard unavailable") from exc
+        if int(cast(int, results[0])) > limit:
+            raise RateLimitError("Too many authentication attempts. Try again later.")
+
     async def request_login_code(
         self,
         *,
@@ -224,6 +237,8 @@ class AuthService:
         """Returns the freshly minted plaintext code. The router decides
         whether to leak it back to the caller (dev only) or keep it secret."""
         email_lower = email.strip().lower()
+
+        await self._claim_bootstrap_budget(f"issue:ip:{hash_token(ip_address)}", 30, 3600)
 
         code = generate_email_code()
         salt = generate_code_salt()
@@ -264,7 +279,6 @@ class AuthService:
         device_id: str | None = None,
     ) -> AuthTokens | MfaLoginChallenge:
         email_lower = email.strip().lower()
-        now = utc_now()
 
         if await self._login_is_blocked(email_lower=email_lower, ip_address=ip_address):
             raise RateLimitError(
@@ -284,6 +298,7 @@ class AuthService:
             raise AuthenticationError("Invalid or expired code")
 
         candidate_hash = hash_code(code, ec.code_salt)
+        await self._claim_bootstrap_budget(f"verify:{ec.id}", 5, 300)
         if not await self.repo.email_code_matches(
             code_id=ec.id,
             email_lower=email_lower,
@@ -324,27 +339,39 @@ class AuthService:
 
         # The database lookup resolves assignment.password_required without a
         # tenant GUC because login happens before an authenticated context exists.
-        is_support = user.is_developer or user.is_administrator
-        needs_password = is_support or bool(user.password_hash) or user.password_required
-        if needs_password:
-            password_ok = bool(
-                password and user.password_hash and verify_password(password, user.password_hash)
-            )
-            if not password_ok:
-                await self.repo.insert_login_attempt(
-                    email_lower=email_lower,
-                    user_id=user.id,
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                    outcome="password_failed",
-                )
-                raise AuthenticationError("Invalid credentials")
+        if user.password_hash:
+            raise AuthenticationError("Use email and password to sign in")
+        if not await self.repo.confirm_bootstrap_email(ec.id, candidate_hash):
+            raise AuthenticationError("Invalid or expired code")
+
+        return await self._complete_login_proof(
+            user=user,
+            code_id=ec.id,
+            candidate_hash=candidate_hash,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            device_id=device_id,
+        )
+
+    async def _complete_login_proof(
+        self,
+        *,
+        user: AuthUserRecord,
+        code_id: UUID,
+        candidate_hash: str,
+        ip_address: str,
+        user_agent: str | None,
+        device_id: str | None,
+    ) -> AuthTokens | MfaLoginChallenge:
+        """Finish a DB-bound, single-use proof without granting password step-up."""
+        now = utc_now()
+        email_lower = user.email.lower()
 
         if user.mfa_required:
             challenge_token = generate_refresh_token()
             challenge = await self.repo.create_mfa_challenge_from_email_code(
                 email_lower=email_lower,
-                code_id=ec.id,
+                code_id=code_id,
                 candidate_hash=candidate_hash,
                 token_hash=hash_token(challenge_token),
                 ip_address=ip_address,
@@ -361,7 +388,7 @@ class AuthService:
 
         refresh_token = generate_refresh_token()
         session_id = await self.repo.create_session_from_email_code(
-            code_id=ec.id,
+            code_id=code_id,
             email_lower=email_lower,
             candidate_hash=candidate_hash,
             refresh_token_hash=hash_token(refresh_token),
@@ -375,7 +402,7 @@ class AuthService:
         accepted_memberships = await self.repo.accept_tenant_invitation(
             session_id=session_id,
             tenant_id=user.home_tenant_id,
-            email_code_id=ec.id,
+            email_code_id=code_id,
             accepted_at=now,
         )
         if user.membership_status == "pending" and accepted_memberships != 1:
@@ -461,7 +488,11 @@ class AuthService:
                 "Set an account password first", details={"reason": "password_setup_required"}
             )
         await self._claim_password_attempt(user_id)
-        if not verify_password(password, password_hash):
+        try:
+            password_matches = verify_password(password, password_hash)
+        except ValueError:
+            password_matches = False
+        if not password_matches:
             await self.repo.insert_login_attempt(
                 email_lower=identity.email.lower(),
                 user_id=user_id,
