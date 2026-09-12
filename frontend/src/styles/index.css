@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme follows the user's in-app preference, including changes without reload. */
+.brand-mark-white {
+  display: none;
+}
+
+[data-theme="dark"] .brand-mark-color,
+.brand-mark[data-brand-tone="inverse"] .brand-mark-color {
+  display: none;
+}
+
+[data-theme="dark"] .brand-mark-white,
+.brand-mark[data-brand-tone="inverse"] .brand-mark-white {
+  display: block;
+}
+
 /* =============================================================================
    Design tokens — single source of truth for the visual language.
    Values are HSL channels ("H S% L%") so Tailwind can apply opacity modifiers
