@@ -49,6 +49,11 @@ try {
           const page = await context.newPage();
           const errors = [];
           const externalRequests = [];
+          const policyViolations = [];
+          page.on("console", (message) => {
+            if (message.type() === "error")
+              policyViolations.push(message.text());
+          });
           page.on("pageerror", (error) => errors.push(error.message));
           page.on("request", (request) => {
             if (!request.url().startsWith(`${origin}/`))
@@ -57,6 +62,81 @@ try {
           for (const route of ["/", "/downloads/"]) {
             await page.goto(`${origin}${route}`, { waitUntil: "networkidle" });
             await playwright.expect(page.locator("h1")).toBeVisible();
+            if (route === "/") {
+              for (const [role, title, total, navigation] of [
+                [
+                  "cashier",
+                  "Покупатель перед вами. Всё нужное рядом.",
+                  "20 TJS",
+                  "Касса",
+                ],
+                [
+                  "stock",
+                  "Поставка — в понятном документе",
+                  "№ 024",
+                  "Приходы",
+                ],
+                ["owner", "Что происходит в аптеке", "1 320 TJS", "Обзор"],
+              ]) {
+                const button = page.locator(`[data-role="${role}"]`);
+                await button.focus();
+                await page.keyboard.press(role === "stock" ? "Space" : "Enter");
+                await playwright.expect(button).toBeFocused();
+                await playwright
+                  .expect(button)
+                  .toHaveAttribute("aria-pressed", "true");
+                await playwright
+                  .expect(page.locator('[data-role][aria-pressed="true"]'))
+                  .toHaveCount(1);
+                await playwright
+                  .expect(page.locator("#preview-title"))
+                  .toHaveText(title);
+                await playwright
+                  .expect(page.locator("#value-a"))
+                  .toHaveText(total);
+                await playwright
+                  .expect(page.locator(".app-nav .selected"))
+                  .toHaveText(navigation);
+                if (role === "owner") {
+                  await playwright.expect(page.locator(".chart")).toBeVisible();
+                  await playwright
+                    .expect(page.locator(".mini-list"))
+                    .toContainText("Центральная аптека");
+                } else {
+                  await playwright.expect(page.locator(".chart")).toBeHidden();
+                  await playwright
+                    .expect(page.locator(".mini-list"))
+                    .toBeVisible();
+                  await playwright
+                    .expect(page.locator(".mini-list"))
+                    .toContainText("Бинт медицинский");
+                }
+                assert.ok(
+                  await page.evaluate(
+                    () =>
+                      document.documentElement.scrollWidth <=
+                      document.documentElement.clientWidth + 1,
+                  ),
+                  `${width}: ${role} overflow`,
+                );
+                checks += 1;
+              }
+              for (const role of ["cashier", "stock", "owner"]) {
+                await page.locator(`[data-preview="${role}"]`).click();
+                await playwright
+                  .expect(page.locator(`[data-role="${role}"]`))
+                  .toHaveAttribute("aria-pressed", "true");
+                await playwright.expect(page).toHaveURL(`${origin}/#preview`);
+                const offset = await page
+                  .locator("#preview")
+                  .evaluate((element) => element.getBoundingClientRect().top);
+                assert.ok(
+                  offset >= 0 && offset < 100,
+                  "Feature link must reveal its example",
+                );
+                checks += 1;
+              }
+            }
             const geometry = await page.evaluate(() => ({
               viewport: document.documentElement.clientWidth,
               content: document.documentElement.scrollWidth,
@@ -107,6 +187,7 @@ try {
             [],
             "Public pages must not emit browser errors",
           );
+          assert.deepEqual(policyViolations, [], "No console or CSP errors");
           await page.route(appUrl, (route) =>
             route.fulfill({
               contentType: "text/html",
