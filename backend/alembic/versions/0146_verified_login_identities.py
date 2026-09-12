@@ -16,6 +16,7 @@ revision = "0146"
 down_revision = "0145"
 branch_labels = None
 depends_on = None
+REFERENCE_TABLES = ("app_user", "session", "email_code")
 
 
 def _source(filename: str) -> ModuleType:
@@ -283,7 +284,41 @@ END $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_
 )
 
 
+def _grant_missing_reference_privileges() -> None:
+    op.execute("""CREATE TEMPORARY TABLE aurum_0146_missing_reference_privilege (
+      table_name TEXT PRIMARY KEY
+    ) ON COMMIT DROP""")
+    for table_name in REFERENCE_TABLES:
+        op.execute(f"""DO $$
+        BEGIN
+          IF NOT pg_catalog.has_table_privilege(
+            'aurum_schema_owner', 'public.{table_name}', 'REFERENCES'
+          ) THEN
+            INSERT INTO pg_temp.aurum_0146_missing_reference_privilege(table_name)
+            VALUES ('{table_name}');
+            GRANT REFERENCES ON TABLE public.{table_name} TO aurum_schema_owner;
+          END IF;
+        END $$""")
+
+
+def _restore_reference_privileges() -> None:
+    for table_name in REFERENCE_TABLES:
+        op.execute(f"""DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM pg_temp.aurum_0146_missing_reference_privilege
+            WHERE table_name='{table_name}'
+          ) THEN
+            REVOKE REFERENCES ON TABLE public.{table_name} FROM aurum_schema_owner;
+          END IF;
+        END $$""")
+    op.execute("DROP TABLE pg_temp.aurum_0146_missing_reference_privilege")
+
+
 def upgrade() -> None:
+    # Hardened clusters may revoke owner REFERENCES while retaining migration DDL.
+    # Borrow only the missing privileges for FK creation, then restore the ACL.
+    _grant_missing_reference_privileges()
     schema_sql = """
 ALTER TABLE public.app_user ADD COLUMN verified_phone TEXT UNIQUE,
  ADD COLUMN phone_verified_at TIMESTAMPTZ, ADD COLUMN email_verified_at TIMESTAMPTZ,
@@ -309,6 +344,7 @@ CREATE INDEX ix_identity_code_expiry ON public.auth_identity_code(expires_at,id)
     for statement in schema_sql.split(";"):
         if statement.strip():
             op.execute(statement)
+    _restore_reference_privileges()
     for signature, sql in FUNCTIONS:
         op.execute(sql)
         op.execute(f"ALTER FUNCTION public.{signature} OWNER TO aurum_schema_owner")
