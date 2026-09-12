@@ -11,6 +11,33 @@ import {
 } from "./helpers";
 
 test.describe("Auth", () => {
+  test("login remains usable on narrow screens in both themes", async ({ page }) => {
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+      for (const width of [320, 390, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto("/login", { waitUntil: "domcontentloaded" });
+        const email = page.getByLabel("Email", { exact: true });
+        const submit = page.getByRole("button", { name: "Получить код", exact: true });
+        await expect(email).toBeVisible();
+        await expect(submit).toBeVisible();
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        const inputBounds = await email.boundingBox();
+        const buttonBounds = await submit.boundingBox();
+        expect(inputBounds?.height).toBeGreaterThanOrEqual(44);
+        expect(buttonBounds?.height).toBeGreaterThanOrEqual(44);
+        await email.focus();
+        await page.keyboard.press("Tab");
+        await expect(submit).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(page.locator("#email-error")).toBeVisible();
+        await expect(email).toHaveAttribute("aria-invalid", "true");
+      }
+    }
+  });
+
   test("opens the public website in a new tab and preserves the login form", async ({
     page,
     context,
