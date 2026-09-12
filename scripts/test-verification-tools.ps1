@@ -151,6 +151,44 @@ $unknown = Get-Scope -Paths @("unknown/new-area/file.xyz")
 Assert-Equal -Actual $unknown.risk -Expected "full" -Because "unknown roots fail closed"
 Assert-Contains -Actual @($unknown.reasons) -Expected "unknown-path" -Because "unknown roots explain the escalation"
 
+foreach ($path in @("website/src/index.html", "website/assets/site.css", "website/scripts/test.mjs", "website/new-area/future.xyz")) {
+    $website = Get-Scope -Paths @($path)
+    Assert-Equal -Actual $website.risk -Expected "standard" -Because "the standalone website is isolated from the application"
+    Assert-Equal -Actual $website.flags.website -Expected $true -Because "website files have their own area"
+    Assert-Equal -Actual $website.verification.websiteTests -Expected $true -Because "every website change selects its checks"
+    Assert-Equal -Actual $website.verification.backendTests -Expected "none" -Because "website changes do not require a database"
+    Assert-Equal -Actual $website.verification.frontendTests -Expected "none" -Because "website changes do not run application Vitest"
+    Assert-Equal -Actual $website.verification.e2e -Expected "none" -Because "website changes do not start the application E2E stack"
+}
+$websiteDocs = Get-Scope -Paths @("website/README.md")
+Assert-Equal -Actual $websiteDocs.risk -Expected "docs" -Because "website instructions remain documentation"
+Assert-Equal -Actual $websiteDocs.verification.websiteTests -Expected $false -Because "documentation alone needs no website checks"
+$websiteNearMiss = Get-Scope -Paths @("website_fake/index.html")
+Assert-Equal -Actual $websiteNearMiss.risk -Expected "full" -Because "near-miss website roots do not bypass classification"
+$websiteInfrastructure = Get-Scope -Paths @("website/Dockerfile")
+Assert-Equal -Actual $websiteInfrastructure.risk -Expected "full" -Because "website infrastructure keeps the existing infrastructure gate"
+
+$websitePlan = Get-Plan -Mode "Auto" -Paths @("website/src/index.html")
+$websiteStepIds = @($websitePlan.steps.id | Where-Object { $_ -like "website-*" })
+Assert-Equal -Actual ($websiteStepIds -join ",") -Expected "website-unit,website-build,website-browser" -Because "Auto runs all website checks in order"
+Assert-Count -Actual @($websitePlan.steps | Where-Object { $_.id -like "backend-*" -or $_.id -like "frontend-*" -or $_.id -eq "e2e" }) -Expected 0 -Because "website Auto has no application infrastructure dependency"
+foreach ($check in @(
+    @{ Id = "website-unit"; Script = "website/scripts/test.mjs" },
+    @{ Id = "website-build"; Script = "website/scripts/build.mjs" },
+    @{ Id = "website-browser"; Script = "website/scripts/check-browser.mjs" }
+)) {
+    $websiteStep = @($websitePlan.steps | Where-Object { $_.id -eq $check.Id })[0]
+    Assert-Equal -Actual $websiteStep.command -Expected "node" -Because "website checks use the existing Node runtime"
+    Assert-Contains -Actual $websiteStep.arguments -Expected $check.Script -Because "the planned website entrypoint is explicit"
+    Assert-Equal -Actual $websiteStep.cwd -Expected (Resolve-Path (Join-Path $PSScriptRoot "..")).Path -Because "website checks resolve paths from the repository root"
+}
+$websiteBuildStep = @($websitePlan.steps | Where-Object { $_.id -eq "website-build" })[0]
+Assert-Contains -Actual $websiteBuildStep.arguments -Expected "--production" -Because "Auto validates production configuration"
+Assert-Equal -Actual $websiteBuildStep.environment.APP_URL -Expected "https://app.example.test/login" -Because "verification uses an explicit non-production application address"
+Assert-Equal -Actual $websiteBuildStep.environment.WEBSITE_OUTPUT_DIR -Expected ".codex/website-tests/production-verification" -Because "verification must not replace the user's local website preview"
+$quickWebsite = Get-Plan -Mode "Quick" -Paths @("website/src/index.html")
+Assert-Equal -Actual ((@($quickWebsite.steps.id | Where-Object { $_ -like "website-*" })) -join ",") -Expected "website-unit" -Because "Quick keeps fast website tests while Auto provides the full website gate"
+
 $fakeAuth = Get-Scope -Paths @("backend/app/domains/authentication_fake/service.py")
 Assert-Equal -Actual $fakeAuth.risk -Expected "full" -Because "near-miss domain names do not bypass classification"
 
@@ -263,6 +301,7 @@ $quickCritical = Get-Plan -Mode "Quick" -Paths @("backend/app/domains/pos/servic
 Assert-Equal -Actual $quickCritical.scope.risk -Expected "critical" -Because "Quick sees critical risk"
 Assert-Contains -Actual @($quickCritical.steps.id) -Expected "e2e" -Because "Quick never weakens critical verification"
 Assert-Contains -Actual @($quickCritical.steps.id) -Expected "frontend-build" -Because "Quick keeps the critical build"
+Assert-Contains -Actual @($quickCritical.steps.id) -Expected "website-browser" -Because "Quick does not weaken website verification for critical changes"
 
 $quickCatalog = Get-Plan -Mode "Quick" -Paths @("backend/app/domains/catalog/service.py")
 Assert-Equal -Actual (@($quickCatalog.steps.id) -contains "e2e") -Expected $false -Because "Quick omits integrated E2E during the edit loop"
@@ -272,6 +311,9 @@ $fullDocs = Get-Plan -Mode "Full" -Paths @("docs/adr/9999-example.md")
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "backend-tests" -Because "Full always runs backend tests"
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "frontend-tests" -Because "Full always runs frontend tests"
 Assert-Contains -Actual @($fullDocs.steps.id) -Expected "e2e" -Because "Full always runs E2E"
+foreach ($id in @("website-unit", "website-build", "website-browser")) {
+    Assert-Contains -Actual @($fullDocs.steps.id) -Expected $id -Because "Full always runs $id"
+}
 $fullBackend = @($fullDocs.steps | Where-Object { $_.id -eq "backend-tests" })[0]
 Assert-Contains -Actual $fullBackend.arguments -Expected "tests" -Because "Full keeps the complete backend suite inside Docker"
 
@@ -342,6 +384,38 @@ try {
     [IO.File]::WriteAllText($goodFixture, "clean`n", $encoding)
     [IO.File]::WriteAllText($badFixture, "trailing   `n", $encoding)
 
+    & {
+        # Dot-source only the side-effect-free planner, then exercise its real runner.
+        . $verifyScript -Mode Auto -ChangedPath @("website/src/index.html") -PlanOnly -Format Json | Out-Null
+        $existingValue = [Environment]::GetEnvironmentVariable("AURUM_VERIFY_ENV_EXISTING", "Process")
+        $missingValue = [Environment]::GetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", "Process")
+        try {
+            [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_EXISTING", "inherited", "Process")
+            [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", $null, "Process")
+            foreach ($expectedExit in @(0, 17)) {
+                $probe = 'if ($env:AURUM_VERIFY_ENV_EXISTING -ne "scoped" -or $env:AURUM_VERIFY_ENV_MISSING -ne "temporary") { exit 23 }; exit ' + $expectedExit
+                $environmentStep = New-Step -Id "environment-$expectedExit" -Name "Environment isolation fixture" -WorkingDirectory $fixtureRoot -Command $powershellExecutable -Arguments @("-NoProfile", "-Command", $probe) -Environment @{
+                    AURUM_VERIFY_ENV_EXISTING = "scoped"
+                    AURUM_VERIFY_ENV_MISSING = "temporary"
+                }
+                $caughtFailure = $false
+                try {
+                    Invoke-LoggedStep -Step $environmentStep -LogDirectory $fixtureRoot -Number 1 -Total 1 *> $null
+                }
+                catch {
+                    $caughtFailure = $true
+                }
+                Assert-Equal -Actual $caughtFailure -Expected ($expectedExit -ne 0) -Because "the environment fixture propagates its command result"
+                Assert-Equal -Actual ([Environment]::GetEnvironmentVariable("AURUM_VERIFY_ENV_EXISTING", "Process")) -Expected "inherited" -Because "step environment is restored after success or failure"
+                Assert-Equal -Actual ([Environment]::GetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", "Process")) -Expected $null -Because "new environment keys do not leak into later checks"
+            }
+        }
+        finally {
+            [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_EXISTING", $existingValue, "Process")
+            [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", $missingValue, "Process")
+        }
+    }
+
     $whitespaceArguments = @("-NoProfile")
     if ($env:OS -eq "Windows_NT") {
         $whitespaceArguments += @("-ExecutionPolicy", "Bypass")
@@ -373,6 +447,8 @@ finally {
     if ([IO.Directory]::Exists($resolvedFixtureRoot)) {
         [IO.File]::Delete((Join-Path $resolvedFixtureRoot "good.txt"))
         [IO.File]::Delete((Join-Path $resolvedFixtureRoot "bad.txt"))
+        [IO.File]::Delete((Join-Path $resolvedFixtureRoot "01-environment-0.log"))
+        [IO.File]::Delete((Join-Path $resolvedFixtureRoot "01-environment-17.log"))
         [IO.Directory]::Delete($resolvedFixtureRoot, $false)
     }
 }

@@ -1,0 +1,16 @@
+{
+  "name": "aurum-pharma-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:production": "node scripts/build.mjs --production",
+    "preview": "node scripts/serve.mjs",
+    "test": "node scripts/test.mjs",
+    "test:browser": "node scripts/check-browser.mjs"
+  }
+}

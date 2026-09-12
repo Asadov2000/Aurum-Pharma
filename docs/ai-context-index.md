@@ -6,6 +6,8 @@
 ## Быстрый старт задачи
 
 1. Прочитать `AGENTS.md`.
+   При первом входе в репозиторий открыть [карту проекта](project-structure.md);
+   очередность новых блоков находится в [плане развития](implementation-roadmap.md).
 2. Выполнить `scripts/verify-change.ps1 -Mode Auto -PlanOnly`.
 3. Искать нужные символы и файлы через `rg`, не читать домен целиком.
 4. До редактирования записать краткий task brief:
@@ -39,6 +41,9 @@
 | Backend core/middleware | `backend/app/core/`, `backend/app/middleware/` | `backend/tests/core/`, `backend/tests/middleware/` |
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |
 | Frontend-фича | `frontend/src/features/<domain>/` | `frontend/tests/features/<domain>/` |
+| Публичный сайт и способы установки | `website/src/`, `website/scripts/`; [ADR-0041](adr/0041-public-website-boundary.md) | `website/scripts/test.mjs`, браузерная проверка сайта, CI gate |
+| Границы компонентов и план развития | [project-structure.md](project-structure.md), [implementation-roadmap.md](implementation-roadmap.md) | отличать реализованные пути и проверенные результаты от планов |
+| Будущий Windows-клиент / установщик | [desktop-host-implementation.md](desktop-host-implementation.md), [desktop-bridge.md](desktop-bridge.md); `desktop/` ещё не реализован | `scripts/windows-host-readiness.ps1` — проверка toolchain, не выпуск клиента |
 | Общий UI | `frontend/src/components/` | `frontend/tests/components/` |
 | Общие frontend-механизмы | `frontend/src/lib/`, `frontend/src/stores/` | `frontend/tests/lib/`, тесты фичи |
 | Browser flow | `frontend/e2e/*.spec.ts` | изолированный `scripts/e2e-isolated.ps1` |

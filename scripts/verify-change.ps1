@@ -33,7 +33,8 @@ function New-Step {
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [Parameter(Mandatory = $true)][string]$Command,
-        [Parameter(Mandatory = $true)][string[]]$Arguments
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [hashtable]$Environment = @{}
     )
 
     return [pscustomobject][ordered]@{
@@ -42,6 +43,7 @@ function New-Step {
         cwd = $WorkingDirectory
         command = $Command
         arguments = @($Arguments)
+        environment = $Environment
     }
 }
 
@@ -104,8 +106,13 @@ function Invoke-LoggedStep {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     Write-Host ("[{0}/{1}] {2}" -f $Number, $Total, $Step.name)
 
+    $previousEnvironment = @{}
     Push-Location $Step.cwd
     try {
+        foreach ($entry in $Step.environment.GetEnumerator()) {
+            $previousEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+        }
         $arguments = @($Step.arguments)
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
@@ -125,6 +132,9 @@ function Invoke-LoggedStep {
         }
     }
     finally {
+        foreach ($entry in $previousEnvironment.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+        }
         Pop-Location
         $timer.Stop()
     }
@@ -153,11 +163,16 @@ $backendQuality = [bool]$scope.verification.backendQuality
 $frontendQuality = [bool]$scope.verification.frontendQuality
 $frontendBuild = [bool]$scope.verification.frontendBuild
 $toolingSelfTest = [bool]$scope.verification.toolingSelfTest
+$websiteTests = [bool]$scope.verification.websiteTests
+$websiteBuild = [bool]$scope.verification.websiteBuild
+$websiteBrowser = [bool]$scope.verification.websiteBrowser
 
 if ($Mode -eq "Quick" -and -not [bool]$scope.flags.critical) {
     $e2eMode = "none"
     if ($scope.risk -ne "full") {
         $frontendBuild = $false
+        $websiteBuild = $false
+        $websiteBrowser = $false
     }
 }
 elseif ($Mode -eq "Full") {
@@ -168,6 +183,9 @@ elseif ($Mode -eq "Full") {
     $frontendQuality = $true
     $frontendBuild = $true
     $toolingSelfTest = $true
+    $websiteTests = $true
+    $websiteBuild = $true
+    $websiteBrowser = $true
 }
 
 $steps = [System.Collections.Generic.List[object]]::new()
@@ -214,6 +232,19 @@ if ($frontendQuality) {
 }
 if ($frontendBuild) {
     Add-Step -Steps $steps -Step (New-Step -Id "frontend-build" -Name "Frontend production build" -WorkingDirectory (Join-Path $repoRoot "frontend") -Command "pnpm" -Arguments @("build"))
+}
+
+if ($websiteTests) {
+    Add-Step -Steps $steps -Step (New-Step -Id "website-unit" -Name "Public website static and unit checks" -WorkingDirectory $repoRoot -Command "node" -Arguments @("website/scripts/test.mjs"))
+}
+if ($websiteBuild) {
+    Add-Step -Steps $steps -Step (New-Step -Id "website-build" -Name "Public website production build" -WorkingDirectory $repoRoot -Command "node" -Arguments @("website/scripts/build.mjs", "--production") -Environment @{
+        APP_URL = "https://app.example.test/login"
+        WEBSITE_OUTPUT_DIR = ".codex/website-tests/production-verification"
+    })
+}
+if ($websiteBrowser) {
+    Add-Step -Steps $steps -Step (New-Step -Id "website-browser" -Name "Public website browser checks" -WorkingDirectory $repoRoot -Command "node" -Arguments @("website/scripts/check-browser.mjs"))
 }
 
 if ($e2eMode -ne "none") {
