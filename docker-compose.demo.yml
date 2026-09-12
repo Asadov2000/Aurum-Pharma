@@ -431,6 +431,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: http://localhost:8000/api/v1
+        VITE_PUBLIC_WEBSITE_URL: ${VITE_PUBLIC_WEBSITE_URL:-}
     container_name: aurum-demo-frontend
     volumes:
       - frontend-vite-cache:/app/node_modules/.vite
