@@ -394,7 +394,9 @@ try {
             [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", $null, "Process")
             foreach ($expectedExit in @(0, 17)) {
                 $probe = 'if ($env:AURUM_VERIFY_ENV_EXISTING -ne "scoped" -or $env:AURUM_VERIFY_ENV_MISSING -ne "temporary") { exit 23 }; exit ' + $expectedExit
-                $environmentStep = New-Step -Id "environment-$expectedExit" -Name "Environment isolation fixture" -WorkingDirectory $fixtureRoot -Command $powershellExecutable -Arguments @("-NoProfile", "-Command", $probe) -Environment @{
+                # Windows PowerShell 5.1 strips nested quotes in native -Command arguments.
+                $encodedProbe = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
+                $environmentStep = New-Step -Id "environment-$expectedExit" -Name "Environment isolation fixture" -WorkingDirectory $fixtureRoot -Command $powershellExecutable -Arguments @("-NoProfile", "-EncodedCommand", $encodedProbe) -Environment @{
                     AURUM_VERIFY_ENV_EXISTING = "scoped"
                     AURUM_VERIFY_ENV_MISSING = "temporary"
                 }
