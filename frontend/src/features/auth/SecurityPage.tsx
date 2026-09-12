@@ -17,6 +17,7 @@ import { OwnershipTransferPanel } from "@/features/roles/OwnershipTransferPanel"
 import { useActiveSessionsQuery, useRevokeActiveSession, useRevokeOtherSessions } from "./queries";
 import { type ActiveSession } from "./types";
 import { MfaSettingsPanel } from "./MfaSettingsPanel";
+import { AccountIdentityPanel } from "./AccountIdentityPanel";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -57,6 +58,7 @@ function describeDevice(userAgent: string | null): string {
 export function SecurityPage({ embedded = false }: { embedded?: boolean } = {}): JSX.Element {
   return (
     <div className={embedded ? "space-y-5" : "max-w-4xl space-y-5"}>
+      <AccountIdentityPanel />
       <MfaSettingsPanel />
       <SessionsPanel embedded={embedded} />
     </div>

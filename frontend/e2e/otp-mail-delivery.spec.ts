@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 
 import {
   assertDockerAvailable,
@@ -8,7 +9,7 @@ import {
   E2E_POSTGRES_CONTAINER,
   E2E_POSTGRES_DB,
 } from "./docker";
-import { API, CASHIER, clearLoginRateLimit } from "./helpers";
+import { API, OWNER, apiContext, apiLogin, clearLoginRateLimit, seedBranch } from "./helpers";
 
 // Native HTTP and captured Docker stdin/stdout keep codes, mail and tokens out
 // of browser traces, screenshots, videos and assertion diagnostics.
@@ -30,7 +31,10 @@ function isolatedDocker(args: string[], input?: string): string {
   }
 }
 
-function runningService(project: string, service: "platform-mailer" | "celery-beat"): string {
+function runningService(
+  project: string,
+  service: "platform-mailer" | "celery-beat" | "backend",
+): string {
   const id = isolatedDocker([
     "ps",
     "--filter",
@@ -81,16 +85,21 @@ if payload['mode'] == 'baseline':
     print(json.dumps([message['ID'] for message in matching]))
 else:
     result = None
+    counts = {'matching': len(matching), 'new': 0, 'withText': 0, 'withCode': 0, 'withOutboxId': 0}
     for message in matching:
         if message['ID'] in payload['baseline']:
             continue
+        counts['new'] += 1
         details = read('message/' + message['ID'])
         code = re.search(r'(?<!\d)\d{6}(?!\d)', details.get('Text', ''))
         outbox = re.search(r'auth-login-([0-9a-f-]{36})@', details.get('MessageID', ''))
+        counts['withText'] += bool(details.get('Text', ''))
+        counts['withCode'] += bool(code)
+        counts['withOutboxId'] += bool(outbox)
         if code and outbox:
             result = {'code': code.group(0), 'outboxId': outbox.group(1)}
             break
-    print(json.dumps(result))
+    print(json.dumps(counts if payload['mode'] == 'diagnostics' else result))
 `;
 
 interface DeliveredCode {
@@ -98,10 +107,15 @@ interface DeliveredCode {
   outboxId: string;
 }
 
-function readMailbox(mailer: string, mode: "baseline" | "poll", baseline: string[] = []): unknown {
+function readMailbox(
+  mailer: string,
+  email: string,
+  mode: "baseline" | "poll" | "diagnostics",
+  baseline: string[] = [],
+): unknown {
   const output = isolatedDocker(
     ["exec", "-i", mailer, "python", "-c", mailboxProgram],
-    JSON.stringify({ mode, baseline, email: CASHIER.email }),
+    JSON.stringify({ mode, baseline, email }),
   );
   try {
     return JSON.parse(output) as unknown;
@@ -118,10 +132,112 @@ function deliveredCode(value: unknown): DeliveredCode | null {
   return { code: value.code, outboxId: value.outboxId };
 }
 
-test("delivers a login code through outbox, beat, Celery and SMTP before authenticating", async () => {
+function isolatedSql(statement: string): string {
+  return isolatedDocker(
+    [
+      "exec",
+      "-i",
+      E2E_POSTGRES_CONTAINER,
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      E2E_POSTGRES_DB,
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-Atq",
+    ],
+    statement,
+  );
+}
+
+function issuanceSnapshot(email: string): string {
+  // The generated UUID address remains in captured stdin, never diagnostics.
+  return isolatedSql(`SELECT json_build_object(
+    'database',current_database(),
+    'fixtureInvitedNoPassword',(SELECT count(*) FROM app_user WHERE email_lower='${email}' AND status='invited' AND password_hash IS NULL),
+    'codes',(SELECT count(*) FROM email_code WHERE email_lower='${email}'),
+    'requests',(SELECT count(*) FROM login_attempt WHERE email_lower='${email}' AND outcome='code_requested'),
+    'outbox',(SELECT count(*) FROM auth_email_outbox o JOIN email_code c ON c.id=o.email_code_id WHERE c.email_lower='${email}'),
+    'revision',(SELECT version_num FROM alembic_version),
+    'issuer',(SELECT json_build_object('owner',pg_get_userbyid(p.proowner),'bodyHash',md5(p.prosrc),'hasOutboxInsert',strpos(p.prosrc,'INSERT INTO public.auth_email_outbox')>0)
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='issue_auth_email_code' AND p.pronargs=8)
+  );`);
+}
+
+const apiDatabaseProgram = String.raw`
+import asyncio, json
+from sqlalchemy import text
+from app.core.db import AppSessionLocal, app_engine
+async def inspect():
+    try:
+        async with AppSessionLocal() as session:
+            row = (await session.execute(text("SELECT current_database() AS database, current_user AS role, session_user AS session_role, (SELECT md5(p.prosrc) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='issue_auth_email_code' AND p.pronargs=8) AS issuer_body_hash"))).mappings().one()
+            print(json.dumps(dict(row)))
+    except Exception as error:
+        print(json.dumps({'inspectionError': type(error).__name__}))
+    finally:
+        await app_engine.dispose()
+asyncio.run(inspect())
+`;
+
+function apiDatabaseSnapshot(mailer: string): string {
+  const [project] = isolatedDocker(["inspect", "--format", labelFormat, mailer]).split("|");
+  if (!project) throw new Error("Isolated API project is unavailable");
+  const backend = runningService(project, "backend");
+  return isolatedDocker(["exec", backend, "python", "-c", apiDatabaseProgram]);
+}
+
+async function inviteEmployee(email: string): Promise<void> {
+  clearLoginRateLimit(OWNER.email);
+  const anonymous = await request.newContext();
+  let owner: Awaited<ReturnType<typeof apiContext>> | undefined;
+  try {
+    owner = await apiContext((await apiLogin(anonymous, OWNER)).access_token);
+    const templatesResponse = await owner.get("templates");
+    expect(templatesResponse.ok()).toBe(true);
+    const templates = (await templatesResponse.json()) as {
+      slug: string;
+      permissions: string[];
+    }[];
+    const cashier = templates.find((template) => template.slug === "cashier");
+    if (!cashier) throw new Error("SMTP fixture requires the cashier role template");
+    const roleResponse = await owner.post("roles", {
+      data: { name: `SMTP ${randomUUID()}`, permissions: cashier.permissions },
+    });
+    expect(roleResponse.status()).toBe(201);
+    const role = (await roleResponse.json()) as { id: string };
+    const branch = await seedBranch(owner, `SMTP ${randomUUID()}`);
+    const invitation = await owner.post("users/invite", {
+      data: {
+        operation_id: randomUUID(),
+        email,
+        full_name: "SMTP bootstrap test",
+        role_id: role.id,
+        branch_id: branch.id,
+      },
+    });
+    expect(invitation.status()).toBe(201);
+  } finally {
+    await owner?.dispose();
+    await anonymous.dispose();
+  }
+}
+
+test("delivers a first-login code through outbox, beat, Celery and SMTP before authenticating", async () => {
   const mailer = isolatedMailer();
-  clearLoginRateLimit(CASHIER.email);
-  const snapshot = readMailbox(mailer, "baseline");
+  const email = `mail-bootstrap-${randomUUID()}@e2e.aurum.tj`;
+  // Exercise the actual employee invitation lifecycle. An orphan invited user
+  // is intentionally refused email delivery by the database invitation guard.
+  await inviteEmployee(email);
+  const fixtureCount = isolatedSql(
+    `SELECT count(*) FROM app_user WHERE email_lower='${email}' AND status='invited' AND password_hash IS NULL;`,
+  );
+  expect(fixtureCount, "SMTP fixture must persist as one invited account without a password").toBe(
+    "1",
+  );
+  clearLoginRateLimit(email);
+  const snapshot = readMailbox(mailer, email, "baseline");
   if (!Array.isArray(snapshot) || !snapshot.every((id: unknown) => typeof id === "string")) {
     throw new Error("Mailpit baseline is unavailable");
   }
@@ -129,22 +245,54 @@ test("delivers a login code through outbox, beat, Celery and SMTP before authent
   const requested = await fetch(`${API}/auth/login/code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: CASHIER.email }),
+    body: JSON.stringify({ email }),
     signal: AbortSignal.timeout(15_000),
   });
   expect(requested.status).toBe(202);
   // Deliberately discard the development response; only the SMTP-delivered code is usable here.
   await requested.arrayBuffer();
+  const issuance = issuanceSnapshot(email);
+  const parsedIssuance = JSON.parse(issuance) as {
+    codes?: unknown;
+    requests?: unknown;
+    outbox?: unknown;
+  };
+  if (parsedIssuance.codes !== 1 || parsedIssuance.requests !== 1 || parsedIssuance.outbox !== 1) {
+    throw new Error(
+      `SMTP issuance did not persist the expected code/request/outbox; state=${issuance}; API=${apiDatabaseSnapshot(mailer)}`,
+    );
+  }
   let delivery: DeliveredCode | null = null;
-  await expect
-    .poll(
-      () => {
-        delivery = deliveredCode(readMailbox(mailer, "poll", baseline));
-        return delivery !== null;
-      },
-      { timeout: 30_000, intervals: [500, 1000] },
-    )
-    .toBe(true);
+  try {
+    await expect
+      .poll(
+        () => {
+          delivery = deliveredCode(readMailbox(mailer, email, "poll", baseline));
+          return delivery !== null;
+        },
+        { timeout: 30_000, intervals: [500, 1000] },
+      )
+      .toBe(true);
+  } catch {
+    // Only aggregate delivery state is reported; never emit addresses, message
+    // bodies, code hashes, encrypted payloads, credentials or authentication codes.
+    const outbox = isolatedDocker([
+      "exec",
+      E2E_POSTGRES_CONTAINER,
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      E2E_POSTGRES_DB,
+      "-At",
+      "-c",
+      `SELECT json_build_object('pending',count(*) FILTER(WHERE o.status='pending'),'processing',count(*) FILTER(WHERE o.status='processing'),'sent',count(*) FILTER(WHERE o.status='sent'),'failed',count(*) FILTER(WHERE o.status='failed'),'cancelled',count(*) FILTER(WHERE o.status='cancelled')) FROM auth_email_outbox o JOIN email_code c ON c.id=o.email_code_id WHERE c.email_lower='${email}';`,
+    ]);
+    const mailbox = readMailbox(mailer, email, "diagnostics", baseline);
+    throw new Error(
+      `SMTP delivery timed out; outbox counts=${outbox}; mailbox counts=${JSON.stringify(mailbox)}`,
+    );
+  }
   const received = delivery as DeliveredCode | null;
   if (!received) throw new Error("No SMTP-delivered login code received");
 
@@ -170,9 +318,8 @@ test("delivers a login code through outbox, beat, Celery and SMTP before authent
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        email: CASHIER.email,
+        email,
         code: received.code,
-        password: CASHIER.password,
       }),
       signal: AbortSignal.timeout(15_000),
     });
@@ -186,6 +333,6 @@ test("delivers a login code through outbox, beat, Celery and SMTP before authent
   });
   expect(me.status).toBe(200);
   const user = (await me.json()) as { email?: unknown };
-  expect(user.email === CASHIER.email).toBe(true);
+  expect(user.email === email).toBe(true);
   expect((await verify()).status).toBe(401);
 });

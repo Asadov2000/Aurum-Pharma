@@ -37,6 +37,7 @@
 | Задача | Реализация | Тесты |
 |---|---|---|
 | Backend-домен | `backend/app/domains/<domain>/` | `backend/tests/domains/<domain>/` |
+| Почта/пароль, SMS-вход и контакты | `backend/app/domains/auth/`, `frontend/src/features/auth/`; [ADR-0042](adr/0042-account-login-identities.md), [Payom](runbooks/payom-sms.md) | auth pytest, Vitest, `frontend/e2e/login-identities.spec.ts`; реальные SMS проверяются отдельно |
 | RLS и инварианты БД | модели, миграции, PostgreSQL triggers | `backend/tests/isolation/` |
 | Backend core/middleware | `backend/app/core/`, `backend/app/middleware/` | `backend/tests/core/`, `backend/tests/middleware/` |
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |

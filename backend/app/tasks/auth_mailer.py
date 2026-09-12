@@ -21,7 +21,7 @@ settings = get_mailer_settings()
 
 def _message(claim: LoginEmailClaim) -> EmailMessage:
     message = EmailMessage()
-    message["Subject"] = "Код входа в Aurum Pharma"
+    message["Subject"] = "Код подтверждения Aurum Pharma"
     message["From"] = settings.EMAIL_FROM
     message["To"] = claim.recipient_email
     message["Date"] = format_datetime(datetime.now(UTC))
@@ -30,9 +30,9 @@ def _message(claim: LoginEmailClaim) -> EmailMessage:
     expiry = claim.code_expires_at.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
     message.set_content(
         "Здравствуйте!\n\n"
-        f"Код входа в Aurum Pharma: {claim.login_code}\n\n"
+        f"Код подтверждения Aurum Pharma: {claim.login_code}\n\n"
         f"Код действует до {expiry} и может быть использован только один раз. "
-        "Если вы не запрашивали вход, проигнорируйте это письмо.\n"
+        "Никому не сообщайте код. Если вы его не запрашивали, проигнорируйте это письмо.\n"
     )
     return message
 

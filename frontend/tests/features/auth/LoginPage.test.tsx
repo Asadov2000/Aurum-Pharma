@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigate = vi.fn();
@@ -17,6 +17,20 @@ const fetchMe = vi.fn();
 const recoverMfa = vi.fn();
 const startMfaEnrollment = vi.fn();
 const verifyMfa = vi.fn();
+const loginWithPassword = vi.fn();
+const requestPhoneLoginCode = vi.fn();
+const verifyPhoneLoginCode = vi.fn();
+const fetchLoginMethods = vi.fn();
+const requestPasswordResetCode = vi.fn();
+const resetAccountPassword = vi.fn();
+vi.mock("@/features/auth/identityApi", () => ({
+  loginWithPassword: (...args: unknown[]) => loginWithPassword(...args),
+  requestPhoneLoginCode: (...args: unknown[]) => requestPhoneLoginCode(...args),
+  verifyPhoneLoginCode: (...args: unknown[]) => verifyPhoneLoginCode(...args),
+  fetchLoginMethods: (...args: unknown[]) => fetchLoginMethods(...args),
+  requestPasswordResetCode: (...args: unknown[]) => requestPasswordResetCode(...args),
+  resetAccountPassword: (...args: unknown[]) => resetAccountPassword(...args),
+}));
 
 vi.mock("@/features/auth/api", () => ({
   completeMfaEnrollment: (...args: unknown[]) => completeMfaEnrollment(...args),
@@ -51,18 +65,26 @@ const SELLER = {
   support_access: null,
 };
 
-function renderPage() {
+function renderPage(bootstrap = true) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={qc}>
       <LoginPage />
     </QueryClientProvider>,
   );
+  if (bootstrap) fireEvent.click(screen.getByRole("button", { name: "Первый вход без пароля" }));
+  return rendered;
 }
 
 describe("LoginPage", () => {
   beforeEach(() => {
     navigate.mockReset();
+    loginWithPassword.mockReset();
+    requestPasswordResetCode.mockReset();
+    resetAccountPassword.mockReset();
+    requestPhoneLoginCode.mockReset();
+    verifyPhoneLoginCode.mockReset();
+    fetchLoginMethods.mockReset().mockResolvedValue({ phone_login_enabled: true });
     requestLoginCode.mockReset();
     verifyLoginCode.mockReset();
     completeMfaEnrollment.mockReset();
@@ -121,20 +143,15 @@ describe("LoginPage", () => {
     expect(screen.getByText(/Dev-режим/i)).toBeInTheDocument();
   });
 
-  it("lets the user reveal and hide the optional password", async () => {
-    requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: null });
-    renderPage();
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@aurum.tj" } });
-    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
-
-    const passwordInput = (await screen.findByLabelText(/Пароль/i)) as HTMLInputElement;
+  it("lets the user reveal and hide their password without requesting a code", () => {
+    renderPage(false);
+    const passwordInput = screen.getByLabelText("Пароль") as HTMLInputElement;
     expect(passwordInput.type).toBe("password");
-
     fireEvent.click(screen.getByRole("button", { name: "Показать" }));
     expect(passwordInput.type).toBe("text");
-
     fireEvent.click(screen.getByRole("button", { name: "Скрыть" }));
     expect(passwordInput.type).toBe("password");
+    expect(requestLoginCode).not.toHaveBeenCalled();
   });
 
   it("logs in and navigates to the first accessible section", async () => {
@@ -155,7 +172,6 @@ describe("LoginPage", () => {
         {
           email: "owner@aurum.tj",
           code: "123456",
-          password: undefined,
         },
         expect.any(AbortSignal),
       );
@@ -204,7 +220,7 @@ describe("LoginPage", () => {
 
   it("completes the support login only after a valid TOTP code", async () => {
     requestLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: "123456" });
-    verifyLoginCode.mockResolvedValueOnce({
+    loginWithPassword.mockResolvedValueOnce({
       status: "mfa_required",
       challenge_token: "challenge-1",
       expires_in: 300,
@@ -214,12 +230,11 @@ describe("LoginPage", () => {
       token_type: "bearer",
       expires_in: 900,
     });
-    renderPage();
+    renderPage(false);
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "support@aurum.tj" },
     });
-    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
     const passwordInput = await screen.findByLabelText(/Пароль/i);
     fireEvent.change(passwordInput, { target: { value: "strong-password" } });
     fireEvent.submit(passwordInput.closest("form")!);
@@ -229,10 +244,9 @@ describe("LoginPage", () => {
     fireEvent.submit(mfaInput.closest("form")!);
 
     await waitFor(() => {
-      expect(verifyLoginCode).toHaveBeenCalledWith(
+      expect(loginWithPassword).toHaveBeenCalledWith(
         {
           email: "support@aurum.tj",
-          code: "123456",
           password: "strong-password",
         },
         expect.any(AbortSignal),
@@ -360,45 +374,28 @@ describe("LoginPage", () => {
     );
   });
 
-  it("blocks account switching during verification and clears credentials afterwards", async () => {
+  it("blocks account switching during password verification and clears the password afterwards", async () => {
     let rejectVerification: (reason?: unknown) => void = () => undefined;
-    requestLoginCode
-      .mockResolvedValueOnce({ status: "ok", dev_code: "123456" })
-      .mockResolvedValueOnce({ status: "ok", dev_code: null });
-    verifyLoginCode.mockImplementationOnce(
+    loginWithPassword.mockImplementationOnce(
       () =>
         new Promise((_resolve, reject) => {
           rejectVerification = reject;
         }),
     );
-    renderPage();
-
-    fireEvent.change(screen.getByLabelText("Email"), {
-      target: { value: "first@aurum.tj" },
-    });
-    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
-    const passwordInput = await screen.findByLabelText(/Пароль/i);
-    fireEvent.change(passwordInput, { target: { value: "old-password" } });
-    fireEvent.submit(passwordInput.closest("form")!);
-    await waitFor(() => expect(verifyLoginCode).toHaveBeenCalledTimes(1));
-
-    const changeEmailButton = screen.getByRole("button", { name: "Изменить email" });
-    expect(changeEmailButton).toBeDisabled();
-
+    renderPage(false);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "first@aurum.tj" } });
+    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "old-password" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Войти" }).closest("form")!);
+    await waitFor(() => expect(loginWithPassword).toHaveBeenCalledTimes(1));
+    const phoneSwitch = screen.getByRole("button", { name: "Телефон" });
+    expect(phoneSwitch).toBeDisabled();
     rejectVerification(new Error("network timeout"));
-    await waitFor(() => expect(changeEmailButton).toBeEnabled());
-    fireEvent.click(changeEmailButton);
-    expect(await screen.findByRole("button", { name: /Получить код/i })).toBeInTheDocument();
+    await waitFor(() => expect(phoneSwitch).toBeEnabled());
+    fireEvent.click(phoneSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Почта" }));
+    expect(screen.getByLabelText("Пароль")).toHaveValue("");
     expect(useAuthStore.getState().accessToken).toBeNull();
     expect(navigate).not.toHaveBeenCalled();
-
-    fireEvent.change(screen.getByLabelText("Email"), {
-      target: { value: "second@aurum.tj" },
-    });
-    fireEvent.submit(screen.getByRole("button", { name: /Получить код/i }).closest("form")!);
-
-    expect(await screen.findByLabelText(/Код из письма/i)).toHaveValue("");
-    expect(screen.getByLabelText(/Пароль/i)).toHaveValue("");
   });
 
   it("keeps the recovery transition disabled while MFA verification is pending", async () => {
@@ -438,5 +435,84 @@ describe("LoginPage", () => {
       expires_in: 900,
     });
     await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/pos" }));
+  });
+  it("signs in with email and password without sending an email code", async () => {
+    loginWithPassword.mockResolvedValueOnce({
+      access_token: "password-access",
+      token_type: "bearer",
+      expires_in: 900,
+    });
+    renderPage(false);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@aurum.tj" } });
+    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "correct-password" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Войти" }).closest("form")!);
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/pos" }));
+    expect(loginWithPassword).toHaveBeenCalledWith(
+      { email: "owner@aurum.tj", password: "correct-password" },
+      expect.any(AbortSignal),
+    );
+    expect(requestLoginCode).not.toHaveBeenCalled();
+  });
+
+  it("normalizes a Tajik phone and requires MFA before creating an authenticated session", async () => {
+    requestPhoneLoginCode.mockResolvedValueOnce({ status: "ok", dev_code: "123456" });
+    verifyPhoneLoginCode.mockResolvedValueOnce({
+      status: "mfa_required",
+      challenge_token: "sms-mfa",
+      expires_in: 300,
+    });
+    renderPage(false);
+    fireEvent.click(screen.getByRole("button", { name: "Телефон" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Получить код" })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("Номер телефона"), {
+      target: { value: "90 123 45 67" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: "Получить код" }).closest("form")!);
+    const code = await screen.findByLabelText("Код из SMS");
+    expect(requestPhoneLoginCode).toHaveBeenCalledWith("+992901234567", expect.any(AbortSignal));
+    expect(screen.queryByLabelText("Пароль")).not.toBeInTheDocument();
+    fireEvent.submit(code.closest("form")!);
+    expect(await screen.findByLabelText("Код подтверждения")).toBeInTheDocument();
+    expect(verifyPhoneLoginCode).toHaveBeenCalledWith(
+      { phone: "+992901234567", code: "123456" },
+      expect.any(AbortSignal),
+    );
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("keeps SMS disabled when the delivery service is not configured", async () => {
+    fetchLoginMethods.mockResolvedValue({ phone_login_enabled: false });
+    renderPage(false);
+    fireEvent.click(screen.getByRole("button", { name: "Телефон" }));
+    expect(await screen.findByText(/Вход по SMS пока не подключён/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Получить код" })).toBeDisabled();
+    await act(async () => {
+      fireEvent.submit(screen.getByLabelText("Номер телефона").closest("form")!);
+    });
+    expect(requestPhoneLoginCode).not.toHaveBeenCalled();
+  });
+
+  it("rejects a foreign phone number without sending an SMS", async () => {
+    renderPage(false);
+    fireEvent.click(screen.getByRole("button", { name: "Телефон" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Получить код" })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("Номер телефона"), {
+      target: { value: "+79012345678" },
+    });
+    fireEvent.submit(screen.getByLabelText("Номер телефона").closest("form")!);
+    expect(await screen.findByText("Введите номер +992 и 9 цифр")).toBeInTheDocument();
+    expect(requestPhoneLoginCode).not.toHaveBeenCalled();
+  });
+  it("opens the deferred recovery form only after the user chooses forgot password", async () => {
+    renderPage(false);
+    expect(screen.queryByRole("heading", { name: "Забыли пароль?" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "private-draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Забыли пароль?" }));
+    expect(await screen.findByRole("heading", { name: "Забыли пароль?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Получить код восстановления" })).toBeInTheDocument();
+    expect(requestPasswordResetCode).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Вернуться ко входу" }));
+    expect(screen.getByLabelText("Пароль")).toHaveValue("");
   });
 });

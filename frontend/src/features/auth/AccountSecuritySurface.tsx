@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { MfaSetupPrompt } from "./MfaSetupPrompt";
+import { PasswordSetupPrompt } from "./PasswordSetupPrompt";
 import { useMfaStepUpRequested } from "./stepUpCoordinator";
 
 const MfaStepUpDialog = lazy(async () => {
@@ -17,6 +18,7 @@ export default function AccountSecuritySurface({
   const stepUpRequested = useMfaStepUpRequested();
   return (
     <>
+      {showPrompt ? <PasswordSetupPrompt /> : null}
       {showPrompt ? <MfaSetupPrompt /> : null}
       {stepUpRequested
         ? createPortal(

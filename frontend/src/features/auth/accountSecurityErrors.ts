@@ -29,3 +29,9 @@ export function describeAccountSecurityError(error: unknown, fallback: string): 
   }
   return describeApiError(error, fallback);
 }
+
+export function codeRetryAfter(error: unknown): number | null {
+  if (!isAxiosError(error) || error.response?.status !== 429) return null;
+  const seconds = Number(error.response.headers["retry-after"]);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(Math.ceil(seconds), 3_600) : 60;
+}

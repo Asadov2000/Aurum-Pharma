@@ -11,7 +11,7 @@ export function useMeQuery() {
   const accessToken = useAuthStore((s) => s.accessToken);
   return useQuery({
     queryKey: meQueryKey,
-    queryFn: fetchMe,
+    queryFn: ({ signal }) => fetchMe(signal),
     enabled: accessToken !== null,
     staleTime: 60_000,
   });

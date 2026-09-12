@@ -11,6 +11,34 @@ import {
 } from "./helpers";
 
 test.describe("Auth", () => {
+  test("login remains usable on narrow screens in both themes", async ({ page }) => {
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+      for (const width of [320, 390, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto("/login", { waitUntil: "domcontentloaded" });
+        const email = page.getByLabel("Email", { exact: true });
+        const submit = page.getByRole("button", { name: "Войти", exact: true });
+        await expect(email).toBeVisible();
+        await expect(submit).toBeVisible();
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        const inputBounds = await email.boundingBox();
+        const buttonBounds = await submit.boundingBox();
+        expect(inputBounds?.height).toBeGreaterThanOrEqual(44);
+        expect(buttonBounds?.height).toBeGreaterThanOrEqual(44);
+        await email.focus();
+        await page.keyboard.press("Tab");
+        await expect(page.getByLabel("Пароль", { exact: true })).toBeFocused();
+        await submit.focus();
+        await page.keyboard.press("Enter");
+        await expect(page.locator("#identity-error")).toBeVisible();
+        await expect(email).toHaveAttribute("aria-invalid", "true");
+      }
+    }
+  });
+
   test("opens the public website in a new tab and preserves the login form", async ({
     page,
     context,
@@ -35,9 +63,6 @@ test.describe("Auth", () => {
     clearLoginRateLimit(DEV.email);
     await page.goto("/login", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Email").fill(DEV.email);
-    await page.getByRole("button", { name: /Получить код/ }).click();
-
-    await expect(page.getByText(/Dev-режим/)).toBeVisible();
     await page.getByLabel(/Пароль/).fill(DEV.password);
     await page.getByRole("button", { name: /^Войти$/ }).click();
     await page.getByLabel("Код подтверждения").fill(currentTotp(DEV.totpSecret!));
@@ -50,9 +75,6 @@ test.describe("Auth", () => {
     clearLoginRateLimit(OWNER.email);
     await page.goto("/login", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Email").fill(OWNER.email);
-    await page.getByRole("button", { name: /Получить код/ }).click();
-
-    await expect(page.getByText(/Dev-режим/)).toBeVisible();
     await page.getByLabel(/Пароль/).fill(OWNER.password);
     await page.getByRole("button", { name: /^Войти$/ }).click();
     await page.getByLabel("Код подтверждения").fill(currentTotp(OWNER.totpSecret!));
@@ -279,13 +301,13 @@ test.describe("Auth", () => {
   test("invalid code surfaces a friendly error", async ({ page }) => {
     clearLoginRateLimit(DEV.email);
     await page.goto("/login", { waitUntil: "domcontentloaded" });
-    await page.getByLabel("Email").fill(DEV.email);
+    await page.getByRole("button", { name: "Первый вход без пароля" }).click();
+    await page.getByLabel("Email").fill("unknown-bootstrap@e2e.aurum.tj");
     await page.getByRole("button", { name: /Получить код/ }).click();
 
     const codeField = page.getByLabel(/Код из письма/);
     await expect(codeField).toBeVisible();
     await codeField.fill("000000");
-    await page.getByLabel(/Пароль/).fill(DEV.password);
     await page.getByRole("button", { name: /^Войти$/ }).click();
 
     await expect(page.getByRole("alert").first()).toBeVisible();

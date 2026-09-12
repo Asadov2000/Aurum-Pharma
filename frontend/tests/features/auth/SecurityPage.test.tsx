@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/stores/auth";
 
+vi.mock("@/features/auth/AccountIdentityPanel", () => ({
+  AccountIdentityPanel: () => <div>Способы входа</div>,
+}));
 const listActiveSessions = vi.fn();
 const revokeActiveSession = vi.fn();
 const revokeOtherSessions = vi.fn();

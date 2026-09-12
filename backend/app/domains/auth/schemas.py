@@ -133,6 +133,16 @@ class PasswordSetupRequest(BaseModel):
 
     code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
     new_password: str = Field(min_length=12, max_length=128)
+    channel: Literal["email", "phone"] = "email"
+
+    @field_validator("new_password")
+    @classmethod
+    def _bcrypt_input_limit(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("Password cannot contain a NUL character")
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must fit within 72 UTF-8 bytes")
+        return value
 
 
 class AccountMfaEnrollmentResponse(MfaEnrollmentStartResponse):

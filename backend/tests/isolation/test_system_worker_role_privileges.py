@@ -27,6 +27,59 @@ WORKER_FUNCTIONS = [
 ]
 
 
+async def test_identity_challenge_retention_is_bounded_and_preserves_fresh_codes(
+    maintenance_engine: AsyncEngine,
+    system_worker_engine: AsyncEngine,
+) -> None:
+    identifiers = [uuid4(), uuid4(), uuid4()]
+    try:
+        async with maintenance_engine.begin() as connection:
+            assert str(await connection.scalar(text("SELECT current_database()"))).endswith("_test")
+            for index, identifier in enumerate(identifiers):
+                await connection.execute(
+                    text("""INSERT INTO public.auth_identity_code
+                    (id,channel,contact,purpose,code_hash,code_salt,expires_at)
+                    VALUES(:id,'phone','+992900000123','login',:hash,:salt,
+                    now()+make_interval(hours=>:hours))"""),
+                    {
+                        "id": identifier,
+                        "hash": "0" * 64,
+                        "salt": "0" * 32,
+                        "hours": -25 if index < 2 else 1,
+                    },
+                )
+        for remaining in (2, 1):
+            async with system_worker_engine.begin() as connection:
+                assert (
+                    await connection.scalar(
+                        text("SELECT public.worker_purge_expired_email_codes(1)")
+                    )
+                    == 1
+                )
+            async with maintenance_engine.connect() as connection:
+                assert (
+                    await connection.scalar(
+                        text("SELECT count(*) FROM public.auth_identity_code WHERE id=ANY(:ids)"),
+                        {"ids": identifiers},
+                    )
+                    == remaining
+                )
+        async with maintenance_engine.connect() as connection:
+            assert (
+                await connection.scalar(
+                    text("SELECT id FROM public.auth_identity_code WHERE id=ANY(:ids)"),
+                    {"ids": identifiers},
+                )
+                == identifiers[-1]
+            )
+    finally:
+        async with maintenance_engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM public.auth_identity_code WHERE id=ANY(:ids)"),
+                {"ids": identifiers},
+            )
+
+
 @pytest_asyncio.fixture
 async def system_worker_engine() -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(os.environ["DATABASE_URL_WORKER"], poolclass=NullPool)

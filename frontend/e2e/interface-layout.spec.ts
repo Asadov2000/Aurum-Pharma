@@ -390,7 +390,7 @@ test.describe("Interface layout", () => {
       page.getByRole("heading", { level: 1, name: "Вход в систему", exact: true }),
     ).toBeVisible();
     await expect(page.getByLabel("Email")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Получить код" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Войти", exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page, "/login @ 320x568");
   });
 

@@ -1,4 +1,4 @@
-import { request, test } from "@playwright/test";
+import { type APIResponse, type Request, type Route, request, test } from "@playwright/test";
 
 import {
   apiContext,
@@ -13,6 +13,20 @@ import {
   seedSupplier,
   uniqueName,
 } from "./helpers";
+
+// Proxied API failures may include authorization headers in their call log.
+test.use({ trace: "off" });
+
+async function fetchDraftRequest(route: Route): Promise<APIResponse> {
+  try {
+    // Only ECONNRESET is retried. The original row ID, revision and body stay
+    // unchanged, and the server must replay these idempotent draft operations.
+    return await route.fetch({ maxRetries: 1 });
+  } catch {
+    // Never attach the original error/cause: it can contain a bearer token.
+    throw new Error("Draft request proxy failed after one network retry");
+  }
+}
 
 test("incomplete incoming input survives lost responses and reload without duplicate items", async ({
   page,
@@ -42,19 +56,31 @@ test("incomplete incoming input survives lost responses and reload without dupli
     await page.goto(`/incoming/${incomingDocument.id}`);
 
     let droppedSaveResponse = false;
+    let droppedSaveRequest: Request | null = null;
     await page.route(`**/api/v1/${rowsPath}/*`, async (route) => {
-      if (route.request().method() !== "PUT" || droppedSaveResponse) {
+      if (route.request().method() !== "PUT" || droppedSaveRequest !== null) {
         await route.continue();
         return;
       }
-      const response = await route.fetch();
+      const payload = route.request().postDataJSON() as { fields?: { qty?: unknown } };
+      if (payload.fields?.qty !== "12,") {
+        await route.continue();
+        return;
+      }
+      droppedSaveRequest = route.request();
+      const response = await fetchDraftRequest(route);
       expect(response.ok()).toBe(true);
       droppedSaveResponse = true;
       await route.abort("failed");
     });
 
     await page.getByRole("button", { name: "Добавить позицию", exact: true }).click();
-    await page.getByLabel("Количество единиц").fill("12,");
+    await Promise.all([
+      page.waitForEvent("requestfailed", {
+        predicate: (failed) => failed === droppedSaveRequest && droppedSaveResponse,
+      }),
+      page.getByLabel("Количество единиц").fill("12,"),
+    ]);
     await expect(page.getByText(/Не сохранено/)).toBeVisible();
     expect(droppedSaveResponse).toBe(true);
     const beforeRetry = (await (await api.get(rowsPath)).json()) as {
@@ -106,17 +132,24 @@ test("incomplete incoming input survives lost responses and reload without dupli
     await page.getByLabel("Розничная цена за единицу").fill("5.00");
 
     let droppedCommitResponse = false;
+    let droppedCommitRequest: Request | null = null;
     await page.route(`**/api/v1/${rowsPath}/*/commit`, async (route) => {
-      if (droppedCommitResponse) {
+      if (route.request().method() !== "POST" || droppedCommitRequest !== null) {
         await route.continue();
         return;
       }
-      const response = await route.fetch();
+      droppedCommitRequest = route.request();
+      const response = await fetchDraftRequest(route);
       expect(response.ok()).toBe(true);
       droppedCommitResponse = true;
       await route.abort("failed");
     });
-    await page.getByRole("button", { name: "Добавить", exact: true }).click();
+    await Promise.all([
+      page.waitForEvent("requestfailed", {
+        predicate: (failed) => failed === droppedCommitRequest && droppedCommitResponse,
+      }),
+      page.getByRole("button", { name: "Добавить", exact: true }).click(),
+    ]);
     await expect(page.getByText(/Ответ не получен. Повторите добавление/)).toBeVisible();
     expect(droppedCommitResponse).toBe(true);
     await page.getByRole("button", { name: "Повторить добавление", exact: true }).click();

@@ -79,10 +79,9 @@ async def _new_mfa_challenge(
 ) -> str:
     await _seed_code(db_session, user.email, code="123456")
     response = await auth_client.post(
-        "/api/v1/auth/login/verify",
+        "/api/v1/auth/login/password",
         json={
             "email": user.email,
-            "code": "123456",
             "password": _PASSWORD,
         },
     )
@@ -137,10 +136,9 @@ async def _enroll_support(
 
     await _seed_code(db_session, user.email, code="123456")
     login = await auth_client.post(
-        "/api/v1/auth/login/verify",
+        "/api/v1/auth/login/password",
         json={
             "email": user.email,
-            "code": "123456",
             "password": _PASSWORD,
         },
     )
@@ -186,27 +184,25 @@ async def test_support_login_requires_password_before_mfa_challenge(
     await _seed_code(db_session, user.email, code="123456")
 
     missing = await auth_client.post(
-        "/api/v1/auth/login/verify",
-        json={"email": user.email, "code": "123456"},
+        "/api/v1/auth/login/password",
+        json={"email": user.email},
     )
     wrong = await auth_client.post(
-        "/api/v1/auth/login/verify",
+        "/api/v1/auth/login/password",
         json={
             "email": user.email,
-            "code": "123456",
             "password": "wrong-password",
         },
     )
     accepted = await auth_client.post(
-        "/api/v1/auth/login/verify",
+        "/api/v1/auth/login/password",
         json={
             "email": user.email,
-            "code": "123456",
             "password": _PASSWORD,
         },
     )
 
-    assert missing.status_code == 401
+    assert missing.status_code == 422
     assert wrong.status_code == 401
     assert accepted.status_code == 200
     assert "access_token" in accepted.json()
@@ -240,8 +236,8 @@ async def test_active_owner_enrolls_mfa_and_keeps_tenant_context(
 
     await _seed_code(db_session, owner.email, code="123456")
     login = await auth_client.post(
-        "/api/v1/auth/login/verify",
-        json={"email": owner.email, "code": "123456", "password": _PASSWORD},
+        "/api/v1/auth/login/password",
+        json={"email": owner.email, "password": _PASSWORD},
     )
     assert login.status_code == 200
     setup = await _start_optional_enrollment(
@@ -842,8 +838,8 @@ async def test_support_mfa_flow_works_through_real_app_and_support_pools(
                 )
 
         login = await client.post(
-            "/api/v1/auth/login/verify",
-            json={"email": email, "code": code, "password": _PASSWORD},
+            "/api/v1/auth/login/password",
+            json={"email": email, "password": _PASSWORD},
         )
         assert login.status_code == 200
         enrollment = await client.post(

@@ -12,6 +12,7 @@ _AUTH_REDIS_PATTERNS = (
     "auth:perms:*",
     "auth:mfa-attempts:*",
     "auth:password-confirmation:*",
+    "auth:identity:*",
 )
 
 

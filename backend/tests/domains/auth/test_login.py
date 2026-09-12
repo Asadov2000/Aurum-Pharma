@@ -350,18 +350,20 @@ async def test_local_testing_mode_skips_only_long_login_lockout(
     assert tokens.access_token
 
 
-async def test_verify_password_required_and_correct(db_session: AsyncSession, make_user) -> None:
+async def test_bootstrap_code_cannot_replace_password_login(
+    db_session: AsyncSession, make_user
+) -> None:
     user = await make_user(email="pwd@aurum.tj", password="hunter2")
     await _seed_code(db_session, user.email, code="123456")
     service = AuthService(AuthRepository(db_session))
 
-    access, refresh, _ = await service.verify_login_code(
-        email=user.email,
-        code="123456",
-        password="hunter2",
-        ip_address="127.0.0.1",
-    )
-    assert access and refresh
+    with pytest.raises(AuthenticationError):
+        await service.verify_login_code(
+            email=user.email,
+            code="123456",
+            password="hunter2",
+            ip_address="127.0.0.1",
+        )
 
 
 async def test_verify_password_required_but_wrong(db_session: AsyncSession, make_user) -> None:

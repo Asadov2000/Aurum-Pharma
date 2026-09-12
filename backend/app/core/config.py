@@ -174,6 +174,12 @@ class Settings(BaseSettings):
     # Staging and production refuse to start with this flag enabled, so a
     # copied development configuration cannot weaken authentication.
     AUTH_LOCAL_TESTING_MODE: bool = False
+    SMS_PROVIDER: Literal["disabled", "development", "payom"] = "disabled"
+    PAYOM_API_URL: str = Field(default="", repr=False)
+    PAYOM_API_TOKEN: SecretStr | None = None
+    PAYOM_SENDER_NAME: str = Field(default="AurumPharma", min_length=1, max_length=32)
+    SMS_TIMEOUT_SECONDS: float = Field(default=10, gt=0, le=30)
+    SMS_DAILY_LIMIT: int = Field(default=100, ge=1, le=100000)
     REFRESH_COOKIE_NAME: str = "aurum_refresh_token"
     REFRESH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     # None means "secure in production, HTTP-friendly in local development".
@@ -234,6 +240,37 @@ class Settings(BaseSettings):
     @property
     def auth_login_guard_enabled(self) -> bool:
         return self.ENVIRONMENT != "development" or not self.AUTH_LOCAL_TESTING_MODE
+
+    @model_validator(mode="after")
+    def _guard_sms_provider(self) -> Settings:
+        if self.SMS_PROVIDER == "development" and self.ENVIRONMENT != "development":
+            raise ValueError("Development SMS is allowed only in development")
+        if self.SMS_PROVIDER != "payom":
+            return self
+        try:
+            parsed = urlsplit(self.PAYOM_API_URL)
+            hostname = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            raise ValueError("PAYOM_API_URL must be an HTTPS message endpoint") from None
+        if (
+            parsed.scheme != "https"
+            or not hostname
+            or hostname.lower() in {"host", "localhost"}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path != "/api/message"
+            or parsed.query
+            or parsed.fragment
+            or port not in {None, 443}
+        ):
+            raise ValueError("PAYOM_API_URL must be an HTTPS message endpoint")
+        token = self.PAYOM_API_TOKEN.get_secret_value() if self.PAYOM_API_TOKEN else ""
+        if not token or any(ord(character) < 33 or ord(character) > 126 for character in token):
+            raise ValueError("PAYOM_API_TOKEN is required for Payom")
+        if not self.PAYOM_SENDER_NAME.strip():
+            raise ValueError("PAYOM_SENDER_NAME must not be blank")
+        return self
 
     @model_validator(mode="after")
     def _guard_access_token_contract(self) -> Settings:

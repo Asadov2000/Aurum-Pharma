@@ -106,8 +106,8 @@ export async function logoutRequest(operationId: string | null): Promise<void> {
   await api.post("/auth/logout", operationId ? { operation_id: operationId } : null, withoutAuth());
 }
 
-export async function fetchMe(): Promise<MeResponse> {
-  const { data } = await api.get<MeResponse>("/auth/me");
+export async function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
+  const { data } = await api.get<MeResponse>("/auth/me", { signal });
   return data;
 }
 

@@ -109,6 +109,7 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "auth_identity_code",
     "alembic_version",
     "app_user",
     "auth_email_outbox",
@@ -185,6 +186,18 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "confirm_bootstrap_email",
+    "lookup_identity_password",
+    "lookup_account_identity",
+    "dismiss_account_password_prompt",
+    "issue_identity_code",
+    "find_identity_code",
+    "check_identity_code",
+    "consume_identity_reauth",
+    "create_identity_login_proof",
+    "lookup_identity_factor",
+    "complete_identity_password",
+    "complete_identity_phone",
     "auth_settings_session_matches",
     "current_auth_confirmation_at",
     "lookup_account_mfa_settings",
@@ -469,6 +482,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "confirm_bootstrap_email",
     "lookup_auth_session_password",
     "accept_platform_staff_invitation",
     "accept_tenant_invitation",
@@ -1165,23 +1179,24 @@ async def test_auth_functions_hide_secrets_and_reject_replay(
                 )
             ).scalar_one()
 
-        async with app_engine_privileges.begin() as conn:
-            issue_status = (
+            # Only the privileged credential verifier can mint this short-lived
+            # proof after checking a password. The tenant pool cannot mint it.
+            proof = (
                 await conn.execute(
                     text(
-                        "SELECT public.issue_auth_email_code("
-                        ":email, :candidate_hash, :salt, '127.0.0.1', NULL, "
-                        ":code, CAST(1 AS SMALLINT), :encryption_key)"
+                        "SELECT public.create_identity_login_proof("
+                        ":email,:password_hash,NULL,NULL,:candidate_hash,:salt,'127.0.0.1')"
                     ),
                     {
                         "email": email,
+                        "password_hash": password_hash,
                         "candidate_hash": candidate_hash,
                         "salt": salt,
-                        "code": code,
-                        "encryption_key": derive_email_outbox_encryption_key(),
                     },
                 )
             ).scalar_one()
+
+        async with app_engine_privileges.begin() as conn:
             challenge = (
                 (
                     await conn.execute(
@@ -1310,7 +1325,7 @@ async def test_auth_functions_hide_secrets_and_reject_replay(
                 )
             ).scalar_one()
 
-        assert issue_status == "created"
+        assert proof is not None
         assert challenge["code_salt"] == salt
         assert current_identity["password_hash"] is None
         assert login_identity == {"id": user_id, "password_hash": password_hash}

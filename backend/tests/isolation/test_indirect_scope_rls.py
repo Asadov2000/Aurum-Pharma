@@ -25,6 +25,7 @@ from app.core.security import (
     hash_code,
     hash_password,
     hash_token,
+    verify_password,
 )
 from app.domains.notifications.repository import NotificationsRepository
 from app.domains.notifications.service import NotificationsService
@@ -860,6 +861,45 @@ async def test_auth_lookup_resolves_password_requirement_without_tenant_context(
                     {"email": email},
                 )
             ).scalar_one()
+            # A bootstrap email code cannot bypass an already configured password.
+            assert (
+                await conn.execute(
+                    text(
+                        "SELECT id FROM public.lookup_login_user_by_email("
+                        ":email, :code_id, :candidate_hash)"
+                    ),
+                    {"email": email, "code_id": code_id, "candidate_hash": candidate_hash},
+                )
+            ).first() is None
+
+        # The privileged credential verifier supplies the proof only after password
+        # verification; tenantless lookups through aurum_app must still work with it.
+        async with support_engine_iso.begin() as conn:
+            password_hash = (
+                await conn.execute(
+                    text("SELECT public.lookup_identity_password(:email)"),
+                    {"email": email},
+                )
+            ).scalar_one()
+            assert verify_password("RlsFixture1234", password_hash)
+            proof = (
+                await conn.execute(
+                    text(
+                        "SELECT public.create_identity_login_proof("
+                        ":email,:password_hash,NULL,NULL,:candidate_hash,:salt,'127.0.0.1')"
+                    ),
+                    {
+                        "email": email,
+                        "password_hash": password_hash,
+                        "candidate_hash": candidate_hash,
+                        "salt": salt,
+                    },
+                )
+            ).scalar_one()
+            assert proof is not None
+            code_id = UUID(proof["id"])
+
+        async with app_engine_iso.begin() as conn:
             login_record = (
                 (
                     await conn.execute(

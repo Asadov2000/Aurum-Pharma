@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { cancelMfaStepUp, requestMfaStepUp } from "@/features/auth/stepUpCoordinator";
 
+vi.mock("@/features/auth/PasswordSetupPrompt", () => ({
+  PasswordSetupPrompt: () => <p>Предложение создать пароль</p>,
+}));
+
 vi.mock("@/features/auth/MfaSetupPrompt", () => ({
   MfaSetupPrompt: () => <p>Необязательное предложение защиты</p>,
 }));

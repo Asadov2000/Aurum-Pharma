@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Page, request } from "@playwright/test";
 import { createHmac } from "node:crypto";
 
-import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
+import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB, E2E_REDIS_CONTAINER } from "./docker";
 
 export const API = process.env.E2E_API_URL ?? "http://localhost:18000/api/v1";
 
@@ -28,6 +28,18 @@ export function clearLoginRateLimit(email: string): void {
     "UPDATE support_mfa SET last_used_counter=NULL " +
     `WHERE user_id=(SELECT id FROM app_user WHERE lower(email)=${emailLiteral});`;
   dockerExec(E2E_POSTGRES_CONTAINER, ["psql", "-U", "postgres", "-d", E2E_POSTGRES_DB, "-c", sql]);
+  clearIdentityRateLimits();
+}
+
+/** Only the sequential disposable E2E stack may clear these attempt buckets.
+ * Backend tests exercise production rate limits without this helper. */
+export function clearIdentityRateLimits(): void {
+  dockerExec(E2E_REDIS_CONTAINER, [
+    "sh",
+    "-c",
+    'export REDISCLI_AUTH="$REDIS_PASSWORD"\n' +
+      'exec redis-cli EVAL \'local keys = redis.call("KEYS", "auth:identity:*"); for _, key in ipairs(keys) do redis.call("DEL", key) end; return #keys\' 0',
+  ]);
 }
 
 export function makeSupportSessionRequireStepUp(email: string): void {
@@ -108,28 +120,31 @@ export async function apiLogin(api: APIRequestContext, creds: Creds): Promise<To
   let lastErr = "";
   for (let attempt = 0; attempt < 3; attempt++) {
     clearLoginRateLimit(creds.email);
-    const codeRes = await api.post(`${API}/auth/login/code`, {
-      data: { email: creds.email },
-      timeout: 30_000,
-    });
-    if (codeRes.status() === 429) {
-      lastErr = "429 after bucket clear";
-      await sleep(2_000);
-      continue;
+    let bootstrapCode: string | null = null;
+    if (!creds.password) {
+      const codeRes = await api.post(`${API}/auth/login/code`, {
+        data: { email: creds.email },
+        timeout: 30_000,
+      });
+      if (codeRes.status() === 429) {
+        lastErr = "429 after bucket clear";
+        await sleep(2_000);
+        continue;
+      }
+      if (!codeRes.ok()) throw new Error(`Bootstrap code request failed: ${codeRes.status()}`);
+      const body = (await codeRes.json()) as { dev_code: string | null };
+      bootstrapCode = body.dev_code;
+      if (!bootstrapCode) throw new Error("Bootstrap tests require development email delivery");
     }
-    if (!codeRes.ok()) {
-      throw new Error(`/auth/login/code → ${codeRes.status()} ${await codeRes.text()}`);
-    }
-    const { dev_code } = (await codeRes.json()) as { dev_code: string | null };
-    if (!dev_code) {
-      throw new Error(
-        "dev_code missing from response — backend ENVIRONMENT must equal 'development'",
-      );
-    }
-    const verifyRes = await api.post(`${API}/auth/login/verify`, {
-      data: { email: creds.email, code: dev_code, password: creds.password },
-      timeout: 30_000,
-    });
+    const verifyRes = await api.post(
+      `${API}/auth/login/${creds.password ? "password" : "verify"}`,
+      {
+        data: creds.password
+          ? { email: creds.email, password: creds.password }
+          : { email: creds.email, code: bootstrapCode },
+        timeout: 30_000,
+      },
+    );
     if (!verifyRes.ok()) {
       throw new Error(`/auth/login/verify → ${verifyRes.status()} ${await verifyRes.text()}`);
     }
