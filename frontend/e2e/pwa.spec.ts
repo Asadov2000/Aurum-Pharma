@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { createHash } from "node:crypto";
 
 const manifestPath = "/manifest.webmanifest?v=12-8";
+const staticCacheName = "aurum-pharma-static-v4-manifest-updates";
 
 interface WebManifestIcon {
   src: string;
@@ -11,6 +12,7 @@ interface WebManifestIcon {
 }
 
 interface WebManifest {
+  id: string;
   name: string;
   short_name: string;
   display: string;
@@ -42,6 +44,7 @@ test.describe("PWA metadata", () => {
     const manifest = (await response.json()) as WebManifest;
     expect(manifest.name).toBe("Aurum Pharma");
     expect(manifest.short_name).toBe("Aurum");
+    expect(manifest.id).toBe("/");
     expect(manifest.display).toBe("standalone");
     expect(manifest.theme_color).toBe("#00566B");
     expect(manifest.icons).toEqual(
@@ -145,13 +148,54 @@ test.describe("PWA metadata", () => {
         ).join("");
       }, iconPath);
       expect(actualHash).toBe(expectedHash);
-      await expect
-        .poll(() => page.evaluate(() => caches.keys()))
-        .toContain("aurum-pharma-static-v3-brand12-8");
+      await expect.poll(() => page.evaluate(() => caches.keys())).toContain(staticCacheName);
     } finally {
       await isolatedContext.close();
     }
   });
+
+  for (const metadataPath of [manifestPath, "/manifest.webmanifest?v=previous-install"]) {
+    test(`refreshes cached metadata and retains it offline: ${metadataPath}`, async ({
+      browser,
+      baseURL,
+      request,
+    }) => {
+      const expectedResponse = await request.get(metadataPath);
+      expect(expectedResponse.ok()).toBeTruthy();
+      const expectedManifest = await expectedResponse.json();
+      const context = await browser.newContext({ baseURL, serviceWorkers: "allow" });
+      try {
+        const page = await context.newPage();
+        await page.goto(manifestPath);
+        await page.evaluate(async () => {
+          await navigator.serviceWorker.register("/sw.js");
+          await navigator.serviceWorker.ready;
+        });
+        await expect
+          .poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))
+          .toBe(true);
+        await page.evaluate(
+          async ({ path, cacheName }) => {
+            const cache = await caches.open(cacheName);
+            await cache.put(path, new Response(JSON.stringify({ name: "Old installed name" })));
+          },
+          { path: metadataPath, cacheName: staticCacheName },
+        );
+
+        const fetchMetadata = () =>
+          page.evaluate(async (path) => {
+            const response = await fetch(path);
+            if (!response.ok) throw new Error("Manifest request failed");
+            return response.json();
+          }, metadataPath);
+        expect(await fetchMetadata()).toEqual(expectedManifest);
+        await context.setOffline(true);
+        expect(await fetchMetadata()).toEqual(expectedManifest);
+      } finally {
+        await context.close();
+      }
+    });
+  }
 
   test("keeps service worker caching away from API and document routes", async ({ request }) => {
     const response = await request.get("/sw.js");
