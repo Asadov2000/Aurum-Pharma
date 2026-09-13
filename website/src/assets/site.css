@@ -2,9 +2,21 @@
   --ink: #12343e;
   --muted: #60767e;
   --teal: #00566b;
-  --mint: #079d9a;
+  --mint: #007f7d;
   --line: #dce8eb;
   --paper: #f7fafb;
+  --canvas: #fff;
+  --surface: #fff;
+  --on-accent: #fff;
+  --selection: #e1f1f3;
+  --success: #197260;
+  --success-surface: #e8f5ef;
+  --stage: linear-gradient(145deg, #e8f5f5, #e4edf5 65%, #d6eced);
+  --stage-foot: #edf4f5;
+  --pills: #ffffff99;
+  --product-border: #c7dfe3;
+  --product-shadow: 0 12px 42px #27485220;
+  color-scheme: light;
   font-family:
     Inter,
     -apple-system,
@@ -12,8 +24,60 @@
     "Segoe UI",
     sans-serif;
   color: var(--ink);
-  background: #fff;
+  background: var(--canvas);
   font-synthesis: none;
+}
+:root[data-theme="dark"] {
+  --ink: #e5f0f1;
+  --muted: #a4b8bf;
+  --teal: #83ded4;
+  --mint: #61d5c2;
+  --line: #30474f;
+  --paper: #17282f;
+  --canvas: #101b20;
+  --surface: #1c3038;
+  --on-accent: #102b30;
+  --selection: #23474b;
+  --success: #8fe2bd;
+  --success-surface: #203f37;
+  --stage: linear-gradient(145deg, #1b393d, #1b2e3c 65%, #203c40);
+  --stage-foot: #1a3038;
+  --pills: #10262bd9;
+  --product-border: #3b5962;
+  --product-shadow: 0 18px 50px #00000033;
+  color-scheme: dark;
+}
+[data-brand-dark],
+.theme-sun {
+  display: none;
+}
+[data-theme="dark"] [data-brand-light],
+[data-theme="dark"] .theme-moon {
+  display: none;
+}
+[data-theme="dark"] [data-brand-dark],
+[data-theme="dark"] .theme-sun {
+  display: block;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--teal);
+  background: transparent;
+}
+.theme-toggle:hover {
+  background: var(--paper);
 }
 * {
   box-sizing: border-box;
@@ -41,7 +105,7 @@ a {
 a:focus-visible,
 button:focus-visible,
 summary:focus-visible {
-  outline: 3px solid #079d9a;
+  outline: 3px solid var(--mint);
   outline-offset: 4px;
 }
 html {
@@ -137,11 +201,11 @@ h1 span {
   font-weight: 600;
   font-size: 14px;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--surface);
 }
 .primary {
   background: var(--teal);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--teal);
 }
 .button:hover {
@@ -155,7 +219,7 @@ h1 span {
 .product-stage {
   padding: 40px 40px 0;
   margin: 40px -24px 0;
-  background: linear-gradient(145deg, #e8f5f5, #e4edf5 65%, #d6eced);
+  background: var(--stage);
   border-radius: 22px 22px 0 0;
   position: relative;
   overflow: hidden;
@@ -164,8 +228,8 @@ h1 span {
   display: flex;
   justify-content: center;
   gap: 5px;
-  background: #fff9;
-  border: 1px solid #fff;
+  background: var(--pills);
+  border: 1px solid var(--surface);
   padding: 5px;
   border-radius: 11px;
   width: max-content;
@@ -175,7 +239,7 @@ h1 span {
 .role-pills button {
   border: 0;
   background: transparent;
-  color: #48656e;
+  color: var(--muted);
   border-radius: 7px;
   padding: 10px 20px;
   font-size: 13px;
@@ -183,13 +247,13 @@ h1 span {
 }
 .role-pills button[aria-pressed="true"] {
   background: var(--teal);
-  color: #fff;
+  color: var(--on-accent);
   box-shadow: 0 3px 7px #00566b22;
 }
 .product {
-  background: #fff;
-  box-shadow: 0 12px 42px #27485220;
-  border: 1px solid #c7dfe3;
+  background: var(--surface);
+  box-shadow: var(--product-shadow);
+  border: 1px solid var(--product-border);
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
   text-align: left;
@@ -214,19 +278,19 @@ h1 span {
 }
 .app-nav {
   padding: 22px 12px;
-  background: #f7fafb;
+  background: var(--paper);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  color: #687d85;
+  color: var(--muted);
   font-size: 12px;
 }
 .app-nav span {
   padding: 9px 12px;
 }
 .app-nav .selected {
-  background: #e1f1f3;
+  background: var(--selection);
   border-radius: 6px;
   color: var(--teal);
   font-weight: 700;
@@ -246,7 +310,7 @@ h1 span {
 }
 .sample {
   font-size: 10px;
-  color: #60777e;
+  color: var(--muted);
   border: 1px solid var(--line);
   padding: 5px 8px;
   border-radius: 4px;
@@ -292,6 +356,12 @@ h1 span {
   height: 85px;
   margin-top: 8px;
 }
+.chart-grid {
+  stroke: var(--line);
+}
+.chart-line {
+  stroke: var(--mint);
+}
 .mini-list {
   font-size: 11px;
 }
@@ -304,19 +374,19 @@ h1 span {
   padding: 9px 0;
 }
 .badge {
-  color: #197260;
-  background: #e8f5ef;
+  color: var(--success);
+  background: var(--success-surface);
   padding: 4px 7px;
   border-radius: 4px;
 }
 .stage-foot {
   margin: 0 -24px;
-  background: #edf4f5;
+  background: var(--stage-foot);
   padding: 16px 20px;
   border-radius: 0 0 22px 22px;
   text-align: center;
   font-size: 12px;
-  color: #56717b;
+  color: var(--muted);
 }
 .facts {
   display: flex;
@@ -391,7 +461,7 @@ h2 {
   color: var(--teal);
   display: inline-block;
   margin-top: 9px;
-  border-bottom: 1px solid #badadd;
+  border-bottom: 1px solid var(--line);
   padding-bottom: 4px;
 }
 .team {
@@ -409,7 +479,7 @@ h2 {
   line-height: 1.7;
 }
 .permission {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 24px;
@@ -422,7 +492,7 @@ h2 {
   font-size: 14px;
 }
 .avatar {
-  background: #e3f3f3;
+  background: var(--selection);
   color: var(--teal);
   width: 40px;
   height: 40px;
@@ -484,7 +554,7 @@ h2 {
 }
 .available {
   font-size: 11px;
-  color: #167863;
+  color: var(--success);
   white-space: nowrap;
 }
 .future {
@@ -579,10 +649,13 @@ summary::after {
   }
   header {
     height: 78px;
-    gap: 15px;
+    gap: 10px;
   }
   .logo {
-    width: 169px;
+    width: 144px;
+  }
+  .header-actions {
+    gap: 8px;
   }
   nav {
     display: none;
@@ -735,7 +808,7 @@ summary::after {
   top: -100px;
   z-index: 10;
   background: var(--teal);
-  color: white;
+  color: var(--on-accent);
   padding: 14px 20px;
   border-radius: 8px;
 }
@@ -855,11 +928,11 @@ summary::after {
   border-radius: 5px;
 }
 .status-available {
-  background: #e8f5ef;
-  color: #197260;
+  background: var(--success-surface);
+  color: var(--success);
 }
 .status-pending {
-  background: #eef2f3;
+  background: var(--paper);
   color: var(--muted);
 }
 .download-card h2 {
