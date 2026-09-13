@@ -1,4 +1,4 @@
-const CACHE_NAME = "aurum-pharma-static-v3-brand12-8";
+const CACHE_NAME = "aurum-pharma-static-v4-manifest-updates";
 const MAX_STATIC_CACHE_ENTRIES = 80;
 const STATIC_ASSET_PATTERN = /\.(?:css|ico|js|png|svg|webmanifest|woff2?)$/i;
 
@@ -11,11 +11,7 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(
-          keys
-            .filter((key) => key !== CACHE_NAME)
-            .map((key) => caches.delete(key)),
-        ),
+        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
       )
       .then(() => self.clients.claim()),
   );
@@ -37,6 +33,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Keep the installed app's metadata fresh, including previously linked query URLs.
+  if (url.pathname === "/manifest.webmanifest") {
+    event.respondWith(fetchManifest(request));
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) {
@@ -45,18 +47,7 @@ self.addEventListener("fetch", (event) => {
 
       return fetch(request).then((response) => {
         if (response.status === 200 && response.type === "basic") {
-          const responseCopy = response.clone();
-          event.waitUntil(
-            caches
-              .open(CACHE_NAME)
-              .then(async (cache) => {
-                await cache.put(request, responseCopy);
-                const keys = await cache.keys();
-                const staleKeys = keys.slice(0, Math.max(0, keys.length - MAX_STATIC_CACHE_ENTRIES));
-                await Promise.all(staleKeys.map((key) => cache.delete(key)));
-              })
-              .catch(() => undefined),
-          );
+          event.waitUntil(cacheStaticResponse(request, response));
         }
 
         return response;
@@ -64,3 +55,36 @@ self.addEventListener("fetch", (event) => {
     }),
   );
 });
+
+async function fetchManifest(request) {
+  let response;
+  try {
+    response = await fetch(request, { cache: "no-cache" });
+  } catch {
+    // A short outage should retain the last successfully downloaded metadata.
+  }
+
+  if (response?.status === 200 && response.type === "basic") {
+    await cacheStaticResponse(request, response);
+    return response;
+  }
+
+  const cached = await caches
+    .open(CACHE_NAME)
+    .then((cache) => cache.match(request))
+    .catch(() => undefined);
+  return cached ?? response ?? Response.error();
+}
+
+function cacheStaticResponse(request, response) {
+  const responseCopy = response.clone();
+  return caches
+    .open(CACHE_NAME)
+    .then(async (cache) => {
+      await cache.put(request, responseCopy);
+      const keys = await cache.keys();
+      const staleKeys = keys.slice(0, Math.max(0, keys.length - MAX_STATIC_CACHE_ENTRIES));
+      await Promise.all(staleKeys.map((key) => cache.delete(key)));
+    })
+    .catch(() => undefined);
+}

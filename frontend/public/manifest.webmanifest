@@ -1,6 +1,7 @@
 {
   "name": "Aurum Pharma",
   "short_name": "Aurum",
+  "id": "/",
   "description": "Система автоматизации аптек для Республики Таджикистан",
   "start_url": "/",
   "scope": "/",
