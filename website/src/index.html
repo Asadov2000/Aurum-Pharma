@@ -10,6 +10,7 @@
       content="Aurum Pharma — касса, каталог, поставки и команда аптеки в одном приложении. Для аптек Таджикистана. Возможности и способы установки."
     />
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <script src="/assets/theme.js"></script>
     <link rel="stylesheet" href="/assets/site.css" />
     <script src="/assets/product-preview.js" defer></script>
   </head>
@@ -18,8 +19,15 @@
     <header class="wrap">
       <a href="/" aria-label="Aurum Pharma — главная"
         ><img
+          data-brand-light
           class="logo"
           src="/assets/brand/logo-color.svg"
+          width="1061"
+          height="256"
+          alt="Aurum Pharma" /><img
+          data-brand-dark
+          class="logo"
+          src="/assets/brand/logo-white.svg"
           width="1061"
           height="256"
           alt="Aurum Pharma"
@@ -28,7 +36,45 @@
         <a href="#features">Возможности</a><a href="#team">Для команды</a
         ><a href="#install">Установка</a>
       </nav>
-      <a class="login" href="{{APP_URL}}">Войти ↗</a>
+      <div class="header-actions">
+        <button
+          class="theme-toggle"
+          type="button"
+          data-theme-toggle
+          hidden
+          aria-label="Тёмная тема"
+          aria-pressed="false"
+        >
+          <svg
+            class="theme-moon"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            aria-hidden="true"
+          >
+            <path d="M20 15.1A8.5 8.5 0 0 1 8.9 4a8.5 8.5 0 1 0 11.1 11.1Z" />
+          </svg>
+          <svg
+            class="theme-sun"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="4" />
+            <path
+              d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"
+            />
+          </svg>
+        </button>
+        <a class="login" href="{{APP_URL}}">Войти ↗</a>
+      </div>
     </header>
     <main id="main">
       <section class="hero wrap entry">
@@ -64,7 +110,14 @@
           <div class="product">
             <div class="app-top">
               <img
+                data-brand-light
                 src="/assets/brand/logo-color.svg"
+                width="1061"
+                height="256"
+                alt=""
+              /><img
+                data-brand-dark
+                src="/assets/brand/logo-white.svg"
                 width="1061"
                 height="256"
                 alt=""
@@ -112,7 +165,7 @@
                       </defs>
                       <path
                         d="M0 75 H360 M0 40 H360 M0 5 H360"
-                        stroke="#e3edef"
+                        class="chart-grid"
                         fill="none"
                       />
                       <path
@@ -121,7 +174,7 @@
                       />
                       <path
                         d="M0 69 Q25 63 40 67 T80 47 T120 55 T160 24 T200 39 T240 15 T280 24 T320 8 L360 12"
-                        stroke="#079d9a"
+                        class="chart-line"
                         stroke-width="2.5"
                         fill="none"
                       />
@@ -330,7 +383,14 @@
     </main>
     <footer class="bottom wrap">
       <img
+        data-brand-light
         src="/assets/brand/logo-color.svg"
+        width="1061"
+        height="256"
+        alt="Aurum Pharma"
+      /><img
+        data-brand-dark
+        src="/assets/brand/logo-white.svg"
         width="1061"
         height="256"
         alt="Aurum Pharma"
