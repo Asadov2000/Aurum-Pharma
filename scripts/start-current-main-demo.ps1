@@ -14,6 +14,8 @@ $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $runtimeRoot = Join-Path $workspace ".codex\runtime-main"
 $runtimeStateRoot = Join-Path $workspace ".codex"
 $imageRevisionFile = Join-Path $runtimeStateRoot "runtime-main-image-revision"
+$websiteUrlFile = Join-Path $runtimeStateRoot "demo-public-website-url"
+$previousWebsiteUrl = [Environment]::GetEnvironmentVariable("VITE_PUBLIC_WEBSITE_URL", "Process")
 $failed = $false
 
 function Invoke-Git {
@@ -104,6 +106,22 @@ try {
     Write-Host "Workspace: $workspace"
     Write-Host "Runtime:   $runtimeRoot"
 
+    # Deployment settings are separate from the showcase credential-only file.
+    # An explicit process setting takes precedence over this machine's saved URL.
+    if ([string]::IsNullOrWhiteSpace($previousWebsiteUrl) -and
+        (Test-Path -LiteralPath $websiteUrlFile -PathType Leaf)) {
+        $websiteUrlText = [IO.File]::ReadAllText($websiteUrlFile).Trim()
+        $websiteUrl = $null
+        if (-not [Uri]::TryCreate($websiteUrlText, [UriKind]::Absolute, [ref]$websiteUrl) -or
+            $websiteUrl.Scheme -ne "https" -or $websiteUrl.IsLoopback -or
+            $websiteUrl.Host -in @("0.0.0.0", "[::]") -or
+            $websiteUrl.UserInfo -ne "" -or $websiteUrl.Query -ne "" -or
+            $websiteUrl.Fragment -ne "") {
+            throw "demo-public-website-url must contain an HTTPS website URL without credentials, query or fragment."
+        }
+        [Environment]::SetEnvironmentVariable("VITE_PUBLIC_WEBSITE_URL", $websiteUrl.AbsoluteUri, "Process")
+    }
+
     if ($DryRun) {
         Write-Host "Current main would be fetched into the isolated runtime worktree."
         $dryRunLauncher = Join-Path $PSScriptRoot "start-local-demo-admin.ps1"
@@ -178,6 +196,7 @@ catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
 }
 finally {
+    [Environment]::SetEnvironmentVariable("VITE_PUBLIC_WEBSITE_URL", $previousWebsiteUrl, "Process")
     if ($failed -and $PauseOnError -and -not $DryRun) {
         Write-Host ""
         Read-Host "Press Enter to close this window"
