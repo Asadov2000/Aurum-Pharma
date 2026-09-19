@@ -384,6 +384,52 @@ try {
     [IO.File]::WriteAllText($goodFixture, "clean`n", $encoding)
     [IO.File]::WriteAllText($badFixture, "trailing   `n", $encoding)
 
+    $launcherFixtureScripts = Join-Path $fixtureRoot "scripts"
+    $launcherFixtureState = Join-Path $fixtureRoot ".codex"
+    [IO.Directory]::CreateDirectory($launcherFixtureScripts) | Out-Null
+    [IO.Directory]::CreateDirectory($launcherFixtureState) | Out-Null
+    $fixtureLauncher = Join-Path $launcherFixtureScripts "start-current-main-demo.ps1"
+    $fixtureChild = Join-Path $launcherFixtureScripts "start-local-demo-admin.ps1"
+    $fixtureWebsiteUrl = Join-Path $launcherFixtureState "demo-public-website-url"
+    Copy-Item -LiteralPath $currentMainLauncherScript -Destination $fixtureLauncher
+    [IO.File]::WriteAllText($fixtureChild, @'
+param([switch]$DryRun, [switch]$NoBrowser)
+if (-not $DryRun -or -not $NoBrowser) { exit 19 }
+Write-Output "FIXTURE_WEBSITE=$env:VITE_PUBLIC_WEBSITE_URL"
+'@, $encoding)
+    $fixtureLauncherArguments = @("-NoProfile")
+    if ($env:OS -eq "Windows_NT") {
+        $fixtureLauncherArguments += @("-ExecutionPolicy", "Bypass")
+    }
+    $fixtureLauncherArguments += @("-File", $fixtureLauncher, "-DryRun", "-NoBrowser")
+    $existingWebsiteUrl = [Environment]::GetEnvironmentVariable("VITE_PUBLIC_WEBSITE_URL", "Process")
+    try {
+        [Environment]::SetEnvironmentVariable("VITE_PUBLIC_WEBSITE_URL", $null, "Process")
+        $fixtureOutput = & $powershellExecutable @fixtureLauncherArguments
+        Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the launcher works without a saved website URL"
+        Assert-Contains -Actual @($fixtureOutput) -Expected "FIXTURE_WEBSITE=" -Because "missing website configuration remains unset in the child"
+
+        [IO.File]::WriteAllText($fixtureWebsiteUrl, "https://saved.example.test/`n", $encoding)
+        $fixtureOutput = & $powershellExecutable @fixtureLauncherArguments
+        Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the launcher accepts a saved HTTPS website URL"
+        Assert-Contains -Actual @($fixtureOutput) -Expected "FIXTURE_WEBSITE=https://saved.example.test/" -Because "the saved URL reaches the child launcher"
+
+        [IO.File]::WriteAllText($fixtureWebsiteUrl, "http://invalid.example.test/", $encoding)
+        [Environment]::SetEnvironmentVariable("VITE_PUBLIC_WEBSITE_URL", "https://process.example.test/", "Process")
+        $fixtureOutput = & $powershellExecutable @fixtureLauncherArguments
+        Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "an explicit process URL takes precedence over an invalid saved URL"
+        Assert-Contains -Actual @($fixtureOutput) -Expected "FIXTURE_WEBSITE=https://process.example.test/" -Because "the process URL reaches the child unchanged"
+
+        [Environment]::SetEnvironmentVariable("VITE_PUBLIC_WEBSITE_URL", $null, "Process")
+        $fixtureOutput = & $powershellExecutable @fixtureLauncherArguments
+        Assert-Equal -Actual ($LASTEXITCODE -ne 0) -Expected $true -Because "a saved HTTP website URL stops the launcher"
+        Assert-Equal -Actual (($fixtureOutput -join "`n") -match "must contain an HTTPS website URL") -Expected $true -Because "invalid saved URLs receive a useful error"
+        Assert-Equal -Actual (($fixtureOutput -join "`n") -match "FIXTURE_WEBSITE=") -Expected $false -Because "invalid saved URLs never reach the child launcher"
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable("VITE_PUBLIC_WEBSITE_URL", $existingWebsiteUrl, "Process")
+    }
+
     & {
         # Dot-source only the side-effect-free planner, then exercise its real runner.
         . $verifyScript -Mode Auto -ChangedPath @("website/src/index.html") -PlanOnly -Format Json | Out-Null
@@ -447,6 +493,15 @@ finally {
         throw "Refusing to remove a fixture directory outside the workspace fixture directory."
     }
     if ([IO.Directory]::Exists($resolvedFixtureRoot)) {
+        [IO.File]::Delete((Join-Path $resolvedFixtureRoot "scripts/start-current-main-demo.ps1"))
+        [IO.File]::Delete((Join-Path $resolvedFixtureRoot "scripts/start-local-demo-admin.ps1"))
+        [IO.File]::Delete((Join-Path $resolvedFixtureRoot ".codex/demo-public-website-url"))
+        foreach ($directory in @("scripts", ".codex")) {
+            $fixtureDirectory = Join-Path $resolvedFixtureRoot $directory
+            if ([IO.Directory]::Exists($fixtureDirectory)) {
+                [IO.Directory]::Delete($fixtureDirectory, $false)
+            }
+        }
         [IO.File]::Delete((Join-Path $resolvedFixtureRoot "good.txt"))
         [IO.File]::Delete((Join-Path $resolvedFixtureRoot "bad.txt"))
         [IO.File]::Delete((Join-Path $resolvedFixtureRoot "01-environment-0.log"))
