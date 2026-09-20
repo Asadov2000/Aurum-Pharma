@@ -86,22 +86,36 @@ function Get-VisualStudioInstallations {
         return @()
     }
 
-    $result = Invoke-TextCommand -Exe $vswhere -Arguments @(
-        "-all",
-        "-format",
-        "json",
-        "-products",
-        "*",
-        "-requiresAny",
-        "Microsoft.VisualStudio.Workload.ManagedDesktop",
-        "Microsoft.VisualStudio.Component.Windows10SDK.19041"
+    $requirementSets = @(
+        @(
+            "Microsoft.VisualStudio.Workload.ManagedDesktop",
+            "Microsoft.VisualStudio.Workload.Universal",
+            "Microsoft.VisualStudio.Component.WindowsAppSdkSupport.CSharp"
+        ),
+        @(
+            "Microsoft.VisualStudio.Workload.ManagedDesktop",
+            "Microsoft.VisualStudio.Workload.Universal",
+            "Microsoft.VisualStudio.ComponentGroup.WindowsAppSDK.Cs"
+        )
     )
 
-    if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.Output)) {
-        return @()
+    foreach ($requirements in $requirementSets) {
+        $arguments = @(
+            "-all",
+            "-format",
+            "json",
+            "-products",
+            "*",
+            "-requires"
+        ) + $requirements
+        $result = Invoke-TextCommand -Exe $vswhere -Arguments $arguments
+
+        if ($result.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($result.Output)) {
+            return @($result.Output | ConvertFrom-Json)
+        }
     }
 
-    return @($result.Output | ConvertFrom-Json)
+    return @()
 }
 
 function Get-WindowsSdkVersions {
@@ -172,11 +186,11 @@ else {
 $visualStudio = @(Get-VisualStudioInstallations)
 if ($visualStudio.Count -gt 0) {
     foreach ($install in $visualStudio) {
-        Add-Present "Visual Studio with desktop/Windows SDK workload: $($install.displayName) $($install.catalog.productDisplayVersion)."
+        Add-Present "Visual Studio with Managed Desktop, Universal and .NET WinUI workloads: $($install.displayName) $($install.catalog.productDisplayVersion)."
     }
 }
 else {
-    Add-Missing "Visual Studio with Managed Desktop and Windows SDK workload was not found by vswhere."
+    Add-Missing "Visual Studio with Managed Desktop, Universal and .NET WinUI workloads was not found by vswhere."
 }
 
 $sdkVersions = @(Get-WindowsSdkVersions)

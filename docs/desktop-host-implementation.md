@@ -4,6 +4,11 @@
 как `scripts/windows-host-readiness.ps1 -FailOnMissing` станет зелёным и
 `scripts/windows-host-scaffold.ps1 -Create` сможет создать WinUI 3 проект.
 
+Текущий первый slice реализован: packaged host загружает доверенный app origin,
+добавляет bridge только в top-level документ этого origin, открывает внешние
+ссылки системным браузером и показывает восстановимый экран ошибки. Аппаратные
+capabilities остаются пустыми до появления рабочих адаптеров.
+
 ## Цель
 
 Windows-приложение не должно становиться отдельной версией продукта. Оно хостит
@@ -32,12 +37,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-scaffold.ps1 -Cr
 - `net10.0`;
 - packaged app по умолчанию;
 - успешный `dotnet build`.
-
-Unpackaged вариант разрешён только если нужен прямой `.exe` launch-flow:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-scaffold.ps1 -Create -Unpackaged
-```
 
 ## Минимальная структура host-проекта
 

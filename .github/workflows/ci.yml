@@ -1929,10 +1929,36 @@ jobs:
           docker logs "$container"
           exit 1
 
+  desktop:
+    name: Windows desktop quality gate
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore desktop tests
+        run: dotnet restore desktop/AurumPharma.Desktop.Core.Tests/AurumPharma.Desktop.Core.Tests.csproj --runtime win-x64 --locked-mode
+
+      - name: Test desktop core
+        run: dotnet test desktop/AurumPharma.Desktop.Core.Tests/AurumPharma.Desktop.Core.Tests.csproj --configuration Release --runtime win-x64 --no-restore
+
+      - name: Restore Windows host
+        run: dotnet restore desktop/AurumPharma.Desktop/AurumPharma.Desktop.csproj --runtime win-x64 --locked-mode -p:PublishReadyToRun=true
+
+      - name: Build packaged Windows host
+        run: dotnet build desktop/AurumPharma.Desktop/AurumPharma.Desktop.csproj --configuration Release --runtime win-x64 --no-restore -p:Platform=x64 -p:PublishReadyToRun=true
+
   ci-gate:
     name: CI gate
     if: always()
-    needs: [verification-tooling, backend, frontend, dependency-audit, e2e, production-containers]
+    needs: [verification-tooling, backend, frontend, desktop, dependency-audit, e2e, production-containers]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -1946,6 +1972,7 @@ jobs:
           BACKEND_RESULT: ${{ needs.backend.result }}
           VERIFICATION_TOOLING_RESULT: ${{ needs['verification-tooling'].result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
           AUDIT_RESULT: ${{ needs['dependency-audit'].result }}
           E2E_RESULT: ${{ needs.e2e.result }}
           PRODUCTION_CONTAINERS_RESULT: ${{ needs['production-containers'].result }}
@@ -1955,6 +1982,7 @@ jobs:
             "verification-tooling:$VERIFICATION_TOOLING_RESULT" \
             "backend:$BACKEND_RESULT" \
             "frontend:$FRONTEND_RESULT" \
+            "desktop:$DESKTOP_RESULT" \
             "dependency-audit:$AUDIT_RESULT" \
             "e2e:$E2E_RESULT" \
             "production-containers:$PRODUCTION_CONTAINERS_RESULT"; do

@@ -3,7 +3,6 @@ param(
     [switch]$Force,
     [switch]$SkipReadiness,
     [switch]$SkipBuild,
-    [switch]$Unpackaged,
     [ValidatePattern("^[A-Za-z][A-Za-z0-9_.-]*$")]
     [string]$ProjectName = "AurumPharma.Desktop",
     [ValidateSet("net10.0", "net9.0", "net8.0")]
@@ -52,13 +51,11 @@ function Invoke-Checked {
     }
 }
 
-$packaging = if ($Unpackaged) { "unpackaged" } else { "packaged" }
-
 Write-Host "Aurum Pharma Windows host scaffold"
 Write-Host "Project: $ProjectName"
 Write-Host "Path: $ProjectPath"
 Write-Host "Framework: $Framework"
-Write-Host "Packaging: $packaging"
+Write-Host "Packaging: packaged"
 
 if (-not $Create) {
     Write-Host ""
@@ -93,10 +90,7 @@ if (-not (Test-Path $DesktopRoot)) {
     New-Item -ItemType Directory -Path $DesktopRoot | Out-Null
 }
 
-$templateArgs = @("new", "winui", "-o", $ProjectPath, "-f", $Framework)
-if ($Unpackaged) {
-    $templateArgs += "--unpackaged"
-}
+$templateArgs = @("new", "winui", "-o", $ProjectPath, "-tfm", $Framework, "--no-update-check")
 
 if ($Force) {
     $templateArgs += "--force"

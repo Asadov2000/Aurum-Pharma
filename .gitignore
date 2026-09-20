@@ -61,3 +61,8 @@ celerybeat-schedule.*
 
 # Codex local worktrees, reports and runtime state
 .codex/
+.tmp/
+
+# .NET build artifacts
+**/bin/
+**/obj/

@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ConfigPath = Join-Path $RepoRoot "infra\windows\winui-prerequisites.yaml"
 $ReadinessScript = Join-Path $RepoRoot "scripts\windows-host-readiness.ps1"
+$WinUiTemplatePackage = "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates"
 
 function Stop-Setup {
     param([string]$Message)
@@ -20,6 +21,15 @@ function Stop-Setup {
 function Test-Command {
     param([string]$Name)
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Test-WinUiTemplate {
+    if (-not (Test-Command "dotnet")) {
+        return $false
+    }
+
+    & dotnet new list winui *> $null
+    return $LASTEXITCODE -eq 0
 }
 
 function Invoke-Checked {
@@ -59,6 +69,7 @@ if (-not $Apply) {
     Write-Host "Dry-run mode: no installs, no system changes."
     Write-Host "This setup would run:"
     Write-Host "winget configure -f winui-prerequisites.yaml --accept-configuration-agreements --disable-interactivity"
+    Write-Host "dotnet new install $WinUiTemplatePackage (only when the WinUI template is missing)"
     Write-Host ""
     Write-Host "To apply prerequisites intentionally, run:"
     Write-Host "powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-setup.ps1 -Apply"
@@ -98,6 +109,15 @@ try {
 }
 finally {
     Pop-Location
+}
+
+if (-not (Test-WinUiTemplate)) {
+    Invoke-Checked "Installing the official WinUI dotnet templates" @(
+        "dotnet",
+        "new",
+        "install",
+        $WinUiTemplatePackage
+    )
 }
 
 if (-not $SkipPostCheck) {

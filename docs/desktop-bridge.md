@@ -105,12 +105,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-scaffold.ps1 -Cr
 - packaging: packaged WinUI 3 app.
 
 Скрипт не перезаписывает существующую папку без `-Force`. После scaffold он
-запускает `dotnet build` для созданного `.csproj`. Если нужен прямой `.exe`
-launch-flow, можно создать unpackaged вариант:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows-host-scaffold.ps1 -Create -Unpackaged
-```
+запускает `dotnet build` для созданного packaged `.csproj`.
 
 После создания проекта host-side реализация идёт по
 `docs/desktop-host-implementation.md`.
