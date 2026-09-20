@@ -374,6 +374,55 @@ async def get_read_snapshot_manifest(
         tenant_id=principal.tenant_id,
         branch_id=principal.branch_id,
         credential_kid=principal.credential_kid,
+        credential_digest=principal.credential_digest,
+    )
+
+
+@router.post("/read-snapshot/refresh", response_model=ManifestRead)
+async def refresh_read_snapshot(
+    response: Response,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+) -> ManifestRead:
+    """Publish a new snapshot only for the authenticated Edge node itself."""
+
+    _prevent_credential_caching(response)
+    principal = context.principal
+    return await SyncCloudService(SyncCloudRepository(context.session)).publish_read_snapshot(
+        edge_node_id=principal.node_id,
+        expected_tenant_id=principal.tenant_id,
+        expected_branch_id=principal.branch_id,
+        expected_credential_kid=principal.credential_kid,
+        credential_digest=principal.credential_digest,
+    )
+
+
+@router.get(
+    "/read-snapshot/{snapshot_id}/chunks",
+    response_model=list[ChunkRead],
+)
+async def get_read_snapshot_chunk_batch(
+    snapshot_id: UUID,
+    response: Response,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=20)] = 20,
+) -> list[ChunkRead]:
+    _prevent_credential_caching(response)
+    principal = context.principal
+    return await SyncCloudService(SyncCloudRepository(context.session)).read_snapshot_chunk_batch(
+        snapshot_id=snapshot_id,
+        offset=offset,
+        limit=limit,
+        edge_node_id=principal.node_id,
+        tenant_id=principal.tenant_id,
+        branch_id=principal.branch_id,
+        credential_kid=principal.credential_kid,
     )
 
 

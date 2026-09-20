@@ -125,6 +125,10 @@ async def get_edge_context(
 
     async with AppSessionLocal() as session:
         async with session.begin():
+            # Snapshot publication reads several domain tables. Establish one
+            # MVCC view before authentication performs the first statement so
+            # a concurrent Cloud write cannot create a mixed Edge revision.
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
             result = await session.execute(
                 text("SELECT * FROM public.authenticate_edge_node(:kid, :credential_hash)"),
                 {"kid": kid, "credential_hash": credential_hash},

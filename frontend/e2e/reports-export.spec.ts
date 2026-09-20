@@ -136,7 +136,9 @@ test.describe("Reports export", () => {
     await stockReport.getByLabel("Товар, МНН или партия").fill(item.brand_name);
     await expect(stockReport.getByRole("button", { name: "Скачать в Excel" })).toBeDisabled();
     await stockReport.getByRole("button", { name: "Показать" }).click();
-    await expect(stockReport.getByText(item.brand_name)).toBeVisible();
+    await expect(
+      stockReport.getByRole("table", { name: "Остатки лекарств на выбранную дату" }),
+    ).toContainText(item.brand_name);
     const exportResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === "/api/v1/reports/stock-on-date.xlsx" &&

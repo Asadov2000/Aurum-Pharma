@@ -31,10 +31,7 @@ from app.domains.sync.read_snapshot import (
 from app.domains.sync.read_snapshot import (
     ManifestRead as ReadSnapshotManifestRead,
 )
-from app.domains.sync.read_snapshot import (
-    ReadSnapshotComponent,
-    ReadSnapshotValidationError,
-)
+from app.domains.sync.read_snapshot import ReadSnapshotValidationError
 from app.domains.sync.read_snapshot import (
     verify_chunk as verify_read_snapshot_chunk,
 )
@@ -184,20 +181,36 @@ async def _read_snapshot_manifest(
     return ReadSnapshotManifestRead.model_validate(cast(object, response.json()))
 
 
-async def _read_snapshot_chunk(
+async def _refresh_read_snapshot(
+    client: httpx.AsyncClient,
+    *,
+    credential: str,
+) -> None:
+    response = await client.post(
+        "/api/v1/sync/read-snapshot/refresh",
+        headers=_request_headers(credential),
+    )
+    response.raise_for_status()
+
+
+async def _read_snapshot_chunk_batch(
     client: httpx.AsyncClient,
     *,
     credential: str,
     snapshot_id: str,
-    component: ReadSnapshotComponent,
-    chunk_index: int,
-) -> ReadSnapshotChunkRead:
+    offset: int,
+    limit: int,
+) -> list[ReadSnapshotChunkRead]:
     response = await client.get(
-        f"/api/v1/sync/read-snapshot/{snapshot_id}/{component}/chunks/{chunk_index}",
+        f"/api/v1/sync/read-snapshot/{snapshot_id}/chunks",
         headers=_request_headers(credential),
+        params={"offset": offset, "limit": limit},
     )
     response.raise_for_status()
-    return ReadSnapshotChunkRead.model_validate(cast(object, response.json()))
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise ReadSnapshotValidationError("Read snapshot chunk batch is invalid")
+    return [ReadSnapshotChunkRead.model_validate(item) for item in payload]
 
 
 async def _install_read_snapshot(
@@ -234,6 +247,19 @@ async def _active_read_snapshot_id(
             )
 
 
+async def _confirm_active_read_snapshot(envelope: ReadSnapshotManifestRead) -> None:
+    manifest = envelope.manifest
+    async with AppSessionLocal() as session:
+        async with session.begin():
+            await _set_read_snapshot_scope(session, envelope)
+            await SyncEdgeRepository(session).confirm_active_read_snapshot(
+                tenant_id=manifest.tenant_id,
+                branch_id=manifest.branch_id,
+                edge_node_id=manifest.edge_node_id,
+                snapshot_id=manifest.snapshot_id,
+            )
+
+
 async def _sync_read_snapshot(
     client: httpx.AsyncClient,
     *,
@@ -244,22 +270,33 @@ async def _sync_read_snapshot(
         return
     manifest = verify_read_snapshot_manifest(envelope, credential=credential)
     if await _active_read_snapshot_id(envelope) == manifest.snapshot_id:
+        await _confirm_active_read_snapshot(envelope)
         return
     chunks: list[ReadSnapshotChunkRead] = []
-    for component in manifest.components:
-        for descriptor in component.chunks:
-            chunk = await _read_snapshot_chunk(
-                client,
-                credential=credential,
-                snapshot_id=str(manifest.snapshot_id),
-                component=component.component,
-                chunk_index=descriptor.chunk_index,
-            )
+    expected_chunk_count = sum(component.chunk_count for component in manifest.components)
+    while len(chunks) < expected_chunk_count:
+        batch = await _read_snapshot_chunk_batch(
+            client,
+            credential=credential,
+            snapshot_id=str(manifest.snapshot_id),
+            offset=len(chunks),
+            limit=20,
+        )
+        if not batch:
+            raise ReadSnapshotValidationError("Read snapshot download is incomplete")
+        for chunk in batch:
             verify_read_snapshot_chunk(manifest, chunk)
             chunks.append(chunk)
-    expected_chunk_count = sum(component.chunk_count for component in manifest.components)
     if len(chunks) != expected_chunk_count:
         raise ReadSnapshotValidationError("Read snapshot download is incomplete")
+    expected_keys = {
+        (component.component, descriptor.chunk_index)
+        for component in manifest.components
+        for descriptor in component.chunks
+    }
+    actual_keys = {(chunk.component, chunk.chunk_index) for chunk in chunks}
+    if actual_keys != expected_keys:
+        raise ReadSnapshotValidationError("Read snapshot chunk set is incomplete")
     await _install_read_snapshot(envelope=envelope, chunks=chunks)
 
 
@@ -389,7 +426,13 @@ async def _report_incident(
     return SyncQuarantineIncidentRead.model_validate(cast(object, response.json()))
 
 
-async def run_cycle(client: httpx.AsyncClient, settings: Settings, credential: str) -> None:
+async def run_cycle(
+    client: httpx.AsyncClient,
+    settings: Settings,
+    credential: str,
+    *,
+    refresh_read_snapshot: bool = True,
+) -> None:
     pull = await _pull(
         client,
         credential=credential,
@@ -446,6 +489,8 @@ async def run_cycle(client: httpx.AsyncClient, settings: Settings, credential: s
             sequence=report.last_sequence,
         )
         return
+    if refresh_read_snapshot:
+        await _refresh_read_snapshot(client, credential=credential)
     await _sync_read_snapshot(client, credential=credential)
 
 
@@ -462,9 +507,19 @@ async def run(*, once: bool) -> None:
         timeout=timeout,
         follow_redirects=False,
     ) as client:
+        next_snapshot_refresh = 0.0
         while True:
             try:
-                await run_cycle(client, settings, credential)
+                now = time.monotonic()
+                refresh_read_snapshot = once or now >= next_snapshot_refresh
+                await run_cycle(
+                    client,
+                    settings,
+                    credential,
+                    refresh_read_snapshot=refresh_read_snapshot,
+                )
+                if refresh_read_snapshot:
+                    next_snapshot_refresh = now + settings.EDGE_READ_SNAPSHOT_REFRESH_SECONDS
                 backoff = 1.0
             except httpx.HTTPStatusError as exc:
                 logger.warning(
