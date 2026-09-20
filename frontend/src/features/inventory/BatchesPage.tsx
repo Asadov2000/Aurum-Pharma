@@ -22,6 +22,7 @@ import {
   TR,
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
+import { resolveDataPlane } from "@/features/edgeReadModel/dataPlane";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
@@ -59,8 +60,23 @@ const inventorySections = [
 ] as const;
 
 const VIEW_STORAGE_KEY = "aurum:batches:view:v1";
+const EdgeInventoryPage = lazy(async () => {
+  const module = await import("@/features/edgeReadModel/EdgeReadOnlyPages");
+  return { default: module.EdgeInventoryPage };
+});
 
 export function BatchesPage(): JSX.Element {
+  const plane = useMemo(() => resolveDataPlane(), []);
+  return plane.mode === "edge-readonly" ? (
+    <Suspense fallback={<SkeletonRows rows={6} />}>
+      <EdgeInventoryPage plane={plane} />
+    </Suspense>
+  ) : (
+    <CloudBatchesPage />
+  );
+}
+
+function CloudBatchesPage(): JSX.Element {
   const { user } = useAuth();
   const canViewCustomerReturns = hasPermission(user, "customer_returns.view");
   const [section, setSection] = useState<InventorySection>("saleable");

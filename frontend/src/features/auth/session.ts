@@ -4,6 +4,7 @@ import { useSupportAccessStore } from "@/stores/supportAccess";
 
 export function clearClientSession(): void {
   queryClient.clear();
+  window.dispatchEvent(new Event("aurum:client-session-cleared"));
   useSupportAccessStore.getState().clear();
   useAuthStore.getState().clear();
 }

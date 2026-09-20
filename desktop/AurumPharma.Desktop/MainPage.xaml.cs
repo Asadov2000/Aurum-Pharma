@@ -158,6 +158,9 @@ public sealed partial class MainPage : Page
     {
         var origin = JsonSerializer.Serialize(settings.TrustedOrigin);
         var version = JsonSerializer.Serialize(GetAppVersion());
+        var dataPlane = settings.EdgeBranchId is Guid branchId
+            ? JsonSerializer.Serialize(new { mode = "edge-readonly", branchId })
+            : JsonSerializer.Serialize(new { mode = "cloud" });
         return $$"""
             (() => {
               if (window.top !== window || window.location.origin !== {{origin}}) {
@@ -168,6 +171,7 @@ public sealed partial class MainPage : Page
                 appVersion: {{version}},
                 platform: "windows",
                 capabilities: Object.freeze([]),
+                dataPlane: Object.freeze({{dataPlane}}),
                 postMessage(message) {
                   window.chrome.webview.postMessage(message);
                 }

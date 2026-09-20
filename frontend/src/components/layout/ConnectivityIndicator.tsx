@@ -9,8 +9,8 @@ export function ConnectivityIndicator(): JSX.Element {
       : status === "offline"
         ? "Нет сети"
         : status === "server-unavailable"
-          ? "Сервер недоступен"
-          : "Проверка связи";
+          ? "Сервис недоступен"
+          : "Проверка";
 
   return (
     <span
@@ -23,11 +23,7 @@ export function ConnectivityIndicator(): JSX.Element {
         aria-hidden="true"
         className={cn(
           "h-2 w-2 rounded-full",
-          status === "online"
-            ? "bg-success"
-            : status === "checking"
-              ? "bg-warning"
-              : "bg-danger",
+          status === "online" ? "bg-success" : status === "checking" ? "bg-warning" : "bg-danger",
         )}
       />
       <span className="sr-only xl:not-sr-only">{label}</span>

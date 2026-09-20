@@ -64,6 +64,9 @@ export interface DesktopFileExportRequest {
 export interface AurumDesktopBridge {
   readonly appVersion?: string;
   readonly capabilities?: readonly DesktopBridgeCapability[];
+  readonly dataPlane?:
+    | { readonly mode: "cloud" }
+    | { readonly mode: "edge-readonly"; readonly branchId: string };
   readonly platform?: "windows";
   postMessage?(message: DesktopBridgeMessage): void;
 }
@@ -106,9 +109,7 @@ const CAPABILITIES: readonly DesktopBridgeCapability[] = [
   "receipt-print",
 ];
 
-export function getDesktopBridge(
-  target: DesktopBridgeTarget = window,
-): AurumDesktopBridge | null {
+export function getDesktopBridge(target: DesktopBridgeTarget = window): AurumDesktopBridge | null {
   return target.aurumDesktop ?? null;
 }
 
@@ -116,9 +117,7 @@ export function hasDesktopBridge(target: DesktopBridgeTarget = window): boolean 
   return getDesktopBridge(target) !== null || target.chrome?.webview !== undefined;
 }
 
-export function getDesktopBridgeInfo(
-  target: DesktopBridgeTarget = window,
-): DesktopBridgeInfo {
+export function getDesktopBridgeInfo(target: DesktopBridgeTarget = window): DesktopBridgeInfo {
   const bridge = getDesktopBridge(target);
   const isAvailable = hasDesktopBridge(target);
 
@@ -233,10 +232,7 @@ export function requestDesktopFileExport(
   );
 }
 
-export function dispatchDesktopBarcodeScan(
-  rawCode: string,
-  target: EventTarget = window,
-): boolean {
+export function dispatchDesktopBarcodeScan(rawCode: string, target: EventTarget = window): boolean {
   const code = normalizeDesktopBarcode(rawCode);
   if (!code) {
     return false;
