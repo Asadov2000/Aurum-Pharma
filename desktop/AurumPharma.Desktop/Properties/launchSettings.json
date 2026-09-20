@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "AurumPharma.Desktop (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "AurumPharma.Desktop (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

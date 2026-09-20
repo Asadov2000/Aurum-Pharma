@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="AurumPharma_Desktop.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <WebView2
+            x:Name="Browser"
+            CoreWebView2Initialized="Browser_CoreWebView2Initialized"
+            Source="about:blank" />
+
+        <StackPanel
+            x:Name="LoadingPanel"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Spacing="16"
+            Visibility="Collapsed">
+            <ProgressRing Width="40" Height="40" IsActive="True" />
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontSize="16"
+                FontWeight="SemiBold"
+                Text="Запуск Aurum Pharma…" />
+        </StackPanel>
+
+        <StackPanel
+            x:Name="ErrorPanel"
+            Width="520"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Spacing="16"
+            Visibility="Collapsed">
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontSize="22"
+                FontWeight="SemiBold"
+                Text="Не удалось открыть Aurum Pharma" />
+            <TextBlock
+                HorizontalAlignment="Center"
+                Text="Проверьте, что локальный сервис запущен, и повторите подключение."
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+            <Button
+                HorizontalAlignment="Center"
+                Click="RetryButton_Click"
+                Content="Повторить" />
+        </StackPanel>
+    </Grid>
+</Page>

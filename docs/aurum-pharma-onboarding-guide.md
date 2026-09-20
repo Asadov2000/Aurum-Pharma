@@ -259,7 +259,10 @@ window.aurumDesktop = {
 - `aurum.file-export.request`;
 - `aurum-desktop-barcode-scanned`.
 
-Что ещё не сделано: реальный WinUI host, работа с физическим оборудованием и подключение native receipt-print к UI. Сейчас чек можно печатать web-flow/PDF, а bridge-контракт для нативной печати уже описан.
+Packaged WinUI host уже реализован и безопасно загружает общий frontend. Что ещё
+не сделано: работа с физическим оборудованием и подключение native receipt-print
+к UI. Сейчас чек можно печатать web-flow/PDF, а desktop host не заявляет
+аппаратные capabilities до появления рабочих адаптеров.
 
 ---
 
