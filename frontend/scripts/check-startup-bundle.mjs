@@ -38,6 +38,7 @@ const routeBudgets = [
 for (const requiredSource of [
   "src/features/auth/LoginPage.tsx",
   "src/features/auth/MfaStepUpDialog.tsx",
+  "src/features/dashboard/SupportProfile.tsx",
 ]) {
   if (!manifest[requiredSource]?.isDynamicEntry) {
     throw new Error(`${requiredSource} must remain a lazy production chunk`);
@@ -70,7 +71,7 @@ const pos = routeResults.find(({ budget }) => budget.source.includes("POSPage"))
 const login = routeResults.find(({ budget }) => budget.source.includes("LoginPage"));
 assertResourcesExclude(
   dashboard.resources,
-  ["vendor-forms", "LoginPage", "MfaStepUpDialog"],
+  ["vendor-forms", "LoginPage", "MfaStepUpDialog", "SupportProfile"],
   "Dashboard",
 );
 assertResourcesExclude(pos.resources, ["LoginPage", "MfaStepUpDialog"], "POS");

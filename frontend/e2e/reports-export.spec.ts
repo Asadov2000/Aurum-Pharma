@@ -133,8 +133,7 @@ test.describe("Reports export", () => {
 
     await page.getByRole("tab", { name: /^Остатки/ }).click();
     const stockReport = page.getByRole("region", { name: "Остатки и сроки годности" });
-    await expect(stockReport.getByText(item.brand_name)).toBeVisible();
-    await stockReport.getByLabel("Поиск").fill(item.brand_name);
+    await stockReport.getByLabel("Товар, МНН или партия").fill(item.brand_name);
     await expect(stockReport.getByRole("button", { name: "Скачать в Excel" })).toBeDisabled();
     await stockReport.getByRole("button", { name: "Показать" }).click();
     await expect(stockReport.getByText(item.brand_name)).toBeVisible();

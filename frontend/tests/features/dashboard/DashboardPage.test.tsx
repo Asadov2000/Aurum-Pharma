@@ -147,10 +147,10 @@ describe("DashboardPage", () => {
     expect(screen.queryByRole("link", { name: "Открыть партии" })).not.toBeInTheDocument();
   });
 
-  it("shows the profile fallback for a support user without a tenant", () => {
+  it("shows the profile fallback for a support user without a tenant", async () => {
     mockUser = { is_developer: true, full_name: "Dev", email: "dev@aurum.tj" };
     renderPage();
-    expect(screen.getByText(/Сводка по аптеке доступна/)).toBeInTheDocument();
+    expect(await screen.findByText(/Сводка по аптеке доступна/)).toBeInTheDocument();
     // Must NOT have called the tenant-scoped endpoint.
     expect(getDashboardSummary).not.toHaveBeenCalled();
   });
