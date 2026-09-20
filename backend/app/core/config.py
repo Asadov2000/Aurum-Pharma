@@ -224,6 +224,9 @@ class Settings(BaseSettings):
     EDGE_BOOTSTRAP_TTL_SECONDS: int = Field(default=86400, ge=300, le=604800)
     EDGE_BOOTSTRAP_CHUNK_SIZE: int = Field(default=100, ge=1, le=100)
     EDGE_BOOTSTRAP_MAX_EVENTS: int = Field(default=10000, ge=100, le=100000)
+    EDGE_READ_SNAPSHOT_CHUNK_SIZE: int = Field(default=500, ge=50, le=2000)
+    EDGE_READ_SNAPSHOT_STALE_SECONDS: int = Field(default=86400, ge=300, le=2592000)
+    EDGE_READ_SNAPSHOT_REFRESH_SECONDS: int = Field(default=300, ge=30, le=3600)
     # Fail-closed until mTLS, signed bootstrap, and the cash-only Edge runtime
     # are all available. The handover protocol can still be exercised in tests.
     EDGE_WRITER_READINESS_ENABLED: bool = False

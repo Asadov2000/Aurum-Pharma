@@ -61,6 +61,17 @@ from app.domains.sync.read_snapshot import (
     Manifest,
     ManifestRead,
     ReadSnapshotComponent,
+    ReadSnapshotScope,
+)
+from app.domains.sync.read_snapshot import (
+    build_manifest as build_read_snapshot_manifest,
+)
+from app.domains.sync.read_snapshot_projection import (
+    CatalogProductRecord,
+    FoundationRecord,
+    InventoryBatchRecord,
+    SupplierRecord,
+    build_component_chunks,
 )
 from app.domains.sync.repository import (
     ActivationFoundationSource,
@@ -643,6 +654,7 @@ class SyncCloudService:
         tenant_id: UUID,
         branch_id: UUID,
         credential_kid: UUID,
+        credential_digest: str | None = None,
     ) -> ManifestRead:
         stored = await self.repo.get_latest_read_snapshot(
             tenant_id=tenant_id,
@@ -650,6 +662,20 @@ class SyncCloudService:
             edge_node_id=edge_node_id,
             credential_kid=credential_kid,
         )
+        if stored is None and credential_digest is not None:
+            await self.publish_read_snapshot(
+                edge_node_id=edge_node_id,
+                expected_tenant_id=tenant_id,
+                expected_branch_id=branch_id,
+                expected_credential_kid=credential_kid,
+                credential_digest=credential_digest,
+            )
+            stored = await self.repo.get_latest_read_snapshot(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                edge_node_id=edge_node_id,
+                credential_kid=credential_kid,
+            )
         if stored is None:
             raise NotFoundError("Read snapshot not found")
         snapshot, component_rows = stored
@@ -704,6 +730,237 @@ class SyncCloudService:
             signature=snapshot.signature,
         )
 
+    async def publish_read_snapshot(
+        self,
+        *,
+        edge_node_id: UUID,
+        expected_tenant_id: UUID,
+        expected_branch_id: UUID,
+        expected_credential_kid: UUID,
+        credential_digest: str,
+    ) -> ManifestRead:
+        """Publish one internally consistent snapshot for an active Edge node."""
+
+        await self.repo.lock_read_snapshot_scope(edge_node_id)
+        stored = await self.repo.get_latest_read_snapshot(
+            tenant_id=expected_tenant_id,
+            branch_id=expected_branch_id,
+            edge_node_id=edge_node_id,
+            credential_kid=expected_credential_kid,
+        )
+        if stored is not None:
+            latest, _ = stored
+            snapshot_age = (utc_now() - latest.source_generated_at).total_seconds()
+            if snapshot_age < get_settings().EDGE_READ_SNAPSHOT_REFRESH_SECONDS:
+                return await self.read_snapshot_manifest(
+                    edge_node_id=edge_node_id,
+                    tenant_id=expected_tenant_id,
+                    branch_id=expected_branch_id,
+                    credential_kid=expected_credential_kid,
+                )
+
+        foundation_source = await self.repo.read_snapshot_foundation_source(
+            tenant_id=expected_tenant_id, branch_id=expected_branch_id
+        )
+        if foundation_source is None:
+            raise BusinessRuleError("Edge snapshot foundation is incomplete")
+        tenant, tenant_settings, branch, registers = foundation_source
+        catalog_rows, barcode_rows, supplier_rows = await self.repo.read_snapshot_catalog_source(
+            tenant_id=expected_tenant_id
+        )
+        inventory_rows = await self.repo.read_snapshot_inventory_source(
+            tenant_id=expected_tenant_id, branch_id=expected_branch_id
+        )
+
+        foundation = FoundationRecord(
+            source_fingerprint="0" * 64,
+            tenant={
+                "id": tenant.id,
+                "name": tenant.name,
+                "legal_name": tenant.legal_name,
+                "inn_or_tin": tenant.inn_or_tin,
+                "registration_number": tenant.registration_number,
+                "legal_address": tenant.legal_address,
+                "status": tenant.status,
+                "drug_catalog_mode": tenant.drug_catalog_mode,
+                "updated_at": tenant.updated_at,
+            },
+            settings={
+                "expiry_thresholds": tenant_settings.expiry_thresholds,
+                "expired_sale_mode": tenant_settings.expired_sale_mode,
+                "refund_reason_mode": tenant_settings.refund_reason_mode,
+                "pos_payment_methods": tenant_settings.pos_payment_methods,
+                "pos_mixed_payment_enabled": tenant_settings.pos_mixed_payment_enabled,
+                "draft_sale_lifetime_min": tenant_settings.draft_sale_lifetime_min,
+                "report_timezone": tenant_settings.report_timezone,
+                "prescription_warning_text": tenant_settings.prescription_warning_text,
+                "version": tenant_settings.version,
+                "updated_at": tenant_settings.updated_at,
+            },
+            branch={
+                "id": branch.id,
+                "tenant_id": branch.tenant_id,
+                "name": branch.name,
+                "address": branch.address,
+                "branch_type": branch.branch_type,
+                "license_number": branch.license_number,
+                "license_expires_at": branch.license_expires_at,
+                "working_hours": branch.working_hours,
+                "receipt_header": branch.receipt_header,
+                "is_active": branch.is_active,
+                "updated_at": branch.updated_at,
+            },
+            registers=tuple(
+                {
+                    "id": register.id,
+                    "tenant_id": register.tenant_id,
+                    "branch_id": register.branch_id,
+                    "name": register.name,
+                    "printer_type": register.printer_type,
+                    "printer_config": register.printer_config,
+                    "card_terminal_id": register.card_terminal_id,
+                    "qr_terminal_id": register.qr_terminal_id,
+                    "is_active": register.is_active,
+                    "updated_at": register.updated_at,
+                }
+                for register in registers
+            ),
+        )
+        catalog = tuple(
+            CatalogProductRecord(
+                id=item.id,
+                tenant_id=item.tenant_id,
+                brand_name=item.brand_name,
+                inn=item.inn,
+                manufacturer=item.manufacturer,
+                form=item.form,
+                dosage=item.dosage,
+                pack_size=item.pack_size,
+                atx_code=item.atx_code,
+                dispensing_type=item.dispensing_type,
+                storage_type=item.storage_type,
+                category=item.category,
+                base_price=item.base_price,
+                currency=item.currency,
+                image_version=item.image_version,
+                is_active=item.is_active,
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+                deleted_at=item.deleted_at,
+                barcodes=tuple(
+                    {"id": barcode.id, "code": barcode.code, "code_type": barcode.code_type}
+                    for barcode in barcode_rows.get(item.id, ())
+                ),
+            )
+            for item in catalog_rows
+        )
+        suppliers = tuple(
+            SupplierRecord(
+                id=item.id,
+                tenant_id=item.tenant_id,
+                name=item.name,
+                legal_name=item.legal_name,
+                inn_or_tin=item.inn_or_tin,
+                contact_person=item.contact_person,
+                phone=item.phone,
+                email=item.email,
+                address=item.address,
+                notes=item.notes,
+                is_active=item.is_active,
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            )
+            for item in supplier_rows
+        )
+        inventory = tuple(
+            InventoryBatchRecord(
+                id=batch.id,
+                tenant_id=batch.tenant_id,
+                branch_id=batch.branch_id,
+                catalog_id=batch.catalog_id,
+                batch_number=batch.batch_number,
+                manufactured_at=batch.manufactured_at,
+                expires_at=batch.expires_at,
+                purchase_price=batch.purchase_price,
+                sale_price=batch.sale_price,
+                currency=batch.currency,
+                qty_initial=batch.qty_initial,
+                qty_remaining=batch.qty_remaining,
+                is_blocked=batch.is_blocked,
+                block_reason=batch.block_reason,
+                blocked_at=batch.blocked_at,
+                created_at=batch.created_at,
+                updated_at=batch.updated_at,
+                branch_name=branch_name,
+                catalog_name=product.brand_name,
+                catalog_form=product.form,
+                catalog_dosage=product.dosage,
+                catalog_pack_size=product.pack_size,
+            )
+            for batch, branch_name, product in inventory_rows
+        )
+        source_fingerprint = canonical_json_hash(
+            {
+                "foundation": foundation.model_dump(mode="json", exclude={"source_fingerprint"}),
+                "catalog": [item.model_dump(mode="json") for item in catalog],
+                "suppliers": [item.model_dump(mode="json") for item in suppliers],
+                "inventory": [item.model_dump(mode="json") for item in inventory],
+            }
+        )
+        foundation = foundation.model_copy(update={"source_fingerprint": source_fingerprint})
+        if stored is not None:
+            latest, _ = stored
+            latest_chunks = await self.repo.list_read_snapshot_chunks(
+                snapshot_id=latest.snapshot_id,
+                tenant_id=expected_tenant_id,
+                branch_id=expected_branch_id,
+                edge_node_id=edge_node_id,
+            )
+            prior_fingerprint: object | None = None
+            for chunk in latest_chunks:
+                if chunk.component != "foundation" or chunk.chunk_index != 0:
+                    continue
+                stored_items = chunk.payload.get("items")
+                if not isinstance(stored_items, list) or not stored_items:
+                    continue
+                first_item = stored_items[0]
+                if isinstance(first_item, dict):
+                    prior_fingerprint = first_item.get("source_fingerprint")
+                break
+            if prior_fingerprint == source_fingerprint:
+                return await self.read_snapshot_manifest(
+                    edge_node_id=edge_node_id,
+                    tenant_id=expected_tenant_id,
+                    branch_id=expected_branch_id,
+                    credential_kid=expected_credential_kid,
+                )
+        revision = await self.repo.next_read_snapshot_revision(
+            tenant_id=expected_tenant_id,
+            branch_id=expected_branch_id,
+            edge_node_id=edge_node_id,
+        )
+        chunks_by_component = build_component_chunks(
+            foundation=foundation,
+            catalog=catalog,
+            suppliers=suppliers,
+            inventory=inventory,
+            chunk_size=get_settings().EDGE_READ_SNAPSHOT_CHUNK_SIZE,
+        )
+        envelope, chunks = build_read_snapshot_manifest(
+            ReadSnapshotScope(
+                edge_node_id=edge_node_id,
+                tenant_id=expected_tenant_id,
+                branch_id=expected_branch_id,
+                source_revision=revision,
+            ),
+            chunks_by_component,
+            credential_kid=expected_credential_kid,
+            credential_digest=credential_digest,
+            source_generated_at=utc_now(),
+        )
+        await self.repo.publish_read_snapshot(envelope=envelope, chunks=chunks)
+        return envelope
+
     async def read_snapshot_chunk(
         self,
         *,
@@ -749,6 +1006,50 @@ class SyncCloudService:
                 "payload": payload,
             }
         )
+
+    async def read_snapshot_chunk_batch(
+        self,
+        *,
+        snapshot_id: UUID,
+        offset: int,
+        limit: int,
+        edge_node_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        credential_kid: UUID,
+    ) -> list[ChunkRead]:
+        manifest = await self.read_snapshot_manifest(
+            edge_node_id=edge_node_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            credential_kid=credential_kid,
+        )
+        if manifest.manifest.snapshot_id != snapshot_id:
+            raise NotFoundError("Read snapshot not found")
+        rows = await self.repo.list_read_snapshot_chunks(
+            snapshot_id=snapshot_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+        )
+        return [
+            ChunkRead.model_validate(
+                {
+                    "schema_version": row.schema_version,
+                    "snapshot_id": row.snapshot_id,
+                    "edge_node_id": row.node_id,
+                    "tenant_id": row.tenant_id,
+                    "branch_id": row.branch_id,
+                    "source_revision": row.source_revision,
+                    "component": row.component,
+                    "chunk_index": row.chunk_index,
+                    "item_count": row.item_count,
+                    "payload_hash": row.payload_hash,
+                    "payload": row.payload.get("items"),
+                }
+            )
+            for row in rows[offset : offset + limit]
+        ]
 
     async def activation_foundation_bootstrap(
         self,

@@ -119,13 +119,6 @@ async def test_read_snapshot_downloads_every_verified_chunk_before_install(
         credential_digest=credential.digest,
         source_generated_at=utc_now(),
     )
-    chunk_by_path = {
-        (
-            f"/api/v1/sync/read-snapshot/{chunk.snapshot_id}/"
-            f"{chunk.component}/chunks/{chunk.chunk_index}"
-        ): chunk
-        for chunk in chunks
-    }
     installed: list[dict[str, object]] = []
 
     async def no_active_snapshot(*args: object, **kwargs: object) -> None:
@@ -137,8 +130,14 @@ async def test_read_snapshot_downloads_every_verified_chunk_before_install(
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/sync/read-snapshot/manifest":
             return httpx.Response(200, json=envelope.model_dump(mode="json"))
-        chunk = chunk_by_path[request.url.path]
-        return httpx.Response(200, json=chunk.model_dump(mode="json"))
+        if request.url.path.endswith("/chunks"):
+            offset = int(request.url.params["offset"])
+            limit = int(request.url.params["limit"])
+            return httpx.Response(
+                200,
+                json=[chunk.model_dump(mode="json") for chunk in chunks[offset : offset + limit]],
+            )
+        raise AssertionError(f"Unexpected path: {request.url.path}")
 
     monkeypatch.setattr(worker, "_active_read_snapshot_id", no_active_snapshot)
     monkeypatch.setattr(worker, "_install_read_snapshot", capture_install)
@@ -175,6 +174,101 @@ async def test_read_snapshot_missing_on_cloud_is_a_noop(
     assert not install_called
 
 
+async def test_read_snapshot_over_request_limit_uses_bounded_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential = EdgeCredential(kid=uuid4(), secret="3" * 64)
+    envelope, chunks = build_manifest(
+        ReadSnapshotScope(
+            edge_node_id=uuid4(),
+            tenant_id=uuid4(),
+            branch_id=uuid4(),
+            source_revision=1,
+        ),
+        {
+            "foundation": [[{"kind": "foundation"}]],
+            "catalog": [[{"id": index}] for index in range(125)],
+            "inventory": [[]],
+        },
+        credential_kid=credential.kid,
+        credential_digest=credential.digest,
+        source_generated_at=utc_now(),
+    )
+    batch_requests = 0
+    installed = False
+
+    async def no_active_snapshot(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def capture_install(*args: object, **kwargs: object) -> None:
+        nonlocal installed
+        installed = True
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal batch_requests
+        if request.url.path == "/api/v1/sync/read-snapshot/manifest":
+            return httpx.Response(200, json=envelope.model_dump(mode="json"))
+        batch_requests += 1
+        offset = int(request.url.params["offset"])
+        limit = int(request.url.params["limit"])
+        return httpx.Response(
+            200,
+            json=[chunk.model_dump(mode="json") for chunk in chunks[offset : offset + limit]],
+        )
+
+    monkeypatch.setattr(worker, "_active_read_snapshot_id", no_active_snapshot)
+    monkeypatch.setattr(worker, "_install_read_snapshot", capture_install)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://cloud.example",
+    ) as client:
+        await worker._sync_read_snapshot(client, credential=credential.token)
+
+    assert installed is True
+    assert len(chunks) > 120
+    assert batch_requests == 7
+
+
+async def test_read_snapshot_confirmation_refreshes_freshness_without_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential = EdgeCredential(kid=uuid4(), secret="4" * 64)
+    envelope, _ = build_manifest(
+        ReadSnapshotScope(
+            edge_node_id=uuid4(),
+            tenant_id=uuid4(),
+            branch_id=uuid4(),
+            source_revision=1,
+        ),
+        {"foundation": [[]], "catalog": [[]], "inventory": [[]]},
+        credential_kid=credential.kid,
+        credential_digest=credential.digest,
+        source_generated_at=utc_now(),
+    )
+    confirmed = False
+
+    async def active_snapshot(*args: object, **kwargs: object) -> UUID:
+        return envelope.manifest.snapshot_id
+
+    async def capture_confirmation(*args: object, **kwargs: object) -> None:
+        nonlocal confirmed
+        confirmed = True
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/sync/read-snapshot/manifest"
+        return httpx.Response(200, json=envelope.model_dump(mode="json"))
+
+    monkeypatch.setattr(worker, "_active_read_snapshot_id", active_snapshot)
+    monkeypatch.setattr(worker, "_confirm_active_read_snapshot", capture_confirmation)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://cloud.example",
+    ) as client:
+        await worker._sync_read_snapshot(client, credential=credential.token)
+
+    assert confirmed is True
+
+
 async def test_read_snapshot_rejects_tampered_chunk_before_install(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -200,13 +294,7 @@ async def test_read_snapshot_rejects_tampered_chunk_before_install(
     )
     first_chunk = chunks[0]
     tampered = first_chunk.model_copy(update={"payload": ({"currency": "USD"},)})
-    chunk_by_path = {
-        (
-            f"/api/v1/sync/read-snapshot/{chunk.snapshot_id}/"
-            f"{chunk.component}/chunks/{chunk.chunk_index}"
-        ): (tampered if chunk == first_chunk else chunk)
-        for chunk in chunks
-    }
+    downloaded_chunks = [tampered if chunk == first_chunk else chunk for chunk in chunks]
     install_called = False
 
     async def no_active_snapshot(*args: object, **kwargs: object) -> None:
@@ -219,7 +307,17 @@ async def test_read_snapshot_rejects_tampered_chunk_before_install(
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/sync/read-snapshot/manifest":
             return httpx.Response(200, json=envelope.model_dump(mode="json"))
-        return httpx.Response(200, json=chunk_by_path[request.url.path].model_dump(mode="json"))
+        if request.url.path.endswith("/chunks"):
+            offset = int(request.url.params["offset"])
+            limit = int(request.url.params["limit"])
+            return httpx.Response(
+                200,
+                json=[
+                    chunk.model_dump(mode="json")
+                    for chunk in downloaded_chunks[offset : offset + limit]
+                ],
+            )
+        raise AssertionError(f"Unexpected path: {request.url.path}")
 
     monkeypatch.setattr(worker, "_active_read_snapshot_id", no_active_snapshot)
     monkeypatch.setattr(worker, "_install_read_snapshot", capture_install)

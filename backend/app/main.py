@@ -51,6 +51,7 @@ from app.domains.pos.router import router as pos_router
 from app.domains.roles.router import router as roles_router
 from app.domains.suppliers import router as suppliers_router
 from app.domains.support_access import router as support_access_router
+from app.domains.sync.read_model_router import router as sync_read_model_router
 from app.domains.sync.router import admin_router as sync_admin_router
 from app.domains.sync.router import router as sync_router
 from app.middleware.auth_context import AuthContextMiddleware
@@ -146,6 +147,7 @@ app.include_router(notifications_router)
 app.include_router(dashboard_router)
 app.include_router(sync_admin_router)
 app.include_router(sync_router)
+app.include_router(sync_read_model_router)
 
 
 @app.get("/healthz", tags=["meta"])

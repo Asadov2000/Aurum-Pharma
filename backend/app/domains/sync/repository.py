@@ -8,12 +8,15 @@ from decimal import Decimal
 from typing import Literal, cast
 from uuid import UUID
 
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.catalog.models import Barcode, TenantCatalog
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
+from app.domains.inventory.models import Batch
+from app.domains.suppliers.models import Supplier
 from app.domains.sync.models import (
     SyncActivationBootstrap,
     SyncActivationFoundation,
@@ -570,6 +573,151 @@ class SyncOutboxRepository:
 class SyncCloudRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def lock_read_snapshot_scope(self, edge_node_id: UUID) -> None:
+        """Serialize publishers without granting runtime access to sync_node."""
+
+        await self.session.execute(
+            text(
+                "SELECT pg_catalog.pg_advisory_xact_lock("
+                "pg_catalog.hashtextextended(:edge_node_id, 0))"
+            ),
+            {"edge_node_id": str(edge_node_id)},
+        )
+
+    async def next_read_snapshot_revision(
+        self, *, tenant_id: UUID, branch_id: UUID, edge_node_id: UUID
+    ) -> int:
+        result = await self.session.execute(
+            select(func.coalesce(func.max(SyncReadSnapshot.source_revision), 0)).where(
+                SyncReadSnapshot.tenant_id == tenant_id,
+                SyncReadSnapshot.branch_id == branch_id,
+                SyncReadSnapshot.node_id == edge_node_id,
+            )
+        )
+        return int(result.scalar_one()) + 1
+
+    async def read_snapshot_foundation_source(
+        self, *, tenant_id: UUID, branch_id: UUID
+    ) -> tuple[Tenant, TenantSettings, Branch, list[Register]] | None:
+        tenant = await self.session.get(Tenant, tenant_id)
+        settings = await self.session.get(TenantSettings, tenant_id)
+        branch_result = await self.session.execute(
+            select(Branch).where(Branch.id == branch_id, Branch.tenant_id == tenant_id)
+        )
+        branch = branch_result.scalar_one_or_none()
+        if tenant is None or settings is None or branch is None:
+            return None
+        registers_result = await self.session.execute(
+            select(Register)
+            .where(Register.tenant_id == tenant_id, Register.branch_id == branch_id)
+            .order_by(Register.id)
+        )
+        return tenant, settings, branch, list(registers_result.scalars().all())
+
+    async def read_snapshot_catalog_source(
+        self, *, tenant_id: UUID
+    ) -> tuple[list[TenantCatalog], dict[UUID, list[Barcode]], list[Supplier]]:
+        catalog_result = await self.session.execute(
+            select(TenantCatalog)
+            .where(TenantCatalog.tenant_id == tenant_id)
+            .order_by(TenantCatalog.id)
+        )
+        barcode_result = await self.session.execute(
+            select(Barcode)
+            .where(Barcode.tenant_id == tenant_id)
+            .order_by(Barcode.catalog_id, Barcode.id)
+        )
+        supplier_result = await self.session.execute(
+            select(Supplier).where(Supplier.tenant_id == tenant_id).order_by(Supplier.id)
+        )
+        barcodes: dict[UUID, list[Barcode]] = {}
+        for barcode in barcode_result.scalars().all():
+            barcodes.setdefault(barcode.catalog_id, []).append(barcode)
+        return (
+            list(catalog_result.scalars().all()),
+            barcodes,
+            list(supplier_result.scalars().all()),
+        )
+
+    async def read_snapshot_inventory_source(
+        self, *, tenant_id: UUID, branch_id: UUID
+    ) -> list[tuple[Batch, str, TenantCatalog]]:
+        result = await self.session.execute(
+            select(Batch, Branch.name, TenantCatalog)
+            .join(
+                Branch,
+                (Branch.id == Batch.branch_id) & (Branch.tenant_id == Batch.tenant_id),
+            )
+            .join(
+                TenantCatalog,
+                (TenantCatalog.id == Batch.catalog_id)
+                & (TenantCatalog.tenant_id == Batch.tenant_id),
+            )
+            .where(Batch.tenant_id == tenant_id, Batch.branch_id == branch_id)
+            .order_by(Batch.id)
+        )
+        return [(row[0], str(row[1]), row[2]) for row in result.all()]
+
+    async def publish_read_snapshot(
+        self, *, envelope: ManifestRead, chunks: list[ChunkRead]
+    ) -> None:
+        """Persist a complete Cloud snapshot; readers never observe the draft."""
+
+        manifest = envelope.manifest
+        scope_values = {
+            "snapshot_id": manifest.snapshot_id,
+            "tenant_id": manifest.tenant_id,
+            "branch_id": manifest.branch_id,
+            "node_id": manifest.edge_node_id,
+            "source_revision": manifest.source_revision,
+        }
+        await self.session.execute(
+            insert(SyncReadSnapshot).values(
+                **scope_values,
+                status="draft",
+                schema_version=manifest.schema_version,
+                credential_kid=manifest.credential_kid,
+                manifest_hash=envelope.manifest_hash,
+                snapshot_hash=manifest.snapshot_hash,
+                signature_algorithm=envelope.signature_algorithm,
+                signature=envelope.signature,
+                source_generated_at=manifest.source_generated_at,
+            )
+        )
+        for component in manifest.components:
+            await self.session.execute(
+                insert(SyncReadSnapshotComponent).values(
+                    **scope_values,
+                    component=component.component,
+                    schema_version=component.schema_version,
+                    item_count=component.item_count,
+                    chunk_count=component.chunk_count,
+                    component_hash=component.component_hash,
+                )
+            )
+        for chunk in chunks:
+            await self.session.execute(
+                insert(SyncReadSnapshotChunk).values(
+                    **scope_values,
+                    component=chunk.component,
+                    chunk_index=chunk.chunk_index,
+                    schema_version=chunk.schema_version,
+                    item_count=chunk.item_count,
+                    payload={"items": list(chunk.payload)},
+                    payload_hash=chunk.payload_hash,
+                )
+            )
+        await self.session.execute(
+            update(SyncReadSnapshot)
+            .where(
+                SyncReadSnapshot.snapshot_id == manifest.snapshot_id,
+                SyncReadSnapshot.tenant_id == manifest.tenant_id,
+                SyncReadSnapshot.branch_id == manifest.branch_id,
+                SyncReadSnapshot.node_id == manifest.edge_node_id,
+            )
+            .values(status="ready")
+        )
 
     async def get_latest_read_snapshot(
         self,
@@ -1509,6 +1657,90 @@ class SyncEdgeRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_active_read_snapshot(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        credential_kid: UUID,
+    ) -> (
+        tuple[
+            SyncReadSnapshot,
+            list[SyncReadSnapshotComponent],
+            list[SyncReadSnapshotChunk],
+            datetime,
+        ]
+        | None
+    ):
+        result = await self.session.execute(
+            select(SyncReadSnapshot, SyncReadSnapshotCursor.activated_at)
+            .join(
+                SyncReadSnapshotCursor,
+                (SyncReadSnapshotCursor.active_snapshot_id == SyncReadSnapshot.snapshot_id)
+                & (SyncReadSnapshotCursor.tenant_id == SyncReadSnapshot.tenant_id)
+                & (SyncReadSnapshotCursor.branch_id == SyncReadSnapshot.branch_id)
+                & (SyncReadSnapshotCursor.node_id == SyncReadSnapshot.node_id),
+            )
+            .where(
+                SyncReadSnapshot.tenant_id == tenant_id,
+                SyncReadSnapshot.branch_id == branch_id,
+                SyncReadSnapshot.credential_kid == credential_kid,
+                SyncReadSnapshot.status == "ready",
+            )
+        )
+        active = result.one_or_none()
+        if active is None:
+            return None
+        snapshot, confirmed_at = active
+        components = await self.session.execute(
+            select(SyncReadSnapshotComponent)
+            .where(
+                SyncReadSnapshotComponent.snapshot_id == snapshot.snapshot_id,
+                SyncReadSnapshotComponent.tenant_id == tenant_id,
+                SyncReadSnapshotComponent.branch_id == branch_id,
+                SyncReadSnapshotComponent.node_id == snapshot.node_id,
+            )
+            .order_by(SyncReadSnapshotComponent.component)
+        )
+        chunks = await self.session.execute(
+            select(SyncReadSnapshotChunk)
+            .where(
+                SyncReadSnapshotChunk.snapshot_id == snapshot.snapshot_id,
+                SyncReadSnapshotChunk.tenant_id == tenant_id,
+                SyncReadSnapshotChunk.branch_id == branch_id,
+                SyncReadSnapshotChunk.node_id == snapshot.node_id,
+            )
+            .order_by(SyncReadSnapshotChunk.component, SyncReadSnapshotChunk.chunk_index)
+        )
+        return (
+            snapshot,
+            list(components.scalars().all()),
+            list(chunks.scalars().all()),
+            confirmed_at,
+        )
+
+    async def confirm_active_read_snapshot(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        snapshot_id: UUID,
+    ) -> None:
+        await self.session.execute(
+            update(SyncReadSnapshotCursor)
+            .where(
+                SyncReadSnapshotCursor.tenant_id == tenant_id,
+                SyncReadSnapshotCursor.branch_id == branch_id,
+                SyncReadSnapshotCursor.node_id == edge_node_id,
+                SyncReadSnapshotCursor.active_snapshot_id == snapshot_id,
+            )
+            .values(
+                activated_at=func.statement_timestamp(),
+                updated_at=func.statement_timestamp(),
+            )
+        )
+
     async def install_read_snapshot(
         self,
         *,
@@ -1575,7 +1807,7 @@ class SyncEdgeRepository:
             node_id=manifest.edge_node_id,
             active_snapshot_id=manifest.snapshot_id,
             version=1,
-            activated_at=manifest.source_generated_at,
+            activated_at=func.statement_timestamp(),
         )
         await self.session.execute(
             cursor_insert.on_conflict_do_update(
@@ -1587,7 +1819,8 @@ class SyncEdgeRepository:
                 set_={
                     "active_snapshot_id": manifest.snapshot_id,
                     "version": SyncReadSnapshotCursor.version + 1,
-                    "activated_at": manifest.source_generated_at,
+                    "activated_at": func.statement_timestamp(),
+                    "updated_at": func.statement_timestamp(),
                 },
             )
         )
