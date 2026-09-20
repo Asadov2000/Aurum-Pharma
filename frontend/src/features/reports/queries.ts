@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
+import { useReportBranchScope } from "./branchScope";
 import {
   getSalesSummary,
   getStockOnDate,
@@ -31,7 +32,9 @@ export function useZReportQuery(shiftId: string | null) {
 }
 
 export function useShiftHistoryQuery(params: ShiftHistoryParams) {
+  const { canView } = useReportBranchScope();
   return useQuery({
+    enabled: canView,
     queryKey: reportsKeys.shifts(params),
     queryFn: () => listShiftHistory(params),
     placeholderData: keepPreviousData,
@@ -39,7 +42,9 @@ export function useShiftHistoryQuery(params: ShiftHistoryParams) {
 }
 
 export function useSalesSummaryQuery(params: SalesSummaryParams) {
+  const { canView } = useReportBranchScope();
   return useQuery({
+    enabled: canView,
     queryKey: reportsKeys.salesSummary(params),
     queryFn: () => getSalesSummary(params),
     placeholderData: keepPreviousData,
@@ -47,7 +52,9 @@ export function useSalesSummaryQuery(params: SalesSummaryParams) {
 }
 
 export function useTopProductsQuery(params: TopProductsParams) {
+  const { canView } = useReportBranchScope();
   return useQuery({
+    enabled: canView,
     queryKey: reportsKeys.topProducts(params),
     queryFn: () => getTopProducts(params),
     placeholderData: keepPreviousData,
@@ -55,7 +62,9 @@ export function useTopProductsQuery(params: TopProductsParams) {
 }
 
 export function useStockOnDateQuery(params: StockOnDateParams) {
+  const { canView } = useReportBranchScope();
   return useQuery({
+    enabled: canView,
     queryKey: reportsKeys.stockOnDate(params),
     queryFn: () => getStockOnDate(params),
     placeholderData: keepPreviousData,

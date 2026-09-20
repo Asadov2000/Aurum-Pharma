@@ -1,8 +1,8 @@
 """Dashboard summary assembly + Redis cache.
 
 The summary is read-heavy and tolerates 60s of staleness, so we cache the
-serialized payload under `tenant:{id}:dashboard`. A cache miss runs ~7
-small aggregate queries and writes the JSON back with a 60s TTL.
+operational payload under `tenant:{id}:dashboard:v2` with a 60s TTL.
+Financial data is read live through the caller-authorized ledger projection.
 """
 
 from __future__ import annotations
@@ -16,6 +16,9 @@ from redis.exceptions import RedisError
 
 from app.core.errors import AurumError
 from app.core.time import local_day_range, utc_now
+from app.domains.billing.repository import BillingRepository
+from app.domains.billing.schemas import TenantBillingFinancialAccountRead
+from app.domains.billing.service import BillingService
 from app.domains.dashboard.repository import DashboardRepository, as_decimal
 from app.domains.dashboard.schemas import (
     ChecklistSection,
@@ -35,7 +38,7 @@ CACHE_TTL_SECONDS = 60
 
 
 def cache_key(tenant_id: UUID) -> str:
-    return f"tenant:{tenant_id}:dashboard"
+    return f"tenant:{tenant_id}:dashboard:v2"
 
 
 class DashboardService:
@@ -71,6 +74,29 @@ class DashboardService:
                 logger.warning("dashboard_cache_write_failed")
         return summary
 
+    async def get_finance(self, *, actor_user_id: UUID, tenant_id: UUID) -> FinanceSection:
+        """Read the protected ledger live; never cache caller-specific finances."""
+        account = TenantBillingFinancialAccountRead.model_validate(
+            await BillingService(
+                BillingRepository(self.repo.session)
+            ).read_tenant_financial_account(actor_user_id=actor_user_id, tenant_id=tenant_id)
+        )
+        open_invoices = [
+            invoice
+            for invoice in account.invoices
+            if invoice.document_state == "issued" and invoice.outstanding_amount > 0
+        ]
+        return FinanceSection(
+            subscription_status=account.subscription.status if account.subscription else None,
+            subscription_period_end=(
+                account.subscription.period_end if account.subscription else None
+            ),
+            open_invoices_count=len(open_invoices),
+            open_invoices_total=account.outstanding_amount,
+            currency=account.currency,
+            has_overdue=any(invoice.collection_state == "overdue" for invoice in open_invoices),
+        )
+
     async def _compute(self, tenant_id: UUID) -> DashboardSummary:
         settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
         timezone_name = settings.report_timezone if settings is not None else "Asia/Dushanbe"
@@ -86,8 +112,6 @@ class DashboardService:
         shifts = await self.repo.active_shifts(tenant_id)
         batches = await self.repo.expiring_batches(tenant_id, boundaries=boundaries)
         licenses = await self.repo.expiring_licenses(tenant_id, today=today)
-        sub = await self.repo.current_subscription(tenant_id)
-        invoices = await self.repo.open_invoices(tenant_id)
         draft_incoming = await self.repo.draft_incoming_count(tenant_id)
         day_start, day_end = local_day_range(today, timezone_name)
         closed = await self.repo.closed_shifts(
@@ -127,14 +151,7 @@ class DashboardService:
                     for lic in licenses
                 ],
             ),
-            finance=FinanceSection(
-                subscription_status=sub["status"] if sub else None,
-                subscription_period_end=sub["period_end"] if sub else None,
-                open_invoices_count=int(invoices["cnt"]),
-                open_invoices_total=as_decimal(invoices["total"]),
-                currency=invoices["currency"],
-                has_overdue=int(invoices["overdue_cnt"]) > 0,
-            ),
+            finance=None,
             checklist=ChecklistSection(
                 draft_incoming_count=draft_incoming,
                 closed_shifts_count=int(closed["cnt"]),

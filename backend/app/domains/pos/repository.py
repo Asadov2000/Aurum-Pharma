@@ -1394,7 +1394,7 @@ class POSRepository:
                 breakdown[m] = Decimal(str(total))
 
         return {
-            "total_sales": Decimal(str(total_sales)),
+            "total_sales": Decimal(str(total_sales)) + Decimal(str(total_discounts)),
             "sales_count": int(sales_count),
             "total_discounts": Decimal(str(total_discounts)),
             "total_refunds": Decimal(str(total_refunds)),
@@ -1702,7 +1702,9 @@ class POSRepository:
                     ELSE s.status
                   END AS status,
                   s.sale_type,
-                  s.total_amount AS gross, s.currency,
+                  s.total_amount + COALESCE(
+                    (SELECT SUM(si.discount_amount) FROM sale_item si WHERE si.sale_id = s.id), 0
+                  ) AS gross, s.currency,
                   b.name AS branch_name,
                   u.full_name AS cashier_name,
                   COALESCE(
@@ -1798,13 +1800,15 @@ class POSRepository:
 
         return {
             "rows": rows,
-            "gross_sales": Decimal(str(t["gross_sales"])),
+            "gross_sales": Decimal(str(t["gross_sales"])) + Decimal(str(total_discounts)),
             "total_refunds": Decimal(str(t["total_refunds"])),
             "total_discounts": Decimal(str(total_discounts)),
             "sales_count": int(t["sales_count"]),
             "returns_count": int(t["returns_count"]),
             "payment_breakdown": breakdown,
-            "daily": daily,
+            "daily": [
+                {**row, "gross_sales": row["gross_sales"] + row["total_discounts"]} for row in daily
+            ],
         }
 
     async def stock_on_date(
@@ -1814,6 +1818,8 @@ class POSRepository:
         on_date: Any,
         branch_id: UUID | None,
         tz: str = "Asia/Dushanbe",
+        query: str | None = None,
+        expires_before: date | None = None,
     ) -> list[dict[str, Any]]:
         """Per-batch stock as of `on_date`, summed from the batch_movement
         ledger (Σ qty_delta for movements dated ≤ on_date). The ledger is the
@@ -1829,6 +1835,15 @@ class POSRepository:
         if branch_id is not None:
             clauses.append("b.branch_id = :branch")
             params["branch"] = str(branch_id)
+        if query:
+            clauses.append(
+                "(tc.brand_name ILIKE :search OR tc.inn ILIKE :search "
+                "OR b.batch_number ILIKE :search)"
+            )
+            params["search"] = f"%{query.strip()}%"
+        if expires_before is not None:
+            clauses.append("b.expires_at <= :expires_before")
+            params["expires_before"] = expires_before
         where = " AND ".join(clauses)
 
         sql = text(f"""
@@ -1917,7 +1932,7 @@ class POSRepository:
             SELECT
               COUNT(*) AS total,
               COALESCE(SUM(qty), 0) AS total_qty,
-              COALESCE(SUM(qty * purchase_price), 0) AS total_value
+              COALESCE(SUM(ROUND(qty * purchase_price, 2)), 0) AS total_value
             FROM balances
             WHERE {filtered_where}
         """)
@@ -1989,8 +2004,8 @@ class POSRepository:
               ), 0) AS quantity,
               COALESCE(SUM(
                 CASE WHEN s.sale_type = 'return'
-                  THEN -(si.total_price - si.discount_amount)
-                  ELSE si.total_price - si.discount_amount
+                  THEN -si.total_price
+                  ELSE si.total_price
                 END
               ), 0) AS revenue,
               COUNT(DISTINCT s.id) FILTER (WHERE s.sale_type = 'sale') AS receipts_count,
@@ -2004,8 +2019,8 @@ class POSRepository:
             HAVING
               SUM(CASE WHEN s.sale_type = 'return' THEN -si.qty ELSE si.qty END) <> 0
               OR SUM(CASE WHEN s.sale_type = 'return'
-                    THEN -(si.total_price - si.discount_amount)
-                    ELSE si.total_price - si.discount_amount END) <> 0
+                    THEN -si.total_price
+                    ELSE si.total_price END) <> 0
             ORDER BY {order_expression} DESC, tc.brand_name ASC, si.catalog_id ASC
             LIMIT :limit
         """)

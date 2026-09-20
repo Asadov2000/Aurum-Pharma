@@ -61,6 +61,6 @@ class ChecklistSection(BaseModel):
 class DashboardSummary(BaseModel):
     today: TodaySection
     expiring: ExpiringSection
-    finance: FinanceSection
+    finance: FinanceSection | None
     checklist: ChecklistSection
     generated_at: datetime

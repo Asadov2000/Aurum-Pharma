@@ -974,10 +974,11 @@ async def stock_on_date_overview(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=10, le=100)] = 25,
 ) -> StockOnDateOverview:
+    tenant_id = _current_tenant_or_400(user)
     effective_branch_id = _effective_report_branch_id(user, branch_id)
     return await service.get_stock_on_date_overview(
-        tenant_id=_current_tenant_or_400(user),
-        on_date=on_date or date.today(),
+        tenant_id=tenant_id,
+        on_date=on_date or await service.report_local_date(tenant_id),
         branch_id=effective_branch_id,
         query=query,
         expires_within_days=expires_within_days,
@@ -1002,17 +1003,21 @@ async def stock_on_date_xlsx(
     audit: Annotated[AuditService, Depends(_audit_service)],
     on_date: Annotated[date | None, Query(alias="date")] = None,
     branch_id: Annotated[UUID | None, Query()] = None,
+    query: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
+    expires_within_days: Annotated[int | None, Query(ge=0, le=3650)] = None,
 ) -> Response:
     """Stock as of a date (default today) as XLSX, reconstructed from the
     batch_movement ledger. Generated on the fly (not cached). Empty stock → a
     valid zero file."""
     tenant_id = _current_tenant_or_400(user)
-    effective_date = on_date or date.today()
+    effective_date = on_date or await service.report_local_date(tenant_id)
     effective_branch_id = _effective_report_branch_id(user, branch_id)
     xlsx = await service.get_stock_on_date_xlsx(
         tenant_id=tenant_id,
         on_date=effective_date,
         branch_id=effective_branch_id,
+        query=query,
+        expires_within_days=expires_within_days,
     )
     await audit.log_export(
         tenant_id=tenant_id,
@@ -1021,6 +1026,8 @@ async def stock_on_date_xlsx(
         metadata={
             "on_date": effective_date.isoformat(),
             "branch_id": str(effective_branch_id) if effective_branch_id is not None else None,
+            "search_applied": query is not None,
+            "expires_within_days": expires_within_days,
             "format": "xlsx",
         },
     )

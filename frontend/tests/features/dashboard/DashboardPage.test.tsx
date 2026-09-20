@@ -98,6 +98,14 @@ describe("DashboardPage", () => {
     vi.clearAllMocks();
   });
 
+  it("does not present unavailable finance as zero debt", async () => {
+    getDashboardSummary.mockResolvedValueOnce({ ...SUMMARY, finance: null });
+    renderPage();
+    expect(await screen.findByText("Финансовая сводка недоступна с текущими правами доступа.")).toBeInTheDocument();
+    expect(screen.queryByText("Просроченных платежей нет")).not.toBeInTheDocument();
+    expect(screen.queryByText("Нет активной подписки")).not.toBeInTheDocument();
+  });
+
   it("renders all four sections with data", async () => {
     getDashboardSummary.mockResolvedValueOnce(SUMMARY);
     renderPage();

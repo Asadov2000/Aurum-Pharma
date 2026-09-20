@@ -5,12 +5,89 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
 
+from openpyxl import load_workbook
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+
+
+async def test_fractional_stock_totals_and_filtered_export_match_screen(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    s = await pos_scaffold(batch_qty=Decimal("0.005"))
+    inventory = InventoryRepository(db_session)
+    today = await _today(db_session)
+    second = await inventory.create_batch(
+        tenant_id=s["tenant"].id,
+        branch_id=s["branch"].id,
+        catalog_id=s["item"].id,
+        batch_number="MATCH-ROUNDING",
+        expires_at=today + timedelta(days=10),
+        purchase_price=Decimal("3.00"),
+        sale_price=Decimal("10.00"),
+        qty_initial=Decimal("0.005"),
+        qty_remaining=Decimal("0"),
+    )
+    await inventory.insert_movement(
+        tenant_id=s["tenant"].id,
+        batch_id=second.id,
+        movement_type="incoming",
+        qty_delta=Decimal("0.005"),
+        source_table=None,
+        source_id=None,
+    )
+    service = POSService(POSRepository(db_session))
+    data = await service.build_stock_on_date(
+        tenant_id=s["tenant"].id, on_date=today, branch_id=None
+    )
+    overview = await service.get_stock_on_date_overview(
+        tenant_id=s["tenant"].id,
+        on_date=today,
+        branch_id=None,
+        query=None,
+        expires_within_days=None,
+        page=1,
+        page_size=50,
+    )
+    assert data.total_value == overview.total_value == Decimal("0.04")
+    assert sum(row.value for row in overview.rows) == overview.total_value
+    s["branch"].is_active = False
+    await db_session.flush()
+    archived = await service.build_stock_on_date(
+        tenant_id=s["tenant"].id, on_date=today, branch_id=None
+    )
+    assert archived.show_branch_column is True
+    assert all(row.branch_name == s["branch"].name for row in archived.rows)
+    for query, expiry, expected_rows in [
+        ("MATCH", 30, 1),
+        ("missing", 30, 0),
+        ("MATCH", 5, 0),
+    ]:
+        overview = await service.get_stock_on_date_overview(
+            tenant_id=s["tenant"].id,
+            on_date=today,
+            branch_id=None,
+            query=query,
+            expires_within_days=expiry,
+            page=1,
+            page_size=50,
+        )
+        content = await service.get_stock_on_date_xlsx(
+            tenant_id=s["tenant"].id,
+            on_date=today,
+            branch_id=None,
+            query=query,
+            expires_within_days=expiry,
+        )
+        sheet = load_workbook(BytesIO(content)).active
+        assert overview.total == expected_rows
+        assert sheet.max_row == 4 + expected_rows
+        assert sheet.cell(sheet.max_row, 8).value == float(overview.total_value)
 
 
 async def _today(db: AsyncSession) -> date:

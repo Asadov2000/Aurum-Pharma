@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useState } from "react";
 
+import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import { Button, Modal, PageHeader, SkeletonRows } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
@@ -9,6 +10,7 @@ import { getZReportXlsx } from "@/features/pos/api";
 import { downloadBlob } from "@/lib/download";
 import { cn } from "@/lib/utils";
 
+import { useReportBranchScope } from "./branchScope";
 import { DEFAULT_REPORT_TIME_ZONE } from "./calendar";
 import { useZReportQuery } from "./queries";
 import { SalesOverviewPanel } from "./SalesOverviewPanel";
@@ -32,16 +34,26 @@ const REPORT_VIEWS: Array<{ value: ReportView; label: string; description: strin
 
 export function ReportsPage(): JSX.Element {
   const { user } = useAuth();
+  const { scopeKey, canView } = useReportBranchScope();
   const canExport = hasPermission(user, "reports.export");
   const [selectedShift, setSelectedShift] = useState<ShiftHistoryItem | null>(null);
   const [view, setView] = useState<ReportView>(readInitialReportView);
-  const settings = useTenantOperationalSettingsQuery();
+  const settings = useTenantOperationalSettingsQuery(canView);
   const reportTimezone = settings.data?.report_timezone ?? DEFAULT_REPORT_TIME_ZONE;
 
   const changeView = (next: ReportView) => {
     setView(next);
     writeReportView(next);
   };
+
+  if (!canView)
+    return (
+      <AccessDeniedCard
+        title="Отчёты"
+        message="Нет доступа к отчётам аптечных точек."
+        fallbackTo={null}
+      />
+    );
 
   return (
     <div className="space-y-4">
@@ -81,25 +93,25 @@ export function ReportsPage(): JSX.Element {
           <div id={`report-panel-${view}`} role="tabpanel" aria-labelledby={`report-tab-${view}`}>
             {view === "sales" ? (
               <SalesOverviewPanel
-                key={`sales-overview-${reportTimezone}`}
+                key={`sales-overview-${reportTimezone}-${scopeKey}`}
                 reportTimezone={reportTimezone}
                 canExport={canExport}
               />
             ) : view === "products" ? (
               <TopProductsPanel
-                key={`top-products-${reportTimezone}`}
+                key={`top-products-${reportTimezone}-${scopeKey}`}
                 reportTimezone={reportTimezone}
               />
             ) : view === "shifts" ? (
               <ShiftHistoryPanel
-                key={`shift-history-${reportTimezone}`}
+                key={`shift-history-${reportTimezone}-${scopeKey}`}
                 selectedShift={selectedShift}
                 onSelect={setSelectedShift}
                 reportTimezone={reportTimezone}
               />
             ) : (
               <StockOnDatePanel
-                key={`stock-date-${reportTimezone}`}
+                key={`stock-date-${reportTimezone}-${scopeKey}`}
                 reportTimezone={reportTimezone}
                 canExport={canExport}
               />

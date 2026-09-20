@@ -1,3 +1,4 @@
+import { hashKey } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -20,9 +21,9 @@ import {
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/features/foundation/errors";
-import { useBranchesQuery } from "@/features/foundation/queries";
 import { downloadBlob } from "@/lib/download";
 
+import { useReportBranches } from "./branchScope";
 import { getStockOnDateXlsx } from "./api";
 import { calendarDateInTimeZone, DEFAULT_REPORT_TIME_ZONE } from "./calendar";
 import { useStockOnDateQuery } from "./queries";
@@ -45,22 +46,23 @@ export function StockOnDatePanel({
   reportTimezone?: string;
   canExport?: boolean;
 }): JSX.Element {
+  const branches = useReportBranches();
+  const { defaultBranchId } = branches;
   const filterPreferenceKey = useFilterPreferenceKey("reports-stock-on-date");
   const defaults = useMemo<FilterValues>(
     () => ({
       date: calendarDateInTimeZone(new Date(), reportTimezone),
-      branch_id: "",
+      branch_id: defaultBranchId,
       query: "",
       expires_within_days: "",
     }),
-    [reportTimezone],
+    [reportTimezone, defaultBranchId],
   );
   const form = useForm<FilterValues>({ defaultValues: defaults });
   const watched = form.watch();
   const [params, setParams] = useState<StockOnDateParams>(() => toParams(defaults, 1));
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const branches = useBranchesQuery(false);
   const query = useStockOnDateQuery(params);
   const watchedParams = toParams(watched, params.page);
   const pendingChanges =
@@ -79,17 +81,21 @@ export function StockOnDatePanel({
       return;
     }
     form.clearErrors();
-    setParams(toParams(parsed.data, 1));
+    const next = toParams(parsed.data, 1);
+    if (hashKey([next]) === hashKey([params])) void query.refetch();
+    setParams(next);
   });
 
   const download = async () => {
-    const parsed = filterSchema.safeParse(form.getValues());
-    if (!parsed.success) return;
+    if (pendingChanges || query.isPlaceholderData) return;
     setDownloadError(null);
     setDownloading(true);
     try {
-      const blob = await getStockOnDateXlsx(parsed.data.date, parsed.data.branch_id || undefined);
-      downloadBlob(blob, `stock-${parsed.data.date}.xlsx`);
+      const blob = await getStockOnDateXlsx(params.date, params.branch_id, {
+        query: params.query,
+        expires_within_days: params.expires_within_days,
+      });
+      downloadBlob(blob, `stock-${params.date}.xlsx`);
     } catch (error) {
       setDownloadError(describeApiError(error, "Не удалось скачать полный отчёт"));
     } finally {
@@ -109,7 +115,12 @@ export function StockOnDatePanel({
           </p>
         </div>
         {canExport && (
-          <Button variant="secondary" isLoading={downloading} onClick={() => void download()}>
+          <Button
+            variant="secondary"
+            disabled={pendingChanges || query.isPlaceholderData}
+            isLoading={downloading}
+            onClick={() => void download()}
+          >
             Скачать в Excel
           </Button>
         )}
@@ -172,14 +183,18 @@ export function StockOnDatePanel({
               activeLabel: branches.data?.find((branch) => branch.id === watched.branch_id)?.name,
               active: Boolean(watched.branch_id),
               onClear: () => {
-                form.setValue("branch_id", "");
-                setParams((current) => ({ ...current, branch_id: undefined, page: 1 }));
+                form.setValue("branch_id", defaultBranchId);
+                setParams((current) => ({
+                  ...current,
+                  branch_id: defaultBranchId || undefined,
+                  page: 1,
+                }));
               },
               content: (
                 <div>
                   <Label htmlFor="stock_branch">Аптечная точка</Label>
                   <Select id="stock_branch" {...form.register("branch_id")}>
-                    <option value="">Все доступные точки</option>
+                    {branches.scope === null && <option value="">Все доступные точки</option>}
                     {branches.data?.map((branch) => (
                       <option key={branch.id} value={branch.id}>
                         {branch.name}
@@ -249,7 +264,7 @@ export function StockOnDatePanel({
         </div>
       )}
 
-      {query.isLoading ? (
+      {query.isLoading || query.isPlaceholderData ? (
         <SkeletonRows rows={8} />
       ) : query.isError ? (
         <div

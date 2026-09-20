@@ -46,8 +46,7 @@ async def test_summary_empty_tenant_zeroed(db_session: AsyncSession) -> None:
     assert summary.today.cashiers_on_shift == 0
     assert summary.expiring.batches == []
     assert summary.expiring.licenses == []
-    assert summary.finance.open_invoices_count == 0
-    assert summary.finance.has_overdue is False
+    assert summary.finance is None
     assert summary.checklist.draft_incoming_count == 0
     assert summary.checklist.latest_closed_shift_id is None
 

@@ -1,3 +1,4 @@
+import { hashKey } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -20,10 +21,11 @@ import {
   TR,
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
-import { useBranchesQuery, useRegistersQuery } from "@/features/foundation/queries";
+import { useRegistersQuery } from "@/features/foundation/queries";
 import { describeApiError } from "@/lib/errorMessages";
 import { cn } from "@/lib/utils";
 
+import { useReportBranches } from "./branchScope";
 import { recentReportRange } from "./calendar";
 import { useShiftHistoryQuery } from "./queries";
 import { type ShiftHistoryItem, type ShiftHistoryParams } from "./types";
@@ -68,12 +70,12 @@ interface ShiftHistoryPanelProps {
   reportTimezone: string;
 }
 
-function defaultFilters(reportTimezone: string): FilterValues {
+function defaultFilters(reportTimezone: string, branchId = ""): FilterValues {
   const range = recentReportRange(reportTimezone);
   return {
     date_from: range.dateFrom,
     date_to: range.dateTo,
-    branch_id: "",
+    branch_id: branchId,
     register_id: "",
     cashier_query: "",
   };
@@ -97,8 +99,13 @@ export function ShiftHistoryPanel({
   onSelect,
   reportTimezone,
 }: ShiftHistoryPanelProps): JSX.Element {
+  const branches = useReportBranches();
+  const { defaultBranchId } = branches;
   const filterPreferenceKey = useFilterPreferenceKey("reports-shift-history");
-  const defaults = useMemo(() => defaultFilters(reportTimezone), [reportTimezone]);
+  const defaults = useMemo(
+    () => defaultFilters(reportTimezone, defaultBranchId),
+    [reportTimezone, defaultBranchId],
+  );
   const form = useForm<FilterValues>({ defaultValues: defaults });
   const [filters, setFilters] = useState<FilterValues>(defaults);
   const [page, setPage] = useState(1);
@@ -110,7 +117,6 @@ export function ShiftHistoryPanel({
     watchedFilters.register_id !== filters.register_id ||
     watchedFilters.cashier_query.trim() !== filters.cashier_query;
   const branchId = form.watch("branch_id");
-  const branches = useBranchesQuery(false);
   const branchFilterName = branches.data?.find(
     (branch) => branch.id === watchedFilters.branch_id,
   )?.name;
@@ -142,13 +148,17 @@ export function ShiftHistoryPanel({
       });
       return;
     }
+    form.clearErrors();
+    if (hashKey([toParams(parsed.data, 1)]) === hashKey([toParams(filters, page)])) {
+      void history.refetch();
+    }
     setFilters(parsed.data);
     setPage(1);
     onSelect(null);
   });
 
   const resetFilters = () => {
-    const next = defaultFilters(reportTimezone);
+    const next = defaultFilters(reportTimezone, defaultBranchId);
     form.reset(next);
     setFilters(next);
     setPage(1);
@@ -234,7 +244,7 @@ export function ShiftHistoryPanel({
                       onChange: () => form.setValue("register_id", ""),
                     })}
                   >
-                    <option value="">Все доступные</option>
+                    {branches.scope === null && <option value="">Все доступные</option>}
                     {branches.data?.map((branch) => (
                       <option key={branch.id} value={branch.id}>
                         {branch.name}
@@ -246,11 +256,11 @@ export function ShiftHistoryPanel({
               active: Boolean(watchedFilters.branch_id),
               activeLabel: branchFilterName ? `Аптечная точка: ${branchFilterName}` : undefined,
               onClear: () => {
-                form.setValue("branch_id", "");
+                form.setValue("branch_id", defaultBranchId);
                 form.setValue("register_id", "");
                 setFilters((current) => ({
                   ...current,
-                  branch_id: "",
+                  branch_id: defaultBranchId,
                   register_id: "",
                 }));
                 setPage(1);

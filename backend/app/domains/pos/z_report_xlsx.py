@@ -125,7 +125,7 @@ def _money_or_none(value: Decimal | None) -> object:
 def get_or_render_z_report_xlsx(data: ZReportData) -> bytes:
     """Return the cached workbook for a closed shift, rendering and storing it on
     first request. Blocking — call from a worker thread."""
-    key = f"zreports/{data.shift_id}.xlsx"
+    key = f"zreports/v2/{data.report_timezone}/{data.shift_id}.xlsx"
     try:
         bucket = ensure_bucket()
         return get_object(f"{bucket}/{key}")

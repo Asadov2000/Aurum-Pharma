@@ -551,9 +551,18 @@ function FinancePanel({
   data,
   canOpenBilling,
 }: {
-  data: FinanceSection;
+  data: FinanceSection | null;
   canOpenBilling: boolean;
 }): JSX.Element {
+  if (data === null) {
+    return (
+      <Panel title="Финансы">
+        <p className="px-4 py-6 text-sm text-foreground-muted">
+          Финансовая сводка недоступна с текущими правами доступа.
+        </p>
+      </Panel>
+    );
+  }
   return (
     <Panel
       title="Финансы"

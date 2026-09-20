@@ -948,6 +948,7 @@ class ZReportData(BaseModel):
     """Fully-resolved shift summary for the XLSX export."""
 
     shift_id: UUID
+    report_timezone: str = "Asia/Dushanbe"
     status: str
     # header
     pharmacy_name: str

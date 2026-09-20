@@ -137,46 +137,6 @@ class DashboardRepository:
         )
         return [dict(r) for r in rows]
 
-    async def current_subscription(self, tenant_id: UUID) -> dict[str, Any] | None:
-        row = (
-            (
-                await self.session.execute(
-                    text(
-                        "SELECT status, period_end FROM tenant_subscription "
-                        "WHERE tenant_id = :tid AND status <> 'archived' "
-                        "ORDER BY created_at DESC LIMIT 1"
-                    ),
-                    {"tid": str(tenant_id)},
-                )
-            )
-            .mappings()
-            .first()
-        )
-        return dict(row) if row is not None else None
-
-    async def open_invoices(self, tenant_id: UUID) -> dict[str, Any]:
-        row = (
-            (
-                await self.session.execute(
-                    text(
-                        "SELECT COUNT(*) AS cnt, "
-                        "COALESCE(SUM(amount - discount_amount), 0) AS total, "
-                        "COALESCE(MAX(currency), 'TJS') AS currency, "
-                        "COUNT(*) FILTER ("
-                        "  WHERE status = 'overdue' "
-                        "  OR (status = 'pending' AND due_at < now())"
-                        ") AS overdue_cnt "
-                        "FROM invoice "
-                        "WHERE tenant_id = :tid AND status IN ('pending', 'overdue')"
-                    ),
-                    {"tid": str(tenant_id)},
-                )
-            )
-            .mappings()
-            .one()
-        )
-        return dict(row)
-
     async def draft_incoming_count(self, tenant_id: UUID) -> int:
         return int(
             (
