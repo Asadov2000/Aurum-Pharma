@@ -7,7 +7,7 @@ import asyncio
 import random
 import time
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import structlog
@@ -24,6 +24,22 @@ from app.domains.sync.bootstrap import (
     chunk_as_pull,
     verify_chunk,
     verify_manifest,
+)
+from app.domains.sync.read_snapshot import (
+    ChunkRead as ReadSnapshotChunkRead,
+)
+from app.domains.sync.read_snapshot import (
+    ManifestRead as ReadSnapshotManifestRead,
+)
+from app.domains.sync.read_snapshot import (
+    ReadSnapshotComponent,
+    ReadSnapshotValidationError,
+)
+from app.domains.sync.read_snapshot import (
+    verify_chunk as verify_read_snapshot_chunk,
+)
+from app.domains.sync.read_snapshot import (
+    verify_manifest as verify_read_snapshot_manifest,
 )
 from app.domains.sync.repository import SyncEdgeRepository
 from app.domains.sync.schemas import (
@@ -70,6 +86,22 @@ async def _set_edge_scope(session: AsyncSession, pull: SyncPullResponse) -> None
         ("app.tenant_id", pull.tenant_id),
         ("app.branch_id", pull.branch_id),
         ("app.edge_node_id", pull.edge_node_id),
+    ):
+        await session.execute(
+            text("SELECT set_config(:name, :value, true)"),
+            {"name": name, "value": str(value)},
+        )
+
+
+async def _set_read_snapshot_scope(
+    session: AsyncSession,
+    manifest: ReadSnapshotManifestRead,
+) -> None:
+    scope = manifest.manifest
+    for name, value in (
+        ("app.tenant_id", scope.tenant_id),
+        ("app.branch_id", scope.branch_id),
+        ("app.edge_node_id", scope.edge_node_id),
     ):
         await session.execute(
             text("SELECT set_config(:name, :value, true)"),
@@ -135,6 +167,100 @@ async def _bootstrap_chunk(
     )
     response.raise_for_status()
     return SyncBootstrapChunkRead.model_validate(cast(object, response.json()))
+
+
+async def _read_snapshot_manifest(
+    client: httpx.AsyncClient,
+    *,
+    credential: str,
+) -> ReadSnapshotManifestRead | None:
+    response = await client.get(
+        "/api/v1/sync/read-snapshot/manifest",
+        headers=_request_headers(credential),
+    )
+    if response.status_code == httpx.codes.NOT_FOUND:
+        return None
+    response.raise_for_status()
+    return ReadSnapshotManifestRead.model_validate(cast(object, response.json()))
+
+
+async def _read_snapshot_chunk(
+    client: httpx.AsyncClient,
+    *,
+    credential: str,
+    snapshot_id: str,
+    component: ReadSnapshotComponent,
+    chunk_index: int,
+) -> ReadSnapshotChunkRead:
+    response = await client.get(
+        f"/api/v1/sync/read-snapshot/{snapshot_id}/{component}/chunks/{chunk_index}",
+        headers=_request_headers(credential),
+    )
+    response.raise_for_status()
+    return ReadSnapshotChunkRead.model_validate(cast(object, response.json()))
+
+
+async def _install_read_snapshot(
+    envelope: ReadSnapshotManifestRead,
+    chunks: list[ReadSnapshotChunkRead],
+) -> None:
+    async with AppSessionLocal() as session:
+        async with session.begin():
+            await _set_read_snapshot_scope(session, envelope)
+            repo = SyncEdgeRepository(session)
+            active_snapshot_id = await repo.get_active_read_snapshot_id(
+                tenant_id=envelope.manifest.tenant_id,
+                branch_id=envelope.manifest.branch_id,
+                edge_node_id=envelope.manifest.edge_node_id,
+            )
+            if active_snapshot_id == envelope.manifest.snapshot_id:
+                return
+            await repo.install_read_snapshot(
+                envelope=envelope,
+                chunks=chunks,
+            )
+
+
+async def _active_read_snapshot_id(
+    envelope: ReadSnapshotManifestRead,
+) -> UUID | None:
+    async with AppSessionLocal() as session:
+        async with session.begin():
+            await _set_read_snapshot_scope(session, envelope)
+            return await SyncEdgeRepository(session).get_active_read_snapshot_id(
+                tenant_id=envelope.manifest.tenant_id,
+                branch_id=envelope.manifest.branch_id,
+                edge_node_id=envelope.manifest.edge_node_id,
+            )
+
+
+async def _sync_read_snapshot(
+    client: httpx.AsyncClient,
+    *,
+    credential: str,
+) -> None:
+    envelope = await _read_snapshot_manifest(client, credential=credential)
+    if envelope is None:
+        return
+    manifest = verify_read_snapshot_manifest(envelope, credential=credential)
+    if await _active_read_snapshot_id(envelope) == manifest.snapshot_id:
+        return
+    chunks: list[ReadSnapshotChunkRead] = []
+    for component in manifest.components:
+        for descriptor in component.chunks:
+            chunk = await _read_snapshot_chunk(
+                client,
+                credential=credential,
+                snapshot_id=str(manifest.snapshot_id),
+                component=component.component,
+                chunk_index=descriptor.chunk_index,
+            )
+            verify_read_snapshot_chunk(manifest, chunk)
+            chunks.append(chunk)
+    expected_chunk_count = sum(component.chunk_count for component in manifest.components)
+    if len(chunks) != expected_chunk_count:
+        raise ReadSnapshotValidationError("Read snapshot download is incomplete")
+    await _install_read_snapshot(envelope=envelope, chunks=chunks)
 
 
 async def _local_cursor(pull: SyncPullResponse) -> tuple[str, int, bool] | None:
@@ -319,6 +445,8 @@ async def run_cycle(client: httpx.AsyncClient, settings: Settings, credential: s
             branch_id=str(final_pull.branch_id),
             sequence=report.last_sequence,
         )
+        return
+    await _sync_read_snapshot(client, credential=credential)
 
 
 async def run(*, once: bool) -> None:

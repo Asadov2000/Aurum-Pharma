@@ -6,7 +6,19 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, Numeric, Text, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -453,6 +465,257 @@ class SyncActivationBootstrapChunk(Base):
     created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadSnapshot(Base):
+    """A content-addressed Cloud read model installed on one Edge node."""
+
+    __tablename__ = "sync_read_snapshot"
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'ready')", name="ck_sync_read_snapshot_status"),
+        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_schema_version"),
+        CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_source_revision"),
+        CheckConstraint(
+            "manifest_hash ~ '^[0-9a-f]{64}$'", name="ck_sync_read_snapshot_manifest_hash"
+        ),
+        CheckConstraint("snapshot_hash ~ '^[0-9a-f]{64}$'", name="ck_sync_read_snapshot_hash"),
+        CheckConstraint(
+            "signature_algorithm = 'hmac-sha256-edge-read-snapshot-v1'",
+            name="ck_sync_read_snapshot_signature_algorithm",
+        ),
+        CheckConstraint("signature ~ '^[0-9a-f]{64}$'", name="ck_sync_read_snapshot_signature"),
+        UniqueConstraint(
+            "snapshot_id",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            name="uq_sync_read_snapshot_scope",
+        ),
+        UniqueConstraint(
+            "snapshot_id",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            "source_revision",
+            name="uq_sync_read_snapshot_revision_scope",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            "source_revision",
+            name="uq_sync_read_snapshot_source_revision",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "branch_id"],
+            ["branch.tenant_id", "branch.id"],
+            name="fk_sync_read_snapshot_branch_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["node_id", "tenant_id", "branch_id"],
+            ["sync_node.id", "sync_node.tenant_id", "sync_node.branch_id"],
+            name="fk_sync_read_snapshot_node_scope",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_sync_read_snapshot_scope_created",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            text("created_at DESC"),
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    credential_kid: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    manifest_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    signature_algorithm: Mapped[str] = mapped_column(Text, nullable=False)
+    signature: Mapped[str] = mapped_column(Text, nullable=False)
+    source_generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadSnapshotComponent(Base):
+    """Immutable manifest entry within a read snapshot."""
+
+    __tablename__ = "sync_read_snapshot_component"
+    __table_args__ = (
+        CheckConstraint(
+            "component IN ('foundation', 'catalog', 'inventory')",
+            name="ck_sync_read_snapshot_component_name",
+        ),
+        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_component_schema"),
+        CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_component_revision"),
+        CheckConstraint("item_count >= 0", name="ck_sync_read_snapshot_component_items"),
+        CheckConstraint("chunk_count > 0", name="ck_sync_read_snapshot_component_chunks"),
+        CheckConstraint(
+            "component_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_sync_read_snapshot_component_hash",
+        ),
+        UniqueConstraint(
+            "snapshot_id",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            "source_revision",
+            "component",
+            "schema_version",
+            name="uq_sync_read_snapshot_component_scope",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "tenant_id", "branch_id", "node_id", "source_revision"],
+            [
+                "sync_read_snapshot.snapshot_id",
+                "sync_read_snapshot.tenant_id",
+                "sync_read_snapshot.branch_id",
+                "sync_read_snapshot.node_id",
+                "sync_read_snapshot.source_revision",
+            ],
+            name="fk_sync_read_snapshot_component_snapshot",
+            ondelete="RESTRICT",
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    component: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    source_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    component_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadSnapshotChunk(Base):
+    """Immutable chunk payload within a read snapshot component."""
+
+    __tablename__ = "sync_read_snapshot_chunk"
+    __table_args__ = (
+        CheckConstraint("chunk_index >= 0", name="ck_sync_read_snapshot_chunk_index"),
+        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_chunk_schema"),
+        CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_chunk_revision"),
+        CheckConstraint("item_count >= 0", name="ck_sync_read_snapshot_chunk_items"),
+        CheckConstraint(
+            "jsonb_typeof(payload) = 'object' "
+            "AND jsonb_typeof(payload -> 'items') = 'array' "
+            "AND jsonb_array_length(payload -> 'items') = item_count",
+            name="ck_sync_read_snapshot_chunk_payload",
+        ),
+        CheckConstraint("payload_hash ~ '^[0-9a-f]{64}$'", name="ck_sync_read_snapshot_chunk_hash"),
+        ForeignKeyConstraint(
+            [
+                "snapshot_id",
+                "tenant_id",
+                "branch_id",
+                "node_id",
+                "source_revision",
+                "component",
+                "schema_version",
+            ],
+            [
+                "sync_read_snapshot_component.snapshot_id",
+                "sync_read_snapshot_component.tenant_id",
+                "sync_read_snapshot_component.branch_id",
+                "sync_read_snapshot_component.node_id",
+                "sync_read_snapshot_component.source_revision",
+                "sync_read_snapshot_component.component",
+                "sync_read_snapshot_component.schema_version",
+            ],
+            name="fk_sync_read_snapshot_chunk_component",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_sync_read_snapshot_chunk_scope",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            "snapshot_id",
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    component: Mapped[str] = mapped_column(Text, primary_key=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    source_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadSnapshotCursor(Base):
+    """Mutable pointer to the active complete snapshot for an Edge node."""
+
+    __tablename__ = "sync_read_snapshot_cursor"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_sync_read_snapshot_cursor_version"),
+        ForeignKeyConstraint(
+            ["active_snapshot_id", "tenant_id", "branch_id", "node_id"],
+            [
+                "sync_read_snapshot.snapshot_id",
+                "sync_read_snapshot.tenant_id",
+                "sync_read_snapshot.branch_id",
+                "sync_read_snapshot.node_id",
+            ],
+            name="fk_sync_read_snapshot_cursor_active",
+            ondelete="RESTRICT",
+        ),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    active_snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
+    activated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
     )
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 

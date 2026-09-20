@@ -22,6 +22,10 @@ from app.domains.sync.models import (
     SyncNode,
     SyncOutboxEvent,
     SyncQuarantineIncident,
+    SyncReadSnapshot,
+    SyncReadSnapshotChunk,
+    SyncReadSnapshotComponent,
+    SyncReadSnapshotCursor,
     SyncSaleProjection,
     SyncShadowReport,
     SyncStream,
@@ -29,6 +33,7 @@ from app.domains.sync.models import (
     SyncWriterEpoch,
     SyncWriterReadiness,
 )
+from app.domains.sync.read_snapshot import ChunkRead, ManifestRead
 from app.domains.sync.schemas import SyncEventEnvelope, SyncQuarantineIncidentRequest
 
 
@@ -565,6 +570,86 @@ class SyncOutboxRepository:
 class SyncCloudRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_latest_read_snapshot(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        credential_kid: UUID,
+    ) -> tuple[SyncReadSnapshot, list[SyncReadSnapshotComponent]] | None:
+        result = await self.session.execute(
+            select(SyncReadSnapshot)
+            .where(
+                SyncReadSnapshot.tenant_id == tenant_id,
+                SyncReadSnapshot.branch_id == branch_id,
+                SyncReadSnapshot.node_id == edge_node_id,
+                SyncReadSnapshot.credential_kid == credential_kid,
+                SyncReadSnapshot.status == "ready",
+            )
+            .order_by(SyncReadSnapshot.source_revision.desc())
+            .limit(1)
+        )
+        snapshot = result.scalar_one_or_none()
+        if snapshot is None:
+            return None
+        component_result = await self.session.execute(
+            select(SyncReadSnapshotComponent)
+            .where(
+                SyncReadSnapshotComponent.snapshot_id == snapshot.snapshot_id,
+                SyncReadSnapshotComponent.tenant_id == tenant_id,
+                SyncReadSnapshotComponent.branch_id == branch_id,
+                SyncReadSnapshotComponent.node_id == edge_node_id,
+            )
+            .order_by(SyncReadSnapshotComponent.component)
+        )
+        return snapshot, list(component_result.scalars().all())
+
+    async def list_read_snapshot_chunks(
+        self,
+        *,
+        snapshot_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+    ) -> list[SyncReadSnapshotChunk]:
+        result = await self.session.execute(
+            select(SyncReadSnapshotChunk)
+            .where(
+                SyncReadSnapshotChunk.snapshot_id == snapshot_id,
+                SyncReadSnapshotChunk.tenant_id == tenant_id,
+                SyncReadSnapshotChunk.branch_id == branch_id,
+                SyncReadSnapshotChunk.node_id == edge_node_id,
+            )
+            .order_by(
+                SyncReadSnapshotChunk.component,
+                SyncReadSnapshotChunk.chunk_index,
+            )
+        )
+        return list(result.scalars().all())
+
+    async def get_read_snapshot_chunk(
+        self,
+        *,
+        snapshot_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        component: str,
+        chunk_index: int,
+    ) -> SyncReadSnapshotChunk | None:
+        result = await self.session.execute(
+            select(SyncReadSnapshotChunk).where(
+                SyncReadSnapshotChunk.snapshot_id == snapshot_id,
+                SyncReadSnapshotChunk.tenant_id == tenant_id,
+                SyncReadSnapshotChunk.branch_id == branch_id,
+                SyncReadSnapshotChunk.node_id == edge_node_id,
+                SyncReadSnapshotChunk.component == component,
+                SyncReadSnapshotChunk.chunk_index == chunk_index,
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def record_quarantine_incident(
         self,
@@ -1407,6 +1492,105 @@ class SyncCloudRepository:
 class SyncEdgeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_active_read_snapshot_id(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+    ) -> UUID | None:
+        result = await self.session.execute(
+            select(SyncReadSnapshotCursor.active_snapshot_id).where(
+                SyncReadSnapshotCursor.tenant_id == tenant_id,
+                SyncReadSnapshotCursor.branch_id == branch_id,
+                SyncReadSnapshotCursor.node_id == edge_node_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def install_read_snapshot(
+        self,
+        *,
+        envelope: ManifestRead,
+        chunks: list[ChunkRead],
+    ) -> None:
+        manifest = envelope.manifest
+        scope_values = {
+            "snapshot_id": manifest.snapshot_id,
+            "tenant_id": manifest.tenant_id,
+            "branch_id": manifest.branch_id,
+            "node_id": manifest.edge_node_id,
+            "source_revision": manifest.source_revision,
+        }
+        await self.session.execute(
+            insert(SyncReadSnapshot).values(
+                **scope_values,
+                status="draft",
+                schema_version=manifest.schema_version,
+                credential_kid=manifest.credential_kid,
+                manifest_hash=envelope.manifest_hash,
+                snapshot_hash=manifest.snapshot_hash,
+                signature_algorithm=envelope.signature_algorithm,
+                signature=envelope.signature,
+                source_generated_at=manifest.source_generated_at,
+            )
+        )
+        for component in manifest.components:
+            await self.session.execute(
+                insert(SyncReadSnapshotComponent).values(
+                    **scope_values,
+                    component=component.component,
+                    schema_version=component.schema_version,
+                    item_count=component.item_count,
+                    chunk_count=component.chunk_count,
+                    component_hash=component.component_hash,
+                )
+            )
+        for chunk in chunks:
+            await self.session.execute(
+                insert(SyncReadSnapshotChunk).values(
+                    **scope_values,
+                    component=chunk.component,
+                    chunk_index=chunk.chunk_index,
+                    schema_version=chunk.schema_version,
+                    item_count=chunk.item_count,
+                    payload={"items": list(chunk.payload)},
+                    payload_hash=chunk.payload_hash,
+                )
+            )
+        await self.session.execute(
+            update(SyncReadSnapshot)
+            .where(
+                SyncReadSnapshot.snapshot_id == manifest.snapshot_id,
+                SyncReadSnapshot.tenant_id == manifest.tenant_id,
+                SyncReadSnapshot.branch_id == manifest.branch_id,
+                SyncReadSnapshot.node_id == manifest.edge_node_id,
+            )
+            .values(status="ready")
+        )
+        cursor_insert = pg_insert(SyncReadSnapshotCursor).values(
+            tenant_id=manifest.tenant_id,
+            branch_id=manifest.branch_id,
+            node_id=manifest.edge_node_id,
+            active_snapshot_id=manifest.snapshot_id,
+            version=1,
+            activated_at=manifest.source_generated_at,
+        )
+        await self.session.execute(
+            cursor_insert.on_conflict_do_update(
+                index_elements=[
+                    SyncReadSnapshotCursor.tenant_id,
+                    SyncReadSnapshotCursor.branch_id,
+                    SyncReadSnapshotCursor.node_id,
+                ],
+                set_={
+                    "active_snapshot_id": manifest.snapshot_id,
+                    "version": SyncReadSnapshotCursor.version + 1,
+                    "activated_at": manifest.source_generated_at,
+                },
+            )
+        )
 
     async def record_quarantine_incident(
         self,

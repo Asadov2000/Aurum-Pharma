@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -10,6 +10,12 @@ import pytest
 from app.core.config import get_settings
 from app.core.time import utc_now
 from app.domains.sync import worker
+from app.domains.sync.credentials import EdgeCredential
+from app.domains.sync.read_snapshot import (
+    ReadSnapshotScope,
+    ReadSnapshotValidationError,
+    build_manifest,
+)
 from app.domains.sync.schemas import (
     EdgeApplyResult,
     SyncPullResponse,
@@ -88,3 +94,140 @@ async def test_halted_cycle_reports_incident_and_never_reports_healthy_checkpoin
         await worker.run_cycle(client, get_settings(), "development-credential")
 
     assert calls == {"incident": 1, "checkpoint": 0}
+
+
+async def test_read_snapshot_downloads_every_verified_chunk_before_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential = EdgeCredential(
+        kid=UUID("10000000-0000-0000-0000-000000000001"),
+        secret="1" * 64,
+    )
+    envelope, chunks = build_manifest(
+        ReadSnapshotScope(
+            edge_node_id=UUID("10000000-0000-0000-0000-000000000002"),
+            tenant_id=UUID("10000000-0000-0000-0000-000000000003"),
+            branch_id=UUID("10000000-0000-0000-0000-000000000004"),
+            source_revision=1,
+        ),
+        {
+            "foundation": [[{"currency": "TJS"}]],
+            "catalog": [[{"id": "product-1"}]],
+            "inventory": [],
+        },
+        credential_kid=credential.kid,
+        credential_digest=credential.digest,
+        source_generated_at=utc_now(),
+    )
+    chunk_by_path = {
+        (
+            f"/api/v1/sync/read-snapshot/{chunk.snapshot_id}/"
+            f"{chunk.component}/chunks/{chunk.chunk_index}"
+        ): chunk
+        for chunk in chunks
+    }
+    installed: list[dict[str, object]] = []
+
+    async def no_active_snapshot(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def capture_install(*args: object, **kwargs: object) -> None:
+        installed.append(dict(kwargs))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/sync/read-snapshot/manifest":
+            return httpx.Response(200, json=envelope.model_dump(mode="json"))
+        chunk = chunk_by_path[request.url.path]
+        return httpx.Response(200, json=chunk.model_dump(mode="json"))
+
+    monkeypatch.setattr(worker, "_active_read_snapshot_id", no_active_snapshot)
+    monkeypatch.setattr(worker, "_install_read_snapshot", capture_install)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://cloud.example",
+    ) as client:
+        await worker._sync_read_snapshot(client, credential=credential.token)
+
+    assert len(installed) == 1
+    assert installed[0]["envelope"] == envelope
+    assert installed[0]["chunks"] == chunks
+
+
+async def test_read_snapshot_missing_on_cloud_is_a_noop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_called = False
+
+    async def capture_install(*args: object, **kwargs: object) -> None:
+        nonlocal install_called
+        install_called = True
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    monkeypatch.setattr(worker, "_install_read_snapshot", capture_install)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://cloud.example",
+    ) as client:
+        await worker._sync_read_snapshot(client, credential="unused")
+
+    assert not install_called
+
+
+async def test_read_snapshot_rejects_tampered_chunk_before_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential = EdgeCredential(
+        kid=UUID("20000000-0000-0000-0000-000000000001"),
+        secret="2" * 64,
+    )
+    envelope, chunks = build_manifest(
+        ReadSnapshotScope(
+            edge_node_id=UUID("20000000-0000-0000-0000-000000000002"),
+            tenant_id=UUID("20000000-0000-0000-0000-000000000003"),
+            branch_id=UUID("20000000-0000-0000-0000-000000000004"),
+            source_revision=1,
+        ),
+        {
+            "foundation": [[{"currency": "TJS"}]],
+            "catalog": [[{"id": "product-1"}]],
+            "inventory": [],
+        },
+        credential_kid=credential.kid,
+        credential_digest=credential.digest,
+        source_generated_at=utc_now(),
+    )
+    first_chunk = chunks[0]
+    tampered = first_chunk.model_copy(update={"payload": ({"currency": "USD"},)})
+    chunk_by_path = {
+        (
+            f"/api/v1/sync/read-snapshot/{chunk.snapshot_id}/"
+            f"{chunk.component}/chunks/{chunk.chunk_index}"
+        ): (tampered if chunk == first_chunk else chunk)
+        for chunk in chunks
+    }
+    install_called = False
+
+    async def no_active_snapshot(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def capture_install(*args: object, **kwargs: object) -> None:
+        nonlocal install_called
+        install_called = True
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/sync/read-snapshot/manifest":
+            return httpx.Response(200, json=envelope.model_dump(mode="json"))
+        return httpx.Response(200, json=chunk_by_path[request.url.path].model_dump(mode="json"))
+
+    monkeypatch.setattr(worker, "_active_read_snapshot_id", no_active_snapshot)
+    monkeypatch.setattr(worker, "_install_read_snapshot", capture_install)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://cloud.example",
+    ) as client:
+        with pytest.raises(ReadSnapshotValidationError, match="payload hash"):
+            await worker._sync_read_snapshot(client, credential=credential.token)
+
+    assert not install_called
