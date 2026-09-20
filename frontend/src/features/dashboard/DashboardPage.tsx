@@ -557,9 +557,7 @@ function FinancePanel({
   if (data === null) {
     return (
       <Panel title="Финансы">
-        <p className="px-4 py-6 text-sm text-foreground-muted">
-          Финансовая сводка недоступна с текущими правами доступа.
-        </p>
+        <p className="p-4 text-sm">Нет доступа к финансам.</p>
       </Panel>
     );
   }

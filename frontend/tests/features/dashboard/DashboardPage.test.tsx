@@ -101,7 +101,7 @@ describe("DashboardPage", () => {
   it("does not present unavailable finance as zero debt", async () => {
     getDashboardSummary.mockResolvedValueOnce({ ...SUMMARY, finance: null });
     renderPage();
-    expect(await screen.findByText("Финансовая сводка недоступна с текущими правами доступа.")).toBeInTheDocument();
+    expect(await screen.findByText("Нет доступа к финансам.")).toBeInTheDocument();
     expect(screen.queryByText("Просроченных платежей нет")).not.toBeInTheDocument();
     expect(screen.queryByText("Нет активной подписки")).not.toBeInTheDocument();
   });
