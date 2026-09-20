@@ -52,6 +52,8 @@ NO_DELETE_TABLES = {
     "incoming_draft_row",
     "pos_payment_attempt",
     "pos_refund_attempt",
+    "sync_read_snapshot",
+    "sync_read_snapshot_cursor",
     "user_preferences",
 }
 
@@ -62,6 +64,8 @@ APPEND_ONLY_TABLES = {
     "pos_command",
     "pos_refund_reference",
     "supplier_return",
+    "sync_read_snapshot_chunk",
+    "sync_read_snapshot_component",
     "write_off",
 }
 
@@ -186,6 +190,10 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_audit_sync_read_snapshot_storage",
+    "trg_guard_sync_read_snapshot",
+    "trg_guard_sync_read_snapshot_cursor",
+    "trg_guard_sync_read_snapshot_storage",
     "confirm_bootstrap_email",
     "lookup_identity_password",
     "lookup_account_identity",

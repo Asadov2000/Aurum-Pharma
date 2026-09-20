@@ -16,6 +16,7 @@ from app.core.deps import (
 from app.core.errors import AuthenticationError
 from app.domains.sync.auth import EdgeRequestContext, get_edge_context
 from app.domains.sync.bootstrap import BootstrapScope
+from app.domains.sync.read_snapshot import ChunkRead, ManifestRead, ReadSnapshotComponent
 from app.domains.sync.repository import SyncCloudRepository
 from app.domains.sync.schemas import (
     SyncActivationBootstrapRead,
@@ -355,6 +356,51 @@ async def get_bootstrap_manifest(
     _prevent_credential_caching(response)
     return await SyncCloudService(SyncCloudRepository(context.session)).bootstrap_manifest(
         scope=_bootstrap_scope(context)
+    )
+
+
+@router.get("/read-snapshot/manifest", response_model=ManifestRead)
+async def get_read_snapshot_manifest(
+    response: Response,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+) -> ManifestRead:
+    _prevent_credential_caching(response)
+    principal = context.principal
+    return await SyncCloudService(SyncCloudRepository(context.session)).read_snapshot_manifest(
+        edge_node_id=principal.node_id,
+        tenant_id=principal.tenant_id,
+        branch_id=principal.branch_id,
+        credential_kid=principal.credential_kid,
+    )
+
+
+@router.get(
+    "/read-snapshot/{snapshot_id}/{component}/chunks/{chunk_index}",
+    response_model=ChunkRead,
+)
+async def get_read_snapshot_chunk(
+    snapshot_id: UUID,
+    component: ReadSnapshotComponent,
+    response: Response,
+    context: Annotated[
+        EdgeRequestContext,
+        Depends(get_edge_context, scope="function"),
+    ],
+    chunk_index: Annotated[int, Path(ge=0)],
+) -> ChunkRead:
+    _prevent_credential_caching(response)
+    principal = context.principal
+    return await SyncCloudService(SyncCloudRepository(context.session)).read_snapshot_chunk(
+        snapshot_id=snapshot_id,
+        component=component,
+        chunk_index=chunk_index,
+        edge_node_id=principal.node_id,
+        tenant_id=principal.tenant_id,
+        branch_id=principal.branch_id,
+        credential_kid=principal.credential_kid,
     )
 
 

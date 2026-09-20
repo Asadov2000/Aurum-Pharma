@@ -53,6 +53,15 @@ from app.domains.sync.models import (
     SyncSaleProjection,
     SyncWriterActivation,
 )
+from app.domains.sync.read_snapshot import (
+    REQUIRED_COMPONENTS,
+    ChunkDescriptor,
+    ChunkRead,
+    ComponentDescriptor,
+    Manifest,
+    ManifestRead,
+    ReadSnapshotComponent,
+)
 from app.domains.sync.repository import (
     ActivationFoundationSource,
     SyncCloudRepository,
@@ -626,6 +635,120 @@ class SyncAdminService:
 class SyncCloudService:
     def __init__(self, repo: SyncCloudRepository) -> None:
         self.repo = repo
+
+    async def read_snapshot_manifest(
+        self,
+        *,
+        edge_node_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        credential_kid: UUID,
+    ) -> ManifestRead:
+        stored = await self.repo.get_latest_read_snapshot(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            credential_kid=credential_kid,
+        )
+        if stored is None:
+            raise NotFoundError("Read snapshot not found")
+        snapshot, component_rows = stored
+        chunk_rows = await self.repo.list_read_snapshot_chunks(
+            snapshot_id=snapshot.snapshot_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+        )
+        component_by_name = {row.component: row for row in component_rows}
+        components: list[ComponentDescriptor] = []
+        for component_name in REQUIRED_COMPONENTS:
+            row = component_by_name.get(component_name)
+            if row is None:
+                raise AurumError("Stored read snapshot is incomplete")
+            descriptors = tuple(
+                ChunkDescriptor(
+                    schema_version=chunk.schema_version,
+                    chunk_index=chunk.chunk_index,
+                    item_count=chunk.item_count,
+                    payload_hash=chunk.payload_hash,
+                )
+                for chunk in chunk_rows
+                if chunk.component == component_name
+            )
+            components.append(
+                ComponentDescriptor(
+                    schema_version=row.schema_version,
+                    component=cast(ReadSnapshotComponent, row.component),
+                    item_count=row.item_count,
+                    chunk_count=row.chunk_count,
+                    chunks=descriptors,
+                    component_hash=row.component_hash,
+                )
+            )
+        manifest = Manifest(
+            schema_version=snapshot.schema_version,
+            snapshot_id=snapshot.snapshot_id,
+            edge_node_id=snapshot.node_id,
+            tenant_id=snapshot.tenant_id,
+            branch_id=snapshot.branch_id,
+            source_revision=snapshot.source_revision,
+            source_generated_at=snapshot.source_generated_at,
+            credential_kid=snapshot.credential_kid,
+            components=tuple(components),
+            snapshot_hash=snapshot.snapshot_hash,
+        )
+        return ManifestRead(
+            manifest=manifest,
+            manifest_hash=snapshot.manifest_hash,
+            signature_algorithm=snapshot.signature_algorithm,
+            signature=snapshot.signature,
+        )
+
+    async def read_snapshot_chunk(
+        self,
+        *,
+        snapshot_id: UUID,
+        component: ReadSnapshotComponent,
+        chunk_index: int,
+        edge_node_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        credential_kid: UUID,
+    ) -> ChunkRead:
+        manifest = await self.read_snapshot_manifest(
+            edge_node_id=edge_node_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            credential_kid=credential_kid,
+        )
+        if manifest.manifest.snapshot_id != snapshot_id:
+            raise NotFoundError("Read snapshot not found")
+        row = await self.repo.get_read_snapshot_chunk(
+            snapshot_id=snapshot_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            component=component,
+            chunk_index=chunk_index,
+        )
+        if row is None:
+            raise NotFoundError("Read snapshot chunk not found")
+        payload = row.payload.get("items")
+        return ChunkRead.model_validate(
+            {
+                "schema_version": row.schema_version,
+                "snapshot_id": row.snapshot_id,
+                "edge_node_id": row.node_id,
+                "tenant_id": row.tenant_id,
+                "branch_id": row.branch_id,
+                "source_revision": row.source_revision,
+                "component": row.component,
+                "chunk_index": row.chunk_index,
+                "item_count": row.item_count,
+                "payload_hash": row.payload_hash,
+                "payload": payload,
+            }
+        )
 
     async def activation_foundation_bootstrap(
         self,
