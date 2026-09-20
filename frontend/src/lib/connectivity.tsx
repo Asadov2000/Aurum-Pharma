@@ -23,8 +23,9 @@ export function ConnectivityProvider({
   children,
   checkHealth = checkServerHealth,
 }: ConnectivityProviderProps): JSX.Element {
+  const localEdge = window.aurumDesktop?.dataPlane?.mode === "edge-readonly";
   const [status, setStatus] = useState<ConnectivityStatus>(() =>
-    readNavigatorOnline() ? "checking" : "offline",
+    readNavigatorOnline() || localEdge ? "checking" : "offline",
   );
   const requestSequence = useRef(0);
   const consecutiveFailures = useRef(0);
@@ -52,7 +53,7 @@ export function ConnectivityProvider({
 
   const runCheck = useCallback(() => {
     scheduleCheck();
-    if (!readNavigatorOnline()) {
+    if (!localEdge && !readNavigatorOnline()) {
       requestSequence.current += 1;
       consecutiveFailures.current = 0;
       requestState.current = 0;
@@ -72,7 +73,7 @@ export function ConnectivityProvider({
       }
       const retryImmediately = requestState.current === 2;
       requestState.current = 0;
-      if (!readNavigatorOnline()) {
+      if (!localEdge && !readNavigatorOnline()) {
         consecutiveFailures.current = 0;
         transitionTo("offline");
         return;
@@ -95,7 +96,7 @@ export function ConnectivityProvider({
       scheduleCheck(retryImmediately ? 0 : DEFAULT_FAILURE_RETRY_MS);
     };
     void checkHealth().then(applyResult, () => applyResult(false));
-  }, [checkHealth, scheduleCheck, transitionTo]);
+  }, [checkHealth, localEdge, scheduleCheck, transitionTo]);
   runCheckRef.current = runCheck;
 
   useEffect(() => {

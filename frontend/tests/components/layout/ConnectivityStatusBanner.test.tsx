@@ -8,6 +8,7 @@ import { ConnectivityProvider } from "@/lib/connectivity";
 describe("ConnectivityStatusBanner", () => {
   afterEach(() => {
     setOnlineStatus(true);
+    Reflect.deleteProperty(window, "aurumDesktop");
   });
 
   it("stays hidden while the browser and server are available", async () => {
@@ -51,7 +52,7 @@ describe("ConnectivityStatusBanner", () => {
     renderBanner(checkHealth);
     await confirmSecondFailure(checkHealth);
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Сервер недоступен");
+    expect(await screen.findByRole("status")).toHaveTextContent("Сервис недоступен");
   });
 
   it("treats health check errors as server unavailability", async () => {
@@ -72,8 +73,27 @@ describe("ConnectivityStatusBanner", () => {
     renderBanner(checkHealth);
 
     await waitFor(() => expect(checkHealth).not.toHaveBeenCalled());
-    expect(screen.queryByText("Сервер недоступен", { exact: false })).not.toBeInTheDocument();
+    expect(screen.queryByText("Сервис недоступен", { exact: false })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Нет интернета");
+  });
+
+  it("keeps checking the local Edge service while WAN is unavailable", async () => {
+    setOnlineStatus(false);
+    Object.defineProperty(window, "aurumDesktop", {
+      configurable: true,
+      value: {
+        dataPlane: {
+          mode: "edge-readonly",
+          branchId: "20000000-0000-4000-8000-000000000002",
+        },
+      },
+    });
+    const checkHealth = vi.fn(async () => true);
+
+    renderBanner(checkHealth);
+
+    await waitFor(() => expect(checkHealth).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("replaces the server warning when the browser goes offline", async () => {
@@ -88,7 +108,7 @@ describe("ConnectivityStatusBanner", () => {
       window.dispatchEvent(new Event("offline"));
     });
 
-    expect(screen.queryByText("Сервер недоступен", { exact: false })).not.toBeInTheDocument();
+    expect(screen.queryByText("Сервис недоступен", { exact: false })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Нет интернета");
   });
 });

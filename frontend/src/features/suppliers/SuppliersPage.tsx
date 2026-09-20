@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, type ReactNode, useEffect, useMemo, useState } from "react";
 
 import {
   Badge,
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
+import { resolveDataPlane } from "@/features/edgeReadModel/dataPlane";
 import { permissionBranchScope } from "@/features/auth/branchPermissions";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
@@ -42,6 +43,10 @@ import { SupplierReturnForm } from "./SupplierReturnForm";
 import { type Supplier, type SupplierReturnDetails, type SupplierSearchSummary } from "./types";
 
 const PAGE_SIZE = 25;
+const EdgeSuppliersPage = lazy(async () => {
+  const module = await import("@/features/edgeReadModel/EdgeReadOnlyPages");
+  return { default: module.EdgeSuppliersPage };
+});
 
 type StatusFilter = "active" | "inactive" | "all";
 type SupplierView = "table" | "cards";
@@ -53,6 +58,17 @@ function supplierStatusLabel(supplier: Supplier): string {
 }
 
 export function SuppliersPage(): JSX.Element {
+  const plane = useMemo(() => resolveDataPlane(), []);
+  return plane.mode === "edge-readonly" ? (
+    <Suspense fallback={<SkeletonRows rows={6} />}>
+      <EdgeSuppliersPage plane={plane} />
+    </Suspense>
+  ) : (
+    <CloudSuppliersPage />
+  );
+}
+
+function CloudSuppliersPage(): JSX.Element {
   const { user } = useAuth();
   const filterPreferenceKey = useFilterPreferenceKey("suppliers");
   const canCreate = hasPermission(user, "suppliers.create");

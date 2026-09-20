@@ -1,11 +1,13 @@
 # Контракт автономной работы точки
 
-Статус: критерии проектирования и приёмки будущего Branch Edge. Текущий web
-runtime их полностью не реализует. Backend уже принимает, проверяет и атомарно
-активирует подписанные read-only snapshots `foundation/catalog/inventory` для
-конкретных tenant, branch и Edge node. Публикация Cloud-данных, локальные API/UI,
-offline-вход и денежные команды остаются следующими блоками. Архитектурное
-решение находится в [ADR-0043](adr/0043-thirty-day-branch-edge-continuity.md).
+Статус: критерии проектирования и приёмки будущего Branch Edge. Текущий runtime
+их полностью не реализует. Backend формирует, проверяет и атомарно активирует
+подписанные read-only snapshots `foundation/catalog/inventory` для конкретных
+tenant, branch и Edge node. Локальный API и общий frontend читают каталог,
+поставщиков и партии из активного снимка, явно показывают свежесть и блокируют
+изменения. Offline-вход, денежные команды, installer и recovery остаются
+следующими блоками. Архитектурное решение находится в
+[ADR-0043](adr/0043-thirty-day-branch-edge-continuity.md).
 
 ## Состояния интерфейса
 
@@ -87,14 +89,16 @@ pipeline. Read-only transport хранит подписанные snapshots от
 activation, проверяет точный набор компонентов, непрерывность chunks и SHA-256,
 а активный указатель меняет одной транзакцией только после полной проверки.
 При этом runtime публикует только профили `cloud` и `edge_shadow`: Edge HTTP
-mutations блокируются, положительный offline verifier отсутствует, генератор
-snapshot, Edge-to-Cloud ingest и локальный backup не выпущены. Packaged WinUI
-host существует в `desktop/`, но пока хостит общий online frontend; локального
-Edge runtime и клиентского установщика ещё нет.
+mutations блокируются, положительный offline verifier отсутствует, Edge-to-Cloud
+ingest и локальный backup не выпущены. Packaged WinUI host существует в
+`desktop/` и через явную branch-привязку открывает read-only страницы общего
+frontend. Полного локального runtime, автозапуска служб и клиентского установщика
+ещё нет.
 
-Поэтому первый исполняемый блок — воспроизводимый read-only Edge на чистом
-Windows-ПК с полным snapshot, локальной сборкой UI, месячным синтетическим
-backlog и restore drill. Денежный writer включается отдельным последующим gate.
+Следующий исполняемый блок — довести read-only Edge до целевой нагрузки на чистом
+Windows-ПК: индексированные проекции, локальная сборка UI, WAN/restart smoke,
+месячный синтетический backlog и restore drill. Денежный writer включается
+отдельным последующим gate.
 
 ## Профиль нагрузки пилота
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import {
   ActionMenu,
@@ -19,6 +19,7 @@ import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
+import { resolveDataPlane } from "@/features/edgeReadModel/dataPlane";
 import { cn } from "@/lib/utils";
 
 import { BarcodesPanel } from "./BarcodesPanel";
@@ -45,6 +46,10 @@ type ViewMode = "list" | "grid";
 type Preset = "all" | "active" | "without_image" | "without_barcode" | "inactive" | "archived";
 
 const pageSizeOptions = [25, 50, 100] as const;
+const EdgeCatalogPage = lazy(async () => {
+  const module = await import("@/features/edgeReadModel/EdgeReadOnlyPages");
+  return { default: module.EdgeCatalogPage };
+});
 const wideCatalogQuery = "(min-width: 1536px)";
 // Main columns, gaps, padding and the separate 44px action area must all fit.
 const listColumnsClass =
@@ -149,6 +154,17 @@ function CatalogDetailContent({
 }
 
 export function CatalogPage(): JSX.Element {
+  const plane = useMemo(() => resolveDataPlane(), []);
+  return plane.mode === "edge-readonly" ? (
+    <Suspense fallback={<SkeletonRows rows={6} />}>
+      <EdgeCatalogPage plane={plane} />
+    </Suspense>
+  ) : (
+    <CloudCatalogPage />
+  );
+}
+
+function CloudCatalogPage(): JSX.Element {
   const { user } = useAuth();
   const filterPreferenceKey = useFilterPreferenceKey("catalog");
   const canCreate = hasPermission(user, "catalog.create");
