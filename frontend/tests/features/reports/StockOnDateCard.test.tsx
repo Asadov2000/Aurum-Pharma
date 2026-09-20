@@ -16,6 +16,16 @@ vi.mock("@/features/reports/api", () => ({
   getTopProducts: vi.fn(),
 }));
 
+vi.mock("@/features/auth/hooks", () => ({
+  useAuth: () => ({
+    user: {
+      is_developer: false,
+      permissions: ["reports.view"],
+      permission_scopes: { "reports.view": null },
+    },
+  }),
+}));
+
 vi.mock("@/lib/download", () => ({
   downloadBlob: (...a: unknown[]) => downloadBlob(...a),
 }));
@@ -64,16 +74,59 @@ describe("StockOnDateCard", () => {
     const blob = new Blob(["x"]);
     getStockOnDateXlsx.mockResolvedValueOnce(blob);
     renderCard(true);
+    await screen.findByText("Остатков по этим условиям нет");
 
     const dateInput = screen.getByLabelText("Дата остатка") as HTMLInputElement;
     fireEvent.change(dateInput, { target: { value: "2026-05-31" } });
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Скачать в Excel/i })).toBeEnabled(),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: /Скачать в Excel/i }));
 
     await waitFor(() => {
-      expect(getStockOnDateXlsx).toHaveBeenCalledWith("2026-05-31", undefined);
+      expect(getStockOnDateXlsx).toHaveBeenCalledWith("2026-05-31", undefined, {
+        query: undefined,
+        expires_within_days: undefined,
+      });
     });
     expect(downloadBlob).toHaveBeenCalledWith(blob, "stock-2026-05-31.xlsx");
+  });
+
+  it("exports applied search and expiry and blocks unapplied changes", async () => {
+    getStockOnDateXlsx.mockResolvedValue(new Blob(["x"]));
+    renderCard(true);
+    await screen.findByText("Остатков по этим условиям нет");
+    fireEvent.change(screen.getByLabelText("Товар, МНН или партия"), {
+      target: { value: "парацетамол" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.change(screen.getByLabelText("Срок закончится"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    expect(screen.getByRole("button", { name: /Скачать в Excel/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Скачать в Excel/i })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Скачать в Excel/i }));
+    await waitFor(() =>
+      expect(getStockOnDateXlsx).toHaveBeenCalledWith(expect.any(String), undefined, {
+        query: "парацетамол",
+        expires_within_days: 30,
+      }),
+    );
+  });
+
+  it("hides the previous stock totals while a different date is loading", async () => {
+    renderCard();
+    await screen.findByText("Остатков по этим условиям нет");
+    getStockOnDate.mockImplementationOnce(() => new Promise(() => undefined));
+    fireEvent.change(screen.getByLabelText("Дата остатка"), { target: { value: "2026-05-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await waitFor(() => expect(getStockOnDate).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Остатков по этим условиям нет")).not.toBeInTheDocument();
+    expect(screen.queryByText("Закупочная стоимость")).not.toBeInTheDocument();
   });
 
   it("keeps the all-branches option when no branches are available", () => {

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,7 @@ def _current_tenant_or_400(user: CurrentUser) -> UUID:
 
 @router.get("/summary", response_model=DashboardSummary)
 async def get_summary(
+    response: Response,
     user: Annotated[
         CurrentUser,
         Depends(require_tenant_permission("reports.view")),
@@ -45,4 +46,18 @@ async def get_summary(
 ) -> DashboardSummary:
     # reports.view (owner/admin/dev) — keeps owner-level financials off the
     # seller's screen. Tenant scoping still comes from the token, not a param.
-    return await service.get_summary(_current_tenant_or_400(user), force_refresh=refresh)
+    response.headers["Cache-Control"] = "private, no-store"
+    tenant_id = _current_tenant_or_400(user)
+    summary = await service.get_summary(tenant_id, force_refresh=refresh)
+    # Shared cache contains operational data only. Financial access is checked
+    # afresh and the protected ledger projection is never stored in that cache.
+    finance = None
+    if (
+        not user.is_developer
+        and not user.is_administrator
+        and user.support_access_session_id is None
+        and user.has_tenant_scope("billing.overview.view")
+        and user.has_tenant_scope("billing.invoice.view")
+    ):
+        finance = await service.get_finance(actor_user_id=user.user_id, tenant_id=tenant_id)
+    return summary.model_copy(update={"finance": finance})

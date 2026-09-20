@@ -2383,6 +2383,13 @@ class POSService:
         settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
         return settings.report_timezone if settings is not None else "Asia/Dushanbe"
 
+    async def report_local_date(self, tenant_id: UUID) -> date:
+        timezone_name = await self._report_tz(tenant_id)
+        try:
+            return self._now().astimezone(ZoneInfo(timezone_name)).date()
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
+
     async def list_sales(
         self,
         *,
@@ -2644,6 +2651,8 @@ class POSService:
         cashier_name = await self.repo.get_user_display_name(shift.opened_by_user_id)
         agg = await self.repo.z_report_aggregates(shift_id)
         bd = agg["payment_breakdown"]
+        report_timezone = await self._report_tz(shift.tenant_id)
+        timezone = ZoneInfo(report_timezone)
 
         return ZReportData(
             shift_id=shift.id,
@@ -2654,8 +2663,9 @@ class POSService:
             register_name=register.name if register is not None else "",
             cashier_user_id=shift.opened_by_user_id,
             cashier_name=cashier_name,
-            opened_at=shift.opened_at,
-            closed_at=shift.closed_at,
+            opened_at=shift.opened_at.astimezone(timezone),
+            closed_at=shift.closed_at.astimezone(timezone) if shift.closed_at else None,
+            report_timezone=report_timezone,
             sales_count=agg["sales_count"],
             total_sales=agg["total_sales"],
             total_discounts=agg["total_discounts"],
@@ -2708,12 +2718,13 @@ class POSService:
         date_to: date,
         branch_id: UUID | None,
     ) -> SalesSummaryData:
+        timezone = ZoneInfo(await self._report_tz(tenant_id))
         agg = await self.repo.sales_summary(
             tenant_id=tenant_id,
             date_from=date_from,
             date_to=date_to,
             branch_id=branch_id,
-            tz=await self._report_tz(tenant_id),
+            tz=timezone.key,
         )
         foundation = FoundationRepository(self.repo.session)
 
@@ -2723,7 +2734,7 @@ class POSService:
             show_branch_column = False
         else:
             branch_name = None
-            show_branch_column = await foundation.count_active_branches(tenant_id) > 1
+            show_branch_column = True
 
         rows: list[SalesSummaryRow] = []
         currency = "TJS"
@@ -2739,7 +2750,9 @@ class POSService:
             discount = Decimal(str(r["discount"]))
             rows.append(
                 SalesSummaryRow(
-                    completed_at=r["completed_at"],
+                    completed_at=(
+                        r["completed_at"].astimezone(timezone) if r["completed_at"] else None
+                    ),
                     receipt_number=r["receipt_number"],
                     cashier_name=r["cashier_name"],
                     branch_name=r["branch_name"],
@@ -2955,12 +2968,20 @@ class POSService:
         tenant_id: UUID,
         on_date: date,
         branch_id: UUID | None,
+        query: str | None = None,
+        expires_within_days: int | None = None,
     ) -> StockOnDateData:
         raw = await self.repo.stock_on_date(
             tenant_id=tenant_id,
             on_date=on_date,
             branch_id=branch_id,
             tz=await self._report_tz(tenant_id),
+            query=query,
+            expires_before=(
+                on_date + timedelta(days=expires_within_days)
+                if expires_within_days is not None
+                else None
+            ),
         )
         foundation = FoundationRepository(self.repo.session)
 
@@ -2970,7 +2991,7 @@ class POSService:
             show_branch_column = False
         else:
             branch_name = None
-            show_branch_column = await foundation.count_active_branches(tenant_id) > 1
+            show_branch_column = True
 
         rows: list[StockRow] = []
         total_qty = Decimal("0")
@@ -2980,7 +3001,7 @@ class POSService:
             currency = r["currency"] or currency
             qty = Decimal(str(r["qty"]))
             purchase_price = Decimal(str(r["purchase_price"]))
-            value = (qty * purchase_price).quantize(Decimal("0.01"))
+            value = (qty * purchase_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             total_qty += qty
             total_value += value
             rows.append(
@@ -3012,11 +3033,17 @@ class POSService:
         tenant_id: UUID,
         on_date: date,
         branch_id: UUID | None,
+        query: str | None = None,
+        expires_within_days: int | None = None,
     ) -> bytes:
         """Render the stock-on-date workbook on the fly (no MinIO cache — live
         data, arbitrary date). An empty result yields a valid zero file."""
         data = await self.build_stock_on_date(
-            tenant_id=tenant_id, on_date=on_date, branch_id=branch_id
+            tenant_id=tenant_id,
+            on_date=on_date,
+            branch_id=branch_id,
+            query=query,
+            expires_within_days=expires_within_days,
         )
         return await anyio.to_thread.run_sync(render_stock_on_date_xlsx, data)
 
@@ -3064,7 +3091,7 @@ class POSService:
                     expires_at=row["expires_at"],
                     qty=qty,
                     purchase_price=purchase_price,
-                    value=(qty * purchase_price).quantize(Decimal("0.01")),
+                    value=(qty * purchase_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
                 )
             )
         return StockOnDateOverview(

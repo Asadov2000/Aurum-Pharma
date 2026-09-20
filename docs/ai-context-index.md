@@ -42,6 +42,7 @@
 | Backend core/middleware | `backend/app/core/`, `backend/app/middleware/` | `backend/tests/core/`, `backend/tests/middleware/` |
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |
 | Frontend-фича | `frontend/src/features/<domain>/` | `frontend/tests/features/<domain>/` |
+| Отчёты, выгрузки и финансовая сводка | [Проверка отчётности](reporting-audit.md), `backend/app/domains/pos/`, `backend/app/domains/dashboard/`, `frontend/src/features/reports/` | pytest POS/dashboard/billing, Vitest reports/dashboard, E2E выгрузок и закрытия смены |
 | Публичный сайт и способы установки | `website/src/`, `website/scripts/`; [ADR-0041](adr/0041-public-website-boundary.md) | `website/scripts/test.mjs`, браузерная проверка сайта, CI gate |
 | Границы компонентов и план развития | [project-structure.md](project-structure.md), [implementation-roadmap.md](implementation-roadmap.md) | отличать реализованные пути и проверенные результаты от планов |
 | Будущий Windows-клиент / установщик | [desktop-host-implementation.md](desktop-host-implementation.md), [desktop-bridge.md](desktop-bridge.md); `desktop/` ещё не реализован | `scripts/windows-host-readiness.ps1` — проверка toolchain, не выпуск клиента |

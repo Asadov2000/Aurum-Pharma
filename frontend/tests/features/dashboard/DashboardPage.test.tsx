@@ -98,6 +98,14 @@ describe("DashboardPage", () => {
     vi.clearAllMocks();
   });
 
+  it("does not present unavailable finance as zero debt", async () => {
+    getDashboardSummary.mockResolvedValueOnce({ ...SUMMARY, finance: null });
+    renderPage();
+    expect(await screen.findByText("Нет доступа к финансам.")).toBeInTheDocument();
+    expect(screen.queryByText("Просроченных платежей нет")).not.toBeInTheDocument();
+    expect(screen.queryByText("Нет активной подписки")).not.toBeInTheDocument();
+  });
+
   it("renders all four sections with data", async () => {
     getDashboardSummary.mockResolvedValueOnce(SUMMARY);
     renderPage();
@@ -139,10 +147,10 @@ describe("DashboardPage", () => {
     expect(screen.queryByRole("link", { name: "Открыть партии" })).not.toBeInTheDocument();
   });
 
-  it("shows the profile fallback for a support user without a tenant", () => {
+  it("shows the profile fallback for a support user without a tenant", async () => {
     mockUser = { is_developer: true, full_name: "Dev", email: "dev@aurum.tj" };
     renderPage();
-    expect(screen.getByText(/Сводка по аптеке доступна/)).toBeInTheDocument();
+    expect(await screen.findByText(/Сводка по аптеке доступна/)).toBeInTheDocument();
     // Must NOT have called the tenant-scoped endpoint.
     expect(getDashboardSummary).not.toHaveBeenCalled();
   });

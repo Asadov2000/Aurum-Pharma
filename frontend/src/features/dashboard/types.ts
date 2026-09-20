@@ -50,7 +50,7 @@ export interface ChecklistSection {
 export interface DashboardSummary {
   today: TodaySection;
   expiring: ExpiringSection;
-  finance: FinanceSection;
+  finance: FinanceSection | null;
   checklist: ChecklistSection;
   generated_at: string;
 }

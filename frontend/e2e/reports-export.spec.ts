@@ -133,10 +133,21 @@ test.describe("Reports export", () => {
 
     await page.getByRole("tab", { name: /^Остатки/ }).click();
     const stockReport = page.getByRole("region", { name: "Остатки и сроки годности" });
+    await stockReport.getByLabel("Товар, МНН или партия").fill(item.brand_name);
+    await expect(stockReport.getByRole("button", { name: "Скачать в Excel" })).toBeDisabled();
+    await stockReport.getByRole("button", { name: "Показать" }).click();
     await expect(stockReport.getByText(item.brand_name)).toBeVisible();
+    const exportResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/v1/reports/stock-on-date.xlsx" &&
+        response.request().method() === "GET",
+    );
     const stockDownload = page.waitForEvent("download");
     await stockReport.getByRole("button", { name: "Скачать в Excel" }).click();
     expect((await stockDownload).suggestedFilename()).toMatch(/\.xlsx$/);
+    const exported = await exportResponse;
+    expect(exported.status()).toBe(200);
+    expect(new URL(exported.url()).searchParams.get("query")).toBe(item.brand_name);
   });
 });
 

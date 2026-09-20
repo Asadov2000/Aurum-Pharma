@@ -1,3 +1,4 @@
+import { hashKey } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -14,9 +15,9 @@ import {
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/features/foundation/errors";
-import { useBranchesQuery } from "@/features/foundation/queries";
 import { downloadBlob } from "@/lib/download";
 
+import { useReportBranches } from "./branchScope";
 import { getSalesSummaryXlsx } from "./api";
 import { addCalendarDays, calendarDateInTimeZone, currentReportMonthRange } from "./calendar";
 import { useSalesSummaryQuery } from "./queries";
@@ -66,11 +67,13 @@ export function SalesOverviewPanel({
   reportTimezone: string;
   canExport: boolean;
 }): JSX.Element {
+  const branches = useReportBranches();
+  const { defaultBranchId } = branches;
   const filterPreferenceKey = useFilterPreferenceKey("reports-sales-overview");
   const defaults = useMemo(() => currentReportMonthRange(reportTimezone), [reportTimezone]);
   const initialValues = useMemo<FilterValues>(
-    () => ({ from: defaults.dateFrom, to: defaults.dateTo, branch_id: "" }),
-    [defaults],
+    () => ({ from: defaults.dateFrom, to: defaults.dateTo, branch_id: defaultBranchId }),
+    [defaults, defaultBranchId],
   );
   const form = useForm<FilterValues>({ defaultValues: initialValues });
   const watched = form.watch();
@@ -82,7 +85,6 @@ export function SalesOverviewPanel({
     (watched.branch_id || undefined) !== params.branch_id;
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const branches = useBranchesQuery(false);
   const branchFilterName = branches.data?.find((branch) => branch.id === watched.branch_id)?.name;
   const query = useSalesSummaryQuery(params);
 
@@ -96,7 +98,9 @@ export function SalesOverviewPanel({
       return false;
     }
     form.clearErrors();
-    setParams(toParams(parsed.data));
+    const next = toParams(parsed.data);
+    if (hashKey([next]) === hashKey([params])) void query.refetch();
+    setParams(next);
     return true;
   };
 
@@ -225,7 +229,7 @@ export function SalesOverviewPanel({
                     className="w-full sm:w-56"
                     {...form.register("branch_id")}
                   >
-                    <option value="">Все доступные</option>
+                    {branches.scope === null && <option value="">Все доступные</option>}
                     {branches.data?.map((branch) => (
                       <option key={branch.id} value={branch.id}>
                         {branch.name}
@@ -237,8 +241,8 @@ export function SalesOverviewPanel({
               active: Boolean(watched.branch_id),
               activeLabel: branchFilterName ? `Аптечная точка: ${branchFilterName}` : undefined,
               onClear: () => {
-                form.setValue("branch_id", "");
-                setParams((current) => ({ ...current, branch_id: undefined }));
+                form.setValue("branch_id", defaultBranchId);
+                setParams((current) => ({ ...current, branch_id: defaultBranchId || undefined }));
               },
               defaultVisible: true,
             },

@@ -1,3 +1,4 @@
+import { hashKey } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -19,8 +20,8 @@ import {
 } from "@/components/ui";
 import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/features/foundation/errors";
-import { useBranchesQuery } from "@/features/foundation/queries";
 
+import { useReportBranches } from "./branchScope";
 import { currentReportMonthRange } from "./calendar";
 import { useTopProductsQuery } from "./queries";
 import { type TopProductsParams } from "./types";
@@ -41,22 +42,23 @@ const filterSchema = z
 type FilterValues = z.infer<typeof filterSchema>;
 
 export function TopProductsPanel({ reportTimezone }: { reportTimezone: string }): JSX.Element {
+  const branches = useReportBranches();
+  const { defaultBranchId } = branches;
   const filterPreferenceKey = useFilterPreferenceKey("reports-top-products");
   const range = useMemo(() => currentReportMonthRange(reportTimezone), [reportTimezone]);
   const defaults = useMemo<FilterValues>(
     () => ({
       from: range.dateFrom,
       to: range.dateTo,
-      branch_id: "",
+      branch_id: defaultBranchId,
       sort_by: "revenue",
       limit: 20,
     }),
-    [range],
+    [range, defaultBranchId],
   );
   const form = useForm<FilterValues>({ defaultValues: defaults });
   const watched = form.watch();
   const [params, setParams] = useState<TopProductsParams>(() => toParams(defaults));
-  const branches = useBranchesQuery(false);
   const query = useTopProductsQuery(params);
   const pendingChanges =
     watched.from !== params.from ||
@@ -75,7 +77,9 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
       return;
     }
     form.clearErrors();
-    setParams(toParams(parsed.data));
+    const next = toParams(parsed.data);
+    if (hashKey([next]) === hashKey([params])) void query.refetch();
+    setParams(next);
   });
 
   return (
@@ -132,14 +136,14 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
               activeLabel: branches.data?.find((branch) => branch.id === watched.branch_id)?.name,
               active: Boolean(watched.branch_id),
               onClear: () => {
-                form.setValue("branch_id", "");
-                setParams((current) => ({ ...current, branch_id: undefined }));
+                form.setValue("branch_id", defaultBranchId);
+                setParams((current) => ({ ...current, branch_id: defaultBranchId || undefined }));
               },
               content: (
                 <div>
                   <Label htmlFor="top_products_branch">Аптечная точка</Label>
                   <Select id="top_products_branch" {...form.register("branch_id")}>
-                    <option value="">Все доступные точки</option>
+                    {branches.scope === null && <option value="">Все доступные точки</option>}
                     {branches.data?.map((branch) => (
                       <option key={branch.id} value={branch.id}>
                         {branch.name}
@@ -211,7 +215,7 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
           onRetry={() => void branches.refetch()}
         />
       )}
-      {query.isLoading ? (
+      {query.isLoading || query.isPlaceholderData ? (
         <SkeletonRows rows={8} />
       ) : query.isError ? (
         <ErrorState

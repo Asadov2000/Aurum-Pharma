@@ -5,14 +5,107 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
 
 import pytest
+from openpyxl import load_workbook
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleError
 from app.domains.pos.repository import POSRepository
+from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.service import POSService
+from app.domains.pos.z_report_xlsx import render_z_report_xlsx
+
+
+async def test_discounted_reports_reconcile_with_payments_and_refunds(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    s = await pos_scaffold(sale_price=10, batch_qty=10)
+    service = POSService(POSRepository(db_session))
+    shift = await service.open_shift(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        opened_by_user_id=s["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    sale = await service.create_sale(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        cashier_user_id=s["cashier"].id,
+    )
+    items, _ = await service.add_item(sale_id=sale.id, catalog_id=s["item"].id, qty=Decimal("3"))
+    await service.repo.update_item(
+        items[0], total_price=Decimal("25.00"), discount_amount=Decimal("5.00")
+    )
+    await service.repo.update_sale(sale, total_amount=Decimal("25.00"))
+    await service.add_payment(sale_id=sale.id, payment_method="cash", amount=Decimal("25"))
+    await service.complete(sale_id=sale.id)
+    today = await _today(db_session)
+    filters = {
+        "tenant_id": s["tenant"].id,
+        "date_from": today,
+        "date_to": today,
+        "branch_id": None,
+    }
+    summary = await service.build_sales_summary(**filters)
+    overview = await service.get_sales_summary_overview(**filters)
+    top = await service.get_top_products_overview(**filters, sort_by="revenue", limit=20)
+    z = await service.build_z_report(shift.id)
+    assert summary.gross_sales == overview.gross_sales == z.total_sales == Decimal("30")
+    assert summary.net == overview.net == overview.daily[0].net == Decimal("25")
+    assert overview.average_sale == top.rows[0].revenue == Decimal("25")
+    assert summary.rows[0].gross == Decimal("30")
+    assert summary.rows[0].net == summary.payment_breakdown.cash == Decimal("25")
+    await service.refund(
+        parent_sale_id=sale.id,
+        items=[(items[0].id, Decimal("3"))],
+        reason="other",
+        comment=None,
+        cashier_user_id=s["cashier"].id,
+    )
+    summary = await service.build_sales_summary(**filters)
+    overview = await service.get_sales_summary_overview(**filters)
+    assert summary.net == overview.net == overview.daily[0].net == Decimal("0")
+    assert summary.total_refunds == Decimal("25")
+    returned = next(row for row in summary.rows if row.kind == "return")
+    assert returned.net == Decimal("25")
+    z = await service.build_z_report(shift.id)
+    assert z.total_sales - z.total_discounts - z.total_refunds == Decimal("0")
+    # Historical all-branch exports retain provenance after branch archival.
+    s["branch"].is_active = False
+    await db_session.flush()
+    summary = await service.build_sales_summary(**filters)
+    assert summary.show_branch_column is True
+    assert all(row.branch_name == s["branch"].name for row in summary.rows)
+
+
+async def test_report_exports_render_tenant_local_timestamps(
+    db_session: AsyncSession, pos_scaffold
+) -> None:
+    s = await pos_scaffold()
+    instant = datetime.now(UTC).replace(hour=20, minute=15, second=0, microsecond=0)
+    service = POSService(POSRepository(db_session), now=lambda: instant)
+    shift = await service.open_shift(
+        tenant_id=s["tenant"].id,
+        register_id=s["register"].id,
+        opened_by_user_id=s["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    await _complete_sale(service, s, qty=Decimal("1"), payments=[("cash", Decimal("10"))])
+    local_date = instant.date() + timedelta(days=1)
+    assert await service.report_local_date(s["tenant"].id) == local_date
+    summary = await service.build_sales_summary(
+        tenant_id=s["tenant"].id, date_from=local_date, date_to=local_date, branch_id=None
+    )
+    workbook = load_workbook(BytesIO(render_sales_summary_xlsx(summary)))
+    assert workbook["Детализация"].cell(2, 1).value == f"{local_date:%d.%m.%Y} 01:15"
+    z = await service.build_z_report(shift.id)
+    workbook = load_workbook(BytesIO(render_z_report_xlsx(z)))
+    values = dict(workbook.active.iter_rows(min_col=1, max_col=2, values_only=True))
+    assert values["Открыта"] == z.opened_at.strftime("%d.%m.%Y %H:%M")
+    assert z.opened_at.utcoffset() == timedelta(hours=5)
 
 
 async def _today(db: AsyncSession) -> date:

@@ -196,6 +196,73 @@ describe("ReportsPage", () => {
     act(() => useAuthStore.getState().clear());
   });
 
+  it("uses report-specific branch grants even when another role grants other branches", async () => {
+    act(() =>
+      useAuthStore.getState().setUser({
+        ...REPORT_USER,
+        permission_scopes: {
+          "reports.view": ["branch-c", "branch-a"],
+          "branches.view": ["branch-b"],
+        },
+      }),
+    );
+    listBranches.mockResolvedValue([
+      { id: "branch-a", name: "Точка А" },
+      { id: "branch-b", name: "Точка Б" },
+      { id: "branch-c", name: "Точка В" },
+    ]);
+    renderPage();
+    await waitFor(() =>
+      expect(getSalesSummary).toHaveBeenCalledWith(
+        expect.objectContaining({ branch_id: "branch-a" }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    const select = await screen.findByLabelText("Аптечная точка");
+    expect(within(select).queryByRole("option", { name: "Точка Б" })).not.toBeInTheDocument();
+    expect(within(select).queryByRole("option", { name: "Все доступные" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    for (const [tab, request] of [
+      ["Товары", getTopProducts],
+      ["Остатки", getStockOnDate],
+      ["Смены", listShiftHistory],
+    ] as const) {
+      await openReportTab(new RegExp(`^${tab}`));
+      await waitFor(() =>
+        expect(request).toHaveBeenCalledWith(expect.objectContaining({ branch_id: "branch-a" })),
+      );
+    }
+  });
+
+  it("does not request report data without report access", async () => {
+    act(() =>
+      useAuthStore.getState().setUser({ ...REPORT_USER, permissions: [], permission_scopes: {} }),
+    );
+    renderPage();
+    expect(await screen.findByText("Нет доступа к отчётам аптечных точек.")).toBeVisible();
+    expect(getTenantOperationalSettings).not.toHaveBeenCalled();
+    expect(getSalesSummary).not.toHaveBeenCalled();
+    expect(listBranches).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Продажи", "Обновить сводку", getSalesSummary],
+    ["Товары", "Показать", getTopProducts],
+    ["Остатки", "Показать", getStockOnDate],
+    ["Смены", "Показать", listShiftHistory],
+  ] as const)(
+    "refreshes %s when the applied filters have not changed",
+    async (tab, button, request) => {
+      renderPage();
+      await openReportTab(new RegExp(`^${tab}`));
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+      const submit = screen.getByRole("button", { name: button, exact: true });
+      await waitFor(() => expect(submit).toBeEnabled());
+      fireEvent.click(submit);
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    },
+  );
+
   it("hides every export action when the account can only view reports", async () => {
     act(() =>
       useAuthStore.getState().setUser({
