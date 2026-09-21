@@ -17,6 +17,7 @@ from app.domains.sync.models import (
     SyncReadBarcodeProjection,
     SyncReadCatalogProjection,
     SyncReadInventoryProjection,
+    SyncReadInventoryRollup,
     SyncReadProjection,
     SyncReadSnapshot,
     SyncReadSnapshotChunk,
@@ -35,6 +36,7 @@ SNAPSHOT_TABLES = {
     "sync_read_barcode_projection",
     "sync_read_supplier_projection",
     "sync_read_inventory_projection",
+    "sync_read_inventory_rollup",
 }
 
 
@@ -85,6 +87,7 @@ def test_read_snapshot_model_metadata_matches_storage_contract() -> None:
         SyncReadBarcodeProjection.__tablename__,
         SyncReadSupplierProjection.__tablename__,
         SyncReadInventoryProjection.__tablename__,
+        SyncReadInventoryRollup.__tablename__,
     } == SNAPSHOT_TABLES
     assert {
         "source_revision",
@@ -161,6 +164,9 @@ async def test_read_snapshot_tables_force_rls_and_limit_runtime_writes(
                             "ck_sync_read_catalog_projection_payload",
                             "ck_sync_read_supplier_projection_payload",
                             "ck_sync_read_inventory_projection_payload",
+                            "ck_sync_read_inventory_rollup_batch_count",
+                            "ck_sync_read_inventory_rollup_blocked_count",
+                            "ck_sync_read_inventory_rollup_blocked_within_total",
                         ]
                     },
                 )
@@ -191,12 +197,69 @@ async def test_read_snapshot_tables_force_rls_and_limit_runtime_writes(
     assert privilege_by_table["sync_read_projection"]["can_update"]
     assert privilege_by_table["sync_read_catalog_projection"]["can_insert"]
     assert not privilege_by_table["sync_read_catalog_projection"]["can_update"]
+    assert privilege_by_table["sync_read_inventory_rollup"]["can_insert"]
+    assert not privilege_by_table["sync_read_inventory_rollup"]["can_update"]
     assert all(not row["can_delete"] for row in privileges)
     assert constraints == {
         "ck_sync_read_projection_foundation_scope",
         "ck_sync_read_catalog_projection_payload",
         "ck_sync_read_supplier_projection_payload",
         "ck_sync_read_inventory_projection_payload",
+        "ck_sync_read_inventory_rollup_batch_count",
+        "ck_sync_read_inventory_rollup_blocked_count",
+        "ck_sync_read_inventory_rollup_blocked_within_total",
+    }
+
+
+async def test_catalog_search_function_has_a_narrow_security_boundary(
+    support_engine_read_snapshot: AsyncEngine,
+) -> None:
+    async with support_engine_read_snapshot.connect() as connection:
+        function = (await connection.execute(text("""
+                    SELECT
+                      pg_catalog.pg_get_userbyid(routine.proowner) AS owner,
+                      language.lanname AS language,
+                      routine.prosecdef,
+                      routine.provolatile::TEXT AS provolatile,
+                      routine.proconfig,
+                      pg_catalog.has_function_privilege(
+                        'aurum_app', routine.oid, 'EXECUTE'
+                      ) AS app_can_execute,
+                      pg_catalog.has_function_privilege(
+                        'aurum_app', routine.oid, 'EXECUTE WITH GRANT OPTION'
+                      ) AS app_can_grant,
+                      pg_catalog.has_function_privilege(
+                        'aurum_support', routine.oid, 'EXECUTE'
+                      ) AS support_can_execute,
+                      EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.aclexplode(
+                          COALESCE(
+                            routine.proacl,
+                            pg_catalog.acldefault('f'::"char", routine.proowner)
+                          )
+                        ) AS acl
+                        WHERE acl.grantee = 0
+                          AND acl.privilege_type = 'EXECUTE'
+                      ) AS public_can_execute
+                    FROM pg_catalog.pg_proc AS routine
+                    JOIN pg_catalog.pg_language AS language
+                      ON language.oid = routine.prolang
+                    WHERE routine.oid = pg_catalog.to_regprocedure(
+                      'public.search_sync_read_catalog(uuid,text)'
+                    )
+                    """))).mappings().one()
+
+    assert dict(function) == {
+        "owner": "aurum_schema_owner",
+        "language": "plpgsql",
+        "prosecdef": True,
+        "provolatile": "s",
+        "proconfig": ["search_path=pg_catalog, pg_temp", "row_security=off"],
+        "app_can_execute": True,
+        "app_can_grant": False,
+        "support_can_execute": False,
+        "public_can_execute": False,
     }
 
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import statistics
@@ -24,7 +25,9 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -53,6 +56,7 @@ FOREIGN_BRANCH_ID = UUID("52000000-0000-0000-0000-000000000002")
 FOREIGN_NODE_ID = UUID("52000000-0000-0000-0000-000000000003")
 TARGET_QUERY = "targetterm"
 TARGET_BARCODE = "2999999999999"
+STABILIZATION_IDLE_SECONDS = 30
 
 
 class BenchmarkFailure(RuntimeError):
@@ -203,10 +207,11 @@ async def verify_environment(env: Connections) -> None:
                 "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
                 "WHERE n.nspname='public' AND c.relname IN "
                 "('sync_read_projection','sync_read_catalog_projection',"
-                "'sync_read_barcode_projection','sync_read_inventory_projection')"
+                "'sync_read_barcode_projection','sync_read_inventory_projection',"
+                "'sync_read_inventory_rollup')"
             )
         )
-        require(projection_tables == 4, 13)
+        require(projection_tables == 5, 13)
 
 
 async def seed(env: Connections, *, catalog_rows: int, inventory_rows: int) -> tuple[float, UUID]:
@@ -329,7 +334,9 @@ async def seed(env: Connections, *, catalog_rows: int, inventory_rows: int) -> t
                 "SELECT CAST(:snapshot_id AS uuid),md5('batch-' || value)::uuid,"
                 "CAST(:tenant_id AS uuid),CAST(:branch_id AS uuid),CAST(:node_id AS uuid),"
                 "md5('catalog-' || (((value-1) % CAST(:catalog_rows AS integer))+1))::uuid,"
-                "(current_date + ((value % 730)+1)::int),10.000,8.00,12.50,(value % 97=0),"
+                "(current_date + ((value % 730)+1)::int),"
+                "CASE WHEN value % 10=0 THEN 0.000 ELSE 10.000 END,"
+                "8.00,12.50,(value % 97=0),"
                 "jsonb_build_object('record_type','inventory_batch','id',"
                 "md5('batch-' || value)::uuid,"
                 "'tenant_id',CAST(:tenant_id AS uuid),'branch_id',CAST(:branch_id AS uuid),"
@@ -338,7 +345,8 @@ async def seed(env: Connections, *, catalog_rows: int, inventory_rows: int) -> t
                 "'batch_number','LOT-' || value,"
                 "'manufactured_at',NULL,'expires_at',current_date + ((value % 730)+1)::int,"
                 "'purchase_price','8.00','sale_price','12.50','currency','TJS','qty_initial','10.000',"
-                "'qty_remaining','10.000','is_blocked',(value % 97=0),'block_reason',NULL,"
+                "'qty_remaining',CASE WHEN value % 10=0 THEN '0.000' ELSE '10.000' END,"
+                "'is_blocked',(value % 97=0),'block_reason',NULL,"
                 "'blocked_at',NULL,'created_at',statement_timestamp(),'updated_at',statement_timestamp(),"
                 "'branch_name','Synthetic branch','catalog_name',"
                 "'Product ' || (((value-1) % CAST(:catalog_rows AS integer))+1),"
@@ -354,9 +362,29 @@ async def seed(env: Connections, *, catalog_rows: int, inventory_rows: int) -> t
                 "inventory_rows": inventory_rows,
             },
         )
+        await db.execute(
+            text(
+                "INSERT INTO sync_read_inventory_rollup "
+                "(snapshot_id,tenant_id,branch_id,node_id,has_stock,expires_at,batch_count,"
+                "total_qty,purchase_value,sale_value,blocked_count) "
+                "SELECT snapshot_id,tenant_id,branch_id,node_id,qty_remaining>0,expires_at,"
+                "count(*),sum(qty_remaining),sum(qty_remaining*purchase_price),"
+                "sum(qty_remaining*sale_price),count(*) FILTER (WHERE is_blocked) "
+                "FROM sync_read_inventory_projection WHERE snapshot_id=:snapshot_id "
+                "GROUP BY snapshot_id,tenant_id,branch_id,node_id,qty_remaining>0,expires_at"
+            ),
+            {"snapshot_id": SNAPSHOT_ID},
+        )
+    async with session(
+        env.app,
+        tenant_id=TENANT_ID,
+        branch_id=BRANCH_ID,
+        node_id=node_id,
+    ) as db:
         await db.execute(text("ANALYZE sync_read_catalog_projection"))
         await db.execute(text("ANALYZE sync_read_barcode_projection"))
         await db.execute(text("ANALYZE sync_read_inventory_projection"))
+        await db.execute(text("ANALYZE sync_read_inventory_rollup"))
     return time.perf_counter() - started, node_id
 
 
@@ -388,6 +416,8 @@ async def visible_projection_rows(
                 "(SELECT count(*) FROM sync_read_barcode_projection "
                 " WHERE snapshot_id=:snapshot_id) + "
                 "(SELECT count(*) FROM sync_read_inventory_projection "
+                " WHERE snapshot_id=:snapshot_id) + "
+                "(SELECT count(*) FROM sync_read_inventory_rollup "
                 " WHERE snapshot_id=:snapshot_id)"
             ),
             {"snapshot_id": SNAPSHOT_ID},
@@ -404,7 +434,7 @@ async def verify_negative_rls(
         branch_id=BRANCH_ID,
         node_id=node_id,
     )
-    require(visible == 1 + (catalog_rows * 2) + inventory_rows, 15)
+    require(visible == 1 + (catalog_rows * 2) + inventory_rows + min(inventory_rows, 730), 15)
     scopes = negative_rls_scopes(node_id)
     for tenant_id, branch_id, scoped_node_id in scopes:
         hidden = await visible_projection_rows(
@@ -487,7 +517,58 @@ async def measure(
     return values[0], values[1:]
 
 
-async def benchmark(env: Connections, *, repetitions: int, node_id: UUID) -> dict[str, object]:
+async def probe_reused_connection(
+    env: Connections,
+    *,
+    node_id: UUID,
+) -> dict[str, object]:
+    from app.domains.sync.repository import SyncEdgeRepository
+
+    async with session(
+        env.app,
+        tenant_id=TENANT_ID,
+        branch_id=BRANCH_ID,
+        node_id=node_id,
+        readonly=True,
+    ) as reused_db:
+        repository = SyncEdgeRepository(reused_db)
+        diagnostic_today = datetime.now(UTC).date()
+
+        def inventory_call(show_empty: bool) -> Awaitable[object]:
+            return repository.list_read_inventory_projection(
+                snapshot_id=SNAPSHOT_ID,
+                show_empty=show_empty,
+                offset=0,
+                limit=20,
+                today=diagnostic_today,
+                orange_until=diagnostic_today + timedelta(days=90),
+            )
+
+        metrics: dict[str, object] = {}
+        for show_empty in (False, True):
+            suffix = "all" if show_empty else "available"
+            call = partial(inventory_call, show_empty)
+            default_ms, _ = await measure(call, 0)
+            await reused_db.execute(text("SET LOCAL plan_cache_mode = 'force_custom_plan'"))
+            custom_ms, _ = await measure(call, 0)
+            await reused_db.execute(text("SET LOCAL plan_cache_mode = 'auto'"))
+            auto_after_ms, _ = await measure(call, 0)
+            metrics[suffix] = {
+                "default_ms": round(default_ms, 3),
+                "force_custom_ms": round(custom_ms, 3),
+                "auto_after_ms": round(auto_after_ms, 3),
+            }
+    return metrics
+
+
+async def benchmark(
+    env: Connections,
+    *,
+    repetitions: int,
+    node_id: UUID,
+    catalog_rows: int,
+    inventory_rows: int,
+) -> dict[str, object]:
     os.environ["EDGE_SYNC_CREDENTIAL"] = CREDENTIAL
     os.environ["EDGE_READ_SNAPSHOT_STALE_SECONDS"] = "86400"
     os.environ.setdefault("JWT_SECRET", "b" * 64)
@@ -495,6 +576,11 @@ async def benchmark(env: Connections, *, repetitions: int, node_id: UUID) -> dic
     from app.domains.sync.read_model import LocalReadModel
     from app.domains.sync.repository import SyncEdgeRepository
 
+    stabilization_started = time.perf_counter()
+    await asyncio.sleep(STABILIZATION_IDLE_SECONDS)
+    stabilization_seconds = time.perf_counter() - stabilization_started
+    reused_connection_probe = await probe_reused_connection(env, node_id=node_id)
+    await env.app.dispose()
     foundation = foundation_payload()
     async with session(
         env.app,
@@ -507,6 +593,65 @@ async def benchmark(env: Connections, *, repetitions: int, node_id: UUID) -> dic
             cast(SyncEdgeRepository, BenchmarkRepository(db, foundation)),
             source_verifier=skip_source_verification_for_microbenchmark,
         )
+        expected_catalog_id = UUID(
+            hashlib.md5(f"catalog-{catalog_rows}".encode(), usedforsecurity=False).hexdigest()
+        )
+        catalog_result = await service.catalog(
+            tenant_id=TENANT_ID,
+            branch_id=BRANCH_ID,
+            query=TARGET_QUERY,
+            page=1,
+            page_size=20,
+        )
+        require(
+            catalog_result.total == 1
+            and len(catalog_result.items) == 1
+            and catalog_result.items[0].id == expected_catalog_id,
+            40,
+        )
+        barcode_result = await service.catalog_details(
+            tenant_id=TENANT_ID,
+            branch_id=BRANCH_ID,
+            barcode=TARGET_BARCODE,
+        )
+        require(barcode_result.item.id == expected_catalog_id, 41)
+
+        expected_available = inventory_rows - (inventory_rows // 10)
+        expected_qty = Decimal(expected_available * 10)
+        expected_purchase_value = Decimal(expected_available * 80)
+        expected_sale_value = Decimal(expected_available * 125)
+        inventory_result = await service.inventory(
+            tenant_id=TENANT_ID,
+            branch_id=BRANCH_ID,
+            can_view_costs=True,
+            show_empty=False,
+            page=1,
+            page_size=20,
+        )
+        require(inventory_result.total == expected_available, 42)
+        require(len(inventory_result.items) == min(20, expected_available), 43)
+        require(inventory_result.summary.total_qty == expected_qty, 44)
+        require(inventory_result.summary.purchase_value == expected_purchase_value, 45)
+        require(inventory_result.summary.sale_value == expected_sale_value, 46)
+        require(
+            inventory_result.summary.blocked_count
+            == (inventory_rows // 97) - (inventory_rows // 970),
+            47,
+        )
+        inventory_all_result = await service.inventory(
+            tenant_id=TENANT_ID,
+            branch_id=BRANCH_ID,
+            can_view_costs=True,
+            show_empty=True,
+            page=1,
+            page_size=20,
+        )
+        require(inventory_all_result.total == inventory_rows, 48)
+        require(len(inventory_all_result.items) == min(20, inventory_rows), 49)
+        require(inventory_all_result.summary.total_qty == expected_qty, 50)
+        require(inventory_all_result.summary.purchase_value == expected_purchase_value, 51)
+        require(inventory_all_result.summary.sale_value == expected_sale_value, 52)
+        require(inventory_all_result.summary.blocked_count == inventory_rows // 97, 53)
         catalog_cold, catalog_warm = await measure(
             lambda: service.catalog(
                 tenant_id=TENANT_ID,
@@ -536,13 +681,33 @@ async def benchmark(env: Connections, *, repetitions: int, node_id: UUID) -> dic
             ),
             repetitions,
         )
+        inventory_all_cold, inventory_all_warm = await measure(
+            lambda: service.inventory(
+                tenant_id=TENANT_ID,
+                branch_id=BRANCH_ID,
+                can_view_costs=True,
+                show_empty=True,
+                page=1,
+                page_size=20,
+            ),
+            repetitions,
+        )
     metrics: dict[str, object] = {
         "catalog_search": {"first_query_ms": round(catalog_cold, 3), **summarize(catalog_warm)},
         "exact_barcode": {"first_query_ms": round(barcode_cold, 3), **summarize(barcode_warm)},
         "inventory": {"first_query_ms": round(inventory_cold, 3), **summarize(inventory_warm)},
+        "inventory_with_empty": {
+            "first_query_ms": round(inventory_all_cold, 3),
+            **summarize(inventory_all_warm),
+        },
     }
     return {
         "metrics": metrics,
+        "stabilization": {
+            "idle_seconds": STABILIZATION_IDLE_SECONDS,
+            "actual_seconds": round(stabilization_seconds, 3),
+            "reused_connection_probe_ms": reused_connection_probe,
+        },
         **benchmark_claims(),
     }
 
@@ -564,7 +729,13 @@ async def run(args: argparse.Namespace) -> None:
             catalog_rows=args.catalog_rows,
             inventory_rows=args.inventory_rows,
         )
-        result = await benchmark(env, repetitions=args.repetitions, node_id=node_id)
+        result = await benchmark(
+            env,
+            repetitions=args.repetitions,
+            node_id=node_id,
+            catalog_rows=args.catalog_rows,
+            inventory_rows=args.inventory_rows,
+        )
         print(
             json.dumps(
                 {
