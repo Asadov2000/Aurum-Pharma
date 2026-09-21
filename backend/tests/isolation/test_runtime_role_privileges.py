@@ -70,6 +70,7 @@ APPEND_ONLY_TABLES = {
     "sync_read_barcode_projection",
     "sync_read_catalog_projection",
     "sync_read_inventory_projection",
+    "sync_read_inventory_rollup",
     "sync_read_supplier_projection",
     "write_off",
 }
@@ -195,12 +196,15 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "search_sync_read_catalog",
     "trg_audit_sync_read_snapshot_storage",
     "trg_guard_sync_read_snapshot",
     "trg_guard_sync_read_snapshot_cursor",
     "trg_guard_sync_read_snapshot_storage",
     "trg_guard_sync_read_projection_header",
     "trg_guard_sync_read_projection_rows",
+    "trg_guard_sync_read_inventory_rollup_ready",
+    "trg_audit_sync_read_inventory_rollup",
     "trg_set_sync_read_projection_search_text",
     "confirm_bootstrap_email",
     "lookup_identity_password",
@@ -498,6 +502,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "search_sync_read_catalog",
     "confirm_bootstrap_email",
     "lookup_auth_session_password",
     "accept_platform_staff_invitation",

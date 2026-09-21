@@ -104,6 +104,7 @@ def test_fixture_scope_and_target_are_deterministic() -> None:
     assert isinstance(branch, dict) and branch["id"] == str(benchmark.BRANCH_ID)
     assert benchmark.TARGET_QUERY in "Product targetterm"
     assert len(benchmark.TARGET_BARCODE) == 13
+    assert benchmark.STABILIZATION_IDLE_SECONDS == 30
 
 
 def test_negative_rls_scopes_change_one_coordinate_at_a_time() -> None:

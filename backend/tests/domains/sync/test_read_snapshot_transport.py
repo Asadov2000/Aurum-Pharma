@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -26,6 +27,7 @@ from app.domains.sync.credentials import EdgeCredential
 from app.domains.sync.read_model import LocalReadModel
 from app.domains.sync.read_snapshot import ReadSnapshotScope, build_manifest, verify_chunk
 from app.domains.sync.read_snapshot_projection import (
+    BarcodeSnapshot,
     IndexedReadProjection,
     build_component_chunks,
 )
@@ -78,15 +80,57 @@ def _projection(*, tenant_id: UUID, branch_id: UUID) -> IndexedReadProjection:
             "branch": base.branch.model_copy(update={"id": branch_id, "tenant_id": tenant_id}),
         }
     )
-    product = _product(tenant_id=tenant_id).model_copy(update={"manufacturer": "Straße"})
+    product = _product(tenant_id=tenant_id).model_copy(
+        update={"brand_name": "Парацетамол 1234", "manufacturer": "Straße"}
+    )
+    literal_product = product.model_copy(
+        update={
+            "id": UUID("20000000-0000-0000-0000-000000000012"),
+            "brand_name": "Literal 100%_\\safe",
+            "inn": "literal",
+            "manufacturer": "Aurum",
+            "barcodes": (
+                BarcodeSnapshot(
+                    id=UUID("20000000-0000-0000-0000-000000000013"),
+                    code="87654321",
+                    code_type="ean8",
+                ),
+            ),
+        }
+    )
+    wildcard_product = product.model_copy(
+        update={
+            "id": UUID("20000000-0000-0000-0000-000000000014"),
+            "brand_name": "Literal 100ABCsafe",
+            "inn": "wildcard",
+            "manufacturer": "Aurum",
+            "barcodes": (
+                BarcodeSnapshot(
+                    id=UUID("20000000-0000-0000-0000-000000000015"),
+                    code="11223344",
+                    code_type="ean8",
+                ),
+            ),
+        }
+    )
     batch = _batch().model_copy(
         update={"tenant_id": tenant_id, "branch_id": branch_id, "catalog_id": product.id}
     )
+    empty_batch = batch.model_copy(
+        update={
+            "id": UUID("20000000-0000-0000-0000-000000000021"),
+            "batch_number": "LOT-EMPTY",
+            "expires_at": date.today() - timedelta(days=1),
+            "qty_remaining": Decimal("0"),
+            "is_blocked": True,
+            "block_reason": "expired",
+        }
+    )
     return IndexedReadProjection(
         foundation=foundation,
-        catalog=(product,),
+        catalog=(product, literal_product, wildcard_product),
         suppliers=(),
-        inventory=(batch,),
+        inventory=(batch, empty_batch),
     )
 
 
@@ -116,6 +160,174 @@ async def _assert_verified_local_read_model(
     )
     assert foundation.metadata.snapshot_id == snapshot_id
     assert catalog.total == 1
+
+
+async def _assert_catalog_projection_search(
+    *,
+    repo: SyncEdgeRepository,
+    snapshot_id: UUID,
+    product_id: UUID,
+    literal_product_id: UUID,
+) -> None:
+    catalog_rows, catalog_total = await repo.list_read_catalog_projection(
+        snapshot_id=snapshot_id,
+        query="пара",
+        offset=0,
+        limit=20,
+    )
+    assert catalog_total == 1
+    assert catalog_rows[0].catalog_id == product_id
+
+    barcode_rows, barcode_total = await repo.list_read_catalog_projection(
+        snapshot_id=snapshot_id,
+        query="3456",
+        offset=0,
+        limit=20,
+    )
+    assert barcode_total == 1
+    assert barcode_rows[0].catalog_id == product_id
+
+    duplicate_rows, duplicate_total = await repo.list_read_catalog_projection(
+        snapshot_id=snapshot_id,
+        query="1234",
+        offset=0,
+        limit=20,
+    )
+    assert duplicate_total == 1
+    assert duplicate_rows[0].catalog_id == product_id
+
+    literal_rows, literal_total = await repo.list_read_catalog_projection(
+        snapshot_id=snapshot_id,
+        query="100%_\\safe",
+        offset=0,
+        limit=20,
+    )
+    assert literal_total == 1
+    assert literal_rows[0].catalog_id == literal_product_id
+
+    page_rows, page_total = await repo.list_read_catalog_projection(
+        snapshot_id=snapshot_id,
+        query=None,
+        offset=1,
+        limit=1,
+    )
+    assert page_total == 3
+    assert len(page_rows) == 1
+
+
+async def _assert_catalog_search_rejects_cross_scope(
+    *,
+    connection: AsyncConnection,
+    snapshot_id: UUID,
+    tenant_id: UUID,
+    branch_id: UUID,
+    node_id: UUID,
+) -> None:
+    foreign_id = uuid4()
+    for scoped_tenant, scoped_branch, scoped_node in (
+        (foreign_id, branch_id, node_id),
+        (tenant_id, foreign_id, node_id),
+        (tenant_id, branch_id, foreign_id),
+    ):
+        await _set_edge_scope(
+            connection,
+            tenant_id=scoped_tenant,
+            branch_id=scoped_branch,
+            node_id=scoped_node,
+        )
+        leaked = await connection.scalar(
+            text("SELECT count(*) FROM public.search_sync_read_catalog(" ":snapshot_id, 'пара')"),
+            {"snapshot_id": snapshot_id},
+        )
+        assert leaked == 0
+    await _set_edge_scope(
+        connection,
+        tenant_id=tenant_id,
+        branch_id=branch_id,
+        node_id=node_id,
+    )
+
+
+async def _assert_catalog_projection_access(
+    *,
+    repo: SyncEdgeRepository,
+    connection: AsyncConnection,
+    snapshot_id: UUID,
+    product_id: UUID,
+    literal_product_id: UUID,
+    tenant_id: UUID,
+    branch_id: UUID,
+    node_id: UUID,
+) -> None:
+    await _set_edge_scope(
+        connection,
+        tenant_id=tenant_id,
+        branch_id=branch_id,
+        node_id=node_id,
+    )
+    await _assert_catalog_projection_search(
+        repo=repo,
+        snapshot_id=snapshot_id,
+        product_id=product_id,
+        literal_product_id=literal_product_id,
+    )
+    await _assert_catalog_search_rejects_cross_scope(
+        connection=connection,
+        snapshot_id=snapshot_id,
+        tenant_id=tenant_id,
+        branch_id=branch_id,
+        node_id=node_id,
+    )
+
+
+async def _assert_inventory_rollup(
+    *, repo: SyncEdgeRepository, connection: AsyncConnection, snapshot_id: UUID
+) -> None:
+    available, available_total, available_summary = await repo.list_read_inventory_projection(
+        snapshot_id=snapshot_id,
+        show_empty=False,
+        offset=0,
+        limit=20,
+        today=date.today(),
+        orange_until=date.today() + timedelta(days=90),
+    )
+    all_batches, all_total, all_summary = await repo.list_read_inventory_projection(
+        snapshot_id=snapshot_id,
+        show_empty=True,
+        offset=0,
+        limit=20,
+        today=date.today(),
+        orange_until=date.today() + timedelta(days=90),
+    )
+    assert len(available) == available_total == 1
+    assert available_summary.total_qty == Decimal("8")
+    assert available_summary.attention_count == 0
+    assert len(all_batches) == all_total == 2
+    assert all_summary.total_qty == Decimal("8")
+    assert all_summary.purchase_value == Decimal("24")
+    assert all_summary.sale_value == Decimal("40")
+    assert all_summary.attention_count == 1
+    assert all_summary.expired_count == 1
+    assert all_summary.blocked_count == 1
+    audit_values = (
+        (
+            await connection.execute(
+                text(
+                    "SELECT new_values FROM audit_log "
+                    "WHERE table_name = 'sync_read_inventory_rollup' "
+                    "AND record_id = :snapshot_id"
+                ),
+                {"snapshot_id": snapshot_id},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert audit_values
+    assert all(
+        "total_qty" not in values and "purchase_value" not in values and "sale_value" not in values
+        for values in audit_values
+    )
 
 
 async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
@@ -182,6 +394,7 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
 
     projection = _projection(tenant_id=tenant_id, branch_id=branch_id)
     product = projection.catalog[0]
+    literal_product = projection.catalog[1]
     component_chunks = build_component_chunks(
         foundation=projection.foundation,
         catalog=projection.catalog,
@@ -260,15 +473,22 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
                 branch_id=branch_id,
                 credential_kid=credential_kid,
             )
-            catalog_rows, catalog_total = await repo.list_read_catalog_projection(
-                snapshot_id=envelope.manifest.snapshot_id,
-                query="пара",
-                offset=0,
-                limit=20,
-            )
             assert active_projection is not None
-            assert catalog_total == 1
-            assert catalog_rows[0].catalog_id == product.id
+            await _assert_catalog_projection_access(
+                repo=repo,
+                connection=connection,
+                snapshot_id=envelope.manifest.snapshot_id,
+                product_id=product.id,
+                literal_product_id=literal_product.id,
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                node_id=edge_node_id,
+            )
+            await _assert_inventory_rollup(
+                repo=repo,
+                connection=connection,
+                snapshot_id=envelope.manifest.snapshot_id,
+            )
             await _assert_verified_local_read_model(
                 repo=repo,
                 tenant_id=tenant_id,

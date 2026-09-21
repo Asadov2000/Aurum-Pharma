@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Literal, cast
 from uuid import UUID
 
-from sqlalchemy import exists, func, insert, or_, select, text, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,7 @@ from app.domains.sync.models import (
     SyncReadBarcodeProjection,
     SyncReadCatalogProjection,
     SyncReadInventoryProjection,
+    SyncReadInventoryRollup,
     SyncReadProjection,
     SyncReadSnapshot,
     SyncReadSnapshotChunk,
@@ -1762,23 +1763,25 @@ class SyncEdgeRepository:
     ) -> tuple[list[SyncReadCatalogProjection], int]:
         filters = [SyncReadCatalogProjection.snapshot_id == snapshot_id]
         if query:
-            pattern = _substring_pattern(query)
-            barcode_match = exists(
-                select(SyncReadBarcodeProjection.barcode_id).where(
-                    SyncReadBarcodeProjection.snapshot_id == snapshot_id,
-                    SyncReadBarcodeProjection.catalog_id == SyncReadCatalogProjection.catalog_id,
-                    SyncReadBarcodeProjection.code.ilike(pattern, escape="\\"),
-                )
+            matched_catalog = func.search_sync_read_catalog(snapshot_id, query).table_valued(
+                "catalog_id"
             )
-            filters.append(
-                or_(
-                    SyncReadCatalogProjection.search_text.ilike(pattern, escape="\\"),
-                    barcode_match,
-                )
+            total = await self.session.scalar(select(func.count()).select_from(matched_catalog))
+            matched_ids = await self.session.scalars(
+                select(matched_catalog.c.catalog_id)
+                .order_by(matched_catalog.c.catalog_id)
+                .offset(offset)
+                .limit(limit)
             )
-        total = await self.session.scalar(
-            select(func.count()).select_from(SyncReadCatalogProjection).where(*filters)
-        )
+            catalog_ids = list(matched_ids.all())
+            if not catalog_ids:
+                return [], int(total or 0)
+            filters.append(SyncReadCatalogProjection.catalog_id.in_(catalog_ids))
+            offset = 0
+        else:
+            total = await self.session.scalar(
+                select(func.count()).select_from(SyncReadCatalogProjection).where(*filters)
+            )
         rows = await self.session.scalars(
             select(SyncReadCatalogProjection)
             .where(*filters)
@@ -1857,31 +1860,30 @@ class SyncEdgeRepository:
         filters = [SyncReadInventoryProjection.snapshot_id == snapshot_id]
         if not show_empty:
             filters.append(SyncReadInventoryProjection.qty_remaining > 0)
-        total = await self.session.scalar(
-            select(func.count()).select_from(SyncReadInventoryProjection).where(*filters)
-        )
+        rollup_filters = [SyncReadInventoryRollup.snapshot_id == snapshot_id]
+        if not show_empty:
+            rollup_filters.append(SyncReadInventoryRollup.has_stock.is_(True))
         summary = (
             await self.session.execute(
                 select(
-                    func.coalesce(func.sum(SyncReadInventoryProjection.qty_remaining), 0),
+                    func.coalesce(func.sum(SyncReadInventoryRollup.batch_count), 0),
+                    func.coalesce(func.sum(SyncReadInventoryRollup.total_qty), 0),
+                    func.coalesce(func.sum(SyncReadInventoryRollup.purchase_value), 0),
+                    func.coalesce(func.sum(SyncReadInventoryRollup.sale_value), 0),
                     func.coalesce(
-                        func.sum(
-                            SyncReadInventoryProjection.qty_remaining
-                            * SyncReadInventoryProjection.purchase_price
+                        func.sum(SyncReadInventoryRollup.batch_count).filter(
+                            SyncReadInventoryRollup.expires_at <= orange_until
                         ),
                         0,
                     ),
                     func.coalesce(
-                        func.sum(
-                            SyncReadInventoryProjection.qty_remaining
-                            * SyncReadInventoryProjection.sale_price
+                        func.sum(SyncReadInventoryRollup.batch_count).filter(
+                            SyncReadInventoryRollup.expires_at < today
                         ),
                         0,
                     ),
-                    func.count().filter(SyncReadInventoryProjection.expires_at <= orange_until),
-                    func.count().filter(SyncReadInventoryProjection.expires_at < today),
-                    func.count().filter(SyncReadInventoryProjection.is_blocked.is_(True)),
-                ).where(*filters)
+                    func.coalesce(func.sum(SyncReadInventoryRollup.blocked_count), 0),
+                ).where(*rollup_filters)
             )
         ).one()
         rows = await self.session.scalars(
@@ -1893,14 +1895,14 @@ class SyncEdgeRepository:
         )
         return (
             list(rows.all()),
-            int(total or 0),
+            int(summary[0]),
             InventoryProjectionSummary(
-                total_qty=Decimal(summary[0]),
-                purchase_value=Decimal(summary[1]),
-                sale_value=Decimal(summary[2]),
-                attention_count=int(summary[3]),
-                expired_count=int(summary[4]),
-                blocked_count=int(summary[5]),
+                total_qty=Decimal(summary[1]),
+                purchase_value=Decimal(summary[2]),
+                sale_value=Decimal(summary[3]),
+                attention_count=int(summary[4]),
+                expired_count=int(summary[5]),
+                blocked_count=int(summary[6]),
             ),
         )
 
@@ -2058,6 +2060,52 @@ class SyncEdgeRepository:
                     }
                     for row in projection.inventory
                 ],
+            )
+            has_stock = SyncReadInventoryProjection.qty_remaining > 0
+            await self.session.execute(
+                insert(SyncReadInventoryRollup).from_select(
+                    [
+                        "snapshot_id",
+                        "tenant_id",
+                        "branch_id",
+                        "node_id",
+                        "has_stock",
+                        "expires_at",
+                        "batch_count",
+                        "total_qty",
+                        "purchase_value",
+                        "sale_value",
+                        "blocked_count",
+                    ],
+                    select(
+                        SyncReadInventoryProjection.snapshot_id,
+                        SyncReadInventoryProjection.tenant_id,
+                        SyncReadInventoryProjection.branch_id,
+                        SyncReadInventoryProjection.node_id,
+                        has_stock,
+                        SyncReadInventoryProjection.expires_at,
+                        func.count(),
+                        func.sum(SyncReadInventoryProjection.qty_remaining),
+                        func.sum(
+                            SyncReadInventoryProjection.qty_remaining
+                            * SyncReadInventoryProjection.purchase_price
+                        ),
+                        func.sum(
+                            SyncReadInventoryProjection.qty_remaining
+                            * SyncReadInventoryProjection.sale_price
+                        ),
+                        func.count().filter(SyncReadInventoryProjection.is_blocked.is_(True)),
+                    )
+                    .where(SyncReadInventoryProjection.snapshot_id == manifest.snapshot_id)
+                    .group_by(
+                        SyncReadInventoryProjection.snapshot_id,
+                        SyncReadInventoryProjection.tenant_id,
+                        SyncReadInventoryProjection.branch_id,
+                        SyncReadInventoryProjection.node_id,
+                        has_stock,
+                        SyncReadInventoryProjection.expires_at,
+                    ),
+                )
             )
         await self.session.execute(
             update(SyncReadProjection)

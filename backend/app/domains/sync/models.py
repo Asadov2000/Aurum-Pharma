@@ -1002,6 +1002,49 @@ class SyncReadInventoryProjection(Base):
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
+class SyncReadInventoryRollup(Base):
+    __tablename__ = "sync_read_inventory_rollup"
+    __table_args__ = (
+        CheckConstraint("batch_count > 0", name="ck_sync_read_inventory_rollup_batch_count"),
+        CheckConstraint("blocked_count >= 0", name="ck_sync_read_inventory_rollup_blocked_count"),
+        CheckConstraint(
+            "blocked_count <= batch_count",
+            name="ck_sync_read_inventory_rollup_blocked_within_total",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "tenant_id", "branch_id", "node_id"],
+            [
+                "sync_read_projection.snapshot_id",
+                "sync_read_projection.tenant_id",
+                "sync_read_projection.branch_id",
+                "sync_read_projection.node_id",
+            ],
+            name="fk_sync_read_inventory_rollup_header",
+            ondelete="RESTRICT",
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    has_stock: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    expires_at: Mapped[date] = mapped_column(Date, primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    batch_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    total_qty: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False)
+    purchase_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    sale_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    blocked_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
 class SyncWriterEpoch(Base):
     __tablename__ = "sync_writer_epoch"
 
