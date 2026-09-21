@@ -14,10 +14,15 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 from app.domains.sync.models import (
+    SyncReadBarcodeProjection,
+    SyncReadCatalogProjection,
+    SyncReadInventoryProjection,
+    SyncReadProjection,
     SyncReadSnapshot,
     SyncReadSnapshotChunk,
     SyncReadSnapshotComponent,
     SyncReadSnapshotCursor,
+    SyncReadSupplierProjection,
 )
 
 SNAPSHOT_TABLES = {
@@ -25,6 +30,11 @@ SNAPSHOT_TABLES = {
     "sync_read_snapshot_component",
     "sync_read_snapshot_chunk",
     "sync_read_snapshot_cursor",
+    "sync_read_projection",
+    "sync_read_catalog_projection",
+    "sync_read_barcode_projection",
+    "sync_read_supplier_projection",
+    "sync_read_inventory_projection",
 }
 
 
@@ -70,6 +80,11 @@ def test_read_snapshot_model_metadata_matches_storage_contract() -> None:
         SyncReadSnapshotComponent.__tablename__,
         SyncReadSnapshotChunk.__tablename__,
         SyncReadSnapshotCursor.__tablename__,
+        SyncReadProjection.__tablename__,
+        SyncReadCatalogProjection.__tablename__,
+        SyncReadBarcodeProjection.__tablename__,
+        SyncReadSupplierProjection.__tablename__,
+        SyncReadInventoryProjection.__tablename__,
     } == SNAPSHOT_TABLES
     assert {
         "source_revision",
@@ -131,6 +146,26 @@ async def test_read_snapshot_tables_force_rls_and_limit_runtime_writes(
                 {"tables": sorted(SNAPSHOT_TABLES)},
             )
         ).mappings()
+        constraints = set(
+            (
+                await connection.execute(
+                    text("""
+                        SELECT conname
+                        FROM pg_catalog.pg_constraint
+                        WHERE connamespace = 'public'::regnamespace
+                          AND conname = ANY(:constraints)
+                        """),
+                    {
+                        "constraints": [
+                            "ck_sync_read_projection_foundation_scope",
+                            "ck_sync_read_catalog_projection_payload",
+                            "ck_sync_read_supplier_projection_payload",
+                            "ck_sync_read_inventory_projection_payload",
+                        ]
+                    },
+                )
+            ).scalars()
+        )
 
     assert {row["relname"] for row in relations} == SNAPSHOT_TABLES
     assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in relations)
@@ -152,7 +187,17 @@ async def test_read_snapshot_tables_force_rls_and_limit_runtime_writes(
     assert not privilege_by_table["sync_read_snapshot_chunk"]["can_update"]
     assert privilege_by_table["sync_read_snapshot_cursor"]["can_insert"]
     assert privilege_by_table["sync_read_snapshot_cursor"]["can_update"]
+    assert privilege_by_table["sync_read_projection"]["can_insert"]
+    assert privilege_by_table["sync_read_projection"]["can_update"]
+    assert privilege_by_table["sync_read_catalog_projection"]["can_insert"]
+    assert not privilege_by_table["sync_read_catalog_projection"]["can_update"]
     assert all(not row["can_delete"] for row in privileges)
+    assert constraints == {
+        "ck_sync_read_projection_foundation_scope",
+        "ck_sync_read_catalog_projection_payload",
+        "ck_sync_read_supplier_projection_payload",
+        "ck_sync_read_inventory_projection_payload",
+    }
 
 
 async def test_edge_runtime_installs_own_snapshot_and_cannot_write_another_node(
@@ -253,6 +298,7 @@ async def test_edge_runtime_installs_own_snapshot_and_cannot_write_another_node(
                     "node_id": node_ids[0],
                     "component": component,
                     "hash": str(index) * 64,
+                    "item_count": 1 if component == "foundation" else 0,
                 }
                 await connection.execute(
                     text("""
@@ -262,7 +308,7 @@ async def test_edge_runtime_installs_own_snapshot_and_cannot_write_another_node(
                           component_hash
                         ) VALUES (
                           :snapshot_id, :component, :tenant_id, :branch_id, :node_id,
-                          1, 1, 0, 1, :hash
+                          1, 1, :item_count, 1, :hash
                         )
                         """),
                     params,
@@ -275,11 +321,57 @@ async def test_edge_runtime_installs_own_snapshot_and_cannot_write_another_node(
                           payload, payload_hash
                         ) VALUES (
                           :snapshot_id, :component, 0, :tenant_id, :branch_id,
-                          :node_id, 1, 1, 0, '{"items": []}'::jsonb, :hash
+                          :node_id, 1, 1, :item_count,
+                          CASE WHEN :component = 'foundation' THEN
+                            jsonb_build_object('items', jsonb_build_array(
+                              jsonb_build_object(
+                                'record_type', 'foundation',
+                                'tenant', jsonb_build_object(
+                                  'id', to_jsonb(CAST(:tenant_id AS UUID))
+                                ),
+                                'branch', jsonb_build_object(
+                                  'id', to_jsonb(CAST(:branch_id AS UUID))
+                                )
+                              )
+                            ))
+                          ELSE '{"items": []}'::jsonb END,
+                          :hash
                         )
                         """),
                     params,
                 )
+            await connection.execute(
+                text("""
+                    INSERT INTO sync_read_projection (
+                      snapshot_id, tenant_id, branch_id, node_id, source_revision,
+                      foundation_payload, catalog_count, supplier_count, inventory_count
+                    ) VALUES (
+                      :snapshot_id, :tenant_id, :branch_id, :node_id, 1,
+                      jsonb_build_object(
+                        'record_type', 'foundation',
+                        'tenant', jsonb_build_object(
+                          'id', to_jsonb(CAST(:tenant_id AS UUID))
+                        ),
+                        'branch', jsonb_build_object(
+                          'id', to_jsonb(CAST(:branch_id AS UUID))
+                        )
+                      ), 0, 0, 0
+                    )
+                    """),
+                {
+                    "snapshot_id": snapshot_id,
+                    "tenant_id": tenant_id,
+                    "branch_id": branch_id,
+                    "node_id": node_ids[0],
+                },
+            )
+            await connection.execute(
+                text(
+                    "UPDATE sync_read_projection SET status = 'ready' "
+                    "WHERE snapshot_id = :snapshot_id"
+                ),
+                {"snapshot_id": snapshot_id},
+            )
             await connection.execute(
                 text(
                     "UPDATE sync_read_snapshot SET status = 'ready' "

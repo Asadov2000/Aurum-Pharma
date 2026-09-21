@@ -1,4 +1,4 @@
-"""Local Edge read model serves only an atomically active typed snapshot."""
+"""Local Edge APIs query the atomically active indexed projection."""
 
 from __future__ import annotations
 
@@ -12,15 +12,15 @@ import pytest
 
 from app.core.errors import ServiceUnavailableError
 from app.domains.sync.credentials import EdgeCredential
+from app.domains.sync.models import SyncReadSnapshot
 from app.domains.sync.read_model import LocalReadModel
-from app.domains.sync.read_snapshot import ReadSnapshotScope, build_manifest
 from app.domains.sync.read_snapshot_projection import (
     CatalogProductRecord,
     FoundationRecord,
     InventoryBatchRecord,
-    build_component_chunks,
+    SupplierRecord,
 )
-from app.domains.sync.repository import SyncEdgeRepository
+from app.domains.sync.repository import InventoryProjectionSummary, SyncEdgeRepository
 
 TENANT_ID = UUID("20000000-0000-0000-0000-000000000001")
 BRANCH_ID = UUID("20000000-0000-0000-0000-000000000002")
@@ -29,23 +29,53 @@ NOW = datetime.now(UTC)
 CREDENTIAL = EdgeCredential(kid=UUID("20000000-0000-0000-0000-000000000099"), secret="a" * 64)
 
 
-class _FakeRepo:
-    def __init__(self, stored: object | None) -> None:
-        self.stored = stored
+def _foundation() -> FoundationRecord:
+    return FoundationRecord(
+        source_fingerprint="f" * 64,
+        tenant={
+            "id": TENANT_ID,
+            "name": "Aurum",
+            "legal_name": None,
+            "inn_or_tin": None,
+            "registration_number": None,
+            "legal_address": None,
+            "status": "active",
+            "drug_catalog_mode": "autonomous",
+            "updated_at": NOW,
+        },
+        settings={
+            "expiry_thresholds": {"yellow": 6, "orange": 3, "red": 1},
+            "expired_sale_mode": "strict",
+            "refund_reason_mode": "optional",
+            "pos_payment_methods": ("cash",),
+            "pos_mixed_payment_enabled": False,
+            "draft_sale_lifetime_min": 30,
+            "report_timezone": "Asia/Dushanbe",
+            "prescription_warning_text": "Prescription required",
+            "version": 1,
+            "updated_at": NOW,
+        },
+        branch={
+            "id": BRANCH_ID,
+            "tenant_id": TENANT_ID,
+            "name": "Center",
+            "address": None,
+            "branch_type": "pharmacy",
+            "license_number": None,
+            "license_expires_at": None,
+            "working_hours": None,
+            "receipt_header": None,
+            "is_active": True,
+            "updated_at": NOW,
+        },
+        registers=(),
+    )
 
-    async def get_active_read_snapshot(self, **_kwargs: object) -> object | None:
-        return self.stored
 
-
-def _stored_snapshot(
-    *,
-    catalog_tenant_id: UUID = TENANT_ID,
-    source_generated_at: datetime | None = None,
-    confirmed_at: datetime | None = None,
-) -> tuple[object, list[object], list[object], datetime]:
-    product = CatalogProductRecord(
+def _product(*, tenant_id: UUID = TENANT_ID) -> CatalogProductRecord:
+    return CatalogProductRecord(
         id=UUID("20000000-0000-0000-0000-000000000010"),
-        tenant_id=catalog_tenant_id,
+        tenant_id=tenant_id,
         brand_name="Парацетамол",
         inn="paracetamol",
         manufacturer="Aurum",
@@ -65,17 +95,20 @@ def _stored_snapshot(
         deleted_at=None,
         barcodes=(
             {
-                "id": "20000000-0000-0000-0000-000000000011",
+                "id": UUID("20000000-0000-0000-0000-000000000011"),
                 "code": "12345678",
                 "code_type": "ean8",
             },
         ),
     )
-    batch = InventoryBatchRecord(
+
+
+def _batch() -> InventoryBatchRecord:
+    return InventoryBatchRecord(
         id=UUID("20000000-0000-0000-0000-000000000020"),
         tenant_id=TENANT_ID,
         branch_id=BRANCH_ID,
-        catalog_id=product.id,
+        catalog_id=_product().id,
         batch_number="LOT-1",
         manufactured_at=None,
         expires_at=date.today() + timedelta(days=400),
@@ -90,105 +123,106 @@ def _stored_snapshot(
         created_at=NOW,
         updated_at=NOW,
         branch_name="Center",
-        catalog_name=product.brand_name,
-        catalog_form=product.form,
-        catalog_dosage=product.dosage,
-        catalog_pack_size=product.pack_size,
+        catalog_name="Парацетамол",
+        catalog_form="tablet",
+        catalog_dosage="500 mg",
+        catalog_pack_size="10",
     )
-    components = build_component_chunks(
-        foundation=FoundationRecord(
-            source_fingerprint="f" * 64,
-            tenant={
-                "id": TENANT_ID,
-                "name": "Aurum",
-                "legal_name": None,
-                "inn_or_tin": None,
-                "registration_number": None,
-                "legal_address": None,
-                "status": "active",
-                "drug_catalog_mode": "autonomous",
-                "updated_at": NOW,
-            },
-            settings={
-                "expiry_thresholds": {"yellow": 6, "orange": 3, "red": 1},
-                "expired_sale_mode": "strict",
-                "refund_reason_mode": "optional",
-                "pos_payment_methods": ("cash",),
-                "pos_mixed_payment_enabled": False,
-                "draft_sale_lifetime_min": 30,
-                "report_timezone": "Asia/Dushanbe",
-                "prescription_warning_text": "Prescription required",
-                "version": 1,
-                "updated_at": NOW,
-            },
-            branch={
-                "id": BRANCH_ID,
-                "tenant_id": TENANT_ID,
-                "name": "Center",
-                "address": None,
-                "branch_type": "pharmacy",
-                "license_number": None,
-                "license_expires_at": None,
-                "working_hours": None,
-                "receipt_header": None,
-                "is_active": True,
-                "updated_at": NOW,
-            },
-            registers=(),
-        ),
-        catalog=(product,),
-        suppliers=(),
-        inventory=(batch,),
-        chunk_size=50,
-    )
-    envelope, signed_chunks = build_manifest(
-        ReadSnapshotScope(
-            edge_node_id=UUID("20000000-0000-0000-0000-000000000098"),
-            tenant_id=TENANT_ID,
-            branch_id=BRANCH_ID,
-            source_revision=4,
-        ),
-        components,
-        credential_kid=CREDENTIAL.kid,
-        credential_digest=CREDENTIAL.digest,
-        source_generated_at=source_generated_at or NOW - timedelta(days=2),
-        snapshot_id=SNAPSHOT_ID,
-    )
-    manifest = envelope.manifest
-    snapshot = SimpleNamespace(
-        snapshot_id=manifest.snapshot_id,
-        node_id=manifest.edge_node_id,
-        tenant_id=manifest.tenant_id,
-        branch_id=manifest.branch_id,
-        schema_version=manifest.schema_version,
-        source_revision=manifest.source_revision,
-        source_generated_at=manifest.source_generated_at,
-        credential_kid=manifest.credential_kid,
-        snapshot_hash=manifest.snapshot_hash,
-        manifest_hash=envelope.manifest_hash,
-        signature_algorithm=envelope.signature_algorithm,
-        signature=envelope.signature,
-    )
-    component_rows = [
-        SimpleNamespace(**component.model_dump()) for component in manifest.components
-    ]
-    chunks = [
-        SimpleNamespace(
-            snapshot_id=chunk.snapshot_id,
-            node_id=chunk.edge_node_id,
-            tenant_id=chunk.tenant_id,
-            branch_id=chunk.branch_id,
-            source_revision=chunk.source_revision,
-            component=chunk.component,
-            chunk_index=chunk.chunk_index,
-            schema_version=chunk.schema_version,
-            item_count=chunk.item_count,
-            payload_hash=chunk.payload_hash,
-            payload={"items": list(chunk.payload)},
+
+
+class _FakeRepo:
+    def __init__(
+        self,
+        *,
+        active: object | None,
+        product: CatalogProductRecord | None = None,
+        batch: InventoryBatchRecord | None = None,
+    ) -> None:
+        self.active = active
+        self.product = product or _product()
+        self.batch = batch or _batch()
+
+    async def get_active_read_projection(self, **_kwargs: object) -> object | None:
+        return self.active
+
+    async def list_read_catalog_projection(self, **_kwargs: object) -> tuple[list[object], int]:
+        return [SimpleNamespace(payload=self.product.model_dump(mode="json"))], 1
+
+    async def get_read_catalog_projection(self, **_kwargs: object) -> tuple[object, list[object]]:
+        barcode = self.product.barcodes[0]
+        return (
+            SimpleNamespace(payload=self.product.model_dump(mode="json")),
+            [
+                SimpleNamespace(
+                    barcode_id=barcode.id,
+                    code=barcode.code,
+                    code_type=barcode.code_type,
+                )
+            ],
         )
-        for chunk in signed_chunks
-    ]
-    return snapshot, component_rows, chunks, confirmed_at or manifest.source_generated_at
+
+    async def list_read_supplier_projection(self, **_kwargs: object) -> tuple[list[object], int]:
+        supplier = SupplierRecord(
+            id=UUID("20000000-0000-0000-0000-000000000030"),
+            tenant_id=TENANT_ID,
+            name="Aurum Supplier",
+            legal_name=None,
+            inn_or_tin=None,
+            contact_person=None,
+            phone=None,
+            email=None,
+            address=None,
+            notes=None,
+            is_active=True,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        return [SimpleNamespace(payload=supplier.model_dump(mode="json"))], 1
+
+    async def list_read_inventory_projection(
+        self, **_kwargs: object
+    ) -> tuple[list[object], int, InventoryProjectionSummary]:
+        return (
+            [SimpleNamespace(payload=self.batch.model_dump(mode="json"))],
+            1,
+            InventoryProjectionSummary(
+                total_qty=Decimal("8"),
+                purchase_value=Decimal("24"),
+                sale_value=Decimal("40"),
+                attention_count=0,
+                expired_count=0,
+                blocked_count=0,
+            ),
+        )
+
+
+def _active(
+    *,
+    source_generated_at: datetime | None = None,
+    confirmed_at: datetime | None = None,
+    foundation_payload: dict[str, object] | None = None,
+) -> tuple[object, object, datetime]:
+    snapshot = SimpleNamespace(
+        snapshot_id=SNAPSHOT_ID,
+        signature="1" * 64,
+        source_revision=4,
+        source_generated_at=source_generated_at or NOW - timedelta(days=2),
+    )
+    projection = SimpleNamespace(
+        foundation_payload=foundation_payload or _foundation().model_dump(mode="json")
+    )
+    return snapshot, projection, confirmed_at or NOW - timedelta(days=2)
+
+
+async def _trust_source(_snapshot: SyncReadSnapshot, _credential: str) -> None:
+    return None
+
+
+def _service(repo: _FakeRepo) -> LocalReadModel:
+    return LocalReadModel(
+        cast(SyncEdgeRepository, repo),
+        source_verifier=_trust_source,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -202,15 +236,10 @@ def _edge_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_catalog_barcode_and_inventory_use_local_snapshot_with_freshness() -> None:
-    service = LocalReadModel(cast(SyncEdgeRepository, _FakeRepo(_stored_snapshot())))
-
+async def test_catalog_barcode_and_inventory_use_indexed_projection_with_freshness() -> None:
+    service = _service(_FakeRepo(active=_active()))
     catalog = await service.catalog(
-        tenant_id=TENANT_ID,
-        branch_id=BRANCH_ID,
-        query="пара",
-        page=1,
-        page_size=20,
+        tenant_id=TENANT_ID, branch_id=BRANCH_ID, query="пара", page=1, page_size=20
     )
     details = await service.catalog_details(
         tenant_id=TENANT_ID, branch_id=BRANCH_ID, barcode="12345678"
@@ -223,7 +252,6 @@ async def test_catalog_barcode_and_inventory_use_local_snapshot_with_freshness()
         page=1,
         page_size=20,
     )
-
     assert catalog.metadata.is_stale is True
     assert catalog.items[0].brand_name == "Парацетамол"
     assert details.item.barcodes[0].code == "12345678"
@@ -233,83 +261,46 @@ async def test_catalog_barcode_and_inventory_use_local_snapshot_with_freshness()
 
 
 @pytest.mark.asyncio
-async def test_missing_active_snapshot_is_explicitly_unavailable() -> None:
-    service = LocalReadModel(cast(SyncEdgeRepository, _FakeRepo(None)))
-
+async def test_missing_active_projection_is_explicitly_unavailable() -> None:
+    service = _service(_FakeRepo(active=None))
     with pytest.raises(ServiceUnavailableError, match="not installed"):
         await service.foundation(tenant_id=TENANT_ID, branch_id=BRANCH_ID)
 
 
 @pytest.mark.asyncio
-async def test_tampered_active_snapshot_is_never_served() -> None:
-    snapshot, components, chunks, confirmed_at = _stored_snapshot()
-    chunks[1].payload["items"][0]["brand_name"] = "Tampered"
-    service = LocalReadModel(
-        cast(
-            SyncEdgeRepository,
-            _FakeRepo((snapshot, components, chunks, confirmed_at)),
-        )
-    )
-
+async def test_corrupted_foundation_projection_is_never_served() -> None:
+    service = _service(_FakeRepo(active=_active(foundation_payload={"broken": True})))
     with pytest.raises(ServiceUnavailableError, match="corrupted"):
-        await service.catalog(
-            tenant_id=TENANT_ID,
-            branch_id=BRANCH_ID,
-            query=None,
-            page=1,
-            page_size=20,
-        )
+        await service.foundation(tenant_id=TENANT_ID, branch_id=BRANCH_ID)
 
 
 @pytest.mark.asyncio
-async def test_signed_cross_tenant_payload_is_never_served() -> None:
-    wrong_tenant = UUID("20000000-0000-0000-0000-000000000077")
-    service = LocalReadModel(
-        cast(
-            SyncEdgeRepository,
-            _FakeRepo(_stored_snapshot(catalog_tenant_id=wrong_tenant)),
-        )
-    )
-
+async def test_cross_tenant_catalog_projection_is_never_served() -> None:
+    service = _service(_FakeRepo(active=_active(), product=_product(tenant_id=UUID(int=77))))
     with pytest.raises(ServiceUnavailableError, match="corrupted"):
         await service.catalog(
-            tenant_id=TENANT_ID,
-            branch_id=BRANCH_ID,
-            query=None,
-            page=1,
-            page_size=20,
+            tenant_id=TENANT_ID, branch_id=BRANCH_ID, query=None, page=1, page_size=20
         )
 
 
 @pytest.mark.asyncio
 async def test_snapshot_from_far_future_is_never_reported_as_fresh() -> None:
-    service = LocalReadModel(
-        cast(
-            SyncEdgeRepository,
-            _FakeRepo(
-                _stored_snapshot(
-                    source_generated_at=datetime.now(UTC) + timedelta(hours=1),
-                    confirmed_at=datetime.now(UTC),
-                )
-            ),
+    service = _service(
+        _FakeRepo(
+            active=_active(
+                source_generated_at=datetime.now(UTC) + timedelta(hours=1),
+                confirmed_at=datetime.now(UTC),
+            )
         )
     )
-
     with pytest.raises(ServiceUnavailableError, match="clock is invalid"):
         await service.foundation(tenant_id=TENANT_ID, branch_id=BRANCH_ID)
 
 
 @pytest.mark.asyncio
-async def test_recent_cloud_confirmation_keeps_unchanged_snapshot_fresh() -> None:
-    service = LocalReadModel(
-        cast(
-            SyncEdgeRepository,
-            _FakeRepo(_stored_snapshot(confirmed_at=datetime.now(UTC))),
-        )
-    )
-
+async def test_recent_confirmation_keeps_unchanged_snapshot_fresh() -> None:
+    service = _service(_FakeRepo(active=_active(confirmed_at=datetime.now(UTC))))
     result = await service.foundation(tenant_id=TENANT_ID, branch_id=BRANCH_ID)
-
     assert result.metadata.source_generated_at < datetime.now(UTC) - timedelta(days=1)
     assert result.metadata.last_confirmed_at > datetime.now(UTC) - timedelta(minutes=1)
     assert result.metadata.is_stale is False

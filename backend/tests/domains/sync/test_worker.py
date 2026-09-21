@@ -141,6 +141,7 @@ async def test_read_snapshot_downloads_every_verified_chunk_before_install(
 
     monkeypatch.setattr(worker, "_active_read_snapshot_id", no_active_snapshot)
     monkeypatch.setattr(worker, "_install_read_snapshot", capture_install)
+    monkeypatch.setattr(worker, "build_indexed_projection", lambda **_kwargs: object())
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(handler),
         base_url="https://cloud.example",
@@ -218,6 +219,7 @@ async def test_read_snapshot_over_request_limit_uses_bounded_batches(
 
     monkeypatch.setattr(worker, "_active_read_snapshot_id", no_active_snapshot)
     monkeypatch.setattr(worker, "_install_read_snapshot", capture_install)
+    monkeypatch.setattr(worker, "build_indexed_projection", lambda **_kwargs: object())
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(handler),
         base_url="https://cloud.example",

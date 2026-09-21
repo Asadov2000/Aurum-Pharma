@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -10,6 +10,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -710,6 +711,287 @@ class SyncReadSnapshotCursor(Base):
     activated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
     )
+    last_confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadProjection(Base):
+    """Ready marker and foundation payload for an indexed snapshot projection."""
+
+    __tablename__ = "sync_read_projection"
+    __table_args__ = (
+        CheckConstraint("projection_version = 1", name="ck_sync_read_projection_version"),
+        CheckConstraint("status IN ('building', 'ready')", name="ck_sync_read_projection_status"),
+        CheckConstraint(
+            "catalog_count >= 0 AND supplier_count >= 0 AND inventory_count >= 0",
+            name="ck_sync_read_projection_counts",
+        ),
+        CheckConstraint(
+            "foundation_payload ->> 'record_type' = 'foundation' "
+            "AND (foundation_payload #>> '{tenant,id}')::uuid = tenant_id "
+            "AND (foundation_payload #>> '{branch,id}')::uuid = branch_id",
+            name="ck_sync_read_projection_foundation_scope",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "tenant_id", "branch_id", "node_id", "source_revision"],
+            [
+                "sync_read_snapshot.snapshot_id",
+                "sync_read_snapshot.tenant_id",
+                "sync_read_snapshot.branch_id",
+                "sync_read_snapshot.node_id",
+                "sync_read_snapshot.source_revision",
+            ],
+            name="fk_sync_read_projection_snapshot",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "snapshot_id",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            name="uq_sync_read_projection_scope",
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    source_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    projection_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'building'"))
+    foundation_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    catalog_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    supplier_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    inventory_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadCatalogProjection(Base):
+    __tablename__ = "sync_read_catalog_projection"
+    __table_args__ = (
+        CheckConstraint(
+            "payload ->> 'record_type' = 'catalog_product' "
+            "AND (payload ->> 'id')::uuid = catalog_id "
+            "AND (payload ->> 'tenant_id')::uuid = tenant_id "
+            "AND search_text = lower(concat_ws(' ', payload ->> 'brand_name', "
+            "payload ->> 'inn', payload ->> 'manufacturer'))",
+            name="ck_sync_read_catalog_projection_payload",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "tenant_id", "branch_id", "node_id"],
+            [
+                "sync_read_projection.snapshot_id",
+                "sync_read_projection.tenant_id",
+                "sync_read_projection.branch_id",
+                "sync_read_projection.node_id",
+            ],
+            name="fk_sync_read_catalog_projection_header",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_sync_read_catalog_projection_search",
+            "search_text",
+            postgresql_using="gin",
+            postgresql_ops={"search_text": "gin_trgm_ops"},
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    catalog_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    search_text: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadBarcodeProjection(Base):
+    __tablename__ = "sync_read_barcode_projection"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["snapshot_id", "catalog_id"],
+            [
+                "sync_read_catalog_projection.snapshot_id",
+                "sync_read_catalog_projection.catalog_id",
+            ],
+            name="fk_sync_read_barcode_projection_catalog",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_sync_read_barcode_projection_lookup",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            "snapshot_id",
+            "code",
+            unique=True,
+        ),
+        Index(
+            "ix_sync_read_barcode_projection_search",
+            "code",
+            postgresql_using="gin",
+            postgresql_ops={"code": "gin_trgm_ops"},
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    barcode_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    catalog_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    code_type: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadSupplierProjection(Base):
+    __tablename__ = "sync_read_supplier_projection"
+    __table_args__ = (
+        CheckConstraint(
+            "payload ->> 'record_type' = 'supplier' "
+            "AND (payload ->> 'id')::uuid = supplier_id "
+            "AND (payload ->> 'tenant_id')::uuid = tenant_id "
+            "AND search_text = lower(concat_ws(' ', payload ->> 'name', "
+            "payload ->> 'legal_name', payload ->> 'inn_or_tin', "
+            "payload ->> 'contact_person'))",
+            name="ck_sync_read_supplier_projection_payload",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "tenant_id", "branch_id", "node_id"],
+            [
+                "sync_read_projection.snapshot_id",
+                "sync_read_projection.tenant_id",
+                "sync_read_projection.branch_id",
+                "sync_read_projection.node_id",
+            ],
+            name="fk_sync_read_supplier_projection_header",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_sync_read_supplier_projection_search",
+            "search_text",
+            postgresql_using="gin",
+            postgresql_ops={"search_text": "gin_trgm_ops"},
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    supplier_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    search_text: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncReadInventoryProjection(Base):
+    __tablename__ = "sync_read_inventory_projection"
+    __table_args__ = (
+        CheckConstraint(
+            "payload ->> 'record_type' = 'inventory_batch' "
+            "AND (payload ->> 'id')::uuid = batch_id "
+            "AND (payload ->> 'tenant_id')::uuid = tenant_id "
+            "AND (payload ->> 'branch_id')::uuid = branch_id "
+            "AND (payload ->> 'catalog_id')::uuid = catalog_id "
+            "AND (payload ->> 'expires_at')::date = expires_at "
+            "AND (payload ->> 'qty_remaining')::numeric = qty_remaining "
+            "AND (payload ->> 'purchase_price')::numeric = purchase_price "
+            "AND (payload ->> 'sale_price')::numeric = sale_price "
+            "AND (payload ->> 'is_blocked')::boolean = is_blocked",
+            name="ck_sync_read_inventory_projection_payload",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "tenant_id", "branch_id", "node_id"],
+            [
+                "sync_read_projection.snapshot_id",
+                "sync_read_projection.tenant_id",
+                "sync_read_projection.branch_id",
+                "sync_read_projection.node_id",
+            ],
+            name="fk_sync_read_inventory_projection_header",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_sync_read_inventory_projection_catalog",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            "snapshot_id",
+            "catalog_id",
+        ),
+        Index(
+            "ix_sync_read_inventory_projection_expiry",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            "snapshot_id",
+            "expires_at",
+        ),
+        Index(
+            "ix_sync_read_inventory_projection_available",
+            "tenant_id",
+            "branch_id",
+            "node_id",
+            "snapshot_id",
+            postgresql_where=text("qty_remaining > 0"),
+        ),
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    batch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    catalog_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    expires_at: Mapped[date] = mapped_column(Date, nullable=False)
+    qty_remaining: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    sale_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
     )

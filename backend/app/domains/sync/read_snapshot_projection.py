@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal, cast
@@ -157,6 +158,16 @@ INVENTORY_RECORD_ADAPTER: TypeAdapter[InventoryBatchRecord] = TypeAdapter(Invent
 FOUNDATION_RECORD_ADAPTER: TypeAdapter[FoundationRecord] = TypeAdapter(FoundationRecord)
 
 
+@dataclass(frozen=True, slots=True)
+class IndexedReadProjection:
+    """Strict records materialized beside one verified read snapshot."""
+
+    foundation: FoundationRecord
+    catalog: tuple[CatalogProductRecord, ...]
+    suppliers: tuple[SupplierRecord, ...]
+    inventory: tuple[InventoryBatchRecord, ...]
+
+
 def dump_record(record: BaseModel) -> ReadSnapshotItem:
     """Convert a strict record to the JSON-only transport contract."""
 
@@ -245,3 +256,45 @@ def validate_projection_scope(
             raise ValueError("Unknown inventory projection record")
         if record.tenant_id != tenant_id or record.branch_id != branch_id:
             raise ValueError("Inventory record does not match snapshot scope")
+
+
+def build_indexed_projection(
+    *,
+    tenant_id: UUID,
+    branch_id: UUID,
+    chunks: Sequence[object],
+) -> IndexedReadProjection:
+    """Parse a fully hash-verified chunk set before the active pointer moves."""
+
+    items_by_component: dict[ReadSnapshotComponent, list[Mapping[str, object]]] = {
+        "foundation": [],
+        "catalog": [],
+        "inventory": [],
+    }
+    for chunk in chunks:
+        component = getattr(chunk, "component", None)
+        payload = getattr(chunk, "payload", None)
+        if component not in items_by_component or not isinstance(payload, Sequence):
+            raise ValueError("Snapshot projection chunk is invalid")
+        if any(not isinstance(item, Mapping) for item in payload):
+            raise ValueError("Snapshot projection item is invalid")
+        items_by_component[cast(ReadSnapshotComponent, component)].extend(
+            cast(Sequence[Mapping[str, object]], payload)
+        )
+
+    parsed = {
+        component: parse_component_items(component, payloads)
+        for component, payloads in items_by_component.items()
+    }
+    validate_projection_scope(tenant_id=tenant_id, branch_id=branch_id, components=parsed)
+    foundation_rows = parsed["foundation"]
+    if len(foundation_rows) != 1 or not isinstance(foundation_rows[0], FoundationRecord):
+        raise ValueError("Foundation projection must contain exactly one record")
+    return IndexedReadProjection(
+        foundation=foundation_rows[0],
+        catalog=tuple(row for row in parsed["catalog"] if isinstance(row, CatalogProductRecord)),
+        suppliers=tuple(row for row in parsed["catalog"] if isinstance(row, SupplierRecord)),
+        inventory=tuple(
+            row for row in parsed["inventory"] if isinstance(row, InventoryBatchRecord)
+        ),
+    )

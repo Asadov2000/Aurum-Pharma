@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -19,9 +22,16 @@ from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
 from app.core.errors import NotFoundError
 from app.core.time import utc_now
+from app.domains.sync.credentials import EdgeCredential
+from app.domains.sync.read_model import LocalReadModel
 from app.domains.sync.read_snapshot import ReadSnapshotScope, build_manifest, verify_chunk
+from app.domains.sync.read_snapshot_projection import (
+    IndexedReadProjection,
+    build_component_chunks,
+)
 from app.domains.sync.repository import SyncCloudRepository, SyncEdgeRepository
 from app.domains.sync.service import SyncCloudService
+from tests.domains.sync.test_local_read_model import _batch, _foundation, _product
 
 
 @pytest_asyncio.fixture
@@ -60,12 +70,61 @@ async def _set_edge_scope(
         )
 
 
+def _projection(*, tenant_id: UUID, branch_id: UUID) -> IndexedReadProjection:
+    base = _foundation()
+    foundation = base.model_copy(
+        update={
+            "tenant": base.tenant.model_copy(update={"id": tenant_id}),
+            "branch": base.branch.model_copy(update={"id": branch_id, "tenant_id": tenant_id}),
+        }
+    )
+    product = _product(tenant_id=tenant_id).model_copy(update={"manufacturer": "Straße"})
+    batch = _batch().model_copy(
+        update={"tenant_id": tenant_id, "branch_id": branch_id, "catalog_id": product.id}
+    )
+    return IndexedReadProjection(
+        foundation=foundation,
+        catalog=(product,),
+        suppliers=(),
+        inventory=(batch,),
+    )
+
+
+async def _assert_verified_local_read_model(
+    *,
+    repo: SyncEdgeRepository,
+    tenant_id: UUID,
+    branch_id: UUID,
+    snapshot_id: UUID,
+    edge_credential: EdgeCredential,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SimpleNamespace(
+        EDGE_SYNC_CREDENTIAL=SimpleNamespace(get_secret_value=lambda: edge_credential.token),
+        EDGE_READ_SNAPSHOT_STALE_SECONDS=86400,
+        EDGE_SYNC_MAX_CLOCK_SKEW_SECONDS=300,
+    )
+    monkeypatch.setattr("app.domains.sync.read_model.get_settings", lambda: settings)
+    read_model = LocalReadModel(repo)
+    foundation = await read_model.foundation(tenant_id=tenant_id, branch_id=branch_id)
+    catalog = await read_model.catalog(
+        tenant_id=tenant_id,
+        branch_id=branch_id,
+        query="пара",
+        page=1,
+        page_size=20,
+    )
+    assert foundation.metadata.snapshot_id == snapshot_id
+    assert catalog.total == 1
+
+
 async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
     support_engine_read_transport: AsyncEngine,
     app_engine_read_transport: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     credential_kid = uuid4()
-    credential_digest = uuid4().hex * 2
+    edge_credential = EdgeCredential(kid=credential_kid, secret=uuid4().hex * 2)
     async with support_engine_read_transport.begin() as connection:
         tenant_id = (
             await connection.execute(
@@ -121,6 +180,15 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
             )
         ).scalar_one()
 
+    projection = _projection(tenant_id=tenant_id, branch_id=branch_id)
+    product = projection.catalog[0]
+    component_chunks = build_component_chunks(
+        foundation=projection.foundation,
+        catalog=projection.catalog,
+        suppliers=projection.suppliers,
+        inventory=projection.inventory,
+        chunk_size=100,
+    )
     envelope, chunks = build_manifest(
         ReadSnapshotScope(
             edge_node_id=edge_node_id,
@@ -128,13 +196,9 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
             branch_id=branch_id,
             source_revision=1,
         ),
-        {
-            "foundation": [[{"currency": "TJS"}]],
-            "catalog": [[{"id": "product-1", "name": "Парацетамол"}]],
-            "inventory": [],
-        },
+        component_chunks,
         credential_kid=credential_kid,
-        credential_digest=credential_digest,
+        credential_digest=edge_credential.digest,
         source_generated_at=utc_now(),
     )
     async with app_engine_read_transport.begin() as connection:
@@ -145,10 +209,88 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
             node_id=edge_node_id,
         )
         async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+            forged = IndexedReadProjection(
+                foundation=projection.foundation,
+                catalog=(product.model_copy(update={"base_price": Decimal("6.00")}),),
+                suppliers=projection.suppliers,
+                inventory=projection.inventory,
+            )
+            with pytest.raises(DBAPIError, match="does not match immutable snapshot content"):
+                async with session.begin_nested():
+                    await SyncEdgeRepository(session).install_read_snapshot(
+                        envelope=envelope,
+                        chunks=chunks,
+                        projection=forged,
+                    )
             await SyncEdgeRepository(session).install_read_snapshot(
                 envelope=envelope,
                 chunks=chunks,
+                projection=projection,
             )
+
+    async with app_engine_read_transport.begin() as connection:
+        await _set_edge_scope(
+            connection,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            node_id=edge_node_id,
+        )
+        async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+            repo = SyncEdgeRepository(session)
+            before_confirmation = (
+                await connection.execute(
+                    text(
+                        "SELECT version, activated_at, last_confirmed_at "
+                        "FROM sync_read_snapshot_cursor "
+                        "WHERE tenant_id=:tenant_id AND branch_id=:branch_id AND node_id=:node_id"
+                    ),
+                    {"tenant_id": tenant_id, "branch_id": branch_id, "node_id": edge_node_id},
+                )
+            ).one()
+            await repo.confirm_active_read_snapshot(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                edge_node_id=edge_node_id,
+                snapshot_id=envelope.manifest.snapshot_id,
+            )
+            await connection.execute(text("SELECT set_config('app.branch_id', '', true)"))
+            await connection.execute(text("SELECT set_config('app.edge_node_id', '', true)"))
+            active_projection = await repo.get_active_read_projection(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                credential_kid=credential_kid,
+            )
+            catalog_rows, catalog_total = await repo.list_read_catalog_projection(
+                snapshot_id=envelope.manifest.snapshot_id,
+                query="пара",
+                offset=0,
+                limit=20,
+            )
+            assert active_projection is not None
+            assert catalog_total == 1
+            assert catalog_rows[0].catalog_id == product.id
+            await _assert_verified_local_read_model(
+                repo=repo,
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                snapshot_id=envelope.manifest.snapshot_id,
+                edge_credential=edge_credential,
+                monkeypatch=monkeypatch,
+            )
+        cursor = (
+            await connection.execute(
+                text(
+                    "SELECT version, active_snapshot_id, activated_at, last_confirmed_at "
+                    "FROM sync_read_snapshot_cursor "
+                    "WHERE tenant_id=:tenant_id AND branch_id=:branch_id AND node_id=:node_id"
+                ),
+                {"tenant_id": tenant_id, "branch_id": branch_id, "node_id": edge_node_id},
+            )
+        ).one()
+        assert cursor.version == before_confirmation.version == 1
+        assert cursor.active_snapshot_id == envelope.manifest.snapshot_id
+        assert cursor.activated_at == before_confirmation.activated_at
+        assert cursor.last_confirmed_at >= before_confirmation.last_confirmed_at
 
     async with app_engine_read_transport.begin() as connection:
         await _set_edge_scope(

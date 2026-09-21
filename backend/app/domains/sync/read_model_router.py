@@ -141,6 +141,8 @@ async def suppliers(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> SupplierReadModel:
+    if not user.can_access_branch("suppliers.view", branch_id):
+        raise PermissionDeniedError("Branch is outside the assigned scope")
     _no_store(response)
     return await service.suppliers(
         tenant_id=_tenant_id(user),
