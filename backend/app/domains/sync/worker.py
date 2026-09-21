@@ -38,6 +38,10 @@ from app.domains.sync.read_snapshot import (
 from app.domains.sync.read_snapshot import (
     verify_manifest as verify_read_snapshot_manifest,
 )
+from app.domains.sync.read_snapshot_projection import (
+    IndexedReadProjection,
+    build_indexed_projection,
+)
 from app.domains.sync.repository import SyncEdgeRepository
 from app.domains.sync.schemas import (
     EdgeApplyResult,
@@ -216,6 +220,7 @@ async def _read_snapshot_chunk_batch(
 async def _install_read_snapshot(
     envelope: ReadSnapshotManifestRead,
     chunks: list[ReadSnapshotChunkRead],
+    projection: IndexedReadProjection,
 ) -> None:
     async with AppSessionLocal() as session:
         async with session.begin():
@@ -231,6 +236,7 @@ async def _install_read_snapshot(
             await repo.install_read_snapshot(
                 envelope=envelope,
                 chunks=chunks,
+                projection=projection,
             )
 
 
@@ -297,7 +303,15 @@ async def _sync_read_snapshot(
     actual_keys = {(chunk.component, chunk.chunk_index) for chunk in chunks}
     if actual_keys != expected_keys:
         raise ReadSnapshotValidationError("Read snapshot chunk set is incomplete")
-    await _install_read_snapshot(envelope=envelope, chunks=chunks)
+    try:
+        projection = build_indexed_projection(
+            tenant_id=manifest.tenant_id,
+            branch_id=manifest.branch_id,
+            chunks=chunks,
+        )
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ReadSnapshotValidationError("Read snapshot projection is invalid") from exc
+    await _install_read_snapshot(envelope=envelope, chunks=chunks, projection=projection)
 
 
 async def _local_cursor(pull: SyncPullResponse) -> tuple[str, int, bool] | None:

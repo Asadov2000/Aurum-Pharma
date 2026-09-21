@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID
 
 from app.domains.sync.read_snapshot_projection import (
@@ -12,6 +13,7 @@ from app.domains.sync.read_snapshot_projection import (
     InventoryBatchRecord,
     SupplierRecord,
     build_component_chunks,
+    build_indexed_projection,
     parse_component_items,
 )
 
@@ -163,3 +165,44 @@ def test_empty_components_keep_verifiable_chunk_zero() -> None:
 
     assert chunks["catalog"] == ((),)
     assert chunks["inventory"] == ((),)
+
+
+def test_verified_chunks_build_strict_indexed_projection() -> None:
+    supplier = SupplierRecord(
+        id=UUID("10000000-0000-0000-0000-000000000010"),
+        tenant_id=TENANT_ID,
+        name="Supplier",
+        legal_name=None,
+        inn_or_tin=None,
+        contact_person=None,
+        phone=None,
+        email=None,
+        address=None,
+        notes=None,
+        is_active=True,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    chunks = build_component_chunks(
+        foundation=_foundation(),
+        catalog=(_catalog(1),),
+        suppliers=(supplier,),
+        inventory=(),
+        chunk_size=50,
+    )
+    stored_chunks = [
+        SimpleNamespace(component=component, payload=payload)
+        for component, component_chunks in chunks.items()
+        for payload in component_chunks
+    ]
+
+    projection = build_indexed_projection(
+        tenant_id=TENANT_ID,
+        branch_id=BRANCH_ID,
+        chunks=stored_chunks,
+    )
+
+    assert projection.foundation == _foundation()
+    assert projection.catalog == (_catalog(1),)
+    assert projection.suppliers == (supplier,)
+    assert projection.inventory == ()

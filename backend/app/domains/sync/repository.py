@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal, cast
 from uuid import UUID
 
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import exists, func, insert, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,10 +25,15 @@ from app.domains.sync.models import (
     SyncNode,
     SyncOutboxEvent,
     SyncQuarantineIncident,
+    SyncReadBarcodeProjection,
+    SyncReadCatalogProjection,
+    SyncReadInventoryProjection,
+    SyncReadProjection,
     SyncReadSnapshot,
     SyncReadSnapshotChunk,
     SyncReadSnapshotComponent,
     SyncReadSnapshotCursor,
+    SyncReadSupplierProjection,
     SyncSaleProjection,
     SyncShadowReport,
     SyncStream,
@@ -37,6 +42,7 @@ from app.domains.sync.models import (
     SyncWriterReadiness,
 )
 from app.domains.sync.read_snapshot import ChunkRead, ManifestRead
+from app.domains.sync.read_snapshot_projection import IndexedReadProjection
 from app.domains.sync.schemas import SyncEventEnvelope, SyncQuarantineIncidentRequest
 
 
@@ -67,6 +73,16 @@ class SyncProjectionOperationCollision(RuntimeError):
     """The tenant-scoped operation ID is already owned by another projection."""
 
 
+@dataclass(frozen=True, slots=True)
+class InventoryProjectionSummary:
+    total_qty: Decimal
+    purchase_value: Decimal
+    sale_value: Decimal
+    attention_count: int
+    expired_count: int
+    blocked_count: int
+
+
 def _is_projection_operation_collision(exc: IntegrityError) -> bool:
     if getattr(exc.orig, "sqlstate", None) != "23505":
         return False
@@ -77,6 +93,11 @@ def _is_projection_operation_collision(exc: IntegrityError) -> bool:
     return constraint_name == "uq_sync_sale_projection_operation" or (
         "uq_sync_sale_projection_operation" in str(exc)
     )
+
+
+def _substring_pattern(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1657,23 +1678,19 @@ class SyncEdgeRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_active_read_snapshot(
+    async def get_active_read_projection(
         self,
         *,
         tenant_id: UUID,
         branch_id: UUID,
         credential_kid: UUID,
-    ) -> (
-        tuple[
-            SyncReadSnapshot,
-            list[SyncReadSnapshotComponent],
-            list[SyncReadSnapshotChunk],
-            datetime,
-        ]
-        | None
-    ):
+    ) -> tuple[SyncReadSnapshot, SyncReadProjection, datetime] | None:
         result = await self.session.execute(
-            select(SyncReadSnapshot, SyncReadSnapshotCursor.activated_at)
+            select(
+                SyncReadSnapshot,
+                SyncReadProjection,
+                SyncReadSnapshotCursor.last_confirmed_at,
+            )
             .join(
                 SyncReadSnapshotCursor,
                 (SyncReadSnapshotCursor.active_snapshot_id == SyncReadSnapshot.snapshot_id)
@@ -1681,42 +1698,210 @@ class SyncEdgeRepository:
                 & (SyncReadSnapshotCursor.branch_id == SyncReadSnapshot.branch_id)
                 & (SyncReadSnapshotCursor.node_id == SyncReadSnapshot.node_id),
             )
+            .join(
+                SyncReadProjection,
+                (SyncReadProjection.snapshot_id == SyncReadSnapshot.snapshot_id)
+                & (SyncReadProjection.tenant_id == SyncReadSnapshot.tenant_id)
+                & (SyncReadProjection.branch_id == SyncReadSnapshot.branch_id)
+                & (SyncReadProjection.node_id == SyncReadSnapshot.node_id),
+            )
             .where(
                 SyncReadSnapshot.tenant_id == tenant_id,
                 SyncReadSnapshot.branch_id == branch_id,
                 SyncReadSnapshot.credential_kid == credential_kid,
                 SyncReadSnapshot.status == "ready",
+                SyncReadProjection.status == "ready",
             )
         )
-        active = result.one_or_none()
-        if active is None:
+        row = result.one_or_none()
+        if row is None:
             return None
-        snapshot, confirmed_at = active
-        components = await self.session.execute(
+        return row[0], row[1], row[2]
+
+    async def get_read_snapshot_verification_bundle(
+        self,
+        *,
+        snapshot_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+    ) -> tuple[list[SyncReadSnapshotComponent], list[SyncReadSnapshotChunk]]:
+        scope = (
+            SyncReadSnapshotComponent.snapshot_id == snapshot_id,
+            SyncReadSnapshotComponent.tenant_id == tenant_id,
+            SyncReadSnapshotComponent.branch_id == branch_id,
+            SyncReadSnapshotComponent.node_id == edge_node_id,
+        )
+        components = await self.session.scalars(
             select(SyncReadSnapshotComponent)
-            .where(
-                SyncReadSnapshotComponent.snapshot_id == snapshot.snapshot_id,
-                SyncReadSnapshotComponent.tenant_id == tenant_id,
-                SyncReadSnapshotComponent.branch_id == branch_id,
-                SyncReadSnapshotComponent.node_id == snapshot.node_id,
-            )
+            .where(*scope)
             .order_by(SyncReadSnapshotComponent.component)
         )
-        chunks = await self.session.execute(
+        chunks = await self.session.scalars(
             select(SyncReadSnapshotChunk)
             .where(
-                SyncReadSnapshotChunk.snapshot_id == snapshot.snapshot_id,
+                SyncReadSnapshotChunk.snapshot_id == snapshot_id,
                 SyncReadSnapshotChunk.tenant_id == tenant_id,
                 SyncReadSnapshotChunk.branch_id == branch_id,
-                SyncReadSnapshotChunk.node_id == snapshot.node_id,
+                SyncReadSnapshotChunk.node_id == edge_node_id,
             )
-            .order_by(SyncReadSnapshotChunk.component, SyncReadSnapshotChunk.chunk_index)
+            .order_by(
+                SyncReadSnapshotChunk.component,
+                SyncReadSnapshotChunk.chunk_index,
+            )
+        )
+        return list(components.all()), list(chunks.all())
+
+    async def list_read_catalog_projection(
+        self,
+        *,
+        snapshot_id: UUID,
+        query: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[SyncReadCatalogProjection], int]:
+        filters = [SyncReadCatalogProjection.snapshot_id == snapshot_id]
+        if query:
+            pattern = _substring_pattern(query)
+            barcode_match = exists(
+                select(SyncReadBarcodeProjection.barcode_id).where(
+                    SyncReadBarcodeProjection.snapshot_id == snapshot_id,
+                    SyncReadBarcodeProjection.catalog_id == SyncReadCatalogProjection.catalog_id,
+                    SyncReadBarcodeProjection.code.ilike(pattern, escape="\\"),
+                )
+            )
+            filters.append(
+                or_(
+                    SyncReadCatalogProjection.search_text.ilike(pattern, escape="\\"),
+                    barcode_match,
+                )
+            )
+        total = await self.session.scalar(
+            select(func.count()).select_from(SyncReadCatalogProjection).where(*filters)
+        )
+        rows = await self.session.scalars(
+            select(SyncReadCatalogProjection)
+            .where(*filters)
+            .order_by(SyncReadCatalogProjection.catalog_id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(rows.all()), int(total or 0)
+
+    async def get_read_catalog_projection(
+        self,
+        *,
+        snapshot_id: UUID,
+        item_id: UUID | None,
+        barcode: str | None,
+    ) -> tuple[SyncReadCatalogProjection, list[SyncReadBarcodeProjection]] | None:
+        statement = select(SyncReadCatalogProjection).where(
+            SyncReadCatalogProjection.snapshot_id == snapshot_id
+        )
+        if item_id is not None:
+            statement = statement.where(SyncReadCatalogProjection.catalog_id == item_id)
+        else:
+            statement = statement.join(
+                SyncReadBarcodeProjection,
+                (SyncReadBarcodeProjection.snapshot_id == SyncReadCatalogProjection.snapshot_id)
+                & (SyncReadBarcodeProjection.catalog_id == SyncReadCatalogProjection.catalog_id),
+            ).where(SyncReadBarcodeProjection.code == barcode)
+        product = (await self.session.scalars(statement.limit(1))).one_or_none()
+        if product is None:
+            return None
+        barcodes = await self.session.scalars(
+            select(SyncReadBarcodeProjection)
+            .where(
+                SyncReadBarcodeProjection.snapshot_id == snapshot_id,
+                SyncReadBarcodeProjection.catalog_id == product.catalog_id,
+            )
+            .order_by(SyncReadBarcodeProjection.code)
+        )
+        return product, list(barcodes.all())
+
+    async def list_read_supplier_projection(
+        self,
+        *,
+        snapshot_id: UUID,
+        query: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[SyncReadSupplierProjection], int]:
+        filters = [SyncReadSupplierProjection.snapshot_id == snapshot_id]
+        if query:
+            filters.append(
+                SyncReadSupplierProjection.search_text.ilike(_substring_pattern(query), escape="\\")
+            )
+        total = await self.session.scalar(
+            select(func.count()).select_from(SyncReadSupplierProjection).where(*filters)
+        )
+        rows = await self.session.scalars(
+            select(SyncReadSupplierProjection)
+            .where(*filters)
+            .order_by(SyncReadSupplierProjection.supplier_id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(rows.all()), int(total or 0)
+
+    async def list_read_inventory_projection(
+        self,
+        *,
+        snapshot_id: UUID,
+        show_empty: bool,
+        offset: int,
+        limit: int,
+        today: date,
+        orange_until: date,
+    ) -> tuple[list[SyncReadInventoryProjection], int, InventoryProjectionSummary]:
+        filters = [SyncReadInventoryProjection.snapshot_id == snapshot_id]
+        if not show_empty:
+            filters.append(SyncReadInventoryProjection.qty_remaining > 0)
+        total = await self.session.scalar(
+            select(func.count()).select_from(SyncReadInventoryProjection).where(*filters)
+        )
+        summary = (
+            await self.session.execute(
+                select(
+                    func.coalesce(func.sum(SyncReadInventoryProjection.qty_remaining), 0),
+                    func.coalesce(
+                        func.sum(
+                            SyncReadInventoryProjection.qty_remaining
+                            * SyncReadInventoryProjection.purchase_price
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            SyncReadInventoryProjection.qty_remaining
+                            * SyncReadInventoryProjection.sale_price
+                        ),
+                        0,
+                    ),
+                    func.count().filter(SyncReadInventoryProjection.expires_at <= orange_until),
+                    func.count().filter(SyncReadInventoryProjection.expires_at < today),
+                    func.count().filter(SyncReadInventoryProjection.is_blocked.is_(True)),
+                ).where(*filters)
+            )
+        ).one()
+        rows = await self.session.scalars(
+            select(SyncReadInventoryProjection)
+            .where(*filters)
+            .order_by(SyncReadInventoryProjection.batch_id)
+            .offset(offset)
+            .limit(limit)
         )
         return (
-            snapshot,
-            list(components.scalars().all()),
-            list(chunks.scalars().all()),
-            confirmed_at,
+            list(rows.all()),
+            int(total or 0),
+            InventoryProjectionSummary(
+                total_qty=Decimal(summary[0]),
+                purchase_value=Decimal(summary[1]),
+                sale_value=Decimal(summary[2]),
+                attention_count=int(summary[3]),
+                expired_count=int(summary[4]),
+                blocked_count=int(summary[5]),
+            ),
         )
 
     async def confirm_active_read_snapshot(
@@ -1736,7 +1921,7 @@ class SyncEdgeRepository:
                 SyncReadSnapshotCursor.active_snapshot_id == snapshot_id,
             )
             .values(
-                activated_at=func.statement_timestamp(),
+                last_confirmed_at=func.statement_timestamp(),
                 updated_at=func.statement_timestamp(),
             )
         )
@@ -1746,8 +1931,18 @@ class SyncEdgeRepository:
         *,
         envelope: ManifestRead,
         chunks: list[ChunkRead],
+        projection: IndexedReadProjection,
     ) -> None:
         manifest = envelope.manifest
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+            {
+                "scope": (
+                    f"edge-read:{manifest.tenant_id}:{manifest.branch_id}:"
+                    f"{manifest.edge_node_id}"
+                )
+            },
+        )
         scope_values = {
             "snapshot_id": manifest.snapshot_id,
             "tenant_id": manifest.tenant_id,
@@ -1791,6 +1986,84 @@ class SyncEdgeRepository:
                     payload_hash=chunk.payload_hash,
                 )
             )
+        projection_scope = {
+            "snapshot_id": manifest.snapshot_id,
+            "tenant_id": manifest.tenant_id,
+            "branch_id": manifest.branch_id,
+            "node_id": manifest.edge_node_id,
+        }
+        await self.session.execute(
+            insert(SyncReadProjection).values(
+                **projection_scope,
+                source_revision=manifest.source_revision,
+                projection_version=1,
+                status="building",
+                foundation_payload=projection.foundation.model_dump(mode="json"),
+                catalog_count=len(projection.catalog),
+                supplier_count=len(projection.suppliers),
+                inventory_count=len(projection.inventory),
+            )
+        )
+        if projection.catalog:
+            await self.session.execute(
+                insert(SyncReadCatalogProjection),
+                [
+                    {
+                        **projection_scope,
+                        "catalog_id": row.id,
+                        "payload": row.model_dump(mode="json"),
+                    }
+                    for row in projection.catalog
+                ],
+            )
+        barcode_values = [
+            {
+                **projection_scope,
+                "barcode_id": barcode.id,
+                "catalog_id": row.id,
+                "code": barcode.code,
+                "code_type": barcode.code_type,
+            }
+            for row in projection.catalog
+            for barcode in row.barcodes
+        ]
+        if barcode_values:
+            await self.session.execute(insert(SyncReadBarcodeProjection), barcode_values)
+        if projection.suppliers:
+            await self.session.execute(
+                insert(SyncReadSupplierProjection),
+                [
+                    {
+                        **projection_scope,
+                        "supplier_id": row.id,
+                        "payload": row.model_dump(mode="json"),
+                    }
+                    for row in projection.suppliers
+                ],
+            )
+        if projection.inventory:
+            await self.session.execute(
+                insert(SyncReadInventoryProjection),
+                [
+                    {
+                        **projection_scope,
+                        "batch_id": row.id,
+                        "catalog_id": row.catalog_id,
+                        "expires_at": row.expires_at,
+                        "qty_remaining": row.qty_remaining,
+                        "purchase_price": row.purchase_price,
+                        "sale_price": row.sale_price,
+                        "is_blocked": row.is_blocked,
+                        "payload": row.model_dump(mode="json"),
+                    }
+                    for row in projection.inventory
+                ],
+            )
+        await self.session.execute(
+            update(SyncReadProjection)
+            .where(SyncReadProjection.snapshot_id == manifest.snapshot_id)
+            .values(status="ready")
+        )
         await self.session.execute(
             update(SyncReadSnapshot)
             .where(
@@ -1808,6 +2081,7 @@ class SyncEdgeRepository:
             active_snapshot_id=manifest.snapshot_id,
             version=1,
             activated_at=func.statement_timestamp(),
+            last_confirmed_at=func.statement_timestamp(),
         )
         await self.session.execute(
             cursor_insert.on_conflict_do_update(
@@ -1820,6 +2094,7 @@ class SyncEdgeRepository:
                     "active_snapshot_id": manifest.snapshot_id,
                     "version": SyncReadSnapshotCursor.version + 1,
                     "activated_at": func.statement_timestamp(),
+                    "last_confirmed_at": func.statement_timestamp(),
                     "updated_at": func.statement_timestamp(),
                 },
             )
