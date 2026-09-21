@@ -28,9 +28,6 @@ export function LoginLayout({
           />
         </div>
         <div className="relative max-w-[395px] pt-28 text-white">
-          <p className="mb-5 text-xs font-semibold uppercase tracking-[0.14em] text-white/90">
-            Рабочее пространство аптеки
-          </p>
           <h2 className="font-display text-[42px] font-semibold leading-[1.1] tracking-[-0.045em]">
             Каждый день.
             <br />
@@ -39,7 +36,6 @@ export function LoginLayout({
           <p className="mt-6 max-w-[340px] text-[15px] leading-7 text-white/90">
             Продажи, товары и команда — в одном приложении.
           </p>
-          <p className="mt-9 text-xs leading-5 text-white/80">Для аптек Таджикистана · TJS</p>
         </div>
       </aside>
 
@@ -74,10 +70,6 @@ export function LoginLayout({
             </div>
           </div>
         </div>
-
-        <p className="px-6 pb-[max(24px,env(safe-area-inset-bottom))] text-center text-xs leading-5 text-foreground-muted">
-          Рабочее пространство вашей аптеки
-        </p>
       </section>
     </main>
   );

@@ -111,6 +111,9 @@ describe("LoginPage", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
     expect(link.closest("form")).toBeNull();
+    expect(screen.queryByText("Рабочее пространство аптеки")).not.toBeInTheDocument();
+    expect(screen.queryByText("Для аптек Таджикистана · TJS")).not.toBeInTheDocument();
+    expect(screen.queryByText("Рабочее пространство вашей аптеки")).not.toBeInTheDocument();
     expect(requestLoginCode).not.toHaveBeenCalled();
   });
 

@@ -184,7 +184,10 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
         <div
           id={listId}
           role="listbox"
-          className="absolute z-dropdown mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-surface-raised shadow-lg"
+          className={cn(
+            "absolute z-dropdown mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-surface-raised shadow-lg",
+            (isFetching || error || items.length === 0) && "pointer-events-none",
+          )}
         >
           {isFetching ? (
             <p className="px-3 py-2 text-sm text-foreground-muted" role="status">
