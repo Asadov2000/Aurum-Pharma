@@ -1,11 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const items = [
+const defaultItems = [
   { id: "c1", brand_name: "Аспирин", dosage: "500мг", manufacturer: "Bayer" },
   { id: "c2", brand_name: "Парацетамол", dosage: "500мг", manufacturer: "GSK" },
   { id: "c3", brand_name: "Ибупрофен", dosage: "200мг", manufacturer: "Borisov" },
 ];
+let items = defaultItems;
 
 vi.mock("@/features/catalog/pickerQueries", () => ({
   useCatalogPickerQuery: () => ({ data: { items, total: items.length } }),
@@ -14,6 +15,10 @@ vi.mock("@/features/catalog/pickerQueries", () => ({
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 
 describe("CatalogPicker — keyboard selection", () => {
+  beforeEach(() => {
+    items = defaultItems;
+  });
+
   it("reports optional search text without selecting or creating a product", () => {
     const onSearchChange = vi.fn();
     const onChange = vi.fn();
@@ -75,6 +80,15 @@ describe("CatalogPicker — keyboard selection", () => {
     fireEvent.change(input, { target: { value: "Аспирин 500" } });
     expect(input.value).toBe("Аспирин 500");
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("does not let an empty result overlay block adjacent actions", async () => {
+    items = [];
+    render(<CatalogPicker value="" onChange={vi.fn()} placeholder="Поиск" />);
+    const input = screen.getByPlaceholderText("Поиск");
+    fireEvent.change(input, { target: { value: "Новый товар" } });
+
+    expect(await screen.findByRole("listbox")).toHaveClass("pointer-events-none");
   });
 
   it("clears the visible label when its controlled value is reset externally", () => {
