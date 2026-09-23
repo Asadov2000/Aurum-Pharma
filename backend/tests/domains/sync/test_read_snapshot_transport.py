@@ -130,7 +130,7 @@ def _projection(*, tenant_id: UUID, branch_id: UUID) -> IndexedReadProjection:
         foundation=foundation,
         catalog=(product, literal_product, wildcard_product),
         suppliers=(),
-        inventory=(batch, empty_batch),
+        inventory=(empty_batch, batch),
     )
 
 
@@ -281,8 +281,15 @@ async def _assert_catalog_projection_access(
 
 
 async def _assert_inventory_rollup(
-    *, repo: SyncEdgeRepository, connection: AsyncConnection, snapshot_id: UUID
+    *,
+    repo: SyncEdgeRepository,
+    connection: AsyncConnection,
+    snapshot_id: UUID,
+    expected_batch_ids: tuple[UUID, ...],
 ) -> None:
+    await _assert_inventory_physical_order(
+        connection, snapshot_id=snapshot_id, expected_ids=expected_batch_ids
+    )
     available, available_total, available_summary = await repo.list_read_inventory_projection(
         snapshot_id=snapshot_id,
         show_empty=False,
@@ -309,6 +316,28 @@ async def _assert_inventory_rollup(
     assert all_summary.attention_count == 1
     assert all_summary.expired_count == 1
     assert all_summary.blocked_count == 1
+    second_page, second_total, second_summary = await repo.list_read_inventory_projection(
+        snapshot_id=snapshot_id,
+        show_empty=True,
+        offset=1,
+        limit=1,
+        today=date.today(),
+        orange_until=date.today() + timedelta(days=90),
+    )
+    empty_page, empty_total, empty_summary = await repo.list_read_inventory_projection(
+        snapshot_id=snapshot_id,
+        show_empty=True,
+        offset=2,
+        limit=1,
+        today=date.today(),
+        orange_until=date.today() + timedelta(days=90),
+    )
+    assert second_page == all_batches[1:]
+    assert second_total == all_total
+    assert second_summary == all_summary
+    assert empty_page == []
+    assert empty_total == all_total
+    assert empty_summary == all_summary
     audit_values = (
         (
             await connection.execute(
@@ -328,6 +357,25 @@ async def _assert_inventory_rollup(
         "total_qty" not in values and "purchase_value" not in values and "sale_value" not in values
         for values in audit_values
     )
+
+
+async def _assert_inventory_physical_order(
+    connection: AsyncConnection, *, snapshot_id: UUID, expected_ids: tuple[UUID, ...]
+) -> None:
+    physical_batch_ids = (
+        (
+            await connection.execute(
+                text(
+                    "SELECT batch_id FROM sync_read_inventory_projection "
+                    "WHERE snapshot_id=:snapshot_id ORDER BY ctid"
+                ),
+                {"snapshot_id": snapshot_id},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert physical_batch_ids == sorted(expected_ids)
 
 
 async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
@@ -488,6 +536,7 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
                 repo=repo,
                 connection=connection,
                 snapshot_id=envelope.manifest.snapshot_id,
+                expected_batch_ids=tuple(row.id for row in projection.inventory),
             )
             await _assert_verified_local_read_model(
                 repo=repo,

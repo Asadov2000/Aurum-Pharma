@@ -83,7 +83,8 @@ try {
         "--network-alias", "edge-benchmark-postgres", "--env-file", $databaseEnv,
         "--mount", "type=bind,source=$infra/postgres/init.sh,target=/docker-entrypoint-initdb.d/init.sh,readonly",
         "--mount", "type=bind,source=$infra/postgres/role-contract.sql,target=/docker-entrypoint-initdb.d/role-contract.inc,readonly",
-        "--memory=8g", "--memory-swap=8g", "--cpus=4", "--shm-size=512m", $postgresImage
+        "--memory=8g", "--memory-swap=8g", "--cpus=4", "--shm-size=512m", $postgresImage,
+        "-c", "shared_buffers=512MB"
     ) -Quiet
 
     $ready = $false

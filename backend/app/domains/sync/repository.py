@@ -1860,6 +1860,17 @@ class SyncEdgeRepository:
         filters = [SyncReadInventoryProjection.snapshot_id == snapshot_id]
         if not show_empty:
             filters.append(SyncReadInventoryProjection.qty_remaining > 0)
+        page_query = select(SyncReadInventoryProjection.batch_id).where(*filters)
+        if show_empty:
+            page_query = page_query.order_by(SyncReadInventoryProjection.batch_id)
+        else:
+            page_query = page_query.order_by(
+                SyncReadInventoryProjection.tenant_id,
+                SyncReadInventoryProjection.branch_id,
+                SyncReadInventoryProjection.node_id,
+                SyncReadInventoryProjection.snapshot_id,
+                SyncReadInventoryProjection.batch_id,
+            )
         rollup_filters = [SyncReadInventoryRollup.snapshot_id == snapshot_id]
         if not show_empty:
             rollup_filters.append(SyncReadInventoryRollup.has_stock.is_(True))
@@ -1886,15 +1897,22 @@ class SyncEdgeRepository:
                 ).where(*rollup_filters)
             )
         ).one()
-        rows = await self.session.scalars(
-            select(SyncReadInventoryProjection)
-            .where(*filters)
-            .order_by(SyncReadInventoryProjection.batch_id)
-            .offset(offset)
-            .limit(limit)
+        batch_ids = list((await self.session.scalars(page_query.offset(offset).limit(limit))).all())
+        rows = (
+            await self.session.scalars(
+                select(SyncReadInventoryProjection)
+                .where(
+                    SyncReadInventoryProjection.snapshot_id == snapshot_id,
+                    SyncReadInventoryProjection.batch_id.in_(batch_ids),
+                )
+                .order_by(SyncReadInventoryProjection.batch_id)
+            )
+            if batch_ids
+            else None
         )
+        items = list(rows.all()) if rows is not None else []
         return (
-            list(rows.all()),
+            items,
             int(summary[0]),
             InventoryProjectionSummary(
                 total_qty=Decimal(summary[1]),
@@ -2058,7 +2076,7 @@ class SyncEdgeRepository:
                         "is_blocked": row.is_blocked,
                         "payload": row.model_dump(mode="json"),
                     }
-                    for row in projection.inventory
+                    for row in sorted(projection.inventory, key=lambda item: item.id)
                 ],
             )
             has_stock = SyncReadInventoryProjection.qty_remaining > 0

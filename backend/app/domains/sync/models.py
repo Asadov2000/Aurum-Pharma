@@ -976,6 +976,7 @@ class SyncReadInventoryProjection(Base):
             "branch_id",
             "node_id",
             "snapshot_id",
+            "batch_id",
             postgresql_where=text("qty_remaining > 0"),
         ),
     )
