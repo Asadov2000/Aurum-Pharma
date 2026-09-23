@@ -3,7 +3,8 @@ param(
     [string]$BackendImage = "aurum-pharma-e2e-backend:local",
     [ValidateRange(1, 100000)][int]$CatalogRows = 100000,
     [ValidateRange(1, 250000)][int]$InventoryRows = 250000,
-    [ValidateRange(5, 200)][int]$Repetitions = 30
+    [ValidateRange(5, 200)][int]$Repetitions = 30,
+    [switch]$FullSnapshot
 )
 
 # Every resource is unique, internal-only and disposable. No shared Compose
@@ -132,7 +133,7 @@ try {
     $imageId = (& docker image inspect --format '{{.Id}}' $BackendImage).Trim()
     if ($LASTEXITCODE -ne 0) { throw "Cannot identify benchmark image." }
     [ordered]@{
-        benchmark = "edge_read_model"
+        benchmark = if ($FullSnapshot) { "edge_full_snapshot" } else { "edge_read_model" }
         revision = $revision
         backend_image_id = $imageId
         catalog_rows = $CatalogRows
@@ -145,9 +146,11 @@ try {
 
     $driverName = "$prefix-driver"
     $containers.Add($driverName)
+    $driverScript = if ($FullSnapshot) { "scripts/benchmark_edge_full_snapshot.py" } else { "scripts/benchmark_edge_read_model.py" }
+    $driverMemory = if ($FullSnapshot) { "5g" } else { "1g" }
     & docker run --name $driverName --network $network --env-file $controllerEnv `
-        @sourceMounts --workdir /app --memory=1g --memory-swap=1g --cpus=1 `
-        --entrypoint python $BackendImage scripts/benchmark_edge_read_model.py `
+        @sourceMounts --workdir /app --memory=$driverMemory --memory-swap=$driverMemory --cpus=1 `
+        --entrypoint python $BackendImage $driverScript `
         --catalog-rows $CatalogRows --inventory-rows $InventoryRows --repetitions $Repetitions
     if ($LASTEXITCODE -ne 0) { throw "Edge read benchmark failed; see the fixed numeric reason." }
 }
