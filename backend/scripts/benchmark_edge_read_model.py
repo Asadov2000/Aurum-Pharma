@@ -2,14 +2,17 @@
 
 Run only through ``scripts/benchmark-edge-read-model.ps1``.  The controller
 accepts two fixed database identities and refuses every other destination before
-constructing an engine. It creates synthetic projection rows in the disposable
-database and measures repository queries plus response mapping in ``LocalReadModel``.
+constructing an engine. It creates synthetic projection rows through an
+installer-only engine, keeps a separate reader connection open from before the
+bulk load, and measures both the first post-install repository reads and
+steady-state ``LocalReadModel`` mapping.
 
 This is a repository microbenchmark. It deliberately supplies a test source
 verifier and does not exercise signed snapshot installation, cryptographic
-verification, active-pointer selection, HTTP or UI. The first observation is
-only the first query in the run; later observations are repetitions. No result
-from this script is an acceptance decision for ADR-0043.
+verification, active-pointer selection, HTTP or UI. The transition gate verifies
+that the pre-opened reader stays within fixed SQL budgets; later observations
+measure steady state. No result from this script is an acceptance decision for
+ADR-0043.
 """
 
 from __future__ import annotations
@@ -27,7 +30,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -35,6 +37,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -57,6 +60,9 @@ FOREIGN_NODE_ID = UUID("52000000-0000-0000-0000-000000000003")
 TARGET_QUERY = "targetterm"
 TARGET_BARCODE = "2999999999999"
 STABILIZATION_IDLE_SECONDS = 30
+CATALOG_TRANSITION_BUDGET_MS = 300
+BARCODE_TRANSITION_BUDGET_MS = 150
+INVENTORY_TRANSITION_BUDGET_MS = 300
 
 
 class BenchmarkFailure(RuntimeError):
@@ -90,6 +96,7 @@ def database_url(variable: str, role: str) -> URL:
 @dataclass(frozen=True, slots=True)
 class Connections:
     app: AsyncEngine
+    installer: AsyncEngine
     support: AsyncEngine
 
 
@@ -105,9 +112,9 @@ def connections() -> Connections:
             max_overflow=0,
             connect_args={"timeout": 10, "command_timeout": 1800},
         )
-        for url in (app_url, support_url)
+        for url in (app_url, app_url, support_url)
     ]
-    return Connections(app=engines[0], support=engines[1])
+    return Connections(app=engines[0], installer=engines[1], support=engines[2])
 
 
 @asynccontextmanager
@@ -185,9 +192,11 @@ def foundation_payload() -> dict[str, object]:
     }
 
 
-async def verify_environment(env: Connections) -> None:
+async def verify_environment(env: Connections) -> int:
+    reader_backend_pid: int | None = None
     for engine, role, bypass in (
         (env.app, "aurum_app", False),
+        (env.installer, "aurum_app", False),
         (env.support, "aurum_support", True),
     ):
         async with session(engine, readonly=True) as db:
@@ -201,6 +210,10 @@ async def verify_environment(env: Connections) -> None:
             ).one()
             require(row[0] == DATABASE_NAME and row[1] == role, 11)
             require(not row[2] and bool(row[3]) is bypass, 12)
+            if engine is env.app:
+                reader_backend_pid = int(
+                    (await db.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+                )
     async with session(env.support, readonly=True) as db:
         projection_tables = await db.scalar(
             text(
@@ -212,6 +225,8 @@ async def verify_environment(env: Connections) -> None:
             )
         )
         require(projection_tables == 5, 13)
+    require(reader_backend_pid is not None, 17)
+    return cast(int, reader_backend_pid)
 
 
 async def seed(env: Connections, *, catalog_rows: int, inventory_rows: int) -> tuple[float, UUID]:
@@ -242,7 +257,7 @@ async def seed(env: Connections, *, catalog_rows: int, inventory_rows: int) -> t
         )
         require(isinstance(node_id, UUID), 14)
     async with session(
-        env.app,
+        env.installer,
         tenant_id=TENANT_ID,
         branch_id=BRANCH_ID,
         node_id=node_id,
@@ -351,7 +366,8 @@ async def seed(env: Connections, *, catalog_rows: int, inventory_rows: int) -> t
                 "'branch_name','Synthetic branch','catalog_name',"
                 "'Product ' || (((value-1) % CAST(:catalog_rows AS integer))+1),"
                 "'catalog_form','tablet','catalog_dosage','500 mg','catalog_pack_size','10') "
-                "FROM generate_series(1,CAST(:inventory_rows AS integer)) value"
+                "FROM generate_series(1,CAST(:inventory_rows AS integer)) value "
+                "ORDER BY md5('batch-' || value)::uuid"
             ),
             {
                 "snapshot_id": SNAPSHOT_ID,
@@ -376,7 +392,7 @@ async def seed(env: Connections, *, catalog_rows: int, inventory_rows: int) -> t
             {"snapshot_id": SNAPSHOT_ID},
         )
     async with session(
-        env.app,
+        env.installer,
         tenant_id=TENANT_ID,
         branch_id=BRANCH_ID,
         node_id=node_id,
@@ -497,6 +513,12 @@ def summarize(values: Sequence[float]) -> dict[str, float | int]:
 
 def benchmark_claims() -> dict[str, object]:
     return {
+        "preopened_reader_transition_budgets_ms": {
+            "catalog_search_ms": CATALOG_TRANSITION_BUDGET_MS,
+            "exact_barcode_ms": BARCODE_TRANSITION_BUDGET_MS,
+            "inventory_ms": INVENTORY_TRANSITION_BUDGET_MS,
+            "inventory_with_empty_ms": INVENTORY_TRANSITION_BUDGET_MS,
+        },
         "reference_budgets_ms": {
             "catalog_search_p95_ms": {"value": 300, "kind": "adr_0043_direct"},
             "exact_barcode_p95_ms": {"value": 150, "kind": "diagnostic_component"},
@@ -517,48 +539,180 @@ async def measure(
     return values[0], values[1:]
 
 
-async def probe_reused_connection(
+async def measure_preopened_reader_transition(
     env: Connections,
     *,
     node_id: UUID,
+    reader_backend_pid: int,
+    catalog_rows: int,
+    inventory_rows: int,
 ) -> dict[str, object]:
     from app.domains.sync.repository import SyncEdgeRepository
 
+    stabilization_started = time.perf_counter()
+    await asyncio.sleep(STABILIZATION_IDLE_SECONDS)
+    stabilization_seconds = time.perf_counter() - stabilization_started
     async with session(
         env.app,
         tenant_id=TENANT_ID,
         branch_id=BRANCH_ID,
         node_id=node_id,
         readonly=True,
-    ) as reused_db:
-        repository = SyncEdgeRepository(reused_db)
-        diagnostic_today = datetime.now(UTC).date()
+    ) as reader_db:
+        current_pid = int(
+            (await reader_db.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        )
+        require(current_pid == reader_backend_pid, 18)
+        repository = SyncEdgeRepository(reader_db)
+        today = datetime.now(UTC).date()
 
-        def inventory_call(show_empty: bool) -> Awaitable[object]:
-            return repository.list_read_inventory_projection(
+        async def sample_reader_waits(
+            done: asyncio.Event, counts: dict[str, int]
+        ) -> None:
+            async with session(env.installer, readonly=True) as observer_db:
+                while not done.is_set():
+                    result = await observer_db.execute(
+                        text(
+                            "SELECT state, wait_event_type, wait_event "
+                            "FROM pg_stat_activity WHERE pid=:pid"
+                        ),
+                        {"pid": current_pid},
+                    )
+                    row = result.one_or_none()
+                    if row is not None:
+                        key = "/".join(str(value or "none") for value in row)
+                        counts[key] = counts.get(key, 0) + 1
+                    try:
+                        await asyncio.wait_for(done.wait(), timeout=0.01)
+                    except TimeoutError:
+                        pass
+
+        async def timed(
+            call: Callable[[], Awaitable[object]], *, budget_ms: int, reason: int
+        ) -> tuple[object, float]:
+            await reader_db.execute(
+                text("SELECT set_config('statement_timeout', :value, true)"),
+                {"value": f"{budget_ms}ms"},
+            )
+            started = time.perf_counter_ns()
+            wait_counts: dict[str, int] = {}
+            done = asyncio.Event()
+            observer = (
+                asyncio.create_task(sample_reader_waits(done, wait_counts))
+                if reason in (64, 66)
+                else None
+            )
+            try:
+                result = await call()
+            except DBAPIError as exc:
+                print(json.dumps({"failed_reason": reason, "reader_waits": wait_counts}))
+                raise BenchmarkFailure(reason) from exc
+            finally:
+                done.set()
+                if observer is not None:
+                    await observer
+            elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
+            if elapsed_ms > budget_ms:
+                print(json.dumps({"failed_reason": reason, "reader_waits": wait_counts}))
+            require(elapsed_ms <= budget_ms, reason)
+            return result, elapsed_ms
+
+        expected_catalog_id = UUID(
+            hashlib.md5(f"catalog-{catalog_rows}".encode(), usedforsecurity=False).hexdigest()
+        )
+        catalog_value, catalog_ms = await timed(
+            lambda: repository.list_read_catalog_projection(
                 snapshot_id=SNAPSHOT_ID,
-                show_empty=show_empty,
+                query=TARGET_QUERY,
                 offset=0,
                 limit=20,
-                today=diagnostic_today,
-                orange_until=diagnostic_today + timedelta(days=90),
-            )
+            ),
+            budget_ms=CATALOG_TRANSITION_BUDGET_MS,
+            reason=60,
+        )
+        catalog_items, catalog_total = cast(
+            tuple[list[object], int], catalog_value
+        )
+        require(
+            catalog_total == 1
+            and len(catalog_items) == 1
+            and getattr(catalog_items[0], "catalog_id", None) == expected_catalog_id,
+            61,
+        )
 
-        metrics: dict[str, object] = {}
-        for show_empty in (False, True):
-            suffix = "all" if show_empty else "available"
-            call = partial(inventory_call, show_empty)
-            default_ms, _ = await measure(call, 0)
-            await reused_db.execute(text("SET LOCAL plan_cache_mode = 'force_custom_plan'"))
-            custom_ms, _ = await measure(call, 0)
-            await reused_db.execute(text("SET LOCAL plan_cache_mode = 'auto'"))
-            auto_after_ms, _ = await measure(call, 0)
-            metrics[suffix] = {
-                "default_ms": round(default_ms, 3),
-                "force_custom_ms": round(custom_ms, 3),
-                "auto_after_ms": round(auto_after_ms, 3),
-            }
-    return metrics
+        barcode_value, barcode_ms = await timed(
+            lambda: repository.get_read_catalog_projection(
+                snapshot_id=SNAPSHOT_ID,
+                item_id=None,
+                barcode=TARGET_BARCODE,
+            ),
+            budget_ms=BARCODE_TRANSITION_BUDGET_MS,
+            reason=62,
+        )
+        require(
+            barcode_value is not None
+            and getattr(cast(tuple[object, object], barcode_value)[0], "catalog_id", None)
+            == expected_catalog_id,
+            63,
+        )
+
+        expected_available = inventory_rows - (inventory_rows // 10)
+        expected_qty = Decimal(expected_available * 10)
+        inventory_value, inventory_ms = await timed(
+            lambda: repository.list_read_inventory_projection(
+                snapshot_id=SNAPSHOT_ID,
+                show_empty=False,
+                offset=0,
+                limit=20,
+                today=today,
+                orange_until=today + timedelta(days=90),
+            ),
+            budget_ms=INVENTORY_TRANSITION_BUDGET_MS,
+            reason=64,
+        )
+        inventory_items, inventory_total, inventory_summary = cast(
+            tuple[list[object], int, object], inventory_value
+        )
+        require(
+            inventory_total == expected_available
+            and len(inventory_items) == min(20, expected_available)
+            and getattr(inventory_summary, "total_qty", None) == expected_qty,
+            65,
+        )
+
+        inventory_all_value, inventory_all_ms = await timed(
+            lambda: repository.list_read_inventory_projection(
+                snapshot_id=SNAPSHOT_ID,
+                show_empty=True,
+                offset=0,
+                limit=20,
+                today=today,
+                orange_until=today + timedelta(days=90),
+            ),
+            budget_ms=INVENTORY_TRANSITION_BUDGET_MS,
+            reason=66,
+        )
+        inventory_all_items, inventory_all_total, inventory_all_summary = cast(
+            tuple[list[object], int, object], inventory_all_value
+        )
+        require(
+            inventory_all_total == inventory_rows
+            and len(inventory_all_items) == min(20, inventory_rows)
+            and getattr(inventory_all_summary, "total_qty", None) == expected_qty,
+            67,
+        )
+
+    return {
+        "reader_connection_preopened": True,
+        "reader_backend_pid_reused": True,
+        "idle_seconds": STABILIZATION_IDLE_SECONDS,
+        "actual_idle_seconds": round(stabilization_seconds, 3),
+        "catalog_search_ms": round(catalog_ms, 3),
+        "exact_barcode_ms": round(barcode_ms, 3),
+        "inventory_ms": round(inventory_ms, 3),
+        "inventory_with_empty_ms": round(inventory_all_ms, 3),
+        "thresholds_met": True,
+    }
 
 
 async def benchmark(
@@ -568,19 +722,11 @@ async def benchmark(
     node_id: UUID,
     catalog_rows: int,
     inventory_rows: int,
+    transition: dict[str, object],
 ) -> dict[str, object]:
-    os.environ["EDGE_SYNC_CREDENTIAL"] = CREDENTIAL
-    os.environ["EDGE_READ_SNAPSHOT_STALE_SECONDS"] = "86400"
-    os.environ.setdefault("JWT_SECRET", "b" * 64)
-    get_settings.cache_clear()
     from app.domains.sync.read_model import LocalReadModel
     from app.domains.sync.repository import SyncEdgeRepository
 
-    stabilization_started = time.perf_counter()
-    await asyncio.sleep(STABILIZATION_IDLE_SECONDS)
-    stabilization_seconds = time.perf_counter() - stabilization_started
-    reused_connection_probe = await probe_reused_connection(env, node_id=node_id)
-    await env.app.dispose()
     foundation = foundation_payload()
     async with session(
         env.app,
@@ -703,11 +849,7 @@ async def benchmark(
     }
     return {
         "metrics": metrics,
-        "stabilization": {
-            "idle_seconds": STABILIZATION_IDLE_SECONDS,
-            "actual_seconds": round(stabilization_seconds, 3),
-            "reused_connection_probe_ms": reused_connection_probe,
-        },
+        "preopened_reader_transition": transition,
         **benchmark_claims(),
     }
 
@@ -715,11 +857,22 @@ async def benchmark(
 async def run(args: argparse.Namespace) -> None:
     require(args.catalog_rows >= 1 and args.inventory_rows >= 1, 30)
     require(args.repetitions >= 5, 31)
+    os.environ["EDGE_SYNC_CREDENTIAL"] = CREDENTIAL
+    os.environ["EDGE_READ_SNAPSHOT_STALE_SECONDS"] = "86400"
+    os.environ.setdefault("JWT_SECRET", "b" * 64)
+    get_settings.cache_clear()
     env = connections()
     try:
-        await verify_environment(env)
+        reader_backend_pid = await verify_environment(env)
         seed_seconds, node_id = await seed(
             env,
+            catalog_rows=args.catalog_rows,
+            inventory_rows=args.inventory_rows,
+        )
+        transition = await measure_preopened_reader_transition(
+            env,
+            node_id=node_id,
+            reader_backend_pid=reader_backend_pid,
             catalog_rows=args.catalog_rows,
             inventory_rows=args.inventory_rows,
         )
@@ -735,6 +888,7 @@ async def run(args: argparse.Namespace) -> None:
             node_id=node_id,
             catalog_rows=args.catalog_rows,
             inventory_rows=args.inventory_rows,
+            transition=transition,
         )
         print(
             json.dumps(
@@ -754,6 +908,7 @@ async def run(args: argparse.Namespace) -> None:
         )
     finally:
         await env.app.dispose()
+        await env.installer.dispose()
         await env.support.dispose()
         get_settings.cache_clear()
 

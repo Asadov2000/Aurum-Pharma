@@ -69,17 +69,24 @@ def test_nonbenchmark_database_is_refused_before_client_construction(
     guarded_environment.assert_not_called()
 
 
-def test_valid_destinations_construct_only_the_two_bounded_engines(
+def test_valid_destinations_construct_separate_reader_installer_and_support_engines(
     guarded_environment: Mock,
 ) -> None:
     guarded_environment.side_effect = None
-    guarded_environment.return_value = Mock()
+    reader = Mock(name="reader")
+    installer = Mock(name="installer")
+    support = Mock(name="support")
+    guarded_environment.side_effect = [reader, installer, support]
 
     result = benchmark.connections()
 
-    assert result.app is guarded_environment.return_value
-    assert result.support is guarded_environment.return_value
-    assert guarded_environment.call_count == 2
+    assert result.app is reader
+    assert result.installer is installer
+    assert result.support is support
+    assert guarded_environment.call_count == 3
+    assert guarded_environment.call_args_list[0].args[0].username == "aurum_app"
+    assert guarded_environment.call_args_list[1].args[0].username == "aurum_app"
+    assert guarded_environment.call_args_list[2].args[0].username == "aurum_support"
 
 
 def test_percentile_uses_nearest_rank_and_summary_is_milliseconds() -> None:
@@ -122,6 +129,12 @@ def test_microbenchmark_reports_references_without_acceptance_claim() -> None:
 
     assert claims["acceptance_claimed"] is False
     assert "thresholds_met" not in claims
+    assert claims["preopened_reader_transition_budgets_ms"] == {
+        "catalog_search_ms": 300,
+        "exact_barcode_ms": 150,
+        "inventory_ms": 300,
+        "inventory_with_empty_ms": 300,
+    }
     references = claims["reference_budgets_ms"]
     assert isinstance(references, dict)
     assert references["inventory_p95_ms"] == {
