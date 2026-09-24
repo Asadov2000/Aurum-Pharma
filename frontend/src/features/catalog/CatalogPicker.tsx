@@ -13,6 +13,8 @@ interface Props {
   onSearchChange?: (text: string) => void;
   /** Optional initial label shown when `value` is preset (e.g. from URL state). */
   initialLabel?: string;
+  /** Prefill an unselected search, such as a supplier's product name. */
+  initialSearch?: string;
   /** Render an inline ✕ that clears the selection. Useful for filters. */
   clearable?: boolean;
   placeholder?: string;
@@ -39,6 +41,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     onChange,
     onSearchChange,
     initialLabel,
+    initialSearch,
     clearable = false,
     placeholder = "Начните вводить название…",
     invalid = false,
@@ -51,15 +54,20 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
   ref,
 ): JSX.Element {
   const [open, setOpen] = useState(false);
-  const [text, setText] = useState(initialLabel ?? "");
+  const [text, setText] = useState(initialLabel ?? initialSearch ?? "");
   const [debounced, setDebounced] = useState("");
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const internalValueClearRef = useRef(false);
+  const keepInitialSearchRef = useRef(Boolean(initialSearch && !value));
   const listId = useId();
 
   useEffect(() => {
     if (value) return;
+    if (keepInitialSearchRef.current) {
+      keepInitialSearchRef.current = false;
+      return;
+    }
     if (internalValueClearRef.current) {
       internalValueClearRef.current = false;
       return;

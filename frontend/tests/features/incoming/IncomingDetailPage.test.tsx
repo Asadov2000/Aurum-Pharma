@@ -9,6 +9,8 @@ const deleteIncomingItem = vi.fn();
 const listIncomingDraftRows = vi.fn();
 const deleteIncomingDraftRow = vi.fn();
 const saveIncomingDraftRow = vi.fn();
+const previewIncomingInvoice = vi.fn();
+const importIncomingInvoice = vi.fn();
 const blockNavigation = vi.fn();
 const resetNavigation = vi.fn();
 const proceedNavigation = vi.fn();
@@ -25,6 +27,8 @@ vi.mock("@/features/incoming/api", () => ({
   listIncomingDraftRows: (...args: unknown[]) => listIncomingDraftRows(...args),
   deleteIncomingDraftRow: (...args: unknown[]) => deleteIncomingDraftRow(...args),
   saveIncomingDraftRow: (...args: unknown[]) => saveIncomingDraftRow(...args),
+  previewIncomingInvoice: (...args: unknown[]) => previewIncomingInvoice(...args),
+  importIncomingInvoice: (...args: unknown[]) => importIncomingInvoice(...args),
   commitIncomingDraftRow: vi.fn(),
   addIncomingItem: vi.fn(),
   updateIncomingItem: vi.fn(),
@@ -128,6 +132,8 @@ describe("IncomingDetailPage", () => {
     deleteIncomingDraftRow.mockReset();
     saveIncomingDraftRow.mockReset();
     saveIncomingDraftRow.mockResolvedValue({ revision: 1 });
+    previewIncomingInvoice.mockReset();
+    importIncomingInvoice.mockReset();
     blockNavigation.mockClear();
     resetNavigation.mockClear();
     proceedNavigation.mockClear();
@@ -208,6 +214,127 @@ describe("IncomingDetailPage", () => {
     expect(await screen.findByRole("button", { name: "Добавить позицию" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Отклонить" })).not.toBeInTheDocument();
+  });
+
+  it("previews mapped invoice columns before creating reviewable draft rows", async () => {
+    previewIncomingInvoice.mockResolvedValue({
+      headers: ["Наименование", "Количество", "Цена"],
+      rows: [["Парацетамол", "4", "12,50"]],
+      suggested_mapping: {
+        source_name: 0,
+        qty: 1,
+        purchase_price: 2,
+        sale_price: null,
+        batch_number: null,
+        expires_at: null,
+        manufactured_at: null,
+      },
+      total_rows: 1,
+      warnings: [],
+    });
+    importIncomingInvoice.mockResolvedValue({ imported_count: 1, existing_count: 0 });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить накладную" }));
+    const dialog = screen.getByRole("dialog", { name: "Загрузить накладную" });
+    const file = new File(["Наименование,Количество,Цена\nПарацетамол,4,12.50"], "invoice.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(within(dialog).getByLabelText("Файл накладной"), {
+      target: { files: [file] },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить файл" }));
+    await within(dialog).findByText("Найдено строк: 1. Ни одна строка ещё не добавлена.");
+    expect(importIncomingInvoice).not.toHaveBeenCalled();
+    expect(within(dialog).getByLabelText("Название товара *")).toHaveValue("0");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить 1 строк в черновик" }));
+    await waitFor(() => expect(importIncomingInvoice).toHaveBeenCalledOnce());
+    expect(importIncomingInvoice.mock.calls[0]?.[0]).toBe("doc-1");
+    expect(importIncomingInvoice.mock.calls[0]?.[1]).toBe(file);
+    expect(importIncomingInvoice.mock.calls[0]?.[2]).toMatchObject({
+      source_name: 0,
+      qty: 1,
+      purchase_price: 2,
+    });
+    expect(await screen.findByText(/1 строк добавлено в черновик/)).toBeInTheDocument();
+  });
+
+  it("does not import when source column is missing or columns are reused", async () => {
+    previewIncomingInvoice.mockResolvedValue({
+      headers: ["Товар", "Количество"],
+      rows: [["Аспирин", "2"]],
+      suggested_mapping: {
+        source_name: null,
+        qty: 1,
+        purchase_price: null,
+        sale_price: null,
+        batch_number: null,
+        expires_at: null,
+        manufactured_at: null,
+      },
+      total_rows: 1,
+      warnings: [],
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить накладную" }));
+    const dialog = screen.getByRole("dialog", { name: "Загрузить накладную" });
+    fireEvent.change(within(dialog).getByLabelText("Файл накладной"), {
+      target: { files: [new File(["Товар,Количество\nАспирин,2"], "invoice.csv")] },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить файл" }));
+    await within(dialog).findByText(/Найдено строк: 1/);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить 1 строк в черновик" }));
+    expect(
+      await within(dialog).findByText("Укажите столбец с названием товара."),
+    ).toBeInTheDocument();
+    expect(importIncomingInvoice).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText("Название товара *"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить 1 строк в черновик" }));
+    expect(
+      await within(dialog).findByText("Каждый столбец можно назначить только одному полю."),
+    ).toBeInTheDocument();
+    expect(importIncomingInvoice).not.toHaveBeenCalled();
+  });
+
+  it("retries an uncertain import with the same file and operation id", async () => {
+    previewIncomingInvoice.mockResolvedValue({
+      headers: ["Товар"],
+      rows: [["Аспирин"]],
+      suggested_mapping: {
+        source_name: 0,
+        qty: null,
+        purchase_price: null,
+        sale_price: null,
+        batch_number: null,
+        expires_at: null,
+        manufactured_at: null,
+      },
+      total_rows: 1,
+      warnings: [],
+    });
+    importIncomingInvoice
+      .mockRejectedValueOnce(new Error("lost reply"))
+      .mockResolvedValueOnce({ imported_count: 0, existing_count: 1 });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить накладную" }));
+    const dialog = screen.getByRole("dialog", { name: "Загрузить накладную" });
+    const file = new File(["Товар\nАспирин"], "invoice.csv");
+    fireEvent.change(within(dialog).getByLabelText("Файл накладной"), {
+      target: { files: [file] },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить файл" }));
+    await within(dialog).findByText(/Найдено строк: 1/);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить 1 строк в черновик" }));
+    expect(await within(dialog).findByText(/Если ответ потерялся/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Файл накладной")).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Повторить загрузку" }));
+    await waitFor(() => expect(importIncomingInvoice).toHaveBeenCalledTimes(2));
+    expect(importIncomingInvoice.mock.calls[0]?.[1]).toBe(file);
+    expect(importIncomingInvoice.mock.calls[1]?.[1]).toBe(file);
+    expect(importIncomingInvoice.mock.calls[0]?.[3]).toBe(importIncomingInvoice.mock.calls[1]?.[3]);
+    expect(await screen.findByText(/Дубли не созданы/)).toBeInTheDocument();
   });
 
   it("restores the raw pending row and blocks final acceptance", async () => {

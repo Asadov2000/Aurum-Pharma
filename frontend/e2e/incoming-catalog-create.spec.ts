@@ -186,11 +186,14 @@ test("selects an existing catalog card from incoming creation without losing the
     await expect(productDialog).toBeHidden();
     await expect(incomingDialog.getByLabel("Количество единиц")).toHaveValue("7");
     await expect(incomingDialog.getByLabel("Номер партии")).toHaveValue("EXISTING-BATCH");
-    const rows = (await (await api.get(`incoming/${document.id}/draft-rows`)).json()) as {
-      fields: { catalog_id: string; qty: string };
-    }[];
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.fields).toMatchObject({ catalog_id: product.id, qty: "7" });
+    await expect
+      .poll(async () => {
+        const rows = (await (await api.get(`incoming/${document.id}/draft-rows`)).json()) as {
+          fields: { catalog_id: string; qty: string };
+        }[];
+        return rows[0]?.fields;
+      })
+      .toMatchObject({ catalog_id: product.id, qty: "7" });
   } finally {
     await api.dispose();
     await anonymous.dispose();

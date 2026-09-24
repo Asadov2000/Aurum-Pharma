@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 
 import { AddItemForm } from "./AddItemForm";
 import { deleteIncomingDraftRow } from "./api";
+import { InvoiceImportForm } from "./InvoiceImportForm";
 import { pharmacyCalendarDate } from "./calendar";
 import { statusLabel, statusTone } from "./labels";
 import { NewIncomingForm } from "./NewIncomingForm";
@@ -46,6 +47,8 @@ export function IncomingDetailPage(): JSX.Element {
   const reject = useRejectIncoming();
   const deleteItem = useDeleteIncomingItem();
   const [adding, setAdding] = useState(false);
+  const [importingInvoice, setImportingInvoice] = useState(false);
+  const [invoiceImportBusy, setInvoiceImportBusy] = useState(false);
   const [activeDraft, setActiveDraft] = useState<IncomingDraftRow | undefined>();
   const [deletingDraft, setDeletingDraft] = useState<IncomingDraftRow | null>(null);
   const [draftDeletePending, setDraftDeletePending] = useState(false);
@@ -323,8 +326,13 @@ export function IncomingDetailPage(): JSX.Element {
               >
                 <div className="min-w-0">
                   <h3 className="break-words text-sm font-medium">
-                    {row.catalog_name || "Товар ещё не выбран"}
+                    {row.catalog_name || row.fields.source_name || "Товар ещё не выбран"}
                   </h3>
+                  {!row.catalog_name && row.fields.source_name && (
+                    <p className="text-xs text-foreground-muted">
+                      Из накладной · товар не сопоставлен
+                    </p>
+                  )}
                   <p className="break-words text-sm text-foreground-muted">
                     Количество: {row.fields.qty || "не указано"}
                   </p>
@@ -371,7 +379,14 @@ export function IncomingDetailPage(): JSX.Element {
               Партии появятся на складе только после принятия прихода.
             </p>
           </div>
-          {canEdit && isDraft && <Button onClick={() => setAdding(true)}>Добавить позицию</Button>}
+          {canEdit && isDraft && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => setImportingInvoice(true)}>
+                Загрузить накладную
+              </Button>
+              <Button onClick={() => setAdding(true)}>Добавить позицию</Button>
+            </div>
+          )}
         </div>
 
         {doc.items.length === 0 ? (
@@ -475,6 +490,32 @@ export function IncomingDetailPage(): JSX.Element {
             onClose={closeItemForm}
             onCancel={requestCloseForm}
             onDirtyChange={setFormDirty}
+          />
+        </Modal>
+      )}
+
+      {canEdit && importingInvoice && (
+        <Modal
+          open
+          onClose={() => {
+            if (!invoiceImportBusy) setImportingInvoice(false);
+          }}
+          title="Загрузить накладную"
+          className="sm:max-w-4xl"
+        >
+          <InvoiceImportForm
+            documentId={doc.id}
+            onClose={() => setImportingInvoice(false)}
+            onImportingChange={setInvoiceImportBusy}
+            onImported={async (result) => {
+              await drafts.refetch();
+              setImportingInvoice(false);
+              setActionMessage(
+                result.imported_count > 0
+                  ? `${result.imported_count} строк добавлено в черновик. Сопоставьте товары и проверьте данные.`
+                  : "Эта накладная уже была загружена. Дубли не созданы.",
+              );
+            }}
           />
         </Modal>
       )}
