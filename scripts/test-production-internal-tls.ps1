@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $postgresImage = "postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2"
 $redisImage = "redis:7-alpine@sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf"
-$minioImage = "quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+$minioImage = "docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z@sha256:635197cb9f36d01bee221d34d1c7d7960f6a95c48b0b6c01d99cd13bdae51a46"
 $powershellImage = "mcr.microsoft.com/powershell:7.5-alpine-3.20@sha256:a6beeddb2fcf45547c9099fba091ce231e51aa374fe62ecc182f7c28b69a6cbf"
 
 $suffix = [guid]::NewGuid().ToString("N").Substring(0, 12)
@@ -146,7 +146,7 @@ cp /run/tls/minio.crt /tmp/certs/public.crt
 cp /run/tls/minio.key /tmp/certs/private.key
 cp /run/tls/ca.crt /tmp/certs/CAs/aurum-internal-ca.crt
 chmod 600 /tmp/certs/private.key
-exec minio server --certs-dir /tmp/certs /data
+exec silo server --certs-dir /tmp/certs /data
 '@
     $minioCommand = $minioCommand.Replace("`r`n", "`n")
     [void](Invoke-Docker -Arguments @(
