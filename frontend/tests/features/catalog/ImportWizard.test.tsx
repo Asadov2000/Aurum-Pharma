@@ -113,6 +113,48 @@ describe("ImportWizard", () => {
     vi.clearAllMocks();
   });
 
+  it("explains what catalog import changes and provides a matching CSV template", () => {
+    renderWizard();
+
+    expect(screen.getByText(/Остатки на складе от этого не появятся/)).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Этапы импорта" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Скачать шаблон CSV" })).toHaveAttribute(
+      "href",
+      "/templates/catalog-import.csv",
+    );
+    expect(screen.getByRole("button", { name: "Выбрать файл" })).toBeEnabled();
+  });
+
+  it("accepts a dropped file and rejects multiple files before upload", async () => {
+    uploadImport.mockResolvedValue(JOB);
+    getImportJob.mockResolvedValue(JOB);
+    const { container } = renderWizard();
+    const dropZone = screen.getByText("Перетащите Excel или CSV сюда").parentElement!;
+    const file = new File(["brand_name\nТовар"], "catalog.csv", { type: "text/csv" });
+    expect(container.querySelector('input[type="file"]')).toHaveAttribute(
+      "accept",
+      ".csv,.xlsx,text/csv",
+    );
+
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file, file] } });
+    expect(screen.getByRole("alert")).toHaveTextContent("Выберите один файл");
+    expect(uploadImport).not.toHaveBeenCalled();
+
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+    await waitFor(() => expect(uploadImport).toHaveBeenCalledWith(file));
+  });
+
+  it("rejects empty and oversized files before upload", async () => {
+    const { input } = renderWizard();
+    fireEvent.change(input, { target: { files: [new File([], "empty.csv")] } });
+    expect(screen.getByRole("alert")).toHaveTextContent("непустым");
+    fireEvent.change(input, {
+      target: { files: [new File([new Uint8Array(10 * 1024 * 1024 + 1)], "large.csv")] },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("не больше 10 МБ");
+    expect(uploadImport).not.toHaveBeenCalled();
+  });
+
   it("rejects a legacy .xls file with a friendly message and never uploads", async () => {
     const { input } = renderWizard();
     const file = new File(["x"], "price.xls", { type: "application/vnd.ms-excel" });
@@ -120,7 +162,7 @@ describe("ImportWizard", () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(screen.getByText(/Поддерживаются файлы .xlsx/)).toBeInTheDocument();
+      expect(screen.getByText(/Выберите файл .xlsx или .csv/)).toBeInTheDocument();
     });
     expect(uploadImport).not.toHaveBeenCalled();
   });
@@ -210,7 +252,7 @@ describe("ImportWizard", () => {
     await waitFor(() => expect(confirmButton).toBeDisabled());
     expect(confirmImport).toHaveBeenCalledTimes(1);
     expect(confirmImport).toHaveBeenCalledWith(JOB.id, "skip");
-    expect(screen.getByLabelText("Что делать с дубликатами")).toBeDisabled();
+    expect(screen.getByRole("group", { name: "Что делать с совпадениями?" })).toBeDisabled();
     await act(async () => confirmRequest.resolve({ ...READY_JOB, status: "importing" }));
     expect(await screen.findByText("Импорт выполняется")).toBeInTheDocument();
   });
@@ -242,14 +284,41 @@ describe("ImportWizard", () => {
     window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
     getImportJob.mockResolvedValue({
       ...READY_JOB,
-      errors: [{ row: 2, messages: ["brand_name is required", "base_price 'abc' is not a number"] }],
+      errors: [
+        { row: 2, messages: ["brand_name is required", "base_price 'abc' is not a number"] },
+      ],
     });
     renderWizard();
 
     expect(await screen.findByText("Строка 2")).toBeInTheDocument();
-    expect(screen.getByText("brand_name is required")).toBeInTheDocument();
-    expect(screen.getByText("base_price 'abc' is not a number")).toBeInTheDocument();
+    expect(screen.getByText("Укажите название товара.")).toBeInTheDocument();
+    expect(screen.getByText("Цена должна быть числом, например 25.50.")).toBeInTheDocument();
     expect(screen.queryByText(/Сложное значение/)).not.toBeInTheDocument();
+  });
+
+  it("shows product name and price first in the preview", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue({
+      ...READY_JOB,
+      preview_data: [
+        {
+          inn: "paracetamol",
+          form: "таблетки",
+          dosage: "500 мг",
+          barcode: "1234567890123",
+          atx_code: "N02BE01",
+          brand_name: "Парацетамол",
+          base_price: "25.50",
+        },
+      ],
+    });
+    renderWizard();
+
+    const preview = await screen.findByRole("table", { name: "Первые строки файла" });
+    const headers = within(preview).getAllByRole("columnheader");
+    expect(headers[0]).toHaveTextContent("Название товара");
+    expect(headers[1]).toHaveTextContent("Цена");
+    expect(within(preview).getByText("Парацетамол")).toBeInTheDocument();
   });
 
   it("distinguishes file failures from product errors and treats markup as text", async () => {
@@ -266,7 +335,9 @@ describe("ImportWizard", () => {
 
     expect(await screen.findByText("Ошибка файла")).toBeInTheDocument();
     expect(screen.getByText("Товар: Тестовый товар")).toBeInTheDocument();
-    expect(screen.getByText("Обработка файла прервана. Загрузите файл повторно.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Обработка файла прервана. Загрузите файл повторно."),
+    ).toBeInTheDocument();
     expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
     expect(screen.queryByText("Строка 0")).not.toBeInTheDocument();
@@ -288,7 +359,32 @@ describe("ImportWizard", () => {
     expect(await screen.findByText("Проверьте файл")).toBeInTheDocument();
     expect(screen.getByText("Старое описание ошибки")).toBeInTheDocument();
     expect(screen.getByText("Не удалось прочитать описание ошибки.")).toBeInTheDocument();
-    expect(screen.queryByText(/internal-value|nested-value|Сложное значение/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/internal-value|nested-value|Сложное значение/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("defaults to preserving existing products and warns before modifying them", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue(READY_JOB);
+    renderWizard();
+
+    const preserve = await screen.findByRole("radio", { name: /Не менять совпавшие товары/ });
+    expect(preserve).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: /Обновить совпавшие товары/ }));
+    expect(screen.getByText(/Отмена импорта не вернёт прежние значения/)).toBeInTheDocument();
+  });
+
+  it("keeps duplicate creation behind an explicit advanced choice", async () => {
+    window.localStorage.setItem("aurum:test:catalog-import", JOB.id);
+    getImportJob.mockResolvedValue(READY_JOB);
+    renderWizard();
+
+    const advanced = await screen.findByText("Дополнительный вариант");
+    expect(screen.getByRole("radio", { name: /Создать отдельные копии/ })).not.toBeVisible();
+    fireEvent.click(advanced);
+    fireEvent.click(screen.getByRole("radio", { name: /Создать отдельные копии/ }));
+    expect(screen.getByText(/могут появиться в каталоге повторно/)).toBeInTheDocument();
   });
 
   it("allows a new upload after a background failure without exposing confirmation", async () => {

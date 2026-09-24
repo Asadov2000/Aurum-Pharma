@@ -1023,6 +1023,9 @@ function CloudCatalogPage(): JSX.Element {
         <ImportWizard
           onClose={() => setImporting(false)}
           canRollback={canDelete}
+          canOpenIncoming={
+            hasPermission(user, "incoming.view") || hasPermission(user, "incoming.create")
+          }
           storageKey={importStorageKey}
         />
       </Modal>
