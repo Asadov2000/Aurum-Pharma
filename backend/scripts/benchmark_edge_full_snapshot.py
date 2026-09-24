@@ -279,6 +279,34 @@ async def _benchmark(
         warm_read_ms.append((time.perf_counter() - started) * 1000)
     warm_read_ms.sort()
     warm_p95_index = min(len(warm_read_ms) - 1, int(len(warm_read_ms) * 0.95))
+    phase_samples: dict[str, list[float]] = {
+        "session": [],
+        "active_projection": [],
+        "catalog_page": [],
+    }
+    for _ in range(repetitions):
+        started = time.perf_counter()
+        async with session(
+            env.app, tenant_id=TENANT_ID, branch_id=BRANCH_ID, node_id=node_id, readonly=True
+        ) as db:
+            entered = time.perf_counter()
+            repo = SyncEdgeRepository(db)
+            _, _, snapshot_id = await LocalReadModel(
+                repo, readiness_guard=readiness.require_verified
+            )._load_projection(tenant_id=TENANT_ID, branch_id=BRANCH_ID)
+            projected = time.perf_counter()
+            rows, total = await repo.list_read_catalog_projection(
+                snapshot_id=snapshot_id, query=None, offset=0, limit=20
+            )
+            paged = time.perf_counter()
+            require(total == catalog_rows and len(rows) == min(20, catalog_rows), 47)
+        phase_samples["session"].append((entered - started) * 1000)
+        phase_samples["active_projection"].append((projected - entered) * 1000)
+        phase_samples["catalog_page"].append((paged - projected) * 1000)
+    phase_p95 = {
+        f"{name}_p95_ms": round(sorted(values)[warm_p95_index], 1)
+        for name, values in phase_samples.items()
+    }
     return {
         "status": "success",
         "benchmark": "edge_full_snapshot",
@@ -292,6 +320,7 @@ async def _benchmark(
         "first_ready_read_ms": round(first_read_seconds * 1000, 1),
         "warm_read_p50_ms": round(statistics.median(warm_read_ms), 1),
         "warm_read_p95_ms": round(warm_read_ms[warm_p95_index], 1),
+        **phase_p95,
         "peak_rss_mb": _peak_rss_mb(),
         "rss_after_generation_mb": generated_rss_mb,
         "rss_after_signing_mb": signed_rss_mb,
