@@ -95,6 +95,52 @@ class CatalogRepository:
             {"tenant_id": str(tenant_id), "operation_id": str(operation_id)},
         )
 
+    async def lock_creation_identity(
+        self, *, tenant_id: UUID, identity: tuple[str, str, str, str, str]
+    ) -> None:
+        """Serialize manual creates sharing one complete product identity."""
+        await self.session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended("
+                "'catalog:identity:' || CAST(:tenant_id AS TEXT) || ':' || :identity, 0))"
+            ),
+            {"tenant_id": str(tenant_id), "identity": json.dumps(identity, ensure_ascii=False)},
+        )
+
+    async def creation_barcode_exists(self, *, tenant_id: UUID, code: str) -> bool:
+        return bool(
+            await self.session.scalar(
+                select(exists().where(Barcode.tenant_id == tenant_id, Barcode.code == code))
+            )
+        )
+
+    async def find_creation_identity(
+        self, *, tenant_id: UUID, identity: tuple[str, str, str, str, str]
+    ) -> TenantCatalog | None:
+        columns = (
+            TenantCatalog.brand_name,
+            TenantCatalog.manufacturer,
+            TenantCatalog.form,
+            TenantCatalog.dosage,
+            TenantCatalog.pack_size,
+        )
+        normalized = (
+            func.lower(func.btrim(func.regexp_replace(column, "[[:space:]]+", " ", "g")))
+            for column in columns
+        )
+        statement = (
+            select(TenantCatalog)
+            .where(
+                TenantCatalog.tenant_id == tenant_id,
+                TenantCatalog.deleted_at.is_(None),
+                TenantCatalog.is_active.is_(True),
+                *(column == value for column, value in zip(normalized, identity, strict=True)),
+            )
+            .order_by(TenantCatalog.created_at, TenantCatalog.id)
+            .limit(1)
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none()
+
     async def get_creation_operation(
         self, *, tenant_id: UUID, operation_id: UUID
     ) -> TenantCatalog | None:

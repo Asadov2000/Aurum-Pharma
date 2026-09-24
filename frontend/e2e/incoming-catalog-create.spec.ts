@@ -8,6 +8,7 @@ import {
   loginInBrowser,
   OWNER,
   seedBranch,
+  seedCatalogItem,
   seedSupplier,
   uniqueName,
 } from "./helpers";
@@ -49,7 +50,7 @@ test("creates a product and barcode inside an incoming row after a lost response
     await incomingDialog.getByLabel("Закупочная цена за единицу").fill("4.00");
     await incomingDialog.getByLabel("Розничная цена за единицу").fill("6.00");
     await incomingDialog.getByPlaceholder(/Начните вводить название/).fill(name);
-    await incomingDialog.getByRole("button", { name: "Новый товар", exact: true }).click();
+    await incomingDialog.getByRole("button", { name: `Проверить и создать «${name}»` }).click();
 
     const productDialog = page.getByRole("dialog", { name: "Добавить товар", exact: true });
     await expect(productDialog.getByLabel("Торговое название")).toHaveValue(name);
@@ -135,6 +136,61 @@ test("creates a product and barcode inside an incoming row after a lost response
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
       ),
     ).toBe(true);
+  } finally {
+    await api.dispose();
+    await anonymous.dispose();
+  }
+});
+
+test("selects an existing catalog card from incoming creation without losing the draft", async ({
+  page,
+}) => {
+  clearLoginRateLimit(OWNER.email);
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const api = await apiContext(tokens.access_token);
+  try {
+    const branch = await seedBranch(api, uniqueName("Existing card branch"));
+    const supplier = await seedSupplier(api, uniqueName("Existing card supplier"));
+    const name = uniqueName("Existing incoming medicine");
+    const product = await seedCatalogItem(api, name);
+    const created = await api.post("incoming", {
+      data: {
+        operation_id: crypto.randomUUID(),
+        branch_id: branch.id,
+        supplier_id: supplier.id,
+        document_date: new Date().toISOString().slice(0, 10),
+      },
+    });
+    expect(created.ok()).toBe(true);
+    const document = (await created.json()) as { id: string };
+
+    await loginInBrowser(page, OWNER);
+    await page.goto(`/incoming/${document.id}`);
+    await page.getByRole("button", { name: "Добавить позицию", exact: true }).click();
+    const incomingDialog = page.getByRole("dialog", { name: "Добавить позицию", exact: true });
+    await incomingDialog.getByLabel("Номер партии").fill("EXISTING-BATCH");
+    await incomingDialog.getByLabel("Количество единиц").fill("7");
+    await incomingDialog.getByLabel("Закупочная цена за единицу").fill("4.00");
+    await incomingDialog.getByLabel("Розничная цена за единицу").fill("6.00");
+    await incomingDialog.getByPlaceholder(/Начните вводить название/).fill(name);
+    await incomingDialog.getByRole("button", { name: `Проверить и создать «${name}»` }).click();
+
+    const productDialog = page.getByRole("dialog", { name: "Добавить товар", exact: true });
+    await expect(productDialog.getByText("Проверьте, нет ли товара в каталоге")).toBeVisible();
+    await productDialog
+      .locator("li")
+      .filter({ hasText: name })
+      .getByRole("button", { name: "Выбрать этот товар" })
+      .click();
+    await expect(productDialog).toBeHidden();
+    await expect(incomingDialog.getByLabel("Количество единиц")).toHaveValue("7");
+    await expect(incomingDialog.getByLabel("Номер партии")).toHaveValue("EXISTING-BATCH");
+    const rows = (await (await api.get(`incoming/${document.id}/draft-rows`)).json()) as {
+      fields: { catalog_id: string; qty: string };
+    }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.fields).toMatchObject({ catalog_id: product.id, qty: "7" });
   } finally {
     await api.dispose();
     await anonymous.dispose();

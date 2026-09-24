@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import { useForm } from "react-hook-form";
+import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { Button, FormError, Input, Label, Select, Switch } from "@/components/ui";
@@ -14,7 +15,8 @@ import {
   storageLabel,
   storageOptions,
 } from "./labels";
-import { useUpdateCatalogItem } from "./queries";
+import { useCatalogItemQuery, useUpdateCatalogItem } from "./queries";
+import { listCatalog } from "./api";
 import { useCatalogCreate } from "./useCatalogCreate";
 import { type CatalogItem } from "./types";
 
@@ -70,6 +72,7 @@ interface Props {
   onCancel?: () => void;
   initialName?: string;
   onCreated?: (item: CatalogItem) => void;
+  onSelectedExisting?: (item: CatalogItem) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
 
@@ -79,12 +82,17 @@ export function CatalogItemForm({
   onCancel = onClose,
   initialName = "",
   onCreated,
+  onSelectedExisting,
   onDirtyChange,
 }: Props): JSX.Element {
   const isEdit = item !== null;
   const create = useCatalogCreate();
   const update = useUpdateCatalogItem();
   const [topError, setTopError] = useState<string | null>(null);
+  const [exactMatchId, setExactMatchId] = useState<string | null>(null);
+  const [reviewedIdentity, setReviewedIdentity] = useState<string | null>(null);
+  const identityAtConflict = useRef<string | null>(null);
+  const exactMatch = useCatalogItemQuery(exactMatchId);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -111,6 +119,34 @@ export function CatalogItemForm({
       barcode_type: "",
     },
   });
+  const brandName = form.watch("brand_name").trim();
+  const identityFields = form.watch(["brand_name", "manufacturer", "form", "dosage", "pack_size"]);
+  const identityKey = identityFields.join("\u0000");
+  useEffect(() => {
+    if (exactMatchId && identityAtConflict.current !== identityKey) setExactMatchId(null);
+  }, [exactMatchId, identityKey]);
+  const [similarName, setSimilarName] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setSimilarName(brandName), 200);
+    return () => clearTimeout(timer);
+  }, [brandName]);
+  const similar = useQuery({
+    queryKey: ["catalog", "creation-similar", similarName],
+    queryFn: ({ signal }) => listCatalog({ q: similarName, page: 1, page_size: 5 }, signal),
+    enabled: !isEdit && Boolean(onSelectedExisting) && similarName.length >= 2 && !create.uncertain,
+    staleTime: 30_000,
+  });
+  const searchReady =
+    isEdit ||
+    !onSelectedExisting ||
+    create.uncertain ||
+    brandName.length < 2 ||
+    (similarName === brandName && similar.isError) ||
+    (similarName === brandName &&
+      !similar.isFetching &&
+      !similar.isPlaceholderData &&
+      !similar.isError &&
+      Boolean(similar.data));
 
   useEffect(() => {
     form.reset({
@@ -143,7 +179,7 @@ export function CatalogItemForm({
     onDirtyChange,
   ]);
 
-  const onSubmit = form.handleSubmit(async (values) => {
+  const submitValues = async (values: FormValues, confirmDistinct = false) => {
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
@@ -158,6 +194,22 @@ export function CatalogItemForm({
       return;
     }
     setTopError(null);
+    if (!searchReady && !confirmDistinct) return;
+    if (
+      !confirmDistinct &&
+      !isEdit &&
+      onSelectedExisting &&
+      similarName === brandName &&
+      !similar.isFetching &&
+      !similar.isPlaceholderData &&
+      !similar.isError &&
+      similar.data?.items.length &&
+      reviewedIdentity !== identityKey
+    ) {
+      setReviewedIdentity(identityKey);
+      return;
+    }
+    setExactMatchId(null);
     const d = parsed.data;
     if (!d.dispensing_type || !d.storage_type) return;
     const nullable = (v: string | undefined) => (v && v.trim() !== "" ? v.trim() : null);
@@ -182,6 +234,7 @@ export function CatalogItemForm({
         });
       } else {
         const created = await create.submit({
+          ...(confirmDistinct ? { confirm_distinct_item: true } : {}),
           brand_name: d.brand_name.trim(),
           inn: nullable(d.inn),
           manufacturer: nullable(d.manufacturer),
@@ -210,17 +263,36 @@ export function CatalogItemForm({
             .safeParse(err.response?.data)
         : null;
       const reason = parsedError?.success ? parsedError.data.error.details.reason : undefined;
+      if (reason === "catalog_identity_match" && isAxiosError(err)) {
+        const duplicate = z
+          .object({
+            error: z.object({ details: z.object({ catalog_id: z.string().uuid() }) }),
+          })
+          .safeParse(err.response?.data);
+        if (duplicate.success) {
+          identityAtConflict.current = identityKey;
+          setExactMatchId(duplicate.data.error.details.catalog_id);
+        }
+      }
       setTopError(
         reason === "barcode_conflict"
           ? "Этот штрихкод уже принадлежит другому товару. Проверьте код или выберите существующий товар."
-          : reason === "operation_payload_mismatch"
-            ? "Эта операция уже использована с другими данными. Закройте карточку и проверьте каталог перед новым созданием."
-            : reason === "created_item_unavailable"
-              ? "Ранее созданный товар архивирован или выключен. Проверьте его карточку в каталоге."
-              : describeApiError(err, "Не удалось сохранить позицию"),
+          : reason === "catalog_identity_match"
+            ? "Такая карточка уже есть в каталоге. Выберите её или явно подтвердите создание отдельного товара."
+            : reason === "operation_payload_mismatch"
+              ? "Эта операция уже использована с другими данными. Закройте карточку и проверьте каталог перед новым созданием."
+              : reason === "created_item_unavailable"
+                ? "Ранее созданный товар архивирован или выключен. Проверьте его карточку в каталоге."
+                : describeApiError(err, "Не удалось сохранить позицию"),
       );
     }
-  });
+  };
+  const onSubmit = form.handleSubmit((values) =>
+    submitValues(
+      values,
+      !isEdit && reviewedIdentity === identityKey && Boolean(similar.data?.items.length),
+    ),
+  );
 
   return (
     <form
@@ -366,6 +438,138 @@ export function CatalogItemForm({
           )}
         </div>
       </fieldset>
+      {!isEdit && onSelectedExisting && similarName.length >= 2 && !create.uncertain && (
+        <div className="rounded-lg border border-border bg-surface-subtle p-3 text-sm">
+          <p className="font-medium">Проверьте, нет ли товара в каталоге</p>
+          {similar.isFetching || similar.isPlaceholderData || similarName !== brandName ? (
+            <p role="status" className="mt-2 text-foreground-muted">
+              Ищем похожие товары…
+            </p>
+          ) : similar.isError ? (
+            <div className="mt-2 space-y-2">
+              <p role="alert" className="text-danger">
+                Не удалось проверить каталог. Можно повторить поиск или продолжить: сервер всё равно
+                проверит точное совпадение перед созданием.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => void similar.refetch()}
+              >
+                Повторить поиск
+              </Button>
+            </div>
+          ) : similar.data?.items.length ? (
+            <ul className="mt-2 space-y-1">
+              {similar.data.items.map((candidate) => (
+                <li key={candidate.id}>
+                  <div className="w-full rounded-md border border-border bg-surface-raised px-3 py-2 text-left">
+                    <span className="block font-medium">{candidate.brand_name}</span>
+                    <span className="text-xs text-foreground-muted">
+                      {[candidate.dosage, candidate.pack_size, candidate.manufacturer]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    <button
+                      type="button"
+                      className="mt-1 font-medium text-primary underline"
+                      onClick={() => {
+                        onSelectedExisting(candidate);
+                        onClose();
+                      }}
+                    >
+                      Выбрать этот товар
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-foreground-muted">
+              Похожих товаров не найдено. Проверьте дозировку и упаковку.
+            </p>
+          )}
+        </div>
+      )}
+      {!isEdit &&
+      onSelectedExisting &&
+      reviewedIdentity === identityKey &&
+      similar.data?.items.length ? (
+        <p role="status" className="text-sm text-warning-foreground">
+          Проверьте дозировку, упаковку и производителя. Если это другой товар, подтвердите создание
+          ниже.
+        </p>
+      ) : null}
+      {exactMatchId && !isEdit && (
+        <div className="rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm">
+          <p className="font-medium">Найдено точное совпадение</p>
+          {exactMatch.isLoading ? (
+            <p role="status">Загружается карточка…</p>
+          ) : exactMatch.isError ? (
+            <div className="mt-2 space-y-2">
+              <p role="alert">
+                Не удалось загрузить найденную карточку. Проверьте право просмотра каталога или
+                повторите загрузку.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => void exactMatch.refetch()}
+              >
+                Повторить загрузку
+              </Button>
+            </div>
+          ) : exactMatch.data ? (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <span>
+                {[
+                  exactMatch.data.brand_name,
+                  exactMatch.data.dosage,
+                  exactMatch.data.pack_size,
+                  exactMatch.data.manufacturer,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              {onSelectedExisting && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    onSelectedExisting(exactMatch.data);
+                    onClose();
+                  }}
+                >
+                  Выбрать существующий товар
+                </Button>
+              )}
+              {!onSelectedExisting && (
+                <a
+                  href="/catalog"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary underline"
+                >
+                  Открыть каталог
+                </a>
+              )}
+            </div>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="mt-2"
+            disabled={form.formState.isSubmitting || !exactMatch.data}
+            onClick={() => void form.handleSubmit((values) => submitValues(values, true))()}
+          >
+            Создать отдельный товар
+          </Button>
+        </div>
+      )}
       {topError && (
         <p className="text-sm text-danger" role="alert">
           {topError}
@@ -375,12 +579,14 @@ export function CatalogItemForm({
         <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
-        <Button type="submit" isLoading={form.formState.isSubmitting}>
+        <Button type="submit" isLoading={form.formState.isSubmitting} disabled={!searchReady}>
           {isEdit
             ? "Сохранить изменения"
             : create.uncertain
               ? "Повторить создание"
-              : "Добавить товар"}
+              : reviewedIdentity === identityKey && similar.data?.items.length
+                ? "Проверил совпадения, создать отдельный товар"
+                : "Добавить товар"}
         </Button>
       </div>
     </form>

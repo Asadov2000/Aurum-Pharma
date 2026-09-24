@@ -13,7 +13,11 @@ vi.mock("@/features/auth/hooks", () => ({
 }));
 vi.mock("@/features/catalog/api", () => ({
   createCatalogItem: (...args: unknown[]) => createCatalogItem(...args),
+  listCatalog: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   updateCatalogItem: vi.fn(),
+}));
+vi.mock("@/features/catalog/pickerApi", () => ({
+  listCatalogForPicker: vi.fn().mockResolvedValue({ items: [] }),
 }));
 vi.mock("@/features/incoming/api", () => ({
   saveIncomingDraftRow: (...args: unknown[]) => saveDraft(...args),
@@ -92,7 +96,9 @@ async function completeCatalog() {
   fireEvent.change(within(dialog).getByLabelText("Тип штрихкода"), {
     target: { value: "code128" },
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Добавить товар", exact: true }));
+  const submit = within(dialog).getByRole("button", { name: "Добавить товар", exact: true });
+  await waitFor(() => expect(submit).toBeEnabled());
+  fireEvent.click(submit);
 }
 
 describe("catalog creation from an incoming draft", () => {
@@ -120,7 +126,7 @@ describe("catalog creation from an incoming draft", () => {
     const { onClose } = setup();
     enterIncoming();
     const incomingForm = screen.getByLabelText("Количество единиц").closest("form");
-    fireEvent.click(screen.getByRole("button", { name: "Новый товар" }));
+    fireEvent.click(screen.getByRole("button", { name: /Проверить и создать «/ }));
     const dialog = await screen.findByRole("dialog", { name: "Добавить товар" });
     expect(saveDraft).toHaveBeenCalledTimes(1);
     expect(saveDraft.mock.calls[0]?.[2].fields).toEqual(
@@ -157,7 +163,7 @@ describe("catalog creation from an incoming draft", () => {
     saveDraft.mockRejectedValue(new Error("offline"));
     setup();
     enterIncoming();
-    fireEvent.click(screen.getByRole("button", { name: "Новый товар" }));
+    fireEvent.click(screen.getByRole("button", { name: /Проверить и создать «/ }));
     expect(await screen.findByText(/Сначала сохраните строку прихода/)).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Добавить товар" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Количество единиц")).toHaveValue("12,");
@@ -170,9 +176,9 @@ describe("catalog creation from an incoming draft", () => {
       .mockRejectedValueOnce(new Error("link reply lost"));
     setup();
     enterIncoming();
-    fireEvent.click(screen.getByRole("button", { name: "Новый товар" }));
+    fireEvent.click(screen.getByRole("button", { name: /Проверить и создать «/ }));
     await completeCatalog();
-    expect(await screen.findByText(/Товар создан и выбран/)).toBeInTheDocument();
+    expect(await screen.findByText(/Товар выбран/)).toBeInTheDocument();
     expect(screen.getByLabelText("Лекарство или товар")).toHaveValue(ITEM.brand_name);
     expect(screen.getByLabelText("Количество единиц")).toHaveValue("12,");
     expect(createCatalogItem).toHaveBeenCalledTimes(1);
@@ -184,7 +190,7 @@ describe("catalog creation from an incoming draft", () => {
   it("reports child dirtiness to the existing incoming guard and preserves raw input on cancel", async () => {
     const { onDirty } = setup();
     enterIncoming();
-    fireEvent.click(screen.getByRole("button", { name: "Новый товар" }));
+    fireEvent.click(screen.getByRole("button", { name: /Проверить и создать «/ }));
     const dialog = await screen.findByRole("dialog", { name: "Добавить товар" });
     fireEvent.change(within(dialog).getByLabelText("Производитель"), { target: { value: "Фарм" } });
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));

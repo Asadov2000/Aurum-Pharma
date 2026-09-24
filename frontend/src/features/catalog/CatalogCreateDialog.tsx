@@ -11,6 +11,7 @@ export function CatalogCreateDialog({
   onClose,
   initialName = "",
   onCreated,
+  onSelectedExisting,
   onDirtyChange,
   guardNavigation = true,
 }: {
@@ -18,6 +19,7 @@ export function CatalogCreateDialog({
   onClose: () => void;
   initialName?: string;
   onCreated?: (item: CatalogItem) => void;
+  onSelectedExisting?: (item: CatalogItem) => void;
   onDirtyChange?: (dirty: boolean) => void;
   /** Incoming already owns a page-wide blocker and aggregates this form's dirty state. */
   guardNavigation?: boolean;
@@ -48,6 +50,7 @@ export function CatalogCreateDialog({
           item={null}
           initialName={initialName}
           onCreated={onCreated}
+          onSelectedExisting={onSelectedExisting}
           onClose={close}
           onCancel={requestClose}
           onDirtyChange={handleDirty}

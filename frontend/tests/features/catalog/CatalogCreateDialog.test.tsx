@@ -4,6 +4,8 @@ import { AxiosError } from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createCatalogItem = vi.fn();
+const getCatalogItem = vi.fn();
+const listCatalog = vi.fn();
 const navigation = vi.hoisted(() => ({
   blocked: false,
   proceed: vi.fn(),
@@ -12,7 +14,12 @@ const navigation = vi.hoisted(() => ({
 }));
 vi.mock("@/features/catalog/api", () => ({
   createCatalogItem: (...args: unknown[]) => createCatalogItem(...args),
+  getCatalogItem: (...args: unknown[]) => getCatalogItem(...args),
+  listCatalog: (...args: unknown[]) => listCatalog(...args),
   updateCatalogItem: vi.fn(),
+}));
+vi.mock("@/features/catalog/pickerApi", () => ({
+  listCatalogForPicker: vi.fn().mockResolvedValue({ items: [] }),
 }));
 vi.mock("@tanstack/react-router", () => ({
   useBlocker: (options: unknown) => {
@@ -29,19 +36,25 @@ import { CatalogCreateDialog } from "@/features/catalog/CatalogCreateDialog";
 
 const ITEM = { id: "ec420f3b-4bf3-46c2-b63e-c69a02cf78e3", brand_name: "Новый препарат" };
 
-function setup() {
+function setup(selectExisting = false) {
   const onCreated = vi.fn();
+  const onSelectedExisting = vi.fn();
   const onClose = vi.fn();
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
   const view = () => (
     <QueryClientProvider client={client}>
-      <CatalogCreateDialog open onClose={onClose} onCreated={onCreated} />
+      <CatalogCreateDialog
+        open
+        onClose={onClose}
+        onCreated={onCreated}
+        onSelectedExisting={selectExisting ? onSelectedExisting : undefined}
+      />
     </QueryClientProvider>
   );
   const rendered = render(view());
-  return { onCreated, onClose, rerender: () => rendered.rerender(view()) };
+  return { onCreated, onSelectedExisting, onClose, rerender: () => rendered.rerender(view()) };
 }
 
 function completeRequired() {
@@ -56,6 +69,15 @@ describe("CatalogCreateDialog", () => {
   beforeEach(() => {
     createCatalogItem.mockReset();
     createCatalogItem.mockResolvedValue(ITEM);
+    getCatalogItem.mockReset();
+    listCatalog.mockReset();
+    listCatalog.mockResolvedValue({ items: [], total: 0 });
+    getCatalogItem.mockResolvedValue({
+      ...ITEM,
+      dosage: "500 мг",
+      pack_size: "№20",
+      manufacturer: "Фарм",
+    });
     navigation.blocked = false;
     navigation.options.mockClear();
     navigation.proceed.mockClear();
@@ -144,6 +166,65 @@ describe("CatalogCreateDialog", () => {
       createCatalogItem.mock.calls[0]?.[0].operation_id,
     );
     expect(createCatalogItem.mock.calls[1]?.[0].initial_barcode.code).toBe("free-code");
+  });
+
+  it("selects a server-confirmed duplicate instead of creating another card", async () => {
+    createCatalogItem.mockRejectedValueOnce(
+      Object.assign(new AxiosError("duplicate"), {
+        response: {
+          status: 409,
+          data: { error: { details: { reason: "catalog_identity_match", catalog_id: ITEM.id } } },
+        },
+      }),
+    );
+    const { onCreated, onSelectedExisting } = setup(true);
+    completeRequired();
+    const submit = screen.getByRole("button", { name: "Добавить товар", exact: true });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать существующий товар" }));
+    expect(onSelectedExisting).toHaveBeenCalledWith(expect.objectContaining({ id: ITEM.id }));
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(createCatalogItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("can create after a similarity search error because the server checks exact matches", async () => {
+    listCatalog.mockRejectedValue(new Error("search unavailable"));
+    const { onCreated } = setup(true);
+    completeRequired();
+    expect(await screen.findByText(/Не удалось проверить каталог/)).toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "Добавить товар", exact: true });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(ITEM));
+    expect(createCatalogItem.mock.calls[0]?.[0]).not.toHaveProperty("confirm_distinct_item");
+  });
+
+  it("requires an explicit override to create a distinct item after exact 409", async () => {
+    createCatalogItem
+      .mockRejectedValueOnce(
+        Object.assign(new AxiosError("duplicate"), {
+          response: {
+            status: 409,
+            data: { error: { details: { reason: "catalog_identity_match", catalog_id: ITEM.id } } },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(ITEM);
+    const { onCreated } = setup();
+    completeRequired();
+    fireEvent.click(screen.getByRole("button", { name: "Добавить товар", exact: true }));
+    const override = await screen.findByRole("button", { name: "Создать отдельный товар" });
+    await waitFor(() => expect(override).toBeEnabled());
+    fireEvent.click(override);
+    await waitFor(() => expect(createCatalogItem).toHaveBeenCalledTimes(2));
+    expect(onCreated).toHaveBeenCalledWith(ITEM);
+    expect(createCatalogItem.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        operation_id: createCatalogItem.mock.calls[0]?.[0].operation_id,
+        confirm_distinct_item: true,
+      }),
+    );
   });
 
   it("guards dirty Escape, outside click and navigation with explicit confirmations", async () => {

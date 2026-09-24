@@ -51,6 +51,7 @@ class BarcodeCreate(BaseModel):
 class CatalogItemCreate(BaseModel):
     operation_id: UUID4 | None = None
     initial_barcode: BarcodeCreate | None = None
+    confirm_distinct_item: bool = False
     brand_name: str = Field(min_length=1, max_length=500)
     inn: str | None = Field(default=None, max_length=500)
     manufacturer: str | None = Field(default=None, max_length=500)
