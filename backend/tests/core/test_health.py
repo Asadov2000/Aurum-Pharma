@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -90,4 +91,28 @@ async def test_healthz_returns_200_when_dependencies_are_ready(
         "status": "ok",
         "db": True,
         "redis": True,
+    }
+
+
+@pytest.mark.parametrize("snapshot_ready", [False, True])
+async def test_edge_health_requires_preverified_snapshot(
+    monkeypatch: pytest.MonkeyPatch, snapshot_ready: bool
+) -> None:
+    monkeypatch.setattr(main_module, "app_engine", _Engine())
+    monkeypatch.setattr(main_module, "redis_client", _Redis())
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(DEPLOYMENT_PROFILE="edge_shadow"))
+    monkeypatch.setattr(
+        main_module,
+        "edge_snapshot_readiness",
+        SimpleNamespace(is_ready=snapshot_ready),
+    )
+
+    response = await main_module.healthz()
+
+    assert response.status_code == (200 if snapshot_ready else 503)
+    assert json.loads(response.body) == {
+        "status": "ok" if snapshot_ready else "degraded",
+        "db": True,
+        "redis": True,
+        "edge_snapshot": snapshot_ready,
     }

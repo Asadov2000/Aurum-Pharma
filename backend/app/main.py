@@ -11,6 +11,7 @@ So inner application middleware is added first and perimeter middleware last.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -52,6 +53,7 @@ from app.domains.roles.router import router as roles_router
 from app.domains.suppliers import router as suppliers_router
 from app.domains.support_access import router as support_access_router
 from app.domains.sync.read_model_router import router as sync_read_model_router
+from app.domains.sync.readiness import edge_snapshot_readiness
 from app.domains.sync.router import admin_router as sync_admin_router
 from app.domains.sync.router import router as sync_router
 from app.middleware.auth_context import AuthContextMiddleware
@@ -68,9 +70,19 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger.info("startup", environment=settings.ENVIRONMENT, app_name=settings.APP_NAME)
+    edge_task: asyncio.Task[None] | None = None
+    if settings.DEPLOYMENT_PROFILE == "edge_shadow":
+        await edge_snapshot_readiness.refresh()
+        edge_task = asyncio.create_task(edge_snapshot_readiness.run())
     try:
         yield
     finally:
+        if edge_task is not None:
+            edge_task.cancel()
+            try:
+                await edge_task
+            except asyncio.CancelledError:
+                pass
         await app_engine.dispose()
         await support_engine.dispose()
         await redis_client.aclose()
@@ -167,10 +179,14 @@ async def healthz() -> JSONResponse:
     except Exception as exc:
         logger.warning("healthz_redis_fail", error_type=type(exc).__name__)
 
-    status = "ok" if db_ok and redis_ok else "degraded"
+    edge_ok = settings.DEPLOYMENT_PROFILE != "edge_shadow" or edge_snapshot_readiness.is_ready
+    status = "ok" if db_ok and redis_ok and edge_ok else "degraded"
+    content: dict[str, str | bool] = {"status": status, "db": db_ok, "redis": redis_ok}
+    if settings.DEPLOYMENT_PROFILE == "edge_shadow":
+        content["edge_snapshot"] = edge_ok
     return JSONResponse(
         status_code=200 if status == "ok" else 503,
-        content={"status": status, "db": db_ok, "redis": redis_ok},
+        content=content,
     )
 
 

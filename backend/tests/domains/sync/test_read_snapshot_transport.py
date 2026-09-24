@@ -16,12 +16,13 @@ from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
     AsyncSession,
+    async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ServiceUnavailableError
 from app.core.time import utc_now
 from app.domains.sync.credentials import EdgeCredential
 from app.domains.sync.read_model import LocalReadModel
@@ -31,6 +32,7 @@ from app.domains.sync.read_snapshot_projection import (
     IndexedReadProjection,
     build_component_chunks,
 )
+from app.domains.sync.readiness import EdgeSnapshotReadiness
 from app.domains.sync.repository import SyncCloudRepository, SyncEdgeRepository
 from app.domains.sync.service import SyncCloudService
 from tests.domains.sync.test_local_read_model import _batch, _foundation, _product
@@ -217,6 +219,7 @@ async def _assert_catalog_projection_search(
 
 async def _assert_catalog_search_rejects_cross_scope(
     *,
+    repo: SyncEdgeRepository,
     connection: AsyncConnection,
     snapshot_id: UUID,
     tenant_id: UUID,
@@ -240,6 +243,14 @@ async def _assert_catalog_search_rejects_cross_scope(
             {"snapshot_id": snapshot_id},
         )
         assert leaked == 0
+        rows, total = await repo.list_read_catalog_projection(
+            snapshot_id=snapshot_id,
+            query=None,
+            offset=0,
+            limit=20,
+        )
+        assert rows == []
+        assert total == 0
     await _set_edge_scope(
         connection,
         tenant_id=tenant_id,
@@ -272,6 +283,7 @@ async def _assert_catalog_projection_access(
         literal_product_id=literal_product_id,
     )
     await _assert_catalog_search_rejects_cross_scope(
+        repo=repo,
         connection=connection,
         snapshot_id=snapshot_id,
         tenant_id=tenant_id,
@@ -434,15 +446,13 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
                     "tenant_id": tenant_id,
                     "branch_id": branch_id,
                     "credential_kid": credential_kid,
-                    "credential_hash": uuid4().hex * 2,
+                    "credential_hash": edge_credential.digest,
                     "cloud_node_id": cloud_node_id,
                 },
             )
         ).scalar_one()
 
     projection = _projection(tenant_id=tenant_id, branch_id=branch_id)
-    product = projection.catalog[0]
-    literal_product = projection.catalog[1]
     component_chunks = build_component_chunks(
         foundation=projection.foundation,
         catalog=projection.catalog,
@@ -450,13 +460,14 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
         inventory=projection.inventory,
         chunk_size=100,
     )
+    scope = ReadSnapshotScope(
+        edge_node_id=edge_node_id,
+        tenant_id=tenant_id,
+        branch_id=branch_id,
+        source_revision=1,
+    )
     envelope, chunks = build_manifest(
-        ReadSnapshotScope(
-            edge_node_id=edge_node_id,
-            tenant_id=tenant_id,
-            branch_id=branch_id,
-            source_revision=1,
-        ),
+        scope,
         component_chunks,
         credential_kid=credential_kid,
         credential_digest=edge_credential.digest,
@@ -472,7 +483,7 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
         async with AsyncSession(bind=connection, expire_on_commit=False) as session:
             forged = IndexedReadProjection(
                 foundation=projection.foundation,
-                catalog=(product.model_copy(update={"base_price": Decimal("6.00")}),),
+                catalog=(projection.catalog[0].model_copy(update={"base_price": Decimal("6.00")}),),
                 suppliers=projection.suppliers,
                 inventory=projection.inventory,
             )
@@ -526,8 +537,8 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
                 repo=repo,
                 connection=connection,
                 snapshot_id=envelope.manifest.snapshot_id,
-                product_id=product.id,
-                literal_product_id=literal_product.id,
+                product_id=projection.catalog[0].id,
+                literal_product_id=projection.catalog[1].id,
                 tenant_id=tenant_id,
                 branch_id=branch_id,
                 node_id=edge_node_id,
@@ -597,3 +608,121 @@ async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
                     branch_id=branch_id,
                     credential_kid=credential_kid,
                 )
+
+    await _assert_preverified_revisions(
+        scope=scope,
+        edge_credential=edge_credential,
+        projection=projection,
+        app_engine=app_engine_read_transport,
+        monkeypatch=monkeypatch,
+    )
+
+
+async def _assert_preverified_revisions(
+    *,
+    scope: ReadSnapshotScope,
+    edge_credential: EdgeCredential,
+    projection: IndexedReadProjection,
+    app_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_settings = SimpleNamespace(
+        EDGE_SYNC_CREDENTIAL=SimpleNamespace(get_secret_value=lambda: edge_credential.token),
+        EDGE_READ_SNAPSHOT_STALE_SECONDS=86400,
+        EDGE_SYNC_MAX_CLOCK_SKEW_SECONDS=300,
+    )
+    monkeypatch.setattr("app.domains.sync.readiness.get_settings", lambda: local_settings)
+    monkeypatch.setattr(
+        "app.domains.sync.readiness.AppSessionLocal",
+        async_sessionmaker(app_engine, expire_on_commit=False),
+    )
+    readiness = EdgeSnapshotReadiness()
+    async with app_engine.begin() as connection:
+        await _set_edge_scope(
+            connection,
+            tenant_id=scope.tenant_id,
+            branch_id=scope.branch_id,
+            node_id=scope.edge_node_id,
+        )
+        async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+            active = await SyncEdgeRepository(session).get_active_read_projection(
+                tenant_id=scope.tenant_id,
+                branch_id=scope.branch_id,
+                credential_kid=edge_credential.kid,
+            )
+            assert active is not None
+            snapshot = active[0]
+    with pytest.raises(ServiceUnavailableError, match="verification is pending"):
+        readiness.require_verified(snapshot)
+    await readiness.poll_once()
+    assert readiness.is_ready
+    readiness.require_verified(snapshot)
+    snapshot.signature = "0" * 64
+    with pytest.raises(ServiceUnavailableError, match="verification is pending"):
+        readiness.require_verified(snapshot)
+
+    component_chunks = build_component_chunks(
+        foundation=projection.foundation,
+        catalog=projection.catalog,
+        suppliers=projection.suppliers,
+        inventory=projection.inventory,
+        chunk_size=100,
+    )
+    next_envelope, next_chunks = build_manifest(
+        ReadSnapshotScope(
+            edge_node_id=scope.edge_node_id,
+            tenant_id=scope.tenant_id,
+            branch_id=scope.branch_id,
+            source_revision=2,
+        ),
+        component_chunks,
+        credential_kid=edge_credential.kid,
+        credential_digest=edge_credential.digest,
+        source_generated_at=utc_now(),
+    )
+    async with app_engine.begin() as connection:
+        await _set_edge_scope(
+            connection,
+            tenant_id=scope.tenant_id,
+            branch_id=scope.branch_id,
+            node_id=scope.edge_node_id,
+        )
+        async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+            await SyncEdgeRepository(session).install_read_snapshot(
+                envelope=next_envelope,
+                chunks=next_chunks,
+                projection=projection,
+            )
+    async with app_engine.begin() as connection:
+        await _set_edge_scope(
+            connection,
+            tenant_id=scope.tenant_id,
+            branch_id=scope.branch_id,
+            node_id=scope.edge_node_id,
+        )
+        async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+            current = await SyncEdgeRepository(session).get_active_read_projection(
+                tenant_id=scope.tenant_id,
+                branch_id=scope.branch_id,
+                credential_kid=edge_credential.kid,
+            )
+            assert current is not None
+            assert current[0].snapshot_id == next_envelope.manifest.snapshot_id
+            with pytest.raises(ServiceUnavailableError, match="verification is pending"):
+                readiness.require_verified(current[0])
+    await readiness.poll_once()
+    async with app_engine.begin() as connection:
+        await _set_edge_scope(
+            connection,
+            tenant_id=scope.tenant_id,
+            branch_id=scope.branch_id,
+            node_id=scope.edge_node_id,
+        )
+        async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+            current = await SyncEdgeRepository(session).get_active_read_projection(
+                tenant_id=scope.tenant_id,
+                branch_id=scope.branch_id,
+                credential_kid=edge_credential.kid,
+            )
+            assert current is not None
+            readiness.require_verified(current[0])

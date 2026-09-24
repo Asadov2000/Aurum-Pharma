@@ -91,9 +91,15 @@ class InventoryReadModel(_ReadModelResponse):
 
 
 type SourceVerifier = Callable[[SyncReadSnapshot, str], Awaitable[None]]
+type ReadinessGuard = Callable[[SyncReadSnapshot], None]
 
 _VERIFIED_SOURCE_CACHE_LIMIT = 8
 _verified_source_cache: OrderedDict[tuple[UUID, str], None] = OrderedDict()
+
+
+def invalidate_verified_source(snapshot: SyncReadSnapshot) -> None:
+    """Force a fresh stored-data check before declaring a revision ready."""
+    _verified_source_cache.pop((snapshot.snapshot_id, snapshot.signature), None)
 
 
 class LocalReadModel:
@@ -102,11 +108,15 @@ class LocalReadModel:
         repo: SyncEdgeRepository,
         *,
         source_verifier: SourceVerifier | None = None,
+        readiness_guard: ReadinessGuard | None = None,
     ) -> None:
         self.repo = repo
         self._source_verifier = source_verifier
+        self._readiness_guard = readiness_guard
 
     async def _verify_stored_source(self, snapshot: SyncReadSnapshot, credential: str) -> None:
+        if self._readiness_guard is not None:
+            self._readiness_guard(snapshot)
         cache_key = (snapshot.snapshot_id, snapshot.signature)
         if cache_key in _verified_source_cache:
             _verified_source_cache.move_to_end(cache_key)
