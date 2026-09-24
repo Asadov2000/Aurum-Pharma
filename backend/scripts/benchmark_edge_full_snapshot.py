@@ -1,4 +1,4 @@
-"""Measure signed Edge snapshot installation and the first verified local read.
+"""Measure signed Edge snapshot installation, preverification, and local reads.
 
 Run only through ``scripts/benchmark-edge-read-model.ps1 -FullSnapshot``. The
 launcher provisions a disposable, isolated database; the imported connection
@@ -31,6 +31,7 @@ os.environ.setdefault("JWT_SECRET", secrets.token_hex(32))
 from app.core.config import get_settings
 from app.domains.sync.credentials import issue_edge_credential
 from app.domains.sync.read_model import LocalReadModel, _verified_source_cache
+from app.domains.sync.readiness import EdgeSnapshotReadiness
 from app.domains.sync.read_snapshot import (
     ReadSnapshotScope,
     build_manifest,
@@ -251,13 +252,18 @@ async def _benchmark(
     reader_start_rss_mb = _current_rss_mb()
 
     _verified_source_cache.clear()
+    readiness = EdgeSnapshotReadiness()
+    started = time.perf_counter()
+    await readiness.poll_once()
+    preverify_seconds = time.perf_counter() - started
+    require(readiness.is_ready, 46)
     started = time.perf_counter()
     async with session(
         env.app, tenant_id=TENANT_ID, branch_id=BRANCH_ID, node_id=node_id, readonly=True
     ) as db:
-        result = await LocalReadModel(SyncEdgeRepository(db)).catalog(
-            tenant_id=TENANT_ID, branch_id=BRANCH_ID, query=None, page=1, page_size=20
-        )
+        result = await LocalReadModel(
+            SyncEdgeRepository(db), readiness_guard=readiness.require_verified
+        ).catalog(tenant_id=TENANT_ID, branch_id=BRANCH_ID, query=None, page=1, page_size=20)
     first_read_seconds = time.perf_counter() - started
     require(result.total == catalog_rows and len(result.items) == min(20, catalog_rows), 44)
     warm_read_ms: list[float] = []
@@ -266,9 +272,9 @@ async def _benchmark(
         async with session(
             env.app, tenant_id=TENANT_ID, branch_id=BRANCH_ID, node_id=node_id, readonly=True
         ) as db:
-            warm_result = await LocalReadModel(SyncEdgeRepository(db)).catalog(
-                tenant_id=TENANT_ID, branch_id=BRANCH_ID, query=None, page=1, page_size=20
-            )
+            warm_result = await LocalReadModel(
+                SyncEdgeRepository(db), readiness_guard=readiness.require_verified
+            ).catalog(tenant_id=TENANT_ID, branch_id=BRANCH_ID, query=None, page=1, page_size=20)
         require(warm_result.total == catalog_rows, 45)
         warm_read_ms.append((time.perf_counter() - started) * 1000)
     warm_read_ms.sort()
@@ -282,7 +288,8 @@ async def _benchmark(
         "generation_seconds": round(generation_seconds, 3),
         "sign_verify_seconds": round(sign_verify_seconds, 3),
         "install_seconds": round(install_seconds, 3),
-        "first_verified_read_seconds": round(first_read_seconds, 3),
+        "preverify_seconds": round(preverify_seconds, 3),
+        "first_ready_read_ms": round(first_read_seconds * 1000, 1),
         "warm_read_p50_ms": round(statistics.median(warm_read_ms), 1),
         "warm_read_p95_ms": round(warm_read_ms[warm_p95_index], 1),
         "peak_rss_mb": _peak_rss_mb(),

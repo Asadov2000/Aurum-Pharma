@@ -1779,8 +1779,19 @@ class SyncEdgeRepository:
             filters.append(SyncReadCatalogProjection.catalog_id.in_(catalog_ids))
             offset = 0
         else:
-            total = await self.session.scalar(
-                select(func.count()).select_from(SyncReadCatalogProjection).where(*filters)
+            # A ready projection's count was checked against its rows at activation.
+            ready_total = await self.session.scalar(
+                select(SyncReadProjection.catalog_count).where(
+                    SyncReadProjection.snapshot_id == snapshot_id,
+                    SyncReadProjection.status == "ready",
+                )
+            )
+            total = (
+                ready_total
+                if ready_total is not None
+                else await self.session.scalar(
+                    select(func.count()).select_from(SyncReadCatalogProjection).where(*filters)
+                )
             )
         rows = await self.session.scalars(
             select(SyncReadCatalogProjection)

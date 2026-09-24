@@ -25,6 +25,7 @@ from app.domains.sync.read_model import (
     LocalReadModel,
     SupplierReadModel,
 )
+from app.domains.sync.readiness import edge_snapshot_readiness
 from app.domains.sync.repository import SyncEdgeRepository
 
 router = APIRouter(prefix="/api/v1/edge/read-model", tags=["edge-read-model"])
@@ -39,7 +40,9 @@ def _service(
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
 ) -> LocalReadModel:
     _ensure_edge_profile()
-    return LocalReadModel(SyncEdgeRepository(db))
+    return LocalReadModel(
+        SyncEdgeRepository(db), readiness_guard=edge_snapshot_readiness.require_verified
+    )
 
 
 def _tenant_id(user: CurrentUser) -> UUID:
