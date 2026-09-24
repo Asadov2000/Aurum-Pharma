@@ -46,7 +46,9 @@
 	}
 
 	handle /healthz {
-		respond 200
+		reverse_proxy backend:8000 {
+			header_up Host backend
+		}
 	}
 
 	handle /assets/* {

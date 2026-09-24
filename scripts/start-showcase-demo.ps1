@@ -597,6 +597,7 @@ try {
 
     Wait-HttpOk -Name "Showcase frontend" -Url "http://localhost:5173"
     Wait-HttpOk -Name "Shared gateway" -Url "http://localhost:18080"
+    Wait-HttpOk -Name "Shared backend health" -Url "http://localhost:18080/healthz" -ExpectedStatus "ok"
     Assert-SharedFrontendCurrent
 
     Invoke-DemoCompose -Title "Show showcase service status" -Arguments @("ps")
