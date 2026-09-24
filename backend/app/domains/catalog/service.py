@@ -62,6 +62,30 @@ PREVIEW_ROW_LIMIT = 100
 ROLLBACK_WINDOW = timedelta(hours=24)
 
 
+def _creation_identity(request: CatalogItemCreate) -> tuple[str, str, str, str, str] | None:
+    values = (
+        request.brand_name,
+        request.manufacturer,
+        request.form,
+        request.dosage,
+        request.pack_size,
+    )
+    if any(not value for value in values):
+        return None
+
+    def normalize(value: str | None) -> str:
+        assert value is not None
+        return " ".join(value.split()).lower()
+
+    return (
+        normalize(request.brand_name),
+        normalize(request.manufacturer),
+        normalize(request.form),
+        normalize(request.dosage),
+        normalize(request.pack_size),
+    )
+
+
 class CatalogService:
     def __init__(
         self,
@@ -84,6 +108,34 @@ class CatalogService:
     # CRUD
     # -------------------------------------------------------------------------
 
+    async def _guard_manual_creation(
+        self,
+        *,
+        tenant_id: UUID,
+        request: CatalogItemCreate,
+        confirm_distinct_item: bool,
+    ) -> None:
+        # The later atomic barcode insert remains authoritative for concurrent claims.
+        if request.initial_barcode is not None and await self.repo.creation_barcode_exists(
+            tenant_id=tenant_id, code=request.initial_barcode.code
+        ):
+            raise ConflictError(
+                "Barcode is already assigned to a catalog item",
+                details={"reason": "barcode_conflict"},
+            )
+        identity = _creation_identity(request)
+        if identity is None:
+            return
+        await self.repo.lock_creation_identity(tenant_id=tenant_id, identity=identity)
+        if confirm_distinct_item:
+            return
+        duplicate = await self.repo.find_creation_identity(tenant_id=tenant_id, identity=identity)
+        if duplicate is not None:
+            raise ConflictError(
+                "Matching catalog item already exists",
+                details={"reason": "catalog_identity_match", "catalog_id": str(duplicate.id)},
+            )
+
     async def create_item(
         self,
         *,
@@ -92,15 +144,25 @@ class CatalogService:
         created_by: UUID | None = None,
         operation_id: UUID | None = None,
         initial_barcode: BarcodeCreate | None = None,
+        confirm_distinct_item: bool = False,
     ) -> TenantCatalog:
         if initial_barcode is not None and operation_id is None:
             raise ValidationError("Initial barcode requires a creation operation ID")
+        request = CatalogItemCreate.model_validate(
+            {
+                **fields,
+                "operation_id": operation_id,
+                "initial_barcode": initial_barcode,
+                "confirm_distinct_item": confirm_distinct_item,
+            }
+        )
         fingerprint: str | None = None
         if operation_id is not None:
-            request = CatalogItemCreate.model_validate(
-                {**fields, "operation_id": operation_id, "initial_barcode": initial_barcode}
+            canonical = request.model_dump(
+                mode="json", exclude={"operation_id", "confirm_distinct_item"}
             )
-            canonical = request.model_dump(mode="json", exclude={"operation_id"})
+            if confirm_distinct_item:
+                canonical["confirm_distinct_item"] = True
             if request.base_price is not None:
                 canonical["base_price"] = format(request.base_price.quantize(Decimal("0.01")), "f")
             fingerprint = sha256(
@@ -125,8 +187,14 @@ class CatalogService:
                     )
                 return existing
             fields = request.model_dump(
-                exclude={"operation_id", "initial_barcode"}, exclude_none=True
+                exclude={"operation_id", "initial_barcode", "confirm_distinct_item"},
+                exclude_none=True,
             )
+        await self._guard_manual_creation(
+            tenant_id=tenant_id,
+            request=request,
+            confirm_distinct_item=confirm_distinct_item,
+        )
         payload = {**fields, "tenant_id": tenant_id}
         if created_by is not None:
             payload["created_by"] = created_by

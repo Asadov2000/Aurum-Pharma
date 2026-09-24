@@ -177,6 +177,101 @@ async def test_barcode_conflict_rolls_back_card_and_audit_and_allows_explicit_co
     assert corrected.id != existing.id
 
 
+PRODUCT_IDENTITY = {
+    "brand_name": "Aspirin Cardio",
+    "manufacturer": "Bayer",
+    "form": "tablets",
+    "dosage": "100 mg",
+    "pack_size": "28",
+}
+
+
+async def test_manual_create_requires_decision_for_complete_identity_and_preserves_retry(
+    db_session: AsyncSession, make_tenant: TenantFactory
+) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    original = await service.create_item(tenant_id=tenant.id, fields=PRODUCT_IDENTITY)
+    before = await _counts(db_session, tenant.id)
+    operation_id = uuid4()
+    with pytest.raises(ConflictError) as error:
+        await service.create_item(
+            tenant_id=tenant.id,
+            fields={key: f"  {value.upper()}  " for key, value in PRODUCT_IDENTITY.items()},
+            operation_id=operation_id,
+        )
+    assert error.value.details == {
+        "reason": "catalog_identity_match",
+        "catalog_id": str(original.id),
+    }
+    assert await _counts(db_session, tenant.id) == before
+    distinct = await service.create_item(
+        tenant_id=tenant.id,
+        fields=PRODUCT_IDENTITY,
+        operation_id=operation_id,
+        confirm_distinct_item=True,
+    )
+    replay = await service.create_item(
+        tenant_id=tenant.id,
+        fields=PRODUCT_IDENTITY,
+        operation_id=operation_id,
+        confirm_distinct_item=True,
+    )
+    assert distinct.id != original.id and replay.id == distinct.id
+    with pytest.raises(ConflictError) as mismatch:
+        await service.create_item(
+            tenant_id=tenant.id, fields=PRODUCT_IDENTITY, operation_id=operation_id
+        )
+    assert mismatch.value.details == {"reason": "operation_payload_mismatch"}
+
+
+async def test_incomplete_or_different_identity_is_not_hard_blocked(
+    db_session: AsyncSession, make_tenant: TenantFactory
+) -> None:
+    tenant = await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    original = await service.create_item(tenant_id=tenant.id, fields=PRODUCT_IDENTITY)
+    different_pack = await service.create_item(
+        tenant_id=tenant.id, fields={**PRODUCT_IDENTITY, "pack_size": "56"}
+    )
+    incomplete = {key: value for key, value in PRODUCT_IDENTITY.items() if key != "dosage"}
+    without_dosage = await service.create_item(tenant_id=tenant.id, fields=incomplete)
+    assert len({original.id, different_pack.id, without_dosage.id}) == 3
+
+
+async def test_identity_guard_is_tenant_scoped_but_barcode_stays_unique(
+    db_session: AsyncSession, make_tenant: TenantFactory
+) -> None:
+    first, second = await make_tenant(), await make_tenant()
+    service = CatalogService(CatalogRepository(db_session))
+    barcode = BarcodeCreate(code="4607013192829")
+    first_item = await service.create_item(
+        tenant_id=first.id,
+        fields=PRODUCT_IDENTITY,
+        operation_id=uuid4(),
+        initial_barcode=barcode,
+    )
+    second_item = await service.create_item(tenant_id=second.id, fields=PRODUCT_IDENTITY)
+    assert first_item.id != second_item.id
+    with pytest.raises(ConflictError) as same_identity_error:
+        await service.create_item(
+            tenant_id=first.id,
+            fields=PRODUCT_IDENTITY,
+            operation_id=uuid4(),
+            initial_barcode=barcode,
+        )
+    assert same_identity_error.value.details == {"reason": "barcode_conflict"}
+    with pytest.raises(ConflictError) as error:
+        await service.create_item(
+            tenant_id=first.id,
+            fields={**PRODUCT_IDENTITY, "pack_size": "56"},
+            operation_id=uuid4(),
+            initial_barcode=barcode,
+            confirm_distinct_item=True,
+        )
+    assert error.value.details == {"reason": "barcode_conflict"}
+
+
 async def test_same_operation_and_barcode_are_explicitly_scoped_on_support_connection(
     db_session: AsyncSession, make_tenant: TenantFactory
 ) -> None:

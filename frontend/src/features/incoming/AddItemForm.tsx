@@ -9,6 +9,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
+import { type CatalogItem } from "@/features/catalog/types";
 import { pharmacyCalendarDate } from "./calendar";
 import { useUpdateIncomingItem } from "./queries";
 import { type IncomingDraftRow, type IncomingItem } from "./types";
@@ -175,7 +176,7 @@ export function AddItemForm({
     return () => subscription.unsubscribe();
   }, [form, isEditing, updateDraft]);
 
-  const openCatalogCreate = async () => {
+  const openCatalogCreate = async (searchName = catalogSearch) => {
     if (
       !canCreateCatalog ||
       preparingCatalog ||
@@ -189,7 +190,7 @@ export function AddItemForm({
     try {
       await draft.save();
       if (!mounted.current) return;
-      setCatalogCreateName(catalogSearch.trim());
+      setCatalogCreateName(searchName.trim());
       setCatalogCreateOpen(true);
     } catch {
       if (mounted.current)
@@ -199,6 +200,20 @@ export function AddItemForm({
     } finally {
       if (mounted.current) setPreparingCatalog(false);
     }
+  };
+
+  const selectCatalogFromDialog = (selected: CatalogItem) => {
+    form.setValue("catalog_id", selected.id, { shouldDirty: true });
+    form.clearErrors("catalog_id");
+    setCatalogLabel(selected.brand_name);
+    setPickerVersion((version) => version + 1);
+    setTopError(null);
+    void draft.save().catch(() => {
+      if (mounted.current)
+        setTopError(
+          "Товар выбран. Связь со строкой прихода ещё не сохранена — повторите сохранение черновика.",
+        );
+    });
   };
 
   const onSubmit = form.handleSubmit(async (values) => {
@@ -326,6 +341,11 @@ export function AddItemForm({
             )}
           />
           <FormError>{form.formState.errors.catalog_id?.message}</FormError>
+          {!isEditing && !canCreateCatalog && catalogSearch.trim().length >= 2 && (
+            <p className="text-xs text-foreground-muted">
+              Не нашли товар? Попросите сотрудника с правом создания товаров добавить его в каталог.
+            </p>
+          )}
           {!isEditing && canCreateCatalog && (
             <Button
               type="button"
@@ -335,7 +355,9 @@ export function AddItemForm({
               isLoading={preparingCatalog}
               onClick={() => void openCatalogCreate()}
             >
-              Новый товар
+              {catalogSearch.trim().length >= 2
+                ? `Проверить и создать «${catalogSearch.trim()}»`
+                : "Новый товар"}
             </Button>
           )}
         </div>
@@ -470,19 +492,8 @@ export function AddItemForm({
               setCatalogCreateOpen(false);
               setCatalogCreateDirty(false);
             }}
-            onCreated={(created) => {
-              form.setValue("catalog_id", created.id, { shouldDirty: true });
-              form.clearErrors("catalog_id");
-              setCatalogLabel(created.brand_name);
-              setPickerVersion((version) => version + 1);
-              setTopError(null);
-              void draft.save().catch(() => {
-                if (mounted.current)
-                  setTopError(
-                    "Товар создан и выбран. Связь со строкой прихода ещё не сохранена — повторите сохранение черновика.",
-                  );
-              });
-            }}
+            onCreated={selectCatalogFromDialog}
+            onSelectedExisting={selectCatalogFromDialog}
           />
         </Suspense>
       )}
