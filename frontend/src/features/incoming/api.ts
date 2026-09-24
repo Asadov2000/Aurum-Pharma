@@ -12,6 +12,9 @@ import {
   type IncomingItemCreatePayload,
   type IncomingItemUpdatePayload,
   type IncomingSearchParams,
+  type InvoiceColumnMapping,
+  type InvoiceImportResult,
+  type InvoicePreview,
 } from "./types";
 
 export async function listIncoming(
@@ -98,6 +101,36 @@ export async function listIncomingDraftRows(
   const { data } = await api.get<IncomingDraftRow[]>(`/incoming/${documentId}/draft-rows`, {
     signal,
   });
+  return data;
+}
+
+export async function previewIncomingInvoice(
+  documentId: string,
+  file: File,
+): Promise<InvoicePreview> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<InvoicePreview>(`/incoming/${documentId}/invoice/preview`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function importIncomingInvoice(
+  documentId: string,
+  file: File,
+  mapping: InvoiceColumnMapping,
+  operationId: string,
+): Promise<InvoiceImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("mapping", JSON.stringify(mapping));
+  form.append("operation_id", operationId);
+  const { data } = await api.post<InvoiceImportResult>(
+    `/incoming/${documentId}/invoice/import`,
+    form,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
   return data;
 }
 

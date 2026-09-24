@@ -12,6 +12,7 @@ import {
 } from "./types";
 
 export const EMPTY_DRAFT_FIELDS: IncomingDraftFields = {
+  source_name: "",
   catalog_id: "",
   batch_number: "",
   manufactured_at: "",
@@ -25,7 +26,11 @@ type Phase = "idle" | "unsaved" | "saving" | "saved" | "error" | "conflict";
 
 export function draftFields(row?: IncomingDraftRow): IncomingDraftFields {
   return row
-    ? { ...row.fields, purchase_price: row.fields.purchase_price ?? "" }
+    ? {
+        ...row.fields,
+        source_name: row.fields.source_name ?? "",
+        purchase_price: row.fields.purchase_price ?? "",
+      }
     : { ...EMPTY_DRAFT_FIELDS };
 }
 

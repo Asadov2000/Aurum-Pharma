@@ -75,6 +75,11 @@ class IncomingDraftService:
             )
         else:
             self._assert_document(row, document_id)
+            # Imported provenance is server-owned and survives edits to the
+            # reviewable fields. Clients cannot forge or clear these keys.
+            raw_fields.update(
+                {key: value for key, value in row.fields.items() if key.startswith("_invoice_")}
+            )
             if row.status != "pending":
                 self._conflict(row.revision, closed=True)
             if row.revision == expected_revision + 1 and row.fields == raw_fields:
@@ -178,7 +183,9 @@ class IncomingDraftService:
     @staticmethod
     def _validated_item(row: IncomingDraftRow) -> IncomingItemBase:
         try:
-            raw = IncomingDraftFields.model_validate(row.fields)
+            raw = IncomingDraftFields.model_validate(
+                {key: value for key, value in row.fields.items() if not key.startswith("_invoice_")}
+            )
         except PydanticValidationError:
             raise BusinessRuleError(
                 "Invalid draft fields",

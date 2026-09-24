@@ -54,6 +54,28 @@ class IncomingRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_draft_rows_by_ids(
+        self, tenant_id: UUID, identifiers: list[UUID]
+    ) -> dict[UUID, IncomingDraftRow]:
+        result = await self.session.scalars(
+            select(IncomingDraftRow).where(
+                IncomingDraftRow.tenant_id == tenant_id,
+                IncomingDraftRow.id.in_(identifiers),
+            )
+        )
+        return {row.id: row for row in result}
+
+    async def get_draft_rows_by_invoice_operation(
+        self, tenant_id: UUID, operation_id: UUID
+    ) -> list[IncomingDraftRow]:
+        result = await self.session.scalars(
+            select(IncomingDraftRow).where(
+                IncomingDraftRow.tenant_id == tenant_id,
+                IncomingDraftRow.fields["_invoice_operation_id"].astext == str(operation_id),
+            )
+        )
+        return list(result)
+
     async def list_draft_rows(self, document_id: UUID) -> list[IncomingDraftRow]:
         result = await self.session.scalars(
             select(IncomingDraftRow)

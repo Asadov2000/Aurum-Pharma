@@ -45,6 +45,7 @@ export interface IncomingDocumentWithItems extends IncomingDocument {
 }
 
 export interface IncomingDraftFields {
+  source_name: string;
   catalog_id: string;
   batch_number: string;
   manufactured_at: string;
@@ -52,6 +53,30 @@ export interface IncomingDraftFields {
   qty: string;
   purchase_price: string;
   sale_price: string;
+}
+
+export type InvoiceColumn =
+  | "source_name"
+  | "batch_number"
+  | "manufactured_at"
+  | "expires_at"
+  | "qty"
+  | "purchase_price"
+  | "sale_price";
+
+export type InvoiceColumnMapping = Record<InvoiceColumn, number | null>;
+
+export interface InvoicePreview {
+  headers: string[];
+  rows: string[][];
+  suggested_mapping: InvoiceColumnMapping;
+  total_rows: number;
+  warnings: string[];
+}
+
+export interface InvoiceImportResult {
+  imported_count: number;
+  existing_count: number;
 }
 
 export interface IncomingDraftRow {

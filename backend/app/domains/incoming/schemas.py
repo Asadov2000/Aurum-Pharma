@@ -106,6 +106,7 @@ class IncomingDraftFields(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     catalog_id: str = Field(max_length=36)
+    source_name: str = Field(default="", max_length=255)
     batch_number: str = Field(max_length=120)
     manufactured_at: str = Field(max_length=32)
     expires_at: str = Field(max_length=32)
@@ -123,6 +124,7 @@ class IncomingDraftFields(BaseModel):
     def as_fields(self) -> dict[str, str]:
         return {
             "catalog_id": self.catalog_id,
+            "source_name": self.source_name,
             "batch_number": self.batch_number,
             "manufactured_at": self.manufactured_at,
             "expires_at": self.expires_at,
@@ -147,6 +149,7 @@ class IncomingDraftCommit(BaseModel):
 
 class IncomingDraftReadFields(BaseModel):
     catalog_id: str
+    source_name: str = ""
     batch_number: str
     manufactured_at: str
     expires_at: str

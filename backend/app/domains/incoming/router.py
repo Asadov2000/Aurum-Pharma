@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Coroutine
 from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import UUID4
@@ -21,6 +22,8 @@ from app.core.deps import (
 )
 from app.core.errors import BusinessRuleError
 from app.domains.incoming.draft_service import IncomingDraftService
+from app.domains.incoming.invoice_parser import MAX_INVOICE_FILE_BYTES
+from app.domains.incoming.invoice_service import IncomingInvoiceService
 from app.domains.incoming.models import IncomingDraftRow
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.schemas import (
@@ -55,6 +58,7 @@ class _DraftRoute(APIRoute):
             except RequestValidationError as exc:
                 known = {
                     "catalog_id",
+                    "source_name",
                     "batch_number",
                     "manufactured_at",
                     "expires_at",
@@ -64,6 +68,9 @@ class _DraftRoute(APIRoute):
                     "expected_revision",
                     "row_id",
                     "document_id",
+                    "mapping",
+                    "operation_id",
+                    "file",
                 }
                 fields = sorted(
                     {str(part) for error in exc.errors() for part in error["loc"] if part in known}
@@ -387,6 +394,64 @@ def _draft_read(
         catalog_name=catalog_name,
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+async def _read_invoice_upload(file: UploadFile) -> bytes:
+    content = bytearray()
+    while chunk := await file.read(1024 * 1024):
+        content.extend(chunk)
+        if len(content) > MAX_INVOICE_FILE_BYTES:
+            raise BusinessRuleError(
+                "Invoice file is too large", details={"reason": "invoice_file_invalid"}
+            )
+    return bytes(content)
+
+
+@draft_router.post("/{document_id}/invoice/preview")
+async def preview_invoice(
+    document_id: UUID,
+    file: Annotated[UploadFile, File()],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("incoming.create", policy="resource"))
+    ],
+    service: Annotated[IncomingService, Depends(_service)],
+) -> dict[str, object]:
+    raw = await _read_invoice_upload(file)
+    return await IncomingInvoiceService(service).preview(
+        document_id,
+        raw,
+        file.filename,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
+    )
+
+
+@draft_router.post("/{document_id}/invoice/import")
+async def import_invoice(
+    document_id: UUID,
+    file: Annotated[UploadFile, File()],
+    mapping: Annotated[str, Form()],
+    operation_id: Annotated[UUID4, Form()],
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("incoming.create", policy="resource"))
+    ],
+    service: Annotated[IncomingService, Depends(_service)],
+) -> dict[str, int]:
+    try:
+        parsed_mapping: object = json.loads(mapping)
+    except (ValueError, TypeError):
+        raise BusinessRuleError(
+            "Invalid invoice column mapping", details={"reason": "invoice_mapping_invalid"}
+        ) from None
+    raw = await _read_invoice_upload(file)
+    return await IncomingInvoiceService(service).import_rows(
+        document_id,
+        raw,
+        file.filename,
+        mapping=parsed_mapping,
+        operation_id=operation_id,
+        actor_id=user.user_id,
+        allowed_branch_ids=user.branch_scope_for("incoming.create"),
     )
 
 

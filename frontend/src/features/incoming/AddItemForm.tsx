@@ -12,7 +12,7 @@ import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { type CatalogItem } from "@/features/catalog/types";
 import { pharmacyCalendarDate } from "./calendar";
 import { useUpdateIncomingItem } from "./queries";
-import { type IncomingDraftRow, type IncomingItem } from "./types";
+import { type IncomingDraftFields, type IncomingDraftRow, type IncomingItem } from "./types";
 import { draftFields, useIncomingDraft } from "./useIncomingDraft";
 
 const CatalogCreateDialog = lazy(() =>
@@ -48,6 +48,7 @@ const decimalString = (
 
 const schema = z
   .object({
+    source_name: z.string().optional(),
     catalog_id: z.string().min(1, "Выберите позицию"),
     batch_number: z.string().optional(),
     manufactured_at: z.string().optional(),
@@ -93,6 +94,19 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
+function draftSnapshot(values: Partial<FormValues>): IncomingDraftFields {
+  return {
+    source_name: values.source_name ?? "",
+    catalog_id: values.catalog_id ?? "",
+    batch_number: values.batch_number ?? "",
+    manufactured_at: values.manufactured_at ?? "",
+    expires_at: values.expires_at ?? "",
+    qty: values.qty ?? "",
+    purchase_price: values.purchase_price ?? "",
+    sale_price: values.sale_price ?? "",
+  };
+}
+
 export function AddItemForm({
   documentId,
   onClose,
@@ -114,7 +128,7 @@ export function AddItemForm({
   const isEditing = item !== undefined;
   const { user } = useAuth();
   const canCreateCatalog = hasPermission(user, "catalog.create");
-  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogSearch, setCatalogSearch] = useState(draftRow?.fields.source_name ?? "");
   const [catalogCreateName, setCatalogCreateName] = useState("");
   const [catalogCreateOpen, setCatalogCreateOpen] = useState(false);
   const [catalogCreateDirty, setCatalogCreateDirty] = useState(false);
@@ -162,17 +176,7 @@ export function AddItemForm({
   const updateDraft = draft.update;
   useEffect(() => {
     if (isEditing) return;
-    const subscription = form.watch((values) =>
-      updateDraft({
-        catalog_id: values.catalog_id ?? "",
-        batch_number: values.batch_number ?? "",
-        manufactured_at: values.manufactured_at ?? "",
-        expires_at: values.expires_at ?? "",
-        qty: values.qty ?? "",
-        purchase_price: values.purchase_price ?? "",
-        sale_price: values.sale_price ?? "",
-      }),
-    );
+    const subscription = form.watch((values) => updateDraft(draftSnapshot(values)));
     return () => subscription.unsubscribe();
   }, [form, isEditing, updateDraft]);
 
@@ -204,6 +208,9 @@ export function AddItemForm({
 
   const selectCatalogFromDialog = (selected: CatalogItem) => {
     form.setValue("catalog_id", selected.id, { shouldDirty: true });
+    // Do not depend on the form watch callback running before the immediate
+    // save when a catalog dialog selects an existing card.
+    updateDraft(draftSnapshot({ ...form.getValues(), catalog_id: selected.id }));
     form.clearErrors("catalog_id");
     setCatalogLabel(selected.brand_name);
     setPickerVersion((version) => version + 1);
@@ -320,6 +327,12 @@ export function AddItemForm({
         }
         className="space-y-3"
       >
+        <input type="hidden" {...form.register("source_name")} />
+        {draftRow?.fields.source_name && (
+          <p className="rounded-md border border-border bg-surface-subtle px-3 py-2 text-sm">
+            В накладной: <strong>{draftRow.fields.source_name}</strong>
+          </p>
+        )}
         <div>
           <Label htmlFor="incoming-catalog-item">Лекарство или товар</Label>
           <Controller
@@ -331,6 +344,9 @@ export function AddItemForm({
                 id="incoming-catalog-item"
                 value={field.value}
                 initialLabel={item?.catalog_name ?? catalogLabel}
+                initialSearch={
+                  draftRow?.fields.catalog_id ? undefined : draftRow?.fields.source_name
+                }
                 onSearchChange={setCatalogSearch}
                 onChange={(id, name) => {
                   setCatalogLabel(name);
@@ -465,6 +481,7 @@ export function AddItemForm({
               if (!mounted.current) return;
               form.reset(draftFields(current));
               setCatalogLabel(current.catalog_name ?? undefined);
+              setCatalogSearch(current.fields.source_name ?? "");
               setPickerVersion((version) => version + 1);
               setReloadOpen(false);
               setTopError(null);
