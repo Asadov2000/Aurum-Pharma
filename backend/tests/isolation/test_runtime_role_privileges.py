@@ -196,6 +196,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "analyze_ready_sync_read_catalog",
     "search_sync_read_catalog",
     "trg_audit_sync_read_snapshot_storage",
     "trg_guard_sync_read_snapshot",
@@ -502,6 +503,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "analyze_ready_sync_read_catalog",
     "search_sync_read_catalog",
     "confirm_bootstrap_email",
     "lookup_auth_session_password",

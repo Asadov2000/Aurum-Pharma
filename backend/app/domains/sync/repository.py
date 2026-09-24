@@ -2151,6 +2151,13 @@ class SyncEdgeRepository:
             )
             .values(status="ready")
         )
+        await self.session.execute(
+            text(
+                "SELECT public.analyze_ready_sync_read_catalog("
+                ":tenant_id, :branch_id, :node_id, :snapshot_id)"
+            ),
+            projection_scope,
+        )
         cursor_insert = pg_insert(SyncReadSnapshotCursor).values(
             tenant_id=manifest.tenant_id,
             branch_id=manifest.branch_id,

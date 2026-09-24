@@ -290,6 +290,13 @@ async def _assert_catalog_projection_access(
         branch_id=branch_id,
         node_id=node_id,
     )
+    await _assert_catalog_statistics_scope_rejected(
+        repo.session,
+        tenant_id=tenant_id,
+        branch_id=branch_id,
+        node_id=node_id,
+        snapshot_id=snapshot_id,
+    )
 
 
 async def _assert_inventory_rollup(
@@ -388,6 +395,40 @@ async def _assert_inventory_physical_order(
         .all()
     )
     assert physical_batch_ids == sorted(expected_ids)
+
+
+async def _assert_catalog_statistics_scope_rejected(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    branch_id: UUID,
+    node_id: UUID,
+    snapshot_id: UUID,
+) -> None:
+    estimated_rows = await session.scalar(
+        text(
+            "SELECT reltuples FROM pg_catalog.pg_class "
+            "WHERE oid = 'public.sync_read_catalog_projection'::regclass"
+        )
+    )
+    assert estimated_rows is not None and estimated_rows >= 3
+    valid_scope = {
+        "tenant_id": tenant_id,
+        "branch_id": branch_id,
+        "node_id": node_id,
+        "snapshot_id": snapshot_id,
+    }
+    for coordinate in valid_scope:
+        invalid_scope = {**valid_scope, coordinate: uuid4()}
+        with pytest.raises(DBAPIError, match="statistics scope is invalid"):
+            async with session.begin_nested():
+                await session.execute(
+                    text(
+                        "SELECT public.analyze_ready_sync_read_catalog("
+                        ":tenant_id, :branch_id, :node_id, :snapshot_id)"
+                    ),
+                    invalid_scope,
+                )
 
 
 async def test_cloud_serves_only_the_nodes_complete_signed_snapshot(
