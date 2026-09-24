@@ -18,6 +18,19 @@ test.describe("Catalog import (owner)", () => {
       .first()
       .click();
 
+    await expect(page.getByText(/Остатки на складе от этого не появятся/)).toBeVisible();
+    await expect(page.getByRole("link", { name: "Скачать шаблон CSV" })).toHaveAttribute(
+      "href",
+      "/templates/catalog-import.csv",
+    );
+    const template = await page.request.get("/templates/catalog-import.csv");
+    expect(template.ok()).toBeTruthy();
+    expect((await template.text()).trim()).toBe("brand_name,manufacturer,base_price,barcode");
+    await expect(page.getByRole("link", { name: /Перейти в «Приходы»/ })).toHaveAttribute(
+      "href",
+      "/incoming",
+    );
+
     // Upload the sample workbook (3 rows); the wizard advances to the job step.
     await page.locator('input[type="file"]').setInputFiles("e2e/fixtures/import-sample.xlsx");
 
@@ -35,7 +48,7 @@ test.describe("Catalog import (owner)", () => {
       .getByRole("button", { name: /Загрузить из Excel\/CSV/ })
       .first()
       .click();
-    await expect(page.getByText("Корректных")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Корректных", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: /Импортировать товары/ }).click();
 
