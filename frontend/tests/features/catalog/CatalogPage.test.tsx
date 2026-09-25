@@ -172,6 +172,13 @@ describe("CatalogPage", () => {
     fireEvent.change(within(dialog).getByLabelText(/Торговое название/i), {
       target: { value: "Анальгин" },
     });
+    const dosageForm = within(dialog).getByLabelText(/^Форма выпуска$/i) as HTMLSelectElement;
+    expect(Array.from(dosageForm.options).slice(1, 4).map((option) => option.text)).toEqual([
+      "Таблетки",
+      "Капсулы",
+      "Сироп",
+    ]);
+    fireEvent.change(dosageForm, { target: { value: "таблетки" } });
     fireEvent.change(within(dialog).getByLabelText(/^Условия отпуска$/i), {
       target: { value: "otc" },
     });
@@ -187,11 +194,42 @@ describe("CatalogPage", () => {
         brand_name: "Анальгин",
         inn: null,
         manufacturer: null,
+        form: "таблетки",
         dispensing_type: "otc",
         storage_type: "normal",
         base_price: null,
       }),
     );
+  });
+
+  it("keeps uncommon dosage forms available for manual entry", async () => {
+    listCatalog.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
+    createCatalogItem.mockResolvedValueOnce(ITEM);
+    renderPage();
+    await screen.findByText(/Каталог пуст/i);
+    fireEvent.click(screen.getAllByRole("button", { name: /Добавить товар/i })[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "Добавить товар" });
+    fireEvent.change(within(dialog).getByLabelText(/^Форма выпуска$/i), {
+      target: { value: "other" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Другая форма выпуска"), {
+      target: { value: "Раствор для диализа" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Торговое название/i), {
+      target: { value: "Тестовый товар" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/^Условия отпуска$/i), {
+      target: { value: "otc" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/^Условия хранения$/i), {
+      target: { value: "normal" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Добавить товар$/i }));
+    await waitFor(() => {
+      expect(createCatalogItem).toHaveBeenCalledWith(
+        expect.objectContaining({ form: "Раствор для диализа" }),
+      );
+    });
   });
 
   it("hides mutation controls from a view-only account", async () => {
@@ -212,5 +250,22 @@ describe("CatalogPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть карточку Парацетамол" }));
 
     expect(await screen.findByRole("dialog", { name: "Карточка товара" })).toBeInTheDocument();
+  });
+
+  it("keeps an imported uncommon dosage form when editing a product", async () => {
+    const uncommonItem = { ...ITEM, form: "Раствор для диализа" };
+    listCatalog.mockResolvedValueOnce({ items: [uncommonItem], total: 1, page: 1, page_size: 25 });
+    getCatalogItem.mockResolvedValue({ ...uncommonItem, barcodes: [] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть карточку Парацетамол" }));
+    const card = await screen.findByRole("dialog", { name: "Карточка товара" });
+    fireEvent.click(within(card).getByRole("button", { name: "Изменить позицию" }));
+
+    const editor = await screen.findByRole("dialog", { name: "Изменить товар: Парацетамол" });
+    expect(within(editor).getByLabelText(/^Форма выпуска$/i)).toHaveValue("other");
+    expect(within(editor).getByLabelText("Другая форма выпуска")).toHaveValue(
+      "Раствор для диализа",
+    );
   });
 });

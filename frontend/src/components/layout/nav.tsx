@@ -1,8 +1,12 @@
-import { HomeIcon, type NavItem } from "./Sidebar";
+import { type NavItem } from "./Sidebar";
 import { canAccessPath, type AppRoutePath, type RouteAccessContext } from "./routeAccess";
 
 export interface AppNavItem extends NavItem {
   to: AppRoutePath;
+}
+
+export function isActiveNavPath(pathname: string, to: string): boolean {
+  return pathname === to || (to !== "/" && pathname.startsWith(`${to}/`));
 }
 
 export function findActiveNavItem(
@@ -11,7 +15,7 @@ export function findActiveNavItem(
 ): NavItem | undefined {
   let active: NavItem | undefined;
   for (const item of items) {
-    const matches = pathname === item.to || (item.to !== "/" && pathname.startsWith(item.to + "/"));
+    const matches = isActiveNavPath(pathname, item.to);
     if (matches && (!active || item.to.length > active.to.length)) active = item;
   }
   return active;
@@ -38,7 +42,7 @@ export function buildNav(
     platformCapabilities,
   };
   const candidates: AppNavItem[] = [
-    { to: "/", label: "Главная", icon: <HomeIcon /> },
+    { to: "/", label: "Главная" },
     { to: "/admin", label: "Управление" },
     { to: "/admin/billing", label: "Расчёты Aurum" },
     { to: "/onboarding", label: "Старт" },
@@ -48,7 +52,7 @@ export function buildNav(
     { to: "/roles", label: "Роли" },
     { to: "/catalog", label: "Каталог" },
     { to: "/suppliers", label: "Поставщики" },
-    { to: "/incoming", label: "Приходы" },
+    { to: "/incoming", label: "Приёмка товаров" },
     { to: "/batches", label: "Партии" },
     { to: "/pos", label: "Касса" },
     { to: "/sales", label: "Чеки" },

@@ -17,6 +17,7 @@ import {
 } from "./labels";
 import { useCatalogItemQuery, useUpdateCatalogItem } from "./queries";
 import { listCatalog } from "./api";
+import { otherDosageForms, popularDosageForms, presetDosageForm } from "./dosageForms";
 import { useCatalogCreate } from "./useCatalogCreate";
 import { type CatalogItem } from "./types";
 
@@ -89,6 +90,9 @@ export function CatalogItemForm({
   const create = useCatalogCreate();
   const update = useUpdateCatalogItem();
   const [topError, setTopError] = useState<string | null>(null);
+  const [customDosageForm, setCustomDosageForm] = useState(
+    () => Boolean(item?.form) && !presetDosageForm(item?.form),
+  );
   const [exactMatchId, setExactMatchId] = useState<string | null>(null);
   const [reviewedIdentity, setReviewedIdentity] = useState<string | null>(null);
   const identityAtConflict = useRef<string | null>(null);
@@ -121,6 +125,9 @@ export function CatalogItemForm({
   });
   const brandName = form.watch("brand_name").trim();
   const identityFields = form.watch(["brand_name", "manufacturer", "form", "dosage", "pack_size"]);
+  const selectedDosageForm = identityFields[2] ?? "";
+  const dosageFormPreset = presetDosageForm(selectedDosageForm);
+  const showCustomDosageForm = customDosageForm || (Boolean(selectedDosageForm) && !dosageFormPreset);
   const identityKey = identityFields.join("\u0000");
   useEffect(() => {
     if (exactMatchId && identityAtConflict.current !== identityKey) setExactMatchId(null);
@@ -149,6 +156,7 @@ export function CatalogItemForm({
       Boolean(similar.data));
 
   useEffect(() => {
+    setCustomDosageForm(Boolean(item?.form) && !presetDosageForm(item?.form));
     form.reset({
       brand_name: item?.brand_name ?? initialName,
       inn: item?.inn ?? "",
@@ -332,8 +340,48 @@ export function CatalogItemForm({
             <Input id="manufacturer" autoComplete="off" {...form.register("manufacturer")} />
           </div>
           <div>
-            <Label htmlFor="form">Форма выпуска</Label>
-            <Input id="form" placeholder="таблетки, сироп…" {...form.register("form")} />
+            <Label htmlFor="form_choice">Форма выпуска</Label>
+            <Select
+              id="form_choice"
+              value={showCustomDosageForm ? "other" : dosageFormPreset ?? ""}
+              invalid={Boolean(form.formState.errors.form)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCustomDosageForm(value === "other");
+                form.setValue("form", value === "other" ? "" : value, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                });
+              }}
+            >
+              <option value="">Выберите форму выпуска</option>
+              <optgroup label="Популярные">
+                {popularDosageForms.map((dosageForm) => (
+                  <option key={dosageForm} value={dosageForm.toLocaleLowerCase("ru-RU")}>
+                    {dosageForm}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Другие формы">
+                {otherDosageForms.map((dosageForm) => (
+                  <option key={dosageForm} value={dosageForm.toLocaleLowerCase("ru-RU")}>
+                    {dosageForm}
+                  </option>
+                ))}
+              </optgroup>
+              <option value="other">Другая форма — указать вручную</option>
+            </Select>
+            {showCustomDosageForm && (
+              <Input
+                id="form"
+                className="mt-2"
+                placeholder="Укажите форму выпуска"
+                aria-label="Другая форма выпуска"
+                invalid={Boolean(form.formState.errors.form)}
+                {...form.register("form")}
+              />
+            )}
+            <FormError>{form.formState.errors.form?.message}</FormError>
           </div>
           <div>
             <Label htmlFor="dosage">Дозировка</Label>

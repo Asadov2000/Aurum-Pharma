@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 import { BrandMark } from "./BrandMark";
 import { NavIcon } from "./icons";
+import { isActiveNavPath } from "./nav";
 import { SIDEBAR_SECTIONS } from "./sidebarPreferences";
 
 export interface NavItem {
@@ -38,14 +39,18 @@ export function Sidebar({
 }: SidebarProps): JSX.Element {
   const location = useRouterState({ select: (state) => state.location });
   const showLabels = mode === "drawer" || expanded;
+  const footerButtonClass = cn(
+    showLabels
+      ? "min-h-[var(--nav-target-size)] w-full justify-start px-3 font-medium"
+      : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0",
+    "text-shell-sidebar-muted hover:bg-white/10 hover:text-shell-sidebar-foreground",
+  );
   const claimed = new Set(SIDEBAR_SECTIONS.flatMap((section) => section.routes));
   const favorites = new Set(favoriteRoutes);
   const favoriteItems = items.filter((item) => favorites.has(item.to));
 
   const renderLink = (item: NavItem): JSX.Element => {
-    const active =
-      location.pathname === item.to ||
-      (item.to !== "/" && location.pathname.startsWith(`${item.to}/`));
+    const active = isActiveNavPath(location.pathname, item.to);
     return (
       <Link
         key={item.to}
@@ -69,13 +74,14 @@ export function Sidebar({
     );
   };
 
-  const renderGroup = (
+  let renderedGroups = 0;
+  const nextGroup = (
     key: string,
     caption: string | undefined,
     groupItems: NavItem[],
-    first = false,
   ): JSX.Element | null => {
     if (groupItems.length === 0) return null;
+    const first = renderedGroups++ === 0;
     return (
       <div
         key={key}
@@ -92,17 +98,6 @@ export function Sidebar({
         {groupItems.map(renderLink)}
       </div>
     );
-  };
-
-  let renderedGroups = 0;
-  const nextGroup = (
-    key: string,
-    caption: string | undefined,
-    groupItems: NavItem[],
-  ): JSX.Element | null => {
-    const rendered = renderGroup(key, caption, groupItems, renderedGroups === 0);
-    if (rendered !== null) renderedGroups += 1;
-    return rendered;
   };
 
   const leftovers = items.filter((item) => !claimed.has(item.to) && !favorites.has(item.to));
@@ -154,12 +149,7 @@ export function Sidebar({
             <Button
               variant="ghost"
               size="sm"
-              className={cn(
-                showLabels
-                  ? "min-h-[var(--nav-target-size)] w-full justify-start px-3 font-medium"
-                  : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0",
-                "text-shell-sidebar-muted hover:bg-white/10 hover:text-shell-sidebar-foreground",
-              )}
+              className={footerButtonClass}
               aria-label="Настроить боковую панель"
               title={!showLabels ? "Настроить боковую панель" : undefined}
               onClick={onOpenSettings}
@@ -172,12 +162,7 @@ export function Sidebar({
             <Button
               variant="ghost"
               size="sm"
-              className={cn(
-                showLabels
-                  ? "min-h-[var(--nav-target-size)] w-full justify-start px-3 font-medium"
-                  : "mx-auto h-[var(--nav-target-size)] w-[var(--nav-target-size)] px-0",
-                "text-shell-sidebar-muted hover:bg-white/10 hover:text-shell-sidebar-foreground",
-              )}
+              className={footerButtonClass}
               aria-label={expanded ? "Свернуть боковую панель" : "Развернуть боковую панель"}
               aria-expanded={expanded}
               title={!showLabels ? "Развернуть боковую панель" : undefined}
