@@ -126,15 +126,11 @@ export function orderSidebarItems<T extends { to: string }>(
   preferences: SidebarPreferences,
 ): T[] {
   const rank = new Map(preferences.routeOrder.map((route, index) => [route, index]));
-  return items
-    .map((item, index) => ({ item, index, rank: rank.get(item.to) }))
-    .sort((left, right) => {
-      if (left.rank === undefined && right.rank === undefined) return left.index - right.index;
-      if (left.rank === undefined) return 1;
-      if (right.rank === undefined) return -1;
-      return left.rank - right.rank;
-    })
-    .map(({ item }) => item);
+  const unranked = preferences.routeOrder.length;
+  return [...items].sort(
+    (left, right) =>
+      (rank.get(left.to) ?? unranked) - (rank.get(right.to) ?? unranked),
+  );
 }
 
 export function visibleSidebarItems<T extends { to: string }>(
