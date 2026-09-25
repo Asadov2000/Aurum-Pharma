@@ -74,11 +74,25 @@ function Test-OwnedResource {
 }
 
 function Invoke-Driver {
-    param([string]$Phase)
+    param([string]$Phase, [int]$ExpectedExitCode = 0)
     $arguments = @("run", "--rm", "--network", $network, "--env-file", $controllerEnv, "--label", $label)
     $arguments += $sourceMounts
     $arguments += @("--workdir", "/app", "--entrypoint", "python", $BackendImage, "scripts/smoke_edge_cold_read.py", $Phase)
-    Invoke-SmokeDocker -Arguments $arguments
+    if ($ExpectedExitCode -eq 0) {
+        Invoke-SmokeDocker -Arguments $arguments
+        return
+    }
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & docker @arguments *> $null
+        $code = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousPreference }
+    if ($code -ne $ExpectedExitCode) {
+        throw "Isolated Edge interrupted install returned unexpected exit $code."
+    }
+    Write-Host "interrupted_snapshot_install=process_exited"
 }
 
 function Wait-Health {
@@ -217,14 +231,21 @@ try {
     Wait-Health -Status 200 -Edge "true"
     Invoke-Driver -Phase "read"
 
+    Invoke-Driver -Phase "interrupt" -ExpectedExitCode 77
+    Wait-Health -Status 200 -Edge "true"
+    Invoke-Driver -Phase "read"
+    Invoke-Driver -Phase "recover"
+    Wait-Health -Status 200 -Edge "true"
+    Invoke-Driver -Phase "read_recovered"
+
     Invoke-SmokeDocker -Arguments @("stop", $postgresName) -Quiet
     Wait-Health -Status 503 -Edge "any"
     Invoke-SmokeDocker -Arguments @("start", $postgresName) -Quiet
     Wait-Health -Status 200 -Edge "true"
     Invoke-SmokeDocker -Arguments @("restart", $apiName) -Quiet
     Wait-Health -Status 200 -Edge "true"
-    Invoke-Driver -Phase "read"
-    Write-Host "[OK] Isolated Edge read-only cold/WAN-absent/restart smoke passed."
+    Invoke-Driver -Phase "read_recovered"
+    Write-Host "[OK] Isolated Edge read-only cold/interrupted-install/restart smoke passed."
 }
 finally {
     $cleanupFailed = $false

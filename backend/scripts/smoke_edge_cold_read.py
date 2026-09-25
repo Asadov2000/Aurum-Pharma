@@ -44,11 +44,14 @@ from scripts.benchmark_edge_read_model import (
 )
 
 
-async def seed(env: Connections) -> None:
+async def install(env: Connections, *, revision: int, interrupt: bool = False) -> None:
     credential = parse_edge_credential(os.environ["EDGE_SYNC_CREDENTIAL"])
-    await verify_environment(env)
-    node_id = await _scope(env, credential.kid, credential.digest)
-    projection = _projection(3, 5)
+    if revision == 1:
+        await verify_environment(env)
+        node_id = await _scope(env, credential.kid, credential.digest)
+    else:
+        node_id = await _node_id(env, credential.kid)
+    projection = _projection(3 + (revision - 1), 5)
     chunks_by_component = build_component_chunks(
         foundation=projection.foundation,
         catalog=projection.catalog,
@@ -61,7 +64,7 @@ async def seed(env: Connections) -> None:
             edge_node_id=node_id,
             tenant_id=TENANT_ID,
             branch_id=BRANCH_ID,
-            source_revision=1,
+            source_revision=revision,
         ),
         chunks_by_component,
         credential_kid=credential.kid,
@@ -77,10 +80,14 @@ async def seed(env: Connections) -> None:
         await SyncEdgeRepository(db).install_read_snapshot(
             envelope=envelope, chunks=chunks, projection=parsed
         )
-    print(json.dumps({"phase": "seed", "status": "ok", "catalog": 3, "inventory": 5}))
+        if interrupt:
+            # Simulate an installer process crash after every SQL write, including
+            # the active cursor, but before PostgreSQL can commit the transaction.
+            os._exit(77)
+    print(json.dumps({"phase": "install", "revision": revision, "status": "ok"}))
 
 
-async def read(env: Connections) -> None:
+async def read(env: Connections, *, expected_revision: int) -> None:
     credential = parse_edge_credential(os.environ["EDGE_SYNC_CREDENTIAL"])
     readiness = EdgeSnapshotReadiness()
     node_id = await _node_id(env, credential.kid)
@@ -118,6 +125,21 @@ async def read(env: Connections) -> None:
         model = LocalReadModel(
             SyncEdgeRepository(db), readiness_guard=readiness.require_verified
         )
+        active = await SyncEdgeRepository(db).get_active_read_projection(
+            tenant_id=TENANT_ID,
+            branch_id=BRANCH_ID,
+            credential_kid=credential.kid,
+        )
+        require(active is not None and active[0].source_revision == expected_revision, 77)
+        revision_two_count = await db.scalar(
+            text(
+                "SELECT count(*) FROM sync_read_snapshot "
+                "WHERE tenant_id=:tenant_id AND branch_id=:branch_id "
+                "AND node_id=:node_id AND source_revision=2"
+            ),
+            {"tenant_id": TENANT_ID, "branch_id": BRANCH_ID, "node_id": node_id},
+        )
+        require(revision_two_count == expected_revision - 1, 78)
         catalog = await model.catalog(
             tenant_id=TENANT_ID, branch_id=BRANCH_ID, query=None, page=1, page_size=20
         )
@@ -132,13 +154,19 @@ async def read(env: Connections) -> None:
             page=1,
             page_size=20,
         )
-    require(catalog.total == 3 and suppliers.total == 0 and inventory.total == 5, 72)
+    require(
+        catalog.total == expected_revision + 2
+        and suppliers.total == 0
+        and inventory.total == 5,
+        72,
+    )
     print(
         json.dumps(
             {
                 "phase": "read",
                 "status": "ok",
                 "catalog": catalog.total,
+                "revision": expected_revision,
                 "suppliers": suppliers.total,
                 "inventory": inventory.total,
                 "signed_preverify": True,
@@ -178,9 +206,13 @@ async def run(phase: str) -> None:
     env = connections()
     try:
         if phase == "seed":
-            await seed(env)
+            await install(env, revision=1)
+        elif phase == "interrupt":
+            await install(env, revision=2, interrupt=True)
+        elif phase == "recover":
+            await install(env, revision=2)
         else:
-            await read(env)
+            await read(env, expected_revision=2 if phase == "read_recovered" else 1)
     finally:
         await env.app.dispose()
         await env.installer.dispose()
@@ -190,7 +222,9 @@ async def run(phase: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=("seed", "read", "health"))
+    parser.add_argument(
+        "phase", choices=("seed", "read", "interrupt", "recover", "read_recovered", "health")
+    )
     parser.add_argument("--expected", type=int, choices=(200, 503))
     parser.add_argument("--expected-edge", choices=("true", "false", "any"))
     args = parser.parse_args()
