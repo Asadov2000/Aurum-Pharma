@@ -381,10 +381,12 @@ export function IncomingDetailPage(): JSX.Element {
           </div>
           {canEdit && isDraft && (
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={() => setImportingInvoice(true)}>
+              <Button className="min-h-11" variant="secondary" onClick={() => setImportingInvoice(true)}>
                 Загрузить накладную
               </Button>
-              <Button onClick={() => setAdding(true)}>Добавить позицию</Button>
+              <Button className="min-h-11" onClick={() => setAdding(true)}>
+                Добавить позицию
+              </Button>
             </div>
           )}
         </div>
