@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$BackendImage = "aurum-pharma-e2e-backend:local",
-    [switch]$VerifyMigration0151Downgrade
+    [switch]$VerifyMigration0151Downgrade,
+    [switch]$VerifyRestore
 )
 
 # Disposable read-only Edge smoke. Unique labels and exact ownership checks
@@ -16,10 +17,12 @@ $scratch = Join-Path $workspace ".codex"
 [void](New-Item -ItemType Directory -Path $scratch -Force)
 $prefix = "aurum-edge-smoke-$([guid]::NewGuid().ToString('N').Substring(0,12))"
 $network = "$prefix-network"
+$restoreNetwork = "$prefix-restore-network"
 $label = "tj.aurum.edge.smoke=$prefix"
 $containers = [Collections.Generic.List[string]]::new()
 $temporaryFiles = [Collections.Generic.List[string]]::new()
 $networkCreated = $false
+$restoreNetworkCreated = $false
 $postgresImage = "postgres:16-alpine@sha256:4327b9fd295502f326f44153a1045a7170ddbfffed1c3829798328556cfd09e2"
 $sourceMounts = @()
 foreach ($source in @("app", "scripts", "alembic", "alembic.ini")) {
@@ -74,8 +77,8 @@ function Test-OwnedResource {
 }
 
 function Invoke-Driver {
-    param([string]$Phase, [int]$ExpectedExitCode = 0)
-    $arguments = @("run", "--rm", "--network", $network, "--env-file", $controllerEnv, "--label", $label)
+    param([string]$Phase, [int]$ExpectedExitCode = 0, [string]$NetworkName = $network)
+    $arguments = @("run", "--rm", "--network", $NetworkName, "--env-file", $controllerEnv, "--label", $label)
     $arguments += $sourceMounts
     $arguments += @("--workdir", "/app", "--entrypoint", "python", $BackendImage, "scripts/smoke_edge_cold_read.py", $Phase)
     if ($ExpectedExitCode -eq 0) {
@@ -112,6 +115,22 @@ function Wait-Health {
         Start-Sleep -Seconds 1
     }
     throw "Isolated Edge API did not reach expected health $Status/$Edge."
+}
+
+function Wait-Postgres {
+    param([string]$ContainerName)
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            & docker exec $ContainerName pg_isready -U postgres -d $database.POSTGRES_DB *> $null
+            $code = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $previousPreference }
+        if ($code -eq 0) { return }
+        Start-Sleep -Seconds 1
+    }
+    throw "Isolated Edge PostgreSQL did not become ready."
 }
 
 try {
@@ -156,19 +175,7 @@ try {
         "--mount", "type=bind,source=$infra/postgres/role-contract.sql,target=/docker-entrypoint-initdb.d/role-contract.inc,readonly",
         "--memory=1g", "--cpus=1", $postgresImage
     ) -Quiet
-    $ready = $false
-    for ($attempt = 0; $attempt -lt 60; $attempt++) {
-        $previousPreference = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = "Continue"
-            & docker exec $postgresName pg_isready -U postgres -d $database.POSTGRES_DB *> $null
-            $code = $LASTEXITCODE
-        }
-        finally { $ErrorActionPreference = $previousPreference }
-        if ($code -eq 0) { $ready = $true; break }
-        Start-Sleep -Seconds 1
-    }
-    if (-not $ready) { throw "Isolated Edge PostgreSQL did not become ready." }
+    Wait-Postgres -ContainerName $postgresName
 
     $redisName = "$prefix-redis"
     $containers.Add($redisName)
@@ -245,6 +252,91 @@ try {
     Invoke-SmokeDocker -Arguments @("restart", $apiName) -Quiet
     Wait-Health -Status 200 -Edge "true"
     Invoke-Driver -Phase "read_recovered"
+    if ($VerifyRestore) {
+        # The archive contains synthetic data only. Both PostgreSQL instances use
+        # private, labelled networks; the source is stopped before restored reads.
+        $backupPath = Join-Path $scratch "$prefix-read-backup.dump"
+        $temporaryFiles.Add($backupPath)
+        Test-OwnedResource -Kind "container" -Name $postgresName
+        Invoke-SmokeDocker -Arguments @(
+            "exec", $postgresName, "pg_dump", "--username=postgres",
+            "--dbname=$($database.POSTGRES_DB)", "--format=custom",
+            "--file=/tmp/edge-read-backup.dump"
+        ) -Quiet
+        $sourceHashLine = (& docker exec $postgresName sha256sum /tmp/edge-read-backup.dump).Trim()
+        if ($LASTEXITCODE -ne 0 -or $sourceHashLine -notmatch '^([0-9a-f]{64})\s') {
+            throw "Could not verify the isolated Edge archive checksum."
+        }
+        $sourceHash = $Matches[1]
+        Invoke-SmokeDocker -Arguments @(
+            "cp", "${postgresName}:/tmp/edge-read-backup.dump", $backupPath
+        ) -Quiet
+        $copiedHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($copiedHash -cne $sourceHash) {
+            throw "Isolated Edge archive checksum changed during copy."
+        }
+        Invoke-SmokeDocker -Arguments @("stop", $apiName, $redisName, $postgresName) -Quiet
+
+        Invoke-SmokeDocker -Arguments @(
+            "network", "create", "--internal", "--label", $label, $restoreNetwork
+        ) -Quiet
+        $restoreNetworkCreated = $true
+        $restoreInternal = (& docker network inspect --format '{{.Internal}}' $restoreNetwork).Trim()
+        if ($LASTEXITCODE -ne 0 -or $restoreInternal -cne "true") {
+            throw "Isolated Edge restore network is not internal."
+        }
+        $restorePostgresName = "$prefix-restore-postgres"
+        $containers.Add($restorePostgresName)
+        Invoke-SmokeDocker -Arguments @(
+            "run", "--detach", "--name", $restorePostgresName, "--label", $label,
+            "--network", $restoreNetwork, "--network-alias", "edge-benchmark-postgres",
+            "--env-file", $databaseEnv,
+            "--mount", "type=bind,source=$infra/postgres/init.sh,target=/docker-entrypoint-initdb.d/init.sh,readonly",
+            "--mount", "type=bind,source=$infra/postgres/role-contract.sql,target=/docker-entrypoint-initdb.d/role-contract.inc,readonly",
+            "--memory=1g", "--cpus=1", $postgresImage
+        ) -Quiet
+        Wait-Postgres -ContainerName $restorePostgresName
+        Invoke-SmokeDocker -Arguments @(
+            "cp", $backupPath, "${restorePostgresName}:/tmp/edge-read-backup.dump"
+        ) -Quiet
+        $restoredHashLine = (& docker exec $restorePostgresName sha256sum /tmp/edge-read-backup.dump).Trim()
+        if ($LASTEXITCODE -ne 0 -or $restoredHashLine -notmatch '^([0-9a-f]{64})\s' -or
+            $Matches[1] -cne $sourceHash) {
+            throw "Isolated Edge archive checksum changed before restore."
+        }
+        Test-OwnedResource -Kind "container" -Name $restorePostgresName
+        Invoke-SmokeDocker -Arguments @(
+            "exec", $restorePostgresName, "pg_restore", "--exit-on-error",
+            "--clean", "--if-exists", "--username=postgres",
+            "--dbname=$($database.POSTGRES_DB)", "/tmp/edge-read-backup.dump"
+        ) -Quiet
+
+        $restoreRedisName = "$prefix-restore-redis"
+        $containers.Add($restoreRedisName)
+        Invoke-SmokeDocker -Arguments @(
+            "run", "--detach", "--name", $restoreRedisName, "--label", $label,
+            "--network", $restoreNetwork, "--network-alias", "edge-smoke-redis",
+            "--memory=128m", "redis:7-alpine", "redis-server", "--save", "", "--appendonly", "no"
+        ) -Quiet
+        $apiName = "$prefix-restore-api"
+        $containers.Add($apiName)
+        $arguments = @(
+            "run", "--detach", "--name", $apiName, "--label", $label,
+            "--network", $restoreNetwork, "--env-file", $controllerEnv
+        )
+        $arguments += $sourceMounts
+        $arguments += @(
+            "--workdir", "/app", "--memory=1g", "--cpus=1", $BackendImage,
+            "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"
+        )
+        Invoke-SmokeDocker -Arguments $arguments -Quiet
+        Wait-Health -Status 200 -Edge "true"
+        Invoke-Driver -Phase "read_recovered" -NetworkName $restoreNetwork
+        Invoke-SmokeDocker -Arguments @("restart", $apiName) -Quiet
+        Wait-Health -Status 200 -Edge "true"
+        Invoke-Driver -Phase "read_recovered" -NetworkName $restoreNetwork
+        Write-Host "isolated_edge_read_restore=verified archive_sha256=$sourceHash"
+    }
     Write-Host "[OK] Isolated Edge read-only cold/interrupted-install/restart smoke passed."
 }
 finally {
@@ -265,6 +357,13 @@ finally {
             }
             catch { $cleanupFailed = $true }
         }
+    }
+    if ($restoreNetworkCreated) {
+        try {
+            Test-OwnedResource -Kind "network" -Name $restoreNetwork
+            Invoke-SmokeDocker -Arguments @("network", "rm", $restoreNetwork) -Quiet
+        }
+        catch { $cleanupFailed = $true }
     }
     if ($networkCreated) {
         try {
