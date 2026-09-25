@@ -114,8 +114,8 @@ export function Sidebar({
       className={cn(
         "flex flex-col border-r border-shell-sidebar-border bg-shell-sidebar text-shell-sidebar-foreground",
         mode === "desktop"
-          ? "sticky top-[var(--app-header-height)] h-[calc(100dvh-var(--app-header-height))] w-full px-2 py-2.5"
-          : "h-full px-3 py-3.5 shadow-xl",
+          ? "fixed bottom-0 left-0 top-[var(--app-header-height)] z-sticky w-[var(--app-sidebar-width)] px-2 py-2.5"
+          : "h-full px-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] pt-3.5 shadow-xl",
       )}
     >
       {mode === "drawer" && (
@@ -127,7 +127,7 @@ export function Sidebar({
 
       <div
         className={cn(
-          "aurum-scrollbar flex flex-1 flex-col overflow-y-auto overscroll-contain",
+          "aurum-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
           showLabels ? "gap-2 pr-1" : "gap-2",
         )}
       >
@@ -144,6 +144,7 @@ export function Sidebar({
 
       {(onOpenSettings || (mode === "desktop" && onToggleExpanded)) && (
         <div
+          data-testid="sidebar-footer"
           className={cn(
             "mt-2 shrink-0 border-t border-shell-sidebar-border pt-2",
             showLabels && "space-y-1",

@@ -191,6 +191,58 @@ test.describe("Interface layout", () => {
     await expectNoHorizontalOverflow(page, "/roles shell @ 320x568");
   });
 
+  test("keeps sidebar actions at the viewport bottom while navigation scrolls", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos");
+
+    await page.getByTestId("app-shell-header").evaluate((header) => {
+      const notice = document.createElement("div");
+      notice.style.height = "48px";
+      header.after(notice);
+    });
+
+    for (const viewport of [
+      { width: 1440, height: 600 },
+      { width: 1024, height: 420 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const navigation = page.getByRole("navigation", { name: "Основная навигация" });
+      const footer = navigation.getByTestId("sidebar-footer");
+      const before = await footer.boundingBox();
+      expect(before).not.toBeNull();
+      expect(before!.y + before!.height).toBeLessThanOrEqual(viewport.height);
+
+      await navigation.locator(".aurum-scrollbar").evaluate((list) => {
+        list.scrollTop = list.scrollHeight;
+      });
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      const after = await footer.boundingBox();
+      expect(after).not.toBeNull();
+      expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+    }
+
+    for (const viewport of [
+      { width: 390, height: 844 },
+      { width: 320, height: 480 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.getByRole("button", { name: "Открыть меню" }).click();
+      const drawer = page.getByRole("dialog", { name: "Меню приложения" });
+      const footer = drawer.getByTestId("sidebar-footer");
+      const before = await footer.boundingBox();
+      expect(before).not.toBeNull();
+      expect(before!.y + before!.height).toBeLessThanOrEqual(viewport.height);
+
+      await drawer.locator(".aurum-scrollbar").evaluate((list) => {
+        list.scrollTop = list.scrollHeight;
+      });
+      const after = await footer.boundingBox();
+      expect(after).not.toBeNull();
+      expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+      await drawer.getByRole("button", { name: "Закрыть меню" }).click();
+    }
+  });
+
   test("keeps the role constructor usable on a narrow screen", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.addInitScript(() => {
