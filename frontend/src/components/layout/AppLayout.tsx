@@ -404,7 +404,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         </div>
       </header>
 
-      <div>
+      <div className="lg:pl-[var(--app-sidebar-width)]">
         <SupportAccessBanner />
         <ConnectivityStatusBanner />
         <PwaUpdateBanner />
