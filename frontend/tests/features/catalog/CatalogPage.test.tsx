@@ -2,6 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/features/catalog/fieldTemplates", () => ({
+  useFieldTemplates: () => ({ data: [], isLoading: false, isError: false }),
+  useCreateFieldTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteFieldTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 const listCatalog = vi.fn();
 const getCatalogSummary = vi.fn();
 const getCatalogItem = vi.fn();
@@ -169,15 +175,15 @@ describe("CatalogPage", () => {
     await screen.findByText(/Каталог пуст/i);
     fireEvent.click(screen.getAllByRole("button", { name: /Добавить товар/i })[0]!);
     const dialog = await screen.findByRole("dialog", { name: "Добавить товар" });
-    fireEvent.change(within(dialog).getByLabelText(/Торговое название/i), {
+    fireEvent.change(within(dialog).getByLabelText(/Название лекарства/i), {
       target: { value: "Анальгин" },
     });
     const dosageForm = within(dialog).getByLabelText(/^Форма выпуска$/i) as HTMLSelectElement;
-    expect(Array.from(dosageForm.options).slice(1, 4).map((option) => option.text)).toEqual([
-      "Таблетки",
-      "Капсулы",
-      "Сироп",
-    ]);
+    expect(
+      Array.from(dosageForm.options)
+        .slice(1, 4)
+        .map((option) => option.text),
+    ).toEqual(["Таблетки", "Капсулы", "Сироп"]);
     fireEvent.change(dosageForm, { target: { value: "таблетки" } });
     fireEvent.change(within(dialog).getByLabelText(/^Условия отпуска$/i), {
       target: { value: "otc" },
@@ -215,7 +221,7 @@ describe("CatalogPage", () => {
     fireEvent.change(within(dialog).getByLabelText("Другая форма выпуска"), {
       target: { value: "Раствор для диализа" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/Торговое название/i), {
+    fireEvent.change(within(dialog).getByLabelText(/Название лекарства/i), {
       target: { value: "Тестовый товар" },
     });
     fireEvent.change(within(dialog).getByLabelText(/^Условия отпуска$/i), {

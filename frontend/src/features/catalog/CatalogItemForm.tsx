@@ -18,6 +18,7 @@ import {
 import { useCatalogItemQuery, useUpdateCatalogItem } from "./queries";
 import { listCatalog } from "./api";
 import { otherDosageForms, popularDosageForms, presetDosageForm } from "./dosageForms";
+import { CatalogTemplateField } from "./CatalogTemplateField";
 import { useCatalogCreate } from "./useCatalogCreate";
 import { type CatalogItem } from "./types";
 
@@ -127,7 +128,8 @@ export function CatalogItemForm({
   const identityFields = form.watch(["brand_name", "manufacturer", "form", "dosage", "pack_size"]);
   const selectedDosageForm = identityFields[2] ?? "";
   const dosageFormPreset = presetDosageForm(selectedDosageForm);
-  const showCustomDosageForm = customDosageForm || (Boolean(selectedDosageForm) && !dosageFormPreset);
+  const showCustomDosageForm =
+    customDosageForm || (Boolean(selectedDosageForm) && !dosageFormPreset);
   const identityKey = identityFields.join("\u0000");
   useEffect(() => {
     if (exactMatchId && identityAtConflict.current !== identityKey) setExactMatchId(null);
@@ -322,7 +324,7 @@ export function CatalogItemForm({
       <fieldset disabled={!isEdit && (create.pending || create.uncertain)}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <Label htmlFor="brand_name">Торговое название</Label>
+            <Label htmlFor="brand_name">Название лекарства</Label>
             <Input
               id="brand_name"
               invalid={Boolean(form.formState.errors.brand_name)}
@@ -343,7 +345,7 @@ export function CatalogItemForm({
             <Label htmlFor="form_choice">Форма выпуска</Label>
             <Select
               id="form_choice"
-              value={showCustomDosageForm ? "other" : dosageFormPreset ?? ""}
+              value={showCustomDosageForm ? "other" : (dosageFormPreset ?? "")}
               invalid={Boolean(form.formState.errors.form)}
               onChange={(event) => {
                 const value = event.target.value;
@@ -383,14 +385,20 @@ export function CatalogItemForm({
             )}
             <FormError>{form.formState.errors.form?.message}</FormError>
           </div>
-          <div>
-            <Label htmlFor="dosage">Дозировка</Label>
-            <Input id="dosage" placeholder="500 мг" {...form.register("dosage")} />
-          </div>
-          <div>
-            <Label htmlFor="pack_size">Размер упаковки</Label>
-            <Input id="pack_size" placeholder="20 таблеток" {...form.register("pack_size")} />
-          </div>
+          <CatalogTemplateField
+            kind="dosage"
+            label="Дозировка"
+            placeholder="500 мг"
+            value={form.watch("dosage") ?? ""}
+            inputProps={form.register("dosage")}
+          />
+          <CatalogTemplateField
+            kind="pack_size"
+            label="Размер упаковки"
+            placeholder="20 таблеток"
+            value={form.watch("pack_size") ?? ""}
+            inputProps={form.register("pack_size")}
+          />
           <div>
             <Label htmlFor="atx_code">ATX-код</Label>
             <Input id="atx_code" {...form.register("atx_code")} />
@@ -427,10 +435,12 @@ export function CatalogItemForm({
             </Select>
             <FormError>{form.formState.errors.storage_type?.message}</FormError>
           </div>
-          <div>
-            <Label htmlFor="category">Категория</Label>
-            <Input id="category" {...form.register("category")} />
-          </div>
+          <CatalogTemplateField
+            kind="category"
+            label="Категория"
+            value={form.watch("category") ?? ""}
+            inputProps={form.register("category")}
+          />
           <div>
             <Label htmlFor="base_price">Цена по умолчанию (TJS)</Label>
             <Input
@@ -474,11 +484,20 @@ export function CatalogItemForm({
                   {...form.register("barcode_type")}
                 >
                   <option value="">Выберите тип</option>
-                  {barcodeOptions.map((type) => (
-                    <option key={type} value={type}>
-                      {barcodeLabel[type]}
-                    </option>
-                  ))}
+                  <optgroup label="Популярные">
+                    {barcodeOptions.slice(0, 3).map((type) => (
+                      <option key={type} value={type}>
+                        {barcodeLabel[type]}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Другие">
+                    {barcodeOptions.slice(3).map((type) => (
+                      <option key={type} value={type}>
+                        {barcodeLabel[type]}
+                      </option>
+                    ))}
+                  </optgroup>
                 </Select>
                 <FormError>{form.formState.errors.barcode_type?.message}</FormError>
               </div>

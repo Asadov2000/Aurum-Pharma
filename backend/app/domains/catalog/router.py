@@ -44,6 +44,8 @@ from app.domains.catalog.schemas import (
     BarcodeCreate,
     BarcodeRead,
     CatalogBarcodeState,
+    CatalogFieldTemplateCreate,
+    CatalogFieldTemplateRead,
     CatalogImageState,
     CatalogItemCreate,
     CatalogItemRead,
@@ -53,6 +55,7 @@ from app.domains.catalog.schemas import (
     CatalogList,
     CatalogPickerList,
     CatalogSummary,
+    CatalogTemplateKind,
     ImportConfirmRequest,
     ImportJobRead,
 )
@@ -113,6 +116,11 @@ def _authorize_catalog_search(user: CurrentUser, branch_id: UUID | None) -> None
         raise PermissionDeniedError("Branch access denied")
 
 
+def _require_tenant_catalog_permission(user: CurrentUser, code: str) -> None:
+    if not user.has_tenant_scope(code):
+        raise PermissionDeniedError("Tenant-wide catalog access is required")
+
+
 def _remove_catalog_image_version(tenant_id: UUID, item_id: UUID, version: UUID) -> None:
     variants: tuple[Literal["display", "thumbnail"], ...] = ("display", "thumbnail")
     for variant in variants:
@@ -132,6 +140,44 @@ def _remove_catalog_image_version(tenant_id: UUID, item_id: UUID, version: UUID)
 # -----------------------------------------------------------------------------
 # CRUD + search
 # -----------------------------------------------------------------------------
+
+
+@router.get("/field-templates", response_model=list[CatalogFieldTemplateRead])
+async def list_field_templates(
+    user: Annotated[CurrentUser, Depends(require_permission("catalog.view"))],
+    service: Annotated[CatalogService, Depends(_service)],
+    kind: Annotated[CatalogTemplateKind | None, Query()] = None,
+) -> list[CatalogFieldTemplateRead]:
+    _require_tenant_catalog_permission(user, "catalog.view")
+    rows = await service.list_field_templates(_current_tenant_or_400(user), kind)
+    return [CatalogFieldTemplateRead.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/field-templates",
+    response_model=CatalogFieldTemplateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_field_template(
+    payload: CatalogFieldTemplateCreate,
+    user: Annotated[CurrentUser, Depends(require_permission("catalog.update"))],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> CatalogFieldTemplateRead:
+    _require_tenant_catalog_permission(user, "catalog.update")
+    row = await service.create_field_template(
+        _current_tenant_or_400(user), payload.kind, payload.value, user.user_id
+    )
+    return CatalogFieldTemplateRead.model_validate(row)
+
+
+@router.delete("/field-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_field_template(
+    template_id: UUID,
+    user: Annotated[CurrentUser, Depends(require_permission("catalog.update"))],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> None:
+    _require_tenant_catalog_permission(user, "catalog.update")
+    await service.delete_field_template(_current_tenant_or_400(user), template_id, user.user_id)
 
 
 @router.get("/picker", response_model=CatalogPickerList)

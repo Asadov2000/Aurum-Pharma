@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import and_, case, delete, exists, func, insert, not_, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -24,7 +24,12 @@ from app.domains.catalog.import_batch import (
     import_key,
 )
 from app.domains.catalog.import_limits import CATALOG_ACTIVE_STATUSES, catalog_execution_lock_key
-from app.domains.catalog.models import Barcode, CatalogImportJob, TenantCatalog
+from app.domains.catalog.models import (
+    Barcode,
+    CatalogFieldTemplate,
+    CatalogImportJob,
+    TenantCatalog,
+)
 from app.domains.inventory.models import Batch
 
 
@@ -44,6 +49,67 @@ def _contains_pattern(value: str) -> str:
 class CatalogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def list_field_templates(
+        self, tenant_id: UUID, kind: str | None
+    ) -> list[CatalogFieldTemplate]:
+        stmt = select(CatalogFieldTemplate).where(
+            CatalogFieldTemplate.tenant_id == tenant_id,
+            CatalogFieldTemplate.deleted_at.is_(None),
+        )
+        if kind is not None:
+            stmt = stmt.where(CatalogFieldTemplate.kind == kind)
+        stmt = stmt.order_by(CatalogFieldTemplate.kind, func.lower(CatalogFieldTemplate.value))
+        return list((await self.session.scalars(stmt)).all())
+
+    async def count_field_templates(self, tenant_id: UUID, kind: str) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(CatalogFieldTemplate)
+            .where(
+                CatalogFieldTemplate.tenant_id == tenant_id,
+                CatalogFieldTemplate.kind == kind,
+                CatalogFieldTemplate.deleted_at.is_(None),
+            )
+        )
+        return int(await self.session.scalar(stmt) or 0)
+
+    async def create_field_template(
+        self, tenant_id: UUID, kind: str, value: str, actor_id: UUID
+    ) -> CatalogFieldTemplate | None:
+        # The partial unique index resolves concurrent duplicate submissions.
+        stmt = (
+            pg_insert(CatalogFieldTemplate)
+            .values(
+                tenant_id=tenant_id,
+                id=uuid4(),
+                kind=kind,
+                value=value,
+                created_by=actor_id,
+                updated_by=actor_id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["tenant_id", "kind", func.lower(CatalogFieldTemplate.value)],
+                index_where=CatalogFieldTemplate.deleted_at.is_(None),
+            )
+            .returning(CatalogFieldTemplate)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def delete_field_template(
+        self, tenant_id: UUID, template_id: UUID, actor_id: UUID
+    ) -> bool:
+        stmt = (
+            update(CatalogFieldTemplate)
+            .where(
+                CatalogFieldTemplate.tenant_id == tenant_id,
+                CatalogFieldTemplate.id == template_id,
+                CatalogFieldTemplate.deleted_at.is_(None),
+            )
+            .values(deleted_at=utc_now(), updated_by=actor_id)
+            .returning(CatalogFieldTemplate.id)
+        )
+        return (await self.session.scalar(stmt)) is not None
 
     @asynccontextmanager
     async def row_savepoint(self) -> AsyncIterator[None]:

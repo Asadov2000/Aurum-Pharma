@@ -132,6 +132,34 @@ class TenantCatalog(Base):
     )
 
 
+class CatalogFieldTemplate(Base):
+    __tablename__ = "catalog_field_template"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('category','dosage','pack_size')", name="ck_catalog_template_kind"
+        ),
+        CheckConstraint(
+            "length(value) BETWEEN 1 AND 120 AND value = btrim(value)",
+            name="ck_catalog_template_value",
+        ),
+    )
+
+
 class Barcode(Base):
     __tablename__ = "barcode"
 

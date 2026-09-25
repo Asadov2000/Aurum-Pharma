@@ -3,6 +3,12 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { AxiosError } from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/features/catalog/fieldTemplates", () => ({
+  useFieldTemplates: () => ({ data: [], isLoading: false, isError: false }),
+  useCreateFieldTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteFieldTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 const createCatalogItem = vi.fn();
 const getCatalogItem = vi.fn();
 const listCatalog = vi.fn();
@@ -58,7 +64,7 @@ function setup(selectExisting = false) {
 }
 
 function completeRequired() {
-  fireEvent.change(screen.getByLabelText("Торговое название"), {
+  fireEvent.change(screen.getByLabelText("Название лекарства"), {
     target: { value: ITEM.brand_name },
   });
   fireEvent.change(screen.getByLabelText("Условия отпуска"), { target: { value: "otc" } });
@@ -86,7 +92,11 @@ describe("CatalogCreateDialog", () => {
 
   it("requires explicit dispensing, storage and barcode type, then creates one atomic payload", async () => {
     const { onCreated, onClose } = setup();
-    fireEvent.change(screen.getByLabelText("Торговое название"), {
+    const barcodeTypes = screen.getByLabelText("Тип штрихкода") as HTMLSelectElement;
+    expect(Array.from(barcodeTypes.options).slice(1, 4).map((option) => option.value)).toEqual([
+      "ean13", "ean8", "code128",
+    ]);
+    fireEvent.change(screen.getByLabelText("Название лекарства"), {
       target: { value: ITEM.brand_name },
     });
     fireEvent.change(screen.getByLabelText("Первый штрихкод (необязательно)"), {
@@ -128,7 +138,7 @@ describe("CatalogCreateDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Добавить товар", exact: true }));
     fireEvent.click(await screen.findByRole("button", { name: "Повторить создание" }));
     await waitFor(() => expect(createCatalogItem).toHaveBeenCalledTimes(2));
-    expect(screen.getByLabelText("Торговое название")).toBeDisabled();
+    expect(screen.getByLabelText("Название лекарства")).toBeDisabled();
     expect(screen.getByLabelText("Условия хранения")).toBeDisabled();
     expect(onCreated).not.toHaveBeenCalled();
     await waitFor(() =>
@@ -244,7 +254,7 @@ describe("CatalogCreateDialog", () => {
         name: "Отмена",
       }),
     );
-    expect(screen.getByLabelText("Торговое название")).toHaveValue(ITEM.brand_name);
+    expect(screen.getByLabelText("Название лекарства")).toHaveValue(ITEM.brand_name);
     navigation.blocked = true;
     rerender();
     const leave = screen.getByRole("dialog", { name: "Уйти со страницы?" });

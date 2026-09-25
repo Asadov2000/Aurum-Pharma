@@ -49,6 +49,7 @@ from app.domains.catalog.import_limits import (
 from app.domains.catalog.import_parser import parse_import
 from app.domains.catalog.models import (
     Barcode,
+    CatalogFieldTemplate,
     CatalogImportJob,
     TenantCatalog,
 )
@@ -95,6 +96,27 @@ class CatalogService:
     ) -> None:
         self.repo = repo
         self._now = now
+
+    async def list_field_templates(
+        self, tenant_id: UUID, kind: str | None
+    ) -> list[CatalogFieldTemplate]:
+        return await self.repo.list_field_templates(tenant_id, kind)
+
+    async def create_field_template(
+        self, tenant_id: UUID, kind: str, value: str, actor_id: UUID
+    ) -> CatalogFieldTemplate:
+        if await self.repo.count_field_templates(tenant_id, kind) >= 200:
+            raise BusinessRuleError("Для этого поля достигнут лимит в 200 шаблонов")
+        template = await self.repo.create_field_template(tenant_id, kind, value, actor_id)
+        if template is None:
+            raise ConflictError("Такой шаблон уже существует")
+        return template
+
+    async def delete_field_template(
+        self, tenant_id: UUID, template_id: UUID, actor_id: UUID
+    ) -> None:
+        if not await self.repo.delete_field_template(tenant_id, template_id, actor_id):
+            raise NotFoundError("Шаблон не найден")
 
     async def _local_today(self, tenant_id: UUID) -> date:
         settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
