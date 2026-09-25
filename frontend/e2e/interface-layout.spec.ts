@@ -218,7 +218,8 @@ test.describe("Interface layout", () => {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       const after = await footer.boundingBox();
       expect(after).not.toBeNull();
-      expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+      expect(after!.y + after!.height).toBeLessThanOrEqual(viewport.height);
+      expect(Math.abs(after!.y + after!.height - (before!.y + before!.height))).toBeLessThanOrEqual(1);
     }
 
     for (const viewport of [
@@ -238,7 +239,8 @@ test.describe("Interface layout", () => {
       });
       const after = await footer.boundingBox();
       expect(after).not.toBeNull();
-      expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+      expect(after!.y + after!.height).toBeLessThanOrEqual(viewport.height);
+      expect(Math.abs(after!.y + after!.height - (before!.y + before!.height))).toBeLessThanOrEqual(1);
       await drawer.getByRole("button", { name: "Закрыть меню" }).click();
     }
   });
