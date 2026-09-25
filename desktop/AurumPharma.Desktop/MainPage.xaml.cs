@@ -16,12 +16,24 @@ public sealed partial class MainPage : Page
     private HostSettings? _settings;
     private DesktopBridgeService? _bridge;
     private bool _bridgeInjected;
+    private bool _settingsInvalid;
 
     public MainPage()
     {
         InitializeComponent();
-        _settings = _settingsService.Load();
-        _bridge = new DesktopBridgeService(_settings);
+        try
+        {
+            _settings = _settingsService.Load();
+            _bridge = new DesktopBridgeService(_settings);
+        }
+        catch (InvalidOperationException)
+        {
+            _settingsInvalid = true;
+            HostLog.Warning("host_settings_invalid");
+            ErrorDescription.Text = "Неверно задан локальный адрес или точка аптеки. Проверьте настройку и перезапустите приложение.";
+            RetryButton.Visibility = Visibility.Collapsed;
+            ShowError();
+        }
     }
 
     private async void Browser_CoreWebView2Initialized(
@@ -30,6 +42,12 @@ public sealed partial class MainPage : Page
     {
         try
         {
+            if (_settingsInvalid)
+            {
+                ShowError();
+                return;
+            }
+
             if (args.Exception is not null || _settings is null)
             {
                 throw args.Exception ?? new InvalidOperationException("Host settings are unavailable.");

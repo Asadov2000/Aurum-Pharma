@@ -33,4 +33,25 @@ public sealed class AppUriPolicyTests
         Assert.False(AppUriPolicy.IsSameOrigin(expected, new Uri("https://public.aurum.tj/")));
         Assert.False(AppUriPolicy.IsSameOrigin(expected, new Uri("http://app.aurum.tj/")));
     }
+
+    [Theory]
+    [InlineData("http://localhost:5173/")]
+    [InlineData("http://127.0.0.1:8080/catalog")]
+    [InlineData("http://[::1]:8080/")]
+    public void EdgeOriginAcceptsLoopback(string value)
+    {
+        Assert.True(AppUriPolicy.TryCreateEdgeOrigin(value, out var uri));
+        Assert.NotNull(uri);
+    }
+
+    [Theory]
+    [InlineData("https://app.aurum.tj/")]
+    [InlineData("https://192.168.1.10/")]
+    [InlineData("http://localhost.evil.test/")]
+    [InlineData("")]
+    public void EdgeOriginRejectsRemoteHosts(string value)
+    {
+        Assert.False(AppUriPolicy.TryCreateEdgeOrigin(value, out var uri));
+        Assert.Null(uri);
+    }
 }

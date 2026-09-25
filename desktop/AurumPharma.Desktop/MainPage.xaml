@@ -37,11 +37,13 @@
                 FontWeight="SemiBold"
                 Text="Не удалось открыть Aurum Pharma" />
             <TextBlock
+                x:Name="ErrorDescription"
                 HorizontalAlignment="Center"
                 Text="Проверьте, что локальный сервис запущен, и повторите подключение."
                 TextAlignment="Center"
                 TextWrapping="Wrap" />
             <Button
+                x:Name="RetryButton"
                 HorizontalAlignment="Center"
                 Click="RetryButton_Click"
                 Content="Повторить" />
