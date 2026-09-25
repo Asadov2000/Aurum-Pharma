@@ -99,8 +99,27 @@ export function DashboardPage(): JSX.Element {
     <div className="space-y-4">
       <PageHeader
         title="Главная"
-        description="Сводка по аптеке за сегодня"
-        meta={generatedAt ? `Обновлено ${generatedAt}` : undefined}
+        description={
+          <>
+            <span className="block">Сводка по аптеке за сегодня</span>
+            <span className="mt-3 inline-flex max-w-full flex-wrap items-center gap-1 rounded-md bg-foreground/[0.04] px-2 py-1">
+              <span className="border-r border-border px-2 text-xs text-foreground-muted">
+                {generatedAt ? `Данные на ${generatedAt}` : "Нет данных"}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 px-2 text-xs text-primary hover:text-primary"
+                aria-label="Обновить сводку"
+                isLoading={refreshing}
+                onClick={() => query.refresh()}
+              >
+                <SyncIcon />
+                Обновить сейчас
+              </Button>
+            </span>
+          </>
+        }
         showTitleOnDesktop
         actions={
           <>
@@ -110,16 +129,6 @@ export function DashboardPage(): JSX.Element {
             {canCreateIncoming && (
               <HeaderActionLink to="/incoming" label="Принять поставку" icon={<IncomingIcon />} />
             )}
-            <Button
-              variant="secondary"
-              size="lg"
-              className="w-[var(--control-height-lg)] px-0"
-              aria-label="Обновить сводку"
-              isLoading={refreshing}
-              onClick={() => query.refresh()}
-            >
-              <SyncIcon />
-            </Button>
           </>
         }
       />
@@ -704,8 +713,8 @@ function formatGeneratedAt(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("ru-RU", {
-    day: "numeric",
-    month: "long",
+    day: "2-digit",
+    month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);

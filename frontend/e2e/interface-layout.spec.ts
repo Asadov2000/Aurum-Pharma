@@ -28,6 +28,28 @@ test.describe("Interface layout", () => {
     clearLoginRateLimit(OWNER.email);
   });
 
+  test("keeps dashboard refresh beside the data timestamp on desktop and mobile", async ({
+    page,
+  }) => {
+    await loginInBrowser(page, OWNER);
+
+    for (const viewport of [
+      { width: 1366, height: 768 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/");
+      const timestamp = page.getByText(/^Данные на /);
+      const refresh = page.getByRole("button", { name: "Обновить сводку" });
+      await expect(timestamp).toBeVisible();
+      await expect(refresh).toHaveText("Обновить сейчас");
+      await expect(
+        timestamp.locator("..").getByRole("button", { name: "Обновить сводку" }),
+      ).toBeVisible();
+      await expectNoHorizontalOverflow(page, `dashboard refresh @ ${viewport.width}`);
+    }
+  });
+
   test("keeps primary workspaces inside desktop and mobile viewports", async ({ page }) => {
     await loginInBrowser(page, OWNER);
 

@@ -126,7 +126,10 @@ describe("DashboardPage", () => {
     expect(screen.getByText(/Есть просрочка/)).toBeInTheDocument();
     // Checklist counts
     expect(screen.getByText("Черновики приёмок")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Обновить сводку" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Обновить сводку" })).toHaveTextContent(
+      "Обновить сейчас",
+    );
+    expect(screen.getByText(/Данные на/)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /Открыть кассу|Новая продажа/ }).length).toBe(2);
   });
 
@@ -164,9 +167,11 @@ describe("DashboardPage", () => {
     renderPage();
 
     await screen.findByText(/1\s500,00 TJS/);
+    const previousTime = screen.getByText(/Данные на/).textContent;
     fireEvent.click(screen.getByRole("button", { name: "Обновить сводку" }));
 
     await waitFor(() => expect(getDashboardSummary).toHaveBeenLastCalledWith(true));
     expect(await screen.findByText(/1\s750,00 TJS/)).toBeInTheDocument();
+    expect(screen.getByText(/Данные на/).textContent).not.toBe(previousTime);
   });
 });
