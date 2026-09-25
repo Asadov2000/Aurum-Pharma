@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 import { Button, SegmentedControl, Switch } from "@/components/ui";
 import { getDensityPreference, setDensityPreference } from "@/lib/density";
-import { getThemePreference, setThemePreference } from "@/lib/theme";
+import { getThemePreference } from "@/lib/theme";
+import { setThemePreferenceWithTransition } from "@/lib/themeTransition";
 
 import { applyLocalAppearance, applyUserPreferences, getLocalAppearance } from "./appearance";
 import { SettingRow, SettingsNotice, SettingsSectionHeader } from "./SettingsPrimitives";
@@ -68,7 +69,7 @@ export function InterfaceSettingsPanel(): JSX.Element {
   };
 
   const changeTheme = (value: ThemePreference) => {
-    setThemePreference(value);
+    setThemePreferenceWithTransition(value);
     setTheme(value);
     sync({ theme: value });
   };
