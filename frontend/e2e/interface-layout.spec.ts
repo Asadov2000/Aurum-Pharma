@@ -145,18 +145,13 @@ test.describe("Interface layout", () => {
     await expect(settingsDialog).toBeHidden();
     await expect(desktopNavigation.getByText("Избранное")).toBeVisible();
 
-    await page.getByRole("button", { name: "Настроить боковую панель" }).click();
-    await page
-      .getByRole("dialog", { name: "Настроить меню" })
-      .getByRole("button", { name: "Авто" })
-      .click();
-    await page
-      .getByRole("dialog", { name: "Настроить меню" })
-      .getByRole("button", { name: "Готово" })
-      .click();
     await page.setViewportSize({ width: 1100, height: 800 });
+    await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "expanded");
+    await page.getByRole("button", { name: "Свернуть боковую панель" }).click();
     await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "compact");
     await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "compact");
+    await page.getByRole("button", { name: "Развернуть боковую панель" }).click();
     await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "expanded");
 
     await page.setViewportSize({ width: 320, height: 568 });
