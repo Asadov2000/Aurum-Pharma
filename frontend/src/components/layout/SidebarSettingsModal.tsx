@@ -66,61 +66,24 @@ export function SidebarSettingsModal({
       bodyClassName="flex min-h-0 flex-col overflow-hidden p-0 sm:p-0"
     >
       <div className="shrink-0 border-b border-border px-4 py-4 sm:px-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="mb-2 text-xs font-semibold text-foreground-muted">
-              Вид на компьютере
-            </div>
-            <div
-              role="group"
-              aria-label="Вид боковой панели"
-              className="grid w-full grid-cols-3 rounded-md border border-input bg-background p-0.5 sm:inline-flex sm:w-auto"
-            >
-              <ModeButton
-                active={preferences.desktopMode === "auto"}
-                label="Авто"
-                shortLabel="Авто"
-                icon={<AutoModeIcon />}
-                onClick={() => onChange({ ...preferences, desktopMode: "auto" })}
-              />
-              <ModeButton
-                active={preferences.desktopMode === "expanded"}
-                label="Развёрнутый"
-                shortLabel="Полный"
-                icon={<ExpandedModeIcon />}
-                onClick={() => onChange({ ...preferences, desktopMode: "expanded" })}
-              />
-              <ModeButton
-                active={preferences.desktopMode === "compact"}
-                label="Компактный"
-                shortLabel="Узкий"
-                icon={<CompactModeIcon />}
-                onClick={() => onChange({ ...preferences, desktopMode: "compact" })}
-              />
-            </div>
-          </div>
-
-          <div className="w-full sm:max-w-64">
-            <label htmlFor="sidebar-settings-search" className="sr-only">
-              Найти раздел
-            </label>
-            <div className="relative">
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-foreground-muted"
-              >
-                <SearchIcon />
-              </span>
-              <Input
-                id="sidebar-settings-search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Найти раздел"
-                className="pl-9"
-                autoComplete="off"
-              />
-            </div>
-          </div>
+        <label htmlFor="sidebar-settings-search" className="sr-only">
+          Найти раздел
+        </label>
+        <div className="relative">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-foreground-muted"
+          >
+            <SearchIcon />
+          </span>
+          <Input
+            id="sidebar-settings-search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Найти раздел"
+            className="pl-9"
+            autoComplete="off"
+          />
         </div>
       </div>
 
@@ -267,39 +230,6 @@ export function SidebarSettingsModal({
   );
 }
 
-function ModeButton({
-  active,
-  label,
-  shortLabel,
-  icon,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  shortLabel: string;
-  icon: JSX.Element;
-  onClick: () => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "inline-flex min-h-[var(--control-height-sm)] min-w-0 items-center justify-center gap-1.5 rounded px-1.5 text-xs font-medium transition-colors duration-fast sm:gap-2 sm:px-3 sm:text-sm",
-        active
-          ? "bg-surface text-primary shadow-sm"
-          : "text-foreground-secondary hover:text-foreground",
-      )}
-    >
-      {icon}
-      <span className="sm:hidden">{shortLabel}</span>
-      <span className="hidden sm:inline">{label}</span>
-    </button>
-  );
-}
-
 function IconButton({
   label,
   title,
@@ -379,59 +309,6 @@ function ArrowIcon({ direction }: { direction: "up" | "down" }): JSX.Element {
       aria-hidden="true"
     >
       <path d={direction === "up" ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} />
-    </svg>
-  );
-}
-
-function ExpandedModeIcon(): JSX.Element {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M9 4v16M12 9h6M12 13h6" />
-    </svg>
-  );
-}
-
-function CompactModeIcon(): JSX.Element {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M8 4v16M5.5 9h.01M5.5 13h.01" />
-    </svg>
-  );
-}
-
-function AutoModeIcon(): JSX.Element {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="5" width="18" height="13" rx="2" />
-      <path d="M8 21h8M12 18v3M8 9h8M8 13h5" />
     </svg>
   );
 }

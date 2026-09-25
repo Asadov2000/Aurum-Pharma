@@ -32,10 +32,11 @@ describe("SidebarSettingsModal", () => {
     expect(screen.getByText("Чеки")).toBeInTheDocument();
     expect(screen.queryByText("Роли")).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Скрыть раздел «Касса»" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Авто" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("group", { name: "Вид боковой панели" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Найти раздел" })).toBeInTheDocument();
   });
 
-  it("applies visibility, favorite, order and mode changes immediately", () => {
+  it("applies visibility, favorite and order changes immediately", () => {
     let latest = defaultSidebarPreferences();
 
     function Harness(): JSX.Element {
@@ -57,9 +58,6 @@ describe("SidebarSettingsModal", () => {
     }
 
     render(<Harness />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Компактный" }));
-    expect(latest.desktopMode).toBe("compact");
 
     fireEvent.click(screen.getByRole("button", { name: "Добавить «Чеки» в избранное" }));
     expect(latest.favoriteRoutes).toEqual(["/sales"]);
