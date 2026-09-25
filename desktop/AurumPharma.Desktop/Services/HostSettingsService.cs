@@ -10,7 +10,29 @@ internal sealed class HostSettingsService
 
     public HostSettings Load()
     {
+        var rawBranchId = Environment.GetEnvironmentVariable(EdgeBranchVariable)?.Trim();
+        Guid? edgeBranchId = null;
+        if (!string.IsNullOrEmpty(rawBranchId))
+        {
+            if (!Guid.TryParse(rawBranchId, out var parsedBranchId) || parsedBranchId == Guid.Empty)
+            {
+                throw new InvalidOperationException($"{EdgeBranchVariable} is invalid.");
+            }
+
+            edgeBranchId = parsedBranchId;
+        }
+
         var appUrl = Environment.GetEnvironmentVariable(AppUrlVariable)?.Trim();
+        if (edgeBranchId is not null)
+        {
+            if (!AppUriPolicy.TryCreateEdgeOrigin(appUrl, out var edgeUri))
+            {
+                throw new InvalidOperationException($"{AppUrlVariable} must be an explicit loopback URL in Edge mode.");
+            }
+
+            return new HostSettings(edgeUri, edgeBranchId);
+        }
+
         if (string.IsNullOrEmpty(appUrl))
         {
             appUrl = DefaultAppUrl;
@@ -19,18 +41,6 @@ internal sealed class HostSettingsService
         if (!AppUriPolicy.TryCreate(appUrl, out var appUri))
         {
             throw new InvalidOperationException($"{AppUrlVariable} is invalid.");
-        }
-
-        var rawBranchId = Environment.GetEnvironmentVariable(EdgeBranchVariable)?.Trim();
-        Guid? edgeBranchId = null;
-        if (!string.IsNullOrEmpty(rawBranchId))
-        {
-            if (!Guid.TryParse(rawBranchId, out var parsedBranchId))
-            {
-                throw new InvalidOperationException($"{EdgeBranchVariable} is invalid.");
-            }
-
-            edgeBranchId = parsedBranchId;
         }
 
         return new HostSettings(appUri, edgeBranchId);

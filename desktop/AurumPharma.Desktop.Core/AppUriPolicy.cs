@@ -33,4 +33,17 @@ public static class AppUriPolicy
             string.Equals(expected.IdnHost, actual.IdnHost, StringComparison.OrdinalIgnoreCase) &&
             expected.Port == actual.Port;
     }
+
+    public static bool TryCreateEdgeOrigin(
+        string? value,
+        [NotNullWhen(true)] out Uri? appUri)
+    {
+        if (TryCreate(value, out appUri) && appUri.IsLoopback)
+        {
+            return true;
+        }
+
+        appUri = null;
+        return false;
+    }
 }
