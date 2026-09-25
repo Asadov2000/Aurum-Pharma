@@ -5,7 +5,8 @@ import { Button } from "@/components/ui";
 import { getDensityPreference, setDensityPreference, type DensityPreference } from "@/lib/density";
 import { applyUserPreferences } from "@/features/settings/appearance";
 import { usePreferenceAutosave } from "@/features/settings/usePreferenceAutosave";
-import { getThemePreference, setThemePreference, type ThemePreference } from "@/lib/theme";
+import { getThemePreference, type ThemePreference } from "@/lib/theme";
+import { setThemePreferenceWithTransition } from "@/lib/themeTransition";
 
 const POPOVER_WIDTH = 360;
 const VIEWPORT_GUTTER = 8;
@@ -137,7 +138,7 @@ export function AppearanceMenu(): JSX.Element {
                   label="Тема оформления"
                   columns="grid-cols-3"
                   onChange={(value) => {
-                    setThemePreference(value);
+                    setThemePreferenceWithTransition(value);
                     setTheme(value);
                     syncPreference({ theme: value });
                   }}

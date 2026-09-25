@@ -489,6 +489,45 @@ test.describe("Interface layout", () => {
     expect(await page.evaluate(() => window.localStorage.getItem("ui:density"))).toBe("touch");
   });
 
+  test("reveals a manually selected theme along the moving cursor", async ({ page }) => {
+    await loginInBrowser(page, OWNER);
+    await page.goto("/catalog");
+    await expect(page.getByRole("heading", { level: 1, name: "Каталог" })).toBeVisible();
+
+    const root = page.locator("html");
+    const initialTheme = await root.getAttribute("data-theme");
+    const nextTheme = initialTheme === "dark" ? "light" : "dark";
+    await page.getByRole("button", { name: "Вид интерфейса" }).click();
+    await page.getByRole("button", { name: nextTheme === "dark" ? "Тёмная" : "Светлая" }).click();
+
+    await expect(root).toHaveAttribute("data-theme", nextTheme);
+    await expect(root).toHaveClass(/theme-slant-transition/);
+    expect(
+      await root.evaluate(
+        (element) => getComputedStyle(element, "::view-transition-new(root)").clipPath,
+      ),
+    ).toContain("polygon(");
+    const fromRight = await root.evaluate((element) =>
+      element.classList.contains("theme-slant-from-right"),
+    );
+    const edgeBefore = await root.evaluate((element) =>
+      Number.parseFloat(element.style.getPropertyValue("--theme-slant-top")),
+    );
+    await page.mouse.move(fromRight ? 200 : 1000, 384);
+    const movedEdge = expect.poll(() =>
+      root.evaluate((element) =>
+        Number.parseFloat(element.style.getPropertyValue("--theme-slant-top")),
+      ),
+    );
+    if (fromRight) await movedEdge.toBeLessThan(edgeBefore);
+    else await movedEdge.toBeGreaterThan(edgeBefore);
+    const viewport = page.viewportSize();
+    await page.mouse.move(fromRight ? 0 : viewport!.width, viewport!.height / 2);
+    await expect(root).not.toHaveClass(/theme-slant-transition/);
+    await page.reload();
+    await expect(root).toHaveAttribute("data-theme", nextTheme);
+  });
+
   test("keeps the catalog usable at intermediate desktop widths", async ({ page }) => {
     await loginInBrowser(page, OWNER);
 
