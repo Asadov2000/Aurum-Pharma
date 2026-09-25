@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -130,6 +133,83 @@ async def test_tenant_catalog_and_barcode_isolated(
                 )
                 await conn.execute(
                     text("DELETE FROM tenant_catalog WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM tenant_settings WHERE tenant_id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+                await conn.execute(
+                    text("DELETE FROM tenant WHERE id = ANY(:ids)"),
+                    {"ids": tenant_ids},
+                )
+
+
+async def test_catalog_field_templates_enforce_tenant_rls(
+    support_engine_iso: AsyncEngine, app_engine_iso: AsyncEngine, maintenance_engine: AsyncEngine
+) -> None:
+    tenant_ids: list[str] = []
+    suffix = uuid4().hex[:8]
+    try:
+        async with support_engine_iso.begin() as conn:
+            rows = await conn.execute(
+                text(
+                    "INSERT INTO tenant (name, contact_email) VALUES "
+                    "('Template A', :email_a), ('Template B', :email_b) RETURNING id"
+                ),
+                {
+                    "email_a": f"template-a-{suffix}@example.invalid",
+                    "email_b": f"template-b-{suffix}@example.invalid",
+                },
+            )
+            tenant_ids = [str(row[0]) for row in rows]
+            await conn.execute(
+                text(
+                    "INSERT INTO catalog_field_template (id, tenant_id, kind, value) VALUES "
+                    "(:id_a, :tenant_a, 'category', 'A'), "
+                    "(:id_b, :tenant_b, 'category', 'B')"
+                ),
+                {
+                    "id_a": str(uuid4()),
+                    "id_b": str(uuid4()),
+                    "tenant_a": tenant_ids[0],
+                    "tenant_b": tenant_ids[1],
+                },
+            )
+
+        async with app_engine_iso.begin() as conn:
+            await _set_tenant(conn, tenant_ids[0])
+            values = (
+                (
+                    await conn.execute(
+                        text("SELECT value FROM catalog_field_template ORDER BY value")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert values == ["A"]
+            result = await conn.execute(
+                text("UPDATE catalog_field_template SET value='Changed' WHERE tenant_id=:other"),
+                {"other": tenant_ids[1]},
+            )
+            assert result.rowcount == 0
+
+        with pytest.raises(DBAPIError):
+            async with app_engine_iso.begin() as conn:
+                await _set_tenant(conn, tenant_ids[0])
+                await conn.execute(
+                    text(
+                        "INSERT INTO catalog_field_template (id, tenant_id, kind, value) "
+                        "VALUES (:id, :other, 'dosage', '500 мг')"
+                    ),
+                    {"id": str(uuid4()), "other": tenant_ids[1]},
+                )
+    finally:
+        if tenant_ids:
+            async with maintenance_engine.begin() as conn:
+                await conn.execute(
+                    text("DELETE FROM catalog_field_template WHERE tenant_id = ANY(:ids)"),
                     {"ids": tenant_ids},
                 )
                 await conn.execute(

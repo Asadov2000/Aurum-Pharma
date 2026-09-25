@@ -23,4 +23,4 @@ export const barcodeLabel: Record<BarcodeType, string> = {
 
 export const dispensingOptions: DispensingType[] = ["prescription", "otc", "special"];
 export const storageOptions: StorageType[] = ["normal", "cold", "frozen"];
-export const barcodeOptions: BarcodeType[] = ["ean13", "ean8", "gs1_128", "code128", "qr", "other"];
+export const barcodeOptions: BarcodeType[] = ["ean13", "ean8", "code128", "gs1_128", "qr", "other"];

@@ -28,7 +28,7 @@ test.describe("Catalog flow (owner)", () => {
     const name = uniqueName("E2E Item");
     await page.getByRole("button", { name: /Добавить товар/ }).click();
     const dialog = page.getByRole("dialog", { name: "Добавить товар" });
-    await dialog.getByLabel("Торговое название").fill(name);
+    await dialog.getByLabel("Название лекарства").fill(name);
     await dialog.getByLabel("Условия отпуска", { exact: true }).selectOption("otc");
     await dialog.getByLabel("Условия хранения", { exact: true }).selectOption("normal");
     await dialog.getByLabel(/Цена по умолчанию/).fill("12.50");

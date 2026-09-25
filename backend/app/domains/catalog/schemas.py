@@ -12,6 +12,7 @@ from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model
 DISPENSING_TYPES = {"prescription", "otc", "special"}
 STORAGE_TYPES = {"normal", "cold", "frozen"}
 BARCODE_TYPES = {"ean13", "ean8", "gs1_128", "code128", "qr", "other"}
+CatalogTemplateKind = Literal["category", "dosage", "pack_size"]
 CatalogLifecycle = Literal["active", "inactive", "archived", "current", "all"]
 CatalogImageState = Literal["any", "with_image", "without_image"]
 CatalogBarcodeState = Literal["any", "with_barcode", "without_barcode"]
@@ -29,6 +30,26 @@ def _strip_optional(value: Any) -> Any:
     if isinstance(value, str):
         return value.strip() or None
     return value
+
+
+class CatalogFieldTemplateCreate(BaseModel):
+    kind: CatalogTemplateKind
+    value: str = Field(min_length=1, max_length=120)
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _normalize_value(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = " ".join(value.split())
+        return _strip_required(value)
+
+
+class CatalogFieldTemplateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    kind: CatalogTemplateKind
+    value: str
 
 
 class BarcodeCreate(BaseModel):

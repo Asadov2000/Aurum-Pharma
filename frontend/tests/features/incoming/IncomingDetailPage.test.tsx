@@ -2,6 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/features/catalog/fieldTemplates", () => ({
+  useFieldTemplates: () => ({ data: [], isLoading: false, isError: false }),
+  useCreateFieldTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteFieldTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 const getIncoming = vi.fn();
 const acceptIncoming = vi.fn();
 const rejectIncoming = vi.fn();
@@ -415,7 +421,7 @@ describe("IncomingDetailPage", () => {
     expect(screen.queryByRole("dialog", { name: "Уйти со страницы?" })).not.toBeInTheDocument();
 
     navigationBlocked = true;
-    fireEvent.change(within(catalog).getByLabelText("Торговое название"), {
+    fireEvent.change(within(catalog).getByLabelText("Название лекарства"), {
       target: { value: "Несохранённый препарат" },
     });
     const confirmation = await screen.findByRole("dialog", { name: "Уйти со страницы?" });
@@ -430,7 +436,7 @@ describe("IncomingDetailPage", () => {
     expect(
       screen.queryByRole("dialog", { name: "Закрыть карточку товара?" }),
     ).not.toBeInTheDocument();
-    expect(within(catalog).getByLabelText("Торговое название")).toHaveValue(
+    expect(within(catalog).getByLabelText("Название лекарства")).toHaveValue(
       "Несохранённый препарат",
     );
   });

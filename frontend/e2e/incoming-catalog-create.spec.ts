@@ -53,7 +53,7 @@ test("creates a product and barcode inside an incoming row after a lost response
     await incomingDialog.getByRole("button", { name: `Проверить и создать «${name}»` }).click();
 
     const productDialog = page.getByRole("dialog", { name: "Добавить товар", exact: true });
-    await expect(productDialog.getByLabel("Торговое название")).toHaveValue(name);
+    await expect(productDialog.getByLabel("Название лекарства")).toHaveValue(name);
     await expect(productDialog.getByLabel("Условия отпуска", { exact: true })).toHaveValue("");
     await expect(productDialog.getByLabel("Условия хранения", { exact: true })).toHaveValue("");
     await productDialog.getByLabel("Условия отпуска", { exact: true }).selectOption("otc");
@@ -80,8 +80,8 @@ test("creates a product and barcode inside an incoming row after a lost response
     });
     await productDialog.getByRole("button", { name: "Добавить товар", exact: true }).click();
     await expect(productDialog.getByText(/Ответ не получен/)).toBeVisible();
-    await expect(productDialog.getByLabel("Торговое название")).toBeDisabled();
-    await productDialog.getByLabel("Торговое название").scrollIntoViewIfNeeded();
+    await expect(productDialog.getByLabel("Название лекарства")).toBeDisabled();
+    await productDialog.getByLabel("Название лекарства").scrollIntoViewIfNeeded();
     await page.screenshot({ path: test.info().outputPath("incoming-product-mobile.png") });
     await productDialog.getByRole("button", { name: "Повторить создание", exact: true }).click();
 

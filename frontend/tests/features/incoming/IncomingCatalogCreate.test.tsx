@@ -2,6 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/features/catalog/fieldTemplates", () => ({
+  useFieldTemplates: () => ({ data: [], isLoading: false, isError: false }),
+  useCreateFieldTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteFieldTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 const createCatalogItem = vi.fn();
 const saveDraft = vi.fn();
 const commitDraft = vi.fn();
@@ -83,7 +89,7 @@ function enterIncoming() {
 
 async function completeCatalog() {
   const dialog = await screen.findByRole("dialog", { name: "Добавить товар" });
-  expect(within(dialog).getByLabelText("Торговое название")).toHaveValue(ITEM.brand_name);
+  expect(within(dialog).getByLabelText("Название лекарства")).toHaveValue(ITEM.brand_name);
   expect(within(dialog).getByLabelText("Дозировка")).toHaveValue("");
   expect(within(dialog).getByLabelText("Размер упаковки")).toHaveValue("");
   fireEvent.change(within(dialog).getByLabelText("Условия отпуска"), { target: { value: "otc" } });

@@ -49,6 +49,7 @@ CRUD_TABLES = {
 }
 
 NO_DELETE_TABLES = {
+    "catalog_field_template",
     "incoming_draft_row",
     "pos_payment_attempt",
     "pos_refund_attempt",
