@@ -429,3 +429,34 @@
   transition-duration: 0.01ms !important;
   scroll-behavior: auto !important;
 }
+
+/* The new theme follows a slanted edge while the pointer moves. The no-op
+   animation keeps the browser snapshots alive until the edge reaches the end. */
+@keyframes theme-slant-hold {
+  from,
+  to {
+    opacity: 1;
+  }
+}
+
+html.theme-slant-transition::view-transition-image-pair(root) {
+  isolation: auto;
+}
+
+html.theme-slant-transition::view-transition-old(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html.theme-slant-transition::view-transition-new(root) {
+  animation: theme-slant-hold 10000ms linear both;
+  mix-blend-mode: normal;
+}
+
+html.theme-slant-from-left::view-transition-new(root) {
+  clip-path: polygon(0 0, var(--theme-slant-top) 0, var(--theme-slant-bottom) 100%, 0 100%);
+}
+
+html.theme-slant-from-right::view-transition-new(root) {
+  clip-path: polygon(var(--theme-slant-top) 0, 100% 0, 100% 100%, var(--theme-slant-bottom) 100%);
+}
