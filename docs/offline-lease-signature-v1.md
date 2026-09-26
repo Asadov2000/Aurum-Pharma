@@ -2,8 +2,8 @@
 
 `Ed25519OfflineLeaseSignatureVerifier` в `offline_lease_signature.py` реализует
 существующий интерфейс проверки подписи. Он работает только с явно переданным
-доверенным snapshot публичных ключей Cloud и не подключён к runtime, HTTP,
-issuer или Windows-службе. Автономный вход остаётся DenyAll.
+доверенным snapshot публичных ключей Cloud. Используется алгоритмом Cloud-выпуска,
+но не подключён к runtime, HTTP или Windows-службе. Автономный вход остаётся DenyAll.
 
 ## Доверенные ключи
 
@@ -50,8 +50,10 @@ trusted-state/TPM адаптерами. Подмена tenant с пересчи�
 проверяют RFC 8032 vectors, malformed encodings, сроки/claims, ключи и ротацию.
 
 Подпись сама не проверяет текущий UTC, наличие права или истечение lease:
-это отдельные условия pipeline. Cloud issuer, защищённая доставка keyring,
+это отдельные условия pipeline. Production Cloud issuer, защищённая доставка keyring,
 доверенное календарное время и восстановление после выключения ещё не реализованы.
+[Алгоритм Cloud issuer](offline-lease-issuance-v1.md) теперь реализован отдельно;
+production выдача, защищённое provisioning ключа и доставка остаются впереди.
 TPM Clock по-прежнему не определяет длительность выключения ПК.
 
 Источники: [PyCryptodome — EdDSA](https://www.pycryptodome.org/src/signature/eddsa),
