@@ -89,6 +89,9 @@ async def test_support_pool_is_limited_to_admin_routes(
     ("method", "path", "expected_support_access"),
     [
         ("GET", "/api/v1/auth/me", True),
+        ("GET", "/api/v1/auth/profile", True),
+        ("POST", "/api/v1/auth/profile", False),
+        ("PATCH", "/api/v1/auth/profile", False),
         ("GET", "/api/v1/roles", True),
         ("PATCH", "/api/v1/roles/44444444-4444-4444-8444-444444444444", True),
         ("GET", "/api/v1/users", True),

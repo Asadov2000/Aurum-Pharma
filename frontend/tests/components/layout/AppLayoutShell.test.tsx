@@ -118,13 +118,30 @@ describe("AppLayout shell", () => {
     const main = screen.getByRole("main");
 
     expect(header).not.toBeNull();
-    expect(
-      within(header as HTMLElement).getByRole("heading", { name: title }),
-    ).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByRole("heading", { name: title })).toBeInTheDocument();
     expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(badge);
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
     expect(within(main).getByText("Page content")).toBeInTheDocument();
     expect(within(main).queryByTestId("tenant-access-banner")).not.toBeInTheDocument();
+  });
+
+  it("opens the personal profile from the header without user-management permissions", async () => {
+    authMock.user.permissions = [];
+    layoutState.pathname = "/profile";
+    render(
+      <AppLayout>
+        <section>Personal profile content</section>
+      </AppLayout>,
+    );
+
+    const header = screen.getByTestId("app-shell-header");
+    const profile = await within(header).findByRole("link", {
+      name: "Открыть мой профиль",
+      exact: true,
+    });
+    expect(profile).toHaveAttribute("href", "/profile");
+    expect(within(profile).getByText(authMock.user.full_name)).toBeInTheDocument();
+    expect(within(screen.getByRole("main")).getByText("Personal profile content")).toBeVisible();
   });
 
   it("keeps the page locked when the mobile drawer closes before another modal", async () => {
