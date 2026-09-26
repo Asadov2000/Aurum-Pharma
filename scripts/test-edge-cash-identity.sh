@@ -51,14 +51,16 @@ psql_super() {
 edge_node_id="$(psql_super <<'SQL'
 BEGIN;
 ALTER TABLE public.branch DISABLE TRIGGER trg_branch_sync_writer;
+-- Complete tenant AFTER INSERT policy seeding before guarded child inserts.
+INSERT INTO public.tenant (name, contact_email, status)
+VALUES (
+    'Edge identity tooling',
+    'edge-identity-' || gen_random_uuid()::text || '@aurum.test',
+    'active'
+)
+RETURNING id AS fixture_tenant_id \gset
 WITH tenant_row AS (
-    INSERT INTO public.tenant (name, contact_email, status)
-    VALUES (
-        'Edge identity tooling',
-        'edge-identity-' || gen_random_uuid()::text || '@aurum.test',
-        'active'
-    )
-    RETURNING id
+    SELECT :'fixture_tenant_id'::UUID AS id
 ), branch_row AS (
     INSERT INTO public.branch (tenant_id, name)
     SELECT id, 'Edge identity branch' FROM tenant_row
