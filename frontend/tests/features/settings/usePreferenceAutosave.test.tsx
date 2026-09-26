@@ -10,6 +10,7 @@ interface Deferred<T> {
 }
 
 const state = vi.hoisted(() => ({
+  loaded: true,
   mutateAsync: vi.fn(),
   refetch: vi.fn(),
   preferences: {
@@ -36,7 +37,7 @@ vi.mock("@/features/auth/hooks", () => ({
 
 vi.mock("@/features/settings/queries", () => ({
   useUserPreferencesQuery: () => ({
-    data: state.preferences,
+    data: state.loaded ? state.preferences : undefined,
     error: null,
     refetch: state.refetch,
   }),
@@ -52,10 +53,47 @@ import { usePreferenceAutosave } from "@/features/settings/usePreferenceAutosave
 describe("usePreferenceAutosave", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    state.loaded = true;
     state.mutateAsync.mockReset();
     state.refetch.mockReset();
     state.preferences = { ...state.preferences, version: 1 };
     state.refetch.mockResolvedValue({ data: state.preferences });
+  });
+
+  it("queues edits before the first preference load and saves with the received version", async () => {
+    state.loaded = false;
+    state.preferences = { ...state.preferences, version: 7 };
+    state.mutateAsync.mockResolvedValue({
+      ...state.preferences,
+      theme: "dark",
+      density: "touch",
+      version: 8,
+    });
+    const { result, rerender } = renderHook(() => usePreferenceAutosave("test-channel"));
+
+    act(() => {
+      result.current.enqueue({ theme: "dark" });
+      result.current.enqueue({ density: "touch" });
+    });
+
+    expect(result.current.hasPending).toBe(true);
+    expect(state.mutateAsync).not.toHaveBeenCalled();
+    const storageKey = "aurum:preferences-pending:v1:user-1%3Atenant-1:test-channel";
+    expect(JSON.parse(window.localStorage.getItem(storageKey) ?? "{}")).toEqual({
+      theme: "dark",
+      density: "touch",
+    });
+
+    state.loaded = true;
+    rerender();
+
+    await waitFor(() => expect(result.current.hasPending).toBe(false));
+    expect(state.mutateAsync).toHaveBeenCalledExactlyOnceWith({
+      expected_version: 7,
+      theme: "dark",
+      density: "touch",
+    });
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
   });
 
   it("serializes rapid changes and keeps the in-flight patch until the server confirms it", async () => {
