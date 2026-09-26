@@ -46,6 +46,7 @@
 | RLS и инварианты БД | модели, миграции, PostgreSQL triggers | `backend/tests/isolation/` |
 | Контракт и алгоритм автономного входа v1 | [offline-auth-lease-v1.md](offline-auth-lease-v1.md), `backend/app/domains/sync/offline_auth_lease.py`, доверенное состояние в `offline_auth_lease_state.py`, модели lease в `schemas.py`; runtime запрещает вход | `backend/tests/domains/sync/test_offline_auth_lease_v1.py`, `test_offline_auth_lease_pipeline_v1.py`, V0-регрессии |
 | Локальный credential и TPM protector | [offline-local-credentials-v1.md](offline-local-credentials-v1.md), `backend/app/domains/sync/local_credentials.py`, `desktop/AurumPharma.Desktop.Core/Security/`; не подключены к runtime | `test_local_credentials.py`, desktop protector tests; реальные TPM/service ACL и anti-rollback не приняты |
+| Сохраняемые попытки и локальные сессии | [offline-local-sessions-v1.md](offline-local-sessions-v1.md), `local_auth_service.py`, `local_auth_state.py`, `local_auth_repository.py`, миграция 0154; runtime закрыт | `test_local_auth_service.py`, `test_local_auth_repository.py`, `tests/isolation/test_local_auth_migration.py`; аппаратный protected-state adapter ещё нужен |
 | Backend core/middleware | `backend/app/core/`, `backend/app/middleware/` | `backend/tests/core/`, `backend/tests/middleware/` |
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |
 | Frontend-фича | `frontend/src/features/<domain>/` | `frontend/tests/features/<domain>/` |

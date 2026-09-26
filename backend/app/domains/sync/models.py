@@ -16,6 +16,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    String,
     Text,
     UniqueConstraint,
     text,
@@ -27,6 +28,79 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 class Base(DeclarativeBase):
     """Local declarative base for the sync domain."""
+
+
+class LocalAuthGuard(Base):
+    """Provisioned durable attempt and trusted-clock state, without credentials."""
+
+    __tablename__ = "local_auth_guard"
+    __table_args__ = (
+        CheckConstraint("credential_revision > 0", name="ck_local_auth_guard_revision"),
+        CheckConstraint("context_digest ~ '^[0-9a-f]{64}$'", name="ck_local_auth_guard_digest"),
+        CheckConstraint("failed_attempts >= 0", name="ck_local_auth_guard_attempts"),
+        CheckConstraint("attempt_sequence >= 0", name="ck_local_auth_guard_sequence"),
+        CheckConstraint("last_counter >= 0", name="ck_local_auth_guard_counter"),
+        CheckConstraint("length(continuity_id) > 0", name="ck_local_auth_guard_continuity"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    credential_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    credential_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    context_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    attempt_sequence: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_counter: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    continuity_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class LocalAuthSession(Base):
+    """Trusted non-secret offline sessions; one current session per workplace."""
+
+    __tablename__ = "local_auth_session"
+    __table_args__ = (
+        Index(
+            "uq_local_auth_session_current_workplace",
+            "tenant_id",
+            "branch_id",
+            "edge_node_id",
+            "register_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    credential_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
 class SyncNode(Base):

@@ -51,6 +51,8 @@ CRUD_TABLES = {
 NO_DELETE_TABLES = {
     "catalog_field_template",
     "incoming_draft_row",
+    "local_auth_guard",
+    "local_auth_session",
     "pos_payment_attempt",
     "pos_refund_attempt",
     "sync_read_snapshot",
