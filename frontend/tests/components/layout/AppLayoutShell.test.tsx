@@ -33,6 +33,7 @@ const layoutState = vi.hoisted(() => ({
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => ({
     logout: authMock.logout,
+    isAuthenticated: true,
     user: authMock.user,
   }),
 }));
@@ -56,6 +57,10 @@ vi.mock("@/components/AppearanceMenu", () => ({
 
 vi.mock("@/features/supportAccess/SupportAccessBanner", () => ({
   SupportAccessBanner: () => null,
+}));
+
+vi.mock("@/features/tenantAccess/TenantAccessBanner", () => ({
+  TenantAccessBanner: () => <span data-testid="tenant-access-banner" />,
 }));
 
 vi.mock("@/features/settings/queries", () => ({
@@ -102,6 +107,7 @@ describe("AppLayout shell", () => {
     );
     await waitFor(() => expect(screen.getByTestId("appearance-menu-ready")).toBeInTheDocument());
 
+    expect(await screen.findByTestId("tenant-access-banner")).toBeInTheDocument();
     const badge = screen.getByTestId("runtime-surface-badge");
     const header = badge.closest("header");
     const main = screen.getByRole("main");
@@ -113,6 +119,7 @@ describe("AppLayout shell", () => {
     expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(badge);
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
     expect(within(main).getByText("Page content")).toBeInTheDocument();
+    expect(within(main).queryByTestId("tenant-access-banner")).not.toBeInTheDocument();
   });
 
   it("keeps the page locked when the mobile drawer closes before another modal", async () => {
