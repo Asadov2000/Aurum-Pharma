@@ -7,6 +7,7 @@ import axios, {
 } from "axios";
 
 import { getAuthSessionGeneration } from "@/stores/auth";
+import { getAuthEpoch } from "@/features/auth/logoutState";
 import { getSupportAccessSessionId } from "@/stores/supportAccess";
 
 const DEV_API_BASE_URL = "http://localhost:8000/api/v1";
@@ -66,6 +67,7 @@ export const api: AxiosInstance = axios.create({
 });
 
 interface RetryConfig extends InternalAxiosRequestConfig {
+  _authEpoch?: string | null;
   _authSessionGeneration?: number;
   _retry?: boolean;
   _skipAuth?: boolean;
@@ -136,13 +138,20 @@ function acceptsSupportContext(pathname: string | null, method: string | undefin
 
 api.interceptors.request.use((config) => {
   const cfg = config as RetryConfig;
+  if (cfg._authEpoch === undefined) cfg._authEpoch = getAuthEpoch();
   cfg._authSessionGeneration ??= getAuthSessionGeneration();
-  if (cfg._authSessionGeneration !== getAuthSessionGeneration()) {
+  if (
+    cfg._authSessionGeneration !== getAuthSessionGeneration() ||
+    cfg._authEpoch !== getAuthEpoch()
+  ) {
     throw new CanceledError("Authentication session changed", config);
   }
   config.headers.delete("X-Aurum-Support-Session");
   if (cfg._skipAuth) return config;
   const token = getAccess();
+  if (cfg._authSessionGeneration !== getAuthSessionGeneration()) {
+    throw new CanceledError("Authentication session changed", config);
+  }
   if (token) {
     config.headers.set("Authorization", `Bearer ${token}`);
     const supportAccessSessionId = getSupportAccessSessionId();
@@ -222,14 +231,22 @@ export function isSupportAccessInactive(error: AxiosError): boolean {
 
 api.interceptors.response.use(
   (response) => {
-    if ((response.config as RetryConfig)._authSessionGeneration !== getAuthSessionGeneration()) {
+    const cfg = response.config as RetryConfig;
+    if (
+      cfg._authSessionGeneration !== getAuthSessionGeneration() ||
+      cfg._authEpoch !== getAuthEpoch()
+    ) {
       throw new CanceledError("Authentication session changed", response.config);
     }
     return response;
   },
   async (error: AxiosError) => {
     const original = error.config as RetryConfig | undefined;
-    if (!original || original._authSessionGeneration !== getAuthSessionGeneration()) {
+    if (
+      !original ||
+      original._authSessionGeneration !== getAuthSessionGeneration() ||
+      original._authEpoch !== getAuthEpoch()
+    ) {
       return Promise.reject(error);
     }
     const generation = original._authSessionGeneration;

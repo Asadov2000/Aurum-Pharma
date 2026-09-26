@@ -1,6 +1,5 @@
 const STORAGE_KEY = "aurum.refresh_operation_id";
-const UUID_V4_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let inMemoryOperationId: string | null = null;
 
@@ -12,7 +11,7 @@ function safeSessionStorage(): Storage | null {
   }
 }
 
-function generateUuidV4(): string {
+export function generateUuidV4(): string {
   if (typeof globalThis.crypto.randomUUID === "function") {
     return globalThis.crypto.randomUUID();
   }
@@ -31,14 +30,19 @@ function generateUuidV4(): string {
 }
 
 export function getPendingRefreshOperationId(): string | null {
-  const stored = safeSessionStorage()?.getItem(STORAGE_KEY) ?? inMemoryOperationId;
+  let stored = inMemoryOperationId;
+  try {
+    stored = safeSessionStorage()?.getItem(STORAGE_KEY) ?? stored;
+  } catch {
+    // Keep the noncredential operation id in memory when storage is unavailable.
+  }
   if (stored && UUID_V4_PATTERN.test(stored)) {
     inMemoryOperationId = stored;
     return stored;
   }
 
   if (stored) {
-    safeSessionStorage()?.removeItem(STORAGE_KEY);
+    clearRefreshOperationId();
   }
   inMemoryOperationId = null;
   return null;
@@ -50,11 +54,19 @@ export function getOrCreateRefreshOperationId(): string {
 
   const operationId = generateUuidV4();
   inMemoryOperationId = operationId;
-  safeSessionStorage()?.setItem(STORAGE_KEY, operationId);
+  try {
+    safeSessionStorage()?.setItem(STORAGE_KEY, operationId);
+  } catch {
+    // The in-memory operation still makes retries idempotent in this tab.
+  }
   return operationId;
 }
 
 export function clearRefreshOperationId(): void {
   inMemoryOperationId = null;
-  safeSessionStorage()?.removeItem(STORAGE_KEY);
+  try {
+    safeSessionStorage()?.removeItem(STORAGE_KEY);
+  } catch {
+    // Local logout must still complete when browser storage is restricted.
+  }
 }

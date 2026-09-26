@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { useSupportAccessStore } from "@/stores/supportAccess";
 import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
+import * as logoutState from "@/features/auth/logoutState";
 
 const defaultAdapter = api.defaults.adapter;
 
@@ -59,6 +60,7 @@ function apiError(config: InternalAxiosRequestConfig, status: number, reason?: s
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   api.defaults.adapter = defaultAdapter;
   configureAuthHooks({
     getAccessToken: () => null,
@@ -71,6 +73,40 @@ afterEach(() => {
 });
 
 describe("HTTP session isolation", () => {
+  it.each([200, 401])(
+    "rejects a late %s response before a suspended tab receives its epoch event",
+    async (status) => {
+      let epoch: string | null = null;
+      vi.spyOn(logoutState, "getAuthEpoch").mockImplementation(() => epoch);
+      authenticate("cashier-1");
+      const generation = getAuthSessionGeneration();
+      const started = deferred<void>();
+      const release = deferred<void>();
+      const refreshTokens = vi.fn();
+      configureAuthHooks({
+        getAccessToken: () => useAuthStore.getState().accessToken,
+        refreshTokens,
+        requestMfaStepUp: async () => null,
+        onAuthFailure: vi.fn(),
+      });
+      api.defaults.adapter = async (config) => {
+        started.resolve();
+        await release.promise;
+        if (status === 401) throw apiError(config, status);
+        return { data: {}, status, statusText: "OK", headers: {}, config };
+      };
+      const rejection = expect(api.get("/catalog")).rejects.toThrow(
+        status === 200 ? "Authentication session changed" : "Request failed",
+      );
+      await started.promise;
+      epoch = "different-tab-session";
+      expect(getAuthSessionGeneration()).toBe(generation);
+      release.resolve();
+      await rejection;
+      expect(refreshTokens).not.toHaveBeenCalled();
+    },
+  );
+
   it("retains the generation during token rotation", () => {
     authenticate("cashier-1");
     const generation = getAuthSessionGeneration();

@@ -1,4 +1,5 @@
 import { api, withoutAuth, withoutRefresh } from "@/lib/api";
+import { runCookieRequest, runSessionRequest } from "./cookieRequests";
 
 import {
   type ActiveSession,
@@ -35,12 +36,14 @@ export async function verifyLoginCode(
   payload: LoginVerifyRequest,
   signal?: AbortSignal,
 ): Promise<LoginVerifyResponse> {
-  const { data } = await api.post<LoginVerifyResponse>(
-    "/auth/login/verify",
-    payload,
-    withoutAuth({ signal, timeout: AUTH_REQUEST_TIMEOUT_MS }),
-  );
-  return data;
+  return runCookieRequest("explicit", async () => {
+    const { data } = await api.post<LoginVerifyResponse>(
+      "/auth/login/verify",
+      payload,
+      withoutAuth({ signal, timeout: AUTH_REQUEST_TIMEOUT_MS }),
+    );
+    return data;
+  });
 }
 
 export async function startMfaEnrollment(
@@ -59,21 +62,25 @@ export async function completeMfaEnrollment(
   payload: MfaCodeRequest,
   signal?: AbortSignal,
 ): Promise<TokenPair> {
-  const { data } = await api.post<TokenPair>(
-    "/auth/mfa/enroll/confirm",
-    payload,
-    withoutAuth({ signal, timeout: AUTH_REQUEST_TIMEOUT_MS }),
-  );
-  return data;
+  return runCookieRequest("explicit", async () => {
+    const { data } = await api.post<TokenPair>(
+      "/auth/mfa/enroll/confirm",
+      payload,
+      withoutAuth({ signal, timeout: AUTH_REQUEST_TIMEOUT_MS }),
+    );
+    return data;
+  });
 }
 
 export async function verifyMfa(payload: MfaCodeRequest, signal?: AbortSignal): Promise<TokenPair> {
-  const { data } = await api.post<TokenPair>(
-    "/auth/mfa/verify",
-    payload,
-    withoutAuth({ signal, timeout: AUTH_REQUEST_TIMEOUT_MS }),
-  );
-  return data;
+  return runCookieRequest("explicit", async () => {
+    const { data } = await api.post<TokenPair>(
+      "/auth/mfa/verify",
+      payload,
+      withoutAuth({ signal, timeout: AUTH_REQUEST_TIMEOUT_MS }),
+    );
+    return data;
+  });
 }
 
 export async function recoverMfa(
@@ -89,21 +96,21 @@ export async function recoverMfa(
 }
 
 export async function stepUpMfa(code: string): Promise<TokenPair> {
-  const { data } = await api.post<TokenPair>("/auth/mfa/step-up", { code }, withoutRefresh());
-  return data;
+  return runSessionRequest(async () => {
+    const { data } = await api.post<TokenPair>("/auth/mfa/step-up", { code }, withoutRefresh());
+    return data;
+  });
 }
 
 export async function refreshTokensRequest(operationId: string): Promise<TokenPair> {
-  const { data } = await api.post<TokenPair>(
-    "/auth/refresh",
-    { operation_id: operationId },
-    withoutAuth(),
-  );
-  return data;
-}
-
-export async function logoutRequest(operationId: string | null): Promise<void> {
-  await api.post("/auth/logout", operationId ? { operation_id: operationId } : null, withoutAuth());
+  return runCookieRequest("refresh", async () => {
+    const { data } = await api.post<TokenPair>(
+      "/auth/refresh",
+      { operation_id: operationId },
+      withoutAuth({ timeout: AUTH_REQUEST_TIMEOUT_MS }),
+    );
+    return data;
+  });
 }
 
 export async function fetchMe(signal?: AbortSignal): Promise<MeResponse> {

@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
 import { clearTokens, loadTokens, saveTokens } from "@/features/auth/storage";
+import { getAuthEpoch, isSessionRestorationBlocked } from "@/features/auth/logoutState";
+import { tokenMatchesEpoch } from "@/features/auth/tokenEpoch";
 import { type MeResponse, type TokenPair } from "@/features/auth/types";
 
 interface AuthState {
@@ -19,6 +21,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   hydrated: false,
   setTokens: (tokens) => {
+    if (isSessionRestorationBlocked() || !tokenMatchesEpoch(tokens, getAuthEpoch())) return;
     saveTokens(tokens);
     set({
       accessToken: tokens.access_token,
@@ -27,6 +30,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   setUser: (user) => set({ user, hydrated: true }),
   clear: () => {
+    sessionGeneration += 1;
     clearTokens();
     set({ accessToken: null, user: null, hydrated: true });
   },

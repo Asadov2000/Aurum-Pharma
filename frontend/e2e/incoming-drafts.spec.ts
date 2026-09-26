@@ -57,6 +57,10 @@ test("incomplete incoming input survives lost responses and reload without dupli
 
     let droppedSaveResponse = false;
     let droppedSaveRequest: Request | null = null;
+    let confirmDroppedSave!: () => void;
+    const droppedSave = new Promise<void>((resolve) => {
+      confirmDroppedSave = resolve;
+    });
     await page.route(`**/api/v1/${rowsPath}/*`, async (route) => {
       if (route.request().method() !== "PUT" || droppedSaveRequest !== null) {
         await route.continue();
@@ -72,13 +76,14 @@ test("incomplete incoming input survives lost responses and reload without dupli
       expect(response.ok()).toBe(true);
       droppedSaveResponse = true;
       await route.abort("failed");
+      confirmDroppedSave();
     });
 
     await page.getByRole("button", { name: "Добавить позицию", exact: true }).click();
     await Promise.all([
-      page.waitForEvent("requestfailed", {
-        predicate: (failed) => failed === droppedSaveRequest && droppedSaveResponse,
-      }),
+      // Synchronize with the actual proxy abort, not browser Request object
+      // identity. The UI error and persisted server snapshot remain mandatory.
+      droppedSave,
       page.getByLabel("Количество единиц").fill("12,"),
     ]);
     await expect(page.getByText(/Не сохранено/)).toBeVisible();

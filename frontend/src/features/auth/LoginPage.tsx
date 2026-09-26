@@ -14,6 +14,9 @@ import { useAuthStore } from "@/stores/auth";
 import { fetchMe } from "./api";
 import { LoginLayout } from "./LoginLayout";
 import { LoginCredentialsForm } from "./LoginCredentialsForm";
+import { LogoutNotice } from "./LogoutNotice";
+import { getAuthEpoch, isSessionRestorationBlocked } from "./logoutState";
+import { tokenMatchesEpoch } from "./tokenEpoch";
 import { clearClientSession } from "./session";
 import { type LoginVerifyResponse, type MfaChallengeResponse, type TokenPair } from "./types";
 
@@ -43,7 +46,12 @@ export function LoginPage(): JSX.Element {
   );
 
   const completeLogin = async (tokens: TokenPair): Promise<void> => {
-    if (activeRequestRef.current) return;
+    if (
+      activeRequestRef.current ||
+      isSessionRestorationBlocked() ||
+      !tokenMatchesEpoch(tokens, getAuthEpoch())
+    )
+      return;
     const controller = new AbortController();
     activeRequestRef.current = controller;
     try {
@@ -88,6 +96,7 @@ export function LoginPage(): JSX.Element {
 
   return (
     <LoginLayout publicWebsiteUrl={publicWebsiteUrl} wide={enrollmentVisible}>
+      <LogoutNotice />
       {challenge ? (
         <Suspense
           fallback={

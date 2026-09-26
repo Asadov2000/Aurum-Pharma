@@ -63,12 +63,27 @@ test.describe("Catalog flow (owner)", () => {
     await page.goto("/catalog");
     // Search by the unique tail (not the shared "E2E Barcode-" prefix) so the
     // new item is the only trigram match and lands on page 1.
-    await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
+    const searchKey = catalogSearchKey(name);
+    const filteredResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === "/api/v1/catalog" &&
+        url.searchParams.get("q") === searchKey &&
+        response.status() === 200
+      );
+    });
+    await page.getByLabel(/Поиск/).fill(searchKey);
+    await filteredResponse;
+    await expect(page.getByText(/^(Поиск…|Обновление…)$/)).toHaveCount(0);
     await expect(catalogItem(page, name)).toBeVisible({
       timeout: 15_000,
     });
 
     // Open the edit modal — BarcodesPanel is rendered next to the form.
+    await page
+      .getByRole("button", { name: `Действия для ${name}`, exact: true })
+      .scrollIntoViewIfNeeded();
     await selectActionMenuItem(page, `Действия для ${name}`, "Изменить");
 
     const dialog = page.locator('div[role="dialog"]');

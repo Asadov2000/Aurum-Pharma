@@ -8,6 +8,9 @@ import { configureAuthHooks, refreshAccessToken } from "@/lib/api";
 import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
 
 import { refreshTokensRequest } from "./api";
+import { completePendingLogout } from "./cookieRequests";
+import { installLogoutSynchronization, synchronizeLogoutState } from "./logout";
+import { isSessionRestorationBlocked } from "./logoutState";
 import { isConfirmedAuthFailure, isTransientRefreshFailure } from "./failures";
 import { getOrCreateRefreshOperationId } from "./refreshOperation";
 import { clearClientSession, clearClientSupportContext } from "./session";
@@ -23,9 +26,10 @@ function wait(delayMs: number): Promise<void> {
 export async function refreshSessionFromCookie(
   retryDelaysMs: readonly number[] = DEFAULT_RETRY_DELAYS_MS,
 ): Promise<string | null> {
+  if (isSessionRestorationBlocked()) return null;
   const generation = getAuthSessionGeneration();
   const ensureCurrentSession = () => {
-    if (generation !== getAuthSessionGeneration()) {
+    if (generation !== getAuthSessionGeneration() || isSessionRestorationBlocked()) {
       throw new CanceledError("Authentication session changed");
     }
   };
@@ -57,6 +61,11 @@ let retryDelayMs = 3_000;
 let onlineListenerInstalled = false;
 
 function runBootstrapRefresh(): void {
+  if (isSessionRestorationBlocked()) {
+    clearClientSession();
+    void completePendingLogout().catch(() => undefined);
+    return;
+  }
   if (useAuthStore.getState().hydrated) return;
   if (retryTimer !== null) {
     window.clearTimeout(retryTimer);
@@ -77,8 +86,12 @@ function runBootstrapRefresh(): void {
 }
 
 export function bootstrapAuth(): void {
+  installLogoutSynchronization();
   configureAuthHooks({
-    getAccessToken: () => useAuthStore.getState().accessToken,
+    getAccessToken: () => {
+      synchronizeLogoutState();
+      return useAuthStore.getState().accessToken;
+    },
     refreshTokens: refreshSessionFromCookie,
     requestMfaStepUp,
     onAuthFailure: clearClientSession,
