@@ -13,7 +13,6 @@ import {
   type ExpiringBatch,
   type ExpiringLicense,
   type ExpiryStatus,
-  type FinanceSection,
   type TodaySection,
 } from "./types";
 
@@ -74,7 +73,6 @@ export function DashboardPage(): JSX.Element {
   const canOpenCatalog = hasAccess("catalog.view");
   const canOpenBatches = hasAccess("batches.view");
   const canOpenBranches = hasAccess("branches.view");
-  const canOpenBilling = ["billing.overview.view", "billing.invoice.view"].every(hasAccess);
   const generatedAt = query.data ? formatGeneratedAt(query.data.generated_at) : null;
   const dashboardError = query.error;
   const refreshing = query.isFetching;
@@ -146,7 +144,6 @@ export function DashboardPage(): JSX.Element {
           canOpenCatalog={canOpenCatalog}
           canOpenBatches={canOpenBatches}
           canOpenBranches={canOpenBranches}
-          canOpenBilling={canOpenBilling}
         />
       ) : null}
 
@@ -197,7 +194,6 @@ function DashboardWorkspace({
   canOpenCatalog,
   canOpenBatches,
   canOpenBranches,
-  canOpenBilling,
 }: {
   data: DashboardSummary;
   canOpenPos: boolean;
@@ -206,7 +202,6 @@ function DashboardWorkspace({
   canOpenCatalog: boolean;
   canOpenBatches: boolean;
   canOpenBranches: boolean;
-  canOpenBilling: boolean;
 }): JSX.Element {
   return (
     <>
@@ -224,7 +219,6 @@ function DashboardWorkspace({
           latestClosedShiftId={data.checklist.latest_closed_shift_id}
           canViewIncoming={canViewIncoming}
         />
-        <FinancePanel data={data.finance} canOpenBilling={canOpenBilling} />
         <QuickActions
           canOpenPos={canOpenPos}
           canCreateIncoming={canCreateIncoming}
@@ -543,65 +537,6 @@ function ChecklistLink({
       </span>
       <ChevronIcon />
     </Link>
-  );
-}
-
-function FinancePanel({
-  data,
-  canOpenBilling,
-}: {
-  data: FinanceSection | null;
-  canOpenBilling: boolean;
-}): JSX.Element {
-  if (data === null) {
-    return (
-      <Panel title="Финансы">
-        <p className="p-4 text-sm">Нет доступа к финансам.</p>
-      </Panel>
-    );
-  }
-  return (
-    <Panel
-      title="Финансы"
-      action={
-        canOpenBilling ? (
-          <Link
-            to="/billing"
-            className="inline-flex min-h-9 items-center rounded-md border border-input px-3 text-sm font-medium text-foreground hover:bg-foreground/[0.025]"
-          >
-            История расчётов
-          </Link>
-        ) : undefined
-      }
-    >
-      <div className="grid min-h-40 grid-cols-1 divide-y divide-border px-4 py-3 sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:px-5">
-        <FinanceMetric label="Открытые счета">
-          <p className="font-mono text-sm font-semibold text-foreground">
-            {data.open_invoices_count} шт. · {money(data.open_invoices_total, data.currency)}
-          </p>
-        </FinanceMetric>
-        <FinanceMetric label="Платежи">
-          {data.has_overdue && canOpenBilling ? (
-            <Link to="/billing">
-              <Badge tone="danger">Есть просрочка — посмотреть</Badge>
-            </Link>
-          ) : data.has_overdue ? (
-            <Badge tone="danger">Есть просрочка</Badge>
-          ) : (
-            <p className="text-sm text-success-foreground">Просроченных платежей нет</p>
-          )}
-        </FinanceMetric>
-      </div>
-    </Panel>
-  );
-}
-
-function FinanceMetric({ label, children }: { label: string; children: ReactNode }): JSX.Element {
-  return (
-    <div className="min-w-0 px-0 py-3 first:pt-0 last:pb-0 sm:px-4 sm:py-2 sm:first:pl-0 sm:last:pr-0">
-      <p className="mb-2 text-xs font-medium text-foreground-muted">{label}</p>
-      {children}
-    </div>
   );
 }
 

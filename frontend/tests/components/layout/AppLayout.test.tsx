@@ -137,10 +137,10 @@ describe("buildNav — owner-only pages", () => {
     expect(labels(items)).toContain("Настройки");
   });
 
-  it("shows financial/reporting pages to an owner", () => {
+  it("keeps reporting available but hides Aurum settlements even with billing permissions", () => {
     const items = buildNav(false, true, true, OWNER_PERMS);
     expect(labels(items)).toContain("Партии");
-    expect(labels(items)).toContain("Расчёты с Aurum");
+    expect(items.some((item) => item.to === "/billing")).toBe(false);
     expect(labels(items)).toContain("Отчёты");
     expect(labels(items)).toContain("Настройки");
   });

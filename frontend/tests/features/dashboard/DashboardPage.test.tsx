@@ -98,22 +98,23 @@ describe("DashboardPage", () => {
     vi.clearAllMocks();
   });
 
-  it("does not present unavailable finance as zero debt", async () => {
+  it("renders the pharmacy summary without an Aurum finance access warning", async () => {
     getDashboardSummary.mockResolvedValueOnce({ ...SUMMARY, finance: null });
     renderPage();
-    expect(await screen.findByText("Нет доступа к финансам.")).toBeInTheDocument();
+    expect(await screen.findByText("Сегодня")).toBeInTheDocument();
+    expect(screen.queryByText("Нет доступа к финансам.")).not.toBeInTheDocument();
     expect(screen.queryByText("Просроченных платежей нет")).not.toBeInTheDocument();
     expect(screen.queryByText("Нет активной подписки")).not.toBeInTheDocument();
   });
 
-  it("renders all four sections with data", async () => {
+  it("renders pharmacy operations without Aurum invoice or payment reminders", async () => {
     getDashboardSummary.mockResolvedValueOnce(SUMMARY);
     renderPage();
 
     // Section titles
     expect(await screen.findByText("Сегодня")).toBeInTheDocument();
     expect(screen.getByText("Сроки годности и лицензии")).toBeInTheDocument();
-    expect(screen.getByText("Финансы")).toBeInTheDocument();
+    expect(screen.queryByText("Финансы")).not.toBeInTheDocument();
     expect(screen.getByText("Требует проверки")).toBeInTheDocument();
 
     // Today numbers
@@ -122,8 +123,12 @@ describe("DashboardPage", () => {
     expect(screen.getByText(/LOT-7/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Лицензии/ }));
     expect(screen.getByText("Аптека №1")).toBeInTheDocument();
-    // Finance overdue badge
-    expect(screen.getByText(/Есть просрочка/)).toBeInTheDocument();
+    // Historical Aurum debt must not become a client-facing payment reminder.
+    expect(screen.queryByText(/Есть просрочка/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Открытые счета")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("link").some((link) => link.getAttribute("href") === "/billing"),
+    ).toBe(false);
     // Checklist counts
     expect(screen.getByText("Черновики приёмок")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Обновить сводку" })).toHaveTextContent(
