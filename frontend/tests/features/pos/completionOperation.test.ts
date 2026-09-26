@@ -6,9 +6,13 @@ import {
   markPendingCompletion,
 } from "@/features/pos/completionOperation";
 import { draftKey, loadDraft } from "@/features/pos/draftStorage";
+import { authenticatePos, POS_SCOPE } from "./posIdentityFixture";
 
 describe("pending POS completion", () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    authenticatePos();
+  });
 
   it("persists and clears the completion marker", () => {
     expect(markPendingCompletion("sale-1")).toBe(true);
@@ -29,7 +33,7 @@ describe("pending POS completion", () => {
 
   it("keeps an expired draft while completion is unresolved", () => {
     window.localStorage.setItem(
-      draftKey("register-1"),
+      draftKey("register-1", POS_SCOPE),
       JSON.stringify({ saleId: "sale-1", nameById: {}, savedAt: 0 }),
     );
     expect(markPendingCompletion("sale-1")).toBe(true);
@@ -56,7 +60,7 @@ describe("pending POS completion", () => {
 
   it("keeps a completed receipt pointer after the draft TTL", () => {
     window.localStorage.setItem(
-      draftKey("register-1"),
+      draftKey("register-1", POS_SCOPE),
       JSON.stringify({
         saleId: "sale-1",
         nameById: {},
