@@ -43,7 +43,7 @@ export function AppearanceMenu(): JSX.Element {
   }, [autosave.hasPending, preferences.data]);
 
   const syncPreference = (patch: { theme: ThemePreference } | { density: DensityPreference }) => {
-    if (!preferences.data) return;
+    // Autosave queues the choice until the initial server version is available.
     autosave.enqueue(patch);
   };
 
