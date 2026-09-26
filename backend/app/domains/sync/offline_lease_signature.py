@@ -49,6 +49,25 @@ def _verify_ed25519(public_key: bytes, message: bytes, signature: bytes) -> None
     eddsa.new(_canonical_public_key(public_key), "rfc8032").verify(message, signature)
 
 
+def trusted_offline_signing_keys(trusted_keys: Mapping[UUID, bytes]) -> Mapping[UUID, bytes]:
+    """Validate and pin explicit keys for separate, domain-bound offline messages."""
+    try:
+        copied: dict[UUID, bytes] = {}
+        material: set[bytes] = set()
+        for key_id, encoded in trusted_keys.items():
+            if not isinstance(key_id, UUID) or key_id.version != 4:
+                raise ValueError(_KEY_CONFIGURATION_ERROR)
+            key = _canonical_public_key(encoded)
+            if (key.pointQ * 8).xy == (0, 1) or encoded in material:
+                raise ValueError(_KEY_CONFIGURATION_ERROR)
+            # Unsigned key_id aliases cannot conceal which pinned key was used.
+            material.add(encoded)
+            copied[key_id] = encoded
+        return MappingProxyType(copied)
+    except Exception:
+        raise ValueError(_KEY_CONFIGURATION_ERROR) from None
+
+
 class Ed25519OfflineLeaseSignatureVerifier:
     """Verify with an explicitly trusted, immutable snapshot of Cloud public keys.
 
@@ -58,22 +77,7 @@ class Ed25519OfflineLeaseSignatureVerifier:
     """
 
     def __init__(self, trusted_keys: Mapping[UUID, bytes]) -> None:
-        try:
-            copied: dict[UUID, bytes] = {}
-            material: set[bytes] = set()
-            for key_id, encoded in trusted_keys.items():
-                if not isinstance(key_id, UUID) or key_id.version != 4:
-                    raise ValueError(_KEY_CONFIGURATION_ERROR)
-                key = _canonical_public_key(encoded)
-                if (key.pointQ * 8).xy == (0, 1) or encoded in material:
-                    raise ValueError(_KEY_CONFIGURATION_ERROR)
-                # Duplicate material under different IDs would let unsigned
-                # envelope key_id aliases conceal which trusted key was used.
-                material.add(encoded)
-                copied[key_id] = encoded
-            self._keys: Mapping[UUID, bytes] = MappingProxyType(copied)
-        except Exception:
-            raise ValueError(_KEY_CONFIGURATION_ERROR) from None
+        self._keys = trusted_offline_signing_keys(trusted_keys)
 
     async def verify(self, lease: SignedOfflineAuthLeaseV1, signing_bytes: bytes) -> None:
         try:

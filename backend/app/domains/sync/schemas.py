@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domains.tenant_access.schemas import AccessModule
+
 Checksum = str
 
 
@@ -280,6 +282,33 @@ class _StrictOfflineAuthModel(BaseModel):
     )
 
 
+class CloudTenantAccessPolicyV1(_StrictOfflineAuthModel):
+    """Strict Cloud projection; quotas and administrative notes grant no commands."""
+
+    tenant_id: UUID4
+    version: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    tenant_status: Literal[
+        "setup", "trial", "active", "grace_period", "readonly", "suspended", "archived"
+    ]
+    mode: Literal["full", "readonly"]
+    blocked_modules: tuple[AccessModule, ...]
+    expires_at: datetime | None
+
+    @field_validator("blocked_modules")
+    @classmethod
+    def validate_modules(cls, value: tuple[AccessModule, ...]) -> tuple[AccessModule, ...]:
+        if value != tuple(sorted(set(value))):
+            raise ValueError("Tenant access modules must be unique and sorted")
+        return value
+
+    @field_validator("expires_at")
+    @classmethod
+    def validate_expiry(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() != timedelta(0)):
+            raise ValueError("Tenant access evaluation requires UTC")
+        return value
+
+
 class OfflineAuthScopeV0(_StrictOfflineAuthModel):
     activation_id: UUID4
     tenant_id: UUID4
@@ -429,6 +458,71 @@ class SignedOfflineAuthLeaseV1(_StrictOfflineAuthModel):
     signing_key_id: UUID4
     signature_algorithm: Literal["ed25519-v1"]
     signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+
+class OfflinePolicyDeliveryScopeV1(_StrictOfflineAuthModel):
+    activation_id: UUID4
+    tenant_id: UUID4
+    branch_id: UUID4
+    edge_node_id: UUID4
+    register_id: UUID4
+    writer_epoch: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    capability: Literal["cash_sale_v1"]
+
+
+class OfflinePolicyDeliveryClaimsV1(_StrictOfflineAuthModel):
+    schema_version: Literal[1]
+    issuer: Literal["aurum-cloud"]
+    audience: Literal["aurum-edge-policy-delivery-v1"]
+    delivery_id: UUID4
+    delivery_sequence: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    scope: OfflinePolicyDeliveryScopeV1
+    device_binding: OfflineAuthDeviceBindingV0
+    policy: CloudTenantAccessPolicyV1
+    issued_at: datetime
+    lease: SignedOfflineAuthLeaseV1 | None
+
+    @field_validator("issued_at")
+    @classmethod
+    def validate_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() != timedelta(0):
+            raise ValueError("Policy delivery must use UTC")
+        return value
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> Self:
+        if self.policy.tenant_id != self.scope.tenant_id:
+            raise ValueError("Policy delivery tenant mismatch")
+        if self.lease is not None:
+            claims = self.lease.claims
+            target = OfflinePolicyDeliveryScopeV1.model_validate(
+                claims.scope.model_dump(mode="python", exclude={"user_id"}, warnings="error")
+            )
+            if (
+                target != self.scope
+                or claims.device_binding != self.device_binding
+                or claims.tenant_access_revision != self.policy.version
+                or claims.issued_at > self.issued_at
+            ):
+                raise ValueError("Policy delivery lease mismatch")
+        return self
+
+
+class SignedOfflinePolicyDeliveryV1(_StrictOfflineAuthModel):
+    claims: OfflinePolicyDeliveryClaimsV1
+    claims_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    signing_key_id: UUID4
+    signature_algorithm: Literal["ed25519-v1"]
+    signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+
+class OfflinePolicyInboxReceiptV1(_StrictOfflineAuthModel):
+    delivery_id: UUID4
+    delivery_sequence: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    tenant_access_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    claims_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    status: Literal["pending_protected_acceptance"] = "pending_protected_acceptance"
+    duplicate: bool
 
 
 class SyncNodeCreate(BaseModel):
