@@ -367,6 +367,69 @@ class OfflineAuthPayloadV0(_StrictOfflineAuthModel):
         return value
 
 
+class OfflineAuthLeaseReferenceV1(_StrictOfflineAuthModel):
+    """Signed reference to separately admitted, versioned local auth state."""
+
+    reference_id: UUID4
+    revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+
+
+class OfflineAuthLeaseClaimsV1(_StrictOfflineAuthModel):
+    """Thirty-day contract only; does not enable offline authentication."""
+
+    schema_version: Literal[1]
+    lease_version: Literal[1]
+    lease_id: UUID4
+    issuer: Literal["aurum-cloud"]
+    audience: Literal["aurum-edge-offline-auth-v1"]
+    auth_context: Literal["owner-approved-local-credential"]
+    # Identity and TPM binding retain their existing wire format. V0 grant
+    # validity and its online-session continuity are deliberately not inherited.
+    scope: OfflineAuthScopeV0
+    device_binding: OfflineAuthDeviceBindingV0
+    allowed_commands: tuple[OfflinePosCommand, ...] = Field(min_length=1, max_length=6)
+    policy_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    subject_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    admission: OfflineAuthLeaseReferenceV1
+    local_credential: OfflineAuthLeaseReferenceV1
+    credential_audience: Literal["aurum-edge-local-auth-v1"]
+    reauthentication_policy: OfflineAuthLeaseReferenceV1
+    issued_at: datetime
+    expires_at: datetime
+
+    @field_validator("allowed_commands")
+    @classmethod
+    def validate_allowed_commands(
+        cls, value: tuple[OfflinePosCommand, ...]
+    ) -> tuple[OfflinePosCommand, ...]:
+        if len(set(value)) != len(value) or value != tuple(sorted(value)):
+            raise ValueError("lease commands must be unique and canonically sorted")
+        return value
+
+    @field_validator("issued_at", "expires_at")
+    @classmethod
+    def validate_utc_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() != timedelta(0):
+            raise ValueError("offline lease timestamps must be UTC")
+        return value
+
+    @model_validator(mode="after")
+    def validate_lease_window(self) -> Self:
+        if not self.issued_at < self.expires_at:
+            raise ValueError("offline lease timestamps are inconsistent")
+        if self.expires_at - self.issued_at > timedelta(days=30):
+            raise ValueError("offline lease exceeds the 30 day limit")
+        return self
+
+
+class SignedOfflineAuthLeaseV1(_StrictOfflineAuthModel):
+    claims: OfflineAuthLeaseClaimsV1
+    claims_hash: Checksum = Field(pattern=r"^[0-9a-f]{64}$")
+    signing_key_id: UUID4
+    signature_algorithm: Literal["ed25519-v1"]
+    signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+
 class SyncNodeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
