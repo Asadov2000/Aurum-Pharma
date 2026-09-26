@@ -9,8 +9,8 @@ try
     var first = WindowsTpmClockReader.Read();
     Thread.Sleep(100);
     var second = WindowsTpmClockReader.Read();
-    var continuityObserved = first.ResetCount == second.ResetCount &&
-        first.RestartCount == second.RestartCount;
+    var continuityObserved = TpmClockContinuity.Evaluate(first, second) ==
+        TpmClockContinuityObservation.RawContinuityObserved;
     var counterProgressObserved = second.ClockMilliseconds > first.ClockMilliseconds &&
         second.TimeMilliseconds >= first.TimeMilliseconds;
     Console.WriteLine(JsonSerializer.Serialize(new
