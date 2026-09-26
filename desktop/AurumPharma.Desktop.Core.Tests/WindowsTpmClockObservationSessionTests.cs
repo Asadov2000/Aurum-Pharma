@@ -184,11 +184,11 @@ public sealed class WindowsTpmClockObservationSessionTests
             return Reading(100);
         });
 
-        var observation = Task.Run(session.Observe);
+        var observation = RunOnDedicatedThread(session.Observe);
         try
         {
             Assert.True(readStarted.Wait(TimeSpan.FromSeconds(5)));
-            Assert.Equal(0U, await Task.Run(() => transport.Fire()).WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(0U, await RunOnDedicatedThread(() => transport.Fire()).WaitAsync(TimeSpan.FromSeconds(5)));
         }
         finally
         {
@@ -238,11 +238,11 @@ public sealed class WindowsTpmClockObservationSessionTests
             return Reading(100);
         });
 
-        var observation = Task.Run(session.Observe);
+        var observation = RunOnDedicatedThread(session.Observe);
         try
         {
             Assert.True(readStarted.Wait(TimeSpan.FromSeconds(5)));
-            await Task.Run(session.Dispose).WaitAsync(TimeSpan.FromSeconds(5));
+            await RunOnDedicatedThread(session.Dispose).WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(1, transport.UnregisterCalls);
         }
         finally
@@ -381,6 +381,14 @@ public sealed class WindowsTpmClockObservationSessionTests
         }
     }
 
+    // Blocking fake hardware and native callbacks must not compete with the test
+    // runner for ThreadPool workers; the five-second deadlock bounds stay intact.
+    private static Task<T> RunOnDedicatedThread<T>(Func<T> action) => Task.Factory.StartNew(
+        action, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+    private static Task RunOnDedicatedThread(Action action) => Task.Factory.StartNew(
+        action, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
     private static TpmClockReading Reading(ulong value, bool safe = true) => new(value, value, 1, 2, safe);
 
     private static void AssertSanitized(Action action)
@@ -431,7 +439,7 @@ public sealed class WindowsTpmClockObservationSessionTests
             if (FireDuringUnregister)
             {
                 // Model a native unregister waiting for an in-flight callback on another thread.
-                UnregisterCallbackResult = Task.Run(() => Fire()).WaitAsync(TimeSpan.FromSeconds(5))
+                UnregisterCallbackResult = RunOnDedicatedThread(() => Fire()).WaitAsync(TimeSpan.FromSeconds(5))
                     .GetAwaiter().GetResult();
             }
             if (ThrowDuringUnregister)

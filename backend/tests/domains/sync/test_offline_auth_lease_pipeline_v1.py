@@ -12,6 +12,8 @@ from typing import TypeVar, cast
 from uuid import UUID
 
 import pytest
+from Crypto.PublicKey import ECC
+from Crypto.Signature import eddsa
 from pydantic import BaseModel
 
 from app.domains.sync.offline_auth import (
@@ -31,6 +33,7 @@ from app.domains.sync.offline_auth_lease_state import (
     OfflineLeaseReauthenticationPolicyV1,
     OfflineLeaseRevisionObservationV1,
 )
+from app.domains.sync.offline_lease_signature import Ed25519OfflineLeaseSignatureVerifier
 from app.domains.sync.schemas import (
     OfflineAuthDeviceBindingV0,
     OfflineAuthLeaseClaimsV1,
@@ -50,6 +53,45 @@ COMMANDS: tuple[OfflinePosCommand, ...] = (
     "shift.open",
 )
 Model = TypeVar("Model", bound=BaseModel)
+
+
+@pytest.mark.parametrize("mutation", ["none", "tenant", "key-id", "signature"])
+async def test_real_cloud_signature_precedes_trusted_state_access(
+    harness: _Harness, mutation: str
+) -> None:
+    key = ECC.generate(curve="Ed25519")
+    public_key = key.public_key().export_key(format="raw")
+    assert isinstance(public_key, bytes)
+    lease = harness.lease.model_copy(
+        update={
+            "signature": eddsa.new(key, "rfc8032")
+            .sign(offline_auth_lease_claims_bytes(harness.lease.claims))
+            .hex()
+        }
+    )
+    verifier = Ed25519OfflineLeaseSignatureVerifier({lease.signing_key_id: public_key})
+    pipeline = OfflineAuthLeaseDecisionPipelineV1(verifier, harness.tpm, harness.state)
+    if mutation == "tenant":
+        lease = _changed(lease, "claims.scope.tenant_id", _uuid(99))
+        lease = lease.model_copy(
+            update={"claims_hash": offline_auth_lease_claims_hash(lease.claims)}
+        )
+    elif mutation == "key-id":
+        lease = lease.model_copy(update={"signing_key_id": _uuid(99)})
+    elif mutation == "signature":
+        lease = lease.model_copy(update={"signature": "00" * 64})
+
+    if mutation != "none":
+        with pytest.raises(OfflineAuthUnavailableError, match=OFFLINE_AUTH_UNAVAILABLE_MESSAGE):
+            await pipeline.authorize(lease, "sale.cash.complete")
+        assert harness.state.events == []
+        assert harness.state.observations == []
+    else:
+        principal = await pipeline.authorize(lease, "sale.cash.complete")
+        assert principal.lease_id == lease.claims.lease_id
+        assert principal.scope == lease.claims.scope
+        assert "commit" in harness.state.events
+        assert len(harness.state.observations) == 1
 
 
 def _uuid(value: int) -> UUID:
