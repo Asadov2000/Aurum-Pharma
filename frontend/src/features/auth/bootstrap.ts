@@ -2,8 +2,10 @@
 // before the router renders, so any in-flight 401 can ask the store for a
 // fresh refresh token instead of going through an empty closure.
 
+import { CanceledError } from "axios";
+
 import { configureAuthHooks, refreshAccessToken } from "@/lib/api";
-import { useAuthStore } from "@/stores/auth";
+import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
 
 import { refreshTokensRequest } from "./api";
 import { isConfirmedAuthFailure, isTransientRefreshFailure } from "./failures";
@@ -21,16 +23,25 @@ function wait(delayMs: number): Promise<void> {
 export async function refreshSessionFromCookie(
   retryDelaysMs: readonly number[] = DEFAULT_RETRY_DELAYS_MS,
 ): Promise<string | null> {
+  const generation = getAuthSessionGeneration();
+  const ensureCurrentSession = () => {
+    if (generation !== getAuthSessionGeneration()) {
+      throw new CanceledError("Authentication session changed");
+    }
+  };
   const operationId = getOrCreateRefreshOperationId();
   let lastError: unknown;
 
   for (const [index, delayMs] of retryDelaysMs.entries()) {
     if (delayMs > 0) await wait(delayMs);
+    ensureCurrentSession();
     try {
       const tokens = await refreshTokensRequest(operationId);
+      ensureCurrentSession();
       useAuthStore.getState().setTokens(tokens);
       return tokens.access_token;
     } catch (error) {
+      ensureCurrentSession();
       if (isConfirmedAuthFailure(error)) return null;
       lastError = error;
       const hasAnotherAttempt = index < retryDelaysMs.length - 1;

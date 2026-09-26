@@ -1,3 +1,4 @@
+import { authenticatePos } from "./posIdentityFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -5,13 +6,17 @@ import {
   createPendingPosCommand,
   isPosCommandExpired,
   loadPendingPosCommand,
+  pendingPosCommandKey,
 } from "@/features/pos/commandOperation";
 
 const REGISTER_ID = "register-1";
 const SALE_ID = "sale-1";
 
 describe("POS command marker", () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    authenticatePos({ tenantId: "tenant-1", userId: "user-1" });
+  });
 
   it("persists a strict PII-free UUIDv4 marker before an item mutation", () => {
     const command = createPendingPosCommand({
@@ -55,7 +60,7 @@ describe("POS command marker", () => {
 
   it("rejects unknown fields and garbage-collects malformed records", () => {
     window.localStorage.setItem(
-      `pos:pendingCommand:v1:${REGISTER_ID}`,
+      pendingPosCommandKey(REGISTER_ID, { tenantId: "tenant-1", userId: "user-1" }),
       JSON.stringify({
         version: 1,
         commandType: "sale.create",

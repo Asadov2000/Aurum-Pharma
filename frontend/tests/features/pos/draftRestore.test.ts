@@ -1,3 +1,4 @@
+import { authenticatePos, POS_SCOPE } from "./posIdentityFixture";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DRAFT_TTL_MIN, draftKey, loadDraft, saveDraft } from "@/features/pos/draftStorage";
@@ -6,7 +7,10 @@ const REG = "reg-1";
 const ATTEMPT_ID = "30000000-0000-4000-8000-000000000001";
 
 describe("loadDraft (POS draft TTL)", () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    authenticatePos();
+  });
   afterEach(() => window.localStorage.clear());
 
   it("returns an empty draft when nothing is stored", () => {
@@ -22,7 +26,7 @@ describe("loadDraft (POS draft TTL)", () => {
 
   it("restores a fresh draft", () => {
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({ saleId: "s-1", nameById: { c1: "Аспирин" }, savedAt: Date.now() }),
     );
     expect(loadDraft(REG)).toEqual({
@@ -37,7 +41,7 @@ describe("loadDraft (POS draft TTL)", () => {
 
   it("restores only the non-sensitive prescription requirement flag", () => {
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({
         saleId: "s-rx",
         nameById: {},
@@ -60,13 +64,13 @@ describe("loadDraft (POS draft TTL)", () => {
     // Saved 20 min ago: kept under a 30-min limit, expired under a 10-min one.
     const twentyMinAgo = Date.now() - 20 * 60_000;
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({ saleId: "s-1", nameById: {}, savedAt: twentyMinAgo }),
     );
     expect(loadDraft(REG, 30).saleId).toBe("s-1");
 
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({ saleId: "s-1", nameById: {}, savedAt: twentyMinAgo }),
     );
     const tight = loadDraft(REG, 10);
@@ -77,34 +81,37 @@ describe("loadDraft (POS draft TTL)", () => {
   it("drops and flags a draft older than the TTL, clearing storage", () => {
     const stale = Date.now() - (DRAFT_TTL_MIN + 1) * 60_000;
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({ saleId: "s-old", nameById: {}, savedAt: stale }),
     );
     const r = loadDraft(REG, DRAFT_TTL_MIN);
     expect(r.saleId).toBeNull();
     expect(r.expired).toBe(true);
     // Storage must be wiped so it can't resurrect on the next load.
-    expect(window.localStorage.getItem(draftKey(REG))).toBeNull();
+    expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).toBeNull();
   });
 
   it("falls back to the default TTL when none is passed", () => {
     const stale = Date.now() - (DRAFT_TTL_MIN + 1) * 60_000;
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({ saleId: "s-old", nameById: {}, savedAt: stale }),
     );
     expect(loadDraft(REG).expired).toBe(true);
   });
 
   it("treats a legacy draft without savedAt as expired (savedAt=0)", () => {
-    window.localStorage.setItem(draftKey(REG), JSON.stringify({ saleId: "s-x", nameById: {} }));
+    window.localStorage.setItem(
+      draftKey(REG, POS_SCOPE),
+      JSON.stringify({ saleId: "s-x", nameById: {} }),
+    );
     const r = loadDraft(REG, 30);
     expect(r.saleId).toBeNull();
     expect(r.expired).toBe(true);
   });
 
   it("ignores corrupt JSON", () => {
-    window.localStorage.setItem(draftKey(REG), "{not json");
+    window.localStorage.setItem(draftKey(REG, POS_SCOPE), "{not json");
     expect(loadDraft(REG, 30)).toEqual({
       saleId: null,
       nameById: {},
@@ -152,7 +159,7 @@ describe("loadDraft (POS draft TTL)", () => {
 
   it("never expires a draft with a confirmed electronic payment", () => {
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({
         saleId: "s-confirmed",
         nameById: {},
@@ -172,12 +179,12 @@ describe("loadDraft (POS draft TTL)", () => {
       expired: false,
       stagedPayments: [{ payment_attempt_id: ATTEMPT_ID }],
     });
-    expect(window.localStorage.getItem(draftKey(REG))).not.toBeNull();
+    expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).not.toBeNull();
   });
 
   it("never expires a draft locked for external-payment review", () => {
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({
         saleId: "s-review",
         nameById: {},
@@ -201,7 +208,7 @@ describe("loadDraft (POS draft TTL)", () => {
 
   it("drops an invalid staged calculation without dropping the cart", () => {
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({
         saleId: "s-pay",
         nameById: {},
@@ -217,7 +224,7 @@ describe("loadDraft (POS draft TTL)", () => {
 
   it("drops an unconfirmed card calculation without dropping the cart", () => {
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({
         saleId: "s-pay",
         nameById: {},

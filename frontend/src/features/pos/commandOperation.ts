@@ -1,5 +1,6 @@
 import { generateUuidV4, isUuidV4 } from "./operationId";
 import { readStoredJson, removeStoredValue, writeStoredJson } from "./operationStorage";
+import { currentPosStorageScope, posStorageKey, type PosStorageScope } from "./posStorageScope";
 
 const STORAGE_PREFIX = "pos:pendingCommand:v1:";
 const ENTITY_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -52,7 +53,9 @@ export type NewPosCommand = PendingPosCommand extends infer Command
     : never
   : never;
 
-const commandKey = (registerId: string): string => `${STORAGE_PREFIX}${registerId}`;
+export const legacyPosCommandKey = (registerId: string): string => `${STORAGE_PREFIX}${registerId}`;
+export const pendingPosCommandKey = (registerId: string, scope: PosStorageScope): string =>
+  posStorageKey("pos:pendingCommand:v2:", registerId, scope);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -66,7 +69,7 @@ function isQty(value: unknown): value is string {
   return typeof value === "string" && QTY_PATTERN.test(value) && Number(value) > 0;
 }
 
-function isPendingCommand(value: unknown, registerId: string): value is PendingPosCommand {
+export function isPendingCommand(value: unknown, registerId: string): value is PendingPosCommand {
   if (
     !isRecord(value) ||
     value.version !== 1 ||
@@ -104,16 +107,23 @@ function isPendingCommand(value: unknown, registerId: string): value is PendingP
   );
 }
 
-export function loadPendingPosCommand(registerId: string): PendingPosCommand | null {
-  if (!isEntityId(registerId)) return null;
-  const parsed = readStoredJson(commandKey(registerId));
+export function loadPendingPosCommand(
+  registerId: string,
+  scope: PosStorageScope | null = currentPosStorageScope(),
+): PendingPosCommand | null {
+  if (!scope || !isEntityId(registerId)) return null;
+  const key = pendingPosCommandKey(registerId, scope);
+  const parsed = readStoredJson(key);
   if (isPendingCommand(parsed, registerId)) return parsed;
-  if (parsed !== null) removeStoredValue(commandKey(registerId));
+  if (parsed !== null) removeStoredValue(key);
   return null;
 }
 
-export function createPendingPosCommand(input: NewPosCommand): PendingPosCommand | null {
-  if (loadPendingPosCommand(input.registerId) !== null) return null;
+export function createPendingPosCommand(
+  input: NewPosCommand,
+  scope: PosStorageScope | null = currentPosStorageScope(),
+): PendingPosCommand | null {
+  if (!scope || loadPendingPosCommand(input.registerId, scope) !== null) return null;
   const operation = {
     ...input,
     version: 1,
@@ -122,12 +132,18 @@ export function createPendingPosCommand(input: NewPosCommand): PendingPosCommand
   } as PendingPosCommand;
   if (!isPendingCommand(operation, input.registerId)) return null;
 
-  return writeStoredJson(commandKey(input.registerId), operation) ? operation : null;
+  return writeStoredJson(pendingPosCommandKey(input.registerId, scope), operation)
+    ? operation
+    : null;
 }
 
-export function clearPendingPosCommand(registerId: string, operationId: string): boolean {
-  if (loadPendingPosCommand(registerId)?.operationId !== operationId) return false;
-  return removeStoredValue(commandKey(registerId));
+export function clearPendingPosCommand(
+  registerId: string,
+  operationId: string,
+  scope: PosStorageScope | null = currentPosStorageScope(),
+): boolean {
+  if (!scope || loadPendingPosCommand(registerId, scope)?.operationId !== operationId) return false;
+  return removeStoredValue(pendingPosCommandKey(registerId, scope));
 }
 
 export function isPosCommandExpired(command: PendingPosCommand, now = Date.now()): boolean {

@@ -1,5 +1,5 @@
 /**
- * Per-register draft persistence for the POS register. The live draft is
+ * Per-user, tenant and register draft persistence. The live draft is
  * stashed in localStorage so a reload or accidental close restores the cart;
  * a stale draft (idle past the TTL) is dropped rather than reopened silently.
  */
@@ -9,8 +9,11 @@ import { loadPendingCheckoutOperation } from "./checkoutOperation";
 import { loadPendingPosCommand } from "./commandOperation";
 import { loadPendingPaymentOperation } from "./paymentOperation";
 import { hasPaymentAttemptOperation } from "./paymentAttemptOperation";
+import { currentPosStorageScope, posStorageKey, type PosStorageScope } from "./posStorageScope";
 
-export const draftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
+export const legacyDraftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
+export const draftKey = (registerId: string, scope: PosStorageScope): string =>
+  posStorageKey("pos:currentSale:v2:", registerId, scope);
 
 // Fallback idle-TTL (minutes) when tenant settings haven't loaded yet. The real
 // limit comes from tenant_settings.draft_sale_lifetime_min, passed into
@@ -48,9 +51,23 @@ export interface DraftInit {
   externalPaymentReviewRequired: boolean;
 }
 
-export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): DraftInit {
+export function scopedDraftStorage(scope: PosStorageScope) {
+  return {
+    saveDraft: (...args: Parameters<typeof saveDraft>): boolean => {
+      args[8] = scope;
+      return saveDraft(...args);
+    },
+    clearDraft: (registerId: string): boolean => clearDraft(registerId, scope),
+  };
+}
+
+export function loadDraft(
+  registerId: string,
+  ttlMin: number = DRAFT_TTL_MIN,
+  scope: PosStorageScope | null = currentPosStorageScope(),
+): DraftInit {
   try {
-    const raw = window.localStorage.getItem(draftKey(registerId));
+    const raw = scope ? window.localStorage.getItem(draftKey(registerId, scope)) : null;
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<SavedDraft>;
       if (parsed && typeof parsed.saleId === "string") {
@@ -64,7 +81,7 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
           ageMin > ttlMin &&
           parsed.status !== "completed" &&
           !hasElectronicPayment &&
-          !loadPendingPosCommand(registerId) &&
+          !loadPendingPosCommand(registerId, scope) &&
           parsed.externalPaymentReviewRequired !== true &&
           !hasPaymentAttemptOperation(parsed.saleId) &&
           !loadPendingPaymentOperation(parsed.saleId) &&
@@ -72,7 +89,7 @@ export function loadDraft(registerId: string, ttlMin: number = DRAFT_TTL_MIN): D
           !loadPendingCheckoutOperation(parsed.saleId)
         ) {
           // Stale: clear it and flag the cashier instead of reopening blind.
-          window.localStorage.removeItem(draftKey(registerId));
+          if (scope) window.localStorage.removeItem(draftKey(registerId, scope));
           return {
             saleId: null,
             nameById: {},
@@ -115,7 +132,9 @@ export function saveDraft(
   stagedPayments: readonly SavedStagedPayment[] = [],
   expiredSaleConfirmed: boolean = false,
   externalPaymentReviewRequired: boolean = false,
+  scope: PosStorageScope | null = currentPosStorageScope(),
 ): boolean {
+  if (!scope) return false;
   const safePayments = parseStagedPayments(stagedPayments);
   if (safePayments.length !== stagedPayments.length) return false;
   const serialized = JSON.stringify({
@@ -129,17 +148,21 @@ export function saveDraft(
     externalPaymentReviewRequired,
   });
   try {
-    window.localStorage.setItem(draftKey(registerId), serialized);
-    return window.localStorage.getItem(draftKey(registerId)) === serialized;
+    window.localStorage.setItem(draftKey(registerId, scope), serialized);
+    return window.localStorage.getItem(draftKey(registerId, scope)) === serialized;
   } catch {
     return false;
   }
 }
 
-export function clearDraft(registerId: string): boolean {
+export function clearDraft(
+  registerId: string,
+  scope: PosStorageScope | null = currentPosStorageScope(),
+): boolean {
+  if (!scope) return false;
   try {
-    window.localStorage.removeItem(draftKey(registerId));
-    return window.localStorage.getItem(draftKey(registerId)) === null;
+    window.localStorage.removeItem(draftKey(registerId, scope));
+    return window.localStorage.getItem(draftKey(registerId, scope)) === null;
   } catch {
     return false;
   }

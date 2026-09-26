@@ -165,6 +165,37 @@ test.describe("POS sale (branch-scoped cashier)", () => {
       expectedCartItems: 1,
       searchKey: catalogSearchKey(item.brand_name),
     });
+
+    const savedDraft = await page.evaluate((registerId) => {
+      const key = Object.keys(window.localStorage).find((candidate) => {
+        if (!candidate.startsWith("pos:currentSale:v2:")) return false;
+        const scope = JSON.parse(
+          decodeURIComponent(candidate.slice("pos:currentSale:v2:".length)),
+        ) as string[];
+        return scope[2] === registerId;
+      });
+      return key ? { key, raw: window.localStorage.getItem(key) } : null;
+    }, assignedRegister.id);
+    expect(savedDraft).not.toBeNull();
+
+    await page.getByRole("button", { name: "Выйти", exact: true }).click();
+    await expect(page).toHaveURL(/\/login/);
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos");
+    await page.getByLabel(/^Касса$/).selectOption(assignedRegister.id);
+    // This owner has no permission to manage another cashier's active shift.
+    await expect(page.getByRole("heading", { name: "Открытие смены" })).toBeVisible();
+    await expect(page.getByText(item.brand_name, { exact: true })).toHaveCount(0);
+    expect(await page.evaluate((key) => window.localStorage.getItem(key), savedDraft!.key)).toBe(
+      savedDraft!.raw,
+    );
+
+    await page.getByRole("button", { name: "Выйти", exact: true }).click();
+    await expect(page).toHaveURL(/\/login/);
+    await loginInBrowser(page, CASHIER);
+    await page.goto("/pos");
+    await expect(page.getByText(item.brand_name, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Чек пуст", { exact: true })).toHaveCount(0);
     await payPosSaleCash(page, "12.50");
     await completePosSale(page);
 

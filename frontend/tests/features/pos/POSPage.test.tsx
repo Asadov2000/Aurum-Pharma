@@ -1,3 +1,4 @@
+import { POS_SCOPE } from "./posIdentityFixture";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -227,7 +228,7 @@ describe("POSPage", () => {
     listRegisters.mockResolvedValue([REGISTER, second]);
     window.localStorage.setItem("pos:lastRegisterId", REGISTER.id);
     window.localStorage.setItem(
-      draftKey(REGISTER.id),
+      draftKey(REGISTER.id, POS_SCOPE),
       JSON.stringify({ saleId: "sale-1", nameById: {}, savedAt: Date.now() }),
     );
     getCurrentShift.mockImplementation((registerId: string) =>
@@ -279,7 +280,7 @@ describe("POSPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить чек и перейти" }));
 
     await waitFor(() => expect(screen.getByLabelText("Касса")).toHaveValue(second.id));
-    expect(window.localStorage.getItem(draftKey(REGISTER.id))).not.toBeNull();
+    expect(window.localStorage.getItem(draftKey(REGISTER.id, POS_SCOPE))).not.toBeNull();
   });
 
   it("hides shift and sale actions that are outside the account permissions", async () => {

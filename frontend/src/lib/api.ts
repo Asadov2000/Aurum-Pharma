@@ -1,10 +1,12 @@
 import axios, {
+  CanceledError,
   type AxiosError,
   type AxiosInstance,
   type AxiosRequestConfig,
   type InternalAxiosRequestConfig,
 } from "axios";
 
+import { getAuthSessionGeneration } from "@/stores/auth";
 import { getSupportAccessSessionId } from "@/stores/supportAccess";
 
 const DEV_API_BASE_URL = "http://localhost:8000/api/v1";
@@ -64,6 +66,7 @@ export const api: AxiosInstance = axios.create({
 });
 
 interface RetryConfig extends InternalAxiosRequestConfig {
+  _authSessionGeneration?: number;
   _retry?: boolean;
   _skipAuth?: boolean;
   _skipRefresh?: boolean;
@@ -133,6 +136,10 @@ function acceptsSupportContext(pathname: string | null, method: string | undefin
 
 api.interceptors.request.use((config) => {
   const cfg = config as RetryConfig;
+  cfg._authSessionGeneration ??= getAuthSessionGeneration();
+  if (cfg._authSessionGeneration !== getAuthSessionGeneration()) {
+    throw new CanceledError("Authentication session changed", config);
+  }
   config.headers.delete("X-Aurum-Support-Session");
   if (cfg._skipAuth) return config;
   const token = getAccess();
@@ -149,27 +156,51 @@ api.interceptors.request.use((config) => {
 
 // In-flight refresh promise — concurrent 401s share the same refresh call so
 // we don't burn the refresh token twice and trigger reuse-detection.
-let refreshing: Promise<string | null> | null = null;
-
-export function refreshAccessToken(): Promise<string | null> {
-  refreshing ??= refresh()
-    .then((token) => {
-      if (!token) onAuthFailure();
-      return token;
-    })
-    .finally(() => {
-      refreshing = null;
-    });
-  return refreshing;
+interface SessionTokenRequest {
+  generation: number;
+  promise: Promise<string | null>;
 }
 
-let steppingUp: Promise<string | null> | null = null;
+let refreshing: SessionTokenRequest | null = null;
 
-export function requestStepUpAccessToken(): Promise<string | null> {
-  steppingUp ??= requestStepUp().finally(() => {
-    steppingUp = null;
-  });
-  return steppingUp;
+export function refreshAccessToken(
+  generation = getAuthSessionGeneration(),
+): Promise<string | null> {
+  if (generation !== getAuthSessionGeneration()) return Promise.resolve(null);
+  if (refreshing?.generation === generation) return refreshing.promise;
+  const pending: SessionTokenRequest = {
+    generation,
+    promise: refresh()
+      .then((token) => {
+        if (generation !== getAuthSessionGeneration()) return null;
+        if (!token) onAuthFailure();
+        return token;
+      })
+      .finally(() => {
+        if (refreshing === pending) refreshing = null;
+      }),
+  };
+  refreshing = pending;
+  return pending.promise;
+}
+
+let steppingUp: SessionTokenRequest | null = null;
+
+export function requestStepUpAccessToken(
+  generation = getAuthSessionGeneration(),
+): Promise<string | null> {
+  if (generation !== getAuthSessionGeneration()) return Promise.resolve(null);
+  if (steppingUp?.generation === generation) return steppingUp.promise;
+  const pending: SessionTokenRequest = {
+    generation,
+    promise: requestStepUp()
+      .then((token) => (generation === getAuthSessionGeneration() ? token : null))
+      .finally(() => {
+        if (steppingUp === pending) steppingUp = null;
+      }),
+  };
+  steppingUp = pending;
+  return pending.promise;
 }
 
 export function isMfaStepUpRequired(error: AxiosError): boolean {
@@ -190,17 +221,26 @@ export function isSupportAccessInactive(error: AxiosError): boolean {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if ((response.config as RetryConfig)._authSessionGeneration !== getAuthSessionGeneration()) {
+      throw new CanceledError("Authentication session changed", response.config);
+    }
+    return response;
+  },
   async (error: AxiosError) => {
     const original = error.config as RetryConfig | undefined;
+    if (!original || original._authSessionGeneration !== getAuthSessionGeneration()) {
+      return Promise.reject(error);
+    }
+    const generation = original._authSessionGeneration;
     if (isSupportAccessInactive(error)) {
       onSupportAccessFailure();
       return Promise.reject(error);
     }
     if (original && !original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
       original._stepUpRetry = true;
-      const newAccess = await requestStepUpAccessToken();
-      if (!newAccess) {
+      const newAccess = await requestStepUpAccessToken(generation);
+      if (!newAccess || generation !== getAuthSessionGeneration()) {
         return Promise.reject(error);
       }
       original.headers.set("Authorization", `Bearer ${newAccess}`);
@@ -219,8 +259,8 @@ api.interceptors.response.use(
 
     original._retry = true;
 
-    const newAccess = await refreshAccessToken();
-    if (!newAccess) {
+    const newAccess = await refreshAccessToken(generation);
+    if (!newAccess || generation !== getAuthSessionGeneration()) {
       return Promise.reject(error);
     }
     original.headers.set("Authorization", `Bearer ${newAccess}`);

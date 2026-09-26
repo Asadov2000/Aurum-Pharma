@@ -241,12 +241,13 @@ export function useDeleteSaleItem() {
   });
 }
 
-export function useAddPayment() {
+export function useAddPayment(isSessionActive: () => boolean) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: { saleId: string; payload: PaymentAddPayload }) =>
       addPayment(args.saleId, args.payload),
     onSuccess: (payment, vars) => {
+      if (!isSessionActive()) return;
       qc.setQueryData<SaleDetails>(posKeys.sale(vars.saleId), (sale) => {
         if (!sale || sale.payments.some((item) => item.id === payment.id)) return sale;
         return { ...sale, payments: [...sale.payments, payment] };
@@ -255,12 +256,13 @@ export function useAddPayment() {
   });
 }
 
-export function useCompleteSale() {
+export function useCompleteSale(isSessionActive: () => boolean) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: { saleId: string; expiredSaleConfirmed?: boolean }) =>
       completeSale(args.saleId, args.expiredSaleConfirmed),
     onSuccess: (data) => {
+      if (!isSessionActive()) return;
       qc.setQueryData<SaleDetails>(posKeys.sale(data.id), (sale) =>
         sale ? { ...sale, ...data } : sale,
       );
@@ -271,24 +273,18 @@ export function useCompleteSale() {
 }
 
 export function useCheckoutSale() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: SaleCheckoutPayload) => checkoutSale(payload),
-    onSuccess: (result) => {
-      qc.setQueryData<SaleDetails>(posKeys.sale(result.sale_id), (sale) =>
-        mergeCheckoutResult(sale, result),
-      );
-      void qc.invalidateQueries({ queryKey: ["inventory", "batches"] });
-    },
   });
 }
 
-export function useAddPrescription() {
+export function useAddPrescription(isSessionActive: () => boolean) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: { saleId: string; payload: PrescriptionLogPayload }) =>
       addPrescription(args.saleId, args.payload),
     onSuccess: (_data, vars) => {
+      if (!isSessionActive()) return;
       void qc.invalidateQueries({ queryKey: posKeys.sale(vars.saleId) });
     },
   });

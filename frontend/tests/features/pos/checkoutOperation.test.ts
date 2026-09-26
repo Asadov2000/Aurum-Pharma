@@ -6,9 +6,13 @@ import {
   loadPendingCheckoutOperation,
 } from "@/features/pos/checkoutOperation";
 import { draftKey, loadDraft } from "@/features/pos/draftStorage";
+import { authenticatePos, POS_SCOPE } from "./posIdentityFixture";
 
 describe("pending POS checkout operation", () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    authenticatePos();
+  });
 
   it("persists only safe identifiers and clears only a matching UUIDv4 operation", () => {
     const operation = createPendingCheckoutOperation("sale-1", "register-1");
@@ -49,7 +53,7 @@ describe("pending POS checkout operation", () => {
 
   it("keeps an expired draft while checkout reconciliation is unresolved", () => {
     window.localStorage.setItem(
-      draftKey("register-1"),
+      draftKey("register-1", POS_SCOPE),
       JSON.stringify({ saleId: "sale-1", nameById: {}, savedAt: 0 }),
     );
     const operation = createPendingCheckoutOperation("sale-1", "register-1");
