@@ -14,14 +14,16 @@ const routeBudgets = [
     label: "Login /login",
     source: "src/features/auth/LoginPage.tsx",
     maxRawBytes: 525 * 1024,
-    maxGzipBytes: 165 * 1024,
+    // ADR-0049 adds the shared durable logout/cookie coordination protocol.
+    // Keep its bounded startup cost explicit rather than excluding auth chunks.
+    maxGzipBytes: 170 * 1024,
     maxRequests: 8,
   },
   {
     label: "Dashboard /",
     source: "src/features/dashboard/DashboardPage.tsx",
     maxRawBytes: 435 * 1024,
-    maxGzipBytes: 140 * 1024,
+    maxGzipBytes: 145 * 1024,
     maxRequests: 6,
   },
   {

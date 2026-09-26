@@ -1,4 +1,5 @@
 import { api, withoutAuth, withoutRefresh } from "@/lib/api";
+import { runCookieRequest } from "./cookieRequests";
 import { type LoginCodeResponse, type LoginVerifyResponse } from "./types";
 
 export type ContactChannel = "email" | "phone";
@@ -24,12 +25,14 @@ export async function loginWithPassword(
   payload: { email: string; password: string },
   signal?: AbortSignal,
 ): Promise<LoginVerifyResponse> {
-  const { data } = await api.post<LoginVerifyResponse>(
-    "/auth/login/password",
-    payload,
-    anonymousConfig(signal),
-  );
-  return data;
+  return runCookieRequest("explicit", async () => {
+    const { data } = await api.post<LoginVerifyResponse>(
+      "/auth/login/password",
+      payload,
+      anonymousConfig(signal),
+    );
+    return data;
+  });
 }
 
 export async function requestPhoneLoginCode(
@@ -48,12 +51,14 @@ export async function verifyPhoneLoginCode(
   payload: { phone: string; code: string },
   signal?: AbortSignal,
 ): Promise<LoginVerifyResponse> {
-  const { data } = await api.post<LoginVerifyResponse>(
-    "/auth/login/phone/verify",
-    payload,
-    anonymousConfig(signal),
-  );
-  return data;
+  return runCookieRequest("explicit", async () => {
+    const { data } = await api.post<LoginVerifyResponse>(
+      "/auth/login/phone/verify",
+      payload,
+      anonymousConfig(signal),
+    );
+    return data;
+  });
 }
 
 export async function requestPasswordResetCode(
@@ -79,7 +84,9 @@ export async function resetAccountPassword(
   },
   signal?: AbortSignal,
 ): Promise<void> {
-  await api.post("/auth/password/reset", payload, anonymousConfig(signal));
+  await runCookieRequest("explicit", () =>
+    api.post("/auth/password/reset", payload, anonymousConfig(signal)).then(() => undefined),
+  );
 }
 
 export async function fetchAccountIdentity(): Promise<AccountIdentity> {

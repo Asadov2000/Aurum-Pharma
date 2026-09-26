@@ -15,8 +15,12 @@ function safeLocalStorage(): Storage | null {
 function clearLegacyTokens(): void {
   const ls = safeLocalStorage();
   if (!ls) return;
-  ls.removeItem(LEGACY_ACCESS_KEY);
-  ls.removeItem(LEGACY_REFRESH_KEY);
+  try {
+    ls.removeItem(LEGACY_ACCESS_KEY);
+    ls.removeItem(LEGACY_REFRESH_KEY);
+  } catch {
+    // Browser storage restrictions must never prevent clearing in-memory access.
+  }
 }
 
 export function loadTokens(): { access: string | null } {

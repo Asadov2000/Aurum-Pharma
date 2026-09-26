@@ -1,4 +1,5 @@
 import { api, withoutRefresh, withoutStepUp } from "@/lib/api";
+import { runCookieRequest, runSessionRequest } from "./cookieRequests";
 import {
   type LoginCodeResponse,
   type MfaCodeRequest,
@@ -27,21 +28,25 @@ export async function startAccountMfaEnrollment(password: string): Promise<MfaSe
 }
 
 export async function confirmAccountMfaEnrollment(payload: MfaCodeRequest): Promise<TokenPair> {
-  const { data } = await api.post<TokenPair>(
-    "/auth/mfa/settings/enroll/confirm",
-    payload,
-    withoutRefresh(),
-  );
-  return data;
+  return runCookieRequest("account", async () => {
+    const { data } = await api.post<TokenPair>(
+      "/auth/mfa/settings/enroll/confirm",
+      payload,
+      withoutRefresh({ timeout: 30_000 }),
+    );
+    return data;
+  });
 }
 
 export async function disableAccountMfa(payload: MfaDisableRequest): Promise<TokenPair> {
-  const { data } = await api.post<TokenPair>(
-    "/auth/mfa/settings/disable",
-    payload,
-    withoutRefresh(),
-  );
-  return data;
+  return runCookieRequest("account", async () => {
+    const { data } = await api.post<TokenPair>(
+      "/auth/mfa/settings/disable",
+      payload,
+      withoutRefresh({ timeout: 30_000 }),
+    );
+    return data;
+  });
 }
 
 export async function requestPasswordSetupCode(
@@ -64,10 +69,12 @@ export async function setupAccountPassword(payload: {
 }
 
 export async function confirmAccountPassword(password: string): Promise<TokenPair> {
-  const { data } = await api.post<TokenPair>(
-    "/auth/password/confirm",
-    { password },
-    withoutStepUp(),
-  );
-  return data;
+  return runSessionRequest(async () => {
+    const { data } = await api.post<TokenPair>(
+      "/auth/password/confirm",
+      { password },
+      withoutStepUp(),
+    );
+    return data;
+  });
 }
