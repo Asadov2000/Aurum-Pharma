@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getOnboardingOverview, startTrial } from "./api";
+import { getOnboardingOverview, launchPharmacy } from "./api";
 import { type OnboardingOverview } from "./types";
 
 export const onboardingKeys = {
@@ -17,10 +17,10 @@ export function useOnboardingOverviewQuery(tenantId: string | undefined) {
   });
 }
 
-export function useStartTrial(tenantId: string | undefined) {
+export function useLaunchPharmacy(tenantId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (operationId: string) => startTrial(operationId),
+    mutationFn: (operationId: string) => launchPharmacy(operationId),
     retry: false,
     onSuccess: (result) => {
       qc.setQueryData<OnboardingOverview>(onboardingKeys.overview(tenantId), (current) =>
@@ -28,9 +28,8 @@ export function useStartTrial(tenantId: string | undefined) {
           ? {
               ...current,
               tenant_status: result.status,
-              trial_started_at: result.trial_started_at,
-              trial_ends_at: result.trial_ends_at,
-              subscription_id: result.subscription_id,
+              launched_at: result.launched_at,
+              can_launch: false,
               can_start_trial: false,
             }
           : current,

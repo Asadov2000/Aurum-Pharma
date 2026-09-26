@@ -9,15 +9,6 @@ import { OwnerCreatedPanel } from "./OwnerCreatedPanel";
 import { useCreateTenant, useCreateTenantOwner, useUpdateTenant } from "./queries";
 import { type Tenant, type TenantStatus } from "./types";
 
-const statusOptions: TenantStatus[] = [
-  "setup",
-  "trial",
-  "active",
-  "grace_period",
-  "readonly",
-  "archived",
-];
-
 const statusLabel: Record<TenantStatus, string> = {
   setup: "Настройка",
   trial: "Пробный",
@@ -71,6 +62,8 @@ const trim = (v: string | undefined) => (v && v.trim() !== "" ? v.trim() : null)
 
 export function TenantForm({ tenant, canManageStatus, onClose }: Props): JSX.Element {
   const isEdit = tenant !== null;
+  const statusOptions: TenantStatus[] =
+    tenant?.status === "archived" ? ["archived"] : [tenant?.status ?? "setup", "archived"];
   const createMutation = useCreateTenant();
   const updateMutation = useUpdateTenant();
   const ownerMutation = useCreateTenantOwner();

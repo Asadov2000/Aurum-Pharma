@@ -167,7 +167,7 @@ export function BranchForm({ branch, onClose, onCancel, onDirtyChange }: Props):
         <div>
           <p className="text-sm font-medium text-foreground">Реквизиты на чеке</p>
           <p className="mt-1 text-xs leading-5 text-foreground-muted">
-            Первая строка обязательна перед запуском пробного периода.
+            Первая строка обязательна перед запуском аптеки.
           </p>
         </div>
         <div>

@@ -1,16 +1,15 @@
-"""Canonical readiness and single-use trial activation for onboarding.
+"""Canonical readiness and single-use pharmacy launch for onboarding.
 
 Readiness is derived from the owning domain tables. The legacy wizard and
 event checklist remain compatibility projections; neither can make an
-unready tenant eligible. Manual and automatic activation share the same
-locked, audited transition.
+unready tenant eligible. Launch uses an owner-authorized database command
+and never creates a subscription.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -24,11 +23,10 @@ from app.core.errors import (
     ConflictError,
     NotFoundError,
     PermissionDeniedError,
+    SubscriptionsDisabledError,
 )
 from app.core.time import utc_now
-from app.domains.billing.models import TenantSubscription
-from app.domains.foundation.models import Tenant
-from app.domains.onboarding.models import OnboardingChecklist, TrialActivation, WizardState
+from app.domains.onboarding.models import OnboardingChecklist, WizardState
 from app.domains.onboarding.repository import (
     OnboardingReadinessSnapshot,
     OnboardingRepository,
@@ -37,22 +35,21 @@ from app.domains.onboarding.repository import (
 logger = structlog.get_logger("onboarding.service")
 
 SETUP_PHASE = timedelta(days=60)
-TRIAL_DURATION = timedelta(days=14)
 TRIAL_MIN_CATALOG_ITEMS = 100
 ALL_STEPS = list(range(1, 9))
 TAJIKISTAN_TIMEZONE = ZoneInfo("Asia/Dushanbe")
 
 
-def _trial_activation_error(exc: DBAPIError) -> AurumError:
+def _launch_activation_error(exc: DBAPIError) -> AurumError:
     sqlstate = getattr(exc.orig, "sqlstate", None)
     if sqlstate == "42501":
-        return PermissionDeniedError("Trial activation is not allowed for this session")
+        return PermissionDeniedError("Launch is not allowed for this session")
     if sqlstate in {"22001", "22023", "23502", "23514", "P0001"}:
-        return BusinessRuleError("Trial activation request is invalid")
+        return BusinessRuleError("Launch checklist is not complete or request is invalid")
     if sqlstate in {"23503", "23505", "40001", "40P01", "55000"}:
         return ConflictError("Launch readiness changed; refresh and try again")
-    logger.error("trial_activation_database_guard_failed", sqlstate=sqlstate)
-    return AurumError("Trial activation database guard failed")
+    logger.error("launch_activation_database_guard_failed", sqlstate=sqlstate)
+    return AurumError("Launch activation database guard failed")
 
 
 @dataclass(frozen=True)
@@ -89,6 +86,16 @@ class OnboardingOverviewData:
     is_ready: bool
     can_start_trial: bool
     blocker_codes: tuple[str, ...]
+    can_launch: bool = False
+    launched_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class LaunchResult:
+    tenant_id: UUID
+    status: Literal["active"]
+    launched_at: datetime
+    operation_id: UUID
 
 
 @dataclass(frozen=True)
@@ -318,74 +325,41 @@ class OnboardingService:
             recommended_completed=sum(1 for task in tasks if task.is_complete),
             recommended_total=len(tasks),
             is_ready=base_ready,
-            can_start_trial=base_ready and snapshot.tenant_status == "setup",
+            can_start_trial=False,
             blocker_codes=blockers,
+            can_launch=base_ready and snapshot.tenant_status == "setup",
+            launched_at=snapshot.launched_at,
         )
 
     async def get_overview(self, tenant_id: UUID) -> OnboardingOverviewData:
         return self._build_overview(await self._snapshot(tenant_id))
 
     # =========================================================================
-    # Start trial (explicit + the eligibility check used by auto_start_trials)
+    # Explicit owner launch, independent of subscription history
     # =========================================================================
 
-    async def assert_trial_eligible(self, tenant_id: UUID) -> OnboardingOverviewData:
-        overview = await self.get_overview(tenant_id)
-        if not overview.is_ready:
-            raise BusinessRuleError(
-                "Cannot start trial: launch checklist is incomplete",
-                details={"blockers": list(overview.blocker_codes)},
-            )
-        return overview
-
-    async def _authorize_trial_start(
+    async def launch(
         self,
         *,
         tenant_id: UUID,
-        source: Literal["manual", "automatic"],
-        actor_user_id: UUID | None,
-        actor_session_id: UUID | None,
-    ) -> None:
-        if source == "manual":
-            if actor_user_id is None or actor_session_id is None:
-                raise PermissionDeniedError("An authenticated owner session is required")
-            if not await self.repo.has_active_ownership_for_update(
+        operation_id: UUID,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+    ) -> LaunchResult:
+        try:
+            activation = await self.repo.launch_tenant(
                 tenant_id=tenant_id,
-                user_id=actor_user_id,
-            ):
-                raise PermissionDeniedError("Only an active pharmacy owner can start the trial")
-            return
-        if actor_user_id is not None or actor_session_id is not None:
-            raise BusinessRuleError("Automatic trial activation cannot impersonate a user")
-
-    @staticmethod
-    def _activation_result(tenant: Tenant, activation: TrialActivation) -> StartTrialResult:
-        if tenant.status == "setup":
-            raise ConflictError("Trial activation history conflicts with tenant status")
-        return StartTrialResult(
-            tenant_id=tenant.id,
-            status=tenant.status,
-            trial_started_at=activation.started_at,
-            trial_ends_at=activation.trial_ends_at,
-            subscription_id=activation.subscription_id,
-        )
-
-    @staticmethod
-    def _legacy_trial_result(
-        tenant: Tenant,
-        subscription: TenantSubscription | None,
-    ) -> StartTrialResult:
-        if subscription is None or tenant.trial_started_at is None:
-            raise BusinessRuleError(
-                "Trial can only be started during setup",
-                details={"tenant_status": tenant.status},
+                operation_id=operation_id,
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
             )
-        return StartTrialResult(
-            tenant_id=tenant.id,
-            status=tenant.status,
-            trial_started_at=tenant.trial_started_at,
-            trial_ends_at=tenant.trial_ends_at or subscription.period_end,
-            subscription_id=subscription.id,
+        except DBAPIError as exc:
+            raise _launch_activation_error(exc) from None
+        return LaunchResult(
+            tenant_id=activation.tenant_id,
+            status="active",
+            launched_at=activation.launched_at,
+            operation_id=activation.operation_id,
         )
 
     async def start_trial(
@@ -397,132 +371,6 @@ class OnboardingService:
         actor_user_id: UUID | None = None,
         actor_session_id: UUID | None = None,
     ) -> StartTrialResult:
-        """Start the tenant's single free trial in one database transaction."""
-        try:
-            return await self._start_trial_locked(
-                tenant_id=tenant_id,
-                source=source,
-                operation_id=operation_id,
-                actor_user_id=actor_user_id,
-                actor_session_id=actor_session_id,
-            )
-        except DBAPIError as exc:
-            raise _trial_activation_error(exc) from exc
-
-    async def _start_trial_locked(
-        self,
-        *,
-        tenant_id: UUID,
-        source: Literal["manual", "automatic"],
-        operation_id: UUID,
-        actor_user_id: UUID | None,
-        actor_session_id: UUID | None,
-    ) -> StartTrialResult:
-        from app.domains.billing.repository import BillingRepository
-        from app.domains.foundation.repository import FoundationRepository
-
-        foundation_repo = FoundationRepository(self.repo.session)
-        billing_repo = BillingRepository(self.repo.session)
-
-        await self.repo.acquire_trial_lock(tenant_id)
-        await self._authorize_trial_start(
-            tenant_id=tenant_id,
-            source=source,
-            actor_user_id=actor_user_id,
-            actor_session_id=actor_session_id,
-        )
-
-        tenant = await self.repo.get_tenant_for_update(tenant_id)
-        if tenant is None:
-            raise NotFoundError("Tenant not found")
-
-        activation = await self.repo.get_trial_activation(tenant_id)
-        if activation is not None:
-            return self._activation_result(tenant, activation)
-
-        existing_subscription = await self.repo.get_current_subscription_for_update(tenant_id)
-        if tenant.status != "setup":
-            return self._legacy_trial_result(tenant, existing_subscription)
-        if existing_subscription is not None:
-            raise ConflictError("Current subscription already exists for setup tenant")
-
-        await self.repo.lock_trial_readiness_inputs(tenant_id)
-        overview = await self.assert_trial_eligible(tenant_id)
-
-        now = utc_now()
-        period_end = now + TRIAL_DURATION
-
-        plan = await billing_repo.get_plan_by_code("aurum_pharma")
-        if plan is None or not plan.is_active:
-            raise BusinessRuleError("No default plan configured")
-
-        snapshot = await self.repo.get_readiness_snapshot(
-            tenant_id=tenant_id,
-            local_today=utc_now().astimezone(TAJIKISTAN_TIMEZONE).date(),
-        )
-        if snapshot is None:
-            raise NotFoundError("Tenant not found")
-        branches_count = snapshot.active_branch_count
-        if branches_count < 1:
-            raise ConflictError("Launch readiness changed; refresh and try again")
-        amount = (plan.price_per_branch * Decimal(branches_count)).quantize(Decimal("0.01"))
-        subscription = await billing_repo.insert_subscription(
-            tenant_id=tenant_id,
-            plan_id=plan.id,
-            status="trial",
-            billing_period="monthly",
-            period_start=now,
-            period_end=period_end,
-            branches_count=branches_count,
-            amount=amount,
-        )
-
-        await foundation_repo.update_tenant(
-            tenant,
-            status="trial",
-            trial_started_at=now,
-            trial_ends_at=period_end,
-        )
-
-        checklist = await self.repo.get_checklist_for_update(tenant_id)
-        if checklist is None:
-            raise NotFoundError("Checklist not initialised for this tenant")
-        await self.repo.update_checklist(
-            checklist,
-            catalog_items_count=(
-                next(step.current for step in overview.steps if step.code == "catalog") or 0
-            ),
-            trial_started_at=now,
-            trial_eligible=True,
-        )
-        wizard = await self.repo.get_wizard_for_update(tenant_id)
-        if wizard is not None and not wizard.is_completed:
-            await self.repo.update_wizard(
-                wizard,
-                current_step=8,
-                steps_completed=ALL_STEPS,
-                is_completed=True,
-                completed_at=now,
-            )
-        await self.repo.record_trial_activation(
-            tenant_id=tenant_id,
-            operation_id=operation_id,
-            source=source,
-            actor_user_id=actor_user_id,
-            actor_session_id=actor_session_id,
-            subscription_id=subscription.id,
-            started_at=now,
-            trial_ends_at=period_end,
-        )
-        logger.info(
-            "trial_started_via_onboarding",
-            tenant_id=str(tenant_id),
-            source=source,
-        )
-        return StartTrialResult(
-            tenant_id=tenant.id,
-            status=tenant.status,
-            trial_started_at=now,
-            trial_ends_at=period_end,
-            subscription_id=subscription.id,
-        )
+        """Keep the retired contract explicit without mutating legacy history."""
+        del tenant_id, source, operation_id, actor_user_id, actor_session_id
+        raise SubscriptionsDisabledError()

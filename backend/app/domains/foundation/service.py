@@ -10,19 +10,15 @@ Key invariants enforced here:
 
 from __future__ import annotations
 
-from datetime import timedelta
 from uuid import UUID
 
 import structlog
 
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
-from app.core.time import utc_now
 from app.domains.foundation.models import Branch, Register, Tenant, TenantSettings
 from app.domains.foundation.repository import BranchLifecycleImpact, FoundationRepository
 
 logger = structlog.get_logger("foundation.service")
-
-TRIAL_DURATION = timedelta(days=14)
 
 
 class FoundationService:
@@ -58,16 +54,12 @@ class FoundationService:
 
     async def update_tenant(self, tenant_id: UUID, *, fields: dict[str, object]) -> Tenant:
         tenant = await self.get_tenant(tenant_id)
-        # Status transitions: enforce just the most painful invariant —
-        # moving to 'trial' fills trial_started_at/trial_ends_at if not set.
         new_status = fields.get("status")
-        if new_status == "trial" and tenant.trial_started_at is None:
-            now = utc_now()
-            fields = {
-                **fields,
-                "trial_started_at": now,
-                "trial_ends_at": now + TRIAL_DURATION,
-            }
+        if new_status is not None and new_status not in (tenant.status, "archived"):
+            raise BusinessRuleError(
+                "Use verified launch or access policy to change tenant access",
+                details={"reason": "tenant_lifecycle_transition_required"},
+            )
         return await self.repo.update_tenant(tenant, **fields)
 
     # -------------------------------------------------------------------------

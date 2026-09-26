@@ -12,6 +12,8 @@ import { AxiosError } from "axios";
 
 /** Exact backend `message` → Russian text (+ suggested action where useful). */
 const MESSAGE_MAP: Record<string, string> = {
+  "Use verified launch or access policy to change tenant access":
+    "Для запуска аптеки завершите проверку готовности. Ограничения меняются в разделе управления доступом.",
   // --- POS / sales ---
   "Insufficient stock for this catalog item":
     "Недостаточно товара на складе. Уменьшите количество или примите новый приход.",
@@ -95,6 +97,7 @@ const MESSAGE_MAP: Record<string, string> = {
 
 /** Domain `code` → category fallback when the message is unknown. */
 const CODE_MAP: Record<string, string> = {
+  subscriptions_disabled: "Подписки отключены. Сохранённые расчёты доступны в истории.",
   not_found: "Запрашиваемые данные не найдены.",
   validation_error: "Проверьте правильность введённых данных.",
   business_rule_violation: "Действие невозможно по правилам системы.",

@@ -56,9 +56,12 @@ async def committed_pos(
         nick = uuid4().hex[:8]
 
         tenant = await foundation.create_tenant(
-            payload={"name": f"Concurrency {nick}", "contact_email": f"c-{nick}@aurum.tj"}
+            payload={
+                "status": "active",
+                "name": f"Concurrency {nick}",
+                "contact_email": f"c-{nick}@aurum.tj",
+            }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
         register = await foundation.create_register(
             tenant_id=tenant.id,

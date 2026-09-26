@@ -19,18 +19,6 @@ beat_app.conf.beat_schedule = {
         "task": "auth.expire_sessions",
         "schedule": crontab(minute=0, hour=3),
     },
-    "auto-start-trials": {
-        "task": "foundation.auto_start_trials",
-        "schedule": crontab(minute=0, hour=4),
-    },
-    "billing-process-trial-endings": {
-        "task": "billing.process_trial_endings",
-        "schedule": crontab(minute=0, hour=6),
-    },
-    "billing-process-grace-endings": {
-        "task": "billing.process_grace_endings",
-        "schedule": crontab(minute=0, hour=7),
-    },
     "platform-accounts-process-invitation-emails": {
         "task": "platform_accounts.process_invitation_emails",
         "schedule": crontab(minute="*"),

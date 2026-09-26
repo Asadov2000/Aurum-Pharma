@@ -23,7 +23,7 @@ const MODULES: readonly PlatformModule[] = [
   {
     id: "billing",
     title: "Расчёты Aurum",
-    description: "Подписки, открытые счета и просроченные расчёты аптек",
+    description: "История счетов, платежи и финансовые корректировки аптек",
     to: "/admin/billing",
     capability: PLATFORM_CAPABILITIES.billingView,
     tone: "primary",

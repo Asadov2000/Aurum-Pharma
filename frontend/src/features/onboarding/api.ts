@@ -1,6 +1,6 @@
 import { api } from "@/lib/api";
 
-import { type OnboardingOverview, type StartTrialResponse } from "./types";
+import { type OnboardingOverview, type LaunchResponse } from "./types";
 
 const ONBOARDING_WRITE_TIMEOUT_MS = 15_000;
 
@@ -9,9 +9,9 @@ export async function getOnboardingOverview(): Promise<OnboardingOverview> {
   return data;
 }
 
-export async function startTrial(operationId: string): Promise<StartTrialResponse> {
-  const { data } = await api.post<StartTrialResponse>(
-    "/onboarding/start-trial",
+export async function launchPharmacy(operationId: string): Promise<LaunchResponse> {
+  const { data } = await api.post<LaunchResponse>(
+    "/onboarding/launch",
     { operation_id: operationId },
     { timeout: ONBOARDING_WRITE_TIMEOUT_MS },
   );

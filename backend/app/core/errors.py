@@ -46,6 +46,11 @@ class ConflictError(AurumError):
     message = "Resource conflict"
 
 
+class SubscriptionsDisabledError(BusinessRuleError):
+    code = "subscriptions_disabled"
+    message = "Subscriptions are disabled; access is managed independently"
+
+
 class PermissionDeniedError(AurumError):
     code = "permission_denied"
     http_status = 403

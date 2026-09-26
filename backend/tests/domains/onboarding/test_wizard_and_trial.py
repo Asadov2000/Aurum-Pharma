@@ -1,25 +1,37 @@
-"""Canonical onboarding readiness and single-use trial activation."""
+"""Canonical onboarding readiness and owner launch without subscriptions."""
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import Request
+from httpx import AsyncClient
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
 
-from app.core.errors import BusinessRuleError, ConflictError, PermissionDeniedError
+from app.core.config import get_settings
+from app.core.deps import _seed_request_db_context, get_db
+from app.core.errors import (
+    BusinessRuleError,
+    ConflictError,
+    PermissionDeniedError,
+    SubscriptionsDisabledError,
+)
 from app.domains.billing.models import TenantSubscription
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
-from app.domains.onboarding.models import TrialActivation
+from app.domains.onboarding.models import TenantLaunchActivation
 from app.domains.onboarding.repository import OnboardingRepository
 from app.domains.onboarding.service import OnboardingService
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from tests.auth_helpers import create_session_access_token
 
 
 async def _make_tenant(db_session: AsyncSession):  # type: ignore[no-untyped-def]
@@ -217,7 +229,9 @@ async def test_overview_uses_canonical_domain_data(db_session: AsyncSession) -> 
     await _prepare_ready_tenant(db_session, tenant.id)
     ready = await service.get_overview(tenant.id)
     assert ready.is_ready is True
-    assert ready.can_start_trial is True
+    assert ready.can_start_trial is False
+    assert ready.can_launch is True
+    assert ready.launched_at is None
     assert ready.required_completed == ready.required_total
     assert ready.recommended_total == 5
     assert all(task.code != "catalog_loaded" for task in ready.recommended_tasks)
@@ -304,108 +318,285 @@ async def test_overview_rejects_inactive_owner_account(db_session: AsyncSession)
     assert overview.can_start_trial is False
 
 
-async def test_start_trial_requires_canonical_readiness(db_session: AsyncSession) -> None:
+async def test_retired_trial_endpoint_service_is_explicitly_disabled(
+    db_session: AsyncSession,
+) -> None:
     tenant = await _make_tenant(db_session)
     service = OnboardingService(OnboardingRepository(db_session))
-    await service.update_catalog_count(tenant_id=tenant.id, count=500)
-
-    with pytest.raises(BusinessRuleError):
-        await service.start_trial(
-            tenant_id=tenant.id,
-            source="automatic",
-            operation_id=uuid4(),
-        )
-
-
-async def test_start_trial_is_single_use_and_idempotent(db_session: AsyncSession) -> None:
-    tenant = await _make_tenant(db_session)
-    owner_user_id = await _prepare_ready_tenant(db_session, tenant.id)
-    owner_session_id = uuid4()
-    await _set_actor_context(
-        db_session,
-        tenant_id=tenant.id,
-        user_id=owner_user_id,
-        session_id=owner_session_id,
-    )
-    service = OnboardingService(OnboardingRepository(db_session))
-    operation_id = uuid4()
-
-    first = await service.start_trial(
-        tenant_id=tenant.id,
-        source="manual",
-        operation_id=operation_id,
-        actor_user_id=owner_user_id,
-        actor_session_id=owner_session_id,
-    )
-    replay = await service.start_trial(
-        tenant_id=tenant.id,
-        source="manual",
-        operation_id=operation_id,
-        actor_user_id=owner_user_id,
-        actor_session_id=owner_session_id,
-    )
-
-    assert first.status == "trial"
-    assert replay.subscription_id == first.subscription_id
-    assert replay.trial_started_at == first.trial_started_at
+    with pytest.raises(SubscriptionsDisabledError) as error:
+        await service.start_trial(tenant_id=tenant.id, source="automatic", operation_id=uuid4())
+    assert error.value.code == "subscriptions_disabled"
     assert (
         await db_session.scalar(
             select(func.count(TenantSubscription.id)).where(
                 TenantSubscription.tenant_id == tenant.id
             )
         )
-        == 1
+        == 0
     )
-    activation = await db_session.get(TrialActivation, tenant.id)
-    assert activation is not None
-    assert activation.operation_id == operation_id
-    assert activation.actor_user_id == owner_user_id
-
-    immutable_probe = await db_session.begin_nested()
-    with pytest.raises(DBAPIError):
-        await db_session.execute(
-            text(
-                "UPDATE public.trial_activation SET source = 'automatic' "
-                "WHERE tenant_id = :tenant_id"
-            ),
-            {"tenant_id": tenant.id},
-        )
-    await immutable_probe.rollback()
-
-    await db_session.execute(
-        text(
-            "UPDATE public.tenant_subscription SET status = 'archived' "
-            "WHERE tenant_id = :tenant_id"
-        ),
-        {"tenant_id": tenant.id},
-    )
-    await db_session.execute(
-        text(
-            "UPDATE public.tenant SET status = 'setup', trial_started_at = NULL, "
-            "trial_ends_at = NULL WHERE id = :tenant_id"
-        ),
-        {"tenant_id": tenant.id},
-    )
-    with pytest.raises(ConflictError):
-        await service.start_trial(
-            tenant_id=tenant.id,
-            source="manual",
-            operation_id=uuid4(),
-            actor_user_id=owner_user_id,
-            actor_session_id=owner_session_id,
-        )
 
 
-async def test_start_trial_rechecks_active_owner(db_session: AsyncSession) -> None:
+async def test_launch_http_contract_and_retired_trial_error(
+    db_session: AsyncSession, client: AsyncClient
+) -> None:
+    from app.main import app
+
     tenant = await _make_tenant(db_session)
-    await _prepare_ready_tenant(db_session, tenant.id)
-    service = OnboardingService(OnboardingRepository(db_session))
+    owner_id = await _prepare_ready_tenant(db_session, tenant.id)
+    token = await create_session_access_token(db_session, user_id=owner_id, tenant_id=tenant.id)
 
-    with pytest.raises(PermissionDeniedError):
-        await service.start_trial(
-            tenant_id=tenant.id,
-            source="manual",
-            operation_id=uuid4(),
-            actor_user_id=uuid4(),
-            actor_session_id=uuid4(),
+    async def owner_db(request: Request) -> AsyncIterator[AsyncSession]:
+        await _seed_request_db_context(request, db_session)
+        yield db_session
+
+    app.dependency_overrides[get_db] = owner_db
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        operation_id = str(uuid4())
+        retired = await client.post(
+            "/api/v1/onboarding/start-trial", headers=headers, json={"operation_id": operation_id}
         )
+        assert retired.status_code == 422
+        assert retired.json()["error"]["code"] == "subscriptions_disabled"
+        response = await client.post(
+            "/api/v1/onboarding/launch", headers=headers, json={"operation_id": operation_id}
+        )
+        assert response.status_code == 201
+        result = response.json()
+        assert set(result) == {"tenant_id", "status", "launched_at", "operation_id"}
+        assert result["tenant_id"] == str(tenant.id)
+        assert result["status"] == "active"
+        assert result["operation_id"] == operation_id
+        assert result["launched_at"]
+        replay = await client.post(
+            "/api/v1/onboarding/launch", headers=headers, json={"operation_id": operation_id}
+        )
+        assert replay.status_code == 201
+        assert replay.json() == result
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def test_owner_launch_is_single_use_idempotent_and_creates_no_subscription(
+    db_session: AsyncSession,
+) -> None:
+    tenant = await _make_tenant(db_session)
+    owner_id = await _prepare_ready_tenant(db_session, tenant.id)
+    session_id = uuid4()
+    await _set_actor_context(
+        db_session, tenant_id=tenant.id, user_id=owner_id, session_id=session_id
+    )
+    service = OnboardingService(OnboardingRepository(db_session))
+    operation_id = uuid4()
+    arguments = {
+        "tenant_id": tenant.id,
+        "operation_id": operation_id,
+        "actor_user_id": owner_id,
+        "actor_session_id": session_id,
+    }
+    first = await service.launch(**arguments)
+    replay = await service.launch(**arguments)
+    assert replay == first
+    assert first.status == "active"
+    assert first.operation_id == operation_id
+    await db_session.refresh(tenant)
+    assert tenant.status == "active"
+    assert tenant.trial_started_at is None
+    assert tenant.trial_ends_at is None
+    assert (
+        await db_session.scalar(
+            select(func.count(TenantSubscription.id)).where(
+                TenantSubscription.tenant_id == tenant.id
+            )
+        )
+        == 0
+    )
+    activation = await db_session.get(TenantLaunchActivation, tenant.id)
+    assert activation is not None
+    assert activation.actor_user_id == owner_id
+    assert activation.actor_session_id == session_id
+    assert activation.launched_at == first.launched_at
+    overview = await service.get_overview(tenant.id)
+    assert overview.launched_at == first.launched_at
+    assert not overview.can_launch
+    assert not overview.can_start_trial
+    with pytest.raises(ConflictError):
+        async with db_session.begin_nested():
+            await service.launch(**{**arguments, "operation_id": uuid4()})
+    for mutation in (
+        "UPDATE public.tenant_launch_activation SET launched_at = now() WHERE tenant_id = :id",
+        "DELETE FROM public.tenant_launch_activation WHERE tenant_id = :id",
+    ):
+        with pytest.raises(DBAPIError):
+            async with db_session.begin_nested():
+                await db_session.execute(text(mutation), {"id": tenant.id})
+
+
+async def test_launch_requires_canonical_readiness_not_checklist_counters(
+    db_session: AsyncSession,
+) -> None:
+    tenant = await _make_tenant(db_session)
+    owner_id = await _add_owner(db_session, tenant.id)
+    session_id = uuid4()
+    await _set_actor_context(
+        db_session, tenant_id=tenant.id, user_id=owner_id, session_id=session_id
+    )
+    service = OnboardingService(OnboardingRepository(db_session))
+    await service.update_catalog_count(tenant_id=tenant.id, count=500)
+    with pytest.raises(BusinessRuleError):
+        async with db_session.begin_nested():
+            await service.launch(
+                tenant_id=tenant.id,
+                operation_id=uuid4(),
+                actor_user_id=owner_id,
+                actor_session_id=session_id,
+            )
+    await db_session.refresh(tenant)
+    assert tenant.status == "setup"
+    assert await db_session.get(TenantLaunchActivation, tenant.id) is None
+
+
+@pytest.mark.parametrize(
+    "invalid", ["not-owner", "blocked-owner", "revoked-session", "wrong-session"]
+)
+async def test_launch_requires_real_active_owner_session(
+    db_session: AsyncSession, invalid: str
+) -> None:
+    tenant = await _make_tenant(db_session)
+    owner_id = await _prepare_ready_tenant(db_session, tenant.id)
+    session_id = uuid4()
+    if invalid == "not-owner":
+        other_tenant = await _make_tenant(db_session)
+        owner_id = await _add_owner(db_session, other_tenant.id)
+    await _set_actor_context(
+        db_session, tenant_id=tenant.id, user_id=owner_id, session_id=session_id
+    )
+    if invalid == "blocked-owner":
+        await db_session.execute(
+            text("UPDATE app_user SET status = 'blocked' WHERE id = :id"), {"id": owner_id}
+        )
+    elif invalid == "revoked-session":
+        await db_session.execute(
+            text("UPDATE session SET revoked_at = now() WHERE id = :id"), {"id": session_id}
+        )
+    elif invalid == "wrong-session":
+        session_id = uuid4()
+    with pytest.raises(PermissionDeniedError):
+        async with db_session.begin_nested():
+            await OnboardingService(OnboardingRepository(db_session)).launch(
+                tenant_id=tenant.id,
+                operation_id=uuid4(),
+                actor_user_id=owner_id,
+                actor_session_id=session_id,
+            )
+    assert await db_session.get(TenantLaunchActivation, tenant.id) is None
+
+
+async def test_database_prevents_setup_active_without_launch_proof(
+    db_session: AsyncSession,
+) -> None:
+    tenant = await _make_tenant(db_session)
+    with pytest.raises(DBAPIError, match="Checked owner launch is required"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("UPDATE tenant SET status = 'active' WHERE id = :id"), {"id": tenant.id}
+            )
+    await db_session.refresh(tenant)
+    assert tenant.status == "setup"
+
+
+async def test_database_prevents_launch_bypass_through_readonly(db_session: AsyncSession) -> None:
+    tenant = await _make_tenant(db_session)
+    with pytest.raises(DBAPIError, match="Checked owner launch is required"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("UPDATE tenant SET status = 'readonly' WHERE id = :id"), {"id": tenant.id}
+            )
+            await db_session.execute(
+                text("UPDATE tenant SET status = 'active' WHERE id = :id"), {"id": tenant.id}
+            )
+
+
+@pytest.mark.parametrize("status", ["trial", "grace_period"])
+async def test_database_rejects_new_legacy_subscription_lifecycle(
+    db_session: AsyncSession, status: str
+) -> None:
+    tenant = await _make_tenant(db_session)
+    with pytest.raises(DBAPIError, match="Subscriptions are disabled"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("UPDATE tenant SET status = :status WHERE id = :id"),
+                {"id": tenant.id, "status": status},
+            )
+
+
+async def test_launch_proof_is_tenant_isolated_and_not_directly_writable(
+    db_engine: AsyncEngine,
+) -> None:
+    app_engine = create_async_engine(get_settings().DATABASE_URL_APP, poolclass=NullPool)
+    tenant_ids: list[UUID] = []
+    try:
+        async with db_engine.begin() as connection:
+            async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+                first, second = await _make_tenant(session), await _make_tenant(session)
+                tenant_ids = [first.id, second.id]
+                owner_id = await _prepare_ready_tenant(session, first.id)
+                session_id = uuid4()
+                await _set_actor_context(
+                    session, tenant_id=first.id, user_id=owner_id, session_id=session_id
+                )
+                await OnboardingService(OnboardingRepository(session)).launch(
+                    tenant_id=first.id,
+                    operation_id=uuid4(),
+                    actor_user_id=owner_id,
+                    actor_session_id=session_id,
+                )
+        async with app_engine.begin() as connection:
+            for key, value in (
+                ("app.tenant_id", tenant_ids[0]),
+                ("app.user_id", owner_id),
+                ("app.auth_session_id", session_id),
+            ):
+                await connection.execute(
+                    text("SELECT set_config(:key, :value, true)"), {"key": key, "value": str(value)}
+                )
+            assert list(
+                await connection.scalars(text("SELECT tenant_id FROM tenant_launch_activation"))
+            ) == [tenant_ids[0]]
+            await connection.execute(
+                text("SELECT set_config('app.tenant_id', :id, true)"), {"id": str(tenant_ids[1])}
+            )
+            assert not list(
+                await connection.scalars(text("SELECT tenant_id FROM tenant_launch_activation"))
+            )
+            with pytest.raises(DBAPIError):
+                async with connection.begin_nested():
+                    await connection.execute(
+                        text(
+                            "INSERT INTO tenant_launch_activation(tenant_id,operation_id,"
+                            "actor_user_id,actor_session_id,launched_at) "
+                            "VALUES (:id,:op,:owner,:session,now())"
+                        ),
+                        {
+                            "id": tenant_ids[1],
+                            "op": uuid4(),
+                            "owner": owner_id,
+                            "session": session_id,
+                        },
+                    )
+            with pytest.raises(DBAPIError, match="Active owner session is required"):
+                async with connection.begin_nested():
+                    await connection.execute(
+                        text("SELECT public.launch_tenant(:id,:op,:owner,:session)"),
+                        {
+                            "id": tenant_ids[0],
+                            "op": uuid4(),
+                            "owner": owner_id,
+                            "session": session_id,
+                        },
+                    )
+    finally:
+        await app_engine.dispose()
+        # This suite runs only in a disposable test database. Keep the unique
+        # launch/audit/writer history intact; the runner retires the database.
+        # Never disable immutable-history guards merely to clean up fixtures.

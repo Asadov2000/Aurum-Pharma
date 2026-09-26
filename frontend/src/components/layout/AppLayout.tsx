@@ -14,6 +14,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Button } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
+import { TenantAccessBanner } from "@/features/tenantAccess/TenantAccessBanner";
 import { useUserPreferencesQuery } from "@/features/settings/queries";
 import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
 
@@ -413,6 +414,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             <SupportAccessBanner />
           </Suspense>
         ) : null}
+        <TenantAccessBanner />
         <ConnectivityStatusBanner />
         <PwaUpdateBanner />
       </div>

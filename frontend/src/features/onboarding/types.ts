@@ -57,13 +57,14 @@ export interface OnboardingOverview {
   recommended_total: number;
   is_ready: boolean;
   can_start_trial: boolean;
+  can_launch: boolean;
+  launched_at: string | null;
   blocker_codes: ReadinessStepCode[];
 }
 
-export interface StartTrialResponse {
+export interface LaunchResponse {
   tenant_id: string;
-  status: TenantLaunchStatus;
-  trial_started_at: string;
-  trial_ends_at: string;
-  subscription_id: string;
+  status: "active";
+  launched_at: string;
+  operation_id: string;
 }

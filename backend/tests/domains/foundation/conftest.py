@@ -69,12 +69,10 @@ async def make_tenant(db_session: AsyncSession):  # type: ignore[no-untyped-def]
         nick = uuid4().hex[:8]
         payload: dict[str, object] = {
             "name": name or f"Tenant {nick}",
+            "status": status,
             "contact_email": contact_email or f"tenant-{nick}@aurum.tj",
         }
         tenant = await service.create_tenant(payload=payload)
-        if status != "setup":
-            await service.update_tenant(tenant.id, fields={"status": status})
-            await db_session.refresh(tenant)
         return tenant
 
     return _make

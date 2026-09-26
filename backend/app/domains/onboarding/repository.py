@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.billing.models import TenantSubscription
 from app.domains.foundation.models import Tenant
-from app.domains.onboarding.models import OnboardingChecklist, TrialActivation, WizardState
+from app.domains.onboarding.models import (
+    OnboardingChecklist,
+    TenantLaunchActivation,
+    TrialActivation,
+    WizardState,
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,7 @@ class OnboardingReadinessSnapshot:
     opened_shift_count: int
     recorded_tasks: frozenset[str]
     subscription_id: UUID | None
+    launched_at: datetime | None = None
 
 
 class OnboardingRepository:
@@ -98,6 +104,28 @@ class OnboardingRepository:
         return checklist
 
     # ---- readiness orchestration ----
+
+    async def launch_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+    ) -> TenantLaunchActivation:
+        await self.session.execute(
+            text("SELECT public.launch_tenant(:tenant_id, :operation_id, :user_id, :session_id)"),
+            {
+                "tenant_id": tenant_id,
+                "operation_id": operation_id,
+                "user_id": actor_user_id,
+                "session_id": actor_session_id,
+            },
+        )
+        activation = await self.session.get(TenantLaunchActivation, tenant_id)
+        if activation is None:
+            raise RuntimeError("Launch command did not persist its result")
+        return activation
 
     async def get_tenant_for_update(self, tenant_id: UUID) -> Tenant | None:
         stmt = (
@@ -376,12 +404,15 @@ class OnboardingRepository:
                     WHERE shift.tenant_id = tenant.id
                   ) AS opened_shift_count,
                   COALESCE(checklist.completed_tasks, '[]'::jsonb) AS recorded_tasks,
-                  subscription.id AS subscription_id
+                  subscription.id AS subscription_id,
+                  launch.launched_at
                 FROM public.tenant AS tenant
                 LEFT JOIN public.tenant_settings AS settings
                   ON settings.tenant_id = tenant.id
                 LEFT JOIN public.onboarding_checklist AS checklist
                   ON checklist.tenant_id = tenant.id
+                LEFT JOIN public.tenant_launch_activation AS launch
+                  ON launch.tenant_id = tenant.id
                 LEFT JOIN LATERAL (
                   SELECT current_subscription.id
                   FROM public.tenant_subscription AS current_subscription
@@ -422,4 +453,5 @@ class OnboardingRepository:
             opened_shift_count=int(row["opened_shift_count"]),
             recorded_tasks=frozenset(row["recorded_tasks"]),
             subscription_id=row["subscription_id"],
+            launched_at=row["launched_at"],
         )

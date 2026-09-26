@@ -27,6 +27,7 @@ import { SupportAccessForm } from "@/features/supportAccess/SupportAccessForm";
 
 import { describeApiError } from "./errors";
 import { useTenantsQuery } from "./queries";
+import { AccessPolicyForm } from "./AccessPolicyForm";
 import { TenantForm } from "./TenantForm";
 import { TenantMemberForm } from "./TenantMemberForm";
 import { type Tenant, type TenantStatus } from "./types";
@@ -58,10 +59,10 @@ export function TenantsPage(): JSX.Element {
   const canManageTenants = hasPlatformCapability(user, PLATFORM_CAPABILITIES.tenantsManage);
   const canCreateOwner = hasPlatformCapability(user, PLATFORM_CAPABILITIES.ownershipProvision);
   const canManageMembers = hasPlatformCapability(user, PLATFORM_CAPABILITIES.membershipsManage);
-  const canManageBilling = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingManage);
   const canUseSupport = hasPlatformCapability(user, PLATFORM_CAPABILITIES.supportUse);
   const canCreateTenant = canManageTenants && canCreateOwner;
-  const hasTenantActions = canManageTenants || canManageMembers || canUseSupport;
+  const hasTenantActions = canViewTenants;
+  const [accessTenant, setAccessTenant] = useState<Tenant | null>(null);
   const [editing, setEditing] = useState<Tenant | null>(null);
   const [creating, setCreating] = useState(false);
   const [memberTenant, setMemberTenant] = useState<Tenant | null>(null);
@@ -185,6 +186,7 @@ export function TenantsPage(): JSX.Element {
                       <ActionMenu
                         label={`Действия для ${t.name}`}
                         items={[
+                          { label: "Управление доступом", onSelect: () => setAccessTenant(t) },
                           ...(canManageTenants
                             ? [{ label: "Изменить", onSelect: () => setEditing(t) }]
                             : []),
@@ -220,6 +222,19 @@ export function TenantsPage(): JSX.Element {
       )}
 
       <Modal
+        open={accessTenant !== null}
+        onClose={() => setAccessTenant(null)}
+        title={`Управление доступом: ${accessTenant?.name ?? ""}`}
+      >
+        {accessTenant && (
+          <AccessPolicyForm
+            tenantId={accessTenant.id}
+            canManage={canManageTenants}
+            onClose={() => setAccessTenant(null)}
+          />
+        )}
+      </Modal>
+      <Modal
         open={creating || editing !== null}
         onClose={() => {
           setCreating(false);
@@ -229,7 +244,7 @@ export function TenantsPage(): JSX.Element {
       >
         <TenantForm
           tenant={editing}
-          canManageStatus={canManageBilling}
+          canManageStatus={canManageTenants}
           onClose={() => {
             setCreating(false);
             setEditing(null);

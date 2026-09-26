@@ -41,12 +41,10 @@ async def pos_scaffold(db_session: AsyncSession):  # type: ignore[no-untyped-def
         tenant = await foundation.create_tenant(
             payload={
                 "name": f"Tenant {nick}",
+                "status": tenant_status,
                 "contact_email": f"t-{nick}@aurum.tj",
             }
         )
-        if tenant_status != "setup":
-            await foundation.update_tenant(tenant.id, fields={"status": tenant_status})
-            await db_session.refresh(tenant)
         branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
         register: Register = await foundation.create_register(
             tenant_id=tenant.id,

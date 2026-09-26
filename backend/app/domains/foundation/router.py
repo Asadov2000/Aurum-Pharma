@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
     CurrentUser,
-    ensure_platform_capability,
     get_db,
     require_any_branch_permission,
     require_branch_permission,
@@ -176,8 +175,6 @@ async def update_tenant(
     ],
     service: Annotated[FoundationService, Depends(_service)],
 ) -> TenantRead:
-    if payload.status is not None:
-        ensure_platform_capability(user, "platform.billing.manage")
     tenant = await service.update_tenant(tenant_id, fields=payload.model_dump(exclude_none=True))
     return TenantRead.model_validate(tenant)
 

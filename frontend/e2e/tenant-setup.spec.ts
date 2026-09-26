@@ -38,12 +38,12 @@ test.describe("Tenant setup (dev)", () => {
     await expect(page.getByRole("cell", { name: email, exact: true })).toBeVisible();
   });
 
-  test("edits a tenant status and the table reflects it", async ({ page }) => {
+  test("saves access restrictions with a preview and archives the tenant", async ({ page }) => {
     const apiAnon = await request.newContext();
     const tokens = await apiLogin(apiAnon, DEV);
     const api = await apiContext(tokens.access_token);
     try {
-      const name = uniqueName("E2E Trial");
+      const name = uniqueName("E2E Archive");
       const createRes = await api.post("admin/tenants", {
         data: {
           name,
@@ -51,25 +51,35 @@ test.describe("Tenant setup (dev)", () => {
         },
       });
       if (!createRes.ok()) {
-        throw new Error(
-          `POST admin/tenants → ${createRes.status()} ${await createRes.text()}`,
-        );
+        throw new Error(`POST admin/tenants → ${createRes.status()} ${await createRes.text()}`);
       }
 
       await loginInBrowser(page, DEV);
       await page.goto("/admin/tenants");
       const row = page.getByRole("row", { name: new RegExp(name) });
       await expect(row).toBeVisible();
+      await selectActionMenuItem(page, `Действия для ${name}`, "Управление доступом");
+      await page.getByLabel("Режим доступа").selectOption("readonly");
+      await page.getByLabel("Лимит сотрудников").fill("5");
+      await page.getByLabel("Причина изменения").fill("Проверка ручного ограничения");
+      await page.getByRole("button", { name: "Проверить последствия" }).click();
+      await expect(page.getByText("Рабочие операции доступны только для чтения.")).toBeVisible();
+      await page.getByRole("button", { name: "Подтвердить изменение" }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await selectActionMenuItem(page, `Действия для ${name}`, "Управление доступом");
+      await expect(page.getByLabel("Режим доступа")).toHaveValue("readonly");
+      await expect(page.getByLabel("Лимит сотрудников")).toHaveValue("5");
+      await expect(page.getByText("Текущая причина: Проверка ручного ограничения")).toBeVisible();
+      await page.getByRole("button", { name: "Закрыть", exact: true }).last().click();
       await selectActionMenuItem(page, `Действия для ${name}`, "Изменить");
-      await page.getByLabel("Статус").selectOption("trial");
+      await page.getByLabel("Статус").selectOption("archived");
       await page.getByRole("button", { name: /^Сохранить$/ }).click();
 
       await expect(page.locator('div[role="dialog"]')).toHaveCount(0);
-      await expect(row.getByText("Пробный")).toBeVisible();
+      await expect(row.getByText("Архив")).toBeVisible();
     } finally {
       await apiAnon.dispose();
       await api.dispose();
     }
   });
-
 });

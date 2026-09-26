@@ -304,7 +304,7 @@ async def test_worker_commands_have_hardened_definer_metadata(
     ]
 
 
-async def test_trial_and_grace_transitions_are_retry_safe(
+async def test_retired_trial_and_grace_commands_preserve_history(
     billing_worker_engine: AsyncEngine,
     maintenance_engine: AsyncEngine,
 ) -> None:
@@ -322,11 +322,11 @@ async def test_trial_and_grace_transitions_are_retry_safe(
         async with billing_worker_engine.begin() as connection:
             assert (
                 await connection.scalar(text("SELECT public.process_billing_trial_endings(100)"))
-                == 1
+                == 0
             )
             assert (
                 await connection.scalar(text("SELECT public.process_billing_grace_endings(100)"))
-                == 1
+                == 0
             )
             assert (
                 await connection.scalar(text("SELECT public.process_billing_grace_endings(100)"))
@@ -353,14 +353,14 @@ async def test_trial_and_grace_transitions_are_retry_safe(
                 .mappings()
                 .one()
             )
-        assert trial_status == "grace_period"
-        assert dict(grace_state) == {"status": "suspended", "tenant_status": "readonly"}
+        assert trial_status == "trial"
+        assert dict(grace_state) == {"status": "grace_period", "tenant_status": "grace_period"}
     finally:
         await _cleanup_tenant(maintenance_engine, trial_tenant)
         await _cleanup_tenant(maintenance_engine, grace_tenant)
 
 
-async def test_concurrent_workers_count_one_transition(
+async def test_concurrent_retired_workers_are_noops(
     billing_worker_engine: AsyncEngine,
     maintenance_engine: AsyncEngine,
 ) -> None:
@@ -379,7 +379,7 @@ async def test_concurrent_workers_count_one_transition(
 
     try:
         results = await asyncio.gather(run_once(), run_once())
-        assert sum(results) == 1
+        assert sum(results) == 0
     finally:
         await _cleanup_tenant(maintenance_engine, tenant_id)
 
