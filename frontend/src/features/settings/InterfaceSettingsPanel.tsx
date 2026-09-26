@@ -64,7 +64,7 @@ export function InterfaceSettingsPanel(): JSX.Element {
   }, [autosave.hasPending, preferences.data]);
 
   const sync = (patch: Omit<UserPreferencesUpdate, "expected_version">) => {
-    if (!preferences.data) return;
+    // Keep early edits pending so the initial response cannot overwrite them.
     autosave.enqueue(patch);
   };
 
