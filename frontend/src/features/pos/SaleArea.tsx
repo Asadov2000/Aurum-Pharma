@@ -18,11 +18,12 @@ import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
 import { useConnectivity } from "@/lib/connectivityContext";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth";
 
 import { BarcodeListener } from "./BarcodeListener";
 import { CartList } from "./CartList";
 import { PaymentPanel } from "./PaymentPanel";
-import { PrescriptionModal } from "./PrescriptionModal";
+import { PosRecoveryGate } from "./PosRecoveryGate";
 import { SearchBar } from "./SearchBar";
 import { ShiftBar } from "./ShiftBar";
 import { getActivePaymentAttempt, getCheckoutResult } from "./api";
@@ -38,12 +39,8 @@ import {
   hasPendingCompletion,
   markPendingCompletion,
 } from "./completionOperation";
-import {
-  type DraftInit,
-  clearDraft as clearDraftStorage,
-  loadDraft,
-  saveDraft,
-} from "./draftStorage";
+import { type DraftInit, loadDraft, scopedDraftStorage } from "./draftStorage";
+import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
 import {
   mergeCheckoutResult,
   posKeys,
@@ -107,6 +104,11 @@ const loadExternalPaymentEvidenceDialog = async () => {
 };
 const NumPad = lazy(loadNumPad);
 const ExternalPaymentEvidenceDialog = lazy(loadExternalPaymentEvidenceDialog);
+const loadPrescriptionModal = async () => {
+  const module = await import("./PrescriptionModal");
+  return { default: module.PrescriptionModal };
+};
+const PrescriptionModal = lazy(loadPrescriptionModal);
 
 type NumPadState =
   | { kind: "qty"; itemId: string; initial: string }
@@ -223,11 +225,14 @@ export function SaleArea({
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
 }): JSX.Element {
+  const user = useAuthStore((state) => state.user);
+  const storageScope = useMemo(
+    () => (user?.active_tenant_id ? { tenantId: user.active_tenant_id, userId: user.id } : null),
+    [user?.active_tenant_id, user?.id],
+  );
   useEffect(() => {
-    // Payment controls are separate chunks, but should be ready before the
-    // cashier needs them during a brief network interruption.
+    // Keep the frequently used keypad ready for a brief interruption.
     void loadNumPad();
-    void loadExternalPaymentEvidenceDialog();
   }, []);
   const isOnline = useConnectivity().canUseServer;
   const shiftQuery = useCurrentShiftQuery(registerId);
@@ -235,33 +240,35 @@ export function SaleArea({
 
   return (
     <div className="min-w-0">
-      {hasShift && canSell ? (
+      {hasShift && canSell && storageScope ? (
         <RegisterWorkspaceGate
-          key={registerId}
+          key={JSON.stringify([storageScope.tenantId, storageScope.userId, registerId])}
           registerId={registerId}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={onRegisterSwitchStateChange}
         >
-          {/* Key by register so switching registers restores that one's draft. */}
-          <ActiveWorkspace
-            registerId={registerId}
-            branchId={shiftQuery.data?.branch_id ?? null}
-            mode={mode}
-            soundOn={soundOn}
-            draftTtlMin={draftTtlMin}
-            paymentMethods={paymentMethods}
-            mixedPaymentEnabled={mixedPaymentEnabled}
-            paymentSettingsLoading={paymentSettingsLoading}
-            paymentSettingsUnavailable={paymentSettingsUnavailable}
-            cardTerminalId={cardTerminalId}
-            qrTerminalId={qrTerminalId}
-            canCloseShift={canCloseShift}
-            canReconcileExternalPayment={canReconcileExternalPayment}
-            canExportReports={canExportReports}
-            online={isOnline}
-            workstationControls={workstationControls}
-            onRegisterSwitchStateChange={onRegisterSwitchStateChange}
-          />
+          <PosRecoveryGate registerId={registerId} scope={storageScope}>
+            <ActiveWorkspace
+              storageScope={storageScope}
+              registerId={registerId}
+              branchId={shiftQuery.data?.branch_id ?? null}
+              mode={mode}
+              soundOn={soundOn}
+              draftTtlMin={draftTtlMin}
+              paymentMethods={paymentMethods}
+              mixedPaymentEnabled={mixedPaymentEnabled}
+              paymentSettingsLoading={paymentSettingsLoading}
+              paymentSettingsUnavailable={paymentSettingsUnavailable}
+              cardTerminalId={cardTerminalId}
+              qrTerminalId={qrTerminalId}
+              canCloseShift={canCloseShift}
+              canReconcileExternalPayment={canReconcileExternalPayment}
+              canExportReports={canExportReports}
+              online={isOnline}
+              workstationControls={workstationControls}
+              onRegisterSwitchStateChange={onRegisterSwitchStateChange}
+            />
+          </PosRecoveryGate>
         </RegisterWorkspaceGate>
       ) : (
         <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
@@ -334,6 +341,7 @@ export interface RegisterSwitchState {
 }
 
 function ActiveWorkspace({
+  storageScope,
   registerId,
   branchId,
   mode,
@@ -352,6 +360,7 @@ function ActiveWorkspace({
   workstationControls,
   onRegisterSwitchStateChange,
 }: {
+  storageScope: PosStorageScope;
   registerId: string;
   branchId: string | null;
   mode: PosMode;
@@ -373,8 +382,13 @@ function ActiveWorkspace({
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
   const queryClient = useQueryClient();
+  const { saveDraft, clearDraft: clearDraftStorage } = useMemo(
+    () => scopedDraftStorage(storageScope),
+    [storageScope],
+  );
+  const [sessionIsActive] = useState(() => capturePosSessionGuard(storageScope));
 
-  const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin));
+  const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin, storageScope));
   const [saleId, setSaleId] = useState<string | null>(init.saleId);
   const [nameById, setNameById] = useState<Record<string, string>>(init.nameById);
   const [pendingPayment, setPendingPayment] = useState<PendingPaymentOperation | null>(() =>
@@ -392,6 +406,9 @@ function ActiveWorkspace({
   const [topError, setTopError] = useState<string | null>(null);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [requiresRx, setRequiresRx] = useState(init.requiresRx);
+  useEffect(() => {
+    if (requiresRx) void loadPrescriptionModal();
+  }, [requiresRx]);
   const [prescription, setPrescription] = useState<PrescriptionLogPayload | null>(null);
   const [stagedPayments, setStagedPayments] = useState<StagedPayment[]>(() =>
     init.stagedPayments.map((payment, index) => ({
@@ -456,11 +473,12 @@ function ActiveWorkspace({
   }, []);
   const posCommand = usePosCommandResilience({
     registerId,
+    scope: storageScope,
     onApplied: onPosCommandApplied,
   });
-  const addPayment = useAddPayment();
-  const addPrescription = useAddPrescription();
-  const completeSale = useCompleteSale();
+  const addPayment = useAddPayment(sessionIsActive);
+  const addPrescription = useAddPrescription(sessionIsActive);
+  const completeSale = useCompleteSale(sessionIsActive);
   const checkoutSale = useCheckoutSale();
   const createPaymentAttempt = useCreatePaymentAttempt();
   const beginPaymentAttemptReconciliation = useBeginPaymentAttemptReconciliation();
@@ -612,7 +630,10 @@ function ActiveWorkspace({
     );
   }, [electronicPaymentPendingResolution, stagedPaymentConflict]);
 
-  const clearDraft = useCallback(() => clearDraftStorage(registerId), [registerId]);
+  const clearDraft = useCallback(
+    () => clearDraftStorage(registerId),
+    [registerId, clearDraftStorage],
+  );
   const persistCompletedReceipt = useCallback(
     (completedSaleId: string): boolean => {
       const persisted = saveDraft(registerId, completedSaleId, nameById, "completed", false);
@@ -633,7 +654,7 @@ function ActiveWorkspace({
       );
       return false;
     },
-    [registerId, nameById],
+    [registerId, nameById, saveDraft],
   );
 
   const acceptCheckoutResult = useCallback(
@@ -642,6 +663,7 @@ function ActiveWorkspace({
       operation: PendingCheckoutOperation,
       openCashDrawer: boolean,
     ): Promise<boolean> => {
+      if (!sessionIsActive()) return false;
       if (
         result.operation_id !== operation.operationId ||
         result.sale_id !== operation.saleId ||
@@ -672,6 +694,7 @@ function ActiveWorkspace({
       queryClient.setQueryData<SaleDetails>(posKeys.sale(result.sale_id), (current) =>
         mergeCheckoutResult(current, result),
       );
+      void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });
       persistCompletedReceipt(result.sale_id);
       stagedPaymentsRef.current = [];
       setStagedPayments([]);
@@ -680,7 +703,7 @@ function ActiveWorkspace({
       await refetchSale();
       return true;
     },
-    [persistCompletedReceipt, queryClient, refetchSale, registerId, saleId],
+    [persistCompletedReceipt, queryClient, refetchSale, registerId, saleId, sessionIsActive],
   );
 
   const recoverCheckout = useCallback(
@@ -688,14 +711,16 @@ function ActiveWorkspace({
       operation: PendingCheckoutOperation,
       openCashDrawer: boolean,
     ): Promise<CheckoutRecoveryOutcome> => {
-      if (checkoutRecoveryRef.current) return "unavailable";
+      if (checkoutRecoveryRef.current || !sessionIsActive()) return "unavailable";
       checkoutRecoveryRef.current = true;
       setCheckoutReconciling(true);
       try {
         const result = await getCheckoutResult(operation.operationId);
+        if (!sessionIsActive()) return "unavailable";
         const accepted = await acceptCheckoutResult(result, operation, openCashDrawer);
         return accepted ? "resolved" : "conflict";
       } catch (error) {
+        if (!sessionIsActive()) return "unavailable";
         if (isAxiosError(error) && error.response?.status === 404) {
           setPendingCheckout(operation);
           setCheckoutUncertain(true);
@@ -715,7 +740,7 @@ function ActiveWorkspace({
         setCheckoutReconciling(false);
       }
     },
-    [acceptCheckoutResult],
+    [acceptCheckoutResult, sessionIsActive],
   );
 
   // Persist the live draft so a reload (or accidental close) restores the cart.
@@ -733,7 +758,15 @@ function ActiveWorkspace({
         externalPaymentReviewRequired,
       );
     }
-  }, [sale, nameById, registerId, requiresRx, stagedPayments, externalPaymentReviewRequired]);
+  }, [
+    sale,
+    nameById,
+    registerId,
+    requiresRx,
+    stagedPayments,
+    externalPaymentReviewRequired,
+    saveDraft,
+  ]);
 
   // Keep the completed receipt addressable until the cashier explicitly starts
   // another sale. This makes printer/browser recovery deterministic.
@@ -953,7 +986,7 @@ function ActiveWorkspace({
     amount: string,
     metadata?: PaymentMetadata,
   ) => {
-    if (!saleId) return;
+    if (!saleId || !sessionIsActive()) return;
     const amt = Number(amount);
     if (!(amt > 0)) return;
     const normalizedAmount = amt.toFixed(2);
@@ -1020,15 +1053,18 @@ function ActiveWorkspace({
           metadata: storedOperation?.metadata ?? metadata,
         },
       });
+      if (!sessionIsActive()) return;
       clearPendingPaymentOperation(saleId, operation.operationId);
       setPendingPayment(null);
     } catch (err) {
+      if (!sessionIsActive()) return;
       if (isDefiniteRejection(err)) {
         clearPendingPaymentOperation(saleId, operation.operationId);
         setPendingPayment(null);
         setTopError(describeApiError(err, "Не удалось добавить оплату"));
       } else {
         const refreshed = await saleQuery.refetch();
+        if (!sessionIsActive()) return;
         const reconciliation = refreshed.data
           ? reconcilePayment(refreshed.data, operation)
           : "pending";
@@ -1182,7 +1218,8 @@ function ActiveWorkspace({
   };
 
   const prepareExternalPayment = async (method: "card" | "qr", amount: string) => {
-    if (!saleId || externalPaymentConfirmationRef.current !== null) return;
+    void loadExternalPaymentEvidenceDialog();
+    if (!saleId || !sessionIsActive() || externalPaymentConfirmationRef.current !== null) return;
     const normalizedAmount = normalizePositiveMoney(amount);
     if (!normalizedAmount) {
       setTopError("Введите корректную сумму электронной оплаты.");
@@ -1204,6 +1241,7 @@ function ActiveWorkspace({
         payment_method: method,
         amount: normalizedAmount,
       });
+      if (!sessionIsActive()) return;
       if (attempt.status === "confirmed") {
         if (stagePayment(method, normalizedAmount, undefined, attempt.id, true)) {
           clearPaymentAttemptOperation(saleId, operation.operationId);
@@ -1212,6 +1250,7 @@ function ActiveWorkspace({
       }
       if (attempt.status === "pending") {
         attempt = await beginPaymentAttemptReconciliation.mutateAsync(attempt.id);
+        if (!sessionIsActive()) return;
       }
       if (attempt.status !== "requires_reconciliation") {
         clearPaymentAttemptOperation(saleId, operation.operationId);
@@ -1248,7 +1287,7 @@ function ActiveWorkspace({
       if (!storedAttempt) {
         try {
           const serverAttempt = await getActivePaymentAttempt(saleId);
-          if (!serverAttempt) return;
+          if (!serverAttempt || !sessionIsActive()) return;
           storedAttempt = saveRecoveredPaymentAttemptOperation(serverAttempt);
           if (!storedAttempt) {
             setTopError(
@@ -1269,7 +1308,7 @@ function ActiveWorkspace({
       }
       await prepareExternalPaymentRef.current(storedAttempt.paymentMethod, storedAttempt.amount);
     })();
-  }, [sale?.status, saleId]);
+  }, [sale?.status, saleId, sessionIsActive]);
 
   const closeExternalPaymentConfirmation = () => {
     externalPaymentConfirmationRef.current = null;
@@ -1277,6 +1316,7 @@ function ActiveWorkspace({
   };
 
   const cancelExternalPayment = async (evidence: PaymentAttemptConfirmPayload) => {
+    if (!sessionIsActive()) return;
     if (
       externalPaymentMutationRef.current ||
       voidPaymentAttempt.isPending ||
@@ -1295,6 +1335,7 @@ function ActiveWorkspace({
           external_reference: evidence.external_reference,
         },
       });
+      if (!sessionIsActive()) return;
       clearPaymentAttemptOperation(confirmation.attempt.sale_id, confirmation.attempt.operation_id);
       closeExternalPaymentConfirmation();
     } catch (error) {
@@ -1305,6 +1346,7 @@ function ActiveWorkspace({
   };
 
   const confirmExternalPayment = async (evidence: PaymentAttemptConfirmPayload) => {
+    if (!sessionIsActive()) return;
     if (
       externalPaymentMutationRef.current ||
       confirmPaymentAttempt.isPending ||
@@ -1319,6 +1361,7 @@ function ActiveWorkspace({
         attemptId: confirmation.attempt.id,
         payload: evidence,
       });
+      if (!sessionIsActive()) return;
       if (attempt.status !== "confirmed") {
         setTopError("Сервер не подтвердил электронную оплату. Не завершайте чек.");
         return;
@@ -1425,6 +1468,7 @@ function ActiveWorkspace({
   };
 
   const completeLegacySale = async () => {
+    if (!sessionIsActive()) return;
     if (!saleId || completingRef.current || completeSale.isPending) return;
     if (pendingPayment || addPayment.isPending) {
       setTopError("Сначала подтвердите результат оплаты.");
@@ -1459,6 +1503,7 @@ function ActiveWorkspace({
     try {
       if (prescription) {
         await addPrescription.mutateAsync({ saleId, payload: prescription });
+        if (!sessionIsActive()) return;
         setPrescription(null);
         setRequiresRx(false);
       }
@@ -1466,6 +1511,7 @@ function ActiveWorkspace({
         saleId,
         expiredSaleConfirmed: false,
       });
+      if (!sessionIsActive()) return;
       if (payments.some((payment) => payment.payment_method === "cash")) {
         requestDesktopCashDrawerOpen({
           reason: "sale-completed",
@@ -1476,8 +1522,10 @@ function ActiveWorkspace({
       persistCompletedReceipt(saleId);
       completingRef.current = false;
     } catch (err) {
+      if (!sessionIsActive()) return;
       if (!isDefiniteRejection(err)) {
         const refreshed = await saleQuery.refetch();
+        if (!sessionIsActive()) return;
         if (refreshed.data?.status === "completed") {
           if (payments.some((payment) => payment.payment_method === "cash")) {
             requestDesktopCashDrawerOpen({
@@ -1508,7 +1556,7 @@ function ActiveWorkspace({
   };
 
   const onComplete = async () => {
-    if (!saleId || !sale || completingRef.current) return;
+    if (!saleId || !sale || completingRef.current || !sessionIsActive()) return;
     if (cartMutationPending) {
       setTopError("Дождитесь завершения изменения товаров в чеке.");
       return;
@@ -1556,6 +1604,7 @@ function ActiveWorkspace({
       setPendingCheckout(storedOperation);
       setCheckoutUncertain(true);
       const recovery = await recoverCheckout(storedOperation, true);
+      if (!sessionIsActive()) return;
       if (recovery !== "not-found") return;
     }
 
@@ -1624,6 +1673,7 @@ function ActiveWorkspace({
       });
       await acceptCheckoutResult(result, operation, true);
     } catch (error) {
+      if (!sessionIsActive()) return;
       if (isDefiniteRejection(error)) {
         clearPendingCheckoutOperation(saleId, operation.operationId);
         setPendingCheckout(null);
@@ -2160,15 +2210,17 @@ function ActiveWorkspace({
         </div>
       )}
 
-      {saleId && (
-        <PrescriptionModal
-          open={prescriptionOpen}
-          onClose={() => setPrescriptionOpen(false)}
-          onSaved={(payload) => {
-            setPrescription(payload);
-            setPrescriptionOpen(false);
-          }}
-        />
+      {saleId && prescriptionOpen && (
+        <Suspense fallback={<p role="status">Загружаем форму рецепта…</p>}>
+          <PrescriptionModal
+            open={prescriptionOpen}
+            onClose={() => setPrescriptionOpen(false)}
+            onSaved={(payload) => {
+              setPrescription(payload);
+              setPrescriptionOpen(false);
+            }}
+          />
+        </Suspense>
       )}
 
       {numpad && (

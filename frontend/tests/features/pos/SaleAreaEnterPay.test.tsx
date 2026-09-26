@@ -1,3 +1,4 @@
+import { authenticatePos, POS_SCOPE } from "./posIdentityFixture";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -72,6 +73,7 @@ import {
   loadPendingCheckoutOperation,
 } from "@/features/pos/checkoutOperation";
 import { draftKey } from "@/features/pos/draftStorage";
+import { posKeys } from "@/features/pos/queries";
 import { createPendingPaymentOperation } from "@/features/pos/paymentOperation";
 import {
   createPaymentAttemptOperation,
@@ -239,6 +241,7 @@ function renderArea(canReconcileExternalPayment: boolean = true, cardTerminalId?
   const result = render(view(["cash", "card", "qr"], true));
   return {
     ...result,
+    queryClient,
     rerenderPaymentSettings: (
       paymentMethods: ("cash" | "card" | "qr")[],
       mixedPaymentEnabled: boolean,
@@ -248,7 +251,7 @@ function renderArea(canReconcileExternalPayment: boolean = true, cardTerminalId?
 
 function seedDraftSale(saleId: string, requiresRx: boolean = false): void {
   window.localStorage.setItem(
-    draftKey(REG),
+    draftKey(REG, POS_SCOPE),
     JSON.stringify({ saleId, nameById: {}, savedAt: Date.now(), requiresRx }),
   );
 }
@@ -290,6 +293,7 @@ function fillExternalPaymentEvidence(
 
 describe("SaleArea atomic checkout", () => {
   beforeEach(() => {
+    authenticatePos();
     window.localStorage.clear();
     getCurrentShift.mockReset();
     getSale.mockReset();
@@ -439,10 +443,12 @@ describe("SaleArea atomic checkout", () => {
     });
     expect(await screen.findByText(/Чек № R-atomic оформлен/i)).toBeInTheDocument();
     expect(requestDesktopCashDrawerOpen).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
-      saleId: SALE.id,
-      status: "completed",
-    });
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG, POS_SCOPE)) ?? "{}")).toMatchObject(
+      {
+        saleId: SALE.id,
+        status: "completed",
+      },
+    );
     expect(screen.getByRole("button", { name: /Закрыть смену/i })).toBeEnabled();
   });
 
@@ -462,16 +468,18 @@ describe("SaleArea atomic checkout", () => {
     expect(screen.getByTestId("cart-item")).toBeInTheDocument();
     expect(checkoutSale).not.toHaveBeenCalled();
     expect(addPayment).not.toHaveBeenCalled();
-    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
-      saleId: SALE.id,
-      stagedPayments: [],
-    });
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG, POS_SCOPE)) ?? "{}")).toMatchObject(
+      {
+        saleId: SALE.id,
+        stagedPayments: [],
+      },
+    );
   });
 
   it("restores a staged cash calculation with tender and keeps the cart locked", async () => {
     let operationId = "";
     window.localStorage.setItem(
-      draftKey(REG),
+      draftKey(REG, POS_SCOPE),
       JSON.stringify({
         saleId: SALE.id,
         nameById: { "c-1": "Парацетамол" },
@@ -622,7 +630,9 @@ describe("SaleArea atomic checkout", () => {
     await waitFor(
       () => {
         expect(loadPaymentAttemptOperation(SALE.id)).toBeNull();
-        expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+        expect(
+          JSON.parse(window.localStorage.getItem(draftKey(REG, POS_SCOPE)) ?? "{}"),
+        ).toMatchObject({
           stagedPayments: [
             {
               payment_method: "card",
@@ -678,7 +688,9 @@ describe("SaleArea atomic checkout", () => {
     );
     await waitFor(() => {
       expect(loadPaymentAttemptOperation(SALE.id)).toBeNull();
-      expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
+      expect(
+        JSON.parse(window.localStorage.getItem(draftKey(REG, POS_SCOPE)) ?? "{}"),
+      ).toMatchObject({
         stagedPayments: [
           {
             payment_method: "card",
@@ -782,12 +794,54 @@ describe("SaleArea atomic checkout", () => {
 
     await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
     expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
-    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
-      saleId: SALE.id,
-    });
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG, POS_SCOPE)) ?? "{}")).toMatchObject(
+      {
+        saleId: SALE.id,
+      },
+    );
 
     resolveCheckout(checkoutResult(operationId));
     await waitFor(() => expect(requestDesktopCashDrawerOpen).toHaveBeenCalledTimes(1));
+    expect(checkoutSale).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not revive cleared sale cache when checkout succeeds after the cashier changes", async () => {
+    let resolveCheckout: (value: ReturnType<typeof checkoutResult>) => void = () => undefined;
+    const response = new Promise<ReturnType<typeof checkoutResult>>((resolve) => {
+      resolveCheckout = resolve;
+    });
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    checkoutSale.mockReturnValue(response);
+
+    const { queryClient } = renderArea();
+    await stageCashPayment();
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+    await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
+    const payload = checkoutSale.mock.calls[0]?.[0] as CheckoutPayload;
+    const pending = loadPendingCheckoutOperation(SALE.id, REG);
+    const ownerDraft = window.localStorage.getItem(draftKey(REG, POS_SCOPE));
+    expect(pending?.operationId).toBe(payload.operation_id);
+    expect(queryClient.getQueryData(posKeys.sale(SALE.id))).toEqual(SALE);
+
+    act(() => {
+      authenticatePos({ tenantId: POS_SCOPE.tenantId, userId: "another-cashier" });
+      queryClient.clear();
+    });
+    expect(queryClient.getQueryData(posKeys.sale(SALE.id))).toBeUndefined();
+    await act(async () => {
+      resolveCheckout(checkoutResult(payload.operation_id));
+      await response;
+    });
+
+    expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(posKeys.sale(SALE.id))).toBeUndefined();
+    expect(
+      queryClient.getQueryCache().find({ queryKey: posKeys.sale(SALE.id), exact: true }),
+    ).toBeUndefined();
+    expect(loadPendingCheckoutOperation(SALE.id, REG)).toEqual(pending);
+    expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).toBe(ownerDraft);
+    expect(JSON.parse(ownerDraft ?? "{}").status).not.toBe("completed");
     expect(checkoutSale).toHaveBeenCalledTimes(1);
   });
 
@@ -832,7 +886,7 @@ describe("SaleArea atomic checkout", () => {
 
     fireEvent.keyDown(window, { key: "F2" });
     expect(screen.getByRole("dialog", { name: "Начать новую продажу" })).toBeInTheDocument();
-    expect(window.localStorage.getItem(draftKey(REG))).not.toBeNull();
+    expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).not.toBeNull();
 
     fireEvent.click(
       within(screen.getByRole("dialog", { name: "Начать новую продажу" })).getByRole("button", {
@@ -845,7 +899,7 @@ describe("SaleArea atomic checkout", () => {
         screen.queryByRole("dialog", { name: "Начать новую продажу" }),
       ).not.toBeInTheDocument();
     });
-    expect(window.localStorage.getItem(draftKey(REG))).toBeNull();
+    expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).toBeNull();
   });
 
   it("does not open the cash drawer for a card checkout", async () => {
@@ -1133,9 +1187,11 @@ describe("SaleArea atomic checkout", () => {
     ).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "F2" });
     expect(loadPendingCheckoutOperation(SALE.id, REG)).toEqual(operation);
-    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
-      saleId: SALE.id,
-    });
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG, POS_SCOPE)) ?? "{}")).toMatchObject(
+      {
+        saleId: SALE.id,
+      },
+    );
   });
 
   it("retries an ambiguous checkout with the same operation id after a temporary 404", async () => {
@@ -1167,6 +1223,47 @@ describe("SaleArea atomic checkout", () => {
     expect(retriedPayload.operation_id).toBe(firstPayload.operation_id);
     expect(await screen.findByText(/Чек № R-atomic оформлен/i)).toBeInTheDocument();
     expect(loadPendingCheckoutOperation(SALE.id, REG)).toBeNull();
+  });
+
+  it("does not replay checkout when a deferred recovery returns 404 after the cashier changes", async () => {
+    let rejectRecovery: (reason: unknown) => void = () => undefined;
+    const recoveryResponse = new Promise<ReturnType<typeof checkoutResult>>((_resolve, reject) => {
+      rejectRecovery = reject;
+    });
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    checkoutSale.mockRejectedValue(new Error("response lost"));
+    getCheckoutResult
+      .mockRejectedValueOnce(apiError(404, "not committed yet"))
+      .mockReturnValueOnce(recoveryResponse);
+
+    renderArea();
+    await stageCashPayment();
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+    await waitFor(() => expect(getCheckoutResult).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Завершить продажу/i })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+    await waitFor(() => expect(getCheckoutResult).toHaveBeenCalledTimes(2));
+    const payload = checkoutSale.mock.calls[0]?.[0] as CheckoutPayload;
+    const pending = loadPendingCheckoutOperation(SALE.id, REG);
+    const ownerDraft = window.localStorage.getItem(draftKey(REG, POS_SCOPE));
+    expect(pending?.operationId).toBe(payload.operation_id);
+    expect(getCheckoutResult).toHaveBeenLastCalledWith(payload.operation_id);
+
+    act(() => {
+      authenticatePos({ tenantId: POS_SCOPE.tenantId, userId: "another-cashier" });
+    });
+    await act(async () => {
+      rejectRecovery(apiError(404, "not committed yet"));
+      await recoveryResponse.catch(() => undefined);
+    });
+
+    expect(checkoutSale).toHaveBeenCalledTimes(1);
+    expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
+    expect(loadPendingCheckoutOperation(SALE.id, REG)).toEqual(pending);
+    expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).toBe(ownerDraft);
   });
 
   it("clears the operation marker after a definite server rejection", async () => {
@@ -1217,15 +1314,17 @@ describe("SaleArea atomic checkout", () => {
       await screen.findByText(/Сервер отклонил продажу после подтверждения карты/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Завершить продажу/i })).toBeDisabled();
-    expect(JSON.parse(window.localStorage.getItem(draftKey(REG)) ?? "{}")).toMatchObject({
-      externalPaymentReviewRequired: true,
-      stagedPayments: [
-        {
-          payment_method: "card",
-          payment_attempt_id: "30000000-0000-4000-8000-000000000001",
-        },
-      ],
-    });
+    expect(JSON.parse(window.localStorage.getItem(draftKey(REG, POS_SCOPE)) ?? "{}")).toMatchObject(
+      {
+        externalPaymentReviewRequired: true,
+        stagedPayments: [
+          {
+            payment_method: "card",
+            payment_attempt_id: "30000000-0000-4000-8000-000000000001",
+          },
+        ],
+      },
+    );
 
     expect(
       screen.queryByRole("button", { name: /Удалить введённую оплату/i }),

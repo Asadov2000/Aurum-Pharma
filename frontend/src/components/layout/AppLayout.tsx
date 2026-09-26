@@ -14,7 +14,6 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Button } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
-import { SupportAccessBanner } from "@/features/supportAccess/SupportAccessBanner";
 import { useUserPreferencesQuery } from "@/features/settings/queries";
 import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
 
@@ -42,6 +41,10 @@ import { type AppRoutePath } from "./routeAccess";
 const AppearanceMenu = lazy(async () => {
   const module = await import("@/components/AppearanceMenu");
   return { default: module.AppearanceMenu };
+});
+const SupportAccessBanner = lazy(async () => {
+  const module = await import("@/features/supportAccess/SupportAccessBanner");
+  return { default: module.SupportAccessBanner };
 });
 
 const AccountSecuritySurface = lazy(() => import("@/features/auth/AccountSecuritySurface"));
@@ -405,7 +408,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       </header>
 
       <div className="lg:pl-[var(--app-sidebar-width)]">
-        <SupportAccessBanner />
+        {user?.support_access ? (
+          <Suspense fallback={<p role="status">Загружаем данные доступа поддержки…</p>}>
+            <SupportAccessBanner />
+          </Suspense>
+        ) : null}
         <ConnectivityStatusBanner />
         <PwaUpdateBanner />
       </div>

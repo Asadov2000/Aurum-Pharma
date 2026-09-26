@@ -1,3 +1,4 @@
+import { authenticatePos, POS_SCOPE } from "./posIdentityFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { draftKey, loadDraft } from "@/features/pos/draftStorage";
@@ -8,7 +9,10 @@ import {
 } from "@/features/pos/paymentOperation";
 
 describe("pending POS payment operation", () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    authenticatePos();
+  });
 
   it("persists one UUIDv4 operation and clears only the matching operation", () => {
     const operation = createPendingPaymentOperation("sale-1", "cash", "50.00");
@@ -38,7 +42,7 @@ describe("pending POS payment operation", () => {
 
   it("keeps an expired draft while a payment result is unresolved", () => {
     window.localStorage.setItem(
-      draftKey("register-1"),
+      draftKey("register-1", POS_SCOPE),
       JSON.stringify({ saleId: "sale-1", nameById: {}, savedAt: 0 }),
     );
     const operation = createPendingPaymentOperation("sale-1", "card", "20.00", {

@@ -32,6 +32,23 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 }));
 
+// Token rotation retains the session; identity changes and logout invalidate work
+// started under its previous authority, including a new login by the same user.
+let sessionGeneration = 0;
+useAuthStore.subscribe((state, previous) => {
+  if (
+    state.user?.id !== previous.user?.id ||
+    state.user?.active_tenant_id !== previous.user?.active_tenant_id ||
+    (previous.accessToken !== null && state.accessToken === null)
+  ) {
+    sessionGeneration += 1;
+  }
+});
+
+export function getAuthSessionGeneration(): number {
+  return sessionGeneration;
+}
+
 export function getAccessToken(): string | null {
   return useAuthStore.getState().accessToken;
 }

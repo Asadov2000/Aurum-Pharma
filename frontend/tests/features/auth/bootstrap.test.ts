@@ -47,13 +47,11 @@ describe("auth bootstrap refresh", () => {
   });
 
   it("retries a temporary server failure without changing the operation", async () => {
-    authApi.refreshTokensRequest
-      .mockRejectedValueOnce(responseError(503))
-      .mockResolvedValueOnce({
-        access_token: "recovered-access",
-        token_type: "bearer",
-        expires_in: 900,
-      });
+    authApi.refreshTokensRequest.mockRejectedValueOnce(responseError(503)).mockResolvedValueOnce({
+      access_token: "recovered-access",
+      token_type: "bearer",
+      expires_in: 900,
+    });
 
     await refreshSessionFromCookie([0, 0]);
 
@@ -68,9 +66,7 @@ describe("auth bootstrap refresh", () => {
       token_type: "bearer",
       expires_in: 900,
     });
-    authApi.refreshTokensRequest.mockRejectedValue(
-      new AxiosError("Network Error", "ERR_NETWORK"),
-    );
+    authApi.refreshTokensRequest.mockRejectedValue(new AxiosError("Network Error", "ERR_NETWORK"));
 
     await expect(refreshSessionFromCookie([0])).rejects.toThrow("Network Error");
 
@@ -83,5 +79,66 @@ describe("auth bootstrap refresh", () => {
 
     await expect(refreshSessionFromCookie([0, 0])).resolves.toBeNull();
     expect(authApi.refreshTokensRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["success", "network failure", "auth failure"])(
+    "does not update the new session or retry a stale refresh %s",
+    async (outcome) => {
+      useAuthStore
+        .getState()
+        .setTokens({ access_token: "old-access", token_type: "bearer", expires_in: 900 });
+      let resolveRefresh!: (value: unknown) => void;
+      let rejectRefresh!: (error: unknown) => void;
+      authApi.refreshTokensRequest.mockImplementation(
+        () =>
+          new Promise((resolve, reject) => {
+            resolveRefresh = resolve;
+            rejectRefresh = reject;
+          }),
+      );
+      const rejection = expect(refreshSessionFromCookie([0, 0])).rejects.toMatchObject({
+        code: "ERR_CANCELED",
+      });
+      useAuthStore.getState().clear();
+      useAuthStore
+        .getState()
+        .setTokens({ access_token: "new-login-access", token_type: "bearer", expires_in: 900 });
+      if (outcome === "success") {
+        resolveRefresh({
+          access_token: "stale-refresh-access",
+          token_type: "bearer",
+          expires_in: 900,
+        });
+      } else {
+        rejectRefresh(
+          outcome === "auth failure"
+            ? responseError(401)
+            : new AxiosError("offline", "ERR_NETWORK"),
+        );
+      }
+      await rejection;
+      expect(useAuthStore.getState().accessToken).toBe("new-login-access");
+      expect(authApi.refreshTokensRequest).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("does not issue a delayed refresh retry after logout", async () => {
+    vi.useFakeTimers();
+    try {
+      useAuthStore
+        .getState()
+        .setTokens({ access_token: "old-access", token_type: "bearer", expires_in: 900 });
+      authApi.refreshTokensRequest.mockRejectedValueOnce(responseError(503));
+      const rejection = expect(refreshSessionFromCookie([0, 300])).rejects.toMatchObject({
+        code: "ERR_CANCELED",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      useAuthStore.getState().clear();
+      await vi.advanceTimersByTimeAsync(300);
+      await rejection;
+      expect(authApi.refreshTokensRequest).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

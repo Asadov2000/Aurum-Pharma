@@ -19,6 +19,11 @@ import {
   type PendingPosCommand,
 } from "./commandOperation";
 import { posKeys } from "./queries";
+import {
+  capturePosSessionGuard,
+  currentPosStorageScope,
+  type PosStorageScope,
+} from "./posStorageScope";
 import { type PosCommandResult, type SaleDetails } from "./types";
 
 type CommandPhase = "idle" | "working" | "retry" | "collision" | "expired";
@@ -36,6 +41,7 @@ interface CommandRunResult {
 
 interface UsePosCommandResilienceOptions {
   registerId: string;
+  scope?: PosStorageScope;
   onApplied: (applied: AppliedPosCommand) => void;
 }
 
@@ -144,12 +150,17 @@ async function sendCommand(command: PendingPosCommand): Promise<unknown> {
 
 export function usePosCommandResilience({
   registerId,
+  scope,
   onApplied,
 }: UsePosCommandResilienceOptions): PosCommandResilience {
   const queryClient = useQueryClient();
+  const [storageScope] = useState(() => scope ?? currentPosStorageScope());
+  const [sessionIsActive] = useState(() =>
+    storageScope ? capturePosSessionGuard(storageScope) : () => false,
+  );
   const initialCommandRef = useRef<PendingPosCommand | null>(null);
   if (initialCommandRef.current === null) {
-    initialCommandRef.current = loadPendingPosCommand(registerId);
+    initialCommandRef.current = loadPendingPosCommand(registerId, storageScope);
   }
   const [pending, setPending] = useState<PendingPosCommand | null>(initialCommandRef.current);
   const [phase, setPhase] = useState<CommandPhase>(pending ? "working" : "idle");
@@ -162,6 +173,7 @@ export function usePosCommandResilience({
 
   const markResolved = useCallback(
     async (command: PendingPosCommand, result: unknown): Promise<AppliedPosCommand | null> => {
+      if (!sessionIsActive()) return null;
       if (!savedResultMatches(command, result)) {
         setPhase("collision");
         return null;
@@ -172,7 +184,13 @@ export function usePosCommandResilience({
         return null;
       }
       const canonical = await getSale(saleId);
-      if (canonical.id !== saleId || canonical.register_id !== command.registerId) {
+      if (!sessionIsActive()) return null;
+      if (
+        canonical.id !== saleId ||
+        canonical.register_id !== command.registerId ||
+        canonical.tenant_id !== storageScope?.tenantId ||
+        canonical.cashier_user_id !== storageScope.userId
+      ) {
         setPhase("collision");
         return null;
       }
@@ -186,7 +204,7 @@ export function usePosCommandResilience({
       queryClient.setQueryData(posKeys.sale(saleId), canonical);
       const applied = { command, result, sale: canonical };
       onAppliedRef.current(applied);
-      if (!clearPendingPosCommand(registerId, command.operationId)) {
+      if (!clearPendingPosCommand(registerId, command.operationId, storageScope)) {
         setPhase("retry");
         return null;
       }
@@ -195,19 +213,21 @@ export function usePosCommandResilience({
       setPhase("idle");
       return applied;
     },
-    [queryClient, registerId],
+    [queryClient, registerId, sessionIsActive, storageScope],
   );
 
   const reconcile = useCallback(
     async (command: PendingPosCommand, allowReplay: boolean): Promise<CommandRunResult> => {
-      if (runningRef.current) return { applied: null };
+      if (runningRef.current || !sessionIsActive()) return { applied: null };
       runningRef.current = true;
       setPhase("working");
       try {
         let stored: PosCommandResult;
         try {
           stored = await getPosCommandResult(command.operationId);
+          if (!sessionIsActive()) return { applied: null };
         } catch (error) {
+          if (!sessionIsActive()) return { applied: null };
           if (!isNotFound(error)) {
             setPhase("retry");
             return { applied: null };
@@ -219,13 +239,15 @@ export function usePosCommandResilience({
           let replayResult: unknown;
           try {
             replayResult = await sendCommand(command);
+            if (!sessionIsActive()) return { applied: null };
           } catch (replayError) {
+            if (!sessionIsActive()) return { applied: null };
             if (isCollision(replayError)) {
               setPhase("collision");
               return { applied: null };
             }
             if (isDefiniteBusinessRejection(replayError)) {
-              clearPendingPosCommand(registerId, command.operationId);
+              clearPendingPosCommand(registerId, command.operationId, storageScope);
               pendingRef.current = null;
               setPending(null);
               setPhase("idle");
@@ -254,13 +276,13 @@ export function usePosCommandResilience({
         runningRef.current = false;
       }
     },
-    [markResolved, registerId],
+    [markResolved, registerId, sessionIsActive, storageScope],
   );
 
   const begin = useCallback(
     async (input: NewPosCommand): Promise<CommandRunResult> => {
-      if (pendingRef.current || runningRef.current) return { applied: null };
-      const command = createPendingPosCommand(input);
+      if (pendingRef.current || runningRef.current || !sessionIsActive()) return { applied: null };
+      const command = createPendingPosCommand(input, storageScope);
       if (!command) {
         setPhase("idle");
         return {
@@ -275,14 +297,16 @@ export function usePosCommandResilience({
       let result: unknown;
       try {
         result = await sendCommand(command);
+        if (!sessionIsActive()) return { applied: null };
       } catch (error) {
+        if (!sessionIsActive()) return { applied: null };
         if (isCollision(error)) {
           runningRef.current = false;
           setPhase("collision");
           return { applied: null };
         }
         if (isDefiniteBusinessRejection(error)) {
-          clearPendingPosCommand(registerId, command.operationId);
+          clearPendingPosCommand(registerId, command.operationId, storageScope);
           pendingRef.current = null;
           setPending(null);
           setPhase("idle");
@@ -301,7 +325,7 @@ export function usePosCommandResilience({
         runningRef.current = false;
       }
     },
-    [markResolved, reconcile, registerId],
+    [markResolved, reconcile, registerId, sessionIsActive, storageScope],
   );
 
   const retry = useCallback(async (): Promise<void> => {

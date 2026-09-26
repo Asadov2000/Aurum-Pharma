@@ -1,3 +1,4 @@
+import { authenticatePos } from "./posIdentityFixture";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { type PropsWithChildren } from "react";
@@ -97,6 +98,7 @@ function setup() {
 
 describe("usePosCommandResilience", () => {
   beforeEach(() => {
+    authenticatePos({ tenantId: "tenant-1", userId: "user-1" });
     window.localStorage.clear();
     Object.values(apiMocks).forEach((mock) => mock.mockReset());
     apiMocks.getSale.mockResolvedValue(SALE);

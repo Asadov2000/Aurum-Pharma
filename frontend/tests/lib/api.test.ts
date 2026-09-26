@@ -11,8 +11,52 @@ import {
   withoutStepUp,
 } from "@/lib/api";
 import { useSupportAccessStore } from "@/stores/supportAccess";
+import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
 
 const defaultAdapter = api.defaults.adapter;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+function authenticate(userId: string, tenantId = "tenant-1"): void {
+  useAuthStore.getState().setUser({
+    id: userId,
+    active_tenant_id: tenantId,
+    home_tenant_id: tenantId,
+    email: "cashier@example.test",
+    full_name: "Кассир",
+    is_developer: false,
+    is_administrator: false,
+    status: "active",
+    last_login_at: null,
+    level: 1,
+    is_tenant_owner: false,
+    branch_assignments: {},
+    permissions: ["pos.sell"],
+    platform_capabilities: [],
+    support_access: null,
+  });
+  useAuthStore.getState().setTokens({
+    access_token: `access-${userId}`,
+    token_type: "bearer",
+    expires_in: 900,
+  });
+}
+
+function apiError(config: InternalAxiosRequestConfig, status: number, reason?: string): AxiosError {
+  return new AxiosError("Request failed", "ERR_BAD_RESPONSE", config, undefined, {
+    data: { error: { details: { reason } } },
+    status,
+    statusText: "Rejected",
+    headers: {},
+    config,
+  });
+}
 
 afterEach(() => {
   api.defaults.adapter = defaultAdapter;
@@ -23,6 +67,152 @@ afterEach(() => {
     onAuthFailure: () => {},
   });
   useSupportAccessStore.getState().clear();
+  useAuthStore.getState().clear();
+});
+
+describe("HTTP session isolation", () => {
+  it("retains the generation during token rotation", () => {
+    authenticate("cashier-1");
+    const generation = getAuthSessionGeneration();
+    useAuthStore.getState().setTokens({
+      access_token: "rotated-access",
+      token_type: "bearer",
+      expires_in: 900,
+    });
+    expect(getAuthSessionGeneration()).toBe(generation);
+  });
+
+  describe.each([
+    ["another user", () => authenticate("cashier-2")],
+    ["another tenant", () => authenticate("cashier-1", "tenant-2")],
+    [
+      "logout and login by the same user",
+      () => {
+        useAuthStore.getState().clear();
+        authenticate("cashier-1");
+      },
+    ],
+  ])("after %s", (_label, changeSession) => {
+    it.each([
+      [401, undefined],
+      [403, "password_step_up_required"],
+      [403, "support_access_inactive"],
+    ])("does not retry or clear current auth for a late %s %s", async (status, reason) => {
+      authenticate("cashier-1");
+      const started = deferred<void>();
+      const release = deferred<void>();
+      const refreshTokens = vi.fn(async () => "refreshed-access");
+      const requestMfaStepUp = vi.fn(async () => "confirmed-access");
+      const onAuthFailure = vi.fn();
+      const onSupportAccessFailure = vi.fn();
+      configureAuthHooks({
+        getAccessToken: () => useAuthStore.getState().accessToken,
+        refreshTokens,
+        requestMfaStepUp,
+        onAuthFailure,
+        onSupportAccessFailure,
+      });
+      const adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
+        started.resolve();
+        await release.promise;
+        throw apiError(config, status, reason);
+      });
+      api.defaults.adapter = adapter;
+      const rejection = expect(api.post("/sales", { register_id: "register-1" })).rejects.toThrow(
+        "Request failed",
+      );
+      await started.promise;
+      changeSession();
+      release.resolve();
+      await rejection;
+      expect(adapter).toHaveBeenCalledTimes(1);
+      expect(refreshTokens).not.toHaveBeenCalled();
+      expect(requestMfaStepUp).not.toHaveBeenCalled();
+      expect(onAuthFailure).not.toHaveBeenCalled();
+      expect(onSupportAccessFailure).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([
+    ["refresh", 401, undefined],
+    ["step-up", 403, "password_step_up_required"],
+  ])("does not replay when the session changes during %s", async (_label, status, reason) => {
+    authenticate("cashier-1");
+    const started = deferred<void>();
+    const proof = deferred<string | null>();
+    const requestProof = vi.fn(() => {
+      started.resolve();
+      return proof.promise;
+    });
+    const onAuthFailure = vi.fn();
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens: requestProof,
+      requestMfaStepUp: requestProof,
+      onAuthFailure,
+    });
+    const adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
+      throw apiError(config, status, reason);
+    });
+    api.defaults.adapter = adapter;
+    const rejection = expect(api.post("/sales", {})).rejects.toThrow("Request failed");
+    await started.promise;
+    useAuthStore.getState().clear();
+    authenticate("cashier-1");
+    proof.resolve("old-confirmed-access");
+    await rejection;
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(onAuthFailure).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["refresh", refreshAccessToken],
+    ["step-up", requestStepUpAccessToken],
+  ])("keeps in-flight %s ownership separate across sessions", async (_label, requestToken) => {
+    authenticate("cashier-1");
+    const oldProof = deferred<string | null>();
+    const newProof = deferred<string | null>();
+    const requestProof = vi
+      .fn()
+      .mockImplementationOnce(() => oldProof.promise)
+      .mockImplementationOnce(() => newProof.promise);
+    const onAuthFailure = vi.fn();
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens: requestProof,
+      requestMfaStepUp: requestProof,
+      onAuthFailure,
+    });
+    const oldRequest = requestToken();
+    authenticate("cashier-2");
+    const newRequest = requestToken();
+    oldProof.resolve(null);
+    await expect(oldRequest).resolves.toBeNull();
+    const concurrentNewRequest = requestToken();
+    expect(concurrentNewRequest).toBe(newRequest);
+    expect(requestProof).toHaveBeenCalledTimes(2);
+    newProof.resolve("new-confirmed-access");
+    await expect(newRequest).resolves.toBe("new-confirmed-access");
+    expect(onAuthFailure).not.toHaveBeenCalled();
+  });
+
+  it("rejects a late successful response before it can repopulate current caches", async () => {
+    authenticate("cashier-1");
+    const started = deferred<void>();
+    const release = deferred<void>();
+    api.defaults.adapter = async (config: InternalAxiosRequestConfig) => {
+      started.resolve();
+      await release.promise;
+      return { data: { sale_id: "old-sale" }, status: 200, statusText: "OK", headers: {}, config };
+    };
+    const rejection = expect(api.get("/sales/old-sale")).rejects.toMatchObject({
+      code: "ERR_CANCELED",
+    });
+    await started.promise;
+    authenticate("cashier-2");
+    release.resolve();
+    await rejection;
+  });
 });
 
 describe("resolveApiBaseUrl", () => {
