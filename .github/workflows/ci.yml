@@ -1949,6 +1949,12 @@ jobs:
       - name: Test desktop core
         run: dotnet test desktop/AurumPharma.Desktop.Core.Tests/AurumPharma.Desktop.Core.Tests.csproj --configuration Release --runtime win-x64 --no-restore
 
+      - name: Restore read-only TPM probe
+        run: dotnet restore desktop/AurumPharma.Desktop.TpmProbe/AurumPharma.Desktop.TpmProbe.csproj --runtime win-x64 --locked-mode
+
+      - name: Build read-only TPM probe
+        run: dotnet build desktop/AurumPharma.Desktop.TpmProbe/AurumPharma.Desktop.TpmProbe.csproj --configuration Release --runtime win-x64 --no-restore
+
       - name: Restore Windows host
         run: dotnet restore desktop/AurumPharma.Desktop/AurumPharma.Desktop.csproj --runtime win-x64 --locked-mode -p:PublishReadyToRun=true
 
