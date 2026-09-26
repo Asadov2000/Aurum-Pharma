@@ -117,4 +117,47 @@ describe("theme transition", () => {
     await Promise.resolve();
     expect(document.documentElement).not.toHaveClass("theme-slant-transition");
   });
+
+  it.each([
+    { originX: 30, edgeX: window.innerWidth - 12, y: 80 },
+    { originX: 30, edgeX: window.innerWidth - 12, y: window.innerHeight - 80 },
+    { originX: window.innerWidth - 30, edgeX: 12, y: 80 },
+    { originX: window.innerWidth - 30, edgeX: 12, y: window.innerHeight - 80 },
+  ])(
+    "finishes an off-centre swipe without waiting for the timer: $originX / $y",
+    async ({ originX, edgeX, y }) => {
+      let finish!: () => void;
+      const finished = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const skip = vi.fn(() => finish());
+      Object.defineProperty(document, "startViewTransition", {
+        configurable: true,
+        value: (update: () => void) => {
+          update();
+          return { ready: Promise.resolve(), finished, skipTransition: skip };
+        },
+      });
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(performance, "now").mockReturnValue(1000);
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+      vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: originX, clientY: y }));
+      setThemePreferenceWithTransition("dark");
+      await Promise.resolve();
+
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: edgeX, clientY: y }));
+      frames.shift()?.(1100);
+      expect(skip).not.toHaveBeenCalled();
+      frames.shift()?.(1280);
+      expect(skip).toHaveBeenCalledOnce();
+      await finished;
+      await Promise.resolve();
+      expect(document.documentElement).not.toHaveClass("theme-slant-transition");
+      expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    },
+  );
 });
