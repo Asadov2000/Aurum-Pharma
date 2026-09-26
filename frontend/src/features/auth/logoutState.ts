@@ -1,3 +1,5 @@
+import { generateUuidV4 } from "./refreshOperation";
+
 export interface LogoutState {
   id: string;
   phase: "pending" | "confirmed" | "signed-in";
@@ -259,7 +261,7 @@ function notifyChange(): void {
 
 export function beginLogout(operationId: string | null): LogoutState {
   const state: LogoutState = {
-    id: crypto.randomUUID(),
+    id: generateUuidV4(),
     phase: "pending",
     operationId: isUuid(operationId) ? operationId : null,
   };
@@ -287,7 +289,7 @@ export function markExplicitLogin(
     return false;
   }
   const state: ExplicitSignIn = {
-    id: crypto.randomUUID(),
+    id: generateUuidV4(),
     acknowledgedLogoutId: snapshot.logoutId,
   };
   if (!persist(SIGN_IN_KEY, state)) {

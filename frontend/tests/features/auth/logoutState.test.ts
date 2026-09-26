@@ -41,6 +41,16 @@ afterEach(() => {
 });
 
 describe("auth/logoutState", () => {
+  it("closes access even when randomUUID is unavailable in the browser context", async () => {
+    vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    const state = await loadState();
+    const intent = state.beginLogout(null);
+    expect(intent.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(state.isSessionRestorationBlocked()).toBe(true);
+  });
+
   it("allows reliable absence and probes persistence only once per page", async () => {
     const state = await loadState();
     const write = vi.spyOn(Storage.prototype, "setItem");

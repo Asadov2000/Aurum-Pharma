@@ -22,8 +22,12 @@ export function installLogoutSynchronization(): void {
 
 export function logoutLocally(): Promise<void> {
   if (pending) return pending;
-  beginLogout(getPendingRefreshOperationId());
-  clearClientSession();
+  const operationId = getPendingRefreshOperationId();
+  try {
+    beginLogout(operationId);
+  } finally {
+    clearClientSession();
+  }
   // A failure leaves a durable pending intent; never reopen the old session.
   const attempt = completePendingLogout().catch(() => undefined);
   const completion = attempt.finally(() => {

@@ -11,7 +11,7 @@ function safeSessionStorage(): Storage | null {
   }
 }
 
-function generateUuidV4(): string {
+export function generateUuidV4(): string {
   if (typeof globalThis.crypto.randomUUID === "function") {
     return globalThis.crypto.randomUUID();
   }
