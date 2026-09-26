@@ -45,6 +45,7 @@
 | Почта/пароль, SMS-вход и контакты | `backend/app/domains/auth/`, `frontend/src/features/auth/`; [ADR-0042](adr/0042-account-login-identities.md), [Payom](runbooks/payom-sms.md) | auth pytest, Vitest, `frontend/e2e/login-identities.spec.ts`; реальные SMS проверяются отдельно |
 | RLS и инварианты БД | модели, миграции, PostgreSQL triggers | `backend/tests/isolation/` |
 | Контракт и алгоритм автономного входа v1 | [offline-auth-lease-v1.md](offline-auth-lease-v1.md), `backend/app/domains/sync/offline_auth_lease.py`, доверенное состояние в `offline_auth_lease_state.py`, модели lease в `schemas.py`; runtime запрещает вход | `backend/tests/domains/sync/test_offline_auth_lease_v1.py`, `test_offline_auth_lease_pipeline_v1.py`, V0-регрессии |
+| Локальный credential и TPM protector | [offline-local-credentials-v1.md](offline-local-credentials-v1.md), `backend/app/domains/sync/local_credentials.py`, `desktop/AurumPharma.Desktop.Core/Security/`; не подключены к runtime | `test_local_credentials.py`, desktop protector tests; реальные TPM/service ACL и anti-rollback не приняты |
 | Backend core/middleware | `backend/app/core/`, `backend/app/middleware/` | `backend/tests/core/`, `backend/tests/middleware/` |
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |
 | Frontend-фича | `frontend/src/features/<domain>/` | `frontend/tests/features/<domain>/` |
