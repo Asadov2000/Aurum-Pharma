@@ -79,6 +79,10 @@ $empty = Get-Scope -Paths @()
 Assert-Equal -Actual $empty.risk -Expected "none" -Because "an explicit empty path set is safe"
 Assert-Count -Actual @($empty.paths) -Expected 0 -Because "an empty path set stays empty"
 
+$oneClickScope = Get-Scope -Paths @("Check-Aurum-Pharma.cmd")
+Assert-Equal -Actual $oneClickScope.risk -Expected "tooling" -Because "the root one-click verifier is classified as verification tooling"
+Assert-Equal -Actual $oneClickScope.verification.toolingSelfTest -Expected $true -Because "the root launcher keeps tooling self-tests mandatory"
+
 $docs = Get-Scope -Paths @("docs/adr/9999-example.md")
 Assert-Equal -Actual $docs.risk -Expected "docs" -Because "documentation does not run app tests"
 Assert-Equal -Actual $docs.verification.backendTests -Expected "none" -Because "docs skip backend"
@@ -439,6 +443,7 @@ Write-Output "FIXTURE_WEBSITE=$env:VITE_PUBLIC_WEBSITE_URL"
             [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_EXISTING", "inherited", "Process")
             [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", $null, "Process")
             foreach ($expectedExit in @(0, 17)) {
+                $originalLocation = (Get-Location).Path
                 $probe = 'if ($env:AURUM_VERIFY_ENV_EXISTING -ne "scoped" -or $env:AURUM_VERIFY_ENV_MISSING -ne "temporary") { exit 23 }; exit ' + $expectedExit
                 # Windows PowerShell 5.1 strips nested quotes in native -Command arguments.
                 $encodedProbe = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
@@ -447,13 +452,19 @@ Write-Output "FIXTURE_WEBSITE=$env:VITE_PUBLIC_WEBSITE_URL"
                     AURUM_VERIFY_ENV_MISSING = "temporary"
                 }
                 $caughtFailure = $false
+                $stepResult = $null
                 try {
-                    Invoke-LoggedStep -Step $environmentStep -LogDirectory $fixtureRoot -Number 1 -Total 1 *> $null
+                    $stepResult = Invoke-LoggedStep -Step $environmentStep -LogDirectory $fixtureRoot -Number 1 -Total 1 6> $null
                 }
                 catch {
                     $caughtFailure = $true
+                    $stepResult = $_.Exception.Data['StepResult']
                 }
                 Assert-Equal -Actual $caughtFailure -Expected ($expectedExit -ne 0) -Because "the environment fixture propagates its command result"
+                Assert-Equal -Actual ($null -ne $stepResult) -Expected $true -Because "success and failure both expose a structured step result"
+                Assert-Equal -Actual $stepResult.exitCode -Expected $expectedExit -Because "the step result preserves the native exit code"
+                Assert-Equal -Actual $stepResult.status -Expected $(if ($expectedExit -eq 0) { "passed" } else { "failed" }) -Because "the step result does not report failure as success"
+                Assert-Equal -Actual ((Get-Location).Path) -Expected $originalLocation -Because "the working directory is restored after success or failure"
                 Assert-Equal -Actual ([Environment]::GetEnvironmentVariable("AURUM_VERIFY_ENV_EXISTING", "Process")) -Expected "inherited" -Because "step environment is restored after success or failure"
                 Assert-Equal -Actual ([Environment]::GetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", "Process")) -Expected $null -Because "new environment keys do not leak into later checks"
             }
@@ -462,6 +473,130 @@ Write-Output "FIXTURE_WEBSITE=$env:VITE_PUBLIC_WEBSITE_URL"
             [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_EXISTING", $existingValue, "Process")
             [Environment]::SetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", $missingValue, "Process")
         }
+
+        function New-ReportFixtureStep {
+            param([string]$Id, [string]$Code)
+            # PS5.1 module autoload emits CLIXML progress on stderr. Suppress
+            # progress so our deliberate raw native stderr stays a valid stream.
+            $childCode = '$ProgressPreference = ''SilentlyContinue''; ' + $Code
+            $encodedCode = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childCode))
+            return New-Step -Id $Id -Name "Report fixture $Id" -WorkingDirectory $fixtureRoot -Command $powershellExecutable -Arguments @("-NoProfile", "-EncodedCommand", $encodedCode)
+        }
+
+        $summaryJson = Join-Path $fixtureRoot "summary.json"
+        $summaryMarkdown = Join-Path $fixtureRoot "summary.md"
+        $sentinelFile = Join-Path $fixtureRoot "unexpected-sentinel.txt"
+        $sentinelCode = '[IO.File]::WriteAllText(''' + $sentinelFile.Replace("'", "''") + ''', ''must not run''); exit 0'
+        $sentinelStep = New-ReportFixtureStep -Id "report-sentinel" -Code $sentinelCode
+        $passStep = New-ReportFixtureStep -Id "report-pass" -Code 'Write-Output "fixture passed"; exit 0'
+        $secondPassStep = New-ReportFixtureStep -Id "report-second-pass" -Code '$report = Get-Content -LiteralPath summary.json -Raw | ConvertFrom-Json; if ($report.status -ne "running" -or $report.steps[0].status -ne "passed" -or $report.steps[1].status -ne "running") { exit 29 }; [Console]::Error.WriteLine("STDERR_ZERO_42"); exit 0'
+
+        $successOutput = @(Invoke-VerificationSteps -Steps @($passStep, $secondPassStep) -LogDirectory $fixtureRoot -Mode Auto -Risk tooling *>&1)
+        $successReport = Get-Content -LiteralPath $summaryJson -Raw | ConvertFrom-Json
+        Assert-Equal -Actual $successReport.version -Expected 1 -Because "execution reports declare their schema version"
+        Assert-Equal -Actual $successReport.status -Expected "passed" -Because "the run passes only when every command succeeds"
+        Assert-Count -Actual @($successReport.steps) -Expected 2 -Because "the report retains every planned step"
+        foreach ($result in $successReport.steps) {
+            Assert-Equal -Actual $result.status -Expected "passed" -Because "both completed commands are successful"
+            Assert-Equal -Actual $result.exitCode -Expected 0 -Because "successful native commands retain exit zero"
+            Assert-Equal -Actual ($result.seconds -ge 0) -Expected $true -Because "elapsed time is recorded"
+            Assert-Equal -Actual (Test-Path -LiteralPath $result.log -PathType Leaf) -Expected $true -Because "each completed step links to an existing detailed log"
+        }
+        Assert-Equal -Actual (Test-Path -LiteralPath $summaryMarkdown -PathType Leaf) -Expected $true -Because "a readable report accompanies the JSON report"
+        Assert-Equal -Actual ((Get-Content -LiteralPath $successReport.steps[1].log -Raw).Contains("STDERR_ZERO_42")) -Expected $true -Because "native stderr with exit zero is logged without a false failure"
+
+        # These are deliberately synthetic values, never credentials from the environment.
+        $syntheticSecret = "fixture-sensitive-token-UNIQUE-DO-NOT-REPORT"
+        $noisyCode = '1..300 | ForEach-Object { Write-Output (''fixture-sensitive-token-UNIQUE-DO-NOT-REPORT '' + (''x'' * 300)) }; [Console]::Error.WriteLine(''fixture-private@example.invalid''); exit 17'
+        $failStep = New-ReportFixtureStep -Id "report-fail" -Code $noisyCode
+        $failureCaught = $false
+        $safeFailure = ""
+        $failureOutput = @(& {
+            try {
+                Invoke-VerificationSteps -Steps @($passStep, $failStep, $sentinelStep) -LogDirectory $fixtureRoot -Mode Auto -Risk tooling
+            }
+            catch {
+                Set-Variable -Name failureCaught -Value $true -Scope 1
+                Set-Variable -Name safeFailure -Value $_.Exception.Message -Scope 1
+            }
+        } *>&1)
+        Assert-Equal -Actual $failureCaught -Expected $true -Because "a failed run throws instead of returning a success signal"
+        $failureReport = Get-Content -LiteralPath $summaryJson -Raw | ConvertFrom-Json
+        Assert-Equal -Actual $failureReport.status -Expected "failed" -Because "one native failure fails the run"
+        Assert-Equal -Actual ($failureReport.steps.status -join ",") -Expected "passed,failed,not_run" -Because "the report distinguishes completed and unattempted checks"
+        Assert-Equal -Actual $failureReport.steps[1].exitCode -Expected 17 -Because "the summary keeps the failing process exit code"
+        Assert-Equal -Actual $failureReport.steps[1].reason -Expected "exit_code" -Because "failure reasons are safe structured categories"
+        Assert-Equal -Actual ($null -eq $failureReport.steps[2].exitCode) -Expected $true -Because "an unattempted command cannot claim exit zero"
+        Assert-Equal -Actual (Test-Path -LiteralPath $sentinelFile) -Expected $false -Because "later commands are not run after failure"
+        $compactText = (@($failureOutput) -join "`n") + $safeFailure + (Get-Content -LiteralPath $summaryJson -Raw) + (Get-Content -LiteralPath $summaryMarkdown -Raw)
+        Assert-Equal -Actual $compactText.Contains($syntheticSecret) -Expected $false -Because "raw log secrets never enter compact output or reports"
+        Assert-Equal -Actual $compactText.Contains("fixture-private@example.invalid") -Expected $false -Because "stderr private values never enter compact output or reports"
+        Assert-Equal -Actual ($compactText.Length -lt 16384) -Expected $true -Because "compact output remains bounded despite a large child log"
+        Assert-Equal -Actual ((Get-Content -LiteralPath $failureReport.steps[1].log -Raw).Contains($syntheticSecret)) -Expected $true -Because "the noisy fixture really produced detailed output"
+
+        $missingStep = New-Step -Id "report-missing" -Name "Missing command fixture" -WorkingDirectory $fixtureRoot -Command (Join-Path $fixtureRoot "missing-command.exe") -Arguments @("unused")
+        $missingCaught = $false
+        try {
+            Invoke-VerificationSteps -Steps @($passStep, $missingStep, $sentinelStep) -LogDirectory $fixtureRoot -Mode Auto -Risk tooling *> $null
+        }
+        catch { $missingCaught = $true }
+        $missingReport = Get-Content -LiteralPath $summaryJson -Raw | ConvertFrom-Json
+        Assert-Equal -Actual $missingCaught -Expected $true -Because "a missing executable cannot inherit the preceding exit zero"
+        Assert-Equal -Actual $missingReport.status -Expected "failed" -Because "command launch errors fail the run"
+        Assert-Equal -Actual $missingReport.steps[1].reason -Expected "command_error" -Because "command launch failure is distinct from native nonzero exit"
+        Assert-Equal -Actual $missingReport.steps[2].status -Expected "not_run" -Because "a missing command also stops later checks"
+
+        function Invoke-ReportFixtureSuccess {
+            param([string]$Marker)
+            Write-Output $Marker
+        }
+        $staleCodeProbe = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('exit 17'))
+        & $powershellExecutable -NoProfile -EncodedCommand $staleCodeProbe
+        $helperStep = New-Step -Id "report-helper" -Name "PowerShell helper fixture" -WorkingDirectory $fixtureRoot -Command "Invoke-ReportFixtureSuccess" -Arguments @("fixture helper passed")
+        $helperResult = Invoke-LoggedStep -Step $helperStep -LogDirectory $fixtureRoot -Number 1 -Total 1 6> $null
+        Assert-Equal -Actual $helperResult.status -Expected "passed" -Because "a successful PowerShell helper does not inherit an earlier native exit 17"
+        Assert-Equal -Actual $helperResult.exitCode -Expected 0 -Because "a successful helper has its own successful result"
+
+        $priorGlobalExit = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        try {
+            Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+            $coldStep = New-Step -Id "report-cold" -Name "First command fixture" -WorkingDirectory $fixtureRoot -Command "Invoke-ReportFixtureSuccess" -Arguments @("cold helper passed")
+            $coldResult = Invoke-LoggedStep -Step $coldStep -LogDirectory $fixtureRoot -Number 1 -Total 1 6> $null
+            Assert-Equal -Actual $coldResult.status -Expected "passed" -Because "strict mode permits execution before any native exit code exists"
+            Assert-Equal -Actual ($null -eq (Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue)) -Expected $true -Because "a previously absent global exit code remains absent"
+        }
+        finally {
+            if ($null -eq $priorGlobalExit) {
+                Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+            }
+            else {
+                Set-Variable -Name LASTEXITCODE -Scope Global -Value $priorGlobalExit.Value
+            }
+        }
+
+        function Invoke-ReportFixtureCancelled {
+            param([string]$Marker)
+            throw (New-Object System.OperationCanceledException($Marker))
+        }
+        $cancelledStep = New-Step -Id "report-cancelled" -Name "Interrupted fixture" -WorkingDirectory $fixtureRoot -Command "Invoke-ReportFixtureCancelled" -Arguments @($syntheticSecret) -Environment @{ AURUM_VERIFY_ENV_MISSING = "temporary" }
+        $cancelledLocation = (Get-Location).Path
+        $cancelledEnvironment = [Environment]::GetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", "Process")
+        $cancelledCaught = $false
+        try {
+            Invoke-VerificationSteps -Steps @($passStep, $cancelledStep, $sentinelStep) -LogDirectory $fixtureRoot -Mode Auto -Risk tooling *> $null
+        }
+        catch {
+            $cancelledCaught = $true
+            Assert-Equal -Actual $_.Exception.Message.Contains($syntheticSecret) -Expected $false -Because "cancellation does not echo exception payloads"
+        }
+        $cancelledReport = Get-Content -LiteralPath $summaryJson -Raw | ConvertFrom-Json
+        Assert-Equal -Actual $cancelledCaught -Expected $true -Because "interruption propagates a non-success signal"
+        Assert-Equal -Actual $cancelledReport.status -Expected "interrupted" -Because "an interrupted run is not marked passed or complete"
+        Assert-Equal -Actual ($cancelledReport.steps.status -join ",") -Expected "passed,interrupted,not_run" -Because "interruption preserves the completed prefix and pending suffix"
+        Assert-Equal -Actual $cancelledReport.steps[1].reason -Expected "interrupted" -Because "cancellation uses the allowed interruption reason"
+        Assert-Equal -Actual ((Get-Location).Path) -Expected $cancelledLocation -Because "interruption restores the working directory"
+        Assert-Equal -Actual ([Environment]::GetEnvironmentVariable("AURUM_VERIFY_ENV_MISSING", "Process")) -Expected $cancelledEnvironment -Because "interruption restores the process environment"
+        Assert-Equal -Actual (Test-Path -LiteralPath $sentinelFile) -Expected $false -Because "interruption never runs a subsequent command"
     }
 
     $whitespaceArguments = @("-NoProfile")
@@ -506,6 +641,14 @@ finally {
         [IO.File]::Delete((Join-Path $resolvedFixtureRoot "bad.txt"))
         [IO.File]::Delete((Join-Path $resolvedFixtureRoot "01-environment-0.log"))
         [IO.File]::Delete((Join-Path $resolvedFixtureRoot "01-environment-17.log"))
+        foreach ($reportFixture in @(
+            "summary.json", "summary.md", "unexpected-sentinel.txt",
+            "01-report-pass.log", "02-report-second-pass.log", "02-report-fail.log",
+            "02-report-missing.log", "01-report-helper.log", "01-report-cold.log", "02-report-cancelled.log",
+            "03-report-sentinel.log"
+        )) {
+            [IO.File]::Delete((Join-Path $resolvedFixtureRoot $reportFixture))
+        }
         [IO.Directory]::Delete($resolvedFixtureRoot, $false)
     }
 }

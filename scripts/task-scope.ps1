@@ -201,6 +201,7 @@ $documentationPatterns = @(
     '\.md$'
 )
 $toolingPatterns = @(
+    '^Check-Aurum-Pharma\.cmd$',
     '^scripts/task-scope\.ps1$',
     '^scripts/verify-change\.ps1$',
     '^scripts/test-verification-tools\.ps1$',

@@ -107,6 +107,10 @@ function Invoke-LoggedStep {
     Write-Host ("[{0}/{1}] {2}" -f $Number, $Total, $Step.name)
 
     $previousEnvironment = @{}
+    $previousExitVariable = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    $previousExitCode = if ($null -ne $previousExitVariable) { $previousExitVariable.Value } else { $null }
+    $exitCode = 1
+    $reason = "command_error"
     Push-Location $Step.cwd
     try {
         foreach ($entry in $Step.environment.GetEnumerator()) {
@@ -115,17 +119,33 @@ function Invoke-LoggedStep {
         }
         $arguments = @($Step.arguments)
         $previousPreference = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
+        $ErrorActionPreference = "Stop"
         try {
-            & $Step.command @arguments *> $logPath
-            $exitCode = $LASTEXITCODE
-            if ($null -eq $exitCode) {
-                $exitCode = 0
+            $global:LASTEXITCODE = $null
+            $resolvedCommand = Get-Command -Name $Step.command -ErrorAction Stop
+            # Windows PowerShell wraps native stderr as ErrorRecord even when
+            # the process exits successfully. Native exit codes decide success;
+            # PowerShell commands still stop on their first error.
+            if ($resolvedCommand.CommandType -eq "Application") {
+                $ErrorActionPreference = "Continue"
             }
+            & $Step.command @arguments *> $logPath
+            $commandSucceeded = $?
+            $exitCode = $global:LASTEXITCODE
+            if ($null -eq $exitCode) {
+                $exitCode = if ($commandSucceeded) { 0 } else { 1 }
+            }
+            $reason = if ($exitCode -eq 0) { $null } else { "exit_code" }
         }
         catch {
             $_ | Out-File -LiteralPath $logPath -Append -Encoding utf8
-            $exitCode = 1
+            if ($null -ne $global:LASTEXITCODE -and $global:LASTEXITCODE -ne 0) {
+                $exitCode = $global:LASTEXITCODE
+                $reason = "exit_code"
+            }
+            if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) {
+                $reason = "interrupted"
+            }
         }
         finally {
             $ErrorActionPreference = $previousPreference
@@ -136,14 +156,127 @@ function Invoke-LoggedStep {
             [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
         }
         Pop-Location
+        if ($null -ne $previousExitVariable) {
+            $global:LASTEXITCODE = $previousExitCode
+        }
+        else {
+            Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        }
         $timer.Stop()
     }
 
+    $result = [pscustomobject][ordered]@{
+        id = $Step.id
+        name = $Step.name
+        status = if ($exitCode -eq 0) { "passed" } elseif ($reason -eq "interrupted") { "interrupted" } else { "failed" }
+        seconds = [Math]::Round($timer.Elapsed.TotalSeconds, 2)
+        exitCode = $exitCode
+        reason = $reason
+        log = $logPath
+    }
     if ($exitCode -ne 0) {
         Write-Host ("[FAIL] {0} ({1:n1}s)" -f $Step.name, $timer.Elapsed.TotalSeconds) -ForegroundColor Red
-        throw "Verification failed. Detailed log: $logPath"
+        $failure = New-Object System.Exception("Verification failed. Detailed log: $logPath")
+        $failure.Data["StepResult"] = $result
+        throw $failure
     }
     Write-Host ("[OK]   {0} ({1:n1}s)" -f $Step.name, $timer.Elapsed.TotalSeconds) -ForegroundColor Green
+    return $result
+}
+
+function Save-VerificationSummary {
+    param(
+        [Parameter(Mandatory = $true)][object]$Summary,
+        [Parameter(Mandatory = $true)][string]$LogDirectory
+    )
+
+    # Only runner-owned metadata is public here; command output and environment
+    # values stay in the individual, ignored logs.
+    $json = $Summary | ConvertTo-Json -Depth 6
+    $lines = @("# Aurum verification", "", "Status: $($Summary.status) | Mode: $($Summary.mode) | Risk: $($Summary.risk)", "")
+    foreach ($item in $Summary.steps) {
+        $lines += "- $($item.id): $($item.status); seconds=$($item.seconds); exit=$($item.exitCode); reason=$($item.reason)"
+    }
+    $encoding = New-Object Text.UTF8Encoding($false)
+    foreach ($file in @(
+        @{ name = "summary.json"; text = $json },
+        @{ name = "summary.md"; text = ($lines -join [Environment]::NewLine) }
+    )) {
+        $destination = Join-Path $LogDirectory $file.name
+        $temporary = "$destination.$([Guid]::NewGuid().ToString('N')).tmp"
+        try {
+            [IO.File]::WriteAllText($temporary, $file.text, $encoding)
+            Move-Item -LiteralPath $temporary -Destination $destination -Force
+        }
+        finally {
+            if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+        }
+    }
+}
+
+function Invoke-VerificationSteps {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Steps,
+        [Parameter(Mandatory = $true)][string]$LogDirectory,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$Risk,
+        [string]$Revision = "",
+        [int]$ChangedPathCount = 0
+    )
+
+    $summary = [pscustomobject][ordered]@{
+        version = 1
+        mode = $Mode.ToLowerInvariant()
+        risk = $Risk
+        revision = $Revision
+        changedPathCount = $ChangedPathCount
+        status = "running"
+        startedAt = [DateTime]::UtcNow.ToString("o")
+        finishedAt = $null
+        steps = @($Steps | ForEach-Object {
+            [pscustomobject][ordered]@{
+                id = $_.id; name = $_.name; status = "not_run"
+                seconds = 0; exitCode = $null; reason = $null; log = $null
+            }
+        })
+    }
+    Save-VerificationSummary -Summary $summary -LogDirectory $LogDirectory
+    try {
+        for ($index = 0; $index -lt $Steps.Count; $index++) {
+            $summary.steps[$index].status = "running"
+            Save-VerificationSummary -Summary $summary -LogDirectory $LogDirectory
+            try {
+                $summary.steps[$index] = Invoke-LoggedStep -Step $Steps[$index] -LogDirectory $LogDirectory -Number ($index + 1) -Total $Steps.Count
+            }
+            catch {
+                if ($_.Exception.Data.Contains("StepResult")) {
+                    $summary.steps[$index] = $_.Exception.Data["StepResult"]
+                }
+                else {
+                    $summary.steps[$index].status = "failed"
+                    $summary.steps[$index].reason = "command_error"
+                }
+                $summary.status = $summary.steps[$index].status
+                throw "Verification stopped. Read $(Join-Path $LogDirectory 'summary.md')"
+            }
+            Save-VerificationSummary -Summary $summary -LogDirectory $LogDirectory
+        }
+        $summary.status = "passed"
+    }
+    finally {
+        if ($summary.status -eq "running") {
+            $summary.status = "interrupted"
+            foreach ($item in $summary.steps) {
+                if ($item.status -eq "running") {
+                    $item.status = "interrupted"
+                    $item.reason = "interrupted"
+                }
+            }
+        }
+        $summary.finishedAt = [DateTime]::UtcNow.ToString("o")
+        Save-VerificationSummary -Summary $summary -LogDirectory $LogDirectory
+        Write-Host "Summary: $(Join-Path $LogDirectory 'summary.md')"
+    }
 }
 
 $scopeParameters = @{
@@ -299,8 +432,19 @@ if ($Mode -eq "Quick") {
 $logRoot = Join-Path (Join-Path $repoRoot ".codex") "verification"
 $logDirectory = Join-Path $logRoot ([Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
-for ($index = 0; $index -lt $steps.Count; $index++) {
-    Invoke-LoggedStep -Step $steps[$index] -LogDirectory $logDirectory -Number ($index + 1) -Total $steps.Count
+try {
+    $revision = (& git -C $repoRoot rev-parse HEAD | Out-String).Trim()
+    Invoke-VerificationSteps -Steps @($steps) -LogDirectory $logDirectory -Mode $Mode -Risk $scope.risk -Revision $revision -ChangedPathCount @($scope.paths).Count
+}
+finally {
+    # Stable entry point for the next assistant turn; the per-run report remains
+    # authoritative when independent runs finish at different times.
+    foreach ($extension in @("json", "md")) {
+        $source = Join-Path $logDirectory "summary.$extension"
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $logRoot "latest.$extension") -Force
+        }
+    }
 }
 
 Write-Host ("Verification passed: {0} steps." -f $steps.Count) -ForegroundColor Green
