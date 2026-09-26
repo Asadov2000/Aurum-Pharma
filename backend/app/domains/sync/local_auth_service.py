@@ -84,6 +84,7 @@ def _assert_admission(
         or authorization.scope != claims.scope
         or authorization.device_binding != claims.device_binding
         or authorization.policy_revision != claims.policy_revision
+        or authorization.tenant_access_revision != claims.tenant_access_revision
         or authorization.subject_revision != claims.subject_revision
         or authorization.admission != claims.admission
         or authorization.local_credential != claims.local_credential
@@ -162,6 +163,7 @@ class LocalOfflineAuthenticatorV1:
         authorization = OfflineLeaseAuthorizationStateV1.model_validate(
             authorization_raw.model_dump(mode="python")
         )
+        await trusted.assert_current_authorization(authorization)
         material = await trusted.read_credential()
         context = LocalCredentialContextV1.model_validate(
             material.context.model_dump(mode="python")
@@ -205,6 +207,7 @@ class LocalOfflineAuthenticatorV1:
         # Re-read authorization before persisting either outcome.
         if await trusted.read_authorization() != authorization:
             _deny()
+        await trusted.assert_current_authorization(authorization)
         guard.attempt_sequence += 1
         guard.last_utc = after.utc_now
         guard.last_counter = after.monotonic_counter

@@ -71,6 +71,7 @@ def _claims() -> OfflineAuthLeaseClaimsV1:
             method="tpm2", key_id=_uuid(9), spki_sha256="ab" * 32
         ),
         policy_revision=11,
+        tenant_access_revision=7,
         subject_revision=13,
         admission=OfflineAuthLeaseReferenceV1(reference_id=_uuid(14), revision=1),
         local_credential=OfflineAuthLeaseReferenceV1(reference_id=_uuid(15), revision=2),
@@ -284,8 +285,9 @@ async def test_nested_claims_are_strictly_revalidated(signed: _SignedLease) -> N
     await _assert_denied(signed.verifier, tampered, signed.signing_bytes)
 
 
-async def test_modified_claims_still_deny_after_rehash(signed: _SignedLease) -> None:
-    claims = signed.lease.claims.model_copy(update={"subject_revision": 14})
+@pytest.mark.parametrize("revision", ["subject_revision", "tenant_access_revision"])
+async def test_modified_claims_still_deny_after_rehash(signed: _SignedLease, revision: str) -> None:
+    claims = signed.lease.claims.model_copy(update={revision: 14})
     tampered = signed.lease.model_copy(
         update={"claims": claims, "claims_hash": offline_auth_lease_claims_hash(claims)}
     )

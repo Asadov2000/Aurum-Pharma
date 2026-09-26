@@ -20,6 +20,7 @@ from app.domains.sync.offline_lease_issuance_state import (
     CloudOfflineLeaseIssuanceStateV1,
 )
 from app.domains.sync.offline_lease_signature import Ed25519OfflineLeaseSignatureVerifier
+from app.domains.sync.offline_tenant_access import permitted_offline_commands
 from app.domains.sync.schemas import (
     OfflineAuthLeaseClaimsV1,
     OfflineAuthScopeV0,
@@ -89,6 +90,14 @@ class CloudOfflineLeaseIssuerV1:
                     raise ValueError("Cloud admission unavailable")
                 now = await transaction.read_cloud_time()
                 _require_utc(now)
+                commands = permitted_offline_commands(
+                    state.tenant_access_policy,
+                    tenant_id=selected.tenant_id,
+                    commands=state.allowed_commands,
+                    now=now,
+                )
+                if not commands:
+                    raise ValueError("Tenant policy does not admit any candidate command")
                 if not self._valid_from <= now < self._valid_until:
                     raise ValueError("Cloud signing key is not current")
                 deadline = min(
@@ -110,8 +119,9 @@ class CloudOfflineLeaseIssuerV1:
                     auth_context="owner-approved-local-credential",
                     scope=state.scope,
                     device_binding=state.device_binding,
-                    allowed_commands=state.allowed_commands,
+                    allowed_commands=commands,
                     policy_revision=state.policy_revision,
+                    tenant_access_revision=state.tenant_access_policy.version,
                     subject_revision=state.subject_revision,
                     admission=state.admission,
                     local_credential=state.local_credential,

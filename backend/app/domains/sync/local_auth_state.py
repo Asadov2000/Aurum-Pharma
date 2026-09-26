@@ -55,6 +55,17 @@ class TrustedLocalLoginStateTransactionV1(Protocol):
 
     async def read_authorization(self) -> OfflineLeaseAuthorizationStateV1 | None: ...
 
+    async def assert_current_authorization(
+        self, authorization: OfflineLeaseAuthorizationStateV1
+    ) -> None:
+        """Require the independently sealed current tenant policy revision.
+
+        Delivery advances the tenant/device-bound floor even when a lease is
+        denied. SQL/lease input cannot establish the seal; missing state,
+        restored authorization and interrupted policy acceptance must deny.
+        """
+        ...
+
     async def read_credential(self) -> TrustedLocalCredentialMaterialV1: ...
 
     async def read_trusted_time(self) -> TrustedClockReading: ...

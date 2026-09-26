@@ -47,6 +47,7 @@ class OfflineLeaseAuthorizationStateV1(_TrustedLeaseState):
     scope: OfflineAuthScopeV0
     device_binding: OfflineAuthDeviceBindingV0
     policy_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    tenant_access_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
     subject_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
     allowed_commands: tuple[OfflinePosCommand, ...] = Field(min_length=1, max_length=6)
     admission: OfflineAuthLeaseReferenceV1
@@ -122,6 +123,18 @@ class OfflineLeaseStateTransactionV1(Protocol):
     """Hold revocation/session/clock serialization until crash-safe commit succeeds."""
 
     async def read_authorization(self) -> OfflineLeaseAuthorizationStateV1 | None: ...
+
+    async def assert_current_authorization(
+        self, authorization: OfflineLeaseAuthorizationStateV1
+    ) -> None:
+        """Compare against independently sealed, tenant/device-bound policy state.
+
+        Trusted policy delivery advances the revision floor before admission,
+        including when the new policy denies all mutations. A lease or SQL row
+        cannot initialize/reset this floor. Missing state, rollback and recovery
+        gaps deny; this assertion never adopts a revision from the caller.
+        """
+        ...
 
     async def read_local_session(self) -> LocalOfflineLeaseSessionV1 | None: ...
 

@@ -476,6 +476,7 @@ async def _service_state(engine: AsyncEngine, state: _LocalState, *, failures: i
         scope=claims.scope,
         device_binding=claims.device_binding,
         policy_revision=claims.policy_revision,
+        tenant_access_revision=claims.tenant_access_revision,
         subject_revision=claims.subject_revision,
         allowed_commands=claims.allowed_commands,
         admission=claims.admission,

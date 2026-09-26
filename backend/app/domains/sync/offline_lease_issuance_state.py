@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.domains.sync.offline_tenant_access import CloudTenantAccessPolicyV1
 from app.domains.sync.schemas import (
     OfflineAuthDeviceBindingV0,
     OfflineAuthLeaseReferenceV1,
@@ -32,6 +33,7 @@ class CloudOfflineLeaseIssuanceStateV1(BaseModel):
     scope: OfflineAuthScopeV0
     device_binding: OfflineAuthDeviceBindingV0
     policy_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    tenant_access_policy: CloudTenantAccessPolicyV1
     subject_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
     allowed_commands: tuple[OfflinePosCommand, ...] = Field(min_length=1, max_length=6)
     admission: OfflineAuthLeaseReferenceV1
@@ -64,6 +66,10 @@ class CloudOfflineLeaseIssuanceStateV1(BaseModel):
 
 class CloudOfflineLeaseIssuanceTransactionV1(Protocol):
     """Serialize issuance against revocation, role, admission and writer changes.
+
+    Read tenant lifecycle and access policy from authoritative tenant-scoped
+    Cloud data under the same tenant-access lock as policy/status mutations.
+    The caller cannot supply that projection or a replacement revision.
 
     Ordinary tenant isolation applies. Keep all checks and issuance persistence
     in one transaction. commit() must confirm durable storage; exiting cannot

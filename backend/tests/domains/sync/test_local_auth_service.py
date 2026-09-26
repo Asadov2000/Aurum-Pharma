@@ -97,6 +97,7 @@ def _claims() -> OfflineAuthLeaseClaimsV1:
         ),
         allowed_commands=("sale.cash.complete", "shift.open"),
         policy_revision=11,
+        tenant_access_revision=7,
         subject_revision=12,
         admission=OfflineAuthLeaseReferenceV1(reference_id=_uuid(13), revision=2),
         local_credential=OfflineAuthLeaseReferenceV1(reference_id=_uuid(14), revision=3),
@@ -142,6 +143,7 @@ class _Harness:
     authorization: OfflineLeaseAuthorizationStateV1 | None
     lease: SignedOfflineAuthLeaseV1
     high_water: LocalAuthGuardSnapshotV1
+    sealed_tenant_access_revision: int | None = 7
     events: list[str] = field(default_factory=list)
     sessions: list[LocalOfflineLeaseSessionV1] = field(default_factory=list)
     clocks: list[TrustedClockReading] = field(
@@ -190,6 +192,13 @@ class _Harness:
     async def read_credential(self) -> TrustedLocalCredentialMaterialV1:
         self.event("credential")
         return self.material
+
+    async def assert_current_authorization(
+        self, authorization: OfflineLeaseAuthorizationStateV1
+    ) -> None:
+        self.event("authorization.assert")
+        if authorization.tenant_access_revision != self.sealed_tenant_access_revision:
+            raise RuntimeError("protected tenant policy does not match")
 
     async def read_trusted_time(self) -> TrustedClockReading:
         self.event("clock")
@@ -333,6 +342,7 @@ def harness(issued: IssuedLocalCredentialV1, monkeypatch: pytest.MonkeyPatch) ->
         scope=claims.scope,
         device_binding=claims.device_binding,
         policy_revision=claims.policy_revision,
+        tenant_access_revision=claims.tenant_access_revision,
         subject_revision=claims.subject_revision,
         allowed_commands=claims.allowed_commands,
         admission=claims.admission,
@@ -457,6 +467,7 @@ async def test_failures_commit_and_fifth_failure_locks_without_more_bcrypt(
         "tenant",
         "guard",
         "authorization",
+        "authorization.assert",
         "credential",
         "assert",
         "clock",
@@ -542,6 +553,7 @@ async def test_missing_enrollment_never_creates_guard_or_session(
         ("scope.writer_epoch", 99),
         ("device_binding.key_id", _uuid(90)),
         ("policy_revision", 99),
+        ("tenant_access_revision", 99),
         ("subject_revision", 99),
         ("admission.revision", 99),
         ("local_credential.revision", 99),
@@ -636,6 +648,41 @@ async def test_revocation_during_bcrypt_cannot_commit_session(
     secret_check.assert_called_once()
     assert harness.sessions == []
     assert "committed" not in harness.events
+
+
+@pytest.mark.parametrize("sealed_revision", [None, 6, 8])
+async def test_matching_old_lease_and_sql_policy_cannot_reset_sealed_revision(
+    harness: _Harness, secret_check: Mock, sealed_revision: int | None
+) -> None:
+    assert harness.authorization is not None
+    assert (
+        harness.authorization.tenant_access_revision == harness.lease.claims.tenant_access_revision
+    )
+    harness.sealed_tenant_access_revision = sealed_revision
+    await _deny(harness)
+    secret_check.assert_not_called()
+    assert "credential" not in harness.events
+    assert "seal" not in harness.events
+    assert harness.sessions == []
+    assert harness.sealed_tenant_access_revision == sealed_revision
+
+
+async def test_policy_delivery_during_secret_check_denies_even_with_unchanged_sql(
+    harness: _Harness, secret_check: Mock
+) -> None:
+    def delivered(*_args: object, **_kwargs: object) -> bool:
+        harness.event("bcrypt")
+        harness.sealed_tenant_access_revision = 8
+        return True
+
+    secret_check.side_effect = delivered
+    original_authorization = harness.authorization
+    await _deny(harness)
+    secret_check.assert_called_once()
+    assert harness.authorization == original_authorization
+    assert harness.events.count("authorization.assert") == 2
+    assert "seal" not in harness.events
+    assert harness.sessions == []
 
 
 @pytest.mark.parametrize("change", ["lease", "shift", "epoch", "register"])

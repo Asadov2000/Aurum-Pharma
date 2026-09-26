@@ -131,6 +131,7 @@ def _claims() -> OfflineAuthLeaseClaimsV1:
         ),
         allowed_commands=COMMANDS,
         policy_revision=11,
+        tenant_access_revision=7,
         subject_revision=12,
         admission=OfflineAuthLeaseReferenceV1(reference_id=_uuid(13), revision=2),
         local_credential=OfflineAuthLeaseReferenceV1(reference_id=_uuid(14), revision=3),
@@ -161,6 +162,7 @@ class _State:
     events: list[str] = field(default_factory=list)
     observations: list[OfflineLeaseRevisionObservationV1] = field(default_factory=list)
     high_water: OfflineLeaseRevisionObservationV1 | None = None
+    sealed_tenant_access_revision: int | None = 7
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     commit_started: asyncio.Event | None = None
     release_commit: asyncio.Event | None = None
@@ -173,6 +175,13 @@ class _State:
     async def read_authorization(self) -> OfflineLeaseAuthorizationStateV1 | None:
         self.record("authorization")
         return self.authorization
+
+    async def assert_current_authorization(
+        self, authorization: OfflineLeaseAuthorizationStateV1
+    ) -> None:
+        self.record("authorization.assert")
+        if authorization.tenant_access_revision != self.sealed_tenant_access_revision:
+            raise RuntimeError("protected tenant policy does not match")
 
     async def read_local_session(self) -> LocalOfflineLeaseSessionV1 | None:
         self.record("session")
@@ -189,6 +198,8 @@ class _State:
             observation.trusted_time.monotonic_counter < previous.trusted_time.monotonic_counter
             or observation.trusted_time.utc_now < previous.trusted_time.utc_now
             or observation.authorization.policy_revision < previous.authorization.policy_revision
+            or observation.authorization.tenant_access_revision
+            < previous.authorization.tenant_access_revision
             or observation.authorization.subject_revision < previous.authorization.subject_revision
         ):
             raise RuntimeError("sealed high-water rollback")
@@ -263,6 +274,7 @@ def harness() -> _Harness:
             scope=claims.scope,
             device_binding=claims.device_binding,
             policy_revision=claims.policy_revision,
+            tenant_access_revision=claims.tenant_access_revision,
             subject_revision=claims.subject_revision,
             allowed_commands=COMMANDS,
             admission=claims.admission,
@@ -336,6 +348,7 @@ async def test_all_commands_require_complete_transaction_and_session_bound(
         "signature",
         "enter",
         "authorization",
+        "authorization.assert",
         "tpm",
         "session",
         "clock",
@@ -371,6 +384,7 @@ SCOPE_CHANGES: list[tuple[str, object]] = [
         ("device_binding.spki_sha256", "ef" * 32),
         ("device_binding.method", "software"),
         ("policy_revision", 99),
+        ("tenant_access_revision", 99),
         ("subject_revision", 99),
         ("admission.reference_id", _uuid(99)),
         ("admission.revision", 99),
@@ -507,7 +521,18 @@ async def test_fresh_confirmation_is_bound_to_command_session_and_clock(
 
 
 @pytest.mark.parametrize(
-    "stage", ["signature", "enter", "authorization", "tpm", "session", "clock", "advance", "commit"]
+    "stage",
+    [
+        "signature",
+        "enter",
+        "authorization",
+        "authorization.assert",
+        "tpm",
+        "session",
+        "clock",
+        "advance",
+        "commit",
+    ],
 )
 async def test_all_adapter_failures_are_uniform_denials(harness: _Harness, stage: str) -> None:
     harness.state.error_at = stage
@@ -571,6 +596,22 @@ async def test_command_must_be_signed_even_if_trusted_state_allows_it(harness: _
 async def test_unknown_command_is_denied_before_trusted_adapters(harness: _Harness) -> None:
     await _assert_denied(harness, cast(OfflinePosCommand, "pos.sell"))
     assert harness.state.events == []
+
+
+@pytest.mark.parametrize("sealed_revision", [None, 6, 8])
+async def test_restored_matching_lease_and_sql_policy_cannot_replace_sealed_revision(
+    harness: _Harness, sealed_revision: int | None
+) -> None:
+    assert harness.state.authorization is not None
+    assert harness.lease.claims.tenant_access_revision == 7
+    assert harness.state.authorization.tenant_access_revision == 7
+    harness.state.sealed_tenant_access_revision = sealed_revision
+    await _assert_denied(harness)
+    assert "authorization.assert" in harness.state.events
+    assert "tpm" not in harness.state.events
+    assert "advance" not in harness.state.events
+    assert harness.state.observations == []
+    assert harness.state.sealed_tenant_access_revision == sealed_revision
 
 
 async def test_no_principal_is_exposed_until_durable_commit(harness: _Harness) -> None:
