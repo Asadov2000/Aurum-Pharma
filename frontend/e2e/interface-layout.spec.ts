@@ -522,8 +522,8 @@ test.describe("Interface layout", () => {
     if (fromRight) await movedEdge.toBeLessThan(edgeBefore);
     else await movedEdge.toBeGreaterThan(edgeBefore);
     const viewport = page.viewportSize();
-    await page.mouse.move(fromRight ? 0 : viewport!.width, viewport!.height / 2);
-    await expect(root).not.toHaveClass(/theme-slant-transition/);
+    await page.mouse.move(fromRight ? 12 : viewport!.width - 12, 80);
+    await expect(root).not.toHaveClass(/theme-slant-transition/, { timeout: 1000 });
     await page.reload();
     await expect(root).toHaveAttribute("data-theme", nextTheme);
   });

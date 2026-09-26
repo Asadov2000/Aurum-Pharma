@@ -35,15 +35,6 @@ if (typeof window !== "undefined") {
   window.addEventListener("pointerdown", rememberPointer, { passive: true });
 }
 
-function originPoint(): Point {
-  if (recentPointer && performance.now() - recentPointer.time < 3000) return recentPointer.point;
-  const focused = document.activeElement?.getBoundingClientRect();
-  if (focused && focused.width > 0 && focused.height > 0) {
-    return { x: focused.left + focused.width / 2, y: focused.top + focused.height / 2 };
-  }
-  return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-}
-
 const clamp = (value: number, maximum: number): number => Math.max(0, Math.min(maximum, value));
 
 /** Animate only explicit user choices; startup and server preference sync stay immediate. */
@@ -55,12 +46,14 @@ export function setThemePreferenceWithTransition(pref: ThemePreference): Resolve
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const hasFinePointer = window.matchMedia("(pointer: fine)").matches;
   const hasRecentPointer = recentPointer !== null && performance.now() - recentPointer.time < 3000;
+  const origin = recentPointer?.point;
 
   if (
     currentTheme === nextTheme ||
     reduceMotion ||
     !hasFinePointer ||
     !hasRecentPointer ||
+    !origin ||
     root.getAttribute("data-reduce-motion") === "true" ||
     !transitionDocument.startViewTransition
   ) {
@@ -72,7 +65,6 @@ export function setThemePreferenceWithTransition(pref: ThemePreference): Resolve
 
   const width = window.innerWidth;
   const height = window.innerHeight;
-  const origin = originPoint();
   const fromRight = origin.x >= width / 2;
   let top = clamp(origin.x, width);
   let bottom = top;
@@ -80,6 +72,7 @@ export function setThemePreferenceWithTransition(pref: ThemePreference): Resolve
   let frame = 0;
   let transition: ThemeViewTransition;
   let cleaned = false;
+  let completion: { time: number; edge: number } | null = null;
 
   const setEdge = () => {
     root.style.setProperty("--theme-slant-top", `${top}px`);
@@ -128,17 +121,26 @@ export function setThemePreferenceWithTransition(pref: ThemePreference): Resolve
       const draw = (now: number) => {
         if (activeTransition !== transition) return;
         const elapsed = now - started;
-        const automatic = clamp((elapsed - AUTO_START_MS) / (DURATION_MS - AUTO_START_MS), 1);
+        if (!completion && (fromRight ? pointer.x <= 24 : pointer.x >= width - 24)) {
+          completion = {
+            time: now,
+            edge: fromRight ? Math.max(top, bottom) : Math.min(top, bottom),
+          };
+        }
+        const automatic = completion
+          ? clamp((now - completion.time) / 180, 1)
+          : clamp((elapsed - AUTO_START_MS) / (DURATION_MS - AUTO_START_MS), 1);
         const eased = automatic * automatic * (3 - 2 * automatic);
         const lean = (height / 2 - pointer.y) * 0.42;
         const pointerTop = clamp(pointer.x + lean, width);
         const pointerBottom = clamp(pointer.x - lean, width);
         if (fromRight) {
-          const automaticEdge = width * (1 - eased);
+          const automaticEdge = (completion?.edge ?? width) * (1 - eased);
           top = Math.min(top, pointerTop, automaticEdge);
           bottom = Math.min(bottom, pointerBottom, automaticEdge);
         } else {
-          const automaticEdge = width * eased;
+          const startEdge = completion?.edge ?? 0;
+          const automaticEdge = startEdge + (width - startEdge) * eased;
           top = Math.max(top, pointerTop, automaticEdge);
           bottom = Math.max(bottom, pointerBottom, automaticEdge);
         }
