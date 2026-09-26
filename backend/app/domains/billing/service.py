@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -21,6 +21,7 @@ from app.core.errors import (
     ConflictError,
     NotFoundError,
     PermissionDeniedError,
+    SubscriptionsDisabledError,
 )
 from app.core.time import utc_now
 from app.domains.billing.models import (
@@ -127,23 +128,7 @@ class BillingService:
         name: str,
         description: str | None,
     ) -> PlatformPricingCommandRecord:
-        payload: dict[str, object] = {
-            "code": code,
-            "name": name.strip(),
-            "description": description.strip() if description else None,
-        }
-        try:
-            return await self.repo.create_platform_pricing_plan(
-                actor_user_id=actor_user_id,
-                actor_session_id=actor_session_id,
-                operation_id=operation_id,
-                request_hash=_pricing_request_hash("plan_created", payload),
-                code=code,
-                name=name,
-                description=description,
-            )
-        except DBAPIError as exc:
-            raise _pricing_error(exc) from exc
+        raise SubscriptionsDisabledError()
 
     async def create_platform_pricing_price(
         self,
@@ -159,31 +144,7 @@ class BillingService:
         change_reason: str,
         terms_snapshot: dict[str, object],
     ) -> PlatformPricingCommandRecord:
-        payload: dict[str, object] = {
-            "plan_id": plan_id,
-            "monthly_price_per_branch": monthly_price_per_branch,
-            "annual_discount_pct": annual_discount_pct,
-            "audience": audience,
-            "notice_days": notice_days,
-            "change_reason": change_reason.strip(),
-            "terms_snapshot": terms_snapshot,
-        }
-        try:
-            return await self.repo.create_platform_pricing_price(
-                actor_user_id=actor_user_id,
-                actor_session_id=actor_session_id,
-                operation_id=operation_id,
-                request_hash=_pricing_request_hash("price_draft_created", payload),
-                plan_id=plan_id,
-                monthly_price_per_branch=monthly_price_per_branch,
-                annual_discount_pct=annual_discount_pct,
-                audience=audience,
-                notice_days=notice_days,
-                change_reason=change_reason,
-                terms_snapshot=terms_snapshot,
-            )
-        except DBAPIError as exc:
-            raise _pricing_error(exc) from exc
+        raise SubscriptionsDisabledError()
 
     async def transition_platform_pricing_price(
         self,
@@ -198,39 +159,7 @@ class BillingService:
         reason_code: str | None = None,
         reason: str | None = None,
     ) -> PlatformPricingCommandRecord:
-        payload: dict[str, object] = {
-            "price_version_id": price_version_id,
-            "expected_row_version": expected_row_version,
-        }
-        parameters: dict[str, object] = {
-            "actor_user_id": actor_user_id,
-            "actor_session_id": actor_session_id,
-            "operation_id": operation_id,
-            "price_version_id": price_version_id,
-            "expected_row_version": expected_row_version,
-        }
-        if action == "price_scheduled":
-            payload["effective_from"] = effective_from
-            parameters["effective_from"] = effective_from
-            command = self.repo.schedule_platform_pricing_price
-        elif action == "price_activated":
-            command = self.repo.activate_platform_pricing_price
-        elif action == "price_cancelled":
-            payload.update(
-                {
-                    "reason_code": reason_code,
-                    "reason": reason.strip() if reason else None,
-                }
-            )
-            parameters.update({"reason_code": reason_code, "reason": reason})
-            command = self.repo.cancel_platform_pricing_price
-        else:
-            raise ValueError("Unsupported billing pricing transition")
-        parameters["request_hash"] = _pricing_request_hash(action, payload)
-        try:
-            return await command(**parameters)
-        except DBAPIError as exc:
-            raise _pricing_error(exc) from exc
+        raise SubscriptionsDisabledError()
 
     async def apply_initial_subscription_price(
         self,
@@ -242,26 +171,7 @@ class BillingService:
         subscription_id: UUID,
         expected_row_version: int,
     ) -> PlatformPricingCommandRecord:
-        payload: dict[str, object] = {
-            "tenant_id": tenant_id,
-            "subscription_id": subscription_id,
-            "expected_row_version": expected_row_version,
-        }
-        try:
-            return await self.repo.apply_initial_subscription_price(
-                actor_user_id=actor_user_id,
-                actor_session_id=actor_session_id,
-                operation_id=operation_id,
-                request_hash=_pricing_request_hash(
-                    "initial_subscription_price_applied",
-                    payload,
-                ),
-                tenant_id=tenant_id,
-                subscription_id=subscription_id,
-                expected_row_version=expected_row_version,
-            )
-        except DBAPIError as exc:
-            raise _pricing_error(exc) from exc
+        raise SubscriptionsDisabledError()
 
     async def issue_subscription_invoice(
         self,
@@ -273,23 +183,7 @@ class BillingService:
         subscription_id: UUID,
         expected_row_version: int,
     ) -> PlatformPricingCommandRecord:
-        payload: dict[str, object] = {
-            "tenant_id": tenant_id,
-            "subscription_id": subscription_id,
-            "expected_row_version": expected_row_version,
-        }
-        try:
-            return await self.repo.issue_subscription_invoice(
-                actor_user_id=actor_user_id,
-                actor_session_id=actor_session_id,
-                operation_id=operation_id,
-                request_hash=_pricing_request_hash("invoice_issued", payload),
-                tenant_id=tenant_id,
-                subscription_id=subscription_id,
-                expected_row_version=expected_row_version,
-            )
-        except DBAPIError as exc:
-            raise _financial_error(exc) from exc
+        raise SubscriptionsDisabledError()
 
     async def create_bank_payment_review(
         self,
@@ -557,27 +451,7 @@ class BillingService:
         paid_at: datetime,
         external_reference: str,
     ) -> PlatformPricingCommandRecord:
-        payload: dict[str, object] = {
-            "tenant_id": tenant_id,
-            "target_invoice_id": target_invoice_id,
-            "amount": amount,
-            "paid_at": paid_at,
-            "external_reference": external_reference,
-        }
-        try:
-            return await self.repo.create_tenant_payment_submission(
-                actor_user_id=actor_user_id,
-                actor_session_id=actor_session_id,
-                operation_id=operation_id,
-                request_hash=_pricing_request_hash("payment_submission_created", payload),
-                tenant_id=tenant_id,
-                target_invoice_id=target_invoice_id,
-                amount=amount,
-                paid_at=paid_at,
-                external_reference=external_reference,
-            )
-        except DBAPIError as exc:
-            raise _financial_error(exc) from exc
+        raise SubscriptionsDisabledError()
 
     async def list_tenant_payment_submissions(
         self,
@@ -782,29 +656,7 @@ class BillingService:
         branches_count: int,
         status: str = "trial",
     ) -> TenantSubscription:
-        plan = await self.repo.get_plan(plan_id)
-        if plan is None or not plan.is_active:
-            raise NotFoundError("Subscription plan not found")
-        now = utc_now()
-        if billing_period == "yearly":
-            period_end = now + timedelta(days=365)
-            multiplier = Decimal("12") * (Decimal("1") - plan.annual_discount_pct / Decimal("100"))
-        else:
-            period_end = now + timedelta(days=30)
-            multiplier = Decimal("1")
-
-        amount = (plan.price_per_branch * branches_count * multiplier).quantize(Decimal("0.01"))
-
-        return await self.repo.insert_subscription(
-            tenant_id=tenant_id,
-            plan_id=plan_id,
-            status=status,
-            billing_period=billing_period,
-            period_start=now,
-            period_end=period_end,
-            branches_count=branches_count,
-            amount=amount,
-        )
+        raise SubscriptionsDisabledError()
 
     # -------- invoices --------
 

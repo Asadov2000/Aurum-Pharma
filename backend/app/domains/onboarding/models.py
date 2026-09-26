@@ -99,3 +99,22 @@ class TrialActivation(Base):
         ),
         CheckConstraint("trial_ends_at > started_at", name="ck_trial_activation_period"),
     )
+
+
+class TenantLaunchActivation(Base):
+    """Immutable proof of an owner's checked launch, independent of billing."""
+
+    __tablename__ = "tenant_launch_activation"
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, unique=True, server_default=text("gen_random_uuid()")
+    )
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, unique=True)
+    actor_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    actor_session_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    launched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))

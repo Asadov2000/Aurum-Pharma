@@ -467,7 +467,7 @@ async def test_administrator_can_view_but_cannot_manage_edge_sync(
     assert "platform.sync.manage" in manage_response.json()["error"]["message"]
 
 
-async def test_tenant_status_change_requires_billing_capability(
+async def test_tenant_access_management_is_independent_of_billing_capability(
     db_session: AsyncSession,
     platform_client: AsyncClient,
 ) -> None:
@@ -511,8 +511,21 @@ async def test_tenant_status_change_requires_billing_capability(
     )
 
     assert ordinary_update.status_code == 200, ordinary_update.text
-    assert status_update.status_code == 403
-    assert "platform.billing.manage" in status_update.json()["error"]["message"]
+    assert status_update.status_code == 422
+    policy_update = await platform_client.patch(
+        f"/api/v1/admin/tenants/{tenant.id}/access-policy",
+        json={"expected_version": 1, "mode": "readonly", "reason": "Temporary review"},
+        headers=_headers(administrator_token),
+    )
+    assert policy_update.status_code == 200, policy_update.text
+    assert policy_update.json()["mode"] == "readonly"
+    archive = await platform_client.patch(
+        f"/api/v1/admin/tenants/{tenant.id}",
+        json={"status": "archived"},
+        headers=_headers(administrator_token),
+    )
+    assert archive.status_code == 200, archive.text
+    assert archive.json()["status"] == "archived"
 
 
 async def test_revocation_is_versioned_and_immediately_invalidates_access(

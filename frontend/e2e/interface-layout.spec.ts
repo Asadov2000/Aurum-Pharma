@@ -9,7 +9,7 @@ const WORKSPACES = [
   { path: "/users", heading: "Сотрудники" },
   { path: "/roles", heading: "Роли" },
   { path: "/pos", heading: "Касса" },
-  { path: "/billing", heading: "Тариф", mobileHeading: "Тариф и оплата" },
+  { path: "/billing", heading: "Расчёты", mobileHeading: "История расчётов" },
 ] as const;
 
 async function expectNoHorizontalOverflow(page: Page, workspace: string) {
@@ -92,7 +92,7 @@ test.describe("Interface layout", () => {
         page.getByRole("heading", { level: 1, name: "Старт", exact: true }),
       ).toBeVisible();
       await expect(page.getByRole("heading", { name: "Готовность системы" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Пробный период" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Постоянный доступ" })).toBeVisible();
       await expectNoHorizontalOverflow(page, `/onboarding @ ${viewport.width}x${viewport.height}`);
     }
   });
@@ -213,7 +213,9 @@ test.describe("Interface layout", () => {
     await expectNoHorizontalOverflow(page, "/roles shell @ 320x568");
   });
 
-  test("keeps sidebar actions at the viewport bottom while navigation scrolls", async ({ page }) => {
+  test("keeps sidebar actions at the viewport bottom while navigation scrolls", async ({
+    page,
+  }) => {
     await loginInBrowser(page, OWNER);
     await page.goto("/pos");
 
@@ -241,7 +243,9 @@ test.describe("Interface layout", () => {
       const after = await footer.boundingBox();
       expect(after).not.toBeNull();
       expect(after!.y + after!.height).toBeLessThanOrEqual(viewport.height);
-      expect(Math.abs(after!.y + after!.height - (before!.y + before!.height))).toBeLessThanOrEqual(1);
+      expect(Math.abs(after!.y + after!.height - (before!.y + before!.height))).toBeLessThanOrEqual(
+        1,
+      );
     }
 
     for (const viewport of [
@@ -262,7 +266,9 @@ test.describe("Interface layout", () => {
       const after = await footer.boundingBox();
       expect(after).not.toBeNull();
       expect(after!.y + after!.height).toBeLessThanOrEqual(viewport.height);
-      expect(Math.abs(after!.y + after!.height - (before!.y + before!.height))).toBeLessThanOrEqual(1);
+      expect(Math.abs(after!.y + after!.height - (before!.y + before!.height))).toBeLessThanOrEqual(
+        1,
+      );
       await drawer.getByRole("button", { name: "Закрыть меню" }).click();
     }
   });
@@ -437,10 +443,10 @@ test.describe("Interface layout", () => {
     await selectTouchDensity(page);
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Тариф и оплата", exact: true }),
+      page.getByRole("heading", { level: 1, name: "История расчётов", exact: true }),
     ).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
-    await expect(page.getByRole("region", { name: "Сводка по тарифу и оплате" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Сохранённые расчёты" })).toBeVisible();
 
     const invoiceSearch = page.getByRole("searchbox", { name: "Номер счёта" });
     const searchBounds = await invoiceSearch.boundingBox();

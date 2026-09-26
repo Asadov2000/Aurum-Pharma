@@ -47,6 +47,11 @@ const SupportAccessBanner = lazy(async () => {
   return { default: module.SupportAccessBanner };
 });
 
+const TenantAccessBanner = lazy(async () => {
+  const module = await import("@/features/tenantAccess/TenantAccessBanner");
+  return { default: module.TenantAccessBanner };
+});
+
 const AccountSecuritySurface = lazy(() => import("@/features/auth/AccountSecuritySurface"));
 
 const SidebarSettingsModal = lazy(async () => {
@@ -57,7 +62,7 @@ const SidebarSettingsModal = lazy(async () => {
 const MobileNavigationPanel = lazy(() => import("./MobileNavigationPanel"));
 
 export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const preferencesQuery = useUserPreferencesQuery();
@@ -411,6 +416,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         {user?.support_access ? (
           <Suspense fallback={<p role="status">Загружаем данные доступа поддержки…</p>}>
             <SupportAccessBanner />
+          </Suspense>
+        ) : null}
+        {isAuthenticated && hasTenant ? (
+          <Suspense fallback={null}>
+            <TenantAccessBanner />
           </Suspense>
         ) : null}
         <ConnectivityStatusBanner />

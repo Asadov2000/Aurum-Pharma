@@ -135,8 +135,8 @@ describe("BillingPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Подписка не подключена")).toBeInTheDocument();
-    expect(screen.getAllByText(/обратитесь в поддержку Aurum Pharma/i)).not.toHaveLength(0);
+    expect(await screen.findByText("Сохранённые расчёты")).toBeInTheDocument();
+    expect(screen.getAllByText(/Историческая задолженность не блокирует/i)).not.toHaveLength(0);
     expect(screen.getByText("Счетов пока нет")).toBeInTheDocument();
   });
 
@@ -144,9 +144,8 @@ describe("BillingPage", () => {
     getFinancialAccount.mockResolvedValueOnce(ACCOUNT);
     renderPage();
 
-    expect(screen.getByRole("heading", { level: 1, name: "Тариф и оплата" })).toBeInTheDocument();
-    expect(await screen.findByText("Есть счет, ожидающий оплаты")).toBeInTheDocument();
-    expect(screen.getByText("Aurum Pharma")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "История расчётов" })).toBeInTheDocument();
+    expect(await screen.findByText("Сохранённые расчёты")).toBeInTheDocument();
     expect(screen.getAllByText("AP-2026-001")).not.toHaveLength(0);
     expect(screen.getAllByText("Ожидает оплаты")).not.toHaveLength(0);
     expect(screen.getAllByText(/1[\s\u00a0]100,00 TJS/)).not.toHaveLength(0);
@@ -170,7 +169,7 @@ describe("BillingPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Оплата просрочена")).toBeInTheDocument();
+    expect(await screen.findByText("Сохранённые расчёты")).toBeInTheDocument();
     expect(screen.getAllByText("AP-2026-OVERDUE")).not.toHaveLength(0);
     expect(screen.getAllByText(/250,00 TJS/)).not.toHaveLength(0);
   });
@@ -276,7 +275,7 @@ describe("BillingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
 
     await waitFor(() => expect(getFinancialAccount).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("Aurum Pharma")).toBeInTheDocument();
+    expect(await screen.findByText("Сохранённые расчёты")).toBeInTheDocument();
   });
 
   it("fully hides create and withdraw actions without tenant permissions", async () => {
@@ -294,54 +293,11 @@ describe("BillingPage", () => {
     expect(screen.queryByRole("button", { name: "Отозвать" })).not.toBeInTheDocument();
   });
 
-  it("submits a bank payment with one stable operation id and clears the reference", async () => {
-    authState.user.permissions = ["billing.payment_submission.create"];
-    getFinancialAccount.mockResolvedValueOnce(ACCOUNT);
-    createPaymentSubmission.mockResolvedValue({ item: SUBMISSION, applied: true });
-    vi.spyOn(crypto, "randomUUID").mockReturnValue(
-      "88888888-8888-4888-8888-888888888888",
-    );
-    renderPage();
-
-    await screen.findByText("Есть счет, ожидающий оплаты");
-    const createButton = screen.getByRole("button", { name: "Сообщить об оплате" });
-    expect(createButton).toBeEnabled();
-    fireEvent.click(createButton);
-    const reference = "TJ-2026-PRIVATE-0125";
-    const dialog = screen.getByRole("dialog", { name: "Подтверждение банковской оплаты" });
-    fireEvent.change(within(dialog).getByLabelText("Сумма, TJS"), {
-      target: { value: "0" },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Отправить на проверку" }));
-    expect(await within(dialog).findByText("Сумма должна быть больше нуля")).toBeInTheDocument();
-    expect(createPaymentSubmission).not.toHaveBeenCalled();
-
-    fireEvent.change(within(dialog).getByLabelText("Сумма, TJS"), {
-      target: { value: "1100.00" },
-    });
-    fireEvent.change(screen.getByLabelText("Номер банковской операции"), {
-      target: { value: reference },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Отправить на проверку" }));
-
-    await waitFor(() =>
-      expect(createPaymentSubmission).toHaveBeenCalledWith(
-        expect.objectContaining({
-          operation_id: "88888888-8888-4888-8888-888888888888",
-          target_invoice_id: INVOICE.invoice_id,
-          amount: "1100.00",
-          external_reference: reference,
-        }),
-      ),
-    );
-    expect(
-      await screen.findByText("Подтверждение оплаты отправлено в Aurum Pharma."),
-    ).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain(reference);
-  });
-
-  it("withdraws a submitted payment only with the dedicated permission", async () => {
-    authState.user.permissions = ["billing.payment_submission.withdraw"];
+  it("keeps historical submissions read-only even with legacy write permissions", async () => {
+    authState.user.permissions = [
+      "billing.payment_submission.create",
+      "billing.payment_submission.withdraw",
+    ];
     getFinancialAccount.mockResolvedValueOnce(ACCOUNT);
     listPaymentSubmissions.mockResolvedValue({
       items: [SUBMISSION],
@@ -349,26 +305,11 @@ describe("BillingPage", () => {
       page: 1,
       page_size: 10,
     });
-    withdrawPaymentSubmission.mockResolvedValue({
-      item: { ...SUBMISSION, status: "withdrawn", can_withdraw: false },
-      applied: true,
-    });
-    vi.spyOn(crypto, "randomUUID").mockReturnValue(
-      "99999999-9999-4999-8999-999999999999",
-    );
     renderPage();
-
-    const withdrawButtons = await screen.findAllByRole("button", { name: "Отозвать" });
-    fireEvent.click(withdrawButtons[0]!);
-    const dialog = screen.getByRole("dialog", { name: "Отозвать заявку" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Отозвать" }));
-
-    await waitFor(() =>
-      expect(withdrawPaymentSubmission).toHaveBeenCalledWith("submission-1", {
-        operation_id: "99999999-9999-4999-8999-999999999999",
-        expected_row_version: 1,
-      }),
-    );
-    expect(await screen.findByText("Заявка на подтверждение оплаты отозвана.")).toBeInTheDocument();
+    expect(await screen.findByText("Заявки об оплате")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Сообщить об оплате" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Отозвать" })).not.toBeInTheDocument();
+    expect(createPaymentSubmission).not.toHaveBeenCalled();
+    expect(withdrawPaymentSubmission).not.toHaveBeenCalled();
   });
 });

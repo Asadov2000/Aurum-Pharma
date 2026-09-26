@@ -145,9 +145,10 @@ describe("TenantsPage", () => {
 
     expect(await screen.findByText("Demo Pharmacy")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Новая аптека/i })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: `Действия для ${SAMPLE.name}` }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `Действия для ${SAMPLE.name}` }));
+    expect(screen.getByRole("menuitem", { name: "Управление доступом" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Изменить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Добавить сотрудника" })).not.toBeInTheDocument();
   });
 
   it("validates required fields when submitting an empty create form", async () => {

@@ -18,6 +18,7 @@ from uuid import UUID
 from fastapi import Depends, Header, Request
 from redis.asyncio import Redis
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -87,7 +88,17 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
     async with sessionmaker() as session:
         async with session.begin():
             await _seed_request_db_context(request, session)
-            yield session
+            try:
+                yield session
+            except DBAPIError as exc:
+                # Translate only our fixed database guard identifiers. Never
+                # expose SQL, parameters, or arbitrary database error contents.
+                from app.domains.tenant_access.errors import translate_guard_error
+
+                translated = translate_guard_error(exc)
+                if translated is not None:
+                    raise translated from None
+                raise
 
 
 async def get_auth_db(request: Request) -> AsyncIterator[AsyncSession]:

@@ -56,6 +56,7 @@ from app.domains.sync.read_model_router import router as sync_read_model_router
 from app.domains.sync.readiness import edge_snapshot_readiness
 from app.domains.sync.router import admin_router as sync_admin_router
 from app.domains.sync.router import router as sync_router
+from app.domains.tenant_access.router import router as tenant_access_router
 from app.middleware.auth_context import AuthContextMiddleware
 from app.middleware.edge_read_only import EdgeReadOnlyMiddleware
 from app.middleware.error_handler import register_error_handlers
@@ -138,6 +139,7 @@ register_error_handlers(app)
 app.include_router(auth_router)
 app.include_router(foundation_admin_router)
 app.include_router(foundation_tenant_router)
+app.include_router(tenant_access_router)
 app.include_router(support_access_router)
 app.include_router(platform_access_router)
 app.include_router(platform_accounts_admin_router)

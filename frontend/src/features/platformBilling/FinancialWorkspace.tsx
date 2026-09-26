@@ -335,9 +335,7 @@ export function FinancialWorkspace({
         onCompleted={(result) => {
           setApprovalTarget(null);
           refreshFinancialData(
-            result.access_restored
-              ? `Платёж подтверждён. Доступ аптеки восстановлен, остаток долга ${formatBillingMoney(result.blocking_outstanding_amount, "TJS")}.`
-              : `Платёж подтверждён. Остаток долга ${formatBillingMoney(result.blocking_outstanding_amount, "TJS")}.`,
+            `Платёж подтверждён. Остаток долга ${formatBillingMoney(result.blocking_outstanding_amount, "TJS")}.`,
           );
         }}
         onRejected={() => {
@@ -380,13 +378,9 @@ export function FinancialWorkspace({
         item={adjustmentDecisionTarget}
         online={online && account.data?.journal_balanced === true}
         onClose={() => setAdjustmentDecisionTarget(null)}
-        onApproved={(result) => {
+        onApproved={() => {
           setAdjustmentDecisionTarget(null);
-          refreshFinancialData(
-            result.access_review_required
-              ? "Корректировка подтверждена. Требуется проверить доступ аптеки."
-              : "Корректировка подтверждена и отражена в журнале.",
-          );
+          refreshFinancialData("Корректировка подтверждена и отражена в журнале.");
         }}
         onRejected={() => {
           setAdjustmentDecisionTarget(null);
@@ -928,15 +922,15 @@ function tenantStatusLabel(status: string): string {
 }
 
 function subscriptionStatusLabel(status: string | null): string {
-  if (!status) return "Подписка не создана";
+  if (!status) return "Исторической подписки нет";
   return (
     (
       {
-        trial: "Пробная подписка",
-        active: "Подписка активна",
-        grace_period: "Льготный период",
-        suspended: "Подписка приостановлена",
-        cancelled: "Подписка отменена",
+        trial: "Архив подписки: пробный период",
+        active: "Архив подписки: была активна",
+        grace_period: "Архив подписки: льготный период",
+        suspended: "Архив подписки: была приостановлена",
+        cancelled: "Архив подписки: отменена",
         archived: "Подписка в архиве",
       } as Record<string, string>
     )[status] ?? "Статус подписки не определён"

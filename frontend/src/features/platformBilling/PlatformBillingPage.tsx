@@ -72,7 +72,6 @@ const subscriptionStatusLabel: Record<string, string> = {
 export function PlatformBillingPage(): JSX.Element {
   const { user } = useAuth();
   const canView = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingView);
-  const canManagePricing = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingPlanManage);
   const canReviewPayments = hasPlatformCapability(user, PLATFORM_CAPABILITIES.billingPaymentReview);
   const canApprovePayments = hasPlatformCapability(
     user,
@@ -159,7 +158,7 @@ export function PlatformBillingPage(): JSX.Element {
     <div className="space-y-4">
       <PageHeader
         title="Расчёты Aurum"
-        description="Защищённый журнал, платежи и тарифы аптек"
+        description="История расчётов и финансовые корректировки. Оплата не изменяет доступ."
         meta={
           workspace === "legacy" && overview.data ? (
             <>данные на {formatDateTime(overview.data.generated_at)}</>
@@ -189,7 +188,7 @@ export function PlatformBillingPage(): JSX.Element {
         label="Раздел расчётов Aurum"
         options={[
           { value: "financial", label: "Клиенты и оплаты" },
-          { value: "pricing", label: "Тарифы и цены" },
+          { value: "pricing", label: "Архив тарифов" },
           { value: "legacy", label: "Архив прежних счетов" },
         ]}
         className="w-full sm:w-auto"
@@ -197,7 +196,7 @@ export function PlatformBillingPage(): JSX.Element {
 
       {workspace === "pricing" ? (
         <PricingWorkspace
-          canManage={canManagePricing}
+          canManage={false}
           currentUserId={user?.id ?? ""}
           onFetchingChange={setPricingFetching}
           refreshSignal={pricingRefreshSignal}

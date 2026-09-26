@@ -237,9 +237,8 @@ async def _seed_tenant_subjects(
     foundation = FoundationService(FoundationRepository(db_session))
     nick = uuid4().hex[:8]
     tenant = await foundation.create_tenant(
-        payload={"name": f"Sec {nick}", "contact_email": f"s-{nick}@aurum.tj"}
+        payload={"status": "active", "name": f"Sec {nick}", "contact_email": f"s-{nick}@aurum.tj"}
     )
-    await foundation.update_tenant(tenant.id, fields={"status": "active"})
 
     regular = AppUser(
         email=f"regular-{nick}@aurum.tj",
@@ -593,9 +592,12 @@ async def test_branch_scoped_user_sees_and_uses_only_assigned_branch(
         pos = POSService(POSRepository(db_session))
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
-            payload={"name": f"Branch Sec {nick}", "contact_email": f"branch-{nick}@aurum.tj"}
+            payload={
+                "status": "active",
+                "name": f"Branch Sec {nick}",
+                "contact_email": f"branch-{nick}@aurum.tj",
+            }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         branch_a = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "A"})
         branch_b = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "B"})
         batch_a_id, batch_b_id = await _seed_scoped_batches(
@@ -744,11 +746,11 @@ async def test_branch_scoped_incoming_user_cannot_use_other_branch(
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
             payload={
+                "status": "active",
                 "name": f"Incoming Sec {nick}",
                 "contact_email": f"incoming-{nick}@aurum.tj",
             }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         branch_a = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "A"})
         branch_b = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "B"})
         supplier = await suppliers.create_supplier(
@@ -1012,9 +1014,12 @@ async def test_cashier_cannot_view_another_cashiers_sale(
         pos = POSService(POSRepository(db_session))
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
-            payload={"name": f"Sales Sec {nick}", "contact_email": f"sales-{nick}@aurum.tj"}
+            payload={
+                "status": "active",
+                "name": f"Sales Sec {nick}",
+                "contact_email": f"sales-{nick}@aurum.tj",
+            }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
         register = await foundation.create_register(
             tenant_id=tenant.id,
@@ -1134,11 +1139,11 @@ async def test_sales_list_keeps_each_capability_paired_with_its_branch_scope(
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
             payload={
+                "status": "active",
                 "name": f"Mixed Sales Scope {nick}",
                 "contact_email": f"mixed-sales-{nick}@aurum.tj",
             }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         own_branch = await foundation.create_branch(
             tenant_id=tenant.id,
             fields={"name": "Own branch"},
@@ -1276,11 +1281,11 @@ async def test_tenant_sales_view_does_not_expand_pos_sell_branch_scope(
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
             payload={
+                "status": "active",
                 "name": f"POS Capability Scope {nick}",
                 "contact_email": f"pos-capability-{nick}@aurum.tj",
             }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         allowed_branch = await foundation.create_branch(
             tenant_id=tenant.id,
             fields={"name": "Allowed POS branch"},
@@ -1361,9 +1366,12 @@ async def test_cashier_cannot_mutate_another_cashiers_pos_work(
         pos = POSService(POSRepository(db_session))
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
-            payload={"name": f"POS Sec {nick}", "contact_email": f"pos-{nick}@aurum.tj"}
+            payload={
+                "status": "active",
+                "name": f"POS Sec {nick}",
+                "contact_email": f"pos-{nick}@aurum.tj",
+            }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
         register = await foundation.create_register(
             tenant_id=tenant.id,
@@ -1534,9 +1542,12 @@ async def test_readonly_tenant_blocks_pos_mutations(
         pos = POSService(POSRepository(db_session))
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
-            payload={"name": f"Readonly POS {nick}", "contact_email": f"ro-pos-{nick}@aurum.tj"}
+            payload={
+                "status": "active",
+                "name": f"Readonly POS {nick}",
+                "contact_email": f"ro-pos-{nick}@aurum.tj",
+            }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
         register = await foundation.create_register(
             tenant_id=tenant.id,
@@ -1600,7 +1611,7 @@ async def test_readonly_tenant_blocks_pos_mutations(
         )
         await pos.complete(sale_id=completed_sale.id)
 
-        await foundation.update_tenant(tenant.id, fields={"status": "readonly"})
+        await foundation.repo.update_tenant(tenant, status="readonly")
 
         headers = {"Authorization": f"Bearer {await _token(db_session, cashier)}"}
         readonly_requests: list[tuple[str, str, dict[str, object] | None]] = [
@@ -1691,11 +1702,11 @@ async def test_electronic_refund_confirmation_requires_separate_permission(
         nick = uuid4().hex[:8]
         tenant = await foundation.create_tenant(
             payload={
+                "status": "active",
                 "name": f"Refund approval {nick}",
                 "contact_email": f"refund-approval-{nick}@aurum.tj",
             }
         )
-        await foundation.update_tenant(tenant.id, fields={"status": "active"})
         branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
         register = await foundation.create_register(
             tenant_id=tenant.id,

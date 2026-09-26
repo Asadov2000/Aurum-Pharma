@@ -16,6 +16,23 @@ from app.core.time import utc_now
 from app.tasks.beat_app import beat_app
 
 
+async def test_runtime_cannot_recreate_subscription_even_with_direct_sql(
+    db_engine: AsyncEngine,
+) -> None:
+    with pytest.raises(DBAPIError) as error:
+        async with db_engine.begin() as connection:
+            await connection.execute(
+                text("""
+                INSERT INTO public.tenant_subscription
+                  (tenant_id, plan_id, status, period_end, branches_count, amount)
+                VALUES (:tenant, :plan, 'active', now() + interval '30 days', 1, 1)
+                """),
+                {"tenant": uuid4(), "plan": uuid4()},
+            )
+    assert getattr(error.value.orig, "sqlstate", None) == "42501"
+    assert "subscriptions_disabled" in str(error.value.orig)
+
+
 async def test_legacy_financial_write_routes_are_not_registered(
     platform_client: AsyncClient,
 ) -> None:
@@ -39,7 +56,14 @@ def test_legacy_invoice_generator_is_not_scheduled() -> None:
         if isinstance(entry, dict) and "task" in entry
     }
 
-    assert "billing.generate_monthly_invoices" not in scheduled_tasks
+    assert scheduled_tasks.isdisjoint(
+        {
+            "billing.generate_monthly_invoices",
+            "billing.process_trial_endings",
+            "billing.process_grace_endings",
+            "foundation.auto_start_trials",
+        }
+    )
 
 
 async def test_legacy_archive_cannot_be_deleted_through_tenant_cascade(

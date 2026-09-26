@@ -13,16 +13,6 @@ from app.core.config import get_settings
 
 
 @pytest_asyncio.fixture
-async def support_engine_iso() -> AsyncIterator[AsyncEngine]:
-    settings = get_settings()
-    engine = create_async_engine(settings.DATABASE_URL_SUPPORT, poolclass=NullPool)
-    try:
-        yield engine
-    finally:
-        await engine.dispose()
-
-
-@pytest_asyncio.fixture
 async def app_engine_iso() -> AsyncIterator[AsyncEngine]:
     settings = get_settings()
     engine = create_async_engine(settings.DATABASE_URL_APP, poolclass=NullPool)
@@ -37,11 +27,11 @@ async def _set_tenant(conn: AsyncConnection, tid: str) -> None:
 
 
 async def test_subscription_invisible_across_tenants(
-    support_engine_iso: AsyncEngine, app_engine_iso: AsyncEngine
+    maintenance_engine: AsyncEngine, app_engine_iso: AsyncEngine
 ) -> None:
     tenant_ids: list[str] = []
     try:
-        async with support_engine_iso.begin() as conn:
+        async with maintenance_engine.begin() as conn:
             tr = await conn.execute(
                 text(
                     "INSERT INTO tenant (name, contact_email) VALUES "
@@ -78,7 +68,7 @@ async def test_subscription_invisible_across_tenants(
             assert len(rows) == 1, "Tenant A must only see its own subscription"
     finally:
         if tenant_ids:
-            async with support_engine_iso.begin() as conn:
+            async with maintenance_engine.begin() as conn:
                 await conn.execute(
                     text("DELETE FROM tenant_subscription WHERE tenant_id = ANY(:ids)"),
                     {"ids": tenant_ids},

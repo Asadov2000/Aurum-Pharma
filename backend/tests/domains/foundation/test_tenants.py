@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import BusinessRuleError
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from tests.auth_helpers import create_support_access_token, create_tenant_access_token
@@ -341,14 +342,18 @@ async def test_admin_endpoints_reject_non_support(
     assert response.status_code == 403
 
 
-async def test_update_tenant_to_trial_fills_dates(db_session: AsyncSession, make_tenant) -> None:
+@pytest.mark.parametrize("status", ["trial", "active", "grace_period", "readonly"])
+async def test_generic_tenant_update_cannot_change_access_lifecycle(
+    db_session: AsyncSession, make_tenant, status: str
+) -> None:
     tenant = await make_tenant(status="setup")
     assert tenant.trial_started_at is None
 
     service = FoundationService(FoundationRepository(db_session))
-    updated = await service.update_tenant(tenant.id, fields={"status": "trial"})
-
-    assert updated.status == "trial"
-    assert updated.trial_started_at is not None
-    assert updated.trial_ends_at is not None
-    assert updated.trial_ends_at > updated.trial_started_at
+    with pytest.raises(BusinessRuleError) as error:
+        await service.update_tenant(tenant.id, fields={"status": status})
+    assert error.value.details["reason"] == "tenant_lifecycle_transition_required"
+    await db_session.refresh(tenant)
+    assert tenant.status == "setup"
+    assert tenant.trial_started_at is None
+    assert tenant.trial_ends_at is None

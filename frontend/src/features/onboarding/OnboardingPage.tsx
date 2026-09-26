@@ -17,7 +17,7 @@ import {
   readinessTaskByCode,
   type ReadinessAction,
 } from "./labels";
-import { useOnboardingOverviewQuery, useStartTrial } from "./queries";
+import { useOnboardingOverviewQuery, useLaunchPharmacy } from "./queries";
 import { type OnboardingOverview, type ReadinessStep, type ReadinessStepCode } from "./types";
 
 const primaryLinkClass =
@@ -41,7 +41,7 @@ function statusCopy(overview: OnboardingOverview): {
     return overview.is_ready
       ? {
           title: "Аптека готова к запуску",
-          description: "Обязательные настройки проверены. Можно начать пробный период.",
+          description: "Обязательные настройки проверены. Можно запустить аптеку.",
           tone: "success",
         }
       : {
@@ -63,8 +63,9 @@ function statusCopy(overview: OnboardingOverview): {
   }
   if (overview.tenant_status === "trial") {
     return {
-      title: "Пробный период активен",
-      description: `Доступ ко всем возможностям действует до ${formatDate(overview.trial_ends_at)}.`,
+      title: "Аптека работает",
+      description:
+        "Постоянный доступ без подписки. Права сотрудников и ограничения Aurum сохраняются.",
       tone: "success",
     };
   }
@@ -77,8 +78,8 @@ function statusCopy(overview: OnboardingOverview): {
   }
   if (overview.tenant_status === "grace_period") {
     return {
-      title: "Нужно проверить оплату",
-      description: "Доступ временно сохранён. Откройте биллинг и проверьте состояние подписки.",
+      title: "Аптека работает",
+      description: "Доступ не зависит от подписки. Ограничениями управляет администратор Aurum.",
       tone: "warning",
     };
   }
@@ -134,22 +135,22 @@ export function OnboardingPage(): JSX.Element {
   const access = useMemo(() => getRouteAccessContext(user), [user]);
   const online = useConnectivity().canUseServer;
   const overviewQuery = useOnboardingOverviewQuery(tenantId);
-  const startTrial = useStartTrial(tenantId);
+  const launchPharmacy = useLaunchPharmacy(tenantId);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [operationId, setOperationId] = useState<string | null>(null);
 
   useEffect(() => {
     if (
       confirmOpen &&
-      startTrial.isError &&
+      launchPharmacy.isError &&
       overviewQuery.data &&
       overviewQuery.data.tenant_status !== "setup"
     ) {
       setConfirmOpen(false);
       setOperationId(null);
-      startTrial.reset();
+      launchPharmacy.reset();
     }
-  }, [confirmOpen, overviewQuery.data, startTrial]);
+  }, [confirmOpen, overviewQuery.data, launchPharmacy]);
 
   if (!online && overviewQuery.data === undefined) {
     return (
@@ -255,9 +256,8 @@ export function OnboardingPage(): JSX.Element {
     return step?.required && !step.is_complete;
   })?.code;
   const canOpenPos = canAccessPath("/pos", access);
-  const canOpenBilling = canAccessPath("/billing", access);
-  const trialCanBeStarted =
-    overview.can_start_trial && access.isTenantOwner && overview.tenant_status === "setup";
+  const canLaunch =
+    overview.can_launch && access.isTenantOwner && overview.tenant_status === "setup";
   const completed = overview.required_completed;
   const total = overview.required_total;
   const progress = total === 0 ? 0 : Math.round((completed / total) * 100);
@@ -271,15 +271,15 @@ export function OnboardingPage(): JSX.Element {
     minute: "2-digit",
   }).format(new Date(overviewQuery.dataUpdatedAt));
 
-  const openTrialConfirmation = (): void => {
+  const openLaunchConfirmation = (): void => {
     setOperationId((current) => current ?? createOperationId());
-    startTrial.reset();
+    launchPharmacy.reset();
     setConfirmOpen(true);
   };
 
-  const confirmTrial = (): void => {
+  const confirmLaunch = (): void => {
     if (!operationId) return;
-    startTrial.mutate(operationId, {
+    launchPharmacy.mutate(operationId, {
       onSuccess: () => {
         setConfirmOpen(false);
         setOperationId(null);
@@ -331,30 +331,29 @@ export function OnboardingPage(): JSX.Element {
         progress={progress}
         showProgress={showReadinessProgress}
         firstAction={firstAction}
-        canOpenBilling={canOpenBilling}
       />
 
       <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(19rem,1fr)]">
         <ReadinessPanel stepsByCode={stepsByCode} activeStepCode={activeStepCode} access={access} />
 
         <aside className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-1">
-          <TrialPanel
+          <AccessPanel
             overview={overview}
-            canStart={trialCanBeStarted}
+            canStart={canLaunch}
             isOwner={access.isTenantOwner}
             online={online}
-            onStart={openTrialConfirmation}
+            onStart={openLaunchConfirmation}
           />
           <RecommendedPanel overview={overview} canOpenPos={canOpenPos} access={access} />
         </aside>
       </div>
 
-      {startTrial.isError && !confirmOpen && (
+      {launchPharmacy.isError && !confirmOpen && (
         <div
           className="rounded-lg border border-danger/25 bg-danger/5 px-4 py-3 text-sm text-danger"
           role="alert"
         >
-          {describeApiError(startTrial.error, "Не удалось начать пробный период")}
+          {describeApiError(launchPharmacy.error, "Не удалось запустить аптеку")}
         </div>
       )}
 
@@ -373,22 +372,22 @@ export function OnboardingPage(): JSX.Element {
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Начать пробный период?"
+        title="Запустить аптеку?"
         message={
           <div className="space-y-3">
             <p>
-              Пробный период начнётся сразу и продлится 14 дней. Повторно активировать бесплатный
-              период для этой аптеки нельзя.
+              После проверки обязательных настроек аптека получит постоянный доступ. Права
+              сотрудников и ограничения администратора Aurum сохраняются.
             </p>
-            {startTrial.isError && (
+            {launchPharmacy.isError && (
               <div
                 className="space-y-3 rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-sm text-danger"
                 role="alert"
               >
-                <p>{describeApiError(startTrial.error, "Не удалось начать пробный период")}</p>
+                <p>{describeApiError(launchPharmacy.error, "Не удалось запустить аптеку")}</p>
                 <p className="text-foreground-secondary">
                   Сервер мог получить запрос. Сначала проверьте статус. Безопасный повтор использует
-                  тот же номер операции и не создаст второй пробный период.
+                  тот же номер операции и не создаст повторный запуск.
                 </p>
                 <Button
                   type="button"
@@ -403,12 +402,12 @@ export function OnboardingPage(): JSX.Element {
             )}
           </div>
         }
-        confirmLabel={startTrial.isError ? "Повторить безопасно" : "Начать период"}
-        isLoading={startTrial.isPending}
-        cancelDisabled={startTrial.isPending}
-        onConfirm={confirmTrial}
+        confirmLabel={launchPharmacy.isError ? "Повторить безопасно" : "Запустить"}
+        isLoading={launchPharmacy.isPending}
+        cancelDisabled={launchPharmacy.isPending}
+        onConfirm={confirmLaunch}
         onCancel={() => {
-          if (startTrial.isPending) return;
+          if (launchPharmacy.isPending) return;
           setConfirmOpen(false);
           setOperationId(null);
         }}
@@ -427,7 +426,6 @@ function LaunchSummary({
   progress,
   showProgress,
   firstAction,
-  canOpenBilling,
 }: {
   overview: OnboardingOverview;
   title: string;
@@ -438,18 +436,11 @@ function LaunchSummary({
   progress: number;
   showProgress: boolean;
   firstAction: ReadinessAction | undefined;
-  canOpenBilling: boolean;
 }): JSX.Element {
   const setupPhase = overview.tenant_status === "setup";
   const primaryAction = firstAction ? (
     <Link to={firstAction.to} search={firstAction.search} className={primaryLinkClass}>
       {firstAction.label}
-      <ArrowRightIcon />
-    </Link>
-  ) : (overview.tenant_status === "grace_period" || overview.tenant_status === "readonly") &&
-    canOpenBilling ? (
-    <Link to="/billing" className={primaryLinkClass}>
-      Открыть биллинг
       <ArrowRightIcon />
     </Link>
   ) : null;
@@ -577,7 +568,7 @@ function ReadinessPanel({
   );
 }
 
-function TrialPanel({
+function AccessPanel({
   overview,
   canStart,
   isOwner,
@@ -596,24 +587,20 @@ function TrialPanel({
       ? "Готов к запуску"
       : "Ожидает готовности"
     : tenantStatusLabel[overview.tenant_status];
-  const detail = isSetup
-    ? "14 дней"
-    : overview.tenant_status === "trial"
-      ? `До ${formatDate(overview.trial_ends_at)}`
-      : overview.tenant_status === "active"
-        ? "Работа доступна"
-        : "Требуется действие";
+  const detail = ["setup", "trial", "active", "grace_period"].includes(overview.tenant_status)
+    ? "Без срока окончания"
+    : "Доступ ограничен";
   const blockedReason = !online
     ? "Нет соединения с сервером."
     : !overview.is_ready
       ? `Осталось выполнить обязательных шагов: ${overview.blocker_codes.length}.`
       : !isOwner
-        ? "Запустить период может только владелец аптеки."
+        ? "Запустить аптеку может только владелец аптеки."
         : null;
 
   return (
     <section className="rounded-lg border border-border bg-surface px-5 py-4">
-      <h2 className="text-base font-semibold text-foreground">Пробный период</h2>
+      <h2 className="text-base font-semibold text-foreground">Постоянный доступ</h2>
       <Badge className="mt-3" tone={overview.is_ready ? "success" : "warning"}>
         {status}
       </Badge>
@@ -621,17 +608,17 @@ function TrialPanel({
       <p className="mt-1 text-sm leading-5 text-foreground-muted">
         {isSetup
           ? overview.is_ready
-            ? "Все обязательные настройки завершены. Период начнётся после подтверждения."
+            ? "Все обязательные настройки завершены. Аптека запустится после подтверждения."
             : "Начнётся после завершения обязательных настроек."
           : overview.tenant_status === "trial"
-            ? "После окончания периода потребуется активная подписка."
-            : "Состояние организации учитывается автоматически."}
+            ? "Доступ не зависит от подписки."
+            : "Доступ определяется правами сотрудников и ограничениями Aurum."}
       </p>
 
       {isSetup && (
         <Button className="mt-4 w-full" size="lg" onClick={onStart} disabled={!canStart || !online}>
           {!canStart && <LockIcon />}
-          Начать пробный период
+          Запустить аптеку
         </Button>
       )}
       {isSetup && blockedReason && (
@@ -641,7 +628,7 @@ function TrialPanel({
       )}
       {isSetup && (
         <p className="mt-2 text-xs text-foreground-muted">
-          Повторная бесплатная активация недоступна.
+          Доступ регулируется правами сотрудников и ограничениями Aurum.
         </p>
       )}
     </section>
@@ -736,9 +723,9 @@ function RecommendedPanel({
 
 const tenantStatusLabel: Record<OnboardingOverview["tenant_status"], string> = {
   setup: "Настройка",
-  trial: "Пробный период",
+  trial: "Работа доступна",
   active: "Работает",
-  grace_period: "Ожидает оплаты",
+  grace_period: "Работа доступна",
   readonly: "Только просмотр",
   archived: "Архив",
 };

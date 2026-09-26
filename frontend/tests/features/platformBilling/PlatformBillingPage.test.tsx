@@ -54,13 +54,10 @@ vi.mock("@/features/platformBilling/api", () => ({
   rejectPlatformBankPaymentReview: (...args: unknown[]) => rejectPlatformBankPaymentReview(...args),
   listPlatformPaymentAdjustmentQueue: (...args: unknown[]) =>
     listPlatformPaymentAdjustmentQueue(...args),
-  listPlatformPaymentSubmissions: (...args: unknown[]) =>
-    listPlatformPaymentSubmissions(...args),
+  listPlatformPaymentSubmissions: (...args: unknown[]) => listPlatformPaymentSubmissions(...args),
   getPlatformPaymentSubmission: (...args: unknown[]) => getPlatformPaymentSubmission(...args),
-  reviewPlatformPaymentSubmission: (...args: unknown[]) =>
-    reviewPlatformPaymentSubmission(...args),
-  rejectPlatformPaymentSubmission: (...args: unknown[]) =>
-    rejectPlatformPaymentSubmission(...args),
+  reviewPlatformPaymentSubmission: (...args: unknown[]) => reviewPlatformPaymentSubmission(...args),
+  rejectPlatformPaymentSubmission: (...args: unknown[]) => rejectPlatformPaymentSubmission(...args),
   createPlatformPaymentAdjustment: (...args: unknown[]) => createPlatformPaymentAdjustment(...args),
   approvePlatformPaymentAdjustment: (...args: unknown[]) =>
     approvePlatformPaymentAdjustment(...args),
@@ -298,9 +295,8 @@ describe("PlatformBillingPage", () => {
       page: 1,
       page_size: 20,
     });
-    getPlatformPaymentApprovalDetail.mockImplementation(
-      (_tenantId: string, reviewId: string) =>
-        Promise.resolve(paymentApprovalDetail(reviewId, reviewId === "review-other" ? 2 : 1)),
+    getPlatformPaymentApprovalDetail.mockImplementation((_tenantId: string, reviewId: string) =>
+      Promise.resolve(paymentApprovalDetail(reviewId, reviewId === "review-other" ? 2 : 1)),
     );
     listPlatformPaymentAdjustmentQueue.mockResolvedValue({
       items: [],
@@ -376,7 +372,7 @@ describe("PlatformBillingPage", () => {
 
   it("keeps pricing mutations hidden for a view-only platform grant", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Тарифы и цены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Архив тарифов" }));
 
     expect(await screen.findByText("Бизнес")).toBeInTheDocument();
     expect(screen.getAllByText("590,00 TJS").length).toBeGreaterThan(0);
@@ -385,67 +381,18 @@ describe("PlatformBillingPage", () => {
     expect(screen.queryByRole("button", { name: "Согласовать" })).not.toBeInTheDocument();
   });
 
-  it("creates a plan for an authorized manager with one stable operation id", async () => {
-    authState.user.platform_capabilities = [
-      "platform.billing.view",
-      "platform.billing.plan.manage",
-    ];
-    const operationId = "123e4567-e89b-42d3-a456-426614174000";
-    vi.spyOn(crypto, "randomUUID").mockReturnValue(operationId);
-    createPlatformPricingPlan.mockResolvedValue({ item: PRICING_PLAN, applied: true });
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Тарифы и цены" }));
-    await screen.findByText("Бизнес");
-
-    fireEvent.click(screen.getByRole("button", { name: "Создать тариф" }));
-    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Премиум" } });
-    fireEvent.change(screen.getByLabelText("Системный код"), {
-      target: { value: "premium" },
-    });
-    fireEvent.click(
-      within(screen.getByRole("dialog", { name: "Новый тариф" })).getByRole("button", {
-        name: "Создать тариф",
-      }),
-    );
-
-    await waitFor(() => {
-      expect(createPlatformPricingPlan).toHaveBeenCalledWith({
-        operation_id: operationId,
-        code: "premium",
-        name: "Премиум",
-        description: null,
-      });
-    });
-    expect(await screen.findByRole("status")).toHaveTextContent("Тариф создан");
-  });
-
-  it("lets only a different authorized user schedule a draft", async () => {
+  it("keeps pricing archived even with a plan-management grant", async () => {
     authState.user.platform_capabilities = [
       "platform.billing.view",
       "platform.billing.plan.manage",
     ];
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Тарифы и цены" }));
-    await screen.findByText("Бизнес");
-    expect(screen.getAllByRole("button", { name: "Согласовать" }).length).toBeGreaterThan(0);
-
-    listPlatformPricingPlans.mockResolvedValue({
-      items: [
-        {
-          ...PRICING_PLAN,
-          versions: [{ ...PRICING_PLAN.versions[0], created_by: "developer-1" }],
-        },
-      ],
-      total: 1,
-      page: 1,
-      page_size: 20,
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Обновить" }));
-
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Согласовать" })).not.toBeInTheDocument(),
-    );
-    expect(screen.getAllByText("Ожидает другого согласующего").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Архив тарифов" }));
+    expect(await screen.findByText("Бизнес")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Создать тариф" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Согласовать" })).not.toBeInTheDocument();
+    expect(createPlatformPricingPlan).not.toHaveBeenCalled();
+    expect(schedulePlatformPricingPrice).not.toHaveBeenCalled();
   });
 
   it("keeps the financial account read-only without payment capabilities", async () => {
@@ -525,9 +472,7 @@ describe("PlatformBillingPage", () => {
       },
       applied: true,
     });
-    vi.spyOn(crypto, "randomUUID").mockReturnValue(
-      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    );
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     const { queryClient } = renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
     fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
@@ -568,9 +513,7 @@ describe("PlatformBillingPage", () => {
       item: { ...PAYMENT_SUBMISSION, status: "rejected", reason_code: "amount_mismatch" },
       applied: true,
     });
-    vi.spyOn(crypto, "randomUUID").mockReturnValue(
-      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-    );
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     const { queryClient } = renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
     fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));

@@ -27,22 +27,6 @@ const expiryTone: Record<ExpiryStatus, "neutral" | "success" | "warning" | "dang
   normal: "neutral",
 };
 
-const subscriptionLabel: Record<string, string> = {
-  trial: "Пробный период",
-  active: "Активна",
-  grace_period: "Льготный период",
-  suspended: "Приостановлена",
-  cancelled: "Отменена",
-  archived: "Архив",
-};
-
-function subscriptionTone(status: string): "success" | "warning" | "danger" | "info" {
-  if (status === "active") return "success";
-  if (status === "trial") return "info";
-  if (status === "grace_period") return "warning";
-  return "danger";
-}
-
 const moneyFormatter = new Intl.NumberFormat("ru-RU", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -585,28 +569,12 @@ function FinancePanel({
             to="/billing"
             className="inline-flex min-h-9 items-center rounded-md border border-input px-3 text-sm font-medium text-foreground hover:bg-foreground/[0.025]"
           >
-            Тариф и оплата
+            История расчётов
           </Link>
         ) : undefined
       }
     >
-      <div className="grid min-h-40 grid-cols-1 divide-y divide-border px-4 py-3 sm:grid-cols-3 sm:divide-x sm:divide-y-0 sm:px-5">
-        <FinanceMetric label="Подписка">
-          {data.subscription_status ? (
-            <>
-              <Badge tone={subscriptionTone(data.subscription_status)}>
-                {subscriptionLabel[data.subscription_status] ?? "Неизвестный статус"}
-              </Badge>
-              {data.subscription_period_end && (
-                <p className="mt-2 text-xs text-foreground-muted">
-                  до {formatDate(data.subscription_period_end)}
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-foreground-muted">Нет активной подписки</p>
-          )}
-        </FinanceMetric>
+      <div className="grid min-h-40 grid-cols-1 divide-y divide-border px-4 py-3 sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:px-5">
         <FinanceMetric label="Открытые счета">
           <p className="font-mono text-sm font-semibold text-foreground">
             {data.open_invoices_count} шт. · {money(data.open_invoices_total, data.currency)}
@@ -615,7 +583,7 @@ function FinancePanel({
         <FinanceMetric label="Платежи">
           {data.has_overdue && canOpenBilling ? (
             <Link to="/billing">
-              <Badge tone="danger">Есть просрочка — оплатить</Badge>
+              <Badge tone="danger">Есть просрочка — посмотреть</Badge>
             </Link>
           ) : data.has_overdue ? (
             <Badge tone="danger">Есть просрочка</Badge>

@@ -39,9 +39,8 @@ async def _seed(db: AsyncSession):  # type: ignore[no-untyped-def]
     inv = InventoryRepository(db)
 
     tenant = await foundation.create_tenant(
-        payload={"name": f"Dash {nick}", "contact_email": f"d-{nick}@aurum.tj"}
+        payload={"status": "active", "name": f"Dash {nick}", "contact_email": f"d-{nick}@aurum.tj"}
     )
-    await foundation.update_tenant(tenant.id, fields={"status": "active"})
     await db.refresh(tenant)
     branch = await foundation.create_branch(tenant_id=tenant.id, fields={"name": "Main"})
     register = await foundation.create_register(
@@ -207,9 +206,8 @@ async def test_dashboard_summary_requires_reports_view(
     foundation = FoundationService(FoundationRepository(db_session))
     nick = uuid4().hex[:8]
     tenant = await foundation.create_tenant(
-        payload={"name": f"Dash {nick}", "contact_email": f"d-{nick}@aurum.tj"}
+        payload={"status": "active", "name": f"Dash {nick}", "contact_email": f"d-{nick}@aurum.tj"}
     )
-    await foundation.update_tenant(tenant.id, fields={"status": "active"})
 
     seller = AppUser(
         email=f"seller-{uuid4().hex[:8]}@aurum.tj",

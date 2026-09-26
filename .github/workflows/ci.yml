@@ -506,6 +506,9 @@ jobs:
 
           docker exec -i "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          -- Historical subscription fixtures use the canonical maintenance identity.
+          SET SESSION AUTHORIZATION aurum_migrator;
+          SET ROLE aurum_schema_owner;
           INSERT INTO public.app_user (id, email, full_name, status)
           VALUES (
             '94000000-0000-4000-8000-000000000001',
@@ -543,6 +546,9 @@ jobs:
           fi
           docker exec -i "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          -- The rejected downgrade rolled back, so retirement guards remain active.
+          SET SESSION AUTHORIZATION aurum_migrator;
+          SET ROLE aurum_schema_owner;
           DELETE FROM public.billing_plan WHERE code = 'billing_0094_guard';
           DELETE FROM public.app_user
           WHERE id = '94000000-0000-4000-8000-000000000001';
@@ -621,6 +627,9 @@ jobs:
           poetry run python -m app.migrate upgrade head
           docker exec -i "$POSTGRES_SERVICE_ID" \
             psql -v ON_ERROR_STOP=1 -U postgres -d aurum_test <<'SQL'
+          -- Clean historical fixtures through maintenance after restoring head.
+          SET SESSION AUTHORIZATION aurum_migrator;
+          SET ROLE aurum_schema_owner;
           DELETE FROM public.tenant_subscription
           WHERE id = '94000000-0000-4000-8000-000000000003';
           DELETE FROM public.tenant_settings

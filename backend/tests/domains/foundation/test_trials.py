@@ -1,4 +1,4 @@
-"""Automatic trial activation uses the canonical readiness transition."""
+"""Retired automatic trial activation never launches or subscribes a tenant."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from app.core.time import utc_now
 from app.tasks.foundation import _auto_start_trials_async
 
 
-async def test_auto_start_trials_promotes_only_ready_expired_setup(
+async def test_auto_start_trials_leaves_ready_and_incomplete_setup_unchanged(
     db_engine: AsyncEngine,
     maintenance_engine: AsyncEngine,
 ) -> None:
@@ -141,7 +141,7 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
         result = await _auto_start_trials_async(
             candidate_tenant_ids=frozenset(tenant_ids),
         )
-        assert result == {"started": 1, "skipped": 1}
+        assert result == {"started": 0, "skipped": 0}
 
         async with maintenance_engine.connect() as connection:
             rows = (
@@ -154,8 +154,8 @@ async def test_auto_start_trials_promotes_only_ready_expired_setup(
                 )
             ).fetchall()
         by_id = {UUID(str(row[0])): (row[1], row[2]) for row in rows}
-        assert by_id[ready_id][0] == "trial"
-        assert by_id[ready_id][1] is not None
+        assert by_id[ready_id][0] == "setup"
+        assert by_id[ready_id][1] is None
         assert by_id[blocked_id][0] == "setup"
         assert by_id[young_id][0] == "setup"
     finally:

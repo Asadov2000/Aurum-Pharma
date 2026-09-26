@@ -13,6 +13,8 @@ from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.onboarding.repository import OnboardingRepository
 from app.domains.onboarding.schemas import (
     ChecklistRead,
+    LaunchRequest,
+    LaunchResponse,
     OnboardingOverviewRead,
     StartTrialRequest,
     StartTrialResponse,
@@ -87,6 +89,23 @@ async def mark_receipt_print_tested(
     if checklist is None:
         raise BusinessRuleError("Onboarding checklist is not initialised")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/launch", response_model=LaunchResponse, status_code=status.HTTP_201_CREATED)
+async def launch_pharmacy(
+    payload: LaunchRequest,
+    user: Annotated[CurrentUser, Depends(require_tenant_owner)],
+    service: Annotated[OnboardingService, Depends(_service)],
+) -> LaunchResponse:
+    if not user.is_tenant_owner or user.session_id is None:
+        raise PermissionDeniedError("An authenticated owner session is required")
+    result = await service.launch(
+        tenant_id=_tenant_or_400(user),
+        operation_id=payload.operation_id,
+        actor_user_id=user.user_id,
+        actor_session_id=user.session_id,
+    )
+    return LaunchResponse.model_validate(result, from_attributes=True)
 
 
 @router.post(

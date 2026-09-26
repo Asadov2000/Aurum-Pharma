@@ -56,6 +56,19 @@ class StartTrialRequest(BaseModel):
     operation_id: UUID4
 
 
+class LaunchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: UUID4
+
+
+class LaunchResponse(BaseModel):
+    tenant_id: UUID
+    status: Literal["active"]
+    launched_at: datetime
+    operation_id: UUID
+
+
 ReadinessStepCode = Literal[
     "pharmacy_profile",
     "licensed_branch",
@@ -126,4 +139,6 @@ class OnboardingOverviewRead(BaseModel):
     recommended_total: int
     is_ready: bool
     can_start_trial: bool
+    can_launch: bool
+    launched_at: datetime | None
     blocker_codes: list[ReadinessStepCode]

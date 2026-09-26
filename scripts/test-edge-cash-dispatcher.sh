@@ -167,6 +167,9 @@ INSERT INTO public.tenant (id, name, contact_email, status)
 SELECT tenant_id, 'Edge dispatcher test',
        'edge-dispatcher-' || tenant_id::TEXT || '@aurum.test', 'active'
 FROM edge_dispatcher_context;
+-- The fixture disables tenant triggers, including the default-policy seed.
+INSERT INTO public.tenant_access_policy (tenant_id)
+SELECT tenant_id FROM edge_dispatcher_context;
 INSERT INTO public.tenant_settings (tenant_id, pos_payment_methods)
 SELECT tenant_id, '["cash"]'::JSONB FROM edge_dispatcher_context;
 INSERT INTO public.app_user (id, email, full_name, home_tenant_id, status)
