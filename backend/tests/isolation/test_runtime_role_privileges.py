@@ -62,6 +62,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "offline_policy_inbox",
     "batch_movement",
     "customer_return_disposition",
     "customer_return_quarantine_item",
@@ -201,6 +202,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_offline_policy_inbox_immutable",
     "assert_tenant_settlement_complete",
     "launch_tenant",
     "trg_enforce_tenant_access",

@@ -30,6 +30,56 @@ class Base(DeclarativeBase):
     """Local declarative base for the sync domain."""
 
 
+class OfflinePolicyInbox(Base):
+    """Immutable received envelopes awaiting independent protected acceptance."""
+
+    __tablename__ = "offline_policy_inbox"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "activation_id",
+            "edge_node_id",
+            "writer_epoch",
+            "delivery_sequence",
+            name="uq_offline_policy_inbox_sequence",
+        ),
+        CheckConstraint("delivery_sequence > 0", name="ck_offline_policy_inbox_sequence"),
+        CheckConstraint("tenant_access_revision > 0", name="ck_offline_policy_inbox_revision"),
+        CheckConstraint("writer_epoch > 0", name="ck_offline_policy_inbox_epoch"),
+        CheckConstraint("capability = 'cash_sale_v1'", name="ck_offline_policy_inbox_capability"),
+        CheckConstraint(
+            "status = 'pending_protected_acceptance'", name="ck_offline_policy_inbox_status"
+        ),
+        CheckConstraint("claims_hash ~ '^[0-9a-f]{64}$'", name="ck_offline_policy_inbox_hash"),
+        CheckConstraint("jsonb_typeof(payload) = 'object'", name="ck_offline_policy_inbox_payload"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    activation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    capability: Mapped[str] = mapped_column(Text, nullable=False)
+    delivery_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tenant_access_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    claims_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending_protected_acceptance'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
 class LocalAuthGuard(Base):
     """Provisioned durable attempt and trusted-clock state, without credentials."""
 
