@@ -88,6 +88,7 @@ def _assert_active_authorization(
         or state.scope != claims.scope
         or state.device_binding != claims.device_binding
         or state.policy_revision != claims.policy_revision
+        or state.tenant_access_revision != claims.tenant_access_revision
         or state.subject_revision != claims.subject_revision
         or state.admission != claims.admission
         or state.local_credential != claims.local_credential
@@ -178,6 +179,7 @@ class OfflineAuthLeaseDecisionPipelineV1:
             authorization = OfflineLeaseAuthorizationStateV1.model_validate(
                 raw_authorization.model_dump(mode="python")
             )
+            await transaction.assert_current_authorization(authorization)
             _assert_active_authorization(authorization, claims, command)
             await self.device_binding_verifier.assert_possession(claims.device_binding)
 

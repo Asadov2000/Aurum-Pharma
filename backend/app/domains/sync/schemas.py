@@ -389,6 +389,7 @@ class OfflineAuthLeaseClaimsV1(_StrictOfflineAuthModel):
     device_binding: OfflineAuthDeviceBindingV0
     allowed_commands: tuple[OfflinePosCommand, ...] = Field(min_length=1, max_length=6)
     policy_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    tenant_access_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
     subject_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
     admission: OfflineAuthLeaseReferenceV1
     local_credential: OfflineAuthLeaseReferenceV1

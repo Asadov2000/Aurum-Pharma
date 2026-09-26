@@ -72,6 +72,7 @@ def _claims() -> OfflineAuthLeaseClaimsV1:
             method="tpm2", key_id=_uuid(9), spki_sha256="ab" * 32
         ),
         policy_revision=11,
+        tenant_access_revision=7,
         subject_revision=13,
         admission=OfflineAuthLeaseReferenceV1(reference_id=_uuid(14), revision=1),
         local_credential=OfflineAuthLeaseReferenceV1(reference_id=_uuid(15), revision=2),
@@ -188,6 +189,7 @@ def test_strict_identity_and_unknown_fields(field: str, value: object) -> None:
     "field",
     [
         "policy_revision",
+        "tenant_access_revision",
         "subject_revision",
         "scope.writer_epoch",
         "admission.revision",
@@ -199,6 +201,13 @@ def test_strict_identity_and_unknown_fields(field: str, value: object) -> None:
 def test_revisions_are_positive_integers_without_coercion(field: str, value: object) -> None:
     with pytest.raises(ValidationError):
         _changed(field, value)
+
+
+def test_unreleased_v1_without_tenant_policy_revision_fails_closed() -> None:
+    payload = _signed(_claims()).model_dump(mode="python")
+    del payload["claims"]["tenant_access_revision"]
+    with pytest.raises(ValidationError):
+        SignedOfflineAuthLeaseV1.model_validate(payload)
 
 
 def test_v0_and_v1_envelopes_reject_each_other() -> None:

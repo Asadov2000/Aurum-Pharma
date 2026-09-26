@@ -28,10 +28,12 @@ from app.domains.sync.offline_auth_lease import (
 from app.domains.sync.offline_lease_issuance_state import CloudOfflineLeaseIssuanceStateV1
 from app.domains.sync.offline_lease_issuer import CloudOfflineLeaseIssuerV1
 from app.domains.sync.offline_lease_signature import Ed25519OfflineLeaseSignatureVerifier
+from app.domains.sync.offline_tenant_access import CloudTenantAccessPolicyV1
 from app.domains.sync.schemas import (
     OfflineAuthDeviceBindingV0,
     OfflineAuthLeaseReferenceV1,
     OfflineAuthScopeV0,
+    OfflinePosCommand,
     SignedOfflineAuthLeaseV1,
 )
 
@@ -65,6 +67,14 @@ def _state() -> CloudOfflineLeaseIssuanceStateV1:
             method="tpm2", key_id=_uuid(8), spki_sha256="ab" * 32
         ),
         policy_revision=17,
+        tenant_access_policy=CloudTenantAccessPolicyV1(
+            tenant_id=_uuid(2),
+            version=7,
+            tenant_status="active",
+            mode="full",
+            blocked_modules=(),
+            expires_at=None,
+        ),
         subject_revision=19,
         allowed_commands=("receipt.print", "sale.cash.complete"),
         admission=OfflineAuthLeaseReferenceV1(reference_id=_uuid(9), revision=3),
@@ -188,6 +198,7 @@ async def test_issue_uses_trusted_rights_revisions_and_real_signature(harness: _
     assert claims.device_binding == state.device_binding
     assert claims.allowed_commands == state.allowed_commands
     assert claims.policy_revision == state.policy_revision
+    assert claims.tenant_access_revision == state.tenant_access_policy.version
     assert claims.subject_revision == state.subject_revision
     assert claims.admission == state.admission
     assert claims.local_credential == state.local_credential
@@ -212,6 +223,96 @@ async def test_issue_uses_trusted_rights_revisions_and_real_signature(harness: _
     )
     with pytest.raises(OfflineAuthUnavailableError):
         await harness.verifier.verify(altered, offline_auth_lease_claims_bytes(altered_claims))
+
+
+@pytest.mark.parametrize(
+    ("restriction", "expected"),
+    [
+        ("full", ("receipt.print", "sale.cash.complete", "shift.close", "shift.open")),
+        ("readonly", ("receipt.print",)),
+        ("pos", ("receipt.print",)),
+        ("inventory", ("receipt.print", "shift.close", "shift.open")),
+    ],
+)
+async def test_signed_commands_intersect_current_tenant_policy(
+    harness: _Harness, restriction: str, expected: tuple[OfflinePosCommand, ...]
+) -> None:
+    assert harness.provider.state is not None
+    state = harness.provider.state
+    policy = state.tenant_access_policy.model_copy(
+        update={
+            "mode": "readonly" if restriction == "readonly" else "full",
+            "blocked_modules": (restriction,) if restriction in {"pos", "inventory"} else (),
+        }
+    )
+    harness.provider.state = state.model_copy(
+        update={
+            "tenant_access_policy": policy,
+            "allowed_commands": (
+                "receipt.print",
+                "sale.cash.complete",
+                "shift.close",
+                "shift.open",
+            ),
+        }
+    )
+    lease = await harness.issuer.issue(harness.scope)
+    assert lease.claims.allowed_commands == expected
+    assert lease.claims.tenant_access_revision == policy.version
+    assert (
+        await harness.verifier.verify(lease, offline_auth_lease_claims_bytes(lease.claims)) is None
+    )
+
+
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+async def test_policy_expiry_only_affects_new_lease_and_never_shortens_admission(
+    harness: _Harness, offset: int
+) -> None:
+    assert harness.provider.state is not None
+    state = harness.provider.state
+    policy = state.tenant_access_policy.model_copy(
+        update={"mode": "readonly", "expires_at": NOW + timedelta(microseconds=offset)}
+    )
+    harness.provider.state = state.model_copy(update={"tenant_access_policy": policy})
+    lease = await harness.issuer.issue(harness.scope)
+    assert lease.claims.allowed_commands == (
+        ("receipt.print", "sale.cash.complete") if offset <= 0 else ("receipt.print",)
+    )
+    assert lease.claims.expires_at == NOW + timedelta(days=30)
+    harness.provider.now = NOW + timedelta(seconds=1)
+    renewed = await harness.issuer.issue(harness.scope)
+    assert renewed.claims.allowed_commands == ("receipt.print", "sale.cash.complete")
+    assert lease.claims.allowed_commands == (
+        ("receipt.print", "sale.cash.complete") if offset <= 0 else ("receipt.print",)
+    )
+
+
+@pytest.mark.parametrize("invalid", ["missing", "tenant", "version", "archived", "empty"])
+async def test_unusable_tenant_policy_never_stages_or_commits_lease(
+    harness: _Harness, invalid: str
+) -> None:
+    assert harness.provider.state is not None
+    state = harness.provider.state
+    if invalid == "missing":
+        harness.provider.state = state.model_copy(update={"tenant_access_policy": None})
+    else:
+        changes: dict[str, object] = {
+            "tenant": {"tenant_id": _uuid(99)},
+            "version": {"version": True},
+            "archived": {"tenant_status": "archived", "expires_at": NOW - timedelta(days=1)},
+            "empty": {"mode": "readonly"},
+        }[invalid]
+        harness.provider.state = state.model_copy(
+            update={
+                "tenant_access_policy": state.tenant_access_policy.model_copy(update=changes),
+                "allowed_commands": ("sale.cash.complete",),
+            }
+        )
+    await _assert_denied(harness)
+    assert harness.provider.staged == []
+    assert harness.provider.committed == []
+    assert "record" not in harness.provider.events
+    assert "commit" not in harness.provider.events
 
 
 @pytest.mark.parametrize("deadline", [*DEADLINE_FIELDS, "key", "thirty-days"])
