@@ -57,7 +57,7 @@ export function buildNav(
     { to: "/pos", label: "Касса" },
     { to: "/sales", label: "Чеки" },
     { to: "/payment-reconciliation", label: "Сверка" },
-    { to: "/billing", label: "Расчёты" },
+    { to: "/billing", label: "Расчёты с Aurum" },
     { to: "/reports", label: "Отчёты" },
     { to: "/audit", label: "Аудит" },
     { to: "/notifications", label: "Уведомления" },

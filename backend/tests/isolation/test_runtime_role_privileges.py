@@ -125,6 +125,7 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "billing_cash_document",
     "auth_identity_code",
     "alembic_version",
     "app_user",
@@ -202,6 +203,11 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "billing_cash_document_json",
+    "command_billing_cash_payment",
+    "read_billing_cash_payments",
+    "trg_guard_billing_cash_document",
+    "trg_guard_cash_adjustment",
     "trg_offline_policy_inbox_immutable",
     "assert_tenant_settlement_complete",
     "launch_tenant",
@@ -520,6 +526,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "read_billing_cash_payments",
     "launch_tenant",
     "analyze_ready_sync_read_catalog",
     "search_sync_read_catalog",

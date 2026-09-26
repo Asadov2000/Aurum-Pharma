@@ -1051,6 +1051,45 @@ class BillingRepository:
             )
         return dict(result)
 
+    async def cash_payment_command(
+        self, parameters: dict[str, object]
+    ) -> PlatformPricingCommandRecord:
+        return await self._pricing_command(
+            "SELECT * FROM public.command_billing_cash_payment("
+            ":actor_user_id,:actor_session_id,:operation_id,:request_hash,:tenant_id,:action,"
+            ":document_id,:expected_row_version,:amount,:paid_at,:purpose,:target_invoice_id,:reason)",
+            parameters,
+        )
+
+    async def read_cash_payments(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID | None,
+        tenant_id: UUID,
+        document_id: UUID | None = None,
+        receipt: bool = False,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, object]:
+        async with self.session.begin_nested():
+            result = await self.session.scalar(
+                text(
+                    "SELECT public.read_billing_cash_payments("
+                    ":actor,:session,:tenant,:document,:receipt,:limit,:offset)"
+                ),
+                {
+                    "actor": actor_user_id,
+                    "session": actor_session_id,
+                    "tenant": tenant_id,
+                    "document": document_id,
+                    "receipt": receipt,
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
+        return dict(result)
+
     async def _pricing_command(
         self,
         statement: str,

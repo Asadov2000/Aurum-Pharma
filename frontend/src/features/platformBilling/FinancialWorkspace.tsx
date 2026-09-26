@@ -20,6 +20,7 @@ import { formatBillingDate, formatBillingMoney } from "@/features/billing/format
 import { describeApiError } from "@/lib/errorMessages";
 
 import { ApprovePaymentModal, RegisterPaymentModal } from "./FinancialPaymentModal";
+import { CashPaymentsWorkspace } from "./CashPaymentsWorkspace";
 import { PaymentAdjustmentDecisionModal, PaymentAdjustmentModal } from "./FinancialAdjustmentModal";
 import { PaymentSubmissionQueue } from "./PaymentSubmissionQueue";
 import { PaymentSubmissionReviewModal } from "./PaymentSubmissionReviewModal";
@@ -215,7 +216,7 @@ export function FinancialWorkspace({
             Клиенты и оплаты
           </h2>
           <p className="mt-0.5 text-xs text-foreground-muted">
-            Защищённый финансовый журнал и независимое подтверждение банковских платежей.
+            Баланс клиентов, наличные и банковские оплаты с независимым подтверждением.
           </p>
         </div>
         {!canReview && !canApprove && !canCreateAdjustment && !canApproveAdjustment ? (
@@ -278,6 +279,15 @@ export function FinancialWorkspace({
                 online={online}
                 onRegister={() => setRegisterOpen(true)}
                 onAdjust={setAdjustmentTarget}
+              />
+              <CashPaymentsWorkspace
+                key={selectedTenant.tenant_id}
+                tenantId={selectedTenant.tenant_id}
+                invoices={account.data.invoices}
+                canReview={canReview}
+                canApprove={canApprove}
+                online={online && account.data.journal_balanced}
+                refreshSignal={refreshSignal}
               />
               {canReview ? (
                 <PaymentSubmissionQueue
@@ -456,7 +466,7 @@ function TenantPicker({
                       {tenant.name}
                     </span>
                     <span className="mt-1 block text-xs text-foreground-muted">
-                      {subscriptionStatusLabel(tenant.subscription_status)}
+                      {tenantStatusLabel(tenant.tenant_status)}
                     </span>
                   </button>
                 </li>
@@ -516,7 +526,7 @@ function FinancialAccountPanel({
               disabled={!commandsEnabled || openInvoices.length === 0}
               onClick={onRegister}
             >
-              Зарегистрировать оплату
+              Банковский платёж
             </Button>
           ) : null}
         </div>
@@ -527,7 +537,7 @@ function FinancialAccountPanel({
             className="border-r md:border-r-0"
           />
           <Metric
-            label="Кредит"
+            label="Аванс"
             value={formatBillingMoney(account.credit_balance, account.currency)}
           />
           <Metric
@@ -676,18 +686,24 @@ function PaymentsPanel({
                   </TD>
                   {canCreateAdjustment ? (
                     <TD className="text-right">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={
-                          !commandsEnabled ||
-                          payment.adjustment_pending ||
-                          Number(payment.reversible_amount) <= 0
-                        }
-                        onClick={() => onAdjust(payment)}
-                      >
-                        {payment.adjustment_pending ? "Ожидает решения" : "Корректировать"}
-                      </Button>
+                      {payment.payment_method === "cash" || payment.can_adjust === false ? (
+                        <span className="text-xs text-foreground-muted">
+                          Корректировки недоступны
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={
+                            !commandsEnabled ||
+                            payment.adjustment_pending ||
+                            Number(payment.reversible_amount) <= 0
+                          }
+                          onClick={() => onAdjust(payment)}
+                        >
+                          {payment.adjustment_pending ? "Ожидает решения" : "Корректировать"}
+                        </Button>
+                      )}
                     </TD>
                   ) : null}
                 </TR>
@@ -911,29 +927,13 @@ function tenantStatusLabel(status: string): string {
     (
       {
         setup: "Настройка",
-        trial: "Пробный период",
+        trial: "Активна",
         active: "Активна",
-        grace_period: "Льготный период",
+        grace_period: "Активна",
         readonly: "Только чтение",
         archived: "В архиве",
       } as Record<string, string>
     )[status] ?? "Статус не определён"
-  );
-}
-
-function subscriptionStatusLabel(status: string | null): string {
-  if (!status) return "Исторической подписки нет";
-  return (
-    (
-      {
-        trial: "Архив подписки: пробный период",
-        active: "Архив подписки: была активна",
-        grace_period: "Архив подписки: льготный период",
-        suspended: "Архив подписки: была приостановлена",
-        cancelled: "Архив подписки: отменена",
-        archived: "Подписка в архиве",
-      } as Record<string, string>
-    )[status] ?? "Статус подписки не определён"
   );
 }
 

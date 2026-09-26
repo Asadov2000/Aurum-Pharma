@@ -9,7 +9,7 @@ const WORKSPACES = [
   { path: "/users", heading: "Сотрудники" },
   { path: "/roles", heading: "Роли" },
   { path: "/pos", heading: "Касса" },
-  { path: "/billing", heading: "Расчёты", mobileHeading: "История расчётов" },
+  { path: "/billing", heading: "Расчёты с Aurum" },
 ] as const;
 
 async function expectNoHorizontalOverflow(page: Page, workspace: string) {
@@ -443,10 +443,13 @@ test.describe("Interface layout", () => {
     await selectTouchDensity(page);
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "История расчётов", exact: true }),
+      page.getByRole("heading", { level: 1, name: "Расчёты с Aurum", exact: true }),
     ).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
-    await expect(page.getByRole("heading", { name: "Сохранённые расчёты" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Состояние расчётов" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Подтвержденные платежи" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "История счетов" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Архив счетов", exact: true }).click();
 
     const invoiceSearch = page.getByRole("searchbox", { name: "Номер счёта" });
     const searchBounds = await invoiceSearch.boundingBox();
