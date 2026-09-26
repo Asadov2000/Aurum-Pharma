@@ -1376,10 +1376,6 @@ async def test_role_and_subscription_writes_are_isolated(
             {"user_id": rows.user_ids[1]},
         ),
         (
-            "UPDATE role SET tenant_id = NULL WHERE id = :role_id",
-            {"role_id": rows.role_ids[0]},
-        ),
-        (
             "UPDATE role SET is_system = true WHERE id = :role_id",
             {"role_id": rows.role_ids[0]},
         ),
@@ -1397,6 +1393,16 @@ async def test_role_and_subscription_writes_are_isolated(
             statement=statement,
             params=params,
         )
+
+    # The immutable tenant-identity guard runs before the RLS WITH CHECK.
+    await _assert_rls_denied(
+        app_engine_iso,
+        tenant_id=rows.tenant_ids[0],
+        user_id=rows.user_ids[0],
+        statement="UPDATE role SET tenant_id = NULL WHERE id = :role_id",
+        params={"role_id": rows.role_ids[0]},
+        expected_sqlstate="23514",
+    )
 
     async with app_engine_iso.begin() as conn:
         await _set_app_context(

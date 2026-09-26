@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -594,15 +595,34 @@ async def _retire_runtime_support_actor(
     )
 
 
-async def test_tenant_support_queries_use_app_rls_and_stop_after_revocation() -> None:
+async def _cleanup_runtime_support_scenario(
+    maintenance_engine: AsyncEngine,
+    support_engine: AsyncEngine,
+    scenario: _RuntimeSupportScenario,
+) -> None:
+    async with maintenance_engine.begin() as connection:
+        await connection.execute(
+            text("DELETE FROM public.tenant WHERE id = ANY(:tenant_ids)"),
+            {"tenant_ids": [scenario.tenant_id, scenario.other_tenant_id]},
+        )
+    async with support_engine.begin() as connection:
+        await connection.execute(text("SELECT set_config('app.support_session', 'true', true)"))
+        await _retire_runtime_support_actor(connection, scenario)
+
+
+async def test_tenant_support_queries_use_app_rls_and_stop_after_revocation(
+    maintenance_engine: AsyncEngine,
+) -> None:
     settings = get_settings()
     support_engine = create_async_engine(
         settings.DATABASE_URL_SUPPORT,
         poolclass=NullPool,
+        connect_args={"server_settings": {"lock_timeout": "5s", "statement_timeout": "30s"}},
     )
     app_engine = create_async_engine(
         settings.DATABASE_URL_APP,
         poolclass=NullPool,
+        connect_args={"server_settings": {"lock_timeout": "5s", "statement_timeout": "30s"}},
     )
     scenario: _RuntimeSupportScenario | None = None
     try:
@@ -691,6 +711,14 @@ async def test_tenant_support_queries_use_app_rls_and_stop_after_revocation() ->
                     )
             assert getattr(forbidden.value.orig, "sqlstate", None) == "42501"
 
+        # Commit the mutation before archiving: writes hold the shared tenant
+        # access lock. Keep the revocation assertions in one open read transaction.
+        async with factory() as app_session, app_session.begin():
+            await _seed_request_db_context(request, app_session)
+            assert (
+                await app_session.scalar(text("SELECT public.is_tenant_support_session()")) is True
+            )
+
             async with support_engine.begin() as connection:
                 await connection.execute(
                     text("""
@@ -724,19 +752,6 @@ async def test_tenant_support_queries_use_app_rls_and_stop_after_revocation() ->
             )
     finally:
         if scenario is not None:
-            async with support_engine.begin() as connection:
-                await connection.execute(
-                    text("SELECT set_config('app.support_session', 'true', true)")
-                )
-                await connection.execute(
-                    text("DELETE FROM public.tenant WHERE id = ANY(:tenant_ids)"),
-                    {
-                        "tenant_ids": [
-                            scenario.tenant_id,
-                            scenario.other_tenant_id,
-                        ]
-                    },
-                )
-                await _retire_runtime_support_actor(connection, scenario)
+            await _cleanup_runtime_support_scenario(maintenance_engine, support_engine, scenario)
         await app_engine.dispose()
         await support_engine.dispose()

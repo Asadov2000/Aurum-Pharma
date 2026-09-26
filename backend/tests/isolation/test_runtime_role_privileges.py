@@ -113,6 +113,8 @@ READ_ONLY_TABLES = {
     "sync_writer_activation",
     "sync_writer_epoch",
     "sync_writer_readiness",
+    "tenant_access_policy",
+    "tenant_launch_activation",
     "tenant_membership",
     "tenant_invitation",
     "tenant_ownership",
@@ -199,6 +201,16 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "assert_tenant_settlement_complete",
+    "launch_tenant",
+    "trg_enforce_tenant_access",
+    "trg_guard_tenant_access_policy",
+    "trg_guard_tenant_checked_launch",
+    "trg_guard_tenant_launch_immutable",
+    "trg_lock_tenant_access_status",
+    "trg_retired_subscription_write",
+    "trg_review_legacy_tenant_access",
+    "trg_seed_tenant_access_policy",
     "analyze_ready_sync_read_catalog",
     "search_sync_read_catalog",
     "trg_audit_sync_read_snapshot_storage",
@@ -506,6 +518,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "launch_tenant",
     "analyze_ready_sync_read_catalog",
     "search_sync_read_catalog",
     "confirm_bootstrap_email",
@@ -1510,14 +1523,15 @@ async def test_support_cannot_create_database_objects(
 
 
 async def test_runtime_views_apply_invoker_tenant_rls(
-    support_engine_privileges: AsyncEngine,
+    maintenance_engine: AsyncEngine,
     app_engine_privileges: AsyncEngine,
 ) -> None:
     tenant_ids: list[str] = []
     nick = uuid4().hex[:10]
 
     try:
-        async with support_engine_privileges.begin() as conn:
+        # Import historical subscriptions through the migration identity only.
+        async with maintenance_engine.begin() as conn:
             plan_id = str(
                 (
                     await conn.execute(
@@ -1591,7 +1605,7 @@ async def test_runtime_views_apply_invoker_tenant_rls(
         assert visible_tenants == {tenant_ids[0]}
     finally:
         if tenant_ids:
-            async with support_engine_privileges.begin() as conn:
+            async with maintenance_engine.begin() as conn:
                 await conn.execute(
                     text("DELETE FROM tenant WHERE id = ANY(CAST(:tenant_ids AS UUID[]))"),
                     {"tenant_ids": tenant_ids},
