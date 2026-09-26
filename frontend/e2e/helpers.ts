@@ -202,6 +202,18 @@ export async function installBrowserSession(page: Page, tokens: TokenPair): Prom
   const deviceValue = optionalCookieValue(tokens.refresh_cookie, DEVICE_COOKIE_NAME);
   const apiUrl = new URL(API);
   if (page.url() !== "about:blank") {
+    // This fixture installs a new server-authenticated session, bypassing the
+    // login UI. Reset both copies of its previous noncredential auth metadata;
+    // clearing cookies alone correctly makes the production barrier fail closed.
+    // Preserve preferences and POS drafts. Real logout tests use explicit UI login.
+    await page.evaluate(() => {
+      for (const key of [
+        "aurum.auth_logout.v1",
+        "aurum.auth_logout.v1.confirmation",
+        "aurum.auth_logout.v1.signin",
+      ])
+        window.localStorage.removeItem(key);
+    });
     await page.goto("about:blank");
   }
   await page.context().clearCookies();
